@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="Koine">
+  <!-- Maskable variant of koine-mark.svg: a full-bleed gradient square (no rounded corners / no
+       transparent edges) so the OS mask never reveals a gap, with the glyph kept inside the central
+       safe zone. Source for icons/icon-512-maskable.png. -->
+  <defs>
+    <linearGradient id="koi-mask" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5aa9ff"/>
+      <stop offset="1" stop-color="#34d3c4"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="32" height="32" fill="url(#koi-mask)"/>
+  <g fill="#08111f" transform="translate(4.82,3.96) scale(0.86)">
+    <rect x="2" y="3" width="4.4" height="22" rx="1.6"/>
+    <path d="M8.2 13.6 18 3h5.6l-9.5 10.3L24 25h-5.9l-7.8-9.3-2.1 2.2z"/>
+  </g>
+</svg>

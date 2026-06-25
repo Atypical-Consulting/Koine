@@ -8,6 +8,11 @@ import {
   generate as generateTemplates,
   resolveTemplatesDir,
 } from "./scripts/generate-templates.mjs";
+// The PWA manifest generator. Its pure core (buildManifest/renderManifest) is exported from the .mjs
+// so the plugin below and the vitest suite drive identical logic. The manifest's start_url/scope and
+// icon srcs are prefixed by the resolved Vite `base` (KOINE_STUDIO_BASE) so the installed app works
+// at the site root or under a sub-path.
+import { buildManifest, renderManifest } from "./scripts/pwa-manifest.mjs";
 // Dev-only plugin: serve `/koine-wasm/**` `?import` requests as raw assets so the browser WASM host's
 // dynamic import of the published dotnet.js loader (a /public asset) doesn't trip Vite's transform
 // middleware and pop the error overlay under the dev server (issue #384).
@@ -54,6 +59,62 @@ function templateManifestPlugin(): Plugin {
   };
 }
 
+// Emit a base-aware PWA Web App Manifest so the studio is installable (Add to Home Screen / Install
+// app). Mirrors templateManifestPlugin's shape: a pure generator (scripts/pwa-manifest.mjs) drives
+// both the build emission and the dev middleware. The manifest's start_url/scope and icon srcs are
+// prefixed with the resolved Vite `base` (KOINE_STUDIO_BASE), and the `<link rel="manifest">` +
+// `<meta name="theme-color">` are injected through transformIndexHtml so they honour that base too.
+function pwaManifestPlugin(): Plugin {
+  let base = "/";
+  const themeColor = buildManifest("/").theme_color;
+  return {
+    name: "koine-pwa-manifest",
+    // base is only known once Vite has resolved the config (it depends on mode + KOINE_STUDIO_BASE).
+    configResolved(config) {
+      base = config.base;
+    },
+    // Build: emit manifest.webmanifest at the output root (served at `${base}manifest.webmanifest`).
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: "manifest.webmanifest",
+        source: renderManifest(base),
+      });
+    },
+    // Dev: there is no bundle, so serve the manifest from memory at the base-aware URL.
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = req.url?.split("?")[0];
+        if (url && url.endsWith("/manifest.webmanifest")) {
+          res.setHeader("Content-Type", "application/manifest+json");
+          res.end(renderManifest(base));
+          return;
+        }
+        next();
+      });
+    },
+    // Inject the manifest link + theme-color. order:'post' runs after Vite's own HTML asset rewriting,
+    // so the href we build with the resolved base is emitted verbatim (no double base-prefixing).
+    transformIndexHtml: {
+      order: "post",
+      handler() {
+        return [
+          {
+            tag: "link",
+            attrs: { rel: "manifest", href: `${base}manifest.webmanifest` },
+            injectTo: "head",
+          },
+          {
+            tag: "meta",
+            attrs: { name: "theme-color", content: themeColor },
+            injectTo: "head",
+          },
+        ];
+      },
+    },
+  };
+}
+
 // https://vite.dev/config/
 //
 // Two modes:
@@ -63,7 +124,7 @@ function templateManifestPlugin(): Plugin {
 export default defineConfig(({ mode }) => {
   const web = mode === "web";
   return {
-    plugins: [templateManifestPlugin(), koineWasmDevPlugin()],
+    plugins: [templateManifestPlugin(), pwaManifestPlugin(), koineWasmDevPlugin()],
 
     // Alias React's runtime to Preact's compat layer so the `zustand` React hook (`useStore`) and
     // any React-shaped deps resolve to Preact. Vanilla Zustand (`zustand/vanilla`) needs none of this;
