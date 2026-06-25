@@ -32,8 +32,13 @@ import {
   saveWorkspaceOverride,
   effectiveSettings,
   WORKSPACE_SCOPED_KEYS,
+  loadKeybindingOverrides,
+  saveKeybindingOverride,
+  resolveKeybindings,
+  clearKeybindingOverrides,
 } from '@/settings/persistence';
 import { BUILTIN_EMIT_TARGETS, setEmitTargets } from '@/shared/emitTargets';
+import { DEFAULT_BINDINGS } from '@/editor/keybindings';
 import type { ChatMessage } from '@/ai/ai';
 
 describe('MCP settings', () => {
@@ -643,5 +648,59 @@ describe('workspace-scoped settings overrides', () => {
     const user: typeof DEFAULT_SETTINGS = { ...DEFAULT_SETTINGS, wordWrap: false };
     effectiveSettings(user, key);
     expect(user.wordWrap).toBe(false);
+  });
+});
+
+describe('keybinding overrides', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('a saved override resolves over the defaults, leaving the others default', () => {
+    saveKeybindingOverride('format', 'Ctrl-d');
+    const resolved = resolveKeybindings();
+    expect(resolved.format).toBe('Ctrl-d');
+    expect(resolved.goToDefinition).toBe(DEFAULT_BINDINGS.goToDefinition);
+    expect(resolved.rename).toBe(DEFAULT_BINDINGS.rename);
+    expect(resolved.findReferences).toBe(DEFAULT_BINDINGS.findReferences);
+    expect(resolved.codeActions).toBe(DEFAULT_BINDINGS.codeActions);
+  });
+
+  test('passing null clears an override, restoring the default', () => {
+    saveKeybindingOverride('format', 'Ctrl-d');
+    expect(resolveKeybindings().format).toBe('Ctrl-d');
+    saveKeybindingOverride('format', null);
+    expect(resolveKeybindings().format).toBe('Mod-s');
+    expect(loadKeybindingOverrides().format).toBeUndefined();
+  });
+
+  test('a corrupt blob resolves to pure defaults and loads as {}', () => {
+    localStorage.setItem('koine.studio.keybindings', 'not json{');
+    expect(loadKeybindingOverrides()).toEqual({});
+    expect(resolveKeybindings()).toEqual(DEFAULT_BINDINGS);
+  });
+
+  test('an unknown stored id is ignored, valid ids survive', () => {
+    localStorage.setItem(
+      'koine.studio.keybindings',
+      JSON.stringify({ bogusCommand: 'Ctrl-x', format: 'Ctrl-d' }),
+    );
+    const overrides = loadKeybindingOverrides();
+    expect(overrides.format).toBe('Ctrl-d');
+    expect((overrides as Record<string, unknown>).bogusCommand).toBeUndefined();
+    const resolved = resolveKeybindings();
+    expect(resolved.format).toBe('Ctrl-d');
+    expect(resolved.rename).toBe(DEFAULT_BINDINGS.rename);
+  });
+
+  test('clearKeybindingOverrides returns the resolved map to pure defaults', () => {
+    saveKeybindingOverride('rename', 'Ctrl-r');
+    expect(resolveKeybindings().rename).toBe('Ctrl-r');
+    clearKeybindingOverrides();
+    expect(resolveKeybindings()).toEqual(DEFAULT_BINDINGS);
+  });
+
+  test('an empty-string override survives load as the deliberate "unbound" value', () => {
+    saveKeybindingOverride('rename', '');
+    expect(loadKeybindingOverrides().rename).toBe('');
+    expect(resolveKeybindings().rename).toBe('');
   });
 });
