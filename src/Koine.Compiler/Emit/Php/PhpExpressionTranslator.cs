@@ -35,6 +35,15 @@ internal sealed class PhpExpressionTranslator
         Property
     }
 
+    /// <summary>
+    /// PHP rendering for each nullary value builtin — the PHP counterpart of the C#
+    /// (<c>DateTimeOffset.UtcNow</c>) / Python / TypeScript (<c>Instant.now()</c>) tables. The
+    /// dependency-free stdlib <c>new \DateTimeImmutable('now')</c> matches the <c>Instant</c> →
+    /// <c>\DateTimeImmutable</c> mapping in <see cref="PhpTypeMapper"/>.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> NullaryValueOpsPhp =
+        new Dictionary<string, string>(StringComparer.Ordinal) { ["now"] = @"new \DateTimeImmutable('now')" };
+
     private NameMode _mode = NameMode.Property;
 
     private readonly ModelIndex _index;
@@ -608,7 +617,16 @@ internal sealed class PhpExpressionTranslator
             return;
         }
 
-        // (2) Enum member reference -> EnumName::UPPER_SNAKE.
+        // (2) Nullary value builtin such as `now` (unless shadowed by a real member). Without this
+        // the bare identifier falls through to (6) and renders an undefined `$now` (issue #395).
+        if (BuiltinOps.IsNullaryValueOp(name) && !_memberNames.Contains(name)
+            && NullaryValueOpsPhp.TryGetValue(name, out var php))
+        {
+            sb.Append(php);
+            return;
+        }
+
+        // (3) Enum member reference -> EnumName::UPPER_SNAKE.
         if (!_memberNames.Contains(name))
         {
             IReadOnlyList<string> owners = _index.EnumsDeclaring(name);
@@ -625,7 +643,7 @@ internal sealed class PhpExpressionTranslator
             }
         }
 
-        // (3) Member of the enclosing type: `$this->camel` (or `$<receiver>->camel`) in a body,
+        // (4) Member of the enclosing type: `$this->camel` (or `$<receiver>->camel`) in a body,
         // `$camel` in a constructor/invariant (where the member is still the local parameter, not yet
         // a field). The receiver is `this` by default; a custom receiver (e.g. `src` for a read-model
         // projection) is set via the constructor parameter.
@@ -643,14 +661,14 @@ internal sealed class PhpExpressionTranslator
             return;
         }
 
-        // (4) An enum *type* reference (the qualifier of `OrderStatus.Draft`): the PascalCase class.
+        // (5) An enum *type* reference (the qualifier of `OrderStatus.Draft`): the PascalCase class.
         if (_index.Classify(name) == TypeKind.Enum)
         {
             sb.Append(PhpNaming.ClassName(name));
             return;
         }
 
-        // (5) Unknown identifier: emit as $camelCase (best effort).
+        // (6) Unknown identifier: emit as $camelCase (best effort).
         sb.Append('$').Append(PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(name)));
     }
 
