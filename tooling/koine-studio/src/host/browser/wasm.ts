@@ -146,11 +146,11 @@ const KOINE_WASM_EXPORT_MAP: Record<keyof KoineWasmApi, true> = {
 };
 
 /**
- * The [JSExport] surface THIS studio build expects the bundle to provide — every method declared on
- * `KoineWasmApi` (compiler-enforced complete via {@link KOINE_WASM_EXPORT_MAP}). It is the studio's
- * *expectation*, not the runtime forward source (that is the bundle's own `Capabilities().exports`,
- * derived at boot — issue #330); it exists only so {@link verifyBootSurface} can flag a bundle missing a
- * method the studio needs, and as the fallback forward set for a bundle too old to ship `Capabilities()`.
+ * Every [JSExport] method this studio build calls — the surface declared on `KoineWasmApi`
+ * (compiler-enforced complete via {@link KOINE_WASM_EXPORT_MAP}). The proxies forward / guard against
+ * this set: a call to one of these names that the live bundle doesn't actually provide fails with the
+ * actionable "rebuild" message rather than a bare `TypeError`. The bundle's own `Capabilities().exports`
+ * is what {@link verifyBootSurface} checks this set against at boot to surface staleness early (#330).
  * Exported for tests.
  */
 export const HOST_DECLARED_EXPORTS: ReadonlySet<string> = new Set(Object.keys(KOINE_WASM_EXPORT_MAP));
@@ -164,14 +164,15 @@ interface WasmCapabilities {
 
 /**
  * Verify the live bundle's self-reported surface against what this studio build expects, ONCE at boot
- * (issue #330): a method `KoineWasmApi` declares that the bundle's `exports` omits means the bundle in
- * `public/koine-wasm/` is stale — surface it now, with the rebuild command, instead of at the first
- * failing call (the pre-#330 behaviour). Returns the set the proxy should treat as the live export
- * surface: the bundle's own `exports` when it reports them, or {@link HOST_DECLARED_EXPORTS} as a fallback
- * for a bundle too old to ship `Capabilities()`. The reverse drift — the bundle exporting a method the
+ * (issue #330): a method `KoineWasmApi` declares that the bundle's `Capabilities().exports` omits means
+ * the bundle in `public/koine-wasm/` is stale — surface it now, with the rebuild command, instead of only
+ * at the first failing call. This is the early-warning half of staleness detection; the proxies still
+ * give the same actionable per-call error (gating on {@link HOST_DECLARED_EXPORTS}) for anyone who misses
+ * the warning. A bundle whose `Capabilities()` can't be read (too old, or it failed to load) is noted but
+ * not fatal — the proxies degrade exactly as before. The reverse drift — the bundle exporting a method the
  * studio does not consume (e.g. the playground-only `Diagnose`/`Compile`) — is expected and not flagged.
  */
-function verifyBootSurface(capabilitiesJson: string | null, source: WasmBootMode): ReadonlySet<string> {
+function verifyBootSurface(capabilitiesJson: string | null, source: WasmBootMode): void {
   let caps: WasmCapabilities | null = null;
   if (capabilitiesJson !== null) {
     try {
@@ -185,20 +186,18 @@ function verifyBootSurface(capabilitiesJson: string | null, source: WasmBootMode
   if (caps === null) {
     console.warn(
       `Koine: could not read the compiler bundle's Capabilities() at boot (${source} path) — the bundle ` +
-        `in public/koine-wasm/ may predate it. Rebuild it with: npm run build:wasm`,
+        `in public/koine-wasm/ may predate it or have failed to load. Rebuild it with: npm run build:wasm`,
     );
-    return HOST_DECLARED_EXPORTS;
+    return;
   }
 
-  const bundleExports = new Set(caps.exports);
-  const missing = [...HOST_DECLARED_EXPORTS].filter((name) => !bundleExports.has(name));
+  const missing = [...HOST_DECLARED_EXPORTS].filter((name) => !caps.exports.includes(name));
   if (missing.length > 0) {
     console.warn(
       `Koine: the compiler bundle in public/koine-wasm/ is stale — it is missing ${missing.length} ` +
         `export(s) this studio build needs (${missing.join(', ')}). Rebuild it with: npm run build:wasm`,
     );
   }
-  return bundleExports;
 }
 
 /** Fetch + return the bundle's raw `Capabilities()` JSON over the worker client, or `null` if unavailable. */
@@ -248,20 +247,18 @@ const WORKER_MISSING_EXPORT_RE = /^Koine WASM export "([^"]+)" is not a function
  * the Promise resolution machinery probes `value.then` to decide if the resolved value is a
  * thenable, so returning a throwing function there would make the language-server boot reject.
  */
-export function guardWasmSurface(
-  raw: Record<string, unknown>,
-  knownExports: ReadonlySet<string>,
-): KoineWasmApi {
+export function guardWasmSurface(raw: Record<string, unknown>): KoineWasmApi {
   return new Proxy(raw, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver);
-      // Only a *known* export name (one the bundle reported at boot, #330) that didn't resolve to a
-      // function is treated as a stale-bundle call site. Everything else passes through untouched —
-      // crucially `then`: the Promise that resolves to this proxy probes `proxy.then` to decide if it's a
-      // thenable, so returning a throwing function there would make the whole language-server boot reject
-      // with a bogus `export "then" is missing`. Symbols and non-export strings (toString, catch, …)
-      // likewise pass through.
-      if (typeof prop !== 'string' || typeof value === 'function' || !knownExports.has(prop))
+      // Only a *known* export name (one this studio build calls — {@link HOST_DECLARED_EXPORTS}) that
+      // didn't resolve to a function is treated as a stale-bundle call site. Everything else passes
+      // through untouched — crucially `then`: the Promise that resolves to this proxy probes `proxy.then`
+      // to decide if it's a thenable, so returning a throwing function there would make the whole
+      // language-server boot reject with a bogus `export "then" is missing`. Symbols and non-export
+      // strings (toString, catch, …) likewise pass through. (verifyBootSurface already warned at boot if
+      // the bundle was stale — this is the per-call backstop for anyone who missed it.)
+      if (typeof prop !== 'string' || typeof value === 'function' || !HOST_DECLARED_EXPORTS.has(prop))
         return value;
       return () => {
         throw new Error(
@@ -282,17 +279,16 @@ export function guardWasmSurface(
  * Property access for non-exports (`then`, `toString`, …) must pass through untouched — see the
  * thenable-probe comment in `guardWasmSurface`.
  */
-function buildWorkerProxy(
-  call: (method: string, args: unknown[]) => Promise<string>,
-  knownExports: ReadonlySet<string>,
-): KoineWasmApi {
+function buildWorkerProxy(call: (method: string, args: unknown[]) => Promise<string>): KoineWasmApi {
   const handler: ProxyHandler<object> = {
     get(_target, prop, _receiver) {
       // Pass through symbols and non-export strings (then, toString, catch, …) without wrapping.
       // This is critical: the Promise machinery probes `.then` on the resolved value to decide
-      // if it's a thenable — intercepting it would cause the boot to reject spuriously. `knownExports`
-      // is the set the bundle reported at boot (#330), not a hand-maintained list.
-      if (typeof prop !== 'string' || !knownExports.has(prop)) {
+      // if it's a thenable — intercepting it would cause the boot to reject spuriously. We forward the
+      // methods this studio build calls ({@link HOST_DECLARED_EXPORTS}); if the bundle is stale and a
+      // forwarded method is absent, the worker rejects with "is not a function" and the catch below
+      // re-raises the actionable rebuild message (verifyBootSurface also warned at boot — #330).
+      if (typeof prop !== 'string' || !HOST_DECLARED_EXPORTS.has(prop)) {
         return undefined;
       }
       // Return an async function that forwards the call to the worker client.
@@ -464,9 +460,10 @@ async function bootMainThread(): Promise<KoineWasmApi> {
   const exports = await runtime.getAssemblyExports(config.mainAssemblyName);
   const raw = (exports as { Koine: { Wasm: { CompilerInterop: Record<string, unknown> } } }).Koine.Wasm
     .CompilerInterop;
-  // Verify the surface at boot from the bundle's own self-description (#330), then guard against it.
-  const knownExports = verifyBootSurface(fetchCapabilitiesRaw(raw), 'main-thread');
-  return guardWasmSurface(raw, knownExports);
+  // Verify the surface at boot from the bundle's own self-description (#330) — warns early if stale —
+  // then guard the surface (the guard re-raises the actionable error per-call as the backstop).
+  verifyBootSurface(fetchCapabilitiesRaw(raw), 'main-thread');
+  return guardWasmSurface(raw);
 }
 
 /**
@@ -486,10 +483,10 @@ export function loadWasmApi(): Promise<KoineWasmApi> {
       bootMode = 'worker';
       const call = client.call.bind(client);
       // Verify the surface at boot from the bundle's own self-description (#330) — Capabilities() is
-      // queried directly over the client (not via the gated proxy), so it resolves before the forward
-      // set exists; the proxy then forwards based on what the bundle reported.
-      const knownExports = verifyBootSurface(await fetchCapabilitiesViaCall(call), 'worker');
-      return buildWorkerProxy(call, knownExports);
+      // queried directly over the client (not via the proxy) — so staleness is warned early; the proxy
+      // then forwards the studio's calls, with the worker's missing-export rejection as the per-call backstop.
+      verifyBootSurface(await fetchCapabilitiesViaCall(call), 'worker');
+      return buildWorkerProxy(call);
     } catch (workerErr: unknown) {
       // A failed worker boot must not brick the studio: tear down the dead worker and boot the
       // runtime on the main thread instead (the pre-#326 path, which boots reliably).

@@ -32,15 +32,15 @@ describe('loadWasmApi — boot-time surface verification (issue #330)', () => {
     vi.resetModules();
   });
 
-  test('queries Capabilities() at boot and forwards a method the bundle reports', async () => {
+  test("queries Capabilities() at boot and forwards the studio's API calls", async () => {
     const { HOST_DECLARED_EXPORTS } = await import('@/host/browser/wasm');
     const mockCall = await mockWorker([...HOST_DECLARED_EXPORTS]); // a complete, non-stale bundle
 
     const { loadWasmApi } = await import('@/host/browser/wasm');
     const api = await loadWasmApi();
 
-    expect(mockCall).toHaveBeenCalledWith('Capabilities', []); // verified at boot...
-    expect(await api.DiagnoseWorkspace('[]')).toBe('{"ok":true}'); // ...and the reported method forwards
+    expect(mockCall).toHaveBeenCalledWith('Capabilities', []); // surface verified at boot...
+    expect(await api.DiagnoseWorkspace('[]')).toBe('{"ok":true}'); // ...and the studio's calls forward
     expect(mockCall).toHaveBeenCalledWith('DiagnoseWorkspace', ['[]']);
   });
 
@@ -68,6 +68,32 @@ describe('loadWasmApi — boot-time surface verification (issue #330)', () => {
     // staying hidden until the first call to the missing feature.
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/stale.*DiagnoseWorkspace.*npm run build:wasm/s));
+    warn.mockRestore();
+  });
+
+  test('a stale bundle ALSO keeps the actionable per-call error (not a bare TypeError)', async () => {
+    // Boot detection is the early warning; the proxy is still the per-call backstop for anyone who
+    // misses it. The bundle omits DiagnoseWorkspace, so the worker rejects the forwarded call as
+    // "not a function" → the proxy re-raises the actionable rebuild message (not a cryptic TypeError).
+    const mockCall = vi.fn<(m: string, a: unknown[]) => Promise<string>>();
+    mockCall.mockImplementation((method) =>
+      method === 'Capabilities'
+        ? Promise.resolve(capsJson(['Capabilities']))
+        : Promise.reject(new Error('Koine WASM export "DiagnoseWorkspace" is not a function')),
+    );
+    const { createKoineWorkerClient } = await import('@/host/browser/workerClient');
+    (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
+      call: mockCall,
+      whenReady: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+    });
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { loadWasmApi } = await import('@/host/browser/wasm');
+    const api = await loadWasmApi();
+
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/stale.*npm run build:wasm/s)); // early warning
+    await expect(api.DiagnoseWorkspace('[]')).rejects.toThrow(/DiagnoseWorkspace.*stale.*npm run build:wasm/s);
     warn.mockRestore();
   });
 });

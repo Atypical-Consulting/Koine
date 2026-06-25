@@ -111,12 +111,9 @@ public static partial class CompilerInterop
     [JSExport]
     public static string Capabilities()
     {
-        // targets: reuse EmitterRegistry.SupportedTargetInfos exactly as ListEmitTargets (#282) does —
-        // no second target list.
-        var targets = new EmitterRegistry().SupportedTargetInfos
-            .Select(i => new WEmitTarget(i.Id, i.DisplayName, i.FileExtension))
-            .ToArray();
-        var dto = new WCapabilities(CompilerVersion(), JsExportNames, targets);
+        // targets: the SAME mapping ListEmitTargets (#282) serves — shared via SupportedEmitTargets() so
+        // there is no second target list.
+        var dto = new WCapabilities(CompilerVersion(), JsExportNames, SupportedEmitTargets());
         return JsonSerializer.Serialize(dto, LangJson.Default.WCapabilities);
     }
 

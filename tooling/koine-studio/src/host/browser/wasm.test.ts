@@ -22,7 +22,7 @@ function withCapabilities(canned: string) {
 describe('guardWasmSurface', () => {
   test('passes through exports the bundle does provide', () => {
     const glossary = vi.fn(() => '{"entries":[]}');
-    const api = guardWasmSurface({ Glossary: glossary }, new Set(['Glossary']));
+    const api = guardWasmSurface({ Glossary: glossary });
 
     expect(api.Glossary('[]')).toBe('{"entries":[]}');
     expect(glossary).toHaveBeenCalledWith('[]');
@@ -30,17 +30,16 @@ describe('guardWasmSurface', () => {
 
   // Reproduces the reported bug: a stale public/koine-wasm/ bundle (built before #67) has no
   // GlossaryModel export, so `api.GlossaryModel(...)` would otherwise blow up with the cryptic
-  // "TypeError: api.GlossaryModel is not a function". The guard turns it into a fix-me message. The
-  // known-export set (#330) is the bundle's boot-reported surface; here GlossaryModel is reported but
-  // didn't resolve to a function — a genuinely corrupt bundle — so the guard flags it.
+  // "TypeError: api.GlossaryModel is not a function". The guard turns it into a fix-me message: the
+  // name is host-declared (a method this studio calls — HOST_DECLARED_EXPORTS) but absent on the bundle.
   test('a missing export throws an actionable rebuild message instead of a raw TypeError', () => {
-    const api = guardWasmSurface({ Glossary: () => '{}' }, new Set(['Glossary', 'GlossaryModel']));
+    const api = guardWasmSurface({ Glossary: () => '{}' });
 
     expect(() => api.GlossaryModel('[]')).toThrowError(/GlossaryModel.*stale.*npm run build:wasm/s);
   });
 
   test('symbol access is untouched so the surface can still be inspected/awaited', () => {
-    const api = guardWasmSurface({}, new Set()) as unknown as Record<PropertyKey, unknown>;
+    const api = guardWasmSurface({}) as unknown as Record<PropertyKey, unknown>;
     expect(api[Symbol.toPrimitive]).toBeUndefined();
   });
 
@@ -49,16 +48,13 @@ describe('guardWasmSurface', () => {
   // `then`, the proxy would masquerade as a thenable and the whole language-server boot would reject
   // with a bogus `export "then" is missing`. So `then` and other non-export strings must pass through.
   test('non-export string props (then, toString) pass through so the proxy is not a fake thenable', () => {
-    const api = guardWasmSurface({ Glossary: () => '{}' }, new Set(['Glossary'])) as unknown as Record<
-      string,
-      unknown
-    >;
+    const api = guardWasmSurface({ Glossary: () => '{}' }) as unknown as Record<string, unknown>;
     expect(api.then).toBeUndefined();
     expect(typeof api.toString).toBe('function');
   });
 
   test('a proxied surface resolves cleanly when returned from a promise (await does not throw)', async () => {
-    const api = guardWasmSurface({ Glossary: () => '{"entries":[]}' }, new Set(['Glossary']));
+    const api = guardWasmSurface({ Glossary: () => '{"entries":[]}' });
     await expect(Promise.resolve(api)).resolves.toBe(api);
   });
 });

@@ -268,7 +268,10 @@ export function mountPlayground(root: HTMLElement): void {
   if (versionEl) {
     void capabilities()
       .then((caps) => {
-        versionEl.textContent = `Koine ${caps.version}`;
+        // Only render a real version string — never "Koine undefined"/"Koine null" from a malformed payload.
+        if (typeof caps.version === 'string' && caps.version.length > 0) {
+          versionEl.textContent = `Koine ${caps.version}`;
+        }
       })
       .catch(() => {
         /* leave the version label blank if the bundle can't report it */

@@ -137,13 +137,18 @@ public static partial class CompilerInterop
     /// <c>glossary</c>/<c>docs</c> generators are excluded. Takes no input. Returns <c>{ targets: [...] }</c>.
     /// </summary>
     [JSExport]
-    public static string ListEmitTargets()
-    {
-        var targets = new EmitterRegistry().SupportedTargetInfos
+    public static string ListEmitTargets() =>
+        JsonSerializer.Serialize(new WEmitTargetsResult(SupportedEmitTargets()), LangJson.Default.WEmitTargetsResult);
+
+    /// <summary>
+    /// The registry's code-emit targets mapped to the wire <see cref="WEmitTarget"/> shape, in display
+    /// order. The single mapping shared by <see cref="ListEmitTargets"/> (#282) and
+    /// <see cref="Capabilities"/> (#330) so the two can never report a different target list.
+    /// </summary>
+    private static WEmitTarget[] SupportedEmitTargets() =>
+        new EmitterRegistry().SupportedTargetInfos
             .Select(i => new WEmitTarget(i.Id, i.DisplayName, i.FileExtension))
             .ToArray();
-        return JsonSerializer.Serialize(new WEmitTargetsResult(targets), LangJson.Default.WEmitTargetsResult);
-    }
 
     /// <summary>
     /// Full-document LSP semantic tokens for a single <c>.koi</c> <paramref name="source"/> — the
