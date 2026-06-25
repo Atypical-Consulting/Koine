@@ -16,6 +16,9 @@ export class BrowserPlatform implements Platform {
   readonly canOpenFolders = fs.supported();
   readonly canSaveProjects = fs.supported();
   readonly persistsWorkspace = fs.persistsWorkspace();
+  // A browser tab cannot spawn a host shell, so there is no integrated terminal: the panel shows a
+  // graceful "desktop only" placeholder. `createTerminal` is deliberately omitted (not implemented).
+  readonly canRunShell = false;
 
   createLspTransport(): LspTransport {
     return new WasmLspTransport();

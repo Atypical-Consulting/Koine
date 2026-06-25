@@ -97,7 +97,7 @@ public sealed partial class RustEmitter
 
         // A derived field projects an expression over the borrowed `src`, every member through its accessor.
         var translator = new RustExpressionTranslator(
-            emit.Index, sourceMembers, emit.EnumMemberToType, typeMapper, context,
+            emit.Index, sourceMembers, emit.EnumMemberToType, emit.EnumVariants, typeMapper, context,
             memberReceiver: "src", membersAsAccessors: true);
 
         var fields = new List<(string Field, string RustType, string Rhs)>();

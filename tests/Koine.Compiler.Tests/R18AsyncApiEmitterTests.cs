@@ -148,6 +148,27 @@ public class R18AsyncApiEmitterTests
     }
 
     [Fact]
+    public void Same_named_events_from_different_publishers_get_distinct_receive_operations()
+    {
+        // #420: Fulfillment subscribes to both Sales.Shipped and Returns.Shipped. The bare
+        // "Fulfillment_receive_Shipped" operation key would collide and silently drop one subscription
+        // (the SortedDictionary keeps only the last) — qualify the receive op by its publisher.
+        var result = new KoineCompiler().Compile(
+            R14IntegrationEventsTests.SameNameCrossPublisher, new AsyncApiEmitter());
+
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        // Two distinct receive operations — one per publisher — each bound to its publisher's channel.
+        yaml.ShouldContain("  Fulfillment_receive_Sales_Shipped:");
+        yaml.ShouldContain("$ref: '#/channels/Sales_Shipped'");
+        yaml.ShouldContain("  Fulfillment_receive_Returns_Shipped:");
+        yaml.ShouldContain("$ref: '#/channels/Returns_Shipped'");
+        // The colliding bare key must not be emitted — it would drop one subscription.
+        yaml.ShouldNotContain("  Fulfillment_receive_Shipped:");
+    }
+
+    [Fact]
     public void No_integration_events_emits_a_minimal_valid_document()
     {
         // A model without any integration event still emits a valid AsyncAPI 3.0 document:

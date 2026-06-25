@@ -10,10 +10,10 @@
 import type { DiagramRenderer } from '@/diagrams/diagrams';
 import type { Graph as MxGraph, Cell as MxCell } from '@maxgraph/core';
 import type { Diagram, DiagramEdge, DiagramGraph, DiagramMember, DiagramNode, DocsFile } from '@/lsp/lsp';
-import { mergeGraphsForView } from '@/model/modelTables';
+import { mergeGraphsForView, type EventFlowEdge, type EventFlowNode } from '@/model/modelTables';
 import { diagramToMermaid } from '@/export/diagramExport';
 import { buildEmptyState } from '@/diagrams/emptyState';
-import { loadDiagramZoom, saveDiagramZoom } from '@/settings/persistence';
+import { loadDiagramPositions, loadDiagramZoom, saveDiagramPositions, saveDiagramZoom } from '@/settings/persistence';
 import {
   DIAGRAM_ANNOTATION_CREATE_EVENT,
   DIAGRAM_CONNECT_EVENT,
@@ -22,6 +22,7 @@ import {
   NODE_EDIT_EVENT,
   NODE_NAVIGATE_EVENT,
   diagramLayoutStore,
+  diagramPersistScope,
   isDiagramEditing,
   isEditableKind,
   type CanvasAnnotationKind,
@@ -63,6 +64,24 @@ const DDD_HEX: Record<string, string> = {
 /** The shape colour for a node kind (drives the minimap + hit-testing). Falls back to slate. */
 function kindColor(kind: string): string {
   return DDD_HEX[kind] ?? '#94a3b8';
+}
+
+// The classic event-storming sticky palette for the Event Flow canvas (#270): a blue command, a yellow
+// aggregate, an orange domain event, a lilac policy, a teal integration event. Kept SEPARATE from DDD_HEX
+// (the domain canvas's palette) on purpose — the two are different visual languages, e.g. an aggregate is
+// purple on the domain class diagram but yellow in event storming — so colouring one never disturbs the
+// other. Literal hex like DDD_HEX (var() doesn't resolve inside SVG fill/stroke attrs).
+const EVENT_FLOW_HEX: Record<EventFlowNode['kind'], string> = {
+  command: '#5aa9f0', // blue
+  aggregate: '#fbbf24', // yellow
+  'domain-event': '#fb923c', // orange
+  policy: '#c4b5fd', // lilac
+  'integration-event': '#2dd4bf', // teal
+};
+
+/** The event-storming card colour for a flow card kind. Falls back to slate. */
+function eventFlowColor(kind: EventFlowNode['kind']): string {
+  return EVENT_FLOW_HEX[kind] ?? '#94a3b8';
 }
 
 // Canvas-only annotation styling (#255). Literal hex like DDD_HEX — var() doesn't resolve inside SVG
@@ -1313,6 +1332,286 @@ export async function renderContextMapGraph(
   handle.graph.addListener(mx.InternalEvent.CLICK, (_sender: unknown, evt: { getProperty(name: string): unknown }) => {
     routeContextMapClick((evt.getProperty('cell') as MxCell | null)?.value, hooks);
   });
+
+  const dispose = (): void => {
+    chrome.dispose();
+    handle.dispose();
+  };
+
+  if (isCurrent()) {
+    container.replaceChildren(root);
+    handle.graph.getView().revalidate(); // re-render now that the surface is in the live DOM
+    chrome.fit(); // frame the laid-out content into the viewport
+    return { dispose };
+  }
+  dispose();
+  return null;
+}
+
+// --- event flow canvas (event storming; #270) --------------------------------
+// A model-derived event-storming flow rendered on the SAME maxGraph engine as the domain canvas: cards
+// (command/aggregate/domain-event/policy/integration-event) connected by flow arrows, with integration
+// events bridging bounded-context swimlanes via publish/subscribe arrows. It consumes the `extractEventFlow`
+// projection (modelTables.ts) — no compiler/LSP round trip. Like the domain canvas, the BUILDER is kept
+// free of the async render lifecycle so tests assert on the model (cells/edges), never on pixels.
+
+/** The size of an event-storming card — reuses {@link nodeSize} via a simple-box {@link DiagramNode} shim
+ *  (a card has no stereotype/members, so it sizes as a single-line box keyed on its label). */
+function eventFlowCardSize(node: EventFlowNode): [number, number] {
+  return nodeSize({
+    id: node.id,
+    label: node.label,
+    kind: node.kind,
+    qualifiedName: node.qualifiedName,
+    sourceSpan: node.span,
+    stereotype: null,
+    members: [],
+  });
+}
+
+/** The HTML label for an event-storming card: a simple `.koi-node` box tagged with `data-kind` (the card
+ *  kind) and given the kind's sticky colour inline, plus `koi-svg-node` + `data-qname` so the inspector's
+ *  selection cross-highlight keeps working (mirrors {@link nodeLabelHtml} for simple nodes). */
+function eventFlowCardHtml(node: EventFlowNode): string {
+  const color = eventFlowColor(node.kind);
+  const kind = escapeHtml(node.kind);
+  const qname = escapeHtml(node.qualifiedName);
+  return (
+    `<div class="koi-node koi-svg-node koi-node--simple koi-eventflow-card" data-kind="${kind}" data-qname="${qname}"` +
+    ` style="background:${color};border-color:${color}">${escapeHtml(node.label)}</div>`
+  );
+}
+
+/** A cell carries an EventFlowNode (a card) iff its value has a `qualifiedName` (edges carry `from`/`to`,
+ *  swimlanes carry a plain string). */
+function cardValue(cell: MxCell | null | undefined): EventFlowNode | null {
+  const v = cell?.value as EventFlowNode | undefined;
+  return v && typeof v === 'object' && 'qualifiedName' in v ? v : null;
+}
+
+/**
+ * The localStorage key for the event-flow canvas's hand-arranged positions (#270). It shares the domain
+ * canvas's per-workspace persist SCOPE ({@link diagramPersistScope}, so a layout never bleeds across
+ * projects) but a DISTINCT view suffix — `koi-event-flow` vs the domain canvas's `koi-domain-diagram` (see
+ * {@link positionKey}). The two views key positions by the SAME qualified names (an event/aggregate appears
+ * in both), so a shared key would have each view clobber the other's layout (and a full-layout save would
+ * even wipe the domain canvas's notes/groups). A separate key keeps each view's arrangement independent.
+ */
+function eventFlowPositionKey(): string {
+  return `${diagramPersistScope()}:koi-event-flow`;
+}
+
+/** Arrange the event flow left→right by its edges — a dependency-ranked {@link HierarchicalLayout}
+ *  (orientation `'east'`, like the context-map layout) so command→event→policy reads as a causal chain.
+ *  Wrapped so a measure-less headless DOM (vitest) can't blank it — the model is the tested contract. */
+function runEventFlowLayout(mx: Mx, graph: MxGraph): void {
+  try {
+    const layout = new mx.HierarchicalLayout(graph, 'east');
+    layout.intraCellSpacing = 40;
+    layout.interRankCellSpacing = 80;
+    graph.batchUpdate(() => layout.execute(graph.getDefaultParent()));
+  } catch {
+    // Unmeasurable DOM (vitest/happy-dom) — the cards are still present and addressable, just unarranged.
+  }
+}
+
+/**
+ * Build the event-storming flow canvas for one {@link EventFlowNode}/{@link EventFlowEdge} projection into
+ * `container`. Mirrors {@link buildCanvas}: the maxGraph module is injected so this stays synchronous and
+ * unit-testable. Cards become one vertex each (coloured by kind); each context referenced by a
+ * publish/subscribe arrow (an endpoint that isn't a card) becomes a swimlane vertex the integration events
+ * bridge. A card click bubbles {@link NODE_NAVIGATE_EVENT} (the inspector routes it to select-and-goto,
+ * exactly like a diagram-node click). A hand-arranged layout persists per element under
+ * {@link eventFlowPositionKey} and is re-applied on the next build, so a dragged flow survives a reload.
+ * The returned {@link CanvasHandle} reuses the domain-canvas shape so the persist path reuses
+ * {@link snapshotPositions} / {@link applySavedPositions}; notes/groups are unused here.
+ */
+export function buildEventFlowCanvas(
+  mx: Mx,
+  container: HTMLElement,
+  flow: { nodes: EventFlowNode[]; edges: EventFlowEdge[] },
+): CanvasHandle {
+  const { Graph } = mx;
+  const graph = new Graph(container);
+  graph.getView().allowEval = false; // CSP-safe (Tauri strict CSP), matching buildCanvas
+  graph.setHtmlLabels(true);
+  graph.setCellsEditable(false); // no in-place editing — the flow is model-derived
+  graph.setCellsResizable(false); // card size is content-derived
+  graph.setCellsMovable(true); // cards drag freely — the flow is a layout-only whiteboard (positions persist)
+
+  // Render each cell's value: a card → its event-storming HTML label; an edge → its label; a swimlane → its string.
+  graph.convertValueToString = (cell): string => {
+    const v = cell.value as EventFlowNode | EventFlowEdge | string | null;
+    if (v && typeof v === 'object') {
+      if ('qualifiedName' in v) return eventFlowCardHtml(v);
+      if ('from' in v && 'to' in v) return v.label ?? '';
+    }
+    return String(v ?? '');
+  };
+
+  // Click a card → bubble NODE_NAVIGATE_EVENT; the inspector selects it + jumps to source. Span-less cards
+  // (commands/policies with no declaration today) are inert, mirroring buildCanvas's span-less nodes.
+  graph.addListener(mx.InternalEvent.CLICK, (_sender: unknown, evt: { getProperty(name: string): unknown }) => {
+    const v = cardValue(evt.getProperty('cell') as MxCell | null);
+    if (v && v.span) {
+      const s = v.span;
+      container.dispatchEvent(
+        new CustomEvent<DiagramNodeNavigateDetail>(NODE_NAVIGATE_EVENT, {
+          bubbles: true,
+          detail: {
+            qualifiedName: v.qualifiedName,
+            file: s.file,
+            line: s.line,
+            column: s.column,
+            endLine: s.endLine,
+            endColumn: s.endColumn,
+          },
+        }),
+      );
+    }
+  });
+
+  const cells = new Map<string, MxCell>();
+  const containers = new Map<string, MxCell>();
+  const root = graph.getDefaultParent();
+  const cardIds = new Set(flow.nodes.map((n) => n.id));
+
+  // The contexts that need a swimlane: every publish/subscribe endpoint that isn't a card (those are
+  // bounded-context names — the integration-event arrows bridge them).
+  const swimlaneContexts = new Set<string>();
+  for (const e of flow.edges) {
+    if (e.kind === 'flow') continue;
+    if (!cardIds.has(e.from)) swimlaneContexts.add(e.from);
+    if (!cardIds.has(e.to)) swimlaneContexts.add(e.to);
+  }
+
+  graph.batchUpdate(() => {
+    // A swimlane per bridged context — a faint dashed territory tile (mirrors the domain canvas containers).
+    for (const ctx of swimlaneContexts) {
+      const cell = graph.insertVertex({
+        parent: root,
+        id: `ctx:${ctx}`,
+        value: ctx.toUpperCase(),
+        position: [0, 0],
+        size: [CONTEXT_MIN_W, CONTEXT_H],
+        style: {
+          shape: 'rectangle',
+          rounded: true,
+          dashed: true,
+          dashPattern: '6 5',
+          fillColor: 'none',
+          strokeColor: 'var(--koi-line)',
+          fontColor: 'var(--koi-muted)',
+          fontStyle: 1,
+          fontSize: 12,
+          verticalAlign: 'middle',
+          align: 'center',
+        },
+      });
+      containers.set(ctx, cell);
+    }
+
+    // Event-storming cards, coloured by kind. The cell SHAPE carries the kind colour (so the Outline minimap
+    // shows recognisable boxes); the opaque HTML label overlays it with the same colour.
+    for (const node of flow.nodes) {
+      const color = eventFlowColor(node.kind);
+      const [w, h] = eventFlowCardSize(node);
+      const cell = graph.insertVertex({
+        parent: root,
+        id: node.id,
+        value: node,
+        position: [0, 0],
+        size: [w, h],
+        style: { fillColor: color, strokeColor: color, rounded: true, overflow: 'fill', verticalAlign: 'top', align: 'left' },
+      });
+      cells.set(node.id, cell);
+    }
+
+    // Edges: a `flow` arrow (card→card) is solid; `publish`/`subscribe` arrows (swimlane↔card) are dashed so
+    // the cross-context bridge reads distinctly. The EventFlowEdge stays on the cell as its value.
+    for (const e of flow.edges) {
+      const source = cells.get(e.from) ?? containers.get(e.from);
+      const target = cells.get(e.to) ?? containers.get(e.to);
+      if (!source || !target) continue;
+      graph.insertEdge({
+        parent: root,
+        source,
+        target,
+        value: e,
+        style: {
+          edgeStyle: 'orthogonalEdgeStyle', // registered name → CSP-safe (no eval)
+          rounded: true,
+          strokeColor: 'var(--koi-diagram-edge)',
+          strokeWidth: 1.4,
+          fontColor: 'var(--koi-fg)',
+          startArrow: 'none',
+          endArrow: 'open',
+          endSize: 11,
+          dashed: e.kind !== 'flow', // publish/subscribe bridge arrows read dashed
+        },
+      });
+    }
+  });
+
+  runEventFlowLayout(mx, graph);
+  // A saved manual layout overrides the auto-arrange, so a hand-positioned flow doesn't snap back on reload.
+  applySavedPositions(graph, cells, loadDiagramPositions(eventFlowPositionKey()));
+
+  // Persist a card drag: snapshot every card's geometry (one gesture freezes the layout to manual, matching
+  // the domain canvas) and save it under the event-flow key. Attached AFTER layout/apply so neither fires a
+  // spurious save (both use setGeometry, not moveCells — but the order keeps the intent clear).
+  graph.addListener(mx.InternalEvent.CELLS_MOVED, () => saveDiagramPositions(eventFlowPositionKey(), snapshotPositions(cells)));
+
+  return {
+    graph,
+    cells,
+    containers,
+    noteCells: new Map(),
+    groupCells: new Map(),
+    dispose: () => graph.destroy(),
+  };
+}
+
+/** A teardown handle for a mounted event-flow canvas (mirrors {@link ContextMapGraphHandle}). */
+export interface EventFlowGraphHandle {
+  dispose(): void;
+}
+
+/**
+ * Render a standalone event-flow canvas into `container`, reusing {@link buildEventFlowCanvas} and the
+ * pan/zoom/minimap chrome. The Events panel (#270 Task 3) mounts this in its Flow view. A superseded render
+ * (`isCurrent()` false) tears itself down rather than clobbering a newer one, and returns null. A dragged
+ * card's position persists per element via {@link buildEventFlowCanvas} (#270 Task 4).
+ */
+export async function renderEventFlowGraph(
+  container: HTMLElement,
+  flow: { nodes: EventFlowNode[]; edges: EventFlowEdge[] },
+  isCurrent: () => boolean,
+): Promise<EventFlowGraphHandle | null> {
+  let mx: Mx;
+  try {
+    mx = await getMaxGraph();
+  } catch (e) {
+    if (isCurrent()) container.innerHTML = `<p class="doc-error">Could not load the diagram renderer: ${escapeHtml(String(e))}</p>`;
+    return null;
+  }
+  if (!isCurrent()) return null;
+
+  const root = document.createElement('div');
+  // Deliberately WITHOUT `koi-svg-diagram`: that class scopes the domain canvas's selection cross-highlight,
+  // and an event-flow card shouldn't be cross-highlighted from the domain canvas.
+  root.className = 'koi-diagrams-single koi-eventflow-graph';
+  const surface = document.createElement('div');
+  surface.className = 'koi-canvas';
+  root.appendChild(surface);
+
+  const handle = buildEventFlowCanvas(mx, surface, flow);
+  // Read-only chrome (zoom bar + minimap, no domain authoring controls), but the cards themselves ARE
+  // movable: let a drag that starts on a card MOVE it while a drag on empty space pans (the read-only chrome
+  // would otherwise pan over a card and the card could never be dragged).
+  const chrome = mountChrome(mx, handle, root, true);
+  const panning = handle.graph.getPlugin('PanningHandler') as unknown as { ignoreCell?: boolean } | undefined;
+  if (panning) panning.ignoreCell = false;
 
   const dispose = (): void => {
     chrome.dispose();

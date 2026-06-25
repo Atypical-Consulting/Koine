@@ -63,7 +63,14 @@ public sealed partial class AsyncApiEmitter
 
                 if (channel is not null)
                 {
-                    operations[$"{ctx.Name}_receive_{sub.EventName}"] = new Operation("receive", channel, ctx.Name);
+                    // When this context receives the same event short name from two or more publishers
+                    // (#420), the bare "<Ctx>_receive_<Event>" key would collide and silently drop a
+                    // subscription — qualify the operation key by its publisher. The single-publisher
+                    // case keeps the bare key, byte-identical to before.
+                    var opKey = index.SubscriptionEventNameIsAmbiguous(ctx.Name, sub.EventName)
+                        ? $"{ctx.Name}_receive_{sub.Context}_{sub.EventName}"
+                        : $"{ctx.Name}_receive_{sub.EventName}";
+                    operations[opKey] = new Operation("receive", channel, ctx.Name);
                 }
             }
         }

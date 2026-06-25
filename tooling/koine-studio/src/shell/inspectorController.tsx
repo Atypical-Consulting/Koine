@@ -45,8 +45,13 @@ import type { PreviewTarget } from '@/settings/persistence';
 import { renderDiagrams } from '@/diagrams/diagrams';
 import { renderContextMapGraph, type ContextMapGraphHandle } from '@/diagrams/diagrams-maxgraph';
 import { buildContextMapGraph, type ContextMapEdge } from '@/diagrams/contextMapGraph';
-import { setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
-import type { AddNodeKind, CanvasAnnotationKind, AggregateMemberKind } from '@/diagrams/diagramContract';
+import { NODE_NAVIGATE_EVENT, setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
+import type {
+  AddNodeKind,
+  CanvasAnnotationKind,
+  AggregateMemberKind,
+  DiagramNodeNavigateDetail,
+} from '@/diagrams/diagramContract';
 import { createLayoutStore } from '@/diagrams/layoutStore';
 import { mergeDiagramGraphs } from '@/model/modelTables';
 import { type GlossaryHandlers } from '@/model/glossary';
@@ -92,7 +97,7 @@ const SYMBOL_KIND_NAMESPACE = 3;
 type CenterView = 'visual' | 'technical' | 'docs' | 'assistant';
 type TechView = 'editor' | 'preview' | 'check' | 'scenarios';
 type DocsView = 'glossary' | 'adr' | 'notes';
-type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap';
+type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap' | 'terminal';
 
 /**
  * The slice of {@link import('@/lsp/lsp').KoineLsp} the loaders call (content requests only). A
@@ -177,6 +182,13 @@ export interface InspectorControllerDeps {
 
   /** The scenario-runner panel (#149), created lazily by ide.ts the first time its tab is shown. */
   ensureScenarios?(): { refresh(): void };
+
+  /**
+   * The integrated terminal panel (#256), created lazily by ide.ts the first time its tab is shown.
+   * `fit()` reflows xterm to the (now-visible) panel. Desktop-only — the browser host omits it, and
+   * the panel renders a placeholder instead.
+   */
+  ensureTerminal?(): { fit(): void };
 
   /** Bind a fixed-height resizer to a panel (ide.ts's resize.ts, injected to keep this DOM-infra-free). */
   initEdgeResizer(opts: {
@@ -315,6 +327,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const eventsPanel = el('panel-events');
   const relationshipsPanel = el('panel-relationships');
   const contextMapView = el('panel-contextmap');
+  const terminalPanel = el('panel-terminal');
 
   // --- center pane restore ---------------------------------------------------
   // Restore the persisted center pane, defaulting to Visual when absent/invalid.
@@ -1414,6 +1427,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     eventsPanel.hidden = tab !== 'events';
     relationshipsPanel.hidden = tab !== 'relationships';
     contextMapView.hidden = tab !== 'contextmap';
+    terminalPanel.hidden = tab !== 'terminal';
     diagCountEl.hidden = tab !== 'problems';
     if (diagEl.classList.contains('collapsed')) applyDiagCollapsed(false);
     ensureBottomLoaded(tab);
@@ -1429,6 +1443,20 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     goto: (span: SourceSpan) => deps.gotoSourceSpan(span),
     onSelect: (qualifiedName: string, context: string) => selection.set({ qualifiedName, context }),
   };
+
+  // The Events panel's Flow canvas (#270) bubbles the canvas's own NODE_NAVIGATE_EVENT up to this host when
+  // a card is clicked (the bottom strip isn't under the diagrams container ide.tsx listens on, so the event
+  // is routed here, like the context-map graph). Route it to the SAME select-and-goto path the Events table
+  // uses: jump to the declaration AND select it so the Properties inspector loads it. Attached once on the
+  // stable host, so it survives the panel's re-mounts on every scope/view change. The card's context is its
+  // qualified-name prefix (the canvas detail carries no separate context field).
+  eventsPanel.addEventListener(NODE_NAVIGATE_EVENT, (e) => {
+    const d = (e as CustomEvent<DiagramNodeNavigateDetail>).detail;
+    if (!d) return;
+    deps.gotoSourceSpan({ file: d.file, line: d.line, column: d.column, endLine: d.endLine, endColumn: d.endColumn });
+    const dot = d.qualifiedName.indexOf('.');
+    selection.set({ qualifiedName: d.qualifiedName, context: dot < 0 ? '' : d.qualifiedName.slice(0, dot) });
+  });
 
   // The merged DiagramGraph projection behind both tables: every per-diagram graph from livingDocs fused
   // into one (node ids disambiguated) so the extractors see all aggregates + the integration-event flow
@@ -1449,6 +1477,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (tab === 'events' && appStore.getState().isStale('events')) void loadEventsPanel();
     if (tab === 'relationships' && appStore.getState().isStale('relationships')) void loadRelationshipsPanel();
     if (tab === 'contextmap' && appStore.getState().isStale('contextmap')) void loadContextMapPanel();
+    // The terminal panel is created lazily by ide.ts the first time its tab is shown (mirrors the
+    // assistant/scenarios panels); fit() reflows xterm now that the panel has layout. Desktop-only —
+    // the browser host omits ensureTerminal and the panel shows its placeholder.
+    if (tab === 'terminal') deps.ensureTerminal?.().fit();
   }
 
   // --- the "Context Map" tab: the strategic context map, as an interactive GRAPH or the dense TABLE ----

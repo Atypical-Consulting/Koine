@@ -39,7 +39,7 @@ export interface CompileResult {
   files: EmittedFile[];
 }
 
-export type Target = 'csharp' | 'typescript' | 'python' | 'php' | 'glossary' | 'asyncapi' | 'openapi';
+export type Target = 'csharp' | 'typescript' | 'python' | 'php' | 'glossary' | 'docs' | 'asyncapi' | 'openapi' | 'rust';
 
 export interface EmitTarget {
   id: string;

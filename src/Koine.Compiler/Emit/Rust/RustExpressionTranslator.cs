@@ -37,6 +37,7 @@ internal sealed class RustExpressionTranslator
     private readonly TypeScope _scope;
     private readonly ISet<string> _memberNames;
     private readonly IReadOnlyDictionary<string, string> _enumMemberToType;
+    private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> _enumVariants;
 
     private readonly HashSet<string> _locals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TypeRef> _localTypes = new(StringComparer.Ordinal);
@@ -50,6 +51,7 @@ internal sealed class RustExpressionTranslator
         ModelIndex index,
         IReadOnlyList<Member> members,
         IReadOnlyDictionary<string, string> enumMemberToType,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> enumVariants,
         RustTypeMapper typeMapper,
         string? context = null,
         string memberReceiver = "self",
@@ -65,6 +67,7 @@ internal sealed class RustExpressionTranslator
         _scope = TypeScope.FromMembers(members, index);
         _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         _enumMemberToType = enumMemberToType;
+        _enumVariants = enumVariants;
         // Derived (computed) members emit as accessor methods, not struct fields, so a reference to one
         // in an instance body must render as a call `self.x()`, never a field read `self.x`.
         _derivedMembers = new HashSet<string>(
@@ -340,7 +343,7 @@ internal sealed class RustExpressionTranslator
                     : owners.Count == 1
                         ? owners[0]
                         : _enumMemberToType.TryGetValue(name, out var fallback) ? fallback : owners[0];
-                sb.Append(_typeMapper.QualifyTypeName(enumType)).Append("::").Append(RustNaming.Variant(name));
+                sb.Append(_typeMapper.QualifyTypeName(enumType)).Append("::").Append(VariantOf(enumType, name));
                 return;
             }
         }
@@ -402,7 +405,7 @@ internal sealed class RustExpressionTranslator
         if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
             && !_locals.Contains(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
         {
-            sb.Append(_typeMapper.QualifyTypeName(qualifier.Name)).Append("::").Append(RustNaming.Variant(ma.MemberName));
+            sb.Append(_typeMapper.QualifyTypeName(qualifier.Name)).Append("::").Append(VariantOf(qualifier.Name, ma.MemberName));
             return;
         }
 
@@ -674,6 +677,19 @@ internal sealed class RustExpressionTranslator
         TypeRef? type = _resolver.Infer(expr, EffectiveScope());
         return type is not null && _index.Classify(type.Name) == TypeKind.Enum ? type.Name : null;
     }
+
+    /// <summary>
+    /// Resolves a referenced enum member to its emitted Rust variant via the shared per-enum
+    /// member→variant map (#323), so a reference renders the SAME disambiguated variant the enum
+    /// declaration emits (e.g. the second of <c>EUR</c>/<c>Eur</c> resolves to <c>Eur2</c>, not a second
+    /// <c>Eur</c>). Falls back to <see cref="RustNaming.Variant"/> for an enum/member the map does not
+    /// carry, matching the pre-de-dup behavior.
+    /// </summary>
+    private string VariantOf(string enumName, string memberName) =>
+        _enumVariants.TryGetValue(enumName, out IReadOnlyDictionary<string, string>? byMember)
+            && byMember.TryGetValue(memberName, out var variant)
+                ? variant
+                : RustNaming.Variant(memberName);
 
     /// <summary>True when an expression is a place (member/local) of a non-Copy type — so a by-value op must clone it.</summary>
     private bool IsNonCopyPlace(Expr expr, TypeRef? type)

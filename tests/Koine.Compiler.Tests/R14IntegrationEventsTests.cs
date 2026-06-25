@@ -1,4 +1,5 @@
 using System.Reflection;
+using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Services;
@@ -40,6 +41,28 @@ public class R14IntegrationEventsTests
         }
         contextmap {
           Sales -> Shipping : open-host
+        }
+        """;
+
+    // Two upstream contexts legitimately publish a same-named integration event; a downstream
+    // context subscribes to both (#420). The bare IHandleShipped seam would collide, so each emitter
+    // qualifies the colliding handler by its publisher (IHandleSalesShipped / IHandleReturnsShipped).
+    public const string SameNameCrossPublisher = """
+        context Sales {
+          publishes Shipped
+          integration event Shipped { orderId: OrderId }
+        }
+        context Returns {
+          publishes Shipped
+          integration event Shipped { rmaId: RmaId }
+        }
+        context Fulfillment {
+          subscribes Sales.Shipped
+          subscribes Returns.Shipped
+        }
+        contextmap {
+          Sales   -> Fulfillment : open-host
+          Returns -> Fulfillment : open-host
         }
         """;
 
@@ -288,8 +311,32 @@ public class R14IntegrationEventsTests
     }
 
     [Fact]
-    public void Subscribing_to_two_same_named_events_from_different_publishers_is_reported()
+    public void Same_named_events_from_different_publishers_emit_publisher_qualified_handlers()
     {
+        var (asm, files) = Build(SameNameCrossPublisher);
+
+        // Two distinct, non-clobbering handler seams — one per publisher, each typed on its own event.
+        var sales = FileContents(files, "Fulfillment/Abstractions/IHandleSalesShipped.cs");
+        sales.ShouldContain("public interface IHandleSalesShipped");
+        sales.ShouldContain("Task Handle(Sales.Shipped theEvent, CancellationToken ct = default);");
+
+        var returns = FileContents(files, "Fulfillment/Abstractions/IHandleReturnsShipped.cs");
+        returns.ShouldContain("public interface IHandleReturnsShipped");
+        returns.ShouldContain("Task Handle(Returns.Shipped theEvent, CancellationToken ct = default);");
+
+        // The bare IHandleShipped seam must NOT be emitted — it would clobber across publishers.
+        files.ShouldNotContain(f => f.RelativePath == "Fulfillment/Abstractions/IHandleShipped.cs");
+
+        asm.GetType("Fulfillment.IHandleSalesShipped").ShouldNotBeNull();
+        asm.GetType("Fulfillment.IHandleReturnsShipped").ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void Subscribing_to_two_same_named_events_from_different_publishers_is_allowed()
+    {
+        // Two upstream contexts legitimately publish a same-named integration event; a downstream
+        // context that integrates with both is a valid DDD shape (#420). KOI1417 no longer fires —
+        // each emitter qualifies the colliding handler seam by publisher instead.
         const string src = """
             context Sales { publishes Changed  integration event Changed { id: OrderId } }
             context Inventory { publishes Changed  integration event Changed { id: ItemId } }
@@ -299,6 +346,31 @@ public class R14IntegrationEventsTests
               Inventory -> Hub : open-host
             }
             """;
-        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.SubscribeHandlerNameCollision);
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.SubscribeHandlerNameCollision);
+    }
+
+    [Fact]
+    public void The_ambiguity_query_flags_only_same_named_cross_publisher_subscriptions()
+    {
+        const string src = """
+            context Sales { publishes Changed  integration event Changed { id: OrderId } }
+            context Inventory {
+              publishes Changed  publishes Restocked
+              integration event Changed { id: ItemId }
+              integration event Restocked { id: ItemId }
+            }
+            context Hub { subscribes Sales.Changed  subscribes Inventory.Changed  subscribes Inventory.Restocked }
+            contextmap {
+              Sales -> Hub : open-host
+              Inventory -> Hub : open-host
+            }
+            """;
+        ModelIndex index = new SemanticModel(new KoineCompiler().Parse(src).Model!).Index;
+        // 'Changed' reaches Hub from both Sales and Inventory → the bare IHandleChanged seam collides.
+        index.SubscriptionEventNameIsAmbiguous("Hub", "Changed").ShouldBeTrue();
+        // 'Restocked' reaches Hub from a single publisher → no collision.
+        index.SubscriptionEventNameIsAmbiguous("Hub", "Restocked").ShouldBeFalse();
+        // A context that does not subscribe to 'Changed' at all → never ambiguous.
+        index.SubscriptionEventNameIsAmbiguous("Sales", "Changed").ShouldBeFalse();
     }
 }
