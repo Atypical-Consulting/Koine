@@ -207,6 +207,7 @@ The great majority of conflicts here are mechanical and have one right answer. R
 | Emitter partials (`Emit/CSharp/CSharpEmitter.*.cs`), `UsingCollector`, `CSharpNaming` | both add methods/usings to the same partial | **Union** — keep both methods; let the build catch a genuine duplicate or signature clash. |
 | Test files (`R##…Tests.cs` and focused suites) | both append tests to the same class | **Union** — keep both sets of tests. |
 | `.csproj`, `Koine.slnx` | both add files/projects | **Union** the item groups. |
+| Studio front-end (`tooling/koine-studio/src/**`) | parallel Studio features touch shared components | **Union** where additive (new components/routes); for the *same* component edited both ways, understand both intents — don't blindly take one side. |
 
 Rule of thumb: **union** additive files (docs, tests, `CHANGELOG`), **regenerate** derived files
 (snapshots, lockfiles), **take-the-higher** for the version. Anything where both sides edited the *same
@@ -252,3 +253,10 @@ Then continue to Step 9 (full build/tests + format gate) — never push a merge 
   origin/main` (resolve once, no force-push) beats a rebase that replays conflicts per-commit. Don't
   hand-merge derived files (snapshots, `package-lock.json`) — regenerate them; and re-build after
   resolving, because a clean text merge can still be a broken compile. See §7.
+- **Raw `git` network ops can be sandbox-blocked while `gh` works.** `gh api`/`gh pr …` succeed, but
+  `git fetch`/`git push` (every per-task push in Step 6, and the `git fetch origin main` in Step 8) may
+  time out with `Failed to connect to github.com port 443`. `gh` proves the host is reachable, so it's a
+  sandbox restriction on git's traffic, not an outage — re-run just those commands with the sandbox
+  disabled. Local git (`merge`, `commit`, conflict resolution, `worktree`) needs no network and runs
+  normally. Use `git -C <path>` rather than `cd <path> && …` — a `cd` in a compound command gets reset
+  between calls here.

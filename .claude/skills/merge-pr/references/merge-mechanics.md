@@ -90,8 +90,9 @@ naming) can't be auto-fixed — `dotnet format` prints "doesn't support Fix All"
 
 ## 4. Sync with `main` and resolve conflicts (`BEHIND` / `DIRTY`)
 
-Identical to `implement-issue`'s Step 8 — the project squash-merges, so **merge, don't rebase**: one
-pass per conflict, no force-push, merge commit squashed away at landing.
+Mirrors `implement-issue`'s Step 8 (same resolutions — the two hot-spot tables are maintained in
+parallel, so keep them in sync when either changes). The project squash-merges, so **merge, don't
+rebase**: one pass per conflict, no force-push, merge commit squashed away at landing.
 
 ```bash
 git fetch origin main

@@ -7,15 +7,15 @@ description: >-
   279 in", or a bare PR link with "merge it." It does the whole tail of the lifecycle hands-off:
   waits for CI to finish, then APPLIES CORRECTIONS to clear whatever is blocking the merge — fixes
   red CI checks, merges the latest `main` into the branch and resolves conflicts so the PR stays
-  mergeable, and addresses unresolved review comments — looping fix → push → re-wait until the PR is
-  green and CLEAN. Then it **squash-merges** the PR, files any follow-up work as fresh issues via the
+  mergeable *as part of landing it now*, and addresses unresolved review comments — looping fix →
+  push → re-wait until the PR is green and CLEAN. Then it **squash-merges** the PR, files any follow-up work as fresh issues via the
   `create-issue` skill (both follow-ups passed inline as `--follow-up "…"` and ones discovered in the
   PR body / review threads), and finally tears down the local branch and its git worktree. ALWAYS
   reach for it on those merge/land/ship phrasings, including loose ones like "can you get that PR
   merged once CI's green" or "wrap up 279 and open follow-ups for the deferred bits." Does NOT apply
-  to OPENING or implementing a PR (that's `implement-issue`), to reviewing a PR without merging it
-  (that's `code-review` / `review`), or to creating a standalone issue with no PR to land
-  (that's `create-issue`).
+  to OPENING or implementing a PR — or to syncing/un-conflicting a PR you're still building rather than
+  landing it right now — (that's `implement-issue`), to reviewing a PR without merging it (that's
+  `code-review` / `review`), or to creating a standalone issue with no PR to land (that's `create-issue`).
 ---
 
 # Merge a Koine pull request
@@ -91,6 +91,13 @@ follow-ups, clean up). If the worktree/branch is already gone, skip Step 7.
 ---
 
 ## Step 1 — Preconditions & resolve the PR
+
+**Load the repo profile first.** This skill shows Koine's values inline (the commit identity, the CI
+gate commands, the squash integration style, the conflict hot-spots) — those are really the *Koine
+profile* used as a worked example. Run the **`get-repo-profile`** skill; it returns
+`.claude/skills/repo-profile.md` (generating it on first use). Prefer the profile's values wherever they
+differ from what's shown here, so this skill works unchanged in any repo. If no profile exists and you
+genuinely can't generate one, fall back to the inline Koine values and note that in the report.
 
 ```bash
 gh api user --jq .login                                  # prints a login, or 401 → not authed
@@ -230,8 +237,13 @@ Only once CI is green **and** `mergeStateStatus == CLEAN`. The repo's integratio
 
 ```bash
 gh pr merge "$PR" --squash --delete-branch \
-  --subject "<conventional title> (#$PR)"     # optional; omit to accept gh's default squash subject
+  --subject "<PR title — already ends in (#issue)> (#$PR)"   # optional; omit to accept gh's default
 ```
+
+**Prefer omitting `--subject`.** `implement-issue` deliberately titled the PR `… (#issue)`, and gh's
+default squash subject is that PR title with `(#PR)` appended — giving the repo's canonical
+`… (#issue) (#PR)` shape automatically. If you *do* override it, keep the `(#issue)` in the subject or
+you drop the link back to the originating issue.
 
 `--delete-branch` removes the **remote** branch and tidies the local ref where it can; Step 7 still
 handles the local worktree + branch explicitly (gh can't delete a branch that's checked out in a

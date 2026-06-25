@@ -9,13 +9,14 @@ description: >-
   — until every box is checked, then runs the `code-review` skill, applies the fixes, merges the latest
   `main` into the branch and resolves any conflicts so the PR stays mergeable, runs the formatter, and
   flips the PR from draft to ready. ALWAYS reach for it when the user wants to implement, build, code,
-  execute, ship, finish, knock out, work through, rebase/sync a branch, fix a PR that conflicts with
-  `main`, resume, or "pick up" a
-  GitHub issue or its plan — e.g. "implement issue 47", "knock out the tasks on issue 71", "execute
-  the plan on this issue and mark the PR ready", "build the feature from issue #X and open a PR", or a
-  bare issue link with "go build it." Does NOT apply to CREATING, filing, or planning a new issue
-  (that's `create-issue`), to editing a plan, or to merely commenting on / closing / listing issues,
-  or to ad-hoc coding with no issue plan to drive it.
+  execute, ship, finish, knock out, work through, resume, or "pick up" a GitHub issue or its plan — or
+  to keep that *in-flight* PR mergeable by rebasing/syncing its branch or fixing its conflicts with
+  `main` while it's still being built — e.g. "implement issue 47", "knock out the tasks on issue 71",
+  "execute the plan on this issue and mark the PR ready", "build the feature from issue #X and open a
+  PR", or a bare issue link with "go build it." Does NOT apply to CREATING, filing, or planning a new
+  issue (that's `create-issue`), to editing a plan, to merely commenting on / closing / listing issues,
+  to ad-hoc coding with no issue plan to drive it, or to *landing* a finished PR — syncing/un-conflicting
+  a PR purely to merge it now is `merge-pr`.
 ---
 
 # Implement a Koine issue from its plan
@@ -87,6 +88,13 @@ rather than making a second one (see `references/github-mechanics.md`).
 ---
 
 ## Step 1 — Preconditions
+
+**Load the repo profile first.** This skill shows Koine's values inline (the commit identity, the
+build/test/`dotnet format` commands, the conflict hot-spots, the layered project grain) — those are
+really the *Koine profile* used as a worked example. Run the **`get-repo-profile`** skill; it returns
+`.claude/skills/repo-profile.md` (generating it on first use). Prefer the profile's values wherever they
+differ from what's shown here, so this skill works unchanged in any repo. If no profile exists and you
+genuinely can't generate one, fall back to the inline Koine values and note that in the report.
 
 ```bash
 gh api user --jq .login                       # prints a login, or 401 → not authed
@@ -374,6 +382,10 @@ Short and concrete:
 - Anything you assumed, deferred, or couldn't verify (e.g. full suite skipped for missing wasm
   workloads). Keep the detail in the PR/issue; the report just points there.
 
+Then **close the loop**: the PR is ready but not landed — a human still owns the decision to merge.
+Point the user at the sibling skill that lands it — **`/merge-pr #<pr>`** waits for CI, applies any
+corrections to keep it mergeable, squash-merges, files follow-ups, and tears down the branch/worktree.
+
 ---
 
 ## Notes on quality
@@ -393,8 +405,10 @@ Short and concrete:
   --verify-no-changes` (the formatter CI enforces) and fix what it flags. Reviewers should never see a
   "ready" PR that doesn't compile, or that goes red in CI the instant it opens.
 - **Don't widen the blast radius.** Implement the plan, not your own ideas. If you spot adjacent work
-  worth doing, note it in the report (or as a follow-up issue via `create-issue`) — don't smuggle it
-  into this PR.
+  worth doing, record it under a `## Follow-ups` heading in the **PR description** (and call it out in
+  your report) — that's the exact place `/merge-pr` harvests deferred work from and files as tracked
+  issues at landing, so noting it only in the ephemeral report would lose it. Don't smuggle the work
+  itself into this PR.
 - **Merge clean, or don't merge.** Issues run in parallel here, so `main` almost always moves under a
   draft PR. A ready PR that conflicts with `main` (or goes red once `main` advances) stalls everyone.
   Merge the latest `main` into the branch right before the ready-flip and resolve the collisions —
