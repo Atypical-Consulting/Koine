@@ -20,6 +20,7 @@
       <button data-mobile="output" type="button">Output</button>
     </div>
     <span class="koi-status" data-kind="busy">loading compiler...</span>
+    <span class="koi-version" title="Compiler version"></span>
     <div class="koi-bar-right">
       <button class="koi-copy" type="button" title="Copy the current file">Copy</button>
       <button class="koi-download" type="button" title="Download all files as a .zip">Download</button>
@@ -139,6 +140,16 @@
     font-weight: 600;
     letter-spacing: 0.01em;
     white-space: nowrap;
+  }
+  /* Compiler version, sourced from Capabilities() at boot (#330) — muted, never clobbered by status. */
+  .koi-version {
+    font-size: 0.72rem;
+    color: var(--koi-muted);
+    opacity: 0.8;
+    white-space: nowrap;
+  }
+  .koi-version:empty {
+    display: none;
   }
   .koi-status[data-kind='ok'] {
     color: var(--koi-ok, #16915a);
