@@ -27,6 +27,20 @@ export function hashFromRoute(route: Route): string {
   return route === 'editor' ? EDITOR_HASH : HOME_HASH;
 }
 
+/**
+ * Decide which view to mount on a cold load — **synchronously**, from the URL hash and a synchronous
+ * "a workspace was previously open" signal. This is deliberately pure and IO-free: it must NOT await
+ * `openDefaultWorkspaceFlow` (or any probe). That async gate is exactly what made the home overlay
+ * fade in over an already-painted editor (#368); resolving the route up front, before first paint,
+ * is what removes the race rather than patching it.
+ *
+ * Editor wins when the hash explicitly asks for it (`#/editor`) or a workspace was already open;
+ * otherwise it's a pristine first load → Home.
+ */
+export function resolveInitialRoute(input: { hash: string; hasPersistedWorkspace: boolean }): Route {
+  return routeFromHash(input.hash) === 'editor' || input.hasPersistedWorkspace ? 'editor' : 'home';
+}
+
 export function createRouteSlice(
   set: StoreApi<RouteSlice>['setState'],
   _get: StoreApi<RouteSlice>['getState'],
