@@ -104,4 +104,38 @@ public class ReviewFixesTests
         a.CacheDiscriminator.ShouldNotBe(b.CacheDiscriminator);
         a.CacheDiscriminator.ShouldNotBe(c.CacheDiscriminator);
     }
+
+    /// <summary>A context with an <c>Is…</c>-named spec and a plain one, to exercise the predicate de-doubling.</summary>
+    private const string SpecPrefixFixture = """
+        context Loans {
+          enum LoanStatus { Active, Returned, Overdue }
+          value Money { amount: Decimal  currency: String }
+          aggregate Loans root Loan {
+            entity Loan identified by LoanId {
+              status: LoanStatus = Active
+              amount: Money
+            }
+          }
+          spec IsOverdue on Loan = status == Overdue
+          spec Premium   on Loan = amount.amount > 1000
+        }
+        """;
+
+    /// <summary>
+    /// #396 (TypeScript half): the spec-predicate builder prepended <c>is</c> unconditionally, so a
+    /// spec already named <c>Is…</c> doubled to <c>isIs…</c> — identical to the PHP bug. The TS emitter
+    /// must de-double too (<c>IsOverdue</c> → <c>isOverdue</c>), while still prefixing a plain spec
+    /// (<c>Premium</c> → <c>isPremium</c>).
+    /// </summary>
+    [Fact]
+    public void Typescript_spec_predicate_does_not_double_the_is_prefix()
+    {
+        var result = new KoineCompiler().Compile(SpecPrefixFixture, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var spec = result.Files.Single(f => f.RelativePath.EndsWith("Specifications.ts", StringComparison.Ordinal));
+        spec.Contents.ShouldContain("export function isOverdue(");
+        spec.Contents.ShouldNotContain("isIsOverdue");
+        spec.Contents.ShouldContain("export function isPremium(");
+    }
 }

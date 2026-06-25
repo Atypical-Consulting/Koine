@@ -217,6 +217,40 @@ public class PhpServicesTests
         content.ShouldContain("bool");
     }
 
+    /// <summary>
+    /// #396: the predicate-name builder prepended <c>is</c> unconditionally, so a spec already named
+    /// with an <c>Is…</c> prefix doubled to <c>isIs…</c>. The prefix must de-double — <c>IsOverdue</c>
+    /// → <c>isOverdue</c> — while a spec without the prefix still gains one (<c>Premium</c> →
+    /// <c>isPremium</c>).
+    /// </summary>
+    [Fact]
+    public void Spec_predicate_does_not_double_the_is_prefix()
+    {
+        const string src = """
+            context Loans {
+              enum LoanStatus { Active, Returned, Overdue }
+              value Money { amount: Decimal  currency: String }
+              aggregate Loans root Loan {
+                entity Loan identified by LoanId {
+                  status: LoanStatus = Active
+                  amount: Money
+                }
+              }
+              spec IsOverdue on Loan = status == Overdue
+              spec Premium   on Loan = amount.amount > 1000
+            }
+            """;
+        var files = Emit(src);
+        var content = FileContent(files, "src/Loans/Specifications/LoansSpecifications.php");
+
+        // `IsOverdue` → `isOverdue`, NOT the doubled `isIsOverdue`.
+        content.ShouldContain("public static function isOverdue(");
+        content.ShouldNotContain("isIsOverdue");
+
+        // A spec without an Is-prefix still gets one.
+        content.ShouldContain("public static function isPremium(");
+    }
+
     // -----------------------------------------------------------------------
     // Combo: both operations and use cases in one context
     // -----------------------------------------------------------------------
