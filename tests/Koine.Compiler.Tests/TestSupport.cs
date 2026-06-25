@@ -212,42 +212,62 @@ public static class TestSupport
         public void Dispose() => _connection.Dispose();
     }
 
+    /// <summary>The env var that opts conformance suites into REQUIRING every target toolchain.</summary>
+    internal const string RequireConformanceEnvVar = "KOINE_REQUIRE_CONFORMANCE";
+
     /// <summary>
-    /// Whether the conformance suites must REQUIRE every target toolchain to be present, reading the
-    /// <c>KOINE_REQUIRE_CONFORMANCE</c> env var live (truthy = <c>1</c> or <c>true</c>, case-insensitive;
-    /// anything else, including unset, is false). CI sets this so a missing toolchain is a hard failure
-    /// rather than a silent skip; locally it is unset so the suite stays green without foreign toolchains.
-    /// Read on each access (not cached) so a test can toggle it for its own scope.
+    /// Parses a <see cref="RequireConformanceEnvVar"/> value: truthy = <c>1</c> or <c>true</c>
+    /// (case-insensitive); anything else, including <c>null</c>/empty, is <c>false</c>. Pure (takes the
+    /// value rather than reading the environment) so the branch logic can be unit-tested without mutating
+    /// the process-wide environment — which would otherwise risk leaking into a parallel conformance suite.
+    /// </summary>
+    internal static bool ParseRequireConformance(string? value) =>
+        value is { Length: > 0 } v && (v == "1" || v.Equals("true", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Whether the conformance suites must REQUIRE every target toolchain to be present, reading
+    /// <see cref="RequireConformanceEnvVar"/> live (see <see cref="ParseRequireConformance"/>). CI sets
+    /// this so a missing toolchain is a hard failure rather than a silent skip; locally it is unset so the
+    /// suite stays green without foreign toolchains.
     /// </summary>
     public static bool RequireConformance =>
-        Environment.GetEnvironmentVariable("KOINE_REQUIRE_CONFORMANCE") is { Length: > 0 } value
-        && (value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase));
+        ParseRequireConformance(Environment.GetEnvironmentVariable(RequireConformanceEnvVar));
 
     /// <summary>
     /// The single decision point every conformance suite funnels its "is the target toolchain present?"
-    /// check through, so no target can silently no-op. Three-way behavior:
+    /// check through, so no target can silently no-op. Delegates to
+    /// <see cref="RequireOrSkip(bool, string, bool)"/> with the live <see cref="RequireConformance"/> flag.
+    /// </summary>
+    public static void RequireOrSkip(bool toolchainAvailable, string notice) =>
+        RequireOrSkip(toolchainAvailable, notice, RequireConformance);
+
+    /// <summary>
+    /// Three-way decision, with <paramref name="requireConformance"/> supplied explicitly so the branch
+    /// logic is unit-testable without touching the process environment:
     /// <list type="bullet">
     /// <item><description><paramref name="toolchainAvailable"/> is <c>true</c> → returns, letting the
     /// caller run its real type-check assertion.</description></item>
-    /// <item><description>absent and <see cref="RequireConformance"/> is set → <see cref="Assert.Fail"/>
+    /// <item><description>absent and <paramref name="requireConformance"/> is set → <see cref="Assert.Fail"/>
     /// with <paramref name="notice"/>, turning a missing toolchain into a red test (CI's contract).</description></item>
     /// <item><description>absent and the flag is off → <see cref="Assert.Skip"/> with
     /// <paramref name="notice"/>, surfacing the gap as xUnit <c>Skipped</c> rather than a false Passed.</description></item>
     /// </list>
     /// </summary>
-    public static void RequireOrSkip(bool toolchainAvailable, string notice)
+    internal static void RequireOrSkip(bool toolchainAvailable, string notice, bool requireConformance)
     {
         if (toolchainAvailable)
         {
             return;
         }
 
-        if (RequireConformance)
+        if (requireConformance)
         {
             Assert.Fail(notice);
         }
-
-        Assert.Skip(notice);
+        else
+        {
+            Assert.Skip(notice);
+        }
     }
 
     /// <summary>

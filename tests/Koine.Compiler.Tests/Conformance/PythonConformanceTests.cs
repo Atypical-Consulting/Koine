@@ -19,11 +19,11 @@ namespace Koine.Compiler.Tests.Conformance;
 public class PythonConformanceTests
 {
     private const string NoToolchainNotice =
-        "INCONCLUSIVE: no Python toolchain (mypy) available locally; type-check not run. " +
+        "No Python toolchain (mypy) available locally; type-check not run. " +
         "Install mypy (or set KOINE_MYPY) — CI runs this for real.";
 
     private const string NoInterpreterNotice =
-        "INCONCLUSIVE: no Python interpreter available locally; syntax check not run. " +
+        "No Python interpreter available locally; syntax check not run. " +
         "Install Python 3.11+ (or set KOINE_PYTHON) — CI runs this for real.";
 
     /// <summary>Clean, <c>--strict</c>-correct Python must type-check (skipped if no toolchain).</summary>

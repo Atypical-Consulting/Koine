@@ -17,11 +17,11 @@ namespace Koine.Compiler.Tests.Conformance;
 public class PhpConformanceTests
 {
     private const string NoToolchainNotice =
-        "INCONCLUSIVE: no PHP toolchain (phpstan) available locally; type-check not run. " +
+        "No PHP toolchain (phpstan) available locally; type-check not run. " +
         "Install phpstan (or set KOINE_PHPSTAN) — CI runs this for real.";
 
     private const string NoInterpreterNotice =
-        "INCONCLUSIVE: no PHP interpreter available locally; syntax check not run. " +
+        "No PHP interpreter available locally; syntax check not run. " +
         "Install PHP (or set KOINE_PHP) — CI runs this for real.";
 
     /// <summary>Clean, valid PHP must type-check (skipped if no toolchain).</summary>

@@ -45,7 +45,7 @@ namespace Koine.Compiler.Tests.Conformance;
 public class CrossEmitterConformanceTests
 {
     private const string NoToolchainNotice =
-        "INCONCLUSIVE: no Node/TypeScript toolchain (tsc + node) available locally; the TypeScript " +
+        "No Node/TypeScript toolchain (tsc + node) available locally; the TypeScript " +
         "half of the cross-emitter comparison was not run. The C#-vs-expected outcomes were still " +
         "asserted. Install Node + TypeScript (or set KOINE_TSC) — CI runs the full comparison.";
 

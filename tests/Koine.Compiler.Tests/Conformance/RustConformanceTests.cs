@@ -17,7 +17,7 @@ namespace Koine.Compiler.Tests.Conformance;
 public class RustConformanceTests
 {
     private const string NoToolchainNotice =
-        "INCONCLUSIVE: no usable Rust toolchain (cargo, networked) available; compile not run. " +
+        "No usable Rust toolchain (cargo, networked) available; compile not run. " +
         "Install Rust (or set KOINE_CARGO) — CI runs this for real.";
 
     /// <summary>A well-formed, dependency-free crate must compile (skipped if no toolchain).</summary>
@@ -61,7 +61,7 @@ public class RustConformanceTests
     /// <c>Ok</c> are both <c>false</c> — so it can never be mistaken for a real pass.
     /// </summary>
     [Fact]
-    public void Missing_toolchain_is_inconclusive_not_a_false_pass()
+    public void Skipped_result_does_not_claim_success()
     {
         TestSupport.RustCheck skipped = TestSupport.RustCheck.Skipped;
         skipped.ToolchainAvailable.ShouldBeFalse();

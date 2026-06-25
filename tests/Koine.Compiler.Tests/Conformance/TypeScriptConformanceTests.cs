@@ -18,7 +18,7 @@ namespace Koine.Compiler.Tests.Conformance;
 public class TypeScriptConformanceTests
 {
     private const string NoToolchainNotice =
-        "INCONCLUSIVE: no TypeScript toolchain (tsc) available locally; type-check not run. " +
+        "No TypeScript toolchain (tsc) available locally; type-check not run. " +
         "Install TypeScript (or set KOINE_TSC) — CI runs this for real.";
 
     /// <summary>Clean, <c>--strict</c>-correct TypeScript must type-check (skipped if no toolchain).</summary>
