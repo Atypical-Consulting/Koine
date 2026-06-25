@@ -1,0 +1,21 @@
+[
+  {"query": "implement issue 47", "should_trigger": true, "note": "'implement issue N'"},
+  {"query": "knock out the tasks on issue 71", "should_trigger": true, "note": "'knock out the tasks'"},
+  {"query": "execute the plan on issue 372 and mark the PR ready", "should_trigger": true, "note": "'execute the plan ... mark PR ready'"},
+  {"query": "build the feature from issue #129 and open a PR", "should_trigger": true, "note": "'build ... and open a PR'"},
+  {"query": "go build it: https://github.com/Atypical-Consulting/Koine/issues/200", "should_trigger": true, "note": "bare issue link + 'go build it'"},
+  {"query": "pick up issue 88 and start coding it", "should_trigger": true, "note": "'pick up ... start coding'"},
+  {"query": "work through the implementation plan on issue 150", "should_trigger": true, "note": "'work through the plan'"},
+  {"query": "ship the implementation for issue 99", "should_trigger": true, "note": "'ship the implementation for issue'"},
+  {"query": "finish the remaining tasks on issue 71", "should_trigger": true, "note": "'finish the remaining tasks'"},
+  {"query": "my draft PR conflicts with main and I'm still building it — sync the branch and fix the conflicts so it stays mergeable", "should_trigger": true, "note": "in-flight PR sync (boundary, → implement-issue)"},
+  {"query": "resume building issue 71 where it left off", "should_trigger": true, "note": "'resume building'"},
+
+  {"query": "file an issue for a new Rust formatter", "should_trigger": false, "note": "→ create-issue"},
+  {"query": "merge PR 281 now that CI is green", "should_trigger": false, "note": "→ merge-pr (land now)"},
+  {"query": "land #281", "should_trigger": false, "note": "→ merge-pr"},
+  {"query": "review the diff on PR 281", "should_trigger": false, "note": "→ review/code-review"},
+  {"query": "set up the repo profile for this repo", "should_trigger": false, "note": "→ get-repo-profile"},
+  {"query": "what does the C# emitter do for aggregates?", "should_trigger": false, "note": "doc question — no lifecycle skill"},
+  {"query": "track this idea so we don't forget it: a Rust emitter", "should_trigger": false, "note": "→ create-issue"}
+]
