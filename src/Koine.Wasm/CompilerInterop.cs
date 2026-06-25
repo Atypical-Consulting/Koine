@@ -149,7 +149,7 @@ public static partial class CompilerInterop
     private static readonly string[] JsExportNames =
     [
         nameof(Diagnose), nameof(Compile), nameof(Capabilities),
-        nameof(DiagnoseWorkspace), nameof(EmitPreview), nameof(ListEmitTargets), nameof(SemanticTokens),
+        nameof(DiagnoseWorkspace), nameof(EmitPreview), nameof(ListEmitTargets), nameof(GbnfGrammar), nameof(SemanticTokens),
         nameof(Glossary), nameof(ContextMap), nameof(GlossaryModel), nameof(SetDoc),
         nameof(Model), nameof(ModelMembers), nameof(EmitKoine), nameof(ApplyModelEdit),
         nameof(Hover), nameof(Completions), nameof(SignatureHelp), nameof(Definition),
