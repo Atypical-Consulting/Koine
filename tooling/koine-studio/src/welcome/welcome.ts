@@ -18,6 +18,12 @@ export interface WelcomeCallbacks {
   onOpenRecent(path: string): void;
   /** Open one of the starter templates as a workspace. */
   onOpenExample(template: Template): void;
+  /**
+   * Return to a live editor session as-is — fired by the "Resume editing" control, which is only
+   * rendered when a session exists to resume ({@link BuildWelcomeOpts.canResume}). Unlike the start
+   * actions, this changes nothing about the workspace. Optional: the legacy body overlay never wires it.
+   */
+  onResume?(): void;
 }
 
 /** Imperative handle returned by createWelcome. */
@@ -139,6 +145,13 @@ interface BuildWelcomeOpts {
    * affordances suppressed (you don't "close" a destination — the router navigates instead).
    */
   embedded: boolean;
+  /**
+   * A live editor session exists to return to (issue #392): the IDE has booted and a workspace is open
+   * behind the route. When true, render a "Resume editing" control that fires {@link WelcomeCallbacks.onResume}
+   * to step back into that session unchanged. A pristine first-load Home leaves this false, so the
+   * control stays absent and Home stays clean.
+   */
+  canResume?: boolean;
 }
 
 /** What {@link buildWelcome} returns: the overlay handle, plus its root element and a destroy() teardown. */
@@ -224,6 +237,21 @@ function buildWelcome(
   closeBtn.hidden = opts.embedded;
   closeBtn.addEventListener('click', () => hide());
   bar.appendChild(closeBtn);
+
+  // "Resume editing" — the purpose-built return-to-session control (issue #392). The routed Home
+  // suppresses the dismiss-✕, so once an editor session is live this is the only visible, keyboard-
+  // reachable way back into it *without* taking a workspace-changing start action. Rendered only when
+  // `canResume`, so a pristine first-load Home (no session yet) stays clean; it sits where the ✕ did.
+  if (opts.canResume) {
+    const resumeBtn = document.createElement('button');
+    resumeBtn.type = 'button';
+    resumeBtn.className = 'koi-welcome-resume';
+    resumeBtn.dataset.action = 'resume';
+    resumeBtn.title = 'Return to your editor session';
+    resumeBtn.textContent = 'Resume editing';
+    resumeBtn.addEventListener('click', () => cb.onResume?.());
+    bar.appendChild(resumeBtn);
+  }
 
   // --- hero: the thesis (left) + get-to-work rail (right) -------------------
   const hero = document.createElement('section');
@@ -850,15 +878,17 @@ export function createWelcome(
  * Mount the welcome screen as a routed, full-page Home view inside `container` — the Home half of
  * issue #368's distinct Home/Editor routes. No `document.body` overlay and no `hidden` toggle: the
  * card is shown the moment it mounts, recents rendered immediately. `destroy()` detaches it when the
- * router swaps to the editor.
+ * router swaps to the editor. Pass `opts.canResume` when an editor session is already live so Home
+ * offers a "Resume editing" control back into it (issue #392).
  */
 export function mountHome(
   container: HTMLElement,
   cb: WelcomeCallbacks,
   templates: readonly Template[] = TEMPLATES,
   canOpenFolders = true,
+  opts: { canResume?: boolean } = {},
 ): { destroy(): void } {
-  const welcome = buildWelcome(cb, templates, canOpenFolders, { embedded: true });
+  const welcome = buildWelcome(cb, templates, canOpenFolders, { embedded: true, canResume: opts.canResume });
   welcome.refreshRecent();
   container.appendChild(welcome.root);
   return { destroy: welcome.destroy };
