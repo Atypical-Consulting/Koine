@@ -8,16 +8,14 @@ namespace Koine.Compiler.Tests.Conformance;
 /// <see cref="PythonSnapshotTests"/>. Each milestone fixture is snapshot-tested (the diff is the review
 /// of the generated Rust) AND compiled with <see cref="TestSupport.CompileRust"/> when a usable Rust
 /// toolchain is present — so a green build proves the emitted crate compiles. When the toolchain is
-/// absent/offline the compile is reported INCONCLUSIVE rather than failing.
+/// absent/offline the compile is funneled through <see cref="TestSupport.RequireOrSkip"/>, which reports
+/// the test as <c>Skipped</c> (not a false Passed) — and a hard <c>Failed</c> in CI, where
+/// <c>KOINE_REQUIRE_CONFORMANCE</c> is set and the toolchain installed.
 /// </summary>
 public class RustSnapshotTests
 {
-    private readonly ITestOutputHelper _output;
-
-    public RustSnapshotTests(ITestOutputHelper output) => _output = output;
-
     private const string NoToolchainNotice =
-        "INCONCLUSIVE: no usable Rust toolchain (cargo, networked) available; cargo check not run.";
+        "No usable Rust toolchain (cargo, networked) available; cargo check not run.";
 
     /// <summary>Value objects + a smart enum with associated data + a regex-validated value object.</summary>
     private const string ValueObjectFixture = """
@@ -66,11 +64,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -118,11 +112,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -174,11 +164,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -234,11 +220,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -267,11 +249,7 @@ public class RustSnapshotTests
         d.ShouldContain("self.subtotal() * self.unit_price");   // derived ref → method call
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
@@ -302,11 +280,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -320,7 +294,7 @@ public class RustSnapshotTests
     {
         if (FindTemplate(relativePath) is not { } source)
         {
-            _output.WriteLine($"INCONCLUSIVE: template '{relativePath}' not found from the test assembly.");
+            Assert.Skip($"Template '{relativePath}' not found from the test assembly; cargo check not run.");
             return;
         }
 
@@ -328,11 +302,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -397,11 +367,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -416,7 +382,7 @@ public class RustSnapshotTests
     {
         if (FindTemplateDir("pizzeria") is not { } sources)
         {
-            _output.WriteLine("INCONCLUSIVE: pizzeria template not found from the test assembly.");
+            Assert.Skip("Pizzeria template not found from the test assembly; cargo check not run.");
             return;
         }
 
@@ -424,11 +390,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -485,11 +447,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -542,11 +500,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -604,11 +558,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -647,11 +597,7 @@ public class RustSnapshotTests
         reservations.ShouldContain("self.domain_events_2.push(DomainEvent::TableReserved(");
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
@@ -678,11 +624,7 @@ public class RustSnapshotTests
         audit.ShouldNotContain("domain_events");
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
@@ -739,11 +681,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -802,11 +740,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -870,11 +804,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
