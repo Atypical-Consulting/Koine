@@ -43,6 +43,11 @@ process is killed before it executes. The synthetic command file is kept for fai
 skill-creator approach, but it is the **early kill** — not the command file — that makes this safe when
 the real skills are installed. The runner never runs a skill body; it only observes the *intent* to.
 
+As defense-in-depth, each subprocess runs with `--disallowedTools Bash Edit Write NotebookEdit`, so
+even if the early kill ever lost the race (e.g. a future CLI stopped emitting partial tool-use events),
+an action skill still could not mutate anything — the tools that do are denied. This does not change
+*which* skill the model invokes (what we measure): the `Skill` tool stays allowed and fires first.
+
 ## How to run
 
 Requires the `claude` CLI on `PATH` and run from inside the repo (the runner strips `CLAUDECODE` so
@@ -63,7 +68,9 @@ a query when its trigger rate is `≥ threshold` (default 0.5) for should-trigge
 for should-not entries. Treat run-to-run flakiness with `--runs-per-query ≥ 3`.
 
 To re-check after a description edit: re-run the affected skill's set and compare `recall` /
-`specificity` against the committed baseline in [`results/`](results).
+`specificity` against the committed baseline in [`results/`](results). A scoped
+`python3 evals/run_all.py --skills <name>` *merges* into the committed `baseline.json` (it refreshes
+only that skill and leaves the others intact), so it is safe to re-run one skill at a time.
 
 ## Baseline
 
