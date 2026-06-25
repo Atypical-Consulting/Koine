@@ -9,7 +9,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { appDataDir, join } from '@tauri-apps/api/path';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from '@/host/types';
+import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc, TerminalTransport } from '@/host/types';
 import { buildLogLArgs, parseLogL, type ChangeEntry } from '@/host/gitHistory';
 import { saveMetaFor } from '@/host/saveMeta';
 import { normalizeCompileTarget } from '@/ai/assistantTools';
@@ -65,14 +65,70 @@ class TauriLspTransport implements LspTransport {
   }
 }
 
+/**
+ * Terminal transport over Tauri IPC. Mirrors {@link TauriLspTransport}: the Rust PTY broker streams
+ * shell output over `pty://data` and announces the exit over `pty://exit`, while keystrokes, resizes
+ * and teardown go out as `pty_*` invoke commands. Listeners are attached in `start` (before
+ * `pty_start`) so no early output is missed, and detached in `stop`.
+ */
+class TauriTerminalTransport implements TerminalTransport {
+  private dataCb?: (data: string) => void;
+  private exitCb?: (code: number) => void;
+  private unlistenData?: UnlistenFn;
+  private unlistenExit?: UnlistenFn;
+
+  onData(cb: (data: string) => void): void {
+    this.dataCb = cb;
+  }
+
+  onExit(cb: (code: number) => void): void {
+    this.exitCb = cb;
+  }
+
+  // Attach the event listeners FIRST (so no output chunk is missed), then spawn the shell.
+  async start(cwd: string | null): Promise<void> {
+    this.unlistenData = await listen<string>('pty://data', (e) => this.dataCb?.(e.payload));
+    this.unlistenExit = await listen<number>('pty://exit', (e) =>
+      this.exitCb?.(typeof e.payload === 'number' ? e.payload : -1),
+    );
+    await invoke('pty_start', { cwd });
+  }
+
+  write(data: string): Promise<void> {
+    return invoke('pty_write', { data }) as Promise<void>;
+  }
+
+  resize(cols: number, rows: number): Promise<void> {
+    return invoke('pty_resize', { cols, rows }) as Promise<void>;
+  }
+
+  async stop(): Promise<void> {
+    this.unlistenData?.();
+    this.unlistenExit?.();
+    // pty_stop is idempotent and safe when nothing is running; swallow any error (the host may
+    // already be gone) so teardown never throws.
+    try {
+      await invoke('pty_stop');
+    } catch {
+      // best effort
+    }
+  }
+}
+
 export class TauriPlatform implements Platform {
   readonly kind = 'tauri' as const;
   readonly canOpenFolders = true;
   readonly canSaveProjects = false;
   readonly persistsWorkspace = true;
+  // The desktop shell brokers a real PTY (see TauriTerminalTransport / the Rust pty_* commands).
+  readonly canRunShell = true;
 
   createLspTransport(): LspTransport {
     return new TauriLspTransport();
+  }
+
+  createTerminal(): TerminalTransport {
+    return new TauriTerminalTransport();
   }
 
   appVersion(): Promise<string> {

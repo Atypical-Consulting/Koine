@@ -111,6 +111,7 @@ class FakePlatform implements Platform {
   readonly kind = 'browser' as const;
   readonly canOpenFolders = true;
   readonly canSaveProjects = true;
+  readonly canRunShell = false;
   persistsWorkspace = true;
   readonly transport = new FakeLspTransport();
 
