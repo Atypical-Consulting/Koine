@@ -205,9 +205,27 @@ jobs:
           cache-dependency-path: tooling/koine-studio/package-lock.json
 
       # (a) Publish + bundle the in-browser compiler, then (b) typecheck and bundle the web frontend.
+      # Built at the DEPLOY's sub-path base (/Koine/studio/) so the boot smoke-test below exercises the
+      # exact base/worker-URL resolution users hit — without forcing AOT (the PR validation stays on the
+      # fast interpreter; the #357 worker-boot bug is in the worker JS, independent of the wasm runtime).
       - name: Build studio (web)
         working-directory: tooling/koine-studio
+        env:
+          KOINE_STUDIO_BASE: /Koine/studio/
         run: |
           npm ci
           npm run build:wasm
           npm run build:web
+
+      # The compiler worker must actually boot in a real browser. The vitest/storybook suites MOCK the
+      # worker, so without this a worker-boot regression (issue #357 — the studio showed "connection
+      # failed") ships green. Only Chromium is needed; --with-deps installs its Linux system libs.
+      - name: Install Playwright Chromium (boot smoke-test)
+        working-directory: tooling/koine-studio
+        run: npx playwright install --with-deps chromium
+
+      - name: Boot smoke-test — the real compiler boots in a browser (#357)
+        working-directory: tooling/koine-studio
+        env:
+          KOINE_STUDIO_BASE: /Koine/studio/
+        run: npm run test:browser

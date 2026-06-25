@@ -11,12 +11,16 @@
 //              | { type: 'boot-failure'; error: string }
 
 import type { WorkerRequest, WorkerResponse, WorkerSignal } from './workerClient';
+import { broadcastBootSignal } from './bootWatchdog';
+import { dotnetEntryUrl } from './dotnetAsset';
 
-/** Base-aware URL of the published dotnet.js loader (respects Vite's `base`, e.g. `/Koine/studio/`). */
-function dotnetEntryUrl(): string {
-  const base = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '');
-  return `${base}/koine-wasm/_framework/dotnet.js`;
-}
+/**
+ * Watchdog ceiling for the in-worker runtime boot. If `dotnet.create()` neither resolves nor rejects
+ * within this window (issue #357 — a silent hang), the worker posts an explicit `boot-failure` so the
+ * host falls back promptly instead of waiting out its own 30 s timer with no diagnostic. A healthy
+ * boot completes in well under a second once the bundle is cached.
+ */
+const BOOT_WATCHDOG_MS = 20_000;
 
 // ---------------------------------------------------------------------------
 // Boot the .NET runtime once.
@@ -45,23 +49,11 @@ function bootRuntime(): Promise<InteropSurface> {
 }
 
 // ---------------------------------------------------------------------------
-// Boot and post the ready / boot-failure signal.
-// ---------------------------------------------------------------------------
-
-bootRuntime()
-  .then(() => {
-    self.postMessage({ type: 'ready' } satisfies WorkerSignal);
-  })
-  .catch((err: unknown) => {
-    const message = err instanceof Error ? err.message : String(err);
-    self.postMessage({ type: 'boot-failure', error: message } satisfies WorkerSignal);
-  });
-
-// ---------------------------------------------------------------------------
 // Message loop: dispatch { id, method, args } → { id, ok, result/error }.
 // ---------------------------------------------------------------------------
 
-self.onmessage = async (ev: MessageEvent<WorkerRequest>): Promise<void> => {
+/** Dispatch one `{ id, method, args }` request → `{ id, ok, result/error }` reply. */
+async function handleMessage(ev: MessageEvent<WorkerRequest>): Promise<void> {
   const { id, method, args } = ev.data;
   try {
     const interop = await bootRuntime();
@@ -75,4 +67,23 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>): Promise<void> => {
     const error = err instanceof Error ? err.message : String(err);
     self.postMessage({ id, ok: false, error } satisfies WorkerResponse);
   }
-};
+}
+
+// ---------------------------------------------------------------------------
+// Boot, then wire the message loop and broadcast ready / boot-failure.
+//
+// CRITICAL (issue #357): the message loop is installed via `addEventListener('message', …)` AFTER the
+// runtime has booted — NOT as a top-level `self.onmessage = …`. Assigning `self.onmessage`
+// synchronously at worker startup clobbers the `message` channel the .NET WebAssembly runtime relies
+// on while `dotnet.create()` boots inside a Worker, which deadlocks the boot: `import(dotnet.js)`
+// resolves but `create()` never settles (no ready, no failure). Wiring the handler only once boot has
+// resolved leaves that channel untouched during the boot. The host sends RPC only after it receives
+// `ready`, so installing the handler just before `ready` loses no messages.
+// ---------------------------------------------------------------------------
+
+broadcastBootSignal(
+  bootRuntime(),
+  (signal: WorkerSignal) => self.postMessage(signal),
+  BOOT_WATCHDOG_MS,
+  () => self.addEventListener('message', (ev: MessageEvent) => void handleMessage(ev as MessageEvent<WorkerRequest>)),
+);

@@ -11,6 +11,7 @@
     "predev:web": "node scripts/generate-templates.mjs && node scripts/build-wasm.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:browser": "node scripts/smoke-boot.mjs",
     "build": "tsc && vite build",
     "prebuild": "node scripts/generate-templates.mjs",
     "build:wasm": "node scripts/build-wasm.mjs",
