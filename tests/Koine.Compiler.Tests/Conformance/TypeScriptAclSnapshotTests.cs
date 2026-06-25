@@ -15,12 +15,8 @@ namespace Koine.Compiler.Tests.Conformance;
 /// </summary>
 public class TypeScriptAclSnapshotTests
 {
-    private readonly ITestOutputHelper _output;
-
-    public TypeScriptAclSnapshotTests(ITestOutputHelper output) => _output = output;
-
     private const string NoToolchainNotice =
-        "INCONCLUSIVE: no TypeScript toolchain (tsc) available locally; type-check not run. " +
+        "No TypeScript toolchain (tsc) available locally; type-check not run. " +
         "Install TypeScript (or set KOINE_TSC) — CI runs this for real.";
 
     /// <summary>
@@ -56,8 +52,9 @@ public class TypeScriptAclSnapshotTests
 
     /// <summary>
     /// The ACL translator is an interface-only seam (no runtime behavior), so behavioral parity is
-    /// N/A — the proof is that the emitted TypeScript type-checks under <c>tsc --strict</c>. Inconclusive
-    /// (logged, not failed) only when no toolchain is present; with one it MUST pass with zero diagnostics.
+    /// N/A — the proof is that the emitted TypeScript type-checks under <c>tsc --strict</c>. Reported
+    /// <c>Skipped</c> (a hard <c>Failed</c> under <c>KOINE_REQUIRE_CONFORMANCE</c>) when no toolchain is
+    /// present; with one it MUST pass with zero diagnostics.
     /// </summary>
     [Fact]
     public void Emitted_acl_typescript_typechecks_under_strict()
@@ -66,11 +63,7 @@ public class TypeScriptAclSnapshotTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue("emitted ACL TypeScript should type-check under --strict:\n" + string.Join("\n", check.Errors));
     }
