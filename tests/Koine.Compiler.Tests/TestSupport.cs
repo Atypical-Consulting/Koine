@@ -213,6 +213,44 @@ public static class TestSupport
     }
 
     /// <summary>
+    /// Whether the conformance suites must REQUIRE every target toolchain to be present, reading the
+    /// <c>KOINE_REQUIRE_CONFORMANCE</c> env var live (truthy = <c>1</c> or <c>true</c>, case-insensitive;
+    /// anything else, including unset, is false). CI sets this so a missing toolchain is a hard failure
+    /// rather than a silent skip; locally it is unset so the suite stays green without foreign toolchains.
+    /// Read on each access (not cached) so a test can toggle it for its own scope.
+    /// </summary>
+    public static bool RequireConformance =>
+        Environment.GetEnvironmentVariable("KOINE_REQUIRE_CONFORMANCE") is { Length: > 0 } value
+        && (value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The single decision point every conformance suite funnels its "is the target toolchain present?"
+    /// check through, so no target can silently no-op. Three-way behavior:
+    /// <list type="bullet">
+    /// <item><description><paramref name="toolchainAvailable"/> is <c>true</c> → returns, letting the
+    /// caller run its real type-check assertion.</description></item>
+    /// <item><description>absent and <see cref="RequireConformance"/> is set → <see cref="Assert.Fail"/>
+    /// with <paramref name="notice"/>, turning a missing toolchain into a red test (CI's contract).</description></item>
+    /// <item><description>absent and the flag is off → <see cref="Assert.Skip"/> with
+    /// <paramref name="notice"/>, surfacing the gap as xUnit <c>Skipped</c> rather than a false Passed.</description></item>
+    /// </list>
+    /// </summary>
+    public static void RequireOrSkip(bool toolchainAvailable, string notice)
+    {
+        if (toolchainAvailable)
+        {
+            return;
+        }
+
+        if (RequireConformance)
+        {
+            Assert.Fail(notice);
+        }
+
+        Assert.Skip(notice);
+    }
+
+    /// <summary>
     /// Result of a TypeScript type-check run. <see cref="ToolchainAvailable"/> is false when
     /// no <c>tsc</c> could be located locally — callers should SKIP (not fail) in that case so
     /// <c>dotnet test</c> stays green without a Node/TypeScript toolchain. When the toolchain IS
