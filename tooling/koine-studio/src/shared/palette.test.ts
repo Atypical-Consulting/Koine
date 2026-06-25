@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { createCommandPalette, type Command } from '@/shared/palette';
+import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
 
 // Each createCommandPalette() self-mounts one .koi-palette-backdrop on document.body. Wipe the body
 // between tests so stale backdrops/handlers (and the central Esc listener's stack entries) don't leak.
@@ -437,5 +438,55 @@ describe('overlay-stack integration (Esc)', () => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
     ).not.toThrow();
     expect(palette.isOpen).toBe(false);
+  });
+});
+
+// The layout command builder is a pure module (src/shell/layoutCommands.ts) so the five view-layout
+// commands the shell spreads into its palette provider can be unit-tested without ide.tsx's giant
+// closure. Each command's run() must call exactly the matching injected action.
+describe('layoutCommands — the view-layout palette commands', () => {
+  // Spy actions: one vi.fn() per LayoutActions method.
+  function spyActions(): LayoutActions {
+    return {
+      split: vi.fn(),
+      toggleOrientation: vi.fn(),
+      closeGroup: vi.fn(),
+      togglePanelSide: vi.fn(),
+      toggleSideRail: vi.fn(),
+    };
+  }
+
+  // The exact ids the shell + the brief pin (so the palette/help/anything keyed on them stay stable),
+  // paired with the action each command must invoke.
+  const wiring: { id: string; action: keyof LayoutActions }[] = [
+    { id: 'editor.split', action: 'split' },
+    { id: 'editor.toggleOrientation', action: 'toggleOrientation' },
+    { id: 'editor.closeGroup', action: 'closeGroup' },
+    { id: 'layout.panelSide', action: 'togglePanelSide' },
+    { id: 'layout.sideRail', action: 'toggleSideRail' },
+  ];
+
+  test('returns exactly the five layout commands, by id', () => {
+    const cmds = layoutCommands(spyActions());
+    expect(cmds.map((c) => c.id)).toEqual(wiring.map((w) => w.id));
+  });
+
+  test('every command carries a non-empty title', () => {
+    const cmds = layoutCommands(spyActions());
+    expect(cmds.every((c) => typeof c.title === 'string' && c.title.length > 0)).toBe(true);
+  });
+
+  test.each(wiring)('command $id run() calls only the $action action, exactly once', ({ id, action }) => {
+    const actions = spyActions();
+    const cmd = layoutCommands(actions).find((c) => c.id === id)!;
+    expect(cmd).toBeDefined();
+
+    cmd.run();
+
+    expect(actions[action]).toHaveBeenCalledTimes(1);
+    // No other action fired.
+    for (const other of Object.keys(actions) as (keyof LayoutActions)[]) {
+      if (other !== action) expect(actions[other]).not.toHaveBeenCalled();
+    }
   });
 });

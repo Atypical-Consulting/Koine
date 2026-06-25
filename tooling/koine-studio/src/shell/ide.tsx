@@ -41,10 +41,12 @@ import {
 import { createWelcome } from '@/welcome/welcome';
 import { type Template } from '@/welcome/templates';
 import { createCommandPalette, type Command } from '@/shared/palette';
+import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
+import { loadLayout, saveLayout, type LayoutState } from '@/shell/layoutStore';
 import { devCommands } from '@/shell/devCommands';
 import { createPreferences } from '@/settings/prefs';
 import { applyAppearance } from '@/settings/appearance';
-import { initSplitResizer, initEdgeResizer } from '@/shell/resize';
+import { initEdgeResizer, initGroupResizer } from '@/shell/resize';
 import { createHelpOverlay } from '@/shared/help';
 import { createGenerateProject } from '@/export/generateProjectWizard';
 import { sanitizeProjectName } from '@/export/generateProject';
@@ -407,6 +409,11 @@ export function init(): () => void {
 
   const editorSession = createEditorSession({
     parent: el('editor-pane'),
+    // The second editor group (group B) mounts here when the user splits the editor; docFor reads a
+    // uri's live text from the shared buffer set so opening a file in B shows the same content group A
+    // would. Both are wired through the layout commands + boot below (Task 4 / issue #265).
+    groupBParent: el('editor-pane-b'),
+    docFor: (uri) => workspace.buffers.get(uri)?.text ?? '',
     doc: initialDoc,
     lineWrap: settings.wordWrap,
     minimap: settings.enableMinimap,
@@ -432,18 +439,27 @@ export function init(): () => void {
   const setStatus = editorSession.setStatus;
 
   // The buffer/dirty/tree half of the editor's onChange (the editor↔LSP sync runs inside
-  // editorSession; the buffer text+dirty update lives in workspace.syncActiveBuffer). Preserves the
-  // original effect order: welcome.hide → buffer text+dirty → onDocEdited → renderTree (only when the
-  // active file's dirty dot just appeared).
-  editorSession.onChange((doc) => {
-    // First edit dismisses the welcome overlay (shown only on a pristine first-run workspace).
+  // editorSession; the buffer text+dirty update lives in workspace.syncBuffer). The callback carries
+  // the EDITING group's uri (group A's active uri, or group B's current uri) so the edit syncs into
+  // the right buffer — a group-B edit must never write group A's (active) buffer (#265). Preserves the
+  // original effect order: welcome.hide → buffer text+dirty → onDocEdited → renderTree (only when that
+  // file's dirty dot just appeared). The active-file-only side effects (recompile via onDocEdited,
+  // history.noteEdit) are gated on `uri === activeUri()`: they are group-A/active-file concerns and a
+  // background B edit must not drive the active file's recompile or undo history.
+  editorSession.onChange((doc, uri) => {
+    // First edit dismisses the welcome overlay (shown only on a pristine first-run workspace). Both
+    // groups dismiss it.
     if (welcome.visible) welcome.hide();
-    const becameDirty = workspace.syncActiveBuffer(doc);
-    controller.onDocEdited();
-    if (!history.isRestoring) history.noteEdit();
-    // Re-render the tree only when the active file's dirty dot just appeared (cheap path).
+    // Sync into the EDITING group's own buffer (active or B), flipping its dirty flag on first change.
+    const becameDirty = workspace.syncBuffer(uri, doc);
+    if (uri === workspace.activeUri()) {
+      // Active-file-only effects: recompile the active doc views + record the edit in undo history.
+      controller.onDocEdited();
+      if (!history.isRestoring) history.noteEdit();
+    }
+    // Re-render the tree only when THIS file's dirty dot just appeared — so B's dirty badge shows too.
     if (becameDirty) workspace.renderTree();
-    // Arm the idle auto-save debounce (a no-op unless Settings → Editor → Auto-save is on).
+    // Arm the idle auto-save debounce for both groups (a no-op unless Auto-save is on); B autosaves too.
     workspace.scheduleAutoSave();
   });
 
@@ -482,7 +498,7 @@ export function init(): () => void {
   // The workspace file explorer. It deals in opaque fs tokens; ide.ts maps token ↔ file:// uri
   // (pathToFileUri) to keep `buffers`, `activeUri` and the LSP workspace coherent on every mutation.
   const explorer = createExplorer({
-    onOpenFile: (token) => void workspace.openFileToken(token),
+    onOpenFile: (token) => void openFileInFocusedGroup(token),
     onNewFile: (parentDirToken, name) => void workspace.handleNewFile(parentDirToken, name),
     onNewFolder: (parentDirToken, name) => void workspace.handleNewFolder(parentDirToken, name),
     onRename: (entry, newName) => void workspace.handleRename(entry, newName),
@@ -519,6 +535,38 @@ export function init(): () => void {
       workspace.activateFile(loc.uri);
     }
     editor.gotoRange(loc.range.start, loc.range.end);
+  }
+
+  // Route a USER-INITIATED "open this file" affordance (a file-tree click, a Go-to-File palette pick)
+  // to whichever editor group has focus. Group A is primary: when it is focused this is the normal
+  // openFileToken/activateFile path that changes workspace.activeUri(). When group B is focused the
+  // file loads into B as a SECONDARY view — group A's active file AND workspace.activeUri() stay
+  // untouched. The buffer is ensured open first (#265) so editorSession.docFor and the LSP have its
+  // text before B reads it. Only these UI affordances honour focus; programmatic navigations
+  // (navigateToDefinition above, diagram/inspector jumps) deliberately bypass this and always target
+  // group A via workspace.activateFile. Takes an fs token (what the explorer hands us).
+  async function openFileInFocusedGroup(token: string): Promise<void> {
+    if (editorSession.focusedGroup() === 'b' && editorSession.groupBEditor()) {
+      const uri = await workspace.ensureBuffer(token);
+      if (uri) {
+        editorSession.openFocusedGroup(uri);
+        persistGroupBUri(uri); // remember B's new file so reload restores it (#265)
+      }
+      return;
+    }
+    await workspace.openFileToken(token);
+  }
+
+  // The uri-keyed twin of openFileInFocusedGroup for affordances that already hold an open buffer's
+  // uri (the Go-to-File palette iterates workspace.buffers, so the buffer is already loaded — no
+  // ensureBuffer needed). Same focus contract: B when focused+open, else the group-A activateFile path.
+  function openUriInFocusedGroup(uri: string): void {
+    if (editorSession.focusedGroup() === 'b' && editorSession.groupBEditor()) {
+      editorSession.openFocusedGroup(uri);
+      persistGroupBUri(uri); // remember B's new file so reload restores it (#265)
+    } else {
+      workspace.activateFile(uri);
+    }
   }
 
   // Replace the active document's contents (used by the AI "Apply to editor" action). Setting the
@@ -1667,22 +1715,155 @@ export function init(): () => void {
     }
   }
 
+  // --- view layout: editor split + repositionable panels (issue #265) -------
+  // View-only state (orientation / panel side / side-rail side / whether the split is open and on
+  // which uri), persisted in localStorage via layoutStore — it NEVER round-trips into the .koi model.
+  // On boot we read it, paint #split's data-* attributes (CSS reflows the grid), open group B if it
+  // was split, and anchor the inspector / left-rail resizers on the side each pane currently sits.
+  // `let` (not const): each layout action below reassigns it from saveLayout's MERGED return value, so
+  // that return is the single source of truth the next action reads (no per-field manual shadow).
+  let layout = loadLayout();
+
+  // Mirror the layout enums onto #split as data-* attributes; _split.scss keys the grid off them
+  // (data-orientation lays the two editor groups side-by-side or stacked; data-panel-side docks the
+  // bottom panel bottom/right; data-siderail-side moves the inspector rail left/right).
+  function applyLayoutAttrs(l: LayoutState): void {
+    splitEl.dataset.split = l.splitOpen ? 'true' : 'false';
+    splitEl.dataset.orientation = l.orientation;
+    splitEl.dataset.panelSide = l.panelSide;
+    splitEl.dataset.siderailSide = l.sideRail;
+  }
+  applyLayoutAttrs(layout);
+
   // The drag handles are a desktop (mouse) idiom; on mobile they're display:none (see _split.scss),
   // so these listeners are inert below $bp-narrow (BP_NARROW). No JS gate needed — CSS owns visibility.
   // A persisted --koi-inspector-w / --koi-leftrail-w on #split is also harmless under the mobile
   // grid-template-columns: 1fr: those custom props aren't referenced inside the @media block.
-  initSplitResizer({ split: el('split'), handle: el('split-resizer') });
+  //
+  // The inspector + left-rail resizers anchor to the side each pane sits on. With the default layout
+  // the inspector is the right rail and the file-rail is the left, so this matches the historical
+  // wiring; when sideRail==='left' the two swap (the inspector becomes the left rail, the file-rail
+  // the right). Each resizer's disposer is kept so a live side-rail/panel/orientation toggle can tear
+  // the stale wiring down and re-init with the new anchor — the handle then drags correctly without a
+  // reload (the grid already reflowed via the data-* swap, but initEdgeResizer captures its anchor at
+  // wire time, so re-init is how we repoint it).
+  let disposeInspectorResizer: () => void;
+  let disposeLeftRailResizer: () => void;
+  let disposeGroupResizer: () => void;
 
-  // Left sidebar width — the single rail (Files / Explorer / Overview / Documentation).
-  initEdgeResizer({
-    target: splitEl,
-    handle: el('leftrail-resizer'),
-    cssVar: '--koi-leftrail-w',
-    anchor: 'left',
-    storageKey: 'koine.studio.leftrailWidth',
-    min: 200,
-    max: (w) => w * 0.5,
+  // (Re)wire the inspector + left-rail handles from the current sideRail side. Disposes any prior
+  // wiring first so toggling never stacks listeners (and the stale anchor never lingers).
+  function wireRailResizers(sideRail: LayoutState['sideRail']): void {
+    disposeInspectorResizer?.();
+    disposeLeftRailResizer?.();
+    const inspectorOnRight = sideRail === 'right';
+    disposeInspectorResizer = initEdgeResizer({
+      target: splitEl,
+      handle: el('split-resizer'),
+      cssVar: '--koi-inspector-w',
+      anchor: inspectorOnRight ? 'right' : 'left',
+      storageKey: 'koine.studio.splitWidth',
+      min: 220,
+    });
+    // Left sidebar width — the single rail (Files / Explorer / Overview / Documentation).
+    disposeLeftRailResizer = initEdgeResizer({
+      target: splitEl,
+      handle: el('leftrail-resizer'),
+      cssVar: '--koi-leftrail-w',
+      anchor: inspectorOnRight ? 'left' : 'right',
+      storageKey: 'koine.studio.leftrailWidth',
+      min: 200,
+      max: (w) => w * 0.5,
+    });
+  }
+
+  // (Re)wire the editor-group divider for the current orientation. Disposed + re-init on a flip so the
+  // divider drags along the NEW axis (--koi-group-w ↔ --koi-group-h, anchor right ↔ bottom) live.
+  function wireGroupResizer(orientation: LayoutState['orientation']): void {
+    disposeGroupResizer?.();
+    disposeGroupResizer = initGroupResizer({ split: splitEl, handle: el('group-resizer'), orientation });
+  }
+
+  wireRailResizers(layout.sideRail);
+  wireGroupResizer(layout.orientation);
+
+  // Switch the routing target for the next file-open by which editor pane the user points at. Group B
+  // is nested inside #editor-pane, so a pointerdown in B bubbles to A's listener too — A's guard
+  // ignores events that originate inside #editor-pane-b so the inner pane wins. focusGroup only moves
+  // the ROUTING target (editorSession owns the caret/DOM focus); harmless when B is closed (focus 'b'
+  // with no group B just falls back to A inside openFocusedGroup). pointerdown (not focusin) so a plain
+  // click anywhere in a pane — gutter, padding — retargets, not only landing the caret in the editor.
+  const editorPaneEl = el('editor-pane');
+  const editorPaneBEl = el('editor-pane-b');
+  editorPaneEl.addEventListener('pointerdown', (e) => {
+    if (editorPaneBEl.contains(e.target as Node)) return; // a B-pane click is handled by B's listener
+    editorSession.focusGroup('a');
   });
+  editorPaneBEl.addEventListener('pointerdown', () => editorSession.focusGroup('b'));
+
+  // Restore the split if it was open. Boot leaves the routing target on group A (a page reload starts
+  // on the primary group — the natural place a returning user resumes); a FRESH "Split editor" (the
+  // split() action below) instead focuses the NEW group B so the very next file-open lands in it, which
+  // is the manual-check flow. openGroupB internally sets focus to 'b', so boot explicitly normalises
+  // back to 'a' — the one place the two paths intentionally differ, documented here so they don't
+  // silently diverge.
+  if (layout.splitOpen) {
+    editorSession.openGroupB(layout.groupActiveUris[1] || workspace.activeUri());
+    editorSession.focusGroup('a');
+  }
+
+  // The five palette commands' effects: each persists the change via saveLayout, then re-applies the
+  // #split data-* attributes (CSS does the reflow) and drives group B. closeGroup tears B down; split
+  // opens/focuses it; the toggles flip the corresponding enum AND re-wire the affected resizer so its
+  // drag handle is live immediately (no reload). The persisted state is what boot reads, so the
+  // arrangement survives a reload too.
+  const layoutActions: LayoutActions = {
+    split() {
+      // Open group B (or focus it if already open) and remember it in the persisted layout. A fresh
+      // split mirrors group A's active uri into B so the user immediately sees a second view to retarget;
+      // openGroupB leaves focus on B so the next file-open lands there (the manual-check flow). Persist
+      // B's CURRENT uri, not blindly A's: if B is already open on another file (re-split), keep that
+      // file so reload restores it (#265). The group resizer was disposed on the last closeGroup — wire
+      // it again so the divider drags on this open.
+      editorSession.openGroupB(workspace.activeUri());
+      const bUri = editorSession.groupBUri() || workspace.activeUri();
+      layout = saveLayout({ splitOpen: true, groupActiveUris: [workspace.activeUri(), bUri] });
+      applyLayoutAttrs(layout);
+      wireGroupResizer(layout.orientation);
+    },
+    toggleOrientation() {
+      const next = layout.orientation === 'horizontal' ? 'vertical' : 'horizontal';
+      layout = saveLayout({ orientation: next });
+      applyLayoutAttrs(layout);
+      wireGroupResizer(next); // re-point the divider to the new axis live
+    },
+    closeGroup() {
+      editorSession.closeGroupB();
+      disposeGroupResizer?.(); // tear down the group divider's listeners so a re-split doesn't stack them (#265)
+      layout = saveLayout({ splitOpen: false });
+      applyLayoutAttrs(layout);
+    },
+    togglePanelSide() {
+      const next = layout.panelSide === 'bottom' ? 'right' : 'bottom';
+      layout = saveLayout({ panelSide: next });
+      applyLayoutAttrs(layout);
+    },
+    toggleSideRail() {
+      const next = layout.sideRail === 'right' ? 'left' : 'right';
+      layout = saveLayout({ sideRail: next });
+      applyLayoutAttrs(layout);
+      wireRailResizers(next); // re-point the inspector + left-rail handles to their swapped anchors live
+    },
+  };
+
+  // Persist group B's re-pointed file so reload restores B to the file the user last opened into it,
+  // not the stale split-open file (#265). Only the B slot of groupActiveUris moves; A's slot tracks the
+  // live active uri. A no-op shape when the split isn't open (B isn't shown), but the callers only
+  // invoke this on the B-routing branch, so the split is open by construction. Declared as a hoisted
+  // function so the earlier openFileInFocusedGroup / openUriInFocusedGroup can call it.
+  function persistGroupBUri(bUri: string): void {
+    layout = saveLayout({ groupActiveUris: [workspace.activeUri(), bUri] });
+  }
 
   // Left-sidebar section disclosure: clicking a header collapses/expands its body (routed through
   // setRailSectionOpen, the single source of truth for section state).
@@ -1756,6 +1937,9 @@ export function init(): () => void {
         ? [{ id: 'save-project-to-disk', title: 'Save to disk…', group: 'File', run: () => void saveProjectToDisk() } as Command]
         : []),
       { id: 'toggle-theme', title: 'Toggle theme', group: 'View', run: () => toggleTheme() },
+      // The editor-split + panel-reposition commands (issue #265). Built from the pure layoutCommands
+      // module so the list is unit-tested; each run() drives the layoutActions wired at boot above.
+      ...layoutCommands(layoutActions),
       { id: 'prefs', title: 'Settings…', hint: 'mod+,', group: 'View', run: () => prefs.open() },
       { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },
       { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => prefs.open('about') },
@@ -1775,7 +1959,7 @@ export function init(): () => void {
     // Surface every open file as a "Go to File" entry so the palette doubles as a
     // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open.
     for (const buf of Array.from(workspace.buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath))) {
-      cmds.push({ id: 'goto:' + buf.uri, title: buf.relPath, group: 'Go to File', run: () => workspace.activateFile(buf.uri) });
+      cmds.push({ id: 'goto:' + buf.uri, title: buf.relPath, group: 'Go to File', run: () => openUriInFocusedGroup(buf.uri) });
     }
 
     return cmds.map((c) => (c.hint ? { ...c, hint: formatChord(c.hint) } : c));
