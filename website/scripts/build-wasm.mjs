@@ -140,8 +140,8 @@ if (bundleDir && bundleIsFresh(join(bundleDir, '_framework'), srcDir)) {
 if (!bundleDir) {
   console.error(
     `\nERROR: no _framework/ found under ${searchRoot}.\n` +
-      `The wasm publish did not produce a browser AppBundle. Ensure the 'wasm-experimental'\n` +
-      `workload is installed:  dotnet workload install wasm-experimental\n`,
+      `The wasm publish did not produce a browser AppBundle. Ensure the wasm workloads are\n` +
+      `installed:  dotnet workload install wasm-tools wasm-experimental\n`,
   );
   process.exit(1);
 }

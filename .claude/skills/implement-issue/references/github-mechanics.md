@@ -6,7 +6,9 @@ older issues, a comment), ticking a single task's checkboxes without touching th
 onto an existing branch/PR.
 
 Throughout, `{owner}/{repo}` is a literal `gh` placeholder it resolves from the repo's `origin`
-(here `Atypical-Consulting/Koine`) — you can paste it as-is.
+(the repo the profile names) — you can paste it as-is. And `git <commit-identity>` is shorthand for the
+author line from the profile's *Commit identity* (SKILL.md Step 1) — substitute its `-c user.email=… -c
+user.name="…"` flags in the commit/merge commands below.
 
 ---
 
@@ -15,8 +17,8 @@ Throughout, `{owner}/{repo}` is a literal `gh` placeholder it resolves from the 
 The user may pass a bare number, an issue URL, or a link to the plan comment. Normalize to a number.
 
 ```bash
-ARG="$1"   # e.g. 21  |  https://github.com/Atypical-Consulting/Koine/issues/21
-           #          |  https://github.com/Atypical-Consulting/Koine/issues/21#issuecomment-3098…
+ARG="$1"   # e.g. 21  |  https://github.com/<owner>/<repo>/issues/21
+           #          |  https://github.com/<owner>/<repo>/issues/21#issuecomment-3098…
 ISSUE=$(printf '%s' "$ARG" | grep -oE '[0-9]+' | head -1)   # first run of digits = issue number
 ```
 
@@ -154,7 +156,7 @@ the worktree via `superpowers:using-git-worktrees`, then the draft PR (empty sca
 branch is ahead of `main`):
 
 ```bash
-git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" \
+git <commit-identity> \
   commit --allow-empty -m "chore(#$ISSUE): scaffold draft PR"
 git push -u origin "$BRANCH"
 gh pr create --draft --base main --head "$BRANCH" --title "<title>" --body "<body, Closes #$ISSUE>"
@@ -181,35 +183,35 @@ real base.
 
 ```bash
 git fetch origin main
-git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" merge origin/main
+git <commit-identity> merge origin/main
 ```
 
-Squash-merge is the project's integration style (`(#NNN)` commits on `main`), so **merge, don't
+When the profile's *Integration style* is squash-merge (`(#NNN)` commits on `main`), **merge, don't
 rebase**: one pass over each conflict, no force-push, and the merge commit is squashed away anyway. (A
 `git rebase origin/main` also works and gives a linear branch, but it replays the conflict per-commit
-and needs `git push --force-with-lease` — only worth it if the user explicitly wants a rebase.)
+and needs `git push --force-with-lease` — only worth it if the repo rebases or the user asks.)
 
-Passing `-c user.email/-c user.name` on the `merge` means the auto-created merge commit carries the
-GitHub identity too — matching the project's commit-identity rule even though it's squashed later.
+Passing the profile's `-c user.email/-c user.name` flags on the `merge` means the auto-created merge
+commit carries the right identity too — matching the commit-identity rule even though it's squashed later.
 
-### Koine conflict hot-spots — known-correct resolutions
+### Conflict hot-spots — known-correct resolutions
 
-The great majority of conflicts here are mechanical and have one right answer. Resolve these yourself:
+The great majority of conflicts are mechanical and have one right answer. The profile's *Conflict
+hot-spots* table lists them per file with the resolution for each — read it and resolve those yourself.
+The recurring shapes:
 
-| File | Why it collides | Resolution |
-|------|-----------------|------------|
-| `Directory.Build.props` — `<Version>` **and** `<InformationalVersion>` | every feature bumps the patch version | Keep the **higher** of the two versions (both lines must match). Never stack both bumps into a double increment. If both branches bumped to the same number, keep one. |
-| `CHANGELOG.md` | everyone appends an entry | **Union** — keep *both* entries under the current heading, in a sensible order. Dropping a sibling PR's line loses real history. |
-| `README.md`, `USER-STORIES.md`, the feature catalogue, `website/` docs | parallel features document themselves | **Union** — keep both sides' sections; never delete a sibling PR's docs to clear the marker. |
-| Verify snapshots `*.verified.txt` (`tests/.../Snapshots/`, `Conformance/Snapshots/`) | two branches changed emitted output for the same domain | **Don't hand-merge.** Take *either* side to clear the conflict, then re-run that test (`dotnet test --filter …`) and accept the fresh `*.received.txt` → `.verified.txt`. The regenerated snapshot is ground truth; a hand-stitched one will mismatch the emitter. |
-| `tooling/koine-studio/package-lock.json` | lockfiles conflict constantly | **Don't hand-merge.** Take either side, then `npm install` in `tooling/koine-studio` to regenerate it deterministically; commit the result. |
-| `tooling/koine-studio/package.json` | both add deps/scripts | Union the deps/scripts, then regenerate the lockfile (above). |
-| Emitter partials (`Emit/CSharp/CSharpEmitter.*.cs`), `UsingCollector`, `CSharpNaming` | both add methods/usings to the same partial | **Union** — keep both methods; let the build catch a genuine duplicate or signature clash. |
-| Test files (`R##…Tests.cs` and focused suites) | both append tests to the same class | **Union** — keep both sets of tests. |
-| `.csproj`, `Koine.slnx` | both add files/projects | **Union** the item groups. |
-| Studio front-end (`tooling/koine-studio/src/**`) | parallel Studio features touch shared components | **Union** where additive (new components/routes); for the *same* component edited both ways, understand both intents — don't blindly take one side. |
+- **Version file** — take the **higher** of the two bumps (never stack both into a double increment; if
+  both branches bumped to the same number, keep one).
+- **Changelog** — **union**: keep *both* entries under the current heading. Dropping a sibling PR's line
+  loses real history.
+- **Docs** (README, roadmap, feature catalogue, site) — **union**: keep both sides' sections.
+- **Derived files** — snapshots and lockfiles must **not** be hand-merged: take *either* side to clear
+  the conflict, then regenerate (re-run the affected test and accept the fresh snapshot; reinstall to
+  rebuild the lockfile). The regenerated artifact is ground truth; a hand-stitched one will mismatch.
+- **Additive code/tests** — **union**: keep both sides' new methods/usings/tests; let the build catch a
+  genuine duplicate or signature clash.
 
-Rule of thumb: **union** additive files (docs, tests, `CHANGELOG`), **regenerate** derived files
+Rule of thumb: **union** additive files (docs, tests, changelog), **regenerate** derived files
 (snapshots, lockfiles), **take-the-higher** for the version. Anything where both sides edited the *same
 logic* is a real semantic conflict — resolve it by understanding both intents, or stop and surface it
 with both sides shown (Autonomy contract).
@@ -217,12 +219,13 @@ with both sides shown (Autonomy contract).
 ### Finish and verify the merge
 
 A clean text merge can still break the build — `main` may have renamed a symbol your branch still calls,
-or two unioned methods may now clash. Prove it before pushing:
+or two unioned methods may now clash. Prove it before pushing, with the profile's *Build* command:
 
 ```bash
 git add -A
-git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit --no-edit   # completes the merge
-dotnet build                 # plus the affected test filters; full suite needs the wasm workloads (Step 9)
+git <commit-identity> commit --no-edit   # completes the merge
+# run the profile's Build command (plus the affected test filters); the full suite may need a
+# prerequisite the profile flags as CI-only — see Step 9
 git push
 ```
 
@@ -249,9 +252,9 @@ Then continue to Step 9 (full build/tests + format gate) — never push a merge 
 - **Whole-file sed is forbidden.** Tick per task, not per repo — see §4.
 - **Empty commit is intentional.** It exists only so a draft PR can open before any code lands; the
   first real task commit immediately makes it meaningful. Don't squash it away mid-run.
-- **Sync before ready — merge, not rebase.** Squash-merge erases branch history, so `git merge
-  origin/main` (resolve once, no force-push) beats a rebase that replays conflicts per-commit. Don't
-  hand-merge derived files (snapshots, `package-lock.json`) — regenerate them; and re-build after
+- **Sync before ready — merge, not rebase.** When the repo squash-merges (the profile's *Integration
+  style*), `git merge origin/main` (resolve once, no force-push) beats a rebase that replays conflicts
+  per-commit. Don't hand-merge derived files (snapshots, lockfiles) — regenerate them; and re-build after
   resolving, because a clean text merge can still be a broken compile. See §7.
 - **Raw `git` network ops can be sandbox-blocked while `gh` works.** `gh api`/`gh pr …` succeed, but
   `git fetch`/`git push` (every per-task push in Step 6, and the `git fetch origin main` in Step 8) may

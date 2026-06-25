@@ -1,0 +1,50 @@
+{
+  "runs_per_query": 3,
+  "threshold": 0.5,
+  "skills": {
+    "create-issue": {
+      "passed": 18,
+      "total": 18,
+      "recall": 1.0,
+      "specificity": 1.0
+    },
+    "implement-issue": {
+      "passed": 18,
+      "total": 18,
+      "recall": 1.0,
+      "specificity": 1.0
+    },
+    "merge-pr": {
+      "passed": 18,
+      "total": 18,
+      "recall": 1.0,
+      "specificity": 1.0
+    },
+    "get-repo-profile": {
+      "passed": 18,
+      "total": 18,
+      "recall": 1.0,
+      "specificity": 1.0
+    }
+  },
+  "boundary": {
+    "implement-issue": {
+      "total": 6,
+      "passed": 6,
+      "failed": 0,
+      "should_trigger": 3,
+      "should_not": 3,
+      "recall": 1.0,
+      "specificity": 1.0
+    },
+    "merge-pr": {
+      "total": 6,
+      "passed": 6,
+      "failed": 0,
+      "should_trigger": 3,
+      "should_not": 3,
+      "recall": 1.0,
+      "specificity": 1.0
+    }
+  }
+}
