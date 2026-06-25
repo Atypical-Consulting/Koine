@@ -32,6 +32,7 @@ import type {
   LspDiagnostic,
   PrepareRenameResult,
   Range,
+  SemanticTokens,
   WorkspaceEdit,
 } from '@/lsp/lsp';
 
@@ -53,6 +54,7 @@ export interface EditorSessionLsp {
   references(line: number, character: number): Promise<Location[]>;
   codeActions(range: Range, diagnostics: LspDiagnostic[]): Promise<CodeAction[]>;
   inlayHints(startLine: number, startChar: number, endLine: number, endChar: number): Promise<InlayHint[]>;
+  semanticTokens(): Promise<SemanticTokens>;
   prepareCallHierarchy(line: number, character: number): Promise<CallHierarchyItem[]>;
   incomingCalls(item: CallHierarchyItem): Promise<CallHierarchyIncomingCall[]>;
   outgoingCalls(item: CallHierarchyItem): Promise<CallHierarchyOutgoingCall[]>;
@@ -234,6 +236,7 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     // Inlay hints (inferred type / parameter-name annotations) and call hierarchy (Mod-Alt-h). The
     // editor owns the in-editor widgets/menu; the LSP client resolves the data over the active uri.
     onInlayHints: (sl, sc, el, ec) => lsp.inlayHints(sl, sc, el, ec),
+    onSemanticTokens: () => lsp.semanticTokens(),
     onPrepareCallHierarchy: (line, character) => lsp.prepareCallHierarchy(line, character),
     onIncomingCalls: (item) => lsp.incomingCalls(item),
     onOutgoingCalls: (item) => lsp.outgoingCalls(item),
@@ -306,6 +309,7 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
         onCodeActions: (range) => codeActions(range),
         onApplyWorkspaceEdit: (edit) => deps.onApplyWorkspaceEdit(edit),
         onInlayHints: (sl, sc, el, ec) => lsp.inlayHints(sl, sc, el, ec),
+        onSemanticTokens: () => lsp.semanticTokens(),
         onPrepareCallHierarchy: (line, character) => lsp.prepareCallHierarchy(line, character),
         onIncomingCalls: (item) => lsp.incomingCalls(item),
         onOutgoingCalls: (item) => lsp.outgoingCalls(item),

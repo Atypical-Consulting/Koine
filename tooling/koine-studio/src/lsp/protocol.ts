@@ -348,6 +348,17 @@ export interface TextEdit {
   newText: string;
 }
 
+// Standard LSP semantic tokens (full document). `data` is the delta-encoded int stream: groups of 5
+// ints `[deltaLine, deltaStartChar, length, tokenType, tokenModifiers]`, deltas relative to the
+// previous token (deltaStartChar is relative to the previous token's start on the same line, else
+// absolute; the first token's deltas are absolute from (0,0)). `tokenType` indexes the legend (see
+// SEMANTIC_TOKEN_TYPES in @/editor/editor — SemanticTokenProvider.TokenTypeNames in C#);
+// `tokenModifiers` is a bitset (bit 0 = declaration). `resultId` supports delta requests we don't use.
+export interface SemanticTokens {
+  data: number[];
+  resultId?: string | null;
+}
+
 // `koine/check` change record (mirrors the server contract).
 export interface CheckChange {
   impact: 'Breaking' | 'NonBreaking';

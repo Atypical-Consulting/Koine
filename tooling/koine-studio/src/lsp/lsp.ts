@@ -38,6 +38,7 @@ import type {
   ScenarioCatalog,
   ScenarioResult,
   SelectionRange,
+  SemanticTokens,
   SetDocResult,
   SignatureHelp,
   StructuredEdit,
@@ -505,6 +506,18 @@ export class KoineLsp {
       range: { start: { line: startLine, character: startChar }, end: { line: endLine, character: endChar } },
     });
     return res ?? [];
+  }
+
+  /**
+   * Semantic tokens (full document) for the active document: the LSP delta-encoded int stream the
+   * editor decodes into semantically-accurate highlighting. Resolves to `{ data: [] }` when the
+   * server returns null, so the editor falls back to the static grammar (graceful degradation).
+   */
+  async semanticTokens(): Promise<SemanticTokens> {
+    const res = await this.request<SemanticTokens | null>('textDocument/semanticTokens/full', {
+      textDocument: { uri: this.activeUri },
+    });
+    return res ?? { data: [] };
   }
 
   /**
