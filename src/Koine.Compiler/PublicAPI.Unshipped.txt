@@ -293,3 +293,37 @@ Koine.Compiler.Services.KoineLanguageService.RenamePreviewAt(Koine.Compiler.Serv
 Koine.Compiler.Services.KoineLanguageService.RenamePreviewAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character, string! newName) -> Koine.Compiler.Services.RenamePreview?
 Koine.Compiler.Services.KoineLanguageService.LinkedEditingRangeAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>?
 Koine.Compiler.Services.KoineLanguageService.LinkedEditingRangeAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>?
+Koine.Compiler.Formatting.FormatRangeEdit
+Koine.Compiler.Formatting.FormatRangeEdit.FormatRangeEdit(int StartLine, int StartCharacter, int EndLine, int EndCharacter, string! NewText) -> void
+Koine.Compiler.Formatting.FormatRangeEdit.StartLine.get -> int
+Koine.Compiler.Formatting.FormatRangeEdit.StartLine.init -> void
+Koine.Compiler.Formatting.FormatRangeEdit.StartCharacter.get -> int
+Koine.Compiler.Formatting.FormatRangeEdit.StartCharacter.init -> void
+Koine.Compiler.Formatting.FormatRangeEdit.EndLine.get -> int
+Koine.Compiler.Formatting.FormatRangeEdit.EndLine.init -> void
+Koine.Compiler.Formatting.FormatRangeEdit.EndCharacter.get -> int
+Koine.Compiler.Formatting.FormatRangeEdit.EndCharacter.init -> void
+Koine.Compiler.Formatting.FormatRangeEdit.NewText.get -> string!
+Koine.Compiler.Formatting.FormatRangeEdit.NewText.init -> void
+Koine.Compiler.Formatting.KoineFormatter.FormatRange(string! source, int startLine, int startCharacter, int endLine, int endCharacter) -> Koine.Compiler.Formatting.FormatRangeEdit?
+Koine.Compiler.Services.TypeHierarchyItemKind
+Koine.Compiler.Services.TypeHierarchyItemKind.Aggregate = 0 -> Koine.Compiler.Services.TypeHierarchyItemKind
+Koine.Compiler.Services.TypeHierarchyItemKind.Entity = 1 -> Koine.Compiler.Services.TypeHierarchyItemKind
+Koine.Compiler.Services.TypeHierarchyItemKind.Value = 2 -> Koine.Compiler.Services.TypeHierarchyItemKind
+Koine.Compiler.Services.TypeHierarchyItemKind.ReadModel = 3 -> Koine.Compiler.Services.TypeHierarchyItemKind
+Koine.Compiler.Services.TypeHierarchyItemKind.Enum = 4 -> Koine.Compiler.Services.TypeHierarchyItemKind
+Koine.Compiler.Services.TypeHierarchyItemKind.Event = 5 -> Koine.Compiler.Services.TypeHierarchyItemKind
+Koine.Compiler.Services.TypeHierarchyItemKind.Other = 6 -> Koine.Compiler.Services.TypeHierarchyItemKind
+Koine.Compiler.Services.TypeHierarchyItem
+Koine.Compiler.Services.TypeHierarchyItem.TypeHierarchyItem(string! Name, Koine.Compiler.Services.TypeHierarchyItemKind Kind, string! Uri, Koine.Compiler.Ast.SourceSpan Span) -> void
+Koine.Compiler.Services.TypeHierarchyItem.Name.get -> string!
+Koine.Compiler.Services.TypeHierarchyItem.Name.init -> void
+Koine.Compiler.Services.TypeHierarchyItem.Kind.get -> Koine.Compiler.Services.TypeHierarchyItemKind
+Koine.Compiler.Services.TypeHierarchyItem.Kind.init -> void
+Koine.Compiler.Services.TypeHierarchyItem.Uri.get -> string!
+Koine.Compiler.Services.TypeHierarchyItem.Uri.init -> void
+Koine.Compiler.Services.TypeHierarchyItem.Span.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Services.TypeHierarchyItem.Span.init -> void
+Koine.Compiler.Services.KoineLanguageService.PrepareTypeHierarchy(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
+Koine.Compiler.Services.KoineLanguageService.Supertypes(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.TypeHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
+Koine.Compiler.Services.KoineLanguageService.Subtypes(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.TypeHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
