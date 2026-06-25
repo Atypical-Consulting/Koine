@@ -320,12 +320,14 @@ export function __setEsModuleImporterForTests(importer: EsModuleImporter | null)
 }
 
 /**
- * Acquire the dotnet.js ES module for the main-thread fallback — CSP-safe and fast-failing (issue #359):
+ * Acquire the dotnet.js ES module for the main-thread fallback — CSP-safe and faster-failing (issue #359):
  *  1. Try a direct `import(/* @vite-ignore *​/ url)` — the same CSP-neutral path the worker already
- *     uses. In the built / deployed bundle (the only place that matters for production) this succeeds
- *     and never touches the DOM, so a strict CSP can't block it and it fails fast on a real load error.
- *  2. Only if that throws (Vite's dev-server public-asset transform breaks a direct app-code import)
- *     fall back to the inline-`<script>` loader, which is invisible to Vite's transform.
+ *     uses. In the built / deployed bundle (the only place that matters for production) this is the
+ *     canonical path: it succeeds and never touches the DOM, so a strict CSP can't block it.
+ *  2. Only if it throws — Vite's dev-server public-asset transform breaks a direct app-code import, and
+ *     the spec keeps the inline loader as a production safety net for a host that blocks the direct
+ *     import — fall back to the inline-`<script>` loader (invisible to Vite's transform). A genuine
+ *     total load failure then rejects via that loader's shortened ~8s timeout rather than the old 30s.
  */
 async function importDotnetModule(url: string): Promise<Record<string, unknown>> {
   try {

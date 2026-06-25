@@ -45,6 +45,18 @@ describe('classifyBootOutcome (issue #359)', () => {
     expect(r.message).not.toMatch(/boot hung/);
   });
 
+  test('worker `error` event WITH assets fetched → still load/parse failure (worker-error predicate isolated)', () => {
+    // Isolates the `verdict === 'worker-error'` half of the OR: even when assets WERE fetched
+    // (frameworkResponses > 0, so the zero-check can't fire), a worker error must fast-fail as
+    // load/parse — never fall through to "boot hung". Without this, dropping the worker-error
+    // predicate would go unnoticed.
+    const r = outcome({ verdict: 'worker-error', frameworkResponses: 7 });
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe('load-parse-failure');
+    expect(r.message).toMatch(/error event/);
+    expect(r.message).not.toMatch(/boot hung/);
+  });
+
   test('timeout with zero _framework responses → load/parse failure', () => {
     // No worker `error` fired, but the worker never fetched a single runtime asset → it never ran.
     const r = outcome({ verdict: 'timeout', frameworkResponses: 0 });
