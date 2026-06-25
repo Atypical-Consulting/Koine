@@ -52,7 +52,7 @@ public sealed partial class TypeScriptEmitter
             first = false;
 
             var targetType = TypeScriptNaming.ToPascalCase(spec.TargetType);
-            var fn = "is" + TypeScriptNaming.ToPascalCase(spec.Name);
+            var fn = "is" + SpecPredicateSubject(TypeScriptNaming.ToPascalCase(spec.Name));
 
             WriteDoc(sb, spec.Doc, "");
             sb.Append("export function ").Append(fn).Append("(target: ").Append(targetType)
@@ -76,6 +76,18 @@ public sealed partial class TypeScriptEmitter
             PathFor(ns, KindFolder.Specifications, name),
             Assemble(emit, ns, KindFolder.Specifications, sb.ToString(), name, specs[0].Span));
     }
+
+    /// <summary>
+    /// The PascalCase spec subject with a redundant leading <c>Is</c> word stripped, so the emitted
+    /// <c>is</c>-predicate name doesn't double: <c>IsFreeOrder</c> → <c>FreeOrder</c> (→ <c>isFreeOrder</c>),
+    /// not <c>isIsFreeOrder</c>. A name that merely starts with "Is" (e.g. <c>Island</c>) is left intact —
+    /// the character after "Is" must be uppercase for it to count as a word prefix. Mirrors the identical
+    /// de-doubling in the PHP emitter (#396).
+    /// </summary>
+    internal static string SpecPredicateSubject(string pascalName) =>
+        pascalName.Length > 2 && pascalName[0] == 'I' && pascalName[1] == 's' && char.IsUpper(pascalName[2])
+            ? pascalName[2..]
+            : pascalName;
 
     /// <summary>
     /// The members in scope for a spec on <paramref name="targetType"/> — entities add a synthetic
