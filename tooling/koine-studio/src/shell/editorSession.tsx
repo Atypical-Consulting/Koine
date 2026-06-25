@@ -16,6 +16,8 @@
 // (#sb-validity) stay imperative here.
 import { render } from 'preact';
 import { createKoineEditor, setEditorDiagnostics, type KoineEditor } from '@/editor/editor';
+import { mountSymbolRow } from '@/editor/symbolRow';
+import { BP_NARROW } from '@/shared/breakpoint';
 import { diagnosticsInRange } from '@/shell/ideUtils';
 import { appStore } from '@/store/index';
 import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
@@ -244,6 +246,31 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     // active buffer to disk. We deliberately do NOT pass onFormat here so the editor's Mod-s keymap
     // stays inert and there's exactly one save path.
   });
+
+  // --- DSL symbol accessory row (#221, mobile) -------------------------------
+  // A one-tap punctuation strip for the phone soft keyboard (which buries Koine's `->`, `«`, `=>`, …
+  // behind shift layers), mounted into group A's pane. mountSymbolRow owns the DOM + insert-at-caret;
+  // this only gates visibility: shown solely while group A's editor (or the strip itself) holds focus
+  // on a narrow viewport, hidden otherwise. Tapping a token preventDefaults mousedown so the editor
+  // keeps focus — so a tap never fires focusout and the strip stays up between insertions. The
+  // `within` check is scoped to group A's editor DOM (not the whole pane) so a focused group B never
+  // shows group A's strip, and so keyboard-tabbing INTO the strip's buttons keeps it visible.
+  const symbolRowHost = document.createElement('div');
+  symbolRowHost.className = 'koi-symbol-row-host';
+  symbolRowHost.hidden = true;
+  deps.parent.appendChild(symbolRowHost);
+  mountSymbolRow(editor.view, symbolRowHost);
+  const syncSymbolRow = (): void => {
+    const narrow = window.innerWidth <= BP_NARROW;
+    const active = document.activeElement;
+    const within = editor.view.dom.contains(active) || symbolRowHost.contains(active);
+    symbolRowHost.hidden = !(narrow && within);
+  };
+  deps.parent.addEventListener('focusin', syncSymbolRow);
+  // focusout fires BEFORE focus settles on the next element, so defer the read of document.activeElement.
+  deps.parent.addEventListener('focusout', () => setTimeout(syncSymbolRow, 0));
+  // A rotate/resize that crosses the breakpoint while focused must re-evaluate visibility.
+  window.addEventListener('resize', syncSymbolRow);
 
   // --- second editor group (group B) -----------------------------------------
   // Group B is a second editing surface over the SAME shared buffer set (deps.docFor reads it). It is
