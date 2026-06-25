@@ -239,12 +239,25 @@ function buildWorkerProxy(call: (method: string, args: unknown[]) => Promise<str
 let loaderSeq = 0;
 
 /**
- * Import the dotnet.js ES module by URL via an injected inline module script. We deliberately do NOT
- * call `import(url)` from app code: under Vite's dev server a dynamic import of a `public/` asset is
- * routed through the module-transform pipeline (the `?import` suffix) and fails on the
- * machine-generated loader. An inline `<script type="module">` is invisible to Vite, so the browser
- * fetches dotnet.js — and its relative dependencies — as raw static files. Works identically for the
- * built / deployed bundle. (Restored from the pre-#326 main-thread boot.)
+ * Blind-timeout ceiling for the inline-`<script>` loader. The inline path only fetches + parses the
+ * small dotnet.js *loader* (the multi-MB runtime downloads later, in `dotnet.create()`), so a few
+ * seconds is plenty. Kept well under the worker's 20 s watchdog so a CSP-blocked or unparseable inline
+ * script fails FAST with an actionable error instead of stalling the boot for the old 30 s (issue #359).
+ */
+const INLINE_LOADER_TIMEOUT_MS = 8_000;
+
+/**
+ * Import the dotnet.js ES module by URL via an injected inline module script. This is the DEV-SERVER
+ * fallback only (see `importDotnetModule`): under Vite's dev server a direct dynamic import of a
+ * `public/` asset is routed through the module-transform pipeline (the `?import` suffix) and fails on
+ * the machine-generated loader, whereas an inline `<script type="module">` is invisible to Vite so the
+ * browser fetches dotnet.js — and its relative dependencies — as raw static files. (Restored from the
+ * pre-#326 main-thread boot.)
+ *
+ * Two ways it fails *slowly* (issue #359), which is why it's the fallback and not the primary path: a
+ * strict Content-Security-Policy that forbids inline scripts blocks it with no callback at all, and an
+ * inline module script raises no DOM `error` event on a parse/load failure — both stall until the
+ * timeout below, which is therefore kept short and rejects with a cause-naming message.
  */
 function importEsModuleViaScript(url: string): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
@@ -273,23 +286,67 @@ function importEsModuleViaScript(url: string): Promise<Record<string, unknown>> 
       reject(new Error(`failed to load ${url}`));
     });
     document.head.appendChild(script);
-    // Safety net so a silent failure can't hang the language-server boot forever.
+    // Safety net: an inline module script raises no DOM `error` event on a parse/load failure, and a
+    // CSP that blocks inline scripts fires no callback at all — so without this the boot would hang.
+    // Reject fast with a cause-naming message instead (issue #359).
     setTimeout(() => {
       if (w[id]) {
         cleanup();
-        reject(new Error(`timed out loading ${url}`));
+        reject(
+          new Error(
+            `timed out loading ${url} after ${INLINE_LOADER_TIMEOUT_MS / 1000}s via the inline-script ` +
+              `loader — a Content-Security-Policy blocking inline scripts, or a parse/load error in ` +
+              `dotnet.js, prevents it from settling.`,
+          ),
+        );
       }
-    }, 30000);
+    }, INLINE_LOADER_TIMEOUT_MS);
   });
+}
+
+/**
+ * The raw dynamic-import primitive, isolated behind a seam so tests can stub it without executing a
+ * real `import()` (which would try to fetch the non-existent dotnet.js URL). Mirrors the worker's
+ * proven `import(/* @vite-ignore *​/ url)` (koine.worker.ts).
+ */
+type EsModuleImporter = (url: string) => Promise<Record<string, unknown>>;
+const defaultEsModuleImporter: EsModuleImporter = (url) =>
+  import(/* @vite-ignore */ url) as Promise<Record<string, unknown>>;
+let esModuleImporter: EsModuleImporter = defaultEsModuleImporter;
+
+/** @internal Test seam — override the raw dynamic-import primitive. Pass `null` to restore. */
+export function __setEsModuleImporterForTests(importer: EsModuleImporter | null): void {
+  esModuleImporter = importer ?? defaultEsModuleImporter;
+}
+
+/**
+ * Acquire the dotnet.js ES module for the main-thread fallback — CSP-safe and faster-failing (issue #359):
+ *  1. Try a direct `import(/* @vite-ignore *​/ url)` — the same CSP-neutral path the worker already
+ *     uses. In the built / deployed bundle (the only place that matters for production) this is the
+ *     canonical path: it succeeds and never touches the DOM, so a strict CSP can't block it.
+ *  2. Only if it throws — Vite's dev-server public-asset transform breaks a direct app-code import, and
+ *     the spec keeps the inline loader as a production safety net for a host that blocks the direct
+ *     import — fall back to the inline-`<script>` loader (invisible to Vite's transform). A genuine
+ *     total load failure then rejects via that loader's shortened ~8s timeout rather than the old 30s.
+ */
+async function importDotnetModule(url: string): Promise<Record<string, unknown>> {
+  try {
+    return await esModuleImporter(url);
+  } catch (directErr: unknown) {
+    const reason = directErr instanceof Error ? directErr.message : String(directErr);
+    // The dev-server case the inline loader exists for. Note it, then take the inline path.
+    console.warn(`Koine: direct dotnet.js import failed (${reason}); using the inline-script loader.`);
+    return importEsModuleViaScript(url);
+  }
 }
 
 /** How the main-thread fallback acquires the dotnet ES module. Overridable for tests. */
 type DotnetModuleLoader = (url: string) => Promise<Record<string, unknown>>;
-let dotnetModuleLoader: DotnetModuleLoader = importEsModuleViaScript;
+let dotnetModuleLoader: DotnetModuleLoader = importDotnetModule;
 
 /** @internal Test seam — override the main-thread dotnet module loader. Pass `null` to restore. */
 export function __setDotnetModuleLoaderForTests(loader: DotnetModuleLoader | null): void {
-  dotnetModuleLoader = loader ?? importEsModuleViaScript;
+  dotnetModuleLoader = loader ?? importDotnetModule;
 }
 
 /** Boot the .NET runtime on the MAIN THREAD and resolve the compiler's [JSExport] surface. */
