@@ -12,6 +12,9 @@ import {
   saveApiKey,
   clearApiKey,
   whenSecretsReady,
+  loadWorkspaceOverrides,
+  saveWorkspaceOverride,
+  effectiveSettings,
   DEFAULT_SETTINGS,
   type Settings,
   type AccentName,
@@ -60,6 +63,14 @@ export interface PrefsCallbacks {
 
   /** Re-pick the workspace root directory; returns its name, or null if dismissed. */
   pickWorkspaceRoot?(): Promise<string | null>;
+
+  /**
+   * The stable storage key of the currently-open workspace, or null when no workspace is open
+   * (or the host can't scope settings per project). Drives the per-row User/Workspace scope toggle:
+   * a non-null key lets the four scoped fields (previewTarget, formatOnSave, wordWrap, lspTrace) be
+   * overridden for this project; null disables the scope control and forces user-level behavior.
+   */
+  workspaceKey?(): string | null;
 }
 
 export interface PrefsHandle {
@@ -110,7 +121,10 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   // --- control factories ----------------------------------------------------
 
   // A labelled settings row: a title (+ optional description) on the left, the control on the right.
-  function row(title: string, description: string, control: HTMLElement): HTMLElement {
+  // `content` is what fills the control cell (usually `control` itself, but a scoped row passes a
+  // wrapper holding the value control + its User/Workspace toggle); `control` is the labelable target
+  // the <label for> binds to (defaults to `content`).
+  function row(title: string, description: string, content: HTMLElement, control: HTMLElement = content): HTMLElement {
     const r = document.createElement('div');
     r.className = 'koi-set-row';
     const text = document.createElement('div');
@@ -139,7 +153,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     }
     const ctrl = document.createElement('div');
     ctrl.className = 'koi-set-control';
-    ctrl.appendChild(control);
+    ctrl.appendChild(content);
     r.append(text, ctrl);
     return r;
   }
@@ -203,6 +217,123 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
       for (const b of buttons) b.setAttribute('aria-checked', String(b.dataset.value === value));
     };
     return { el: group, set };
+  }
+
+  // --- per-workspace scope control ------------------------------------------
+  // The four scoped fields (previewTarget, formatOnSave, wordWrap, lspTrace) can be overridden per
+  // workspace. Each scoped row pairs its VALUE control with a User/Workspace `segmented` toggle that
+  // routes commits either to the global settings blob (User) or the workspace override store
+  // (Workspace). When no workspace is open the toggle is disabled and behavior is forced to User.
+
+  type Scope = 'user' | 'workspace';
+
+  // One scoped row's wiring, registered so populate() can re-sync its scope + value on every open.
+  interface ScopedControl {
+    /** Re-read the override store for the current workspace and reflect scope + effective value. */
+    sync(s: Settings): void;
+  }
+  const scopedControls: ScopedControl[] = [];
+
+  // The current workspace key, or null when none is open / the host doesn't scope settings.
+  const wsKey = (): string | null => cb.workspaceKey?.() ?? null;
+
+  /**
+   * The shared scope-binding for one workspace-scopable field. Builds the User/Workspace segmented
+   * toggle, owns this row's scope state, exposes the `scopedCommit` the value control calls on edit,
+   * and registers itself so populate() re-syncs scope + effective value on every open. The value
+   * control is supplied via `setValue` (so the binding can reset it on a Workspace→User flip) and
+   * `title` names the segmented accessibly ("<title> scope").
+   *
+   * - User scope (or no workspace): value edits go through patchSettings (the global path).
+   * - Workspace scope: value edits go through saveWorkspaceOverride; the host is notified with the
+   *   UNCHANGED user settings so the global value is never touched (it re-applies effective behavior).
+   */
+  function makeScopeBinding<K extends 'previewTarget' | 'formatOnSave' | 'wordWrap' | 'lspTrace'>(
+    field: K,
+    title: string,
+    setValue: (value: Settings[K]) => void,
+  ): { seg: HTMLElement; scopedCommit(value: Settings[K]): void } {
+    let scope: Scope = 'user';
+
+    function scopedCommit(value: Settings[K]): void {
+      const key = wsKey();
+      if (scope === 'workspace' && key) {
+        saveWorkspaceOverride(key, field, value);
+        cb.onChange(loadSettings());
+      } else {
+        cb.onChange(patchSettings({ [field]: value } as Partial<Settings>));
+      }
+    }
+
+    const scopeSeg = segmented<Scope>(
+      `${title} scope`,
+      [
+        { value: 'user', label: 'User' },
+        { value: 'workspace', label: 'Workspace' },
+      ],
+      (next) => {
+        const key = wsKey();
+        if (!key) return; // disabled — nothing to do without a workspace
+        if (next === scope) return;
+        scope = next;
+        if (next === 'workspace') {
+          // Make "Workspace" meaningful at once: persist the row's CURRENT value as the override.
+          saveWorkspaceOverride(key, field, loadSettings()[field]);
+        } else {
+          // Back to User: clear the override and reset the value control to the user value.
+          saveWorkspaceOverride(key, field, null);
+          setValue(loadSettings()[field]);
+        }
+        cb.onChange(loadSettings());
+      },
+    );
+
+    // Reflect "no workspace" unambiguously: disable the toggle's buttons and mark the group, so the
+    // control keeps its place in the layout while clearly inert (and the state stays testable).
+    function applyEnabled(): void {
+      const enabled = wsKey() !== null;
+      scopeSeg.el.setAttribute('aria-disabled', String(!enabled));
+      scopeSeg.el.classList.toggle('is-disabled', !enabled);
+      for (const b of scopeSeg.el.querySelectorAll<HTMLButtonElement>('.koi-seg')) b.disabled = !enabled;
+    }
+
+    scopedControls.push({
+      sync(s: Settings): void {
+        const key = wsKey();
+        const ov = key ? loadWorkspaceOverrides(key) : {};
+        scope = key && field in ov ? 'workspace' : 'user';
+        scopeSeg.set(scope);
+        // Show the effective value: a Workspace row shows its override, a User row the user value.
+        setValue(effectiveSettings(s, key)[field]);
+        applyEnabled();
+      },
+    });
+
+    return { seg: scopeSeg.el, scopedCommit };
+  }
+
+  /**
+   * Build a labelled scoped ROW (label/description on the left; value control + User/Workspace toggle
+   * on the right). `makeControl` receives the row's `scopedCommit` to call on every value edit.
+   */
+  function scopedRow<K extends 'previewTarget' | 'formatOnSave' | 'wordWrap' | 'lspTrace'>(
+    field: K,
+    title: string,
+    description: string,
+    makeControl: (scopedCommit: (value: Settings[K]) => void) => {
+      el: HTMLElement;
+      set(value: Settings[K]): void;
+    },
+  ): HTMLElement {
+    // Late-bound so the binding's Workspace→User reset can drive the value control built just below.
+    let control: { el: HTMLElement; set(value: Settings[K]): void };
+    const binding = makeScopeBinding(field, title, (v) => control.set(v));
+    control = makeControl(binding.scopedCommit);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'koi-set-scoped';
+    wrap.append(control.el, binding.seg);
+    return row(title, description, wrap, control.el);
   }
 
   // The accent swatch picker: one coloured dot per preset, single-selection radio group.
@@ -411,11 +542,29 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   fontInput.addEventListener('input', refreshSpecimen);
   lineHeightInput.addEventListener('input', refreshSpecimen);
 
-  const wordWrap = toggle('Word wrap', (on) => {
-    commit({ wordWrap: on });
-    specimenCode.classList.toggle('is-wrapped', on); // the preview wraps / scrolls just like the editor
+  // Word wrap + Format on save are workspace-scopable: each pairs its toggle with a User/Workspace
+  // scope control (scopedRow). The toggle is built inside makeControl so its onChange routes through
+  // the row's scopedCommit (User → global blob; Workspace → the override store).
+  const wordWrapRow = scopedRow('wordWrap', 'Word wrap', 'Wrap long lines instead of scrolling sideways.', (scopedCommit) => {
+    const t = toggle('Word wrap', (on) => {
+      scopedCommit(on);
+      specimenCode.classList.toggle('is-wrapped', on); // the preview wraps / scrolls just like the editor
+    });
+    // Mirror the specimen whenever populate() (or a scope flip) re-sets the toggle value.
+    return {
+      el: t.el,
+      set: (on) => {
+        t.set(on);
+        specimenCode.classList.toggle('is-wrapped', on);
+      },
+    };
   });
-  const formatOnSave = toggle('Format on save', (on) => commit({ formatOnSave: on }));
+  const formatOnSaveRow = scopedRow(
+    'formatOnSave',
+    'Format on save',
+    'Run the Koine formatter when you press save.',
+    (scopedCommit) => toggle('Format on save', (on) => scopedCommit(on)),
+  );
   const autoSave = toggle('Auto-save', (on) => commit({ autoSave: on }));
   const minimap = toggle('Minimap', (on) => commit({ enableMinimap: on }));
 
@@ -424,15 +573,19 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     specimen,
     row('Font size', 'Editor text size, in pixels.', fontInput),
     row('Line height', 'Vertical spacing between lines.', lineHeightInput),
-    row('Word wrap', 'Wrap long lines instead of scrolling sideways.', wordWrap.el),
-    row('Format on save', 'Run the Koine formatter when you press save.', formatOnSave.el),
+    wordWrapRow,
+    formatOnSaveRow,
     row('Auto-save', 'Save edits automatically after a short pause in typing.', autoSave.el),
     row('Minimap', 'Show a document overview rail on the editor’s right edge.', minimap.el),
   );
 
   // --- Output ---------------------------------------------------------------
 
-  const outputLang = langPicker((target) => commit({ previewTarget: target }));
+  // previewTarget is workspace-scopable. Route the picker's commit through the shared scope binding
+  // (User → global blob; Workspace → the override store) and surface its User/Workspace toggle in the
+  // output block's heading row.
+  const outputScope = makeScopeBinding('previewTarget', 'Output language', (t) => outputLang.set(t));
+  const outputLang = langPicker((target) => outputScope.scopedCommit(target));
 
   // Output lays the picker out full-width under its own heading (not a narrow label/control row) so
   // the four language cards have room to breathe and the caption can say what actually changes.
@@ -447,9 +600,14 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     'The language the Generated preview emits. Your .koi source stays the same — switch any time.';
   outputText.append(outputLabel, outputDesc);
 
+  // The heading row carries the caption on the left and the User/Workspace scope toggle on the right.
+  const outputHead = document.createElement('div');
+  outputHead.className = 'koi-output-head';
+  outputHead.append(outputText, outputScope.seg);
+
   const outputBlock = document.createElement('div');
   outputBlock.className = 'koi-output-block';
-  outputBlock.append(outputText, outputLang.el);
+  outputBlock.append(outputHead, outputLang.el);
 
   const outputPanel = panel('output', outputBlock);
 
@@ -789,15 +947,25 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
 
   // --- Advanced -------------------------------------------------------------
 
+  // LSP trace is workspace-scopable. The <select> is the value control; its change routes through the
+  // scope binding (User → global blob; Workspace → the override store).
   const traceSelect = select([
     { value: 'off', label: 'Off' },
     { value: 'messages', label: 'Messages' },
     { value: 'verbose', label: 'Verbose' },
   ] as const);
-  traceSelect.addEventListener('change', () => {
-    const v = traceSelect.value;
-    commit({ lspTrace: v === 'messages' || v === 'verbose' ? v : 'off' });
-  });
+  const traceRow = scopedRow(
+    'lspTrace',
+    'Language server trace',
+    'Verbosity of LSP logging in the console.',
+    (scopedCommit) => {
+      traceSelect.addEventListener('change', () => {
+        const v = traceSelect.value;
+        scopedCommit(v === 'messages' || v === 'verbose' ? v : 'off');
+      });
+      return { el: traceSelect, set: (v) => (traceSelect.value = v) };
+    },
+  );
 
   // Reset is destructive (it clears the assistant key too), so it confirms on a second click and
   // disarms itself shortly after to avoid an accidental wipe.
@@ -836,7 +1004,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   const advancedPanel = panel(
     'advanced',
     wsRootRow,
-    row('Language server trace', 'Verbosity of LSP logging in the console.', traceSelect),
+    traceRow,
     row('Reset', 'Restore every setting — including the assistant — to its default.', resetBtn),
   );
 
@@ -922,28 +1090,28 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     reduceMotion.set(s.reduceMotion);
     fontInput.value = String(s.fontSize);
     lineHeightInput.value = String(s.lineHeight);
-    wordWrap.set(s.wordWrap);
-    formatOnSave.set(s.formatOnSave);
     autoSave.set(s.autoSave);
     minimap.set(s.enableMinimap);
-    specimenCode.classList.toggle('is-wrapped', s.wordWrap);
     refreshSpecimen();
     // Rebuild the language cards from the live EMIT_TARGETS first: the picker was constructed during
     // init() (before the backend seed), so a backend-seeded target only appears once this re-renders
-    // on open (issue #282). Then re-apply the current selection.
+    // on open (issue #282). The scoped sync below then sets its selection to the effective target.
     outputLang.refresh();
-    outputLang.set(s.previewTarget);
     aiProviderSelect.value = s.aiProvider;
     aiBaseUrlInput.value = s.aiBaseUrl;
     aiKeyInput.value = s.aiApiKey;
     aiModelInput.value = s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
     aiAgenticTools.set(s.aiAgenticTools);
     aiInlineCompletions.set(s.aiInlineCompletions);
-    traceSelect.value = s.lspTrace;
     mcpEnableToggle.set(s.mcpEnabled);
     mcpClientSelect.value = s.mcpClient;
     renderRecipe();
     syncProviderFields();
+    // The four workspace-scopable rows (previewTarget, formatOnSave, wordWrap, lspTrace): reflect each
+    // row's scope (User/Workspace) from the override store and set its value control to the EFFECTIVE
+    // value, so a Workspace row shows its override while a User row shows the user value. Runs after
+    // outputLang.refresh() so the picker's cards exist before its selection is set.
+    for (const sc of scopedControls) sc.sync(s);
   }
 
   modal.onOpen(() => {
