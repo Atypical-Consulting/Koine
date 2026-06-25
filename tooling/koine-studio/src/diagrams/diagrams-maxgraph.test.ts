@@ -3,6 +3,8 @@ import * as mx from '@maxgraph/core';
 import {
   selectDomainGraphs,
   buildCanvas,
+  buildEventFlowCanvas,
+  renderEventFlowGraph,
   isClassNode,
   isContextNode,
   nodeLabelHtml,
@@ -12,6 +14,7 @@ import {
   renderContextMapGraph,
   routeContextMapClick,
 } from '@/diagrams/diagrams-maxgraph';
+import type { EventFlowEdge, EventFlowNode } from '@/model/modelTables';
 
 // The diagram's rename/delete gestures now route through Koine's own modal (koiPrompt/koiConfirm),
 // not window.prompt/confirm. Stub them so the tests drive the async dialog deterministically.
@@ -857,5 +860,120 @@ describe('canvas annotations (#255)', () => {
     } finally {
       handle.dispose();
     }
+  });
+});
+
+// --- event flow canvas (#270) ------------------------------------------------
+const EVENT_FLOW: { nodes: EventFlowNode[]; edges: EventFlowEdge[] } = {
+  nodes: [
+    { id: 'cmd', label: 'PlaceOrder', kind: 'command', qualifiedName: 'Sales.PlaceOrder', context: 'Sales', span: null },
+    {
+      id: 'evt',
+      label: 'OrderPlaced',
+      kind: 'domain-event',
+      qualifiedName: 'Sales.OrderPlaced',
+      context: 'Sales',
+      span: { file: 'file:///m.koi', line: 12, column: 3, endLine: 12, endColumn: 9, offset: 0, length: 6 },
+    },
+    { id: 'pol', label: 'NotifyKitchen', kind: 'policy', qualifiedName: 'Sales.NotifyKitchen', context: 'Sales', span: null },
+    { id: 'int', label: 'OrderShipped', kind: 'integration-event', qualifiedName: 'Sales.OrderShipped', context: 'Sales', span: null },
+  ],
+  edges: [
+    { from: 'cmd', to: 'evt', label: null, kind: 'flow' },
+    { from: 'evt', to: 'pol', label: null, kind: 'flow' },
+    { from: 'Sales', to: 'int', label: 'publishes', kind: 'publish' },
+    { from: 'int', to: 'Shipping', label: 'consumed by', kind: 'subscribe' },
+  ],
+};
+
+describe('buildEventFlowCanvas', () => {
+  test('indexes one card per node and a swimlane per bridged context, with the expected edge endpoints', () => {
+    const container = makeContainer();
+    const handle = buildEventFlowCanvas(mx, container, EVENT_FLOW);
+    try {
+      // one cell per card, keyed by id, carrying the EventFlowNode (and its kind)
+      expect(handle.cells.size).toBe(4);
+      expect(handle.cells.get('cmd')!.value).toMatchObject({ kind: 'command' });
+      expect(handle.cells.get('evt')!.value).toMatchObject({ kind: 'domain-event' });
+      expect(handle.cells.get('pol')!.value).toMatchObject({ kind: 'policy' });
+      expect(handle.cells.get('int')!.value).toMatchObject({ kind: 'integration-event' });
+
+      // a swimlane vertex per context referenced by a publish/subscribe arrow (NOT a card)
+      expect(handle.containers.size).toBe(2);
+      expect(handle.containers.has('Sales')).toBe(true);
+      expect(handle.containers.has('Shipping')).toBe(true);
+
+      // flow edge: command card → event card
+      const flowEdge = handle.cells.get('cmd')!.getEdgeAt(0);
+      expect(flowEdge!.value).toMatchObject({ kind: 'flow' });
+      expect(flowEdge!.getTerminal(false)).toBe(handle.cells.get('evt'));
+
+      // publish edge: Sales swimlane → integration-event card
+      const pub = handle.containers.get('Sales')!.getEdgeAt(0);
+      expect(pub!.value).toMatchObject({ kind: 'publish' });
+      expect(pub!.getTerminal(true)).toBe(handle.containers.get('Sales'));
+      expect(pub!.getTerminal(false)).toBe(handle.cells.get('int'));
+
+      // subscribe edge: integration-event card → Shipping swimlane
+      const sub = handle.containers.get('Shipping')!.getEdgeAt(0);
+      expect(sub!.value).toMatchObject({ kind: 'subscribe' });
+      expect(sub!.getTerminal(true)).toBe(handle.cells.get('int'));
+      expect(sub!.getTerminal(false)).toBe(handle.containers.get('Shipping'));
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('a card click bubbles NODE_NAVIGATE_EVENT with the card’s span; a span-less card is inert', () => {
+    const container = makeContainer();
+    const handle = buildEventFlowCanvas(mx, container, EVENT_FLOW);
+    try {
+      let detail: any = null;
+      container.addEventListener('koi-diagram-node-click', (e) => {
+        detail = (e as CustomEvent).detail;
+      });
+      handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.CLICK, 'cell', handle.cells.get('evt')));
+      expect(detail).toMatchObject({ qualifiedName: 'Sales.OrderPlaced', line: 12, column: 3 });
+
+      detail = null;
+      handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.CLICK, 'cell', handle.cells.get('cmd'))); // span: null
+      expect(detail).toBeNull();
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('an empty flow builds an empty canvas (no cards, no swimlanes)', () => {
+    const container = makeContainer();
+    const handle = buildEventFlowCanvas(mx, container, { nodes: [], edges: [] });
+    try {
+      expect(handle.cells.size).toBe(0);
+      expect(handle.containers.size).toBe(0);
+    } finally {
+      handle.dispose();
+    }
+  });
+});
+
+describe('renderEventFlowGraph', () => {
+  test('mounts a canvas surface + zoom controls for a non-empty flow (its own root class)', async () => {
+    const container = makeContainer();
+    const handle = await renderEventFlowGraph(container, EVENT_FLOW, () => true);
+    try {
+      expect(handle).not.toBeNull();
+      expect(container.querySelector('.koi-eventflow-graph .koi-canvas')).not.toBeNull();
+      expect(container.querySelector('.koi-canvas-controls')).not.toBeNull();
+    } finally {
+      handle?.dispose();
+    }
+  });
+
+  test('a superseded render (isCurrent() false) commits nothing and returns null', async () => {
+    const container = makeContainer();
+    container.append('sentinel');
+    const handle = await renderEventFlowGraph(container, EVENT_FLOW, () => false);
+    expect(handle).toBeNull();
+    expect(container.querySelector('.koi-eventflow-graph')).toBeNull();
+    expect(container.textContent).toContain('sentinel');
   });
 });
