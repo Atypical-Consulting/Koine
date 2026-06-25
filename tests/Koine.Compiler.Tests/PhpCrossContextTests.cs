@@ -71,4 +71,50 @@ public class PhpCrossContextTests
         content.ShouldContain("use Koine\\Menu\\ValueObjects\\Money;");
         content.ShouldNotContain("use Koine\\Payment\\ValueObjects\\Money;");
     }
+
+    // -----------------------------------------------------------------------
+    // Task 2 — `use … as` aliasing for same-named classes in one file
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// An anti-corruption-layer mapping <c>Upstream.Customer -&gt; Downstream.Customer</c>: both sides
+    /// share the short name <c>Customer</c> but are distinct classes in distinct namespaces. PHP cannot
+    /// <c>use</c> both under the bare name, so the upstream copy must be imported
+    /// <c>use … as UpstreamCustomer</c> and the translator's <em>param</em> hint rewritten to that alias,
+    /// while the local return type keeps the bare name.
+    /// </summary>
+    private const string AclSameNameFixture = """
+        context Upstream {
+          value Customer { reference: String }
+        }
+        context Downstream {
+          value Customer { name: String }
+        }
+        contextmap {
+          Upstream -> Downstream : anti-corruption-layer
+            acl { Upstream.Customer -> Downstream.Customer }
+        }
+        """;
+
+    [Fact]
+    public void Acl_same_named_mapping_aliases_the_upstream_import_and_param()
+    {
+        var files = Emit(AclSameNameFixture);
+        var content = FileContent(files, "src/Downstream/Abstractions/UpstreamToDownstreamTranslator.php");
+
+        // The local (file's own) Customer stays bare; the upstream copy is aliased.
+        content.ShouldContain("use Koine\\Downstream\\ValueObjects\\Customer;");
+        content.ShouldContain("use Koine\\Upstream\\ValueObjects\\Customer as UpstreamCustomer;");
+
+        // The param hint is rewritten to the alias; the return keeps the bare local name.
+        content.ShouldContain("public function translateCustomerToCustomer(UpstreamCustomer $source): Customer;");
+    }
+
+    [Fact]
+    public Task Acl_same_named_mapping_snapshot()
+    {
+        var files = Emit(AclSameNameFixture);
+        var content = FileContent(files, "src/Downstream/Abstractions/UpstreamToDownstreamTranslator.php");
+        return Verify(content);
+    }
 }

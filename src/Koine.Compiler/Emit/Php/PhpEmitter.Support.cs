@@ -89,9 +89,17 @@ public sealed partial class PhpEmitter
     /// publisher event) maps that symbol to the context it was DECLARED in so a same-named local type
     /// never silently shadows it. Maps a short class name to its declaring context.
     /// </param>
+    /// <param name="aliasImports">
+    /// Optional <c>alias → FQN</c> bindings emitted as <c>use FQN as alias;</c>. PHP cannot import two
+    /// same-named classes under one bare name, so when a file genuinely references two distinct classes
+    /// that share a short name the emit site rewrites the non-primary reference sites to a distinct
+    /// alias token and registers it here. The body is expected to already use the alias token; the bare
+    /// name is left to <see cref="CollectUses"/>'s normal resolution.
+    /// </param>
     private string Assemble(
         string contextName, string kindFolder, string body, string className,
-        IReadOnlyDictionary<string, string>? symbolContext = null)
+        IReadOnlyDictionary<string, string>? symbolContext = null,
+        IReadOnlyDictionary<string, string>? aliasImports = null)
     {
         var fileNs = NamespaceFor(contextName);
         if (kindFolder.Length > 0)
@@ -106,8 +114,18 @@ public sealed partial class PhpEmitter
         sb.Append('\n');
         sb.Append("namespace ").Append(fileNs).Append(";\n");
 
-        // Collect use lines that the body actually references.
-        var uses = CollectUses(body, fileNs, contextName, className, symbolContext);
+        // Collect the use lines the body references, then fold in any emit-site alias imports
+        // (`FQN as alias`). One ordinally-sorted block keeps emission deterministic.
+        var uses = new SortedSet<string>(
+            CollectUses(body, fileNs, contextName, className, symbolContext), StringComparer.Ordinal);
+        if (aliasImports is not null)
+        {
+            foreach (var (alias, fqn) in aliasImports)
+            {
+                uses.Add(fqn + " as " + alias);
+            }
+        }
+
         if (uses.Count > 0)
         {
             sb.Append('\n');
@@ -210,6 +228,28 @@ public sealed partial class PhpEmitter
         }
 
         return locations[0].Fqn;
+    }
+
+    /// <summary>
+    /// The fully-qualified name a short class name resolves to <em>in a specific declaring context</em>,
+    /// or <c>null</c> when the catalog has no entry for that name in that context. Used by emit sites
+    /// that must alias a same-named cross-context class (e.g. the ACL translator) to obtain the exact
+    /// FQN to bind the alias to.
+    /// </summary>
+    private string? FqnIn(string shortName, string context)
+    {
+        if (_typeCatalog.TryGetValue(shortName, out IReadOnlyList<(string Fqn, string Context)>? locations))
+        {
+            foreach (var loc in locations)
+            {
+                if (loc.Context == context)
+                {
+                    return loc.Fqn;
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
