@@ -181,6 +181,7 @@ internal sealed class LspServer
                                     ["documentHighlightProvider"] = true,
                                     ["inlayHintProvider"] = true,
                                     ["callHierarchyProvider"] = true,
+                                    ["typeHierarchyProvider"] = true,
                                     ["renameProvider"] = new Dictionary<string, object?>
                                     {
                                         ["prepareProvider"] = true,
@@ -426,6 +427,30 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, CallHierarchyOutgoingJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/prepareTypeHierarchy":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, TypeHierarchyPrepareJson(root));
+                            }
+
+                            break;
+
+                        case "typeHierarchy/supertypes":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, TypeHierarchySupertypesJson(root));
+                            }
+
+                            break;
+
+                        case "typeHierarchy/subtypes":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, TypeHierarchySubtypesJson(root));
                             }
 
                             break;
@@ -1200,6 +1225,121 @@ internal sealed class LspServer
 
         return new CallHierarchyItem(name, kind, owningType, "", SourceSpan.None);
     }
+
+    // ---- Type hierarchy (#331, Task 3) ------------------------------------
+
+    /// <summary>
+    /// Prepare type hierarchy (<c>textDocument/prepareTypeHierarchy</c>) at a 0-based position: the
+    /// declared type under the cursor, as a JSON array of LSP TypeHierarchyItem
+    /// (<c>{ name, kind, uri, range, selectionRange, data }</c>). The <c>kind</c> is an LSP SymbolKind
+    /// number; the <c>data</c> blob carries <c>{ thKind }</c> so the supertypes/subtypes requests can
+    /// reconstruct the item. Parity with the WASM <c>PrepareTypeHierarchy</c> export.
+    /// </summary>
+    private object? TypeHierarchyPrepareJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
+        {
+            return null;
+        }
+
+        return _ls.PrepareTypeHierarchy(_compilation, uri, line, ch)
+            .Select(TypeHierarchyItemJson)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Supertypes (<c>typeHierarchy/supertypes</c>): reads <c>params.item</c>, reconstructs the in-process
+    /// item from its <c>name</c> + <c>data.thKind</c>, and returns a JSON array of the declared types it
+    /// points at. Parity with the WASM <c>Supertypes</c> export.
+    /// </summary>
+    private object? TypeHierarchySupertypesJson(JsonElement root)
+    {
+        if (!root.TryGetProperty("params", out var p)
+            || !p.TryGetProperty("item", out var itemEl)
+            || ReadTypeHierarchyItem(itemEl) is not { } item)
+        {
+            return null;
+        }
+
+        return _ls.Supertypes(_compilation, item).Select(TypeHierarchyItemJson).ToArray();
+    }
+
+    /// <summary>
+    /// Subtypes (<c>typeHierarchy/subtypes</c>): reads <c>params.item</c>, reconstructs the in-process
+    /// item, and returns a JSON array of the declared types that point at it (the inverse edges). Parity
+    /// with the WASM <c>Subtypes</c> export.
+    /// </summary>
+    private object? TypeHierarchySubtypesJson(JsonElement root)
+    {
+        if (!root.TryGetProperty("params", out var p)
+            || !p.TryGetProperty("item", out var itemEl)
+            || ReadTypeHierarchyItem(itemEl) is not { } item)
+        {
+            return null;
+        }
+
+        return _ls.Subtypes(_compilation, item).Select(TypeHierarchyItemJson).ToArray();
+    }
+
+    /// <summary>
+    /// Serializes a <see cref="TypeHierarchyItem"/> to an LSP TypeHierarchyItem dict. <c>kind</c> is an LSP
+    /// SymbolKind number; <c>range</c> + <c>selectionRange</c> are both the declaration's 0-based name
+    /// span; the <c>data</c> blob carries <c>thKind</c> so the client can echo it back and the shell can
+    /// reconstruct the item (mirrors the WASM <c>MapTypeHierarchyItem</c>).
+    /// </summary>
+    private static Dictionary<string, object?> TypeHierarchyItemJson(TypeHierarchyItem item)
+    {
+        var range = SpanRange(item.Span);
+        return new Dictionary<string, object?>
+        {
+            ["name"] = item.Name,
+            ["kind"] = LspTypeHierarchyKind(item.Kind),
+            ["uri"] = item.Uri,
+            ["range"] = range,
+            ["selectionRange"] = range,
+            ["data"] = new Dictionary<string, object?>
+            {
+                ["thKind"] = item.Kind.ToString(),
+            },
+        };
+    }
+
+    /// <summary>
+    /// Reconstructs a <see cref="TypeHierarchyItem"/> from an LSP TypeHierarchyItem element: only the
+    /// <c>name</c> and <c>data.thKind</c> are read (the supertypes/subtypes resolution keys off the name;
+    /// the span/uri are placeholders). Returns <c>null</c> when the element lacks a name or thKind.
+    /// </summary>
+    private static TypeHierarchyItem? ReadTypeHierarchyItem(JsonElement itemElement)
+    {
+        if (itemElement.ValueKind != JsonValueKind.Object
+            || !itemElement.TryGetProperty("name", out var nameEl)
+            || nameEl.ValueKind != JsonValueKind.String
+            || nameEl.GetString() is not { Length: > 0 } name
+            || !itemElement.TryGetProperty("data", out var data)
+            || data.ValueKind != JsonValueKind.Object
+            || !data.TryGetProperty("thKind", out var thKindEl)
+            || thKindEl.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var kind = Enum.TryParse<TypeHierarchyItemKind>(thKindEl.GetString(), out var k)
+            ? k
+            : TypeHierarchyItemKind.Other;
+        return new TypeHierarchyItem(name, kind, "", SourceSpan.None);
+    }
+
+    /// <summary>Maps a <see cref="TypeHierarchyItemKind"/> to the numeric LSP <c>SymbolKind</c> (mirrors the WASM backend).</summary>
+    private static int LspTypeHierarchyKind(TypeHierarchyItemKind kind) => kind switch
+    {
+        TypeHierarchyItemKind.Aggregate => 5,  // Class
+        TypeHierarchyItemKind.Entity => 5,     // Class
+        TypeHierarchyItemKind.Value => 23,     // Struct
+        TypeHierarchyItemKind.ReadModel => 11, // Interface
+        TypeHierarchyItemKind.Enum => 10,      // Enum
+        TypeHierarchyItemKind.Event => 24,     // Event
+        _ => 13,                               // Variable
+    };
 
     private object? PrepareRenameResultJson(JsonElement root)
     {

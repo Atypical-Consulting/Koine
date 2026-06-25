@@ -161,6 +161,21 @@ public sealed record CallHierarchyIncomingCall(CallHierarchyItem From);
 public sealed record CallHierarchyOutgoingCall(CallHierarchyItem To);
 
 /// <summary>
+/// The category of a type-hierarchy item — the kind of declared type a node refers to. DDD has no OO
+/// inheritance, so this drives the editor's icon and the wire reconstruction blob, not a class lattice.
+/// </summary>
+public enum TypeHierarchyItemKind { Aggregate, Entity, Value, ReadModel, Enum, Event, Other }
+
+/// <summary>
+/// One node of the type hierarchy: a declared type, located at its declaration <c>NameSpan</c>
+/// (<see cref="Uri"/> + 1-based <see cref="Span"/>). The hierarchy's edges are the model's declared
+/// relationships — <i>supertypes</i> are the types a node points at (an entity/value's member + identity
+/// types, a read model's <c>from</c> source, an aggregate's root), <i>subtypes</i> the inverse — not OO
+/// inheritance (Koine has none). Editor-agnostic; the LSP/WASM shells map it to an LSP TypeHierarchyItem.
+/// </summary>
+public sealed record TypeHierarchyItem(string Name, TypeHierarchyItemKind Kind, string Uri, SourceSpan Span);
+
+/// <summary>
 /// Editor-agnostic language services for <c>.koi</c>. <see cref="CompleteAt"/> is
 /// single-file and lexer-only (works on broken documents). <see cref="HoverAt(IReadOnlyDictionary{string,string},string,int,int)"/> and
 /// <see cref="DefinitionAt(IReadOnlyDictionary{string,string},string,int,int)"/> take a workspace document map (uri → source) plus the
@@ -1743,6 +1758,194 @@ public sealed class KoineLanguageService
     /// index's O(1) name map (events are types) rather than re-walking the model per call.</summary>
     private static EventDecl? FindEvent(ModelIndex index, string name) =>
         index.TryGetDecl(name, out var decl) && decl is EventDecl ev ? ev : null;
+
+    // ---- Type hierarchy (#331, Task 3) ------------------------------------
+
+    /// <summary>
+    /// Resolves the type-hierarchy node under the 0-based LSP <paramref name="line"/>/
+    /// <paramref name="character"/> in <paramref name="activeUri"/> (same opening as
+    /// <see cref="PrepareCallHierarchy"/>): a token naming a declared type (value, entity, aggregate,
+    /// read model, enum, event) resolves to a single <see cref="TypeHierarchyItem"/> at its declaration;
+    /// anything else (a primitive, a field, whitespace, a string/regex) yields an empty list. A list lets
+    /// <c>prepare</c> express "no anchor here" while staying shaped like the call-hierarchy seam.
+    /// </summary>
+    public IReadOnlyList<TypeHierarchyItem> PrepareTypeHierarchy(KoineCompilation compilation, string activeUri, int line, int character)
+    {
+        if (!compilation.Documents.TryGetValue(activeUri, out var source))
+        {
+            return [];
+        }
+
+        var ctx = TokenLocator.Locate(source, line, character);
+        var name = ctx.CurrentToken?.Text;
+        if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
+        {
+            return [];
+        }
+
+        var model = compilation.SemanticModel.Model;
+        var index = compilation.SemanticModel.Index;
+        return FindTypeDecl(model, name) is { } decl && ItemFor(index, decl) is { } item ? [item] : [];
+    }
+
+    /// <summary>
+    /// Supertypes of <paramref name="item"/> — the declared types it points <i>at</i>: for an entity, its
+    /// identity type and the types of its members; for a value/event, its members' types; for a read model,
+    /// its <c>from</c> source; for an aggregate, its root entity. Only edges whose target is a declared
+    /// type (with a location) are surfaced — primitives and undeclared names are skipped silently, exactly
+    /// as the call hierarchy skips undeclared targets. Deduped, in declaration order.
+    /// </summary>
+    public IReadOnlyList<TypeHierarchyItem> Supertypes(KoineCompilation compilation, TypeHierarchyItem item)
+    {
+        var model = compilation.SemanticModel.Model;
+        var index = compilation.SemanticModel.Index;
+        if (FindTypeDecl(model, item.Name) is not { } decl)
+        {
+            return [];
+        }
+
+        var results = new List<TypeHierarchyItem>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var targetName in DeclaredTargets(decl))
+        {
+            if (seen.Add(targetName)
+                && FindTypeDecl(model, targetName) is { } target
+                && ItemFor(index, target) is { } ti)
+            {
+                results.Add(ti);
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Subtypes of <paramref name="item"/> — the inverse edges: every declared type that points <i>at</i>
+    /// it (an entity/value with a member of this type, a read model whose <c>from</c> source is this type,
+    /// an aggregate rooted on it). Deduped, in declaration order. The complement of
+    /// <see cref="Supertypes"/> over the same declared-relationship graph.
+    /// </summary>
+    public IReadOnlyList<TypeHierarchyItem> Subtypes(KoineCompilation compilation, TypeHierarchyItem item)
+    {
+        var model = compilation.SemanticModel.Model;
+        var index = compilation.SemanticModel.Index;
+
+        var results = new List<TypeHierarchyItem>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var decl in model.Contexts.SelectMany(c => c.AllTypeDecls()))
+        {
+            if (DeclaredTargets(decl).Contains(item.Name, StringComparer.Ordinal)
+                && seen.Add(decl.Name)
+                && ItemFor(index, decl) is { } ti)
+            {
+                results.Add(ti);
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>The first declared type named <paramref name="name"/> across all contexts (aggregates
+    /// flattened), or <c>null</c>. First-wins on a duplicate name, deterministically on both backends.</summary>
+    private static TypeDecl? FindTypeDecl(KoineModel model, string name) =>
+        model.Contexts
+            .SelectMany(c => c.AllTypeDecls())
+            .FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.Ordinal));
+
+    /// <summary>
+    /// The declared type names <paramref name="decl"/> points at (its supertype edges): identity + member
+    /// types for an entity, member types for a value/event, the <c>from</c> source for a read model, the
+    /// root for an aggregate. Names only — the caller filters to those that resolve to a declared type.
+    /// </summary>
+    private static IEnumerable<string> DeclaredTargets(TypeDecl decl)
+    {
+        switch (decl)
+        {
+            case EntityDecl e:
+                yield return e.IdentityName;
+                foreach (var n in e.Members.SelectMany(m => TypeRefNames(m.Type)))
+                {
+                    yield return n;
+                }
+
+                break;
+            case ValueObjectDecl v:
+                foreach (var n in v.Members.SelectMany(m => TypeRefNames(m.Type)))
+                {
+                    yield return n;
+                }
+
+                break;
+            case EventDecl ev:
+                foreach (var n in ev.Members.SelectMany(m => TypeRefNames(m.Type)))
+                {
+                    yield return n;
+                }
+
+                break;
+            case IntegrationEventDecl ie:
+                foreach (var n in ie.Members.SelectMany(m => TypeRefNames(m.Type)))
+                {
+                    yield return n;
+                }
+
+                break;
+            case ReadModelDecl rm:
+                yield return rm.SourceType;
+                break;
+            case AggregateDecl agg:
+                yield return agg.RootName;
+                break;
+        }
+    }
+
+    /// <summary>Every simple type name a <see cref="TypeRef"/> references, unwrapping generic
+    /// collections (<c>List&lt;X&gt;</c>, <c>Set&lt;X&gt;</c>, <c>Map&lt;K,V&gt;</c>) to their element/value names.</summary>
+    private static IEnumerable<string> TypeRefNames(TypeRef? type)
+    {
+        if (type is null)
+        {
+            yield break;
+        }
+
+        yield return type.Name;
+        foreach (var n in TypeRefNames(type.Element))
+        {
+            yield return n;
+        }
+
+        foreach (var n in TypeRefNames(type.Value))
+        {
+            yield return n;
+        }
+    }
+
+    /// <summary>Builds a type-hierarchy item pointing at the declaration's <c>NameSpan</c> (its <c>File</c>
+    /// is the declaring document's URI), or <c>null</c> when the declaration has no source location.</summary>
+    private static TypeHierarchyItem? ItemFor(ModelIndex index, TypeDecl decl)
+    {
+        var span = decl.NameSpan.IsNone ? decl.Span : decl.NameSpan;
+        if (span.IsNone)
+        {
+            return null;
+        }
+
+        return new TypeHierarchyItem(decl.Name, TypeHierarchyKindOf(index.Classify(decl.Name)), span.File ?? "", span);
+    }
+
+    /// <summary>Maps the model's <see cref="TypeKind"/> to the editor-facing <see cref="TypeHierarchyItemKind"/>.</summary>
+    private static TypeHierarchyItemKind TypeHierarchyKindOf(TypeKind kind) => kind switch
+    {
+        TypeKind.Aggregate => TypeHierarchyItemKind.Aggregate,
+        TypeKind.Entity => TypeHierarchyItemKind.Entity,
+        TypeKind.Value => TypeHierarchyItemKind.Value,
+        TypeKind.IdValueObject => TypeHierarchyItemKind.Value,
+        TypeKind.ReadModel => TypeHierarchyItemKind.ReadModel,
+        TypeKind.Enum => TypeHierarchyItemKind.Enum,
+        TypeKind.Event => TypeHierarchyItemKind.Event,
+        TypeKind.IntegrationEvent => TypeHierarchyItemKind.Event,
+        _ => TypeHierarchyItemKind.Other,
+    };
 
     /// <summary>
     /// Computes the edits for renaming the name under the cursor to <paramref name="newName"/>:

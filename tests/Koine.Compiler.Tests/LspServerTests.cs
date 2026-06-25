@@ -608,6 +608,7 @@ public class LspServerTests
         var output = RunSession(Initialize());
         output.ShouldContain("\"inlayHintProvider\":true");
         output.ShouldContain("\"callHierarchyProvider\":true");
+        output.ShouldContain("\"typeHierarchyProvider\":true");
     }
 
     // A read model whose direct field `total` infers its type (`Money`) from the source entity `Order`.

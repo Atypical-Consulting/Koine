@@ -909,6 +909,132 @@ public static partial class CompilerInterop
     }
 
     /// <summary>
+    /// Prepare type hierarchy at a 0-based position in <paramref name="activeUri"/> (LSP
+    /// <c>textDocument/prepareTypeHierarchy</c>): the declared type under the cursor, as a JSON array of
+    /// LSP TypeHierarchyItem. Parity with the stdio LSP's <c>TypeHierarchyPrepareJson</c>.
+    /// </summary>
+    [JSExport]
+    public static string PrepareTypeHierarchy(string filesJson, string activeUri, int line, int character)
+    {
+        try
+        {
+            var comp = KoineCompilation.Create(
+                DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList());
+            var items = LanguageService.PrepareTypeHierarchy(comp, activeUri, line, character)
+                .Select(MapTypeHierarchyItem)
+                .ToArray();
+            return JsonSerializer.Serialize(items, LangJson.Default.WTypeHierarchyItemArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
+    /// Supertypes (LSP <c>typeHierarchy/supertypes</c>): <paramref name="itemJson"/> is the LSP
+    /// TypeHierarchyItem; its <c>name</c> + <c>data</c> reconstruct the in-process item. Returns a JSON
+    /// array of the declared types it points at. Parity with the stdio LSP.
+    /// </summary>
+    [JSExport]
+    public static string Supertypes(string filesJson, string itemJson)
+    {
+        try
+        {
+            if (DeserializeTypeHierarchyItem(itemJson) is not { } item)
+            {
+                return "[]";
+            }
+
+            var comp = KoineCompilation.Create(
+                DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList());
+            var items = LanguageService.Supertypes(comp, item)
+                .Select(MapTypeHierarchyItem)
+                .ToArray();
+            return JsonSerializer.Serialize(items, LangJson.Default.WTypeHierarchyItemArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
+    /// Subtypes (LSP <c>typeHierarchy/subtypes</c>): <paramref name="itemJson"/> is the LSP
+    /// TypeHierarchyItem. Returns a JSON array of the declared types that point at it (the inverse edges).
+    /// Parity with the stdio LSP.
+    /// </summary>
+    [JSExport]
+    public static string Subtypes(string filesJson, string itemJson)
+    {
+        try
+        {
+            if (DeserializeTypeHierarchyItem(itemJson) is not { } item)
+            {
+                return "[]";
+            }
+
+            var comp = KoineCompilation.Create(
+                DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList());
+            var items = LanguageService.Subtypes(comp, item)
+                .Select(MapTypeHierarchyItem)
+                .ToArray();
+            return JsonSerializer.Serialize(items, LangJson.Default.WTypeHierarchyItemArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
+    /// Maps a <see cref="TypeHierarchyItem"/> to the wire <see cref="WTypeHierarchyItem"/>: kind is an LSP
+    /// SymbolKind number; range + selectionRange are both the declaration's 0-based name span; the
+    /// <c>data</c> blob carries the in-process kind (<c>thKind</c>) so a supertypes/subtypes request can
+    /// reconstruct the item. Mirrors LspServer's <c>TypeHierarchyItemJson</c>.
+    /// </summary>
+    private static WTypeHierarchyItem MapTypeHierarchyItem(TypeHierarchyItem item)
+    {
+        var range = SpanRange(item.Span);
+        return new WTypeHierarchyItem(
+            item.Name,
+            LspTypeHierarchyKind(item.Kind),
+            item.Uri,
+            range,
+            range,
+            new WTypeHierarchyData(item.Kind.ToString()));
+    }
+
+    /// <summary>
+    /// Reconstructs a <see cref="TypeHierarchyItem"/> from an LSP TypeHierarchyItem JSON: only <c>name</c> +
+    /// <c>data.thKind</c> are read (the supertypes/subtypes resolution keys off the name; the span/uri are
+    /// placeholders). Returns <c>null</c> when malformed — the SAME empty result the stdio LSP produces.
+    /// </summary>
+    private static TypeHierarchyItem? DeserializeTypeHierarchyItem(string itemJson)
+    {
+        WTypeHierarchyItem? dto = JsonSerializer.Deserialize(itemJson, LangJson.Default.WTypeHierarchyItem);
+        if (dto is null || string.IsNullOrEmpty(dto.Name) || dto.Data is null || string.IsNullOrEmpty(dto.Data.ThKind))
+        {
+            return null;
+        }
+
+        var kind = Enum.TryParse<TypeHierarchyItemKind>(dto.Data.ThKind, out var k) ? k : TypeHierarchyItemKind.Other;
+        return new TypeHierarchyItem(dto.Name, kind, "", SourceSpan.None);
+    }
+
+    /// <summary>Maps a <see cref="TypeHierarchyItemKind"/> to the numeric LSP <c>SymbolKind</c> (mirrors LspServer).</summary>
+    private static int LspTypeHierarchyKind(TypeHierarchyItemKind kind) => kind switch
+    {
+        TypeHierarchyItemKind.Aggregate => 5,  // Class
+        TypeHierarchyItemKind.Entity => 5,     // Class
+        TypeHierarchyItemKind.Value => 23,     // Struct
+        TypeHierarchyItemKind.ReadModel => 11, // Interface
+        TypeHierarchyItemKind.Enum => 10,      // Enum
+        TypeHierarchyItemKind.Event => 24,     // Event
+        _ => 13,                               // Variable
+    };
+
+    /// <summary>
     /// The editable identifier range under the cursor (LSP <c>prepareRename</c>): <c>{ range, placeholder }</c>
     /// or the JSON literal <c>null</c> when a rename is not valid there. Parity with the stdio LSP.
     /// </summary>
@@ -1502,6 +1628,19 @@ public sealed record WCallHierarchyIncomingCall(WCallHierarchyItem From, WRange[
 /// (kept empty for parity with the stdio LSP).</summary>
 public sealed record WCallHierarchyOutgoingCall(WCallHierarchyItem To, WRange[] FromRanges);
 
+/// <summary>
+/// LSP TypeHierarchyItem: <see cref="Name"/>, the LSP SymbolKind number <see cref="Kind"/>, the declaring
+/// <see cref="Uri"/>, the name <see cref="Range"/> and <see cref="SelectionRange"/> (both the same 0-based
+/// span), and the opaque <see cref="Data"/> blob the client echoes back so supertypes/subtypes requests
+/// can reconstruct the item. Mirrors the LspServer wire shape (and the call-hierarchy item).
+/// </summary>
+public sealed record WTypeHierarchyItem(
+    string Name, int Kind, string Uri, WRange Range, WRange SelectionRange, WTypeHierarchyData Data);
+
+/// <summary>The opaque <c>data</c> blob on a TypeHierarchyItem: the language-service kind
+/// (<c>"Entity"</c>/<c>"Value"</c>/<c>"ReadModel"</c>/…) so the item can be reconstructed.</summary>
+public sealed record WTypeHierarchyData(string ThKind);
+
 /// <summary>Input shape: one requested position for selection ranges (0-based LSP coordinates).</summary>
 public sealed record WInPosition(int Line, int Character);
 
@@ -1619,6 +1758,8 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WCallHierarchyItem[]))]
 [JsonSerializable(typeof(WCallHierarchyIncomingCall[]))]
 [JsonSerializable(typeof(WCallHierarchyOutgoingCall[]))]
+[JsonSerializable(typeof(WTypeHierarchyItem))]
+[JsonSerializable(typeof(WTypeHierarchyItem[]))]
 [JsonSerializable(typeof(WInPosition[]))]
 [JsonSerializable(typeof(WTextEdit[]))]
 [JsonSerializable(typeof(WPrepareRename))]
