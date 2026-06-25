@@ -68,12 +68,12 @@ Because the backend is the real `koine lsp`, Studio's diagnostics land at the sa
 ## Caching & offline (the wasm bundle)
 
 The WebAssembly runtime is a multi-megabyte download (the trimmed BCL + the Koine compiler and ANTLR
-assemblies). To keep repeat visits fast, the **home-page Playground registers a service worker** that
-**cache-first** serves the `koine-wasm/_framework/*` assets: the first visit downloads them, every
-later visit boots the in-browser compiler from the local cache with **zero network**, and the
-Playground keeps working **offline** once warmed. The cache is keyed on the bundle's content hash
-(`resources.hash` from the wasm boot manifest), so a new release transparently supersedes the old one —
-no manual cache-busting, no half-old/half-new runtime.
+assemblies). To keep repeat visits fast, the **home-page [Playground](/Koine/) registers a service
+worker** that **cache-first** serves its `koine-wasm/_framework/*` assets: the first visit downloads
+them, every later visit boots the in-browser compiler from the local cache (only a small boot-manifest
+check touches the network), and the Playground keeps working **offline** once warmed. The cache is keyed
+on the bundle's content hash (`resources.hash` from the wasm boot manifest), so a new release
+transparently supersedes the old one — no manual cache-busting, no half-old/half-new runtime.
 
 A service worker is the lever here because the site is hosted on **GitHub Pages**, which **cannot set
 custom response headers**: there is no `Cache-Control: immutable` to make the browser trust the bundle
@@ -83,9 +83,11 @@ are **"if/when the host changes" follow-ups** — not enabled today; the service
 instant-repeat-load and offline wins regardless of host headers.
 
 :::note
-This caching is about **bundle delivery** for the in-browser compiler — making the existing web app load
-instantly and run offline. Turning Koine Studio into an **installable, mobile-friendly PWA** is a
-separate, larger effort tracked in [#221](https://github.com/Atypical-Consulting/Koine/issues/221).
+This caching covers the **home-page Playground's** bundle only — its service worker is deliberately
+scoped to `/Koine/koine-wasm/_framework/*` and does **not** manage Studio's own copy under
+`/Koine/studio/`. Giving **Koine Studio** the same treatment — and turning it into an installable,
+mobile-friendly **PWA** — is a separate, larger effort tracked in
+[#221](https://github.com/Atypical-Consulting/Koine/issues/221).
 :::
 
 ## Features

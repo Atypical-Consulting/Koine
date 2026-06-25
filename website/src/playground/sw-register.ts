@@ -17,9 +17,10 @@ export function serviceWorkerUrls(base: string | undefined): { url: string; scop
 
 /** Run `fn` when the browser is idle (so precaching never competes with first paint); setTimeout fallback. */
 function whenIdle(fn: () => void): void {
-  const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void })
-    .requestIdleCallback;
-  if (typeof ric === 'function') ric(fn, { timeout: 5000 });
+  // Call requestIdleCallback off globalThis (not a detached reference) — a Web IDL method invoked
+  // without its `window` receiver throws "Illegal invocation" in Chrome/Firefox.
+  const g = globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void };
+  if (typeof g.requestIdleCallback === 'function') g.requestIdleCallback(fn, { timeout: 5000 });
   else setTimeout(fn, 2000);
 }
 
@@ -40,16 +41,15 @@ export function scheduleIdlePrecache(): void {
  * first paint or the wasm download). No-op where service workers are unavailable.
  */
 export function registerPlaygroundServiceWorker(): void {
-  if (registered) return;
+  if (registered) return; // once per page — mountPlayground may run for several .koi-ide elements
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
   registered = true;
 
   const { url, scope } = serviceWorkerUrls(import.meta.env.BASE_URL);
   const register = (): void => {
-    navigator.serviceWorker.register(url, { type: 'module', scope }).catch(() => {
-      registered = false; // let a later mount retry if this attempt failed
-    });
-    scheduleIdlePrecache(); // warm the cache on idle so the next visit is instant + offline-ready
+    // Stays registered even if this attempt fails — registration is opportunistic and re-running it
+    // (or precache) per mount/navigation would just duplicate work.
+    navigator.serviceWorker.register(url, { type: 'module', scope }).catch(() => {});
   };
 
   if (typeof document !== 'undefined' && document.readyState === 'complete') {
@@ -59,4 +59,6 @@ export function registerPlaygroundServiceWorker(): void {
   } else {
     register();
   }
+
+  scheduleIdlePrecache(); // warm the cache on idle so the next visit is instant + offline-ready
 }

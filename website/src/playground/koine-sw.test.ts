@@ -7,14 +7,17 @@
 import { describe, it, expect } from 'vitest';
 import {
   CACHE_PREFIX,
+  frameworkPrefixForScope,
   isFrameworkPath,
   isBootManifestPath,
+  isLoaderPath,
   frameworkBaseOf,
   cacheNameFor,
   parseBootManifest,
   existingCacheName,
   cacheFirst,
   handleAssetRequest,
+  handleLoaderRequest,
   handleManifestRequest,
   staleCacheNames,
   evictStaleCaches,
@@ -69,17 +72,28 @@ function manifestText(hash = GEN): string {
   })}/*json-end*/;`;
 }
 
+const PREFIX = '/Koine/koine-wasm/_framework/';
+
 describe('koine-sw — pure helpers', () => {
-  it('isFrameworkPath matches only the _framework path', () => {
-    expect(isFrameworkPath('/Koine/koine-wasm/_framework/dotnet.js')).toBe(true);
-    expect(isFrameworkPath('/koine-wasm/_framework/System.Linq.wasm')).toBe(true);
-    expect(isFrameworkPath('/Koine/docs/guide/')).toBe(false);
-    expect(isFrameworkPath('/Koine/koine-wasm/main.js')).toBe(false);
+  it('frameworkPrefixForScope anchors at <base>/koine-wasm/_framework/', () => {
+    expect(frameworkPrefixForScope('/Koine/')).toBe(PREFIX);
+    expect(frameworkPrefixForScope('/')).toBe('/koine-wasm/_framework/');
   });
 
-  it('isBootManifestPath matches the manifest only', () => {
+  it('isFrameworkPath matches the Playground prefix and EXCLUDES Studio + ordinary nav', () => {
+    expect(isFrameworkPath('/Koine/koine-wasm/_framework/dotnet.js', PREFIX)).toBe(true);
+    expect(isFrameworkPath('/Koine/koine-wasm/_framework/System.Linq.wasm', PREFIX)).toBe(true);
+    expect(isFrameworkPath('/Koine/docs/guide/', PREFIX)).toBe(false);
+    expect(isFrameworkPath('/Koine/koine-wasm/main.js', PREFIX)).toBe(false);
+    // Studio loads the same bundle under /studio/ — must NOT be intercepted (issue #328 scope / #221).
+    expect(isFrameworkPath('/Koine/studio/koine-wasm/_framework/dotnet.js', PREFIX)).toBe(false);
+  });
+
+  it('isBootManifestPath / isLoaderPath classify the network-first entries', () => {
     expect(isBootManifestPath('/Koine/koine-wasm/_framework/dotnet.boot.js')).toBe(true);
     expect(isBootManifestPath('/Koine/koine-wasm/_framework/dotnet.js')).toBe(false);
+    expect(isLoaderPath('/Koine/koine-wasm/_framework/dotnet.js')).toBe(true);
+    expect(isLoaderPath('/Koine/koine-wasm/_framework/dotnet.boot.js')).toBe(false);
   });
 
   it('frameworkBaseOf returns the path up to and including _framework/', () => {
@@ -87,9 +101,11 @@ describe('koine-sw — pure helpers', () => {
     expect(frameworkBaseOf('https://x.test/Koine/docs/')).toBeNull();
   });
 
-  it('cacheNameFor sanitises the sha256 hash to a safe cache key', () => {
-    expect(cacheNameFor(GEN)).toBe(`${CACHE_PREFIX}sha256-BOTT8LZFhIOazBbyAPiIInxmq1mROWjUdpbNkgK34`);
+  it('cacheNameFor base64url-maps the sha256 hash and is injective (no +//= collision)', () => {
+    expect(cacheNameFor(GEN)).toBe(`${CACHE_PREFIX}sha256-BOTT8LZFhIOazBby_APiIInxmq1_mROWjUdpbNkgK34`);
     expect(cacheNameFor(GEN).startsWith(CACHE_PREFIX)).toBe(true);
+    // distinct hashes differing only by + vs / must NOT collapse to one cache name
+    expect(cacheNameFor('sha256-a+b')).not.toBe(cacheNameFor('sha256-a/b'));
   });
 
   it('parseBootManifest extracts resources.hash and the full asset list', () => {
@@ -154,7 +170,7 @@ describe('koine-sw — handleAssetRequest', () => {
     let fetched = false;
     const deps = { caches, fetch: async () => { fetched = true; return new Response('net'); } };
 
-    const res = await handleAssetRequest(new Request(`${FW}dotnet.js`), deps);
+    const res = await handleAssetRequest(new Request(`${FW}Koine.Compiler.wasm`), deps);
     expect(await res.text()).toBe('net');
     expect(fetched).toBe(true);
     expect(await caches.keys()).toHaveLength(0); // nothing cached without a generation cache
@@ -168,6 +184,31 @@ describe('koine-sw — handleAssetRequest', () => {
 
     const res = await handleAssetRequest(new Request(`${FW}Koine.Compiler.wasm`), deps);
     expect(await res.text()).toBe('cached-asm');
+  });
+});
+
+describe('koine-sw — handleLoaderRequest (network-first)', () => {
+  it('fetches the loader fresh (even on a cache hit) so it matches the live generation', async () => {
+    const caches = new FakeCaches();
+    const cache = await caches.open(cacheNameFor(GEN));
+    await cache.put(new Request(`${FW}dotnet.js`), new Response('OLD-loader'));
+    const deps = { caches, fetch: async () => new Response('NEW-loader', { status: 200 }) };
+
+    const res = await handleLoaderRequest(new Request(`${FW}dotnet.js`), deps);
+
+    expect(await res.text()).toBe('NEW-loader'); // network wins over the stale cached loader
+    const stored = await cache.match(new Request(`${FW}dotnet.js`));
+    expect(await stored!.text()).toBe('NEW-loader'); // and the cache is refreshed for offline
+  });
+
+  it('falls back to the cached loader when offline', async () => {
+    const caches = new FakeCaches();
+    const cache = await caches.open(cacheNameFor(GEN));
+    await cache.put(new Request(`${FW}dotnet.js`), new Response('cached-loader'));
+    const deps = { caches, fetch: async () => { throw new Error('offline'); } };
+
+    const res = await handleLoaderRequest(new Request(`${FW}dotnet.js`), deps);
+    expect(await res.text()).toBe('cached-loader');
   });
 });
 
@@ -260,6 +301,13 @@ describe('koine-sw — idle precache', () => {
     await precacheFramework(FW, deps); // must not throw
     expect(await caches.keys()).toHaveLength(0);
   });
+
+  it('tolerates a 200-but-non-JSON manifest (Pages 404/redirect HTML) without throwing', async () => {
+    const caches = new FakeCaches();
+    const deps = { caches, fetch: async () => new Response('<!doctype html>404', { status: 200 }) };
+    await precacheFramework(FW, deps); // JSON.parse on HTML must be swallowed, not rejected
+    expect(await caches.keys()).toHaveLength(0);
+  });
 });
 
 describe('koine-sw — offline smoke (warm → go offline → still serves)', () => {
@@ -278,11 +326,14 @@ describe('koine-sw — offline smoke (warm → go offline → still serves)', ()
     // 2. Go offline: every network fetch throws.
     const offline = { caches, fetch: async () => { throw new Error('offline'); } };
 
-    // The manifest still resolves (cached), and every framework asset still serves from cache.
+    // The manifest still resolves (cached), the loader serves from cache, and every asset too.
     const manifest = await handleManifestRequest(new Request(`${FW}dotnet.boot.js`), FW, offline);
     expect((await manifest.text()).includes('json-start')).toBe(true);
 
-    for (const name of ['dotnet.js', 'dotnet.native.wasm', 'Koine.Compiler.wasm', 'System.Linq.wasm']) {
+    const loader = await handleLoaderRequest(new Request(`${FW}dotnet.js`), offline);
+    expect(loader.ok).toBe(true); // loader served from cache despite the downed network
+
+    for (const name of ['dotnet.native.wasm', 'Koine.Compiler.wasm', 'System.Linq.wasm']) {
       const res = await handleAssetRequest(new Request(`${FW}${name}`), offline);
       expect(res.ok).toBe(true); // served from cache, not the (downed) network
     }

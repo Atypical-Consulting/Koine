@@ -59,12 +59,22 @@ changes" follow-up, same bucket as Brotli (see the docs note for #328).
 ## What the service worker keys on (consumed by Tasks 2–3)
 
 - **Generation token:** `config.resources.hash` parsed from `_framework/dotnet.boot.js`. Cache name =
-  `koine-wasm-<sanitized hash>`.
+  `koine-wasm-<hash>`, base64url-mapped (`+`→`-`, `/`→`_`, drop `=`) so distinct hashes never collide.
 - **Precache list:** `dotnet.js` + `dotnet.boot.js` + every `name` under `resources.jsModuleNative`,
   `jsModuleRuntime`, `wasmNative`, `coreAssembly`, `assembly` (all relative to `_framework/`).
-- **Manifest fetch is network-first** (so a new generation is detected even when `koine-sw.js` itself is
-  byte-identical and no SW update fires), falling back to cache for offline. All other `_framework/*`
-  requests are **cache-first** under the current-generation cache.
+- **Request strategies:**
+  - `dotnet.boot.js` (manifest) — **network-first**: re-read every boot to detect a new generation
+    even when `koine-sw.js` is byte-identical (so no SW update fires); evicts stale generations;
+    falls back to cache offline.
+  - `dotnet.js` (loader) — **network-first**: the worker imports it *before* the manifest, so a
+    cache-first loader could be served from a stale generation after a new build and then read the
+    *new* manifest (a half-old/half-new runtime). It's small; the heavy hashed assets stay cache-first.
+  - all other `_framework/*` — **cache-first** under the current-generation cache.
+- **Scope:** the SW is anchored at `<base>/koine-wasm/_framework/` (the Playground's own bundle path),
+  which deliberately **excludes** Koine Studio's `<base>/studio/koine-wasm/_framework/*`. Both apps ship
+  the byte-identical bundle, but scoping to the Playground keeps this issue's surface to the Playground
+  (Studio's offline story is #221) and prevents one app's manifest from evicting the other's cache
+  during a deploy-skew window.
 
 > Verified against the live deployed manifest rather than a local `npm run build:wasm`, because the wasm
 > publish requires the CI-only `wasm-tools`/`wasm-experimental` workloads.
