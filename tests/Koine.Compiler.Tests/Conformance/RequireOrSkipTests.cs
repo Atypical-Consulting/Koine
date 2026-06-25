@@ -39,6 +39,19 @@ public class RequireOrSkipTests
             Should.Throw<SkipException>(() => TestSupport.RequireOrSkip(false, "n")));
 
     /// <summary>
+    /// Absent toolchain with the require-flag on must turn a missing toolchain into a hard <c>Failed</c>,
+    /// i.e. throw <see cref="FailException"/> (NOT a <see cref="SkipException"/>) — CI's contract that a
+    /// dropped toolchain reddens the build instead of silently skipping.
+    /// </summary>
+    [Fact]
+    public void RequireOrSkip_absent_and_flag_on_fails() =>
+        WithRequireConformance("1", () =>
+        {
+            var ex = Should.Throw<FailException>(() => TestSupport.RequireOrSkip(false, "n"));
+            ex.ShouldNotBeAssignableTo<SkipException>();
+        });
+
+    /// <summary>
     /// Sets <c>KOINE_REQUIRE_CONFORMANCE</c> to <paramref name="value"/> (<c>null</c> clears it) for the
     /// duration of <paramref name="body"/>, then restores the prior value — so the flag can never leak
     /// into a sibling test. Forcing the value (rather than assuming ambient absence) keeps these tests
