@@ -329,13 +329,38 @@ fn spawn_reader_thread(
 
 // --- terminal PTY reader thread ---------------------------------------------
 
+/// Pull the longest immediately-decodable UTF-8 prefix out of `carry`, returning it as a `String` and
+/// leaving behind only a trailing *incomplete* multibyte sequence (at most 3 bytes) for the next read
+/// to complete. This is what keeps a multibyte code point that straddles a 4 KB read boundary from
+/// being corrupted: a naive per-read `from_utf8_lossy` would replace the split halves with U+FFFD,
+/// but here the partial tail is retained until its continuation bytes arrive. Genuinely *invalid*
+/// bytes (not a boundary split) are emitted lossily and drained, so `carry` can never grow unbounded
+/// on malformed input. Returns `None` when nothing is emittable yet (empty, or only an incomplete
+/// tail). Pure, so the boundary policy is unit-tested without opening a PTY.
+fn take_decodable(carry: &mut Vec<u8>) -> Option<String> {
+    let end = match std::str::from_utf8(carry) {
+        Ok(s) => s.len(),
+        Err(e) => match e.error_len() {
+            None => e.valid_up_to(),            // incomplete trailing sequence — keep it for next read
+            Some(bad) => e.valid_up_to() + bad, // genuinely invalid bytes — emit lossily, don't retain
+        },
+    };
+    if end == 0 {
+        return None;
+    }
+    let chunk = String::from_utf8_lossy(&carry[..end]).into_owned();
+    carry.drain(..end);
+    Some(chunk)
+}
+
 /// Spawn the reader thread that drains the PTY master and relays it to the frontend. It reads raw
-/// bytes (terminal output is not line- or frame-delimited), decodes each chunk lossily to a `String`
-/// (a UTF-8 sequence can straddle a read boundary; xterm.js on the other end tolerates the rare
-/// replacement char, and lossy keeps us from dropping bytes), and emits it as `pty://data`. When the
-/// read hits EOF the shell has gone: we reap the child to recover its exit code and emit `pty://exit`
-/// exactly once. Unlike the LSP sidecar there is **no** supervision/relaunch — an exited shell simply
-/// closes the terminal. `std::thread` + `std::io` only; no async runtime.
+/// bytes (terminal output is not line- or frame-delimited) into a carry buffer and emits the longest
+/// valid-UTF-8 prefix as `pty://data`, holding back any partial multibyte tail until its continuation
+/// bytes arrive (see [`take_decodable`]) so non-ASCII output (TUIs, emoji/CJK filenames) is not
+/// mojibake'd at read boundaries. When the read hits EOF the shell has gone: we flush any trailing
+/// bytes, reap the child to recover its exit code, and emit `pty://exit` exactly once. Unlike the LSP
+/// sidecar there is **no** supervision/relaunch — an exited shell simply closes the terminal.
+/// `std::thread` + `std::io` only; no async runtime.
 fn spawn_pty_reader_thread(
     app: AppHandle,
     mut reader: Box<dyn Read + Send>,
@@ -343,15 +368,23 @@ fn spawn_pty_reader_thread(
 ) {
     std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
+        let mut carry: Vec<u8> = Vec::new();
         loop {
             match reader.read(&mut buf) {
-                Ok(0) => break,                  // EOF: the shell closed its end of the PTY
+                Ok(0) => break, // EOF: the shell closed its end of the PTY
                 Ok(n) => {
-                    let chunk = String::from_utf8_lossy(&buf[..n]).into_owned();
-                    let _ = app.emit("pty://data", chunk);
+                    carry.extend_from_slice(&buf[..n]);
+                    while let Some(chunk) = take_decodable(&mut carry) {
+                        let _ = app.emit("pty://data", chunk);
+                    }
                 }
                 Err(_) => break, // a read error means the PTY is gone; treat it as EOF
             }
+        }
+        // Flush any trailing bytes (an incomplete sequence at the very end) lossily so nothing the
+        // shell wrote before closing is silently dropped.
+        if !carry.is_empty() {
+            let _ = app.emit("pty://data", String::from_utf8_lossy(&carry).into_owned());
         }
 
         // The PTY reached EOF. Recover the exit code and announce it once, then clear the managed
@@ -1815,5 +1848,47 @@ mod tests {
         // on Unix, `cmd` on Windows) so `pty_start` always has something to spawn.
         let (program, _args) = resolve_shell_command(None);
         assert!(!program.is_empty(), "a platform default shell must be chosen");
+    }
+
+    // --- PTY chunk decoding (pure) ------------------------------------------
+
+    #[test]
+    fn take_decodable_passes_ascii_whole() {
+        let mut carry = b"git status\r\n".to_vec();
+        assert_eq!(take_decodable(&mut carry).as_deref(), Some("git status\r\n"));
+        assert!(carry.is_empty(), "a fully-valid buffer is drained entirely");
+    }
+
+    #[test]
+    fn take_decodable_holds_back_a_split_multibyte_tail() {
+        // '€' is the 3 bytes E2 82 AC. A read boundary that splits it after E2 must NOT corrupt it:
+        // nothing is emittable yet, and the partial byte is retained for the next read.
+        let mut carry = vec![0xE2];
+        assert_eq!(take_decodable(&mut carry), None);
+        assert_eq!(carry, vec![0xE2], "the incomplete sequence is kept, not lossily emitted");
+
+        // The continuation bytes arrive on the next read → the whole code point decodes.
+        carry.extend_from_slice(&[0x82, 0xAC]);
+        assert_eq!(take_decodable(&mut carry).as_deref(), Some("€"));
+        assert!(carry.is_empty());
+    }
+
+    #[test]
+    fn take_decodable_emits_valid_prefix_and_keeps_tail() {
+        // "ab" + the first byte of '€': the ASCII prefix is emitted now, the partial tail held back.
+        let mut carry = vec![b'a', b'b', 0xE2];
+        assert_eq!(take_decodable(&mut carry).as_deref(), Some("ab"));
+        assert_eq!(carry, vec![0xE2]);
+    }
+
+    #[test]
+    fn take_decodable_drains_genuinely_invalid_bytes() {
+        // A lone 0xFF is invalid (not an incomplete sequence): it is emitted lossily and drained
+        // rather than retained, so the buffer can't grow unbounded waiting for a continuation that
+        // will never come. The valid byte that follows is then emitted on the next pull.
+        let mut carry = vec![0xFF, b'x'];
+        assert_eq!(take_decodable(&mut carry).as_deref(), Some("\u{FFFD}"));
+        assert_eq!(take_decodable(&mut carry).as_deref(), Some("x"));
+        assert!(carry.is_empty());
     }
 }

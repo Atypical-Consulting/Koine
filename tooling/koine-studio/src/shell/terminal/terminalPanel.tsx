@@ -72,15 +72,25 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
   // True once the shell has exited; the next Enter restarts it instead of being written to a dead PTY.
   let exited = false;
 
-  // Re-measure the viewport and tell the shell, swallowing the error a zero-size (hidden) container
-  // throws so a fit() before the panel is shown is harmless.
+  // The cols/rows last sent to the shell, so an unchanged fit() doesn't re-issue a pty_resize IPC.
+  let sentCols = 0;
+  let sentRows = 0;
+
+  // Re-measure the viewport and, only when the character grid actually changed, tell the shell.
+  // `fitAddon.fit()` throws on a zero-size (hidden) container — swallow it so a fit() before the panel
+  // is shown is harmless (a real fit follows on reveal/start). The resize invoke is best-effort: it
+  // can reject with "PTY not started" if a reveal-fit races ahead of start(), so its error is ignored
+  // (start()'s own .then(fit) re-syncs the size once the shell is up).
   function fit(): void {
     try {
       fitAddon.fit();
     } catch {
       return; // container not laid out yet (panel hidden) — re-fit happens on show
     }
-    void transport.resize(term.cols, term.rows);
+    if (term.cols === sentCols && term.rows === sentRows) return;
+    sentCols = term.cols;
+    sentRows = term.rows;
+    void transport.resize(term.cols, term.rows).catch(() => {});
   }
 
   function restart(): void {
@@ -106,10 +116,16 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
   });
 
   // Reflow on any container size change (the bottom-panel resizer drag, a window resize, the first
-  // reveal). ResizeObserver is absent in some headless/test envs — guard so the panel still works.
+  // reveal), DEBOUNCED so a drag — which fires the observer every frame — coalesces into one fit (and
+  // at most one pty_resize) when it settles, instead of a per-frame IPC storm. ResizeObserver is
+  // absent in some headless/test envs — guard so the panel still works without it.
   let resizeObserver: ResizeObserver | undefined;
+  let resizeTimer: ReturnType<typeof setTimeout> | undefined;
   if (typeof ResizeObserver !== 'undefined') {
-    resizeObserver = new ResizeObserver(() => fit());
+    resizeObserver = new ResizeObserver(() => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(fit, 50);
+    });
     resizeObserver.observe(parent);
   }
 
@@ -124,6 +140,7 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
     },
     dispose() {
       resizeObserver?.disconnect();
+      clearTimeout(resizeTimer);
       void transport.stop();
       term.dispose();
       host.remove();

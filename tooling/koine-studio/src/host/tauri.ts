@@ -85,8 +85,14 @@ class TauriTerminalTransport implements TerminalTransport {
     this.exitCb = cb;
   }
 
-  // Attach the event listeners FIRST (so no output chunk is missed), then spawn the shell.
+  // Attach the event listeners FIRST (so no output chunk is missed), then spawn the shell. Idempotent
+  // on re-entry: the panel's restart-after-exit calls start() again on the SAME transport, so detach
+  // any prior listeners before re-subscribing — otherwise each restart would stack another pty://data
+  // listener and the relaunched shell's output would be written to the terminal twice (then 3×, …),
+  // and the earlier handles would leak (stop() only holds the latest pair).
   async start(cwd: string | null): Promise<void> {
+    this.unlistenData?.();
+    this.unlistenExit?.();
     this.unlistenData = await listen<string>('pty://data', (e) => this.dataCb?.(e.payload));
     this.unlistenExit = await listen<number>('pty://exit', (e) =>
       this.exitCb?.(typeof e.payload === 'number' ? e.payload : -1),
