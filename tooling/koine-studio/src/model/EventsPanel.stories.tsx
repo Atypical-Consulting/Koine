@@ -66,3 +66,9 @@ export const Scoped: Story = {
     return <EventsPanel {...args} store={store} />;
   },
 };
+
+/** The Flow view (#270): the model-derived event-storming canvas — domain events with a flow arrow from
+ *  their publishing aggregate, integration events bridging context swimlanes — instead of the table. */
+export const Flow: Story = {
+  render: (args) => <EventsPanel {...args} store={createAppStore()} initialView="flow" />,
+};

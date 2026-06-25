@@ -17,9 +17,11 @@ export function EventsPanel(props: {
   store: StoreApi<AppState>;
   graph: DiagramGraph;
   handlers: TableHandlers;
+  /** Which view to open in; defaults to the table. Lets a story / caller open straight to the flow. */
+  initialView?: 'table' | 'flow';
 }) {
   const scope = useAppStore(props.store, (s) => s.activeContext);
-  const [view, setView] = useState<'table' | 'flow'>('table');
+  const [view, setView] = useState<'table' | 'flow'>(props.initialView ?? 'table');
   return (
     <div class="koi-events-panel">
       {/* A toggle-button group (aria-pressed), not tabs — the two views share one panel region. */}

@@ -13,7 +13,7 @@ import type { Diagram, DiagramEdge, DiagramGraph, DiagramMember, DiagramNode, Do
 import { mergeGraphsForView, type EventFlowEdge, type EventFlowNode } from '@/model/modelTables';
 import { diagramToMermaid } from '@/export/diagramExport';
 import { buildEmptyState } from '@/diagrams/emptyState';
-import { loadDiagramZoom, saveDiagramZoom } from '@/settings/persistence';
+import { loadDiagramPositions, loadDiagramZoom, saveDiagramPositions, saveDiagramZoom } from '@/settings/persistence';
 import {
   DIAGRAM_ANNOTATION_CREATE_EVENT,
   DIAGRAM_CONNECT_EVENT,
@@ -22,6 +22,7 @@ import {
   NODE_EDIT_EVENT,
   NODE_NAVIGATE_EVENT,
   diagramLayoutStore,
+  diagramPersistScope,
   isDiagramEditing,
   isEditableKind,
   type CanvasAnnotationKind,
@@ -1388,6 +1389,18 @@ function cardValue(cell: MxCell | null | undefined): EventFlowNode | null {
   return v && typeof v === 'object' && 'qualifiedName' in v ? v : null;
 }
 
+/**
+ * The localStorage key for the event-flow canvas's hand-arranged positions (#270). It shares the domain
+ * canvas's per-workspace persist SCOPE ({@link diagramPersistScope}, so a layout never bleeds across
+ * projects) but a DISTINCT view suffix — `koi-event-flow` vs the domain canvas's `koi-domain-diagram` (see
+ * {@link positionKey}). The two views key positions by the SAME qualified names (an event/aggregate appears
+ * in both), so a shared key would have each view clobber the other's layout (and a full-layout save would
+ * even wipe the domain canvas's notes/groups). A separate key keeps each view's arrangement independent.
+ */
+function eventFlowPositionKey(): string {
+  return `${diagramPersistScope()}:koi-event-flow`;
+}
+
 /** Arrange the event flow left→right by its edges — a dependency-ranked {@link HierarchicalLayout}
  *  (orientation `'east'`, like the context-map layout) so command→event→policy reads as a causal chain.
  *  Wrapped so a measure-less headless DOM (vitest) can't blank it — the model is the tested contract. */
@@ -1408,14 +1421,15 @@ function runEventFlowLayout(mx: Mx, graph: MxGraph): void {
  * unit-testable. Cards become one vertex each (coloured by kind); each context referenced by a
  * publish/subscribe arrow (an endpoint that isn't a card) becomes a swimlane vertex the integration events
  * bridge. A card click bubbles {@link NODE_NAVIGATE_EVENT} (the inspector routes it to select-and-goto,
- * exactly like a diagram-node click). The returned {@link CanvasHandle} reuses the domain-canvas shape so
- * the persist path (#270 Task 4) can reuse {@link snapshotPositions}; notes/groups are unused here.
+ * exactly like a diagram-node click). A hand-arranged layout persists per element under
+ * {@link eventFlowPositionKey} and is re-applied on the next build, so a dragged flow survives a reload.
+ * The returned {@link CanvasHandle} reuses the domain-canvas shape so the persist path reuses
+ * {@link snapshotPositions} / {@link applySavedPositions}; notes/groups are unused here.
  */
 export function buildEventFlowCanvas(
   mx: Mx,
   container: HTMLElement,
   flow: { nodes: EventFlowNode[]; edges: EventFlowEdge[] },
-  onMoved?: (positions: Record<string, DiagramPosition>) => void,
 ): CanvasHandle {
   const { Graph } = mx;
   const graph = new Graph(container);
@@ -1540,12 +1554,13 @@ export function buildEventFlowCanvas(
   });
 
   runEventFlowLayout(mx, graph);
+  // A saved manual layout overrides the auto-arrange, so a hand-positioned flow doesn't snap back on reload.
+  applySavedPositions(graph, cells, loadDiagramPositions(eventFlowPositionKey()));
 
-  // Persist a card drag: snapshot every card's geometry (by qualified name) and hand it to the caller's
-  // saver (#270 Task 4). Attached after layout so the auto-arrange itself doesn't fire a spurious save.
-  if (onMoved) {
-    graph.addListener(mx.InternalEvent.CELLS_MOVED, () => onMoved(snapshotPositions(cells)));
-  }
+  // Persist a card drag: snapshot every card's geometry (one gesture freezes the layout to manual, matching
+  // the domain canvas) and save it under the event-flow key. Attached AFTER layout/apply so neither fires a
+  // spurious save (both use setGeometry, not moveCells — but the order keeps the intent clear).
+  graph.addListener(mx.InternalEvent.CELLS_MOVED, () => saveDiagramPositions(eventFlowPositionKey(), snapshotPositions(cells)));
 
   return {
     graph,
@@ -1565,14 +1580,13 @@ export interface EventFlowGraphHandle {
 /**
  * Render a standalone event-flow canvas into `container`, reusing {@link buildEventFlowCanvas} and the
  * pan/zoom/minimap chrome. The Events panel (#270 Task 3) mounts this in its Flow view. A superseded render
- * (`isCurrent()` false) tears itself down rather than clobbering a newer one, and returns null. `onMoved`
- * is forwarded so a dragged card's position can persist (#270 Task 4).
+ * (`isCurrent()` false) tears itself down rather than clobbering a newer one, and returns null. A dragged
+ * card's position persists per element via {@link buildEventFlowCanvas} (#270 Task 4).
  */
 export async function renderEventFlowGraph(
   container: HTMLElement,
   flow: { nodes: EventFlowNode[]; edges: EventFlowEdge[] },
   isCurrent: () => boolean,
-  onMoved?: (positions: Record<string, DiagramPosition>) => void,
 ): Promise<EventFlowGraphHandle | null> {
   let mx: Mx;
   try {
@@ -1591,7 +1605,7 @@ export async function renderEventFlowGraph(
   surface.className = 'koi-canvas';
   root.appendChild(surface);
 
-  const handle = buildEventFlowCanvas(mx, surface, flow, onMoved);
+  const handle = buildEventFlowCanvas(mx, surface, flow);
   // Read-only chrome (zoom bar + minimap, no domain authoring controls), but the cards themselves ARE
   // movable: let a drag that starts on a card MOVE it while a drag on empty space pans (the read-only chrome
   // would otherwise pan over a card and the card could never be dragged).

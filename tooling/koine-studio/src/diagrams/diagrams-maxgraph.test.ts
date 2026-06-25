@@ -977,3 +977,38 @@ describe('renderEventFlowGraph', () => {
     expect(container.textContent).toContain('sentinel');
   });
 });
+
+describe('event flow layout persistence (#270)', () => {
+  test('moving a card persists under a per-workspace event-flow key (not the domain key), and a fresh canvas restores it', () => {
+    setDiagramPersistScope('ws-eventflow'); // no layout store injected ⇒ the browser-storage fallback is used
+    const container = makeContainer();
+    const handle = buildEventFlowCanvas(mx, container, EVENT_FLOW);
+    try {
+      const model = handle.graph.getDataModel();
+      const cell = handle.cells.get('evt')!;
+      const geo = cell.getGeometry()!.clone();
+      geo.x = 321;
+      geo.y = 123;
+      model.setGeometry(cell, geo);
+      handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.CELLS_MOVED, 'cells', [cell], 'dx', 0, 'dy', 0));
+
+      // Persisted under the event-flow key, keyed by the card's qualified name…
+      expect(loadDiagramPositions('ws-eventflow:koi-event-flow')['Sales.OrderPlaced']).toEqual({ x: 321, y: 123 });
+      // …and NOT under the domain canvas's key, so the two views' layouts never clobber each other.
+      expect(loadDiagramPositions(positionKey())).toEqual({});
+    } finally {
+      handle.dispose();
+    }
+
+    // A FRESH canvas over the same flow re-applies the saved position (survives a reload).
+    const container2 = makeContainer();
+    const handle2 = buildEventFlowCanvas(mx, container2, EVENT_FLOW);
+    try {
+      const restored = handle2.cells.get('evt')!.getGeometry()!;
+      expect(restored.x).toBe(321);
+      expect(restored.y).toBe(123);
+    } finally {
+      handle2.dispose();
+    }
+  });
+});
