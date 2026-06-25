@@ -1791,6 +1791,75 @@ public sealed class KoineLanguageService
     }
 
     /// <summary>
+    /// A preview-shaped rename: the same cross-file edits as <see cref="RenameAt(IReadOnlyDictionary{string,string},string,int,int,string)"/>,
+    /// regrouped per file so an editor can show a file-by-file diff before applying. Returns null in
+    /// exactly the cases <c>RenameAt</c> does (not on a renameable name, an invalid/unchanged identifier,
+    /// or a collision with an existing declaration).
+    /// </summary>
+    public RenamePreview? RenamePreviewAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character, string newName) =>
+        RenamePreviewAt(ToCompilation(documents), activeUri, line, character, newName);
+
+    /// <summary>
+    /// Overload of <see cref="RenamePreviewAt(IReadOnlyDictionary{string,string},string,int,int,string)"/> that
+    /// uses a held <see cref="KoineCompilation"/> snapshot, avoiding re-parses when the caller
+    /// holds and reuses the same compilation across multiple requests.
+    /// </summary>
+    public RenamePreview? RenamePreviewAt(KoineCompilation compilation, string activeUri, int line, int character, string newName)
+    {
+        // Delegate to RenameAt so the WouldCollide check and every other guard are reused, not duplicated.
+        var refs = RenameAt(compilation, activeUri, line, character, newName);
+        if (refs is null)
+        {
+            return null;
+        }
+
+        // Group by file, preserving first-seen file order and the occurrence order within each file.
+        var files = refs
+            .GroupBy(r => r.Uri, StringComparer.Ordinal)
+            .Select(g => new RenameFileChanges(g.Key, g.ToList()))
+            .ToList();
+        return new RenamePreview(newName, files);
+    }
+
+    /// <summary>
+    /// The occurrences of the name under the cursor <em>within the active file only</em> — the LSP
+    /// <c>linkedEditingRange</c> answer (single-file, in-place editing). Resolves the symbol with the
+    /// same guards as <see cref="PrepareRenameAt(KoineCompilation,string,int,int)"/> /
+    /// <see cref="RenameAt(KoineCompilation,string,int,int,string)"/> (null on a string/regex, a primitive,
+    /// or a non-renameable name), then filters the cross-file references to <paramref name="activeUri"/>.
+    /// Returns null when there are no in-file occurrences.
+    /// </summary>
+    public IReadOnlyList<Reference>? LinkedEditingRangeAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character) =>
+        LinkedEditingRangeAt(ToCompilation(documents), activeUri, line, character);
+
+    /// <summary>
+    /// Overload of <see cref="LinkedEditingRangeAt(IReadOnlyDictionary{string,string},string,int,int)"/> that
+    /// uses a held <see cref="KoineCompilation"/> snapshot, avoiding re-parses when the caller
+    /// holds and reuses the same compilation across multiple requests.
+    /// </summary>
+    public IReadOnlyList<Reference>? LinkedEditingRangeAt(KoineCompilation compilation, string activeUri, int line, int character)
+    {
+        if (!compilation.Documents.TryGetValue(activeUri, out var source))
+        {
+            return null;
+        }
+
+        var ctx = TokenLocator.Locate(source, line, character);
+        var name = ctx.CurrentToken?.Text;
+        if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
+        {
+            return null;
+        }
+
+        // Resolve the symbol exactly as RenameAt does (offset + enclosing-type scope), then keep only
+        // the occurrences in the active file — linked editing edits a single file in place.
+        var offset = OffsetOf(source, line, character);
+        var refs = compilation.WorkspaceIndex.FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
+        var inFile = refs.Where(r => string.Equals(r.Uri, activeUri, StringComparison.Ordinal)).ToList();
+        return inFile.Count == 0 ? null : inFile;
+    }
+
+    /// <summary>
     /// The editable identifier range under the cursor — the LSP <c>prepareRename</c> answer.
     /// Returns the declaration/use occurrence at the cursor (a single-token <see cref="Reference"/>)
     /// when a rename would be valid there, or null when the cursor is inside a string/regex, not on a

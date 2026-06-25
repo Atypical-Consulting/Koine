@@ -42,6 +42,23 @@ internal sealed class RefactorService
             actions.Add(extract);
         }
 
+        if (service.TryExtractEntity(startOffset, endOffset) is { } extractEntity)
+        {
+            actions.Add(extractEntity);
+        }
+
+        if (service.TryExtractAggregate(startOffset, endOffset) is { } extractAggregate)
+        {
+            actions.Add(extractAggregate);
+        }
+
+        if (service.TryInlineValueObject(startOffset, endOffset) is { } inline)
+        {
+            actions.Add(inline);
+        }
+
+        actions.AddRange(service.TryMoveTypeBetweenContexts(startOffset, endOffset));
+
         return actions;
     }
 
@@ -180,6 +197,554 @@ internal sealed class RefactorService
             // A one-off, position-specific refactor: not part of a fix-all batch.
             EquivalenceKey: null,
             [insert, replace]);
+    }
+
+    /// <summary>
+    /// Builds the "Extract entity" refactor when the selection lands on one or more contiguous member
+    /// fields of a value/entity/event type. The sibling to <see cref="TryExtractValueObject"/>: instead
+    /// of a <c>value</c>, it emits a new <c>entity ExtractedEntity identified by ExtractedEntityId { … }</c>
+    /// inserted immediately before the enclosing type, carrying the selected fields verbatim, and
+    /// replaces those fields with a single <c>extracted: ExtractedEntity</c> line. <c>ExtractedEntity</c>
+    /// / <c>ExtractedEntityId</c> / <c>extracted</c> are deliberate placeholder names the user renames
+    /// afterward. Returns <c>null</c> when the selection does not land on extractable fields.
+    /// </summary>
+    private CodeFix? TryExtractEntity(int startOffset, int endOffset)
+    {
+        foreach (TypeDecl type in EnumerateTypes(_model))
+        {
+            IReadOnlyList<Member>? members = MembersOf(type);
+            if (members is null || members.Count == 0 || type.Span.IsNone)
+            {
+                continue;
+            }
+
+            // The selection must fall within this type's body.
+            if (!ContainsSelection(type.Span, startOffset, endOffset))
+            {
+                continue;
+            }
+
+            List<Member> selected = SelectedContiguousMembers(members, startOffset, endOffset);
+            if (selected.Count == 0)
+            {
+                continue;
+            }
+
+            // Same guard as extract-VO: a derived/initialized field would carry an RHS referencing
+            // fields left behind in the origin type (dangling refs), so refuse the whole selection.
+            if (selected.Any(m => m.Initializer is not null))
+            {
+                return null;
+            }
+
+            return BuildExtractEntity(type, selected);
+        }
+
+        return null;
+    }
+
+    private CodeFix BuildExtractEntity(TypeDecl type, IReadOnlyList<Member> selected)
+    {
+        // Indentation of the enclosing type declaration (its 1-based start column minus one).
+        var typeIndent = new string(' ', Math.Max(0, type.Span.Column - 1));
+        var fieldIndent = typeIndent + "  ";
+
+        // Disambiguate the placeholder names against what already exists, so the refactor never
+        // silently shadows an existing type or member by reusing a taken name. The identity type name
+        // is derived from the (already-disambiguated) entity name, then itself disambiguated.
+        ISet<string> existingTypes = ExistingTypeNames();
+        var entityName = UniqueName("ExtractedEntity", existingTypes);
+        var idName = UniqueName(entityName + "Id", existingTypes);
+        var fieldName = UniqueName("extracted", MemberNamesOf(type));
+
+        // Build the moved body from the VERBATIM combined source slice, spanning from the start of the
+        // FIRST selected field's leading comment/doc trivia to the END of the last selected field (plus
+        // any same-line trailing comment), so per-field docs and inter-field comments travel along.
+        var moveStart = LeadingContentStart(selected[0]);
+        var moveEnd = ExtendOverTrailingComment(selected[^1].Span.Offset + selected[^1].Span.Length);
+        var movedSlice = SliceRange(moveStart, moveEnd);
+
+        // (1) The extracted entity. The moved slice is re-indented from the origin field indentation to
+        // this entity's body indentation so the layout reads correctly at its new home.
+        var sb = new StringBuilder();
+        sb.Append("entity ").Append(entityName).Append(" identified by ").Append(idName).Append(" {\n");
+        sb.Append(Reindent(movedSlice, selected[0].Span.Column - 1, fieldIndent)).Append('\n');
+        sb.Append(typeIndent).Append("}\n\n").Append(typeIndent);
+
+        // Insert BEFORE the enclosing type's leading-trivia/doc block (not at the type keyword, which
+        // sits AFTER the type's own `///` doc), so the original type keeps its doc.
+        var insertOffset = LeadingTriviaStart(type);
+        var (insertLine, insertCol) = LineColumnOf(insertOffset);
+        SourceSpan insertAt = PointSpan(insertLine, insertCol, insertOffset);
+        var insert = new CodeFixEdit(insertAt, sb.ToString());
+
+        // (2) Replace the SAME combined range (leading trivia included) with one placeholder field,
+        // so nothing in the moved range is left behind or duplicated.
+        SourceSpan combined = RangeSpan(moveStart, moveEnd);
+        var replace = new CodeFixEdit(combined, $"{fieldName}: {entityName}");
+
+        return new CodeFix(
+            $"Extract entity (rename '{entityName}' / '{fieldName}' afterwards)",
+            "refactor.extract",
+            // A one-off, position-specific refactor: not part of a fix-all batch.
+            EquivalenceKey: null,
+            [insert, replace]);
+    }
+
+    /// <summary>
+    /// Builds the "Extract aggregate" refactor when the selection covers one or more contiguous
+    /// <b>whole top-level type declarations</b> (not member fields), the first of which is an
+    /// <see cref="EntityDecl"/> usable as the aggregate root. Unlike <see cref="TryExtractValueObject"/>
+    /// / <see cref="TryExtractEntity"/> (which lift a run of member fields out of a type body), this
+    /// wraps the selected sibling type(s) in a new
+    /// <c>aggregate ExtractedAggregate root &lt;rootEntity&gt; { … }</c> inserted in place, re-indenting
+    /// the wrapped types one level deeper. <c>ExtractedAggregate</c> is a deliberate placeholder name
+    /// the user renames afterward. Returns <c>null</c> when the selection does not land on a whole
+    /// top-level entity (e.g. on member fields, on a non-entity, or on a type already nested in an
+    /// aggregate).
+    /// </summary>
+    private CodeFix? TryExtractAggregate(int startOffset, int endOffset)
+    {
+        foreach (ContextNode ctx in _model.Contexts)
+        {
+            // Only context top-level types are root candidates: a type already nested in an aggregate
+            // is in that aggregate's `.Types`, never in `ctx.Types`, so it is never offered here.
+            IReadOnlyList<TypeDecl> topLevel = ctx.Types;
+            List<TypeDecl> selected = SelectedContiguousTypes(topLevel, startOffset, endOffset);
+            if (selected.Count == 0)
+            {
+                continue;
+            }
+
+            // The first selected type must be a valid aggregate root (an entity); aggregate name must
+            // differ from the root name, which `UniqueName` guarantees against the existing type set.
+            if (selected[0] is not EntityDecl root)
+            {
+                continue;
+            }
+
+            return BuildExtractAggregate(selected, root.Name);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The whole top-level type declarations fully covered by the selection, validated to be
+    /// contiguous in declaration order. A type counts as covered when the selection contains its
+    /// entire span (from its leading-trivia/doc block through the end of its body); a narrow
+    /// field-level selection inside a type body therefore covers nothing. Returns an empty list when
+    /// nothing is fully covered or the covered types are not contiguous.
+    /// </summary>
+    private List<TypeDecl> SelectedContiguousTypes(IReadOnlyList<TypeDecl> types, int startOffset, int endOffset)
+    {
+        var hit = new List<TypeDecl>();
+        var indices = new List<int>();
+        for (var i = 0; i < types.Count; i++)
+        {
+            TypeDecl type = types[i];
+            if (type.Span.IsNone || type.Span.Length <= 0)
+            {
+                continue;
+            }
+
+            var typeStart = LeadingTriviaStart(type);
+            var typeEnd = type.Span.Offset + type.Span.Length;
+
+            // Whole-declaration containment: the selection must span the entire type (trivia included).
+            if (startOffset <= typeStart && endOffset >= typeEnd)
+            {
+                hit.Add(type);
+                indices.Add(i);
+            }
+        }
+
+        // Reject a non-contiguous hit (a selection straddling a gap): wrap a single contiguous run.
+        for (var i = 1; i < indices.Count; i++)
+        {
+            if (indices[i] != indices[i - 1] + 1)
+            {
+                return [];
+            }
+        }
+
+        return hit;
+    }
+
+    private CodeFix BuildExtractAggregate(IReadOnlyList<TypeDecl> selected, string rootName)
+    {
+        // Indentation of the first selected type's declaration (its 1-based start column minus one);
+        // the wrapped types sit one level (two spaces) deeper inside the new aggregate body.
+        var typeIndent = new string(' ', Math.Max(0, selected[0].Span.Column - 1));
+        var innerIndent = typeIndent + "  ";
+
+        // Disambiguate the placeholder aggregate name against every existing type, so the new name
+        // never collides with an existing type and never equals the root name.
+        var aggName = UniqueName("ExtractedAggregate", ExistingTypeNames());
+
+        // The verbatim slice spanning the whole selected run: from the start of the FIRST type's
+        // leading-trivia/doc block through the end of the LAST type's body (plus any same-line trailing
+        // comment), so per-type docs and inter-type comments travel into the aggregate body intact.
+        var moveStart = LeadingTriviaStart(selected[0]);
+        var moveEnd = ExtendOverTrailingComment(selected[^1].Span.Offset + selected[^1].Span.Length);
+        var movedSlice = SliceRange(moveStart, moveEnd);
+
+        // The wrapped types are re-indented from their origin top-level indentation to the aggregate's
+        // inner body indentation so the layout reads correctly one level deeper.
+        var sb = new StringBuilder();
+        sb.Append("aggregate ").Append(aggName).Append(" root ").Append(rootName).Append(" {\n");
+        sb.Append(Reindent(movedSlice, selected[0].Span.Column - 1, innerIndent)).Append('\n');
+        sb.Append(typeIndent).Append('}');
+
+        // Replace the whole moved range with the aggregate that wraps it, so nothing is duplicated.
+        SourceSpan combined = RangeSpan(moveStart, moveEnd);
+        var replace = new CodeFixEdit(combined, sb.ToString());
+
+        return new CodeFix(
+            $"Extract aggregate (rename '{aggName}' afterwards)",
+            "refactor.extract",
+            // A one-off, position-specific refactor: not part of a fix-all batch.
+            EquivalenceKey: null,
+            [replace]);
+    }
+
+    /// <summary>
+    /// Builds the "Inline value object" refactor — the inverse of <see cref="TryExtractValueObject"/> —
+    /// when the selection lands on a reference to a <b>single-use</b> value object (the VO type name in a
+    /// field declaration like <c>addr: Address</c>). The result is two edits in the active file:
+    /// (1) the referencing field is replaced by the VO's member fields inlined in place (re-indented to
+    /// the field's indentation), and (2) the now-dead <c>value Address { … }</c> declaration is removed
+    /// (its whole span including leading trivia). Returns <c>null</c> unless every inlinability guard
+    /// holds: the referenced type is a value object, it is referenced exactly once across the whole
+    /// model (deleting it would otherwise dangle the other refs), and — for v1's self-contained shape —
+    /// it carries no invariants and no members with initializers (those would be silently dropped).
+    /// </summary>
+    private CodeFix? TryInlineValueObject(int startOffset, int endOffset)
+    {
+        // Locate the member field whose type-name reference contains the selection, and the VO it names.
+        foreach (TypeDecl host in EnumerateTypes(_model))
+        {
+            if (MembersOf(host) is not { } members)
+            {
+                continue;
+            }
+
+            foreach (Member member in members)
+            {
+                if (!ReferenceContainsSelection(member, startOffset, endOffset))
+                {
+                    continue;
+                }
+
+                ValueObjectDecl? target = ResolveValueObject(member.Type.Name);
+                if (target is null)
+                {
+                    return null;
+                }
+
+                // Inlinability guards (the no-noise contract): single-use, self-contained.
+                if (target.Invariants.Count > 0 || target.Members.Any(m => m.Initializer is not null))
+                {
+                    return null;
+                }
+
+                if (CountTypeReferences(target.Name) != 1)
+                {
+                    return null;
+                }
+
+                return BuildInline(member, target);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// True when the selection <c>[startOffset, endOffset)</c> lands on <paramref name="member"/>'s type
+    /// reference — i.e. on the VO type name in a field declaration. Uses the parser-populated
+    /// <see cref="TypeRef.Span"/> when present; otherwise locates the type name inside the member's span.
+    /// </summary>
+    private bool ReferenceContainsSelection(Member member, int startOffset, int endOffset)
+    {
+        SourceSpan refSpan = member.Type.Span;
+        if (refSpan.IsNone || refSpan.Length <= 0)
+        {
+            // No type-ref span (recovered parse): fall back to locating the name within the member span.
+            if (member.Span.IsNone || string.IsNullOrEmpty(member.Type.Name))
+            {
+                return false;
+            }
+
+            var idx = _source.IndexOf(member.Type.Name, member.Span.Offset, StringComparison.Ordinal);
+            if (idx < 0 || idx >= member.Span.Offset + member.Span.Length)
+            {
+                return false;
+            }
+
+            refSpan = new SourceSpan(0, 0, 0, 0, idx, member.Type.Name.Length);
+        }
+
+        var refStart = refSpan.Offset;
+        var refEnd = refSpan.Offset + refSpan.Length;
+
+        // Containment for a bare cursor (start == end); overlap for a range selection.
+        return startOffset == endOffset
+            ? startOffset >= refStart && startOffset <= refEnd
+            : startOffset < refEnd && endOffset > refStart;
+    }
+
+    /// <summary>The <see cref="ValueObjectDecl"/> named <paramref name="name"/>, or <c>null</c> when no
+    /// such value object exists (the reference is a primitive, an entity, or unresolved).</summary>
+    private ValueObjectDecl? ResolveValueObject(string name)
+    {
+        foreach (TypeDecl t in EnumerateTypes(_model))
+        {
+            if (t is ValueObjectDecl vo && string.Equals(vo.Name, name, StringComparison.Ordinal))
+            {
+                return vo;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// How many member fields across the whole model reference the type named <paramref name="name"/> —
+    /// directly (<c>x: Name</c>) or as a generic argument (<c>List&lt;Name&gt;</c>, <c>Map&lt;_, Name&gt;</c>).
+    /// Used to gate inline on single use: deleting the declaration would dangle any further reference.
+    /// </summary>
+    private int CountTypeReferences(string name)
+    {
+        var count = 0;
+        foreach (TypeDecl t in EnumerateTypes(_model))
+        {
+            if (MembersOf(t) is not { } members)
+            {
+                continue;
+            }
+
+            foreach (Member m in members)
+            {
+                if (TypeRefMentions(m.Type, name))
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>True when <paramref name="type"/> (or one of its generic arguments) names <paramref name="name"/>.</summary>
+    private static bool TypeRefMentions(TypeRef type, string name) =>
+        string.Equals(type.Name, name, StringComparison.Ordinal)
+        || (type.Element is not null && TypeRefMentions(type.Element, name))
+        || (type.Value is not null && TypeRefMentions(type.Value, name));
+
+    private CodeFix BuildInline(Member member, ValueObjectDecl target)
+    {
+        // (1) Replace the referencing field with the VO's members inlined, re-indented to the field's
+        // own indentation. The member body is the verbatim slice from the first member's leading
+        // comment/doc trivia through the end of the last member, so per-field docs travel along.
+        var fieldIndent = new string(' ', Math.Max(0, member.Span.Column - 1));
+        IReadOnlyList<Member> inlined = target.Members;
+        var bodyStart = LeadingContentStart(inlined[0]);
+        var bodyEnd = ExtendOverTrailingComment(inlined[^1].Span.Offset + inlined[^1].Span.Length);
+        var movedSlice = SliceRange(bodyStart, bodyEnd);
+        var replacement = Reindent(movedSlice, inlined[0].Span.Column - 1, fieldIndent).TrimStart();
+        var replace = new CodeFixEdit(member.Span, replacement);
+
+        // (2) Remove the now-dead value object declaration, including its leading-trivia/doc block, the
+        // declaration's own leading indentation, and the trailing newline — so no blank/indent-only line
+        // is orphaned in its place.
+        var declStart = BackUpOverLineIndent(LeadingTriviaStart(target));
+        var declEnd = ExtendOverTrailingNewline(target.Span.Offset + target.Span.Length);
+        SourceSpan removal = RangeSpan(declStart, declEnd);
+        var remove = new CodeFixEdit(removal, string.Empty);
+
+        return new CodeFix(
+            $"Inline value object '{target.Name}'",
+            "refactor",
+            // A one-off, position-specific refactor: not part of a fix-all batch.
+            EquivalenceKey: null,
+            [replace, remove]);
+    }
+
+    /// <summary>
+    /// Builds the "Move to context 'Target'" refactor(s) when the selection lands inside a <b>top-level
+    /// type declaration</b> of a context and the model has at least two contexts. One action is offered
+    /// per OTHER context; applying it relocates the whole declaration (leading-trivia/doc through body,
+    /// plus its own leading indentation and trailing newline) out of the source context and re-indents it
+    /// into the target context's body, just before the target's closing brace.
+    ///
+    /// <para>The move is a pure text relocation: it does NOT rewrite references. A field elsewhere in the
+    /// source context that still names the moved type therefore becomes a cross-context reference with no
+    /// <c>import</c>, which the semantic validator surfaces as an unresolved-type diagnostic — the move is
+    /// never silently broken. Adding the required import is out of scope for v1.</para>
+    ///
+    /// <para>Types nested in an aggregate live in the aggregate's <c>.Types</c>, never in
+    /// <c>ctx.Types</c>, so they are never offered here (only top-level types move in v1).</para>
+    /// </summary>
+    private IEnumerable<CodeFix> TryMoveTypeBetweenContexts(int startOffset, int endOffset)
+    {
+        // A move needs somewhere to move TO: at least one other context must exist.
+        if (_model.Contexts.Count < 2)
+        {
+            yield break;
+        }
+
+        // Find the INNERMOST type the selection lands inside (the deepest-nested match), then require it
+        // to be a direct top-level member of its context's `.Types`. A type nested in an aggregate is in
+        // that aggregate's `.Types`, never in `ctx.Types`, so a selection on it is rejected here — only
+        // top-level types move between contexts in v1 (the aggregate keyword is its own top-level type).
+        TypeDecl? innermost = null;
+        foreach (TypeDecl type in EnumerateTypes(_model))
+        {
+            if (type.Span.IsNone || !ContainsSelection(type.Span, startOffset, endOffset))
+            {
+                continue;
+            }
+
+            // Prefer the deepest (smallest) containing span: a nested type's span is contained by its
+            // enclosing aggregate's, so the narrower one wins as the selection's true target.
+            if (innermost is null || type.Span.Length < innermost.Span.Length)
+            {
+                innermost = type;
+            }
+        }
+
+        if (innermost is null)
+        {
+            yield break;
+        }
+
+        TypeDecl moved = innermost;
+        ContextNode? sourceCtx = _model.Contexts.FirstOrDefault(c => c.Types.Any(t => ReferenceEquals(t, moved)));
+        if (sourceCtx is null)
+        {
+            yield break;
+        }
+
+        // The verbatim declaration text: from its leading-trivia/doc block, backed up over its own line
+        // indentation, through the end of its body plus any same-line trailing comment and the trailing
+        // newline — exactly as inline-VO removes a dead declaration so no indent-only/blank line lingers.
+        var declStart = BackUpOverLineIndent(LeadingTriviaStart(moved));
+        var declEnd = ExtendOverTrailingNewline(moved.Span.Offset + moved.Span.Length);
+        var declText = SliceRange(declStart, declEnd);
+
+        // The declaration's own indentation width (its 1-based start column minus one), used to re-indent
+        // the moved text to the target context's inner indentation at its new home.
+        var declIndentWidth = Math.Max(0, moved.Span.Column - 1);
+
+        foreach (ContextNode target in _model.Contexts)
+        {
+            if (ReferenceEquals(target, sourceCtx) || target.Span.IsNone)
+            {
+                continue;
+            }
+
+            if (BuildMoveToContext(moved, declStart, declEnd, declText, declIndentWidth, target) is { } fix)
+            {
+                yield return fix;
+            }
+        }
+    }
+
+    private CodeFix? BuildMoveToContext(
+        TypeDecl moved, int declStart, int declEnd, string declText, int declIndentWidth, ContextNode target)
+    {
+        // The target context's inner indentation: its declaration column + one level (two spaces). The
+        // closing brace sits at the context's own column, so members indent one level deeper than that.
+        var ctxIndentWidth = Math.Max(0, target.Span.Column - 1);
+        var innerIndent = new string(' ', ctxIndentWidth + 2);
+
+        // The insertion point is just before the target context's closing brace. The context span runs
+        // from `context` through that `}`, so scan back from the span end for the last `}`.
+        var insertOffset = ClosingBraceOffset(target);
+        if (insertOffset < 0)
+        {
+            return null;
+        }
+
+        // (1) Remove the declaration from the source context (trivia, leading indent, trailing newline).
+        SourceSpan removal = RangeSpan(declStart, declEnd);
+        var remove = new CodeFixEdit(removal, string.Empty);
+
+        // (2) Insert the verbatim declaration into the target body, re-indented to the inner indentation.
+        // `Reindent` already prefixes line 0 with `innerIndent`, so feed it the declaration with its own
+        // leading indentation trimmed and trailing newline(s) dropped; it lands on its own line before
+        // the closing brace (the trailing "\n" pushes the brace back onto a fresh line).
+        var reindented = Reindent(declText.TrimEnd('\n', '\r').TrimStart(), declIndentWidth, innerIndent);
+        var (insertLine, insertCol) = LineColumnOf(insertOffset);
+        SourceSpan insertAt = PointSpan(insertLine, insertCol, insertOffset);
+        var insert = new CodeFixEdit(insertAt, reindented + "\n");
+
+        return new CodeFix(
+            $"Move to context '{target.Name}'",
+            "refactor",
+            // A one-off, position-specific refactor: not part of a fix-all batch.
+            EquivalenceKey: null,
+            [remove, insert]);
+    }
+
+    /// <summary>
+    /// The absolute offset of the target context's closing <c>}</c> (the insertion point for a moved
+    /// type's body). The context span runs from the <c>context</c> keyword through that brace, so scan
+    /// back from the span end over trailing whitespace for the last <c>}</c>. Returns <c>-1</c> when no
+    /// closing brace is found within the span (a recovered/incomplete parse).
+    /// </summary>
+    private int ClosingBraceOffset(ContextNode ctx)
+    {
+        var i = Math.Min(ctx.Span.Offset + ctx.Span.Length, _source.Length) - 1;
+        var floor = Math.Max(0, ctx.Span.Offset);
+        while (i >= floor)
+        {
+            if (_source[i] == '}')
+            {
+                return i;
+            }
+
+            i--;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Backs <paramref name="start"/> up over the inline whitespace (spaces/tabs) that precedes it on
+    /// its line, so a whole-line removal also drops the declaration's own leading indentation rather
+    /// than leaving an indent-only line behind. Stops at the line start (a newline) or buffer start.
+    /// </summary>
+    private int BackUpOverLineIndent(int start)
+    {
+        var i = start;
+        while (i > 0 && (_source[i - 1] == ' ' || _source[i - 1] == '\t'))
+        {
+            i--;
+        }
+
+        return i;
+    }
+
+    /// <summary>
+    /// Extends <paramref name="end"/> over a same-line trailing comment (if any) and the line's
+    /// terminator, so removing a whole declaration does not leave an orphaned blank line behind.
+    /// </summary>
+    private int ExtendOverTrailingNewline(int end)
+    {
+        var i = ExtendOverTrailingComment(end);
+        if (i < _source.Length && _source[i] == '\r')
+        {
+            i++;
+        }
+
+        if (i < _source.Length && _source[i] == '\n')
+        {
+            i++;
+        }
+
+        return i;
     }
 
     /// <summary>
