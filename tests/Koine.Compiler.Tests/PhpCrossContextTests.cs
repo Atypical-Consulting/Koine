@@ -123,13 +123,13 @@ public class PhpCrossContextTests
     // -----------------------------------------------------------------------
     //
     // The issue also describes a subscriber that subscribes to *two* same-named events from different
-    // publishers producing two colliding Handle<Event>.php. That model is already rejected outright,
-    // model-wide and for every emitter, by the target-agnostic validator KOI1417
-    // (SubscribeHandlerNameCollision) — so it can never reach the PHP emitter, and relaxing that
-    // validator would reintroduce the same collision for the C#/TS/Python seams. What *is* reachable in
-    // a valid model — and was genuinely wrong — is a subscriber to one publisher's event whose short
-    // name a different, non-subscribed context also declares: the flat catalog imported whichever copy
-    // sorted first, not the publisher the subscription actually names.
+    // publishers producing two colliding Handle<Event>.php. #394 left that case rejected by KOI1417
+    // (relaxing it then would have reintroduced the collision for the C#/TS seams); #420 has since made
+    // every emitter collision-safe (publisher-qualified seams) and relaxed the validator — see
+    // Two_same_named_events_from_different_publishers_emit_publisher_qualified_handlers below. What was
+    // *also* reachable in a valid model — and was genuinely wrong — is a subscriber to one publisher's
+    // event whose short name a different, non-subscribed context also declares: the flat catalog
+    // imported whichever copy sorted first, not the publisher the subscription actually names.
 
     /// <summary>
     /// Hub subscribes only to <c>Beta.Shipped</c>, but <c>Alpha</c> also declares a same-named
@@ -185,5 +185,34 @@ public class PhpCrossContextTests
         var content = FileContent(files, "src/Shipping/Abstractions/HandleOrderPlaced.php");
         content.ShouldContain("use Koine\\Sales\\Events\\OrderPlaced;");
         content.ShouldContain("public function handle(OrderPlaced $event): void;");
+    }
+
+    // -----------------------------------------------------------------------
+    // #420 — subscribing to two same-named events from different publishers
+    // -----------------------------------------------------------------------
+    //
+    // KOI1417 used to reject this model-wide, for every emitter, because the bare Handle<Event>.php
+    // path would collide. #420 relaxes that validator and makes each emitter qualify the colliding
+    // seam by its publisher (Handle<Pub><Event>), reusing #394's publisher-pinned import resolution so
+    // each handler still binds the right publisher's event.
+
+    [Fact]
+    public void Two_same_named_events_from_different_publishers_emit_publisher_qualified_handlers()
+    {
+        var files = Emit(R14IntegrationEventsTests.SameNameCrossPublisher);
+
+        // Each colliding seam is qualified by its publisher, so the two handlers no longer clobber on
+        // one Handle<Event>.php path; each binds its own publisher's Shipped (the #394 import pinning).
+        var sales = FileContent(files, "src/Fulfillment/Abstractions/HandleSalesShipped.php");
+        sales.ShouldContain("interface HandleSalesShipped");
+        sales.ShouldContain("use Koine\\Sales\\Events\\Shipped;");
+        sales.ShouldContain("public function handle(Shipped $event): void;");
+
+        var returns = FileContent(files, "src/Fulfillment/Abstractions/HandleReturnsShipped.php");
+        returns.ShouldContain("interface HandleReturnsShipped");
+        returns.ShouldContain("use Koine\\Returns\\Events\\Shipped;");
+
+        // The bare HandleShipped seam must NOT be emitted — it would clobber across publishers.
+        files.ShouldNotContain(f => f.RelativePath == "src/Fulfillment/Abstractions/HandleShipped.php");
     }
 }

@@ -24,12 +24,19 @@ public sealed partial class PhpEmitter
     private EmittedFile EmitIntegrationSubscriber(PhpEmitContext emit, SubscribeDecl sub, string subscriberContext)
     {
         var eventType = PhpNaming.ClassName(sub.EventName);
-        var iface = "Handle" + eventType;
+
+        // When the subscriber consumes the same event short name from two or more publishers (#420),
+        // the bare Handle<Event> interface + file would collide on one path — qualify it by the
+        // publisher context (Handle<Pub><Event>), mirroring the C#/TS emitters. The single-publisher
+        // case keeps the bare name, byte-identical to before.
+        var iface = emit.Index.SubscriptionEventNameIsAmbiguous(subscriberContext, sub.EventName)
+            ? "Handle" + PhpNaming.ClassName(sub.Context) + eventType
+            : "Handle" + eventType;
 
         // The subscribed event resolves to the publisher the subscription names — not whichever
-        // same-named copy a different context's declaration sorts first in the catalog. (A subscriber
-        // can't legally subscribe to two same-named events from different publishers — the validator
-        // KOI1417 rejects that model-wide — so one hint per file is always unambiguous.)
+        // same-named copy a different context's declaration sorts first in the catalog. One hint per
+        // file is unambiguous: even when a subscriber consumes two same-named events from different
+        // publishers (#420), each gets its own publisher-qualified file with its own single hint.
         var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [eventType] = sub.Context,
