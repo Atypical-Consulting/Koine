@@ -639,6 +639,37 @@ public static partial class CompilerInterop
     }
 
     /// <summary>
+    /// Range-formatting edits (LSP <c>textDocument/rangeFormatting</c>) for the 0-based selection in
+    /// <paramref name="source"/>: the whole document is formatted, the minimal changed line-region is
+    /// taken and intersected with the selection, yielding a single clipped <c>TextEdit</c> — or an empty
+    /// array when the selection contains nothing to reformat. Parity with the stdio LSP's
+    /// <c>RangeFormattingResultJson</c> (both delegate to <see cref="KoineFormatter.FormatRange"/>).
+    /// </summary>
+    [JSExport]
+    public static string FormatRange(string source, int startLine, int startChar, int endLine, int endChar)
+    {
+        try
+        {
+            var edit = new KoineFormatter().FormatRange(source, startLine, startChar, endLine, endChar);
+            if (edit is null)
+            {
+                return "[]";
+            }
+
+            var wedit = new WTextEdit(
+                new WRange(
+                    new WPosition(edit.StartLine, edit.StartCharacter),
+                    new WPosition(edit.EndLine, edit.EndCharacter)),
+                edit.NewText);
+            return JsonSerializer.Serialize(new[] { wedit }, LangJson.Default.WTextEditArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
     /// Model-versioning compatibility of the current merged workspace against a baseline workspace.
     /// Both are passed as <c>[{uri, text}]</c> (the browser has no filesystem, so the baseline files
     /// are read by the caller and passed in). Every failure mode returns a normal result carrying an

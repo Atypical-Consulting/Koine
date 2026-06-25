@@ -8,6 +8,15 @@ namespace Koine.Compiler.Formatting;
 public sealed record FormatResult(string Text, bool Changed);
 
 /// <summary>
+/// A single canonical-formatting text edit over a 0-based, end-exclusive line/character range:
+/// <see cref="NewText"/> replaces the source between (<see cref="StartLine"/>, <see cref="StartCharacter"/>)
+/// and (<see cref="EndLine"/>, <see cref="EndCharacter"/>). Produced by <see cref="KoineFormatter.FormatRange"/>.
+/// Coordinates are 0-based document line/column indices — the universal text-edit convention, not a
+/// target- or protocol-specific concept — so each backend copies them straight into its own wire shape.
+/// </summary>
+public sealed record FormatRangeEdit(int StartLine, int StartCharacter, int EndLine, int EndCharacter, string NewText);
+
+/// <summary>
 /// Canonical formatter for <c>.koi</c> source (R17.3). It is a TOKEN-STREAM
 /// reprinter, not an AST printer: it lexes the source (ordinary comments ride the
 /// HIDDEN channel, doc comments the DOC channel — see <c>KoineLexer.g4</c>) and
@@ -45,6 +54,103 @@ public sealed class KoineFormatter
         var formatted = Render(tokens);
         return new FormatResult(formatted, !string.Equals(formatted, source, StringComparison.Ordinal));
     }
+
+    /// <summary>
+    /// Range formatting (LSP <c>textDocument/rangeFormatting</c>) over the requested 0-based selection.
+    /// The formatter is whole-document + idempotent, so this formats the whole document, reduces the
+    /// difference to its minimal changed line-region (the longest common leading/trailing run of
+    /// identical lines collapsed away), and INTERSECTS that region with the selected lines — returning a
+    /// single whole-line <see cref="FormatRangeEdit"/>, or <c>null</c> when the selection contains nothing
+    /// that needs reformatting (including an already-canonical document). When the changed block keeps its
+    /// line count (pure indentation/spacing, no blank-line collapse) the selection's lines map 1:1 onto
+    /// the formatted lines and only that sub-range is emitted; otherwise the whole changed region is.
+    /// <paramref name="startCharacter"/> is accepted for selection fidelity but unused — the formatter
+    /// operates on whole lines; <paramref name="endCharacter"/> only distinguishes the editor's
+    /// "N whole lines" gesture (a selection ending at column 0 of the next line excludes that line).
+    /// </summary>
+    public FormatRangeEdit? FormatRange(string source, int startLine, int startCharacter, int endLine, int endCharacter)
+    {
+        _ = startCharacter; // whole-line formatter: the selection's start column does not affect the edit
+        var result = Format(source);
+        if (!result.Changed)
+        {
+            return null;
+        }
+
+        var orig = SplitLines(source);
+        var fmt = SplitLines(result.Text);
+
+        // Minimal changed line-region: collapse the longest common leading/trailing run of identical lines.
+        var prefix = 0;
+        while (prefix < orig.Length && prefix < fmt.Length
+            && string.Equals(orig[prefix], fmt[prefix], StringComparison.Ordinal))
+        {
+            prefix++;
+        }
+
+        var suffix = 0;
+        while (suffix < orig.Length - prefix && suffix < fmt.Length - prefix
+            && string.Equals(orig[^(suffix + 1)], fmt[^(suffix + 1)], StringComparison.Ordinal))
+        {
+            suffix++;
+        }
+
+        var changedStart = prefix;                  // inclusive original-line index
+        var changedEnd = orig.Length - suffix;      // exclusive original-line index
+        var fmtStart = prefix;
+        var fmtEnd = fmt.Length - suffix;
+
+        // The selection as an inclusive [first, last] line span. A selection ending at column 0 of a
+        // later line (the "select N whole lines" gesture) does not include that trailing line.
+        var first = Math.Max(0, startLine);
+        var last = endCharacter == 0 && endLine > startLine ? endLine - 1 : endLine;
+        last = Math.Min(last, orig.Length - 1);
+
+        // Intersect the changed region with the selection ([first, last] inclusive → [first, last+1) exclusive).
+        var lo = Math.Max(changedStart, first);
+        var hi = Math.Min(changedEnd, last + 1);
+        if (lo >= hi)
+        {
+            return null; // the selection touches nothing that needs reformatting
+        }
+
+        int editStart, editEnd, fmtFrom, fmtTo;
+        if (changedEnd - changedStart == fmtEnd - fmtStart)
+        {
+            // Equal line counts → 1:1 correspondence, so clip precisely to the selected sub-range.
+            editStart = lo;
+            editEnd = hi;
+            fmtFrom = fmtStart + (lo - changedStart);
+            fmtTo = fmtStart + (hi - changedStart);
+        }
+        else
+        {
+            // Line count changed within the block → intra-block correspondence is ambiguous; emit the
+            // whole minimal changed region (still gated on the selection intersecting it).
+            editStart = changedStart;
+            editEnd = changedEnd;
+            fmtFrom = fmtStart;
+            fmtTo = fmtEnd;
+        }
+
+        var replacement = string.Join("\n", fmt[fmtFrom..fmtTo]);
+
+        // Whole-line replacement of original lines [editStart, editEnd). The span runs from the start of
+        // line editStart to the start of line editEnd, so the replacement carries a trailing newline.
+        // When editEnd is past the last line (the change reaches EOF, which has no following newline),
+        // anchor the end at the last line's end and drop the trailing newline instead.
+        if (editEnd < orig.Length)
+        {
+            return new FormatRangeEdit(editStart, 0, editEnd, 0, replacement + "\n");
+        }
+
+        var lastLine = orig.Length - 1;
+        return new FormatRangeEdit(editStart, 0, lastLine, orig[lastLine].Length, replacement);
+    }
+
+    /// <summary>Splits text into lines on CRLF/CR/LF (mirrors the LSP/WASM backends' own SplitLines).</summary>
+    private static string[] SplitLines(string text) =>
+        text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
 
     private static List<IToken> Lex(string source)
     {

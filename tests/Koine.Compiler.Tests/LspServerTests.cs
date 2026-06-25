@@ -592,6 +592,7 @@ public class LspServerTests
     {
         var output = RunSession(Initialize());
         output.ShouldContain("\"documentFormattingProvider\":true");
+        output.ShouldContain("\"documentRangeFormattingProvider\":true");
         output.ShouldContain("\"documentSymbolProvider\":true");
         output.ShouldContain("\"referencesProvider\":true");
         output.ShouldContain("\"documentHighlightProvider\":true");

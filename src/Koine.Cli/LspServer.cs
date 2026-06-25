@@ -168,6 +168,7 @@ internal sealed class LspServer
                                     ["hoverProvider"] = true,
                                     ["definitionProvider"] = true,
                                     ["documentFormattingProvider"] = true,
+                                    ["documentRangeFormattingProvider"] = true,
                                     ["documentSymbolProvider"] = true,
                                     ["workspaceSymbolProvider"] = true,
                                     ["foldingRangeProvider"] = true,
@@ -321,6 +322,14 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, FormattingResultJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/rangeFormatting":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, RangeFormattingResultJson(root));
                             }
 
                             break;
@@ -784,6 +793,42 @@ internal sealed class LspServer
                     ["end"] = new Dictionary<string, object?> { ["line"] = lastLine, ["character"] = lastChar },
                 },
                 ["newText"] = formatted,
+            },
+        };
+    }
+
+    /// <summary>
+    /// Range formatting (<c>textDocument/rangeFormatting</c>): formats the document and returns the
+    /// minimal edit clipped to the request's 0-based <c>params.range</c> — a JSON array with a single
+    /// <c>{ range, newText }</c>, or an empty array when the selection contains nothing to reformat.
+    /// Delegates to <see cref="KoineFormatter.FormatRange"/> (the single source of truth shared with the
+    /// WASM <c>FormatRange</c> export, so the two stay in parity).
+    /// </summary>
+    private object? RangeFormattingResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !_docs.TryGetValue(uri, out var text)
+            || !root.TryGetProperty("params", out var p)
+            || !TryGetRange(p, out var sl, out var sc, out var el, out var ec))
+        {
+            return null;
+        }
+
+        var edit = new KoineFormatter().FormatRange(text, sl, sc, el, ec);
+        if (edit is null)
+        {
+            return Array.Empty<object>(); // nothing to change in the selection
+        }
+
+        return new[]
+        {
+            (object)new Dictionary<string, object?>
+            {
+                ["range"] = new Dictionary<string, object?>
+                {
+                    ["start"] = new Dictionary<string, object?> { ["line"] = edit.StartLine, ["character"] = edit.StartCharacter },
+                    ["end"] = new Dictionary<string, object?> { ["line"] = edit.EndLine, ["character"] = edit.EndCharacter },
+                },
+                ["newText"] = edit.NewText,
             },
         };
     }
