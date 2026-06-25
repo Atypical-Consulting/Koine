@@ -100,6 +100,8 @@ function makeAction(opts: {
   desc: string;
   primary?: boolean;
   disabled?: boolean;
+  /** Stable semantic hook (sets `data-action`) for tests and the routed Home's navigation wiring. */
+  action?: string;
   onClick: () => void;
 }): HTMLButtonElement {
   const btn = document.createElement('button');
@@ -108,6 +110,7 @@ function makeAction(opts: {
   // No explicit aria-label: the accessible name is computed from the visible label + description
   // (the icon is aria-hidden), so it always contains the on-screen text — WCAG 2.5.3 (Label in Name).
   if (opts.disabled) btn.disabled = true;
+  if (opts.action) btn.dataset.action = opts.action;
 
   const icon = document.createElement('span');
   icon.className = 'koi-welcome-action-icon';
@@ -129,15 +132,33 @@ function makeAction(opts: {
   return btn;
 }
 
+interface BuildWelcomeOpts {
+  /**
+   * Embedded = a routed, full-page Home view (issue #368): mounted into a container rather than as a
+   * `document.body` overlay, shown immediately (not `hidden`), and with the dismiss-to-editor ✕
+   * affordances suppressed (you don't "close" a destination — the router navigates instead).
+   */
+  embedded: boolean;
+}
+
+/** What {@link buildWelcome} returns: the overlay handle, plus its root element and a destroy() teardown. */
+interface BuiltWelcome extends WelcomeHandle {
+  readonly root: HTMLElement;
+  destroy(): void;
+}
+
 /**
  * Build the welcome console (once) and return show/hide controls. On show() the recent list is rebuilt
- * from getRecentFolders(); any action invokes its callback then hides.
+ * from getRecentFolders(); any action invokes its callback then hides. Shared by {@link createWelcome}
+ * (the legacy body overlay) and {@link mountHome} (the routed Home view) so the markup lives in one
+ * place; `opts.embedded` is the only behavioural fork between the two.
  */
-export function createWelcome(
+function buildWelcome(
   cb: WelcomeCallbacks,
-  templates: readonly Template[] = TEMPLATES,
-  canOpenFolders = true,
-): WelcomeHandle {
+  templates: readonly Template[],
+  canOpenFolders: boolean,
+  opts: BuildWelcomeOpts,
+): BuiltWelcome {
   let shown = false;
   // Live recent-folders filter query — closure-scoped so it survives renderRecent() re-renders but
   // resets per welcome instance (two welcome handles never share a query).
@@ -145,7 +166,9 @@ export function createWelcome(
 
   const root = document.createElement('div');
   root.className = 'koi-welcome';
-  root.hidden = true;
+  // The overlay starts hidden (show() reveals it); the routed Home view is shown the moment it mounts.
+  root.hidden = !opts.embedded;
+  if (opts.embedded) root.classList.add('koi-welcome-embedded');
   // Clicking the dimmed area pops one layer: from the gallery back to the console, or from the console
   // out to the editor — mirroring the Esc behaviour and the modal backdrop convention.
   root.addEventListener('mousedown', (e) => {
@@ -196,6 +219,9 @@ export function createWelcome(
   closeBtn.setAttribute('aria-label', 'Back to editor');
   closeBtn.title = 'Back to editor';
   closeBtn.textContent = '✕';
+  // The routed Home is a destination, not an overlay over a live editor — there's nothing to dismiss
+  // back to, so suppress the ✕ there (navigation is wired separately on the brand/toolbar).
+  closeBtn.hidden = opts.embedded;
   closeBtn.addEventListener('click', () => hide());
   bar.appendChild(closeBtn);
 
@@ -267,6 +293,7 @@ export function createWelcome(
       label: 'New model',
       desc: 'Begin with an empty context',
       primary: true,
+      action: 'new-model',
       onClick: () => {
         hide();
         cb.onNewModel();
@@ -279,6 +306,7 @@ export function createWelcome(
     icon: ICON_GALLERY,
     label: 'Start from an example',
     desc: 'Open a ready-made domain',
+    action: 'open-example',
     onClick: () => showGallery(),
   });
   actions.appendChild(exampleAction);
@@ -290,6 +318,7 @@ export function createWelcome(
       // action as disabled with an honest reason rather than a button that errors on click.
       desc: canOpenFolders ? 'Work on an existing workspace' : 'Needs a Chromium-based browser (Chrome / Edge)',
       disabled: !canOpenFolders,
+      action: 'open-folder',
       onClick: () => {
         hide();
         cb.onOpenFolder();
@@ -708,6 +737,7 @@ export function createWelcome(
   galleryClose.setAttribute('aria-label', 'Back to editor');
   galleryClose.title = 'Back to editor';
   galleryClose.textContent = '✕';
+  galleryClose.hidden = opts.embedded; // same as the console's ✕ — no overlay to dismiss in routed Home
   galleryClose.addEventListener('click', () => hide());
 
   galleryBar.append(backBtn, galleryClose);
@@ -766,6 +796,10 @@ export function createWelcome(
   }
 
   function hide(): void {
+    // The routed Home is never "hidden" — it's torn down by the router (destroy) when navigating to the
+    // editor. So in embedded mode hide() is a no-op, letting an action's `hide(); cb.x()` fall straight
+    // through to its callback (which navigates) without blanking the view first.
+    if (opts.embedded) return;
     if (!shown) return;
     resetGallery();
     root.hidden = true;
@@ -774,7 +808,14 @@ export function createWelcome(
     unregister = null;
   }
 
-  document.body.appendChild(root);
+  // Tear the view down: pop any overlay registrations and detach the root. Used by mountHome's caller
+  // (the boot router) when swapping Home → Editor; the legacy overlay never calls it.
+  function destroy(): void {
+    resetGallery();
+    unregister?.();
+    unregister = null;
+    root.remove();
+  }
 
   return {
     show,
@@ -786,5 +827,39 @@ export function createWelcome(
     get visible() {
       return shown;
     },
+    root,
+    destroy,
   };
+}
+
+/**
+ * The legacy welcome overlay: builds the start console and self-mounts it on `document.body` (hidden
+ * until show()). Public surface is unchanged — the IDE shell still drives it through show()/hide().
+ */
+export function createWelcome(
+  cb: WelcomeCallbacks,
+  templates: readonly Template[] = TEMPLATES,
+  canOpenFolders = true,
+): WelcomeHandle {
+  const welcome = buildWelcome(cb, templates, canOpenFolders, { embedded: false });
+  document.body.appendChild(welcome.root);
+  return welcome;
+}
+
+/**
+ * Mount the welcome screen as a routed, full-page Home view inside `container` — the Home half of
+ * issue #368's distinct Home/Editor routes. No `document.body` overlay and no `hidden` toggle: the
+ * card is shown the moment it mounts, recents rendered immediately. `destroy()` detaches it when the
+ * router swaps to the editor.
+ */
+export function mountHome(
+  container: HTMLElement,
+  cb: WelcomeCallbacks,
+  templates: readonly Template[] = TEMPLATES,
+  canOpenFolders = true,
+): { destroy(): void } {
+  const welcome = buildWelcome(cb, templates, canOpenFolders, { embedded: true });
+  welcome.refreshRecent();
+  container.appendChild(welcome.root);
+  return { destroy: welcome.destroy };
 }
