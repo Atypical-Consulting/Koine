@@ -1,0 +1,232 @@
+{
+  "skill_name": "create-issue",
+  "runs_per_query": 3,
+  "threshold": 0.5,
+  "results": [
+    {
+      "query": "I have three ideas, please open issues for each with a plan",
+      "note": "batch of ideas",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "create-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "add an issue for cross-file context-map imports",
+      "note": "'add an issue'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "create-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "capture this for later: cache the wasm bundle per fingerprint",
+      "note": "'capture this for later'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "create-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "create a backlog item to document the glossary emitter",
+      "note": "'create a backlog item'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "create-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "file an issue for adding a Rust code formatter to the CLI",
+      "note": "plain 'file an issue'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "create-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "log a feature request for TypeScript enum emission",
+      "note": "'log a feature request'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "create-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "make a ticket for the missing PHP value-object equality",
+      "note": "'make a ticket'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "create-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "open a GitHub issue to track the flaky snapshot meta-test",
+      "note": "'open ... issue to track'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "create-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "raise an issue about hover docs missing in the LSP",
+      "note": "'raise an issue'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "create-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "track this idea: a --watch flag that re-emits on file save",
+      "note": "'track this idea'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "create-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "we should file a feature request for incremental compilation",
+      "note": "loose 'we should file'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "create-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "explain how the ANTLR grammar splits lexer and parser",
+      "note": "doc question \u2014 no lifecycle skill",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "(none)": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "implement issue 47 and open a PR",
+      "note": "\u2192 implement-issue",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "implement-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "merge PR 281 now that CI is green",
+      "note": "\u2192 merge-pr",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "merge-pr": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "resume the implementation plan on issue 71",
+      "note": "\u2192 implement-issue",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "implement-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "review the diff on PR 281 without merging it",
+      "note": "\u2192 review/code-review",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "(none)": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "set up the repo profile for this repository",
+      "note": "\u2192 get-repo-profile",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "get-repo-profile": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "what value objects does the C# emitter generate?",
+      "note": "doc question \u2014 no lifecycle skill",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "(none)": 3
+      },
+      "pass": true
+    }
+  ],
+  "summary": {
+    "total": 18,
+    "passed": 18,
+    "failed": 0,
+    "should_trigger": 11,
+    "should_not": 7,
+    "recall": 1.0,
+    "specificity": 1.0
+  }
+}

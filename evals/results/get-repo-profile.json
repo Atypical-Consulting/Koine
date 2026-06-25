@@ -1,0 +1,232 @@
+{
+  "skill_name": "get-repo-profile",
+  "runs_per_query": 3,
+  "threshold": 0.5,
+  "results": [
+    {
+      "query": "configure this repo for the issue skills",
+      "note": "'configure this repo for the issue skills'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "get-repo-profile": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "detect this repo's build/test/format commands for the issue skills",
+      "note": "detect build/test commands",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "get-repo-profile": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "generate the repo profile",
+      "note": "'generate the repo profile'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "get-repo-profile": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "load the repo profile config for the lifecycle skills",
+      "note": "'load the repo profile'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "get-repo-profile": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "make the issue/PR lifecycle skills work in my other repo",
+      "note": "port to another repo",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "get-repo-profile": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "make these skills generic so they work in any repository",
+      "note": "'make these skills generic'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "get-repo-profile": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "port create-issue and merge-pr to this new repo",
+      "note": "'port create-issue/merge-pr'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "get-repo-profile": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "refresh the repo profile after we changed the CI gates",
+      "note": "refresh after CI change",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "get-repo-profile": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "regenerate the repo profile \u2014 the labels changed",
+      "note": "regenerate after label change",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "get-repo-profile": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "set up the repo profile for this repository",
+      "note": "'set up the repo profile'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "get-repo-profile": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "file an issue for a new emitter feature",
+      "note": "\u2192 create-issue",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "create-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "implement issue 47 and open a PR",
+      "note": "\u2192 implement-issue",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "implement-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "merge PR 281",
+      "note": "\u2192 merge-pr",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "merge-pr": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "review PR 281 without merging",
+      "note": "\u2192 review/code-review",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "(none)": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "run the test suite and tell me what fails",
+      "note": "no lifecycle skill",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "(none)": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "update CLAUDE.md with what we learned this session",
+      "note": "\u2192 revise-claude-md, not get-repo-profile",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "(none)": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "what build system and test framework does Koine use?",
+      "note": "doc question \u2014 answerable, no profile generation",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "(none)": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "what's the difference between value objects and entities in DDD?",
+      "note": "doc question \u2014 no lifecycle skill",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "(none)": 3
+      },
+      "pass": true
+    }
+  ],
+  "summary": {
+    "total": 18,
+    "passed": 18,
+    "failed": 0,
+    "should_trigger": 10,
+    "should_not": 8,
+    "recall": 1.0,
+    "specificity": 1.0
+  }
+}

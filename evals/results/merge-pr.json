@@ -1,0 +1,232 @@
+{
+  "skill_name": "merge-pr",
+  "runs_per_query": 3,
+  "threshold": 0.5,
+  "results": [
+    {
+      "query": "can you get that PR merged once CI's green \u2014 it's #281",
+      "note": "loose 'get merged once CI green'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "merge-pr": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "close out PR 281 by squash-merging it",
+      "note": "'close out ... squash-merge'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "merge-pr": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "finish landing PR 281 \u2014 fix the red CI and merge it",
+      "note": "'finish landing ... fix red CI'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "merge-pr": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "get 281 in",
+      "note": "loose 'get N in'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "merge-pr": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "land #281",
+      "note": "'land #N'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "merge-pr": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "land PR 281: resolve its conflicts with main as part of merging it now",
+      "note": "land-now conflict sync (boundary, \u2192 merge-pr)",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "merge-pr": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "merge 281 and tear down its branch afterward",
+      "note": "'merge ... tear down branch'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "merge-pr": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "merge PR 281",
+      "note": "'merge PR N'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "merge-pr": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "ship this PR: https://github.com/Atypical-Consulting/Koine/pull/300",
+      "note": "bare PR link + 'ship'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "merge-pr": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "wrap up PR 281 and open follow-ups for the deferred bits",
+      "note": "'wrap up ... open follow-ups'",
+      "should_trigger": true,
+      "trigger_rate": 1.0,
+      "triggers": 3,
+      "runs": 3,
+      "fired": {
+        "merge-pr": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "build the feature from issue 129 and open the PR",
+      "note": "\u2192 implement-issue",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "implement-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "file an issue to track a parser bug",
+      "note": "\u2192 create-issue",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "create-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "implement issue 47",
+      "note": "\u2192 implement-issue",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "implement-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "my in-flight PR conflicts with main \u2014 sync it while I keep building the feature",
+      "note": "in-flight sync (boundary, \u2192 implement-issue)",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "implement-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "open a PR for issue 47",
+      "note": "\u2192 implement-issue (open, not land)",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "implement-issue": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "review PR 281 but don't merge it",
+      "note": "\u2192 review/code-review",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "(none)": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "set up the repo profile",
+      "note": "\u2192 get-repo-profile",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "get-repo-profile": 3
+      },
+      "pass": true
+    },
+    {
+      "query": "what's the squash-merge title convention here?",
+      "note": "doc question \u2014 no lifecycle skill",
+      "should_trigger": false,
+      "trigger_rate": 0.0,
+      "triggers": 0,
+      "runs": 3,
+      "fired": {
+        "(none)": 3
+      },
+      "pass": true
+    }
+  ],
+  "summary": {
+    "total": 18,
+    "passed": 18,
+    "failed": 0,
+    "should_trigger": 10,
+    "should_not": 8,
+    "recall": 1.0,
+    "specificity": 1.0
+  }
+}
