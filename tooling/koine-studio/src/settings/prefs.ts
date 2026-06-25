@@ -766,11 +766,13 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
 
   // The recipe body: a heading + Copy, the snippet, the config hint, and an optional caveat.
   // The snippet is a read-only CodeMirror JSON view (createJsonView) so it's syntax-highlighted like
-  // every other code surface in Studio; Copy reads its text back verbatim via getText().
+  // every other code surface in Studio; Copy reads its text back verbatim via getText(). tabIndex
+  // keeps the box keyboard-focusable/scrollable (CodeMirror's read-only content isn't in the tab
+  // order); the accessible name lives on the view's role=textbox content, so the wrapper doesn't
+  // repeat it.
   const mcpSnippet = document.createElement('div');
   mcpSnippet.className = 'koi-mcp-snippet';
   mcpSnippet.tabIndex = 0;
-  mcpSnippet.setAttribute('aria-label', 'MCP client configuration snippet');
   const mcpSnippetView = createJsonView(mcpSnippet);
 
   const mcpRecipeCopy = document.createElement('button');

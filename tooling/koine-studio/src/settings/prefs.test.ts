@@ -36,7 +36,7 @@ const mcpToggle = () =>
   document.querySelector<HTMLButtonElement>('.koi-switch[aria-label="Enable MCP server"]')!;
 const mcpClientSelect = () =>
   document.querySelector<HTMLSelectElement>('#koi-settings-panel-mcp .koi-select')!;
-const snippet = () => document.querySelector<HTMLPreElement>('.koi-mcp-snippet')!;
+const snippet = () => document.querySelector<HTMLDivElement>('.koi-mcp-snippet')!;
 const status = () => document.querySelector<HTMLElement>('.koi-mcp-status')!;
 const endpointUrl = () => document.querySelector<HTMLInputElement>('.koi-mcp-control .koi-text')!;
 const testBtn = () =>
