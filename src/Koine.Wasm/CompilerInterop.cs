@@ -5,15 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
-using Koine.Compiler.Emit.AsyncApi;
 using Koine.Compiler.Emit.CSharp;
-using Koine.Compiler.Emit.Docs;
-using Koine.Compiler.Emit.Glossary;
-using Koine.Compiler.Emit.OpenApi;
-using Koine.Compiler.Emit.Php;
-using Koine.Compiler.Emit.Python;
-using Koine.Compiler.Emit.Rust;
-using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Services;
 
 namespace Koine.Wasm;
@@ -34,6 +26,15 @@ public static partial class CompilerInterop
     private static readonly KoineCompiler Compiler = new();
 
     /// <summary>
+    /// The built-in emitter registry (<c>BuiltInEmitterProviders.All</c>) — the single source of truth
+    /// for target → emitter resolution, shared by <see cref="Compile"/>, <see cref="EmitPreview"/> and
+    /// <see cref="SupportedEmitTargets"/>. Built once and held statically (it is immutable after
+    /// construction and the providers are stateless) rather than rebuilt per call, since
+    /// <see cref="Compile"/>/<see cref="EmitPreview"/> run on every playground keystroke.
+    /// </summary>
+    private static readonly EmitterRegistry Registry = new();
+
+    /// <summary>
     /// Parses + validates <paramref name="source"/> and returns the diagnostics as a JSON array
     /// (<c>[{severity, code, message, line, col, endLine, endCol}]</c>) for live editor squiggles.
     /// </summary>
@@ -52,9 +53,10 @@ public static partial class CompilerInterop
     }
 
     /// <summary>
-    /// Compiles <paramref name="source"/> with the emitter named by <paramref name="target"/>
-    /// (<c>csharp</c> | <c>typescript</c> | <c>python</c> | <c>php</c> | <c>rust</c> | <c>glossary</c> |
-    /// <c>docs</c> | <c>asyncapi</c> | <c>openapi</c>) and returns
+    /// Compiles <paramref name="source"/> with the emitter named by <paramref name="target"/> — any
+    /// target the shared <see cref="Registry"/> resolves (<c>BuiltInEmitterProviders.All</c>, the same
+    /// list <see cref="EmitPreview"/> / <see cref="ListEmitTargets"/> use), case-insensitively. An
+    /// unknown/empty/null target falls back to C#. Returns
     /// <c>{ ok, target, diagnostics, files:[{path, contents}] }</c> as JSON.
     /// </summary>
     [JSExport]
@@ -62,23 +64,22 @@ public static partial class CompilerInterop
     {
         try
         {
-            // `target` is non-null per the annotation, but it is marshalled across the JS-interop
-            // boundary where a JS `null`/`undefined` can still arrive at runtime, so the fallback stays.
-            // Every built-in target (BuiltInEmitterProviders.All) is routed explicitly; an unknown
-            // target falls through to C#. Keep this in the registry's display order so a new target is
-            // added here too rather than silently emitting C# (issue #301).
-            IEmitter emitter = (string.IsNullOrEmpty(target) ? "csharp" : target).ToLowerInvariant() switch
-            {
-                "typescript" or "ts" => new TypeScriptEmitter(),
-                "python" or "py" => new PythonEmitter(),
-                "php" => new PhpEmitter(),
-                "rust" or "rs" => new RustEmitter(),
-                "glossary" or "md" => new GlossaryEmitter(),
-                "docs" => new DocsEmitter(),
-                "asyncapi" => new AsyncApiEmitter(),
-                "openapi" => new OpenApiEmitter(),
-                _ => new CSharpEmitter(),
-            };
+            // Resolve the emitter from the SAME EmitterRegistry that EmitPreview / ListEmitTargets use
+            // (issues #282, #301), so target → emitter has ONE source of truth — the registry's
+            // BuiltInEmitterProviders.All. Every registered target (code emitter AND the doc/spec
+            // generators glossary/docs/asyncapi/openapi, which TryCreate resolves too) is reachable,
+            // so a newly-registered target can never silently fall back to C# the way the old
+            // hand-maintained switch could. The switch's short aliases (ts/py/rs/md) are intentionally
+            // dropped: the registry is canonical-id only, matching EmitPreview, and no caller passes
+            // them. `target` is non-null per the annotation, but it is marshalled across the JS-interop
+            // boundary where a JS `null`/`undefined` can still arrive, so an empty/unknown target
+            // normalizes to the CSharpEmitter fallback (today's `default` behavior). No `koine.config`
+            // in the browser ⇒ EmitterOptions.Empty is byte-identical to a parameterless emitter —
+            // matching EmitPreview.
+            var normalizedTarget = string.IsNullOrEmpty(target) ? "csharp" : target;
+            IEmitter emitter = Registry.TryCreate(normalizedTarget, EmitterOptions.Empty, out var resolved)
+                ? resolved
+                : new CSharpEmitter();
 
             var result = Compiler.Compile(source, emitter);
             var dto = new CompileResultDto(
