@@ -81,6 +81,8 @@ import { CanvasPalette } from '@/diagrams/CanvasPalette';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 import { guardedLoad } from '@/shell/guardedLoad';
+import { createInspectorSheet, type InspectorSheet } from '@/shell/inspectorSheet';
+import { isNarrowViewport } from '@/shared/breakpoint';
 import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
@@ -315,6 +317,33 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const scenariosView = el('view-scenarios');
   // Right-rail host: the element inspector (Properties). Fixed — never torn down on a model reload.
   const inspectorHost = el('inspector-host');
+  // Below $bp-narrow the inspector lives in a bottom sheet instead of the fixed #right rail (#221). The
+  // sheet host is OPTIONAL: it's absent from the desktop-only test fixtures, and without it the
+  // controller keeps the original right-rail behaviour untouched (no sheet, no resize listener). When it
+  // exists the sheet is built once here; renderSelectedInspector mounts Properties into its body on a
+  // narrow viewport, and a selection raises it to half.
+  const sheetHostEl = document.getElementById('inspector-sheet-host');
+  const inspectorSheet: InspectorSheet | null = sheetHostEl ? createInspectorSheet(sheetHostEl) : null;
+  // The host the Properties panel is currently rendered into (sheet body on a narrow viewport, else the
+  // fixed #inspector-host). Tracked so renderSelectedInspector can unmount the PRIOR host's Preact tree
+  // when the active host changes across the breakpoint (#221) — Preact's render() leaves it otherwise.
+  let inspectorMountHost: HTMLElement | null = null;
+  // Widening past the breakpoint dismisses the sheet and hands Properties back to the fixed right rail;
+  // narrowing re-mounts it into the sheet body on the next render. Registered only when the sheet exists.
+  // Track the last narrow-ness so a resize TICK that does NOT cross the breakpoint is a no-op: on mobile
+  // the soft keyboard / address bar fire `resize` constantly, and re-mounting Properties on every one
+  // would thrash the panel. Only an actual narrow↔wide CROSS re-renders/re-mounts (a widen still dismisses
+  // the sheet first) — mirroring ide.tsx's diagram-resize cross guard.
+  let wasNarrow = isNarrowViewport();
+  function onViewportResize(): void {
+    if (!inspectorSheet) return;
+    const narrow = isNarrowViewport();
+    if (narrow === wasNarrow) return; // not a cross — ignore the keyboard/address-bar resize churn
+    wasNarrow = narrow;
+    if (!narrow && inspectorSheet.isOpen()) inspectorSheet.setDetent('peek');
+    renderSelectedInspector(); // re-mount into the now-correct host (sheet body vs #inspector-host)
+  }
+  if (inspectorSheet) window.addEventListener('resize', onViewportResize);
   // Top-bar "scope path" host (the ContextBreadcrumb Preact panel — the scope selector + selected
   // element) and its status-bar context mirror.
   const breadcrumbHost = el('breadcrumb-host');
@@ -864,9 +893,18 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // (the store subscriber below calls this when the `selection` slice changes). Preact's top-level
   // render() reconciles into the same host node, so the host keeps its identity across repaints.
   function renderSelectedInspector(): void {
+    // Mobile: mount Properties into the bottom-sheet body; desktop (or no sheet host): the fixed
+    // right-rail host. The PropertiesPanel itself is unchanged — only its mount target differs (#221).
+    const host = inspectorSheet && isNarrowViewport() ? inspectorSheet.contentNode() : inspectorHost;
+    // Preact's render(vnode, newHost) does NOT unmount the tree in the PREVIOUS container, so crossing the
+    // breakpoint (sheet body ↔ #inspector-host) would otherwise leave a live, store-subscribed
+    // PropertiesPanel mounted in the now-hidden host. Unmount the prior host before rendering into the new
+    // one so exactly one panel is ever live (#221).
+    if (inspectorMountHost && inspectorMountHost !== host) render(null, inspectorMountHost);
+    inspectorMountHost = host;
     render(
       <PropertiesPanel store={appStore} index={modelIndex} handlers={inspectorHandlers} />,
-      inspectorHost,
+      host,
     );
     renderSelectedRules();
   }
@@ -956,6 +994,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // explicit repaint keeps the right-rail update synchronous for callers that read it immediately
     // after a set.
     renderSelectedInspector();
+    // Mobile: a fresh selection raises the inspector sheet into view (#221) so the just-selected
+    // element's Properties are visible without hunting for the Props tab. Only when a sheet exists, the
+    // viewport is narrow, and something is actually selected (clearing the selection leaves it be). Raise
+    // through the OWNED instance (not the module-global openInspectorSheet) so this controller drives only
+    // its own sheet — symmetric with the resize-path's instance setDetent('peek'), and split-brain-proof
+    // if more than one sheet ever exists (#221).
+    if (inspectorSheet && isNarrowViewport() && sel) inspectorSheet.setDetent('half');
     // Re-pass the current model index to the palette so its aggregate-scoped buttons (#254) re-gate against
     // the freshly-selected element — a diagram click rebuilds the index before setting the selection, so
     // resolving the selection's kind here uses the up-to-date index rather than a stale captured prop.
@@ -1732,6 +1777,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     clearTimeout(copyResetTimer);
     clearTimeout(editDebounce);
     clearTimeout(bottomPanelDebounce);
+    if (inspectorSheet) {
+      window.removeEventListener('resize', onViewportResize);
+      inspectorSheet.destroy();
+    }
   }
 
   return {

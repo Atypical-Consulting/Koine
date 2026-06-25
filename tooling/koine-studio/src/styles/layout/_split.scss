@@ -144,9 +144,9 @@ body.resizing-y {
   #split[data-mobile-zone='diagram'] #center {
     display: flex;
   }
-  #split[data-mobile-zone='props'] #right {
-    display: flex;
-  }
+  /* There is no 'props' zone here: the inspector is a bottom-sheet OVERLAY (#221) that floats over the
+     current zone, so data-mobile-zone is only ever a real zone (Files/Code/Diagram) and #right stays
+     hidden below $bp-narrow. */
 
   /* Reserve room for the fixed bottom bar so the active zone isn't covered. */
   #app {

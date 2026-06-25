@@ -8,6 +8,7 @@
 // LspTransport) injected through the existing getPlatform() seam (we mock ./host), and a DOM seeded
 // to mirror index.html. No production behavior is changed — only test scaffolding.
 import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest';
+import { act } from '@testing-library/preact';
 import { EditorView } from '@codemirror/view';
 import type { FsEntry, KoiFile, LspTransport, Platform } from '@/host/types';
 import { buildShareUrl, buildWorkspaceShareUrl } from '@/export/share';
@@ -375,6 +376,7 @@ const APP_HTML = `
         <span class="sb-item" id="sb-version"></span>
       </footer>
       <nav id="mobile-zone-bar-host" aria-label="Studio zone switcher"></nav>
+      <div id="inspector-sheet-host"></div>
     </div>`;
 
 /** Seed document.body with the full app markup (mirrors index.html) so init()'s el() lookups resolve. */
@@ -1000,5 +1002,34 @@ describe('ide init() — return-visit start-intent (#368)', () => {
 
     // Drain the fire-and-forget action the intent triggered (newModel) before the env tears down.
     await settleBoot();
+  });
+});
+
+describe('ide init() — mobile Props zone reflects selected state (#221)', () => {
+  test('selecting Props marks its tab aria-selected and keeps the underlying zone (not the empty #right rail)', async () => {
+    const origWidth = window.innerWidth;
+    // A phone-width viewport so the bottom MobileZoneBar drives the single-column shell.
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 500 });
+    try {
+      await boot();
+      const split = document.getElementById('split')!;
+      const underlying = split.dataset.mobileZone; // boot lands on the default 'code' zone underneath
+
+      const propsTab = document.querySelector<HTMLButtonElement>('#mobile-zone-bar-host button[data-zone="props"]')!;
+      expect(propsTab.getAttribute('aria-selected')).toBe('false');
+
+      act(() => propsTab.click()); // flush the store-driven MobileZoneBar re-render
+
+      // The Props tab now reflects selected state (store-driven aria-selected + roving tabindex): the bug
+      // was that selecting Props opened the sheet and returned BEFORE writing the slice, so the tab never
+      // became selected.
+      expect(propsTab.getAttribute('aria-selected')).toBe('true');
+      // …and the single-column shell keeps the underlying real zone — the inspector is a sheet OVERLAY, so
+      // #split is NOT switched to the empty #right rail.
+      expect(split.dataset.mobileZone).toBe(underlying);
+      expect(split.dataset.mobileZone).not.toBe('props');
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: origWidth });
+    }
   });
 });

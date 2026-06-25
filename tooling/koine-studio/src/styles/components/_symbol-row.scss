@@ -1,0 +1,57 @@
+@use '../abstracts' as a;
+
+/* The DSL symbol accessory row (#221): a one-tap punctuation strip for the phone soft keyboard, which
+   buries the punctuation Koine leans on (`->`, `«`, `=>`, …) behind shift layers. editorSession mounts
+   the host into #editor-pane and toggles its [hidden] from a focus/blur listener + a width check, so it
+   shows only while the .koi editor is focused on a narrow viewport. Hidden on desktop (the base rule)
+   and whenever unfocused. Chrome tokens mirror the bottom mode switcher: --koi-paper-2 surface,
+   --koi-line border, --koi-surface keys, --koi-accent focus/press. */
+.koi-symbol-row-host {
+  display: none;
+}
+
+@media (max-width: a.$bp-narrow) {
+  .koi-symbol-row-host:not([hidden]) {
+    display: block;
+    /* Pinned to the bottom of the (visual) viewport so it floats just above the soft keyboard. z-index
+       sits one above the mobile zone bar (40) so the strip layers over the bottom chrome while typing. */
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 41;
+    background: var(--koi-paper-2);
+    border-top: 1px solid var(--koi-line);
+  }
+  .koi-symbol-row {
+    display: flex;
+    gap: 4px;
+    padding: 4px 6px;
+    /* A horizontally-scrollable strip: the token set is wider than a phone, so it swipes. The bar is
+       hidden (the strip is thin) but the content stays scrollable. */
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .koi-symbol-row::-webkit-scrollbar {
+    display: none;
+  }
+  .koi-symbol-btn {
+    flex: 0 0 auto;
+    min-width: 44px; /* WCAG 2.5.5 target size */
+    min-height: 44px;
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+    border: 1px solid var(--koi-line);
+    border-radius: 6px;
+    font-family: var(--koi-font-mono);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .koi-symbol-btn:active {
+    background: color-mix(in srgb, var(--koi-accent) 18%, transparent);
+  }
+  .koi-symbol-btn:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: -2px;
+  }
+}

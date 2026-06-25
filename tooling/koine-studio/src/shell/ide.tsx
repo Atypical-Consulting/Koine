@@ -18,6 +18,7 @@ import {
 } from '@/shell/ideUtils';
 import { createEditorSession } from '@/shell/editorSession';
 import { createInspectorController } from '@/shell/inspectorController';
+import { openInspectorSheet } from '@/shell/inspectorSheet';
 import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
 import { koineMark } from '@/shared/logo';
@@ -64,6 +65,7 @@ import {
   NODE_EDIT_EVENT,
   NODE_NAVIGATE_EVENT,
   setDiagramEditing,
+  setDiagramTouchMode,
   type AddNodeKind,
   type AggregateMemberKind,
   type CanvasAnnotationKind,
@@ -92,7 +94,7 @@ import { createHistoryController } from '@/shell/historyController';
 import { HistoryControls } from '@/shell/HistoryControls';
 import { MobileZoneBar } from '@/shell/MobileZoneBar';
 import { type MobileZone } from '@/store/slices/uiChrome';
-import { BP_NARROW } from '@/shared/breakpoint';
+import { isNarrowViewport } from '@/shared/breakpoint';
 import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
 import { createWorkspaceController, type WorkspaceController } from '@/shell/workspaceController';
@@ -718,13 +720,36 @@ export function init(): () => void {
 
   diagramsView.addEventListener(NODE_NAVIGATE_EVENT, (e) => {
     const detail = (e as CustomEvent<DiagramNodeNavigateDetail>).detail;
-    if (detail) void selectFromDiagram(detail);
+    if (!detail) return;
+    void selectFromDiagram(detail);
+    // On a phone the Properties rail is a bottom sheet (#221, Task 2): a node TAP raises it to half, so
+    // tapping a node doubles as "open this node's editor". Gated on $bp-narrow — desktop keeps its fixed
+    // rail (and openInspectorSheet would otherwise pop the hidden sheet over the page).
+    if (isNarrowViewport()) openInspectorSheet('half');
   });
 
   // Drag-to-edit (issue #93, Task 5): a diagram node gesture (double-click = rename, right-click =
   // delete) round-trips through the model→.koi seam (#91). Enabled now that the seam exists; the
   // renderer keeps the gestures inert until this flips the switch, so the read-only tab is unchanged.
   setDiagramEditing(true);
+  // Touch (tap-to-edit) presentation for the canvas (#221, Task 3): below $bp-narrow, freehand gestures
+  // (drag-move/connect, double-click-rename, right-click-delete) are swapped for tap-to-navigate + drag-to-
+  // pan so a phone drives the canvas by tapping. INDEPENDENT of the editing flag above — the mobile shell
+  // stays editing-capable (the palette + auto-arrange still author). Set from the initial viewport, then
+  // re-evaluated only when the breakpoint is actually crossed, re-rendering the canvas so the renderer
+  // re-wires its gestures for the new mode.
+  setDiagramTouchMode(isNarrowViewport());
+  let diagramWasNarrow = isNarrowViewport();
+  // Named so the init() teardown can removeEventListener it — otherwise this listener (and its closed-over
+  // controller) outlives the IDE and a breakpoint cross would call loadDiagrams() on a torn-down controller.
+  const onDiagramViewportResize = (): void => {
+    const narrow = isNarrowViewport();
+    if (narrow === diagramWasNarrow) return; // act on a CROSS only — not on every resize tick
+    diagramWasNarrow = narrow;
+    setDiagramTouchMode(narrow);
+    void controller.loadDiagrams(); // rebuild the canvas with the now-correct gesture wiring
+  };
+  window.addEventListener('resize', onDiagramViewportResize);
   diagramsView.addEventListener(NODE_EDIT_EVENT, (e) => {
     const detail = (e as CustomEvent<DiagramNodeEditDetail>).detail;
     if (detail) void applyDiagramEdit(detail);
@@ -1095,22 +1120,37 @@ export function init(): () => void {
   // center tab decides which surface shows). The active zone is mirrored onto #split[data-mobile-zone]
   // so the @media rules can show/hide zones without remounting any DOM.
   function selectMobileZone(zone: MobileZone): void {
+    // Props is a single inspector surface: the bottom SHEET (#221), an overlay — not a swapped-in #right
+    // rail. Write the slice for EVERY zone (including 'props') so the tablist's aria-selected + roving
+    // tabIndex reflect the active tab (the bug: returning before the write left Props un-selectable, and
+    // arrow-key nav onto it opened the sheet without updating the tab). For 'props' we additionally raise
+    // the sheet OVER the current zone; the data-mobile-zone MIRROR (below) keeps the underlying real zone
+    // visible for 'props', so the single-column shell never switches to the empty #right rail. The other
+    // three are real zones: writing the slice (plus, for code/diagram, the center tab) surfaces them.
     appStore.getState().setMobileZone(zone);
-    if (zone === 'diagram') controller.selectCenter('visual');
+    if (zone === 'props') openInspectorSheet('half');
+    else if (zone === 'diagram') controller.selectCenter('visual');
     else if (zone === 'code') controller.selectCenter('technical');
   }
   render(<MobileZoneBar store={appStore} onSelect={selectMobileZone} />, el('mobile-zone-bar-host'));
-  splitEl.dataset.mobileZone = appStore.getState().mobileZone;
+  // Mirror the active zone onto #split[data-mobile-zone] so the @media rules show/hide the single-column
+  // zone. 'props' is the exception: the inspector is a bottom-sheet OVERLAY, so selecting it must KEEP the
+  // underlying real zone (Files/Code/Diagram) visible rather than reveal the empty #right rail — we only
+  // mirror REAL zones, leaving the attribute on the last real zone beneath the sheet.
+  function mirrorMobileZone(zone: MobileZone): void {
+    if (zone !== 'props') splitEl.dataset.mobileZone = zone;
+  }
+  mirrorMobileZone(appStore.getState().mobileZone);
   // Mirror only when mobileZone actually changes — the listener fires on every store write, so guard
   // on prevState (the inspectorController idiom) to avoid rewriting the attribute on unrelated updates.
   appStore.subscribe((s, prev) => {
-    if (s.mobileZone !== prev.mobileZone) splitEl.dataset.mobileZone = s.mobileZone;
+    if (s.mobileZone !== prev.mobileZone) mirrorMobileZone(s.mobileZone);
   });
   // On a narrow (phone) first paint, land on the default mobile zone's surface so the bottom bar's
   // active tab and the visible #center surface agree from the start — otherwise the bar highlights the
   // default 'code' zone while #center still shows the desktop-restored Visual surface until the first
-  // tap. Gated on BP_NARROW (the JS mirror of $bp-narrow) so the desktop shell keeps its restored center.
-  if (window.innerWidth <= BP_NARROW) selectMobileZone(appStore.getState().mobileZone);
+  // tap. Gated on the narrow breakpoint (the JS mirror of $bp-narrow) so the desktop shell keeps its restored center.
+  if (isNarrowViewport()) selectMobileZone(appStore.getState().mobileZone);
   // Switching files: repaint the active file's diagnostics, invalidate the doc views so they re-fetch,
   // and follow the new file's bounded context. Preserves the exact effect order of the old activateFile.
   workspace.onActiveChanged((uri) => {
@@ -2138,6 +2178,8 @@ export function init(): () => void {
   // setAutoSave(false) cancels the workspace's idle auto-save timer for the same reason.
   return () => {
     controller.dispose();
+    editorSession.destroy();
+    window.removeEventListener('resize', onDiagramViewportResize);
     terminal?.dispose(); // stop the brokered shell + dispose xterm (#256)
     workspace.setAutoSave(false);
     unsubRouteIntent();
