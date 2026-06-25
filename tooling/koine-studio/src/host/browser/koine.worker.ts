@@ -33,7 +33,11 @@ let interopPromise: Promise<InteropSurface> | null = null;
 function bootRuntime(): Promise<InteropSurface> {
   if (interopPromise) return interopPromise;
   interopPromise = (async (): Promise<InteropSurface> => {
-    // Worker-side dynamic import — Vite must NOT try to resolve this public-asset URL at build time.
+    // Worker-side dynamic import of the published dotnet.js loader. `@vite-ignore` stops Vite from
+    // statically rewriting/resolving the specifier at build time; under the dev server
+    // `koineWasmDevPlugin` (vite.config.ts) serves this `?import` request as a raw /public asset (200),
+    // so the worker fast-path actually boots in dev instead of 500-ing on ERR_LOAD_PUBLIC_URL and
+    // forcing the main-thread fallback every time (issue #384).
     const mod = await import(/* @vite-ignore */ dotnetEntryUrl()) as Record<string, unknown>;
     const dotnet = mod.dotnet as { create(): Promise<unknown> };
     const runtime = await dotnet.create() as {
