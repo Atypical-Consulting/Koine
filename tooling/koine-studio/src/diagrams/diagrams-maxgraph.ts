@@ -452,7 +452,7 @@ export function buildCanvas(
   container: HTMLElement,
   merged: DiagramGraph,
   savedLayout?: DiagramLayout,
-  options?: { readOnly?: boolean },
+  options?: { readOnly?: boolean; touch?: boolean },
 ): CanvasHandle {
   const { Graph } = mx;
   // `readOnly` forces a non-authoring canvas regardless of the global editing flag (the strategic
@@ -464,8 +464,10 @@ export function buildCanvas(
   // author), but FREEHAND manipulation — drag-to-move/connect, double-click-rename, right-click-delete — is
   // off, so a tap selects/navigates and a drag pans. `freehand` is the authoring-gesture predicate every
   // such gesture honours; it requires editing AND not-touch. The context map (readOnly) ignores touch — it
-  // is already a non-authoring, pan-anywhere surface. Independent of `editing` per the contract.
-  const touch = !readOnly && isDiagramTouchMode();
+  // is already a non-authoring, pan-anywhere surface. Independent of `editing` per the contract. Touch is a
+  // per-canvas OPTION (like `readOnly`) — fixed at build time so the canvas's gestures can't drift with the
+  // global flag's timing; the caller passes isDiagramTouchMode() at render.
+  const touch = !readOnly && (options?.touch ?? false);
   const freehand = editing && !touch;
   const graph = new Graph(container);
   // CSP-safe: never fall through to the single `eval` path for unregistered style names (Tauri strict CSP).
@@ -553,7 +555,7 @@ export function buildCanvas(
   // A double-click on a canvas annotation edits its note text / group label instead (#255, no `.koi` edit).
   // Gated on editing; only class-type, context-owned, spanned nodes (never a context / state) rename.
   graph.addListener(mx.InternalEvent.DOUBLE_CLICK, (_sender: unknown, evt: { getProperty(name: string): unknown }) => {
-    if (readOnly || !isDiagramEditing() || isDiagramTouchMode()) return; // touch mode: a tap navigates, no freehand rename
+    if (readOnly || !isDiagramEditing() || touch) return; // touch mode: a tap navigates, no freehand rename
     const cell = evt.getProperty('cell') as MxCell | null;
     if (annotationValue(cell)) {
       void editAnnotation(cell!);
@@ -585,7 +587,7 @@ export function buildCanvas(
   // Right-click a node → delete it; right-click a field-backed edge → remove that field. Gated on editing.
   // A DOM contextmenu listener (capture phase, so it beats maxGraph's own handlers) hit-tests the cell.
   const onContextMenu = (evt: MouseEvent): void => {
-    if (readOnly || !isDiagramEditing() || isDiagramTouchMode()) return; // touch mode: no freehand delete/disconnect
+    if (readOnly || !isDiagramEditing() || touch) return; // touch mode: no freehand delete/disconnect
     const rect = container.getBoundingClientRect();
     const cell = graph.getCellAt(evt.clientX - rect.left, evt.clientY - rect.top);
     if (!cell) return;
@@ -653,7 +655,7 @@ export function buildCanvas(
         /* the temp edge is best-effort to remove; a stray one is corrected by the next re-render */
       }
     }
-    if (readOnly || !isDiagramEditing() || isDiagramTouchMode() || !source || !target || source === target) return;
+    if (readOnly || !isDiagramEditing() || touch || !source || !target || source === target) return;
     container.dispatchEvent(
       new CustomEvent<DiagramConnectDetail>(DIAGRAM_CONNECT_EVENT, {
         bubbles: true,
@@ -1196,7 +1198,9 @@ export function createMaxGraphRenderer(): DiagramRenderer {
       surface.className = 'koi-canvas';
       root.appendChild(surface);
 
-      const handle = buildCanvas(mx, surface, merged, savedLayout);
+      // Pass touch-ness as a per-canvas option (fixed for this render) rather than letting buildCanvas read
+      // the global; the global getter is still read HERE, at the render call site (and by mountChrome below).
+      const handle = buildCanvas(mx, surface, merged, savedLayout, { touch: isDiagramTouchMode() });
       // Chrome (zoom bar + minimap) mounts on `root`, NOT the maxGraph container (`surface`): maxGraph's
       // panGraph reparents every non-SVG child of its container into a shifted preview div while panning
       // (e.g. dragging the minimap), which would yank the controls/minimap to the top-left. Keeping them on

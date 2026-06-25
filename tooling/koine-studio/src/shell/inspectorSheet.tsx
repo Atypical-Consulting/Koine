@@ -9,6 +9,8 @@
 // model state, just DOM + gesture wiring, and the Preact panel lives INSIDE its body. The file is .tsx
 // only to sit beside its siblings — it renders no JSX itself.
 
+import { registerOverlay, visibleFocusables } from '@/shared/overlay';
+
 export type SheetDetent = 'peek' | 'half' | 'full';
 
 export interface InspectorSheet {
@@ -27,15 +29,6 @@ const DETENT_ORDER: SheetDetent[] = ['peek', 'half', 'full'];
 // Vertical drag distance (px) past which a release commits to the next/previous detent rather than
 // snapping back. A small threshold keeps a deliberate flick responsive without firing on a tap.
 const SWIPE_THRESHOLD = 40;
-// The focusable descendants the full-detent focus trap cycles through.
-const FOCUSABLE_SELECTOR = [
-  'a[href]',
-  'button:not([disabled])',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',');
 
 // The most-recently-created sheet, so the controller (and Task 3's accessory affordances) can raise it
 // without holding the instance. There is one inspector sheet per page in production; tests build several
@@ -60,6 +53,9 @@ export function createInspectorSheet(host: HTMLElement): InspectorSheet {
   // The element that held focus before the sheet went modal, restored when it returns to peek (so an
   // Esc/dismiss hands focus back to the editor it came from).
   let focusOrigin: HTMLElement | null = null;
+  // The overlay-stack unregister fn while the sheet is modal (registered on going modal, called on
+  // dismiss/destroy). Esc routes through the shared stack so it closes only the top-most overlay.
+  let unregisterOverlay: (() => void) | null = null;
 
   // Backdrop: dims the page while modal and dismisses on tap. Hidden at peek.
   const backdrop = document.createElement('div');
@@ -95,7 +91,13 @@ export function createInspectorSheet(host: HTMLElement): InspectorSheet {
   // --- drag-to-resize -------------------------------------------------------
   let dragStartY: number | null = null;
   let dragStartDetent: SheetDetent = 'peek';
+  // A committing pointer drag is followed by a synthetic `click` (the browser's pointer→click sequence).
+  // Set on a threshold-crossing release so onHandleClick swallows that trailing click — otherwise the
+  // click ALSO steps a detent: a swipe-up double-steps (peek→half→full), and a swipe-down-to-dismiss is
+  // immediately re-raised so drag-to-dismiss never works.
+  let suppressNextClick = false;
   function onPointerDown(e: PointerEvent): void {
+    suppressNextClick = false; // a fresh gesture clears any uncomsumed suppression
     dragStartY = e.clientY;
     dragStartDetent = detent;
     handle.setPointerCapture?.(e.pointerId);
@@ -105,13 +107,20 @@ export function createInspectorSheet(host: HTMLElement): InspectorSheet {
     const dy = e.clientY - dragStartY;
     dragStartY = null;
     handle.releasePointerCapture?.(e.pointerId);
+    const swiped = dy > SWIPE_THRESHOLD || dy < -SWIPE_THRESHOLD;
     if (dy > SWIPE_THRESHOLD) stepFrom(dragStartDetent, -1); // dragged down → lower
     else if (dy < -SWIPE_THRESHOLD) stepFrom(dragStartDetent, +1); // dragged up → raise
     // else: a tap or a sub-threshold nudge — leave the detent where it is.
+    // Swallow the synthetic click that trails a threshold-crossing drag so it doesn't step again.
+    if (swiped) suppressNextClick = true;
   }
   // A plain tap/click (or Enter/Space on the focused handle) raises one detent — the keyboard + no-drag
   // path. Skipped right after a committing drag so a flick doesn't also fire the click that follows.
   function onHandleClick(): void {
+    if (suppressNextClick) {
+      suppressNextClick = false; // consumed: this click trailed a committing drag
+      return;
+    }
     raiseOne();
   }
   handle.addEventListener('pointerdown', onPointerDown);
@@ -126,19 +135,16 @@ export function createInspectorSheet(host: HTMLElement): InspectorSheet {
     stepFrom(detent, +1);
   }
 
-  // --- focus trap (full) ----------------------------------------------------
-  function focusables(): HTMLElement[] {
-    return Array.from(sheet.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
-  }
+  // --- focus trap (any modal detent: half AND full) -------------------------
+  // The sheet shows a page-covering backdrop and sets aria-modal at BOTH half and full, and half is the
+  // COMMON path (a node tap / selection raises to half), so the modal behaviours — focus-in, Tab trap,
+  // Esc-to-dismiss, focus restore — must apply to ANY modal detent, not just full. The trap reuses
+  // overlay.ts's shared FOCUSABLE_SELECTOR + visible-focusable filter (no drifted local copy) so a hidden
+  // control can never become the wrap target. Esc is handled centrally via the overlay stack (registered
+  // in setDetent), not a sheet-scoped listener, so a single Esc closes only the top-most overlay.
   function onKeyDown(e: KeyboardEvent): void {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopPropagation();
-      setDetent('peek');
-      return;
-    }
-    if (e.key !== 'Tab' || detent !== 'full') return;
-    const items = focusables();
+    if (e.key !== 'Tab' || !isModal(detent)) return;
+    const items = visibleFocusables(sheet);
     if (items.length === 0) {
       e.preventDefault();
       return;
@@ -156,29 +162,50 @@ export function createInspectorSheet(host: HTMLElement): InspectorSheet {
   }
   sheet.addEventListener('keydown', onKeyDown);
 
+  // Toggle the body in/out of the tab + AT order. At peek the full Properties form stays mounted but the
+  // sheet is clipped to the grab-handle strip, so its controls must NOT be reachable while collapsed
+  // (#221): `inert` blocks focus/pointer and aria-hidden removes it from AT. Cleared at half/full.
+  function setBodyInteractive(on: boolean): void {
+    if (on) {
+      body.removeAttribute('inert');
+      body.removeAttribute('aria-hidden');
+    } else {
+      body.setAttribute('inert', '');
+      body.setAttribute('aria-hidden', 'true');
+    }
+  }
+  setBodyInteractive(isModal(detent)); // initialise for the starting (peek) detent
+
   function setDetent(next: SheetDetent): void {
     const prev = detent;
     if (next === prev) return;
+    const wasModal = isModal(prev);
+    const nowModal = isModal(next);
     // Entering modal from rest: remember where focus came from so a dismiss can hand it back.
-    if (!isModal(prev) && isModal(next)) {
+    if (!wasModal && nowModal) {
       focusOrigin = (document.activeElement as HTMLElement | null) ?? null;
     }
     detent = next;
     sheet.dataset.detent = next;
-    backdrop.hidden = !isModal(next);
-    if (isModal(next)) sheet.setAttribute('aria-modal', 'true');
+    backdrop.hidden = !nowModal;
+    setBodyInteractive(nowModal);
+    if (nowModal) sheet.setAttribute('aria-modal', 'true');
     else sheet.removeAttribute('aria-modal');
 
-    if (next === 'full') {
-      // Full takes keyboard focus: blur whatever held it (the editor) and pull focus into the sheet so
-      // the trap has somewhere to land and the editor can't receive keystrokes behind the sheet.
+    if (!wasModal && nowModal) {
+      // Going modal (peek → half/full): join the app's single Esc stack and pull focus into the dialog so
+      // the trap has somewhere to land and the editor behind the backdrop can't receive keystrokes.
+      unregisterOverlay = registerOverlay(() => setDetent('peek'));
       (document.activeElement as HTMLElement | null)?.blur?.();
-      (focusables()[0] ?? handle).focus();
-    } else if (next === 'peek' && isModal(prev)) {
-      // Dismissed back to rest: return focus to its origin (best-effort).
+      (visibleFocusables(sheet)[0] ?? handle).focus();
+    } else if (wasModal && !nowModal) {
+      // Dismissed back to rest: leave the Esc stack and return focus to its origin (best-effort).
+      unregisterOverlay?.();
+      unregisterOverlay = null;
       focusOrigin?.focus?.();
       focusOrigin = null;
     }
+    // half ↔ full stays modal: the overlay registration + focus are already in place — nothing to do.
   }
 
   const api: InspectorSheet = {
@@ -186,6 +213,8 @@ export function createInspectorSheet(host: HTMLElement): InspectorSheet {
     contentNode: () => body,
     isOpen: () => isModal(detent),
     destroy: () => {
+      unregisterOverlay?.(); // leave the Esc stack if torn down while modal (no stale close lingers)
+      unregisterOverlay = null;
       sheet.removeEventListener('keydown', onKeyDown);
       handle.removeEventListener('pointerdown', onPointerDown);
       handle.removeEventListener('pointerup', onPointerUp);

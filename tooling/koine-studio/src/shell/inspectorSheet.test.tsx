@@ -89,6 +89,49 @@ describe('createInspectorSheet — detents + dismiss gestures', () => {
     fireEvent.pointerUp(handle, { clientY: 240, pointerId: 1 });
     expect(sheet.dataset.detent).toBe('peek');
   });
+
+  test('a committing swipe-up does NOT double-step via the trailing synthetic click (#221)', () => {
+    const { host, sheet } = mountSheet();
+    const handle = host.querySelector<HTMLElement>('.koi-sheet-handle')!;
+    // The pointer drag commits ONE step (peek → half). A real browser then fires a `click`; it must be
+    // swallowed so the sheet doesn't ALSO step to full.
+    fireEvent.pointerDown(handle, { clientY: 200, pointerId: 1 });
+    fireEvent.pointerUp(handle, { clientY: 40, pointerId: 1 }); // dy = -160 → raise one
+    expect(sheet.dataset.detent).toBe('half');
+    fireEvent.click(handle);
+    expect(sheet.dataset.detent).toBe('half'); // still half — the trailing click did not step again
+  });
+
+  test('drag-to-dismiss sticks: a committing swipe-down’s trailing click does not re-raise (#221)', () => {
+    const { host, api, sheet } = mountSheet();
+    api.setDetent('half');
+    const handle = host.querySelector<HTMLElement>('.koi-sheet-handle')!;
+    fireEvent.pointerDown(handle, { clientY: 100, pointerId: 1 });
+    fireEvent.pointerUp(handle, { clientY: 240, pointerId: 1 }); // dy = +140 → lower one (half → peek)
+    expect(sheet.dataset.detent).toBe('peek');
+    fireEvent.click(handle);
+    expect(sheet.dataset.detent).toBe('peek'); // NOT immediately re-raised to half
+  });
+
+  test('a plain tap (no drag) still raises one detent', () => {
+    const { host, sheet } = mountSheet();
+    const handle = host.querySelector<HTMLElement>('.koi-sheet-handle')!;
+    fireEvent.click(handle); // keyboard/no-drag path
+    expect(sheet.dataset.detent).toBe('half');
+  });
+
+  test('the body is inert + hidden from AT at peek, and interactive at half (#221)', () => {
+    const { api } = mountSheet();
+    const body = api.contentNode();
+    // Collapsed peek clips the body to the grab-handle strip: the still-mounted Properties form must be
+    // OUT of the tab + AT order.
+    expect(body.hasAttribute('inert')).toBe(true);
+    expect(body.getAttribute('aria-hidden')).toBe('true');
+    // Raised to half it becomes reachable again.
+    api.setDetent('half');
+    expect(body.hasAttribute('inert')).toBe(false);
+    expect(body.hasAttribute('aria-hidden')).toBe(false);
+  });
 });
 
 describe('createInspectorSheet — full detent focus + dismiss', () => {
@@ -119,6 +162,40 @@ describe('createInspectorSheet — full detent focus + dismiss', () => {
     expect(document.activeElement).toBe(last);
 
     // Esc dismisses to peek and returns focus to the editor.
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(sheet.dataset.detent).toBe('peek');
+    expect(document.activeElement).toBe(editor);
+  });
+});
+
+describe('createInspectorSheet — half detent is modal too (#221)', () => {
+  test('opening to half moves focus into the sheet, traps Tab, and Esc dismisses + restores focus', () => {
+    const { api, sheet } = mountSheet();
+    // Two focusables in the body so the trap has somewhere to wrap to.
+    api.contentNode().innerHTML = '<button id="a">A</button><button id="b">B</button>';
+    const editor = document.createElement('button');
+    editor.id = 'fake-editor';
+    document.body.appendChild(editor);
+    editor.focus();
+
+    // half — NOT full — is the common path (a node tap / selection raises to half); it must be just as modal.
+    api.setDetent('half');
+    expect(document.activeElement).not.toBe(editor);
+    expect(sheet.contains(document.activeElement)).toBe(true);
+
+    // Tab is trapped at half (the visible-focusable filter is overlay.ts's, shared with the modal chrome).
+    const focusables = Array.from(sheet.querySelectorAll<HTMLElement>('button'));
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    last.focus();
+    fireEvent.keyDown(last, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+    first.focus();
+    fireEvent.keyDown(first, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+
+    // Esc routes through the app's single overlay stack (no sheet-scoped Esc listener): dismiss to peek +
+    // restore focus to the editor it came from.
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     expect(sheet.dataset.detent).toBe('peek');
     expect(document.activeElement).toBe(editor);
@@ -329,6 +406,30 @@ describe('inspectorController — bottom sheet on a narrow viewport', () => {
     expect(body.querySelector('[data-qname]')?.getAttribute('data-qname')).toBe('Billing.Money');
     // The desktop right-rail host is NOT used for the Properties panel on a narrow viewport.
     expect(el('inspector-host').querySelector('[data-qname]')).toBeNull();
+
+    ctl.dispose();
+  });
+
+  test('crossing to desktop unmounts the sheet-body Properties panel — exactly one mount (#221)', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+    ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
+
+    const sheetBody = el('inspector-sheet-host').querySelector<HTMLElement>('.koi-sheet-body')!;
+    expect(sheetBody.querySelector('[data-qname]')).not.toBeNull(); // mounted into the sheet on narrow
+
+    // Widen past the breakpoint and fire a resize. The controller re-mounts Properties into the fixed
+    // #inspector-host AND must UNMOUNT the prior sheet-body tree — Preact's render(vnode, newHost) leaves
+    // the old container's tree live otherwise (a leaked, store-subscribed panel).
+    setViewport(1024);
+    window.dispatchEvent(new Event('resize'));
+    await flush();
+
+    expect(sheetBody.querySelector('[data-qname]')).toBeNull(); // sheet body emptied (panel unmounted)
+    expect(el('inspector-host').querySelector('[data-qname]')).not.toBeNull(); // the single live mount
 
     ctl.dispose();
   });

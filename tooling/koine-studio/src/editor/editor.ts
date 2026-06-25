@@ -1082,6 +1082,20 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     });
   }
 
+  // Cache narrow-ness via a single matchMedia listener (#221) instead of measuring `window.innerWidth`
+  // on EVERY keystroke/selection inside the hot updateListener below. The MediaQueryList re-evaluates on
+  // a real viewport cross (its `change` event updates the cached flag); destroy() removes the listener.
+  // Falls back to a one-shot innerWidth read where matchMedia is unavailable (older happy-dom).
+  const narrowMql =
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(`(max-width: ${BP_NARROW}px)`)
+      : null;
+  let isNarrow = narrowMql ? narrowMql.matches : typeof window !== 'undefined' && window.innerWidth <= BP_NARROW;
+  const onNarrowChange = (e: MediaQueryListEvent): void => {
+    isNarrow = e.matches;
+  };
+  narrowMql?.addEventListener('change', onNarrowChange);
+
   const view = new EditorView({
     parent: opts.parent,
     state: EditorState.create({
@@ -1147,9 +1161,10 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
           // Fire onChange immediately; the LSP client debounces didChange.
           if (u.docChanged && opts.onChange) opts.onChange(u.state.doc.toString());
           // Keyboard occlusion: on a narrow viewport, keep the caret above the soft keyboard whenever a
-          // focused edit or selection move could have pushed it under the keyboard. Gated on BP_NARROW so
-          // desktop scroll behavior is byte-for-byte unchanged.
-          if ((u.docChanged || u.selectionSet) && u.view.hasFocus && window.innerWidth <= BP_NARROW) {
+          // focused edit or selection move could have pushed it under the keyboard. Gated on the cached
+          // narrow flag (not a per-keystroke innerWidth read) so desktop scroll behavior is byte-for-byte
+          // unchanged.
+          if ((u.docChanged || u.selectionSet) && u.view.hasFocus && isNarrow) {
             scheduleCaretReveal();
           }
         }),
@@ -1162,7 +1177,7 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
   // (happy-dom has none; some desktop browsers expose it only intermittently).
   const visualViewport = typeof window !== 'undefined' ? window.visualViewport : null;
   const onViewportResize = (): void => {
-    if (view.hasFocus && window.innerWidth <= BP_NARROW) scheduleCaretReveal();
+    if (view.hasFocus && isNarrow) scheduleCaretReveal();
   };
   visualViewport?.addEventListener('resize', onViewportResize);
 
@@ -1198,6 +1213,7 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     destroy() {
       viewDestroyed = true; // stop any queued caret-reveal frame from touching a torn-down view
       visualViewport?.removeEventListener('resize', onViewportResize);
+      narrowMql?.removeEventListener('change', onNarrowChange);
       dismissFloating();
       view.destroy();
     },

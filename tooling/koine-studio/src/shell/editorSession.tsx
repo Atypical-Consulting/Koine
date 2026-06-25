@@ -17,7 +17,7 @@
 import { render } from 'preact';
 import { createKoineEditor, setEditorDiagnostics, type KoineEditor } from '@/editor/editor';
 import { mountSymbolRow } from '@/editor/symbolRow';
-import { BP_NARROW } from '@/shared/breakpoint';
+import { isNarrowViewport } from '@/shared/breakpoint';
 import { diagnosticsInRange } from '@/shell/ideUtils';
 import { appStore } from '@/store/index';
 import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
@@ -184,6 +184,15 @@ export interface EditorSession {
    * ide.ts drives when the user opens a file while a split is active.
    */
   openFocusedGroup(uri: string): void;
+
+  /**
+   * Release everything the session owns: the mobile symbol-row accessory (its DOM + CM listeners), the
+   * focusin/focusout/resize listeners it registered, group B (if open), and the primary editor — whose
+   * own destroy() removes its visualViewport listener and trips its torn-down guard. ide.ts calls this
+   * from its init() teardown so a session never outlives its host (the listeners would otherwise leak and
+   * fire into a torn-down DOM).
+   */
+  destroy(): void;
 }
 
 export function createEditorSession(deps: EditorSessionDeps): EditorSession {
@@ -259,16 +268,19 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   symbolRowHost.className = 'koi-symbol-row-host';
   symbolRowHost.hidden = true;
   deps.parent.appendChild(symbolRowHost);
-  mountSymbolRow(editor.view, symbolRowHost);
+  // Keep mountSymbolRow's handle so destroy() can tear the strip down (it owns the DOM + CM listeners).
+  const symbolRow = mountSymbolRow(editor.view, symbolRowHost);
   const syncSymbolRow = (): void => {
-    const narrow = window.innerWidth <= BP_NARROW;
+    const narrow = isNarrowViewport();
     const active = document.activeElement;
     const within = editor.view.dom.contains(active) || symbolRowHost.contains(active);
     symbolRowHost.hidden = !(narrow && within);
   };
-  deps.parent.addEventListener('focusin', syncSymbolRow);
   // focusout fires BEFORE focus settles on the next element, so defer the read of document.activeElement.
-  deps.parent.addEventListener('focusout', () => setTimeout(syncSymbolRow, 0));
+  // Named (not an inline arrow) so destroy() can removeEventListener it — the inline form was un-removable.
+  const onSymbolRowFocusOut = (): void => void setTimeout(syncSymbolRow, 0);
+  deps.parent.addEventListener('focusin', syncSymbolRow);
+  deps.parent.addEventListener('focusout', onSymbolRowFocusOut);
   // A rotate/resize that crosses the breakpoint while focused must re-evaluate visibility.
   window.addEventListener('resize', syncSymbolRow);
 
@@ -519,5 +531,15 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     focusedGroup,
     focusGroup,
     openFocusedGroup,
+    destroy(): void {
+      deps.parent.removeEventListener('focusin', syncSymbolRow);
+      deps.parent.removeEventListener('focusout', onSymbolRowFocusOut);
+      window.removeEventListener('resize', syncSymbolRow);
+      symbolRow.destroy();
+      symbolRowHost.remove();
+      groupB?.destroy();
+      groupB = null;
+      editor.destroy();
+    },
   };
 }

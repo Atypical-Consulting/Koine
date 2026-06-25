@@ -17,8 +17,10 @@ type CloseFn = () => void;
 // Open overlays, bottom-to-top. The last entry is the one Esc closes.
 const stack: CloseFn[] = [];
 
-// Elements that can hold keyboard focus, used to find a modal's first/last tab stop.
-const FOCUSABLE_SELECTOR = [
+// Elements that can hold keyboard focus, used to find a modal's first/last tab stop. Exported so other
+// modal surfaces (the mobile inspector sheet) reuse the SAME selector + visible-focusable filter rather
+// than drifting their own copy.
+export const FOCUSABLE_SELECTOR = [
   'a[href]',
   'button:not([disabled])',
   'input:not([disabled])',
@@ -26,6 +28,19 @@ const FOCUSABLE_SELECTOR = [
   'textarea:not([disabled])',
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
+
+/**
+ * The actually-rendered focusable descendants of `root`, in DOM order — the valid tab stops for a focus
+ * trap. A control inside a display:none / hidden subtree (a collapsed Settings category, a hidden field
+ * row, a collapsed sheet body) has no client rects, so excluding it keeps the computed first/last stops on
+ * visible elements; otherwise the wrap targets an unfocusable element and focus escapes the modal (WCAG
+ * 2.4.3). Shared by createModal's trap and the inspector sheet's.
+ */
+export function visibleFocusables(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (el) => !el.hasAttribute('hidden') && el.getClientRects().length > 0,
+  );
+}
 
 /**
  * Register an open overlay as the new top of the Esc stack. Returns an unregister function
@@ -144,13 +159,10 @@ export function createModal(opts: ModalOptions): ModalHandle {
   // toolbar/editor behind the backdrop, honouring the aria-modal contract (WCAG 2.4.3).
   modal.addEventListener('keydown', (e) => {
     if (e.key !== 'Tab') return;
-    // Only ACTUALLY-rendered controls are valid tab stops: a control inside a display:none panel
-    // (a collapsed Settings category, a hidden field row) has no client rects, so excluding it
-    // keeps the computed first/last stops on visible elements — otherwise the wrap targets an
-    // unfocusable element and focus escapes the modal.
-    const focusable = Array.from(
-      modal.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-    ).filter((el) => !el.hasAttribute('hidden') && el.getClientRects().length > 0);
+    // Only ACTUALLY-rendered controls are valid tab stops (see visibleFocusables): a control inside a
+    // display:none panel has no client rects, so excluding it keeps first/last on visible elements —
+    // otherwise the wrap targets an unfocusable element and focus escapes the modal.
+    const focusable = visibleFocusables(modal);
     if (focusable.length === 0) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];

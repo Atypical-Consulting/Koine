@@ -442,3 +442,24 @@ describe('createEditorSession — second editor group (group B)', () => {
     expect(session.focusedGroup()).toBe('a');
   });
 });
+
+describe('createEditorSession — destroy() tears the session down (#221)', () => {
+  test('destroy() removes the symbol-row host + the editor and a later window resize is inert', () => {
+    const lsp = makeLsp();
+    const session = createEditorSession(makeDeps(lsp));
+    const pane = el('editor-pane');
+    // The session mounted the mobile DSL-symbol accessory row + a CodeMirror editor into its pane.
+    expect(pane.querySelector('.koi-symbol-row-host')).not.toBeNull();
+    expect(pane.querySelector('.cm-editor')).not.toBeNull();
+
+    session.destroy();
+
+    // Both are gone: destroy() removed the symbol-row host and called editor.destroy() (which detaches the
+    // CodeMirror view + removes its visualViewport/matchMedia listeners).
+    expect(pane.querySelector('.koi-symbol-row-host')).toBeNull();
+    expect(pane.querySelector('.cm-editor')).toBeNull();
+    // The focusin/focusout/resize listeners were removed too, so a post-teardown resize is a no-op — it
+    // neither throws nor re-shows the (removed) row.
+    expect(() => window.dispatchEvent(new Event('resize'))).not.toThrow();
+  });
+});

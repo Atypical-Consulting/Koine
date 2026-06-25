@@ -599,7 +599,7 @@ describe('touch mode: freehand off, tap-to-navigate kept (#221 Task 3)', () => {
     setDiagramEditing(true);
     setDiagramTouchMode(true); // freehand off is INDEPENDENT of editing
     const container = makeContainer();
-    const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] });
+    const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] }, undefined, { touch: true });
     try {
       expect(handle.graph.isCellsMovable()).toBe(false); // drag-to-reposition off
       expect(handle.graph.isConnectable()).toBe(false); // drag-to-connect off
@@ -612,7 +612,7 @@ describe('touch mode: freehand off, tap-to-navigate kept (#221 Task 3)', () => {
     setDiagramEditing(true);
     setDiagramTouchMode(true);
     const container = makeContainer();
-    const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] });
+    const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] }, undefined, { touch: true });
     try {
       let fired = false;
       container.addEventListener('koi-diagram-node-edit', () => { fired = true; });
@@ -628,7 +628,7 @@ describe('touch mode: freehand off, tap-to-navigate kept (#221 Task 3)', () => {
     setDiagramEditing(true);
     setDiagramTouchMode(true);
     const container = makeContainer();
-    const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] });
+    const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] }, undefined, { touch: true });
     try {
       handle.graph.getCellAt = (() => handle.cells.get('Ordering.Order')) as typeof handle.graph.getCellAt;
       let fired = false;
@@ -645,7 +645,7 @@ describe('touch mode: freehand off, tap-to-navigate kept (#221 Task 3)', () => {
     setDiagramEditing(true);
     setDiagramTouchMode(true);
     const container = makeContainer();
-    const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] });
+    const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] }, undefined, { touch: true });
     try {
       let detail: any = null;
       container.addEventListener('koi-diagram-node-click', (e) => { detail = (e as CustomEvent).detail; });
