@@ -6,6 +6,7 @@
 // typed id-correlated request/response protocol implemented in workerClient.ts.
 
 import { createKoineWorkerClient, type WorkerClient } from '@/host/browser/workerClient';
+import { dotnetEntryUrl } from '@/host/browser/dotnetAsset';
 
 /** The JS-callable language-service surface (matches src/Koine.Wasm/CompilerInterop.LanguageService.cs). */
 export interface KoineWasmApi {
@@ -144,6 +145,15 @@ const KOINE_WASM_EXPORTS: ReadonlySet<string> = new Set(Object.keys(KOINE_WASM_E
 let apiPromise: Promise<KoineWasmApi> | null = null;
 let workerClientInstance: WorkerClient | null = null;
 
+/** Which boot path produced the live compiler surface (issue #357). */
+export type WasmBootMode = 'worker' | 'main-thread';
+let bootMode: WasmBootMode | null = null;
+
+/** The boot path that produced the live compiler surface, or `null` before `loadWasmApi()` resolves. */
+export function getWasmBootMode(): WasmBootMode | null {
+  return bootMode;
+}
+
 /** Pattern that the worker emits for an export that isn't a function on the interop surface. */
 const WORKER_MISSING_EXPORT_RE = /^Koine WASM export "([^"]+)" is not a function$/;
 
@@ -217,17 +227,125 @@ function buildWorkerProxy(call: (method: string, args: unknown[]) => Promise<str
   return new Proxy({}, handler) as unknown as KoineWasmApi;
 }
 
-/** Boot the worker once and resolve the compiler's [JSExport] surface as an async proxy. */
+// ---------------------------------------------------------------------------
+// Main-thread fallback boot (issue #357).
+//
+// The worker boot is the fast path (off the UI thread, cancellable). But a failed worker boot must
+// NEVER brick the studio, so `loadWasmApi()` falls back to booting the runtime ON THE MAIN THREAD —
+// the path the studio used before #326, which boots reliably. The compiler is then usable (it may
+// jank the UI on a big compile, but it works) instead of dead with "connection failed".
+// ---------------------------------------------------------------------------
+
+let loaderSeq = 0;
+
+/**
+ * Import the dotnet.js ES module by URL via an injected inline module script. We deliberately do NOT
+ * call `import(url)` from app code: under Vite's dev server a dynamic import of a `public/` asset is
+ * routed through the module-transform pipeline (the `?import` suffix) and fails on the
+ * machine-generated loader. An inline `<script type="module">` is invisible to Vite, so the browser
+ * fetches dotnet.js — and its relative dependencies — as raw static files. Works identically for the
+ * built / deployed bundle. (Restored from the pre-#326 main-thread boot.)
+ */
+function importEsModuleViaScript(url: string): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const id = `__koineDotnet_${++loaderSeq}`;
+    const w = window as unknown as Record<string, unknown>;
+    const cleanup = () => {
+      delete w[id];
+      delete w[`${id}_err`];
+    };
+    w[id] = (mod: Record<string, unknown>) => {
+      cleanup();
+      resolve(mod);
+    };
+    w[`${id}_err`] = (message: string) => {
+      cleanup();
+      reject(new Error(message));
+    };
+    const script = document.createElement('script');
+    script.type = 'module';
+    // The inline module is never seen by Vite; its own `import()` is a plain browser fetch.
+    script.textContent =
+      `import(${JSON.stringify(url)}).then(` +
+      `m => window.${id}(m), e => window.${id}_err(String((e && e.message) || e)));`;
+    script.addEventListener('error', () => {
+      cleanup();
+      reject(new Error(`failed to load ${url}`));
+    });
+    document.head.appendChild(script);
+    // Safety net so a silent failure can't hang the language-server boot forever.
+    setTimeout(() => {
+      if (w[id]) {
+        cleanup();
+        reject(new Error(`timed out loading ${url}`));
+      }
+    }, 30000);
+  });
+}
+
+/** How the main-thread fallback acquires the dotnet ES module. Overridable for tests. */
+type DotnetModuleLoader = (url: string) => Promise<Record<string, unknown>>;
+let dotnetModuleLoader: DotnetModuleLoader = importEsModuleViaScript;
+
+/** @internal Test seam — override the main-thread dotnet module loader. Pass `null` to restore. */
+export function __setDotnetModuleLoaderForTests(loader: DotnetModuleLoader | null): void {
+  dotnetModuleLoader = loader ?? importEsModuleViaScript;
+}
+
+/** Boot the .NET runtime on the MAIN THREAD and resolve the compiler's [JSExport] surface. */
+async function bootMainThread(): Promise<KoineWasmApi> {
+  const mod = await dotnetModuleLoader(dotnetEntryUrl());
+  const dotnet = mod.dotnet as {
+    create(): Promise<{
+      getConfig(): { mainAssemblyName: string };
+      getAssemblyExports(name: string): Promise<Record<string, unknown>>;
+    }>;
+  };
+  const runtime = await dotnet.create();
+  const config = runtime.getConfig();
+  const exports = await runtime.getAssemblyExports(config.mainAssemblyName);
+  return guardWasmSurface(
+    (exports as { Koine: { Wasm: { CompilerInterop: Record<string, unknown> } } }).Koine.Wasm
+      .CompilerInterop,
+  );
+}
+
+/**
+ * Boot the worker once and resolve the compiler's [JSExport] surface as an async proxy. If the worker
+ * boot fails or times out (issue #357 — the deployed worker boot can hang), fall back to a main-thread
+ * boot so the studio is never bricked. `getWasmBootMode()` reports which path won.
+ */
 export function loadWasmApi(): Promise<KoineWasmApi> {
   if (apiPromise) return apiPromise;
-  apiPromise = (async () => {
+  const attempt = (async () => {
     const client = createKoineWorkerClient();
     workerClientInstance = client;
-    // Await the worker's `ready` signal (or reject on boot-failure / 30 s timeout).
-    await client.whenReady();
-    return buildWorkerProxy(client.call.bind(client));
+    try {
+      // Fast path: the runtime boots off the UI thread and signals `ready` (or rejects on
+      // boot-failure / the worker's boot timeout).
+      await client.whenReady();
+      bootMode = 'worker';
+      return buildWorkerProxy(client.call.bind(client));
+    } catch (workerErr: unknown) {
+      // A failed worker boot must not brick the studio: tear down the dead worker and boot the
+      // runtime on the main thread instead (the pre-#326 path, which boots reliably).
+      const reason = workerErr instanceof Error ? workerErr.message : String(workerErr);
+      console.warn(`Koine: worker compiler boot failed (${reason}); falling back to the main thread.`);
+      client.dispose();
+      workerClientInstance = null;
+      const api = await bootMainThread();
+      bootMode = 'main-thread';
+      return api;
+    }
   })();
-  return apiPromise;
+  apiPromise = attempt;
+  // Don't cache a TOTAL boot failure (both the worker AND the main-thread boot rejected — e.g. a
+  // transient asset-serving hiccup). Clearing the cache lets a later call retry from scratch instead
+  // of forever re-awaiting a permanently-rejected promise. The caller still sees this attempt reject.
+  attempt.catch(() => {
+    if (apiPromise === attempt) apiPromise = null;
+  });
+  return attempt;
 }
 
 /**

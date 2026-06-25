@@ -22,6 +22,18 @@ response as a `Promise`. Cancellation is supported in two modes:
 plain structured-clone `postMessage`, so **no `SharedArrayBuffer` and no COOP/COEP
 cross-origin-isolation headers are required**.
 
+**Boot ordering (issue #357 — do not regress).** The worker must wire its RPC loop with
+`self.addEventListener('message', …)` **after** `dotnet.create()` resolves — never as a top-level
+`self.onmessage = …`. Assigning `self.onmessage` at worker startup clobbers the `message` channel the
+.NET WebAssembly runtime needs while it boots inside the Worker, which deadlocks the boot
+(`import(dotnet.js)` resolves but `create()` never settles), bricking the studio with "connection
+failed". Two safety nets back this up: a per-boot **watchdog** (`bootWatchdog.ts`) turns a silent hang
+into an explicit `boot-failure`, and `loadWasmApi()` **falls back to a main-thread boot** (the
+pre-worker path) if the worker boot fails — so a worker-boot regression degrades the UI, it doesn't
+kill it. `getWasmBootMode()` reports which path won. The `npm run test:browser` smoke-test
+(`scripts/smoke-boot.mjs`) boots the built studio in headless Chromium and gates the deploy on the
+worker actually reaching `ready` and a compiler call round-tripping.
+
 ## How it works
 
 - The Rust host (`src-tauri/src/lib.rs`) spawns the Koine LSP lazily on the `lsp_start`
