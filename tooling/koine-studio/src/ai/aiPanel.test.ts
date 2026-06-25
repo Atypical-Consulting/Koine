@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   buildExplainPrompt,
+  buildRepairPrompt,
   buildSystem,
   createAssistantPanel,
   formatDomainIndex,
+  MAX_REPAIR_ROUNDS,
   type AssistantContext,
   type AssistantPanelOptions,
   type DomainIndex,
@@ -166,6 +168,9 @@ describe('explain action (panel integration)', () => {
       getWorkspaceKey: () => 'test',
       getSelection: () => ({ text: 'value Money { ... }' }),
       getUseTools: () => false,
+      // Default the constraint OFF in these legacy-behavior tests so the apply-gate is bypassed; the
+      // #257 grammar-constraint tests below opt it on explicitly.
+      getConstrainGrammar: () => false,
       ...overrides,
     };
   }
@@ -247,5 +252,154 @@ describe('explain action (panel integration)', () => {
     createAssistantPanel(makeOpts(c2));
     expect(c2.querySelector('.koi-msg-assistant .koi-md')).not.toBeNull(); // the turn replayed
     expect(c2.querySelector('.koi-assistant-apply')).toBeNull(); // …without Apply
+  });
+});
+
+describe('buildRepairPrompt', () => {
+  test('feeds the previous model AND the line:column diagnostics back, asking for ONLY a koine block', () => {
+    const out = buildRepairPrompt('context X {', 'ok: false — 1 error(s):\n- [error] 1:11 expected }');
+    expect(out).toContain('does not parse');
+    expect(out.toLowerCase()).toContain('only');
+    expect(out).toContain('```koine\ncontext X {\n```'); // the previous candidate, fenced
+    expect(out).toContain('- [error] 1:11 expected }'); // the diagnostics verbatim
+  });
+});
+
+// --- grammar-constraint wiring (#257): chip, apply-gate, repair counter ------
+describe('grammar-constraint mechanisms (panel integration)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    // Reset the shared runAssistant mock's call log AND implementation so `mock.calls[0]` is this
+    // test's own first call (earlier describe blocks leave calls accumulated on the shared spy).
+    vi.mocked(runAssistant).mockReset();
+  });
+  afterEach(() => {
+    localStorage.clear();
+    vi.mocked(runAssistant).mockReset();
+  });
+
+  const CLEAN = 'ok: true — no diagnostics. The model compiles.';
+  const DIRTY = 'ok: false — 1 error(s), 0 warning(s):\n- [error] 1:1 boom';
+
+  // The default mocked runAssistant streams a fenced koine block (a generative turn that offers Apply).
+  function mockReply(body = 'Here is your model:\n```koine\ncontext X {}\n```'): void {
+    vi.mocked(runAssistant).mockImplementation(async (req: { onText: (t: string) => void }) => {
+      req.onText(body);
+      return body;
+    });
+  }
+
+  function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
+    return {
+      container,
+      getProvider: () => 'openai',
+      getBaseUrl: () => 'http://localhost:1234/v1',
+      getApiKey: () => 'sk',
+      getModel: () => '',
+      getContext: () => ({ fileName: 'm.koi', source: 'context X {}', diagnostics: [] }),
+      onApplyModel: () => {},
+      onOpenPrefs: () => {},
+      getWorkspaceKey: () => 'ws',
+      getSelection: () => null,
+      getUseTools: () => false,
+      getConstrainGrammar: () => true,
+      ...over,
+    };
+  }
+
+  // Drive a normal generative send via the first quick action (offerApply defaults true).
+  function fire(container: HTMLElement): void {
+    container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
+  }
+
+  test('gbnf path: attaches the grammar to the request, shows the chip, enables Apply when valid', async () => {
+    mockReply();
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getGrammar: () => Promise.resolve('root ::= "x"'),
+        runCompilerTool: () => Promise.resolve(CLEAN),
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
+    // The GBNF rode along on the request body.
+    expect(vi.mocked(runAssistant).mock.calls[0][0].grammar).toBe('root ::= "x"');
+    // The "grammar-constrained" chip is shown and Apply is enabled (valid by construction).
+    expect(container.querySelector('.koi-assistant-chip')?.textContent).toBe('grammar-constrained');
+    expect(container.querySelector<HTMLButtonElement>('.koi-assistant-apply')!.disabled).toBe(false);
+    expect(container.querySelector('.koi-assistant-invalid')).toBeNull();
+  });
+
+  test('repair path (Anthropic): never valid → "repair k/N" counter, notice, Apply stays disabled', async () => {
+    mockReply();
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getProvider: () => 'anthropic',
+        getBaseUrl: () => '',
+        runCompilerTool: () => Promise.resolve(DIRTY), // always invalid
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-invalid')).not.toBeNull());
+    // The parse-and-repair chip + the counter that reached the max, and NO Apply button.
+    expect(container.querySelector('.koi-assistant-chip')?.textContent).toBe('parse-and-repair');
+    expect(container.querySelector('.koi-assistant-repair-counter')?.textContent).toBe(
+      `repair ${MAX_REPAIR_ROUNDS}/${MAX_REPAIR_ROUNDS}`,
+    );
+    expect(container.querySelector('.koi-assistant-apply')).toBeNull();
+    // No grammar was attached (Anthropic can't be token-masked).
+    expect(vi.mocked(runAssistant).mock.calls[0][0].grammar).toBeUndefined();
+    // initial turn + one regenerate per repair round.
+    expect(vi.mocked(runAssistant).mock.calls.length).toBe(1 + MAX_REPAIR_ROUNDS);
+  });
+
+  test('repair path: invalid then valid on the first round → counter "repair 1/N", Apply enabled', async () => {
+    mockReply();
+    let n = 0;
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getProvider: () => 'anthropic',
+        getBaseUrl: () => '',
+        runCompilerTool: () => Promise.resolve(n++ === 0 ? DIRTY : CLEAN),
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
+    expect(container.querySelector('.koi-assistant-chip')?.textContent).toBe('parse-and-repair');
+    expect(container.querySelector('.koi-assistant-repair-counter')?.textContent).toBe(`repair 1/${MAX_REPAIR_ROUNDS}`);
+    expect(container.querySelector('.koi-assistant-invalid')).toBeNull();
+  });
+
+  test('desktop fallback: capable provider but no GBNF accessor → repair path, no grammar attached', async () => {
+    mockReply();
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        // getGrammar omitted (desktop host) though provider/baseUrl are grammar-capable.
+        runCompilerTool: () => Promise.resolve(CLEAN),
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
+    expect(container.querySelector('.koi-assistant-chip')?.textContent).toBe('parse-and-repair');
+    expect(vi.mocked(runAssistant).mock.calls[0][0].grammar).toBeUndefined();
+  });
+
+  test('no validate seam (host can\'t run tools): constraint degrades to the unguarded affordance', async () => {
+    mockReply();
+    const container = document.createElement('div');
+    // runCompilerTool omitted → no way to parse, so Apply is offered as before, with no chip.
+    createAssistantPanel(opts(container, { getProvider: () => 'anthropic', getBaseUrl: () => '' }));
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
+    expect(container.querySelector('.koi-assistant-chip')).toBeNull();
   });
 });

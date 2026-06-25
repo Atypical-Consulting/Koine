@@ -6,9 +6,23 @@
 // Needs a user-supplied Anthropic API key (set in Preferences, stored locally). With no key it
 // shows a prompt to add one rather than calling the API.
 import { isLocalProviderUrl, runAssistant, type AiProvider, type ChatMessage } from '@/ai/ai';
+import {
+  chooseMechanism,
+  isGrammarCapable,
+  parseValidationOutcome,
+  repairToValid,
+  type ConstraintMechanism,
+} from '@/ai/grammarConstraint';
 import { KOINE_PRIMER } from '@/ai/assistantTools';
 import { renderMarkdown } from '@/editor/editor';
 import { loadChat, saveChat, clearChat } from '@/settings/persistence';
+
+/**
+ * Most parse-and-repair rounds the assistant will attempt before declaring it could not produce a
+ * model that parses (issue #257). Each round is a full extra LLM turn (latency + tokens), so this is
+ * a small constant rather than the larger {@link import('@/ai/ai').MAX_TOOL_ROUNDS} agentic-loop cap.
+ */
+export const MAX_REPAIR_ROUNDS: number = 3;
 
 /**
  * The compiled domain structure (contexts/aggregates/relations + glossary coverage), so reviews and
@@ -65,6 +79,18 @@ export interface AssistantPanelOptions {
    * withhold `runCompilerTool` so ai.ts runs a plain single-round streaming chat.
    */
   getUseTools: () => boolean;
+  /**
+   * Whether to constrain/guarantee the assistant's generated `.koi` parses (issue #257, on by default).
+   * When on: a grammar-capable local backend has its decoding constrained by the GBNF; every other
+   * provider validates-and-repairs the candidate, and "Apply to editor" stays disabled until it parses.
+   */
+  getConstrainGrammar: () => boolean;
+  /**
+   * Fetch the llama.cpp GBNF grammar from the host, to constrain a grammar-capable local model's
+   * decoding (issue #257). Browser-host ONLY — the desktop host omits it, in which case the panel
+   * falls back to the parse-and-repair path. Fetched defensively (a throw is treated as "unavailable").
+   */
+  getGrammar?: () => Promise<string>;
 }
 
 export interface AssistantPanel {
@@ -150,6 +176,26 @@ export function buildExplainPrompt(selectionText: string | null, fileSource: str
     '```koine',
     code,
     '```',
+  ].join('\n');
+}
+
+/**
+ * Build the parse-and-repair re-prompt (issue #257): hand the model back the `.koi` it just produced
+ * plus the `line:column` diagnostics that rejected it, and ask for ONLY the corrected model in a fenced
+ * block. Pure (no DOM) so it unit-tests, and so the repair loop and any future caller share one wording.
+ */
+export function buildRepairPrompt(previous: string, diagnostics: string): string {
+  return [
+    'The Koine model you produced does not parse. Fix it so it compiles cleanly, and return ONLY the',
+    'corrected model in a single ```koine code block — no prose, no explanation.',
+    '',
+    'Your previous model:',
+    '```koine',
+    previous,
+    '```',
+    '',
+    'Compiler diagnostics (line:column):',
+    diagnostics,
   ].join('\n');
 }
 
@@ -303,20 +349,132 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     return bubble;
   }
 
-  // Append an "Apply to editor" affordance when the assistant produced a model.
-  function maybeOfferApply(bubble: HTMLElement, markdown: string): void {
-    const koine = extractKoine(markdown);
-    if (!koine) return;
+  // Attach an enabled "Apply to editor" button that applies the GIVEN source (which, on the repair
+  // path, is the validated/repaired candidate — not necessarily the text in the rendered markdown).
+  function attachApplyButton(bubble: HTMLElement, source: string): void {
     const apply = document.createElement('button');
     apply.type = 'button';
     apply.className = 'koi-assistant-apply';
     apply.textContent = 'Apply to editor';
     apply.addEventListener('click', () => {
-      opts.onApplyModel(koine);
+      opts.onApplyModel(source);
       apply.textContent = 'Applied ✓';
       apply.disabled = true;
     });
     bubble.appendChild(apply);
+  }
+
+  // Append an "Apply to editor" affordance when the assistant produced a model.
+  function maybeOfferApply(bubble: HTMLElement, markdown: string): void {
+    const koine = extractKoine(markdown);
+    if (koine) attachApplyButton(bubble, koine);
+  }
+
+  // A small status chip on an assistant turn ("grammar-constrained" / "parse-and-repair").
+  function addChip(bubble: HTMLElement, label: string): void {
+    const chip = document.createElement('span');
+    chip.className = 'koi-assistant-chip';
+    chip.textContent = label;
+    bubble.appendChild(chip);
+  }
+
+  // The validate seam for the apply-gate: adapt the host's `koine_validate` tool (in-WASM in the
+  // browser, the MCP sidecar on desktop) into a {ok, diagnostics}. Null when the host can't run tools,
+  // in which case the gate is skipped (we can't parse, so we fall back to the unguarded affordance).
+  function makeValidate(): ((source: string) => Promise<{ ok: boolean; diagnostics: string }>) | null {
+    const run = opts.runCompilerTool;
+    if (!run) return null;
+    return async (source) => parseValidationOutcome(await run('koine_validate', JSON.stringify({ source })));
+  }
+
+  /**
+   * Render a finished, CONSTRAINED assistant reply (issue #257): the markdown body, then — for a
+   * generative turn that produced a `.koi` candidate — a mechanism chip and a gated "Apply" button.
+   *
+   *  • `off`    → exactly the legacy behavior: offer Apply unconditionally.
+   *  • `gbnf`   → the output is valid by construction; we still validate ONCE (a "grammar-constrained"
+   *               chip), enabling Apply only if it parses.
+   *  • `repair` → bounded parse-and-repair against the real Koine parser, a live "repair k/N" counter
+   *               and a "parse-and-repair" chip; Apply is enabled only when a candidate finally parses,
+   *               else a "couldn't produce valid Koine" notice is shown and Apply stays disabled.
+   *
+   * Never throws — a failed/aborted repair turn is folded into an `ok:false` outcome — so it can be
+   * awaited inside `send`'s try without disturbing its abort/error handling.
+   */
+  async function renderConstrainedReply(
+    bubble: HTMLElement,
+    content: string,
+    offerApply: boolean,
+    mechanism: ConstraintMechanism,
+    ctx: AssistantContext,
+  ): Promise<void> {
+    bubble.innerHTML = `<div class="koi-md">${renderMarkdown(content)}</div>`;
+    if (!offerApply) return; // explanatory turn — no model to apply, no chip, no gate
+
+    const candidate = extractKoine(content);
+    if (!candidate) return; // prose reply — nothing to apply or gate
+
+    const validate = makeValidate();
+    // Legacy / no-gate path: the toggle is off, or the host can't validate, so behave as before.
+    if (mechanism === 'off' || !validate) {
+      attachApplyButton(bubble, candidate);
+      return;
+    }
+
+    addChip(bubble, mechanism === 'gbnf' ? 'grammar-constrained' : 'parse-and-repair');
+
+    // The grammar-constrained candidate is valid by construction → validate once, never repair. The
+    // repair path re-prompts the model up to MAX_REPAIR_ROUNDS times, showing a live "repair k/N" line.
+    const maxRounds = mechanism === 'gbnf' ? 0 : MAX_REPAIR_ROUNDS;
+    let counter: HTMLElement | null = null;
+    if (mechanism === 'repair') {
+      counter = document.createElement('div');
+      counter.className = 'koi-assistant-repair-counter';
+      bubble.appendChild(counter);
+    }
+
+    let round = 0;
+    let result: { source: string; ok: boolean; rounds: number };
+    try {
+      result = await repairToValid(
+        candidate,
+        {
+          validate,
+          regenerate: async (previous, diagnostics) => {
+            round++;
+            if (counter) counter.textContent = `repair ${round}/${maxRounds}`;
+            const repaired = await runAssistant({
+              provider: opts.getProvider(),
+              baseUrl: opts.getBaseUrl(),
+              apiKey: opts.getApiKey(),
+              model: opts.getModel(),
+              system: buildSystem(ctx),
+              messages: [...messages, { role: 'user', content: buildRepairPrompt(previous, diagnostics) }],
+              signal: aborter?.signal,
+              // Stream nothing into the bubble — we only want the corrected candidate, not a second body.
+              onText: () => {},
+            });
+            return extractKoine(repaired) ?? repaired;
+          },
+        },
+        maxRounds,
+      );
+    } catch {
+      // A network error / user-abort during a repair turn: treat it as "could not validate".
+      result = { source: candidate, ok: false, rounds: round };
+    }
+
+    if (result.ok) {
+      attachApplyButton(bubble, result.source);
+    } else {
+      const notice = document.createElement('div');
+      notice.className = 'koi-assistant-invalid';
+      notice.textContent =
+        mechanism === 'repair'
+          ? `Couldn't produce valid Koine after ${maxRounds} repair attempt${maxRounds === 1 ? '' : 's'} — Apply is disabled.`
+          : "The generated model didn't parse — Apply is disabled.";
+      bubble.appendChild(notice);
+    }
   }
 
   // Render a finished assistant reply into a bubble: the markdown body, plus the "Apply to editor"
@@ -423,6 +581,22 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       // Fetch the grounding context ONCE (a quick-action caller passes the one it already resolved, so
       // getContext — which may hit the LSP to build the domain index — isn't run twice).
       const ctx = ctxOverride ?? (await opts.getContext());
+
+      // Decide the constraint mechanism (issue #257). Only bother fetching the GBNF when the toggle is
+      // on AND the backend is grammar-capable (a local OpenAI-compatible server) AND the host exposes a
+      // grammar accessor (browser only) — otherwise the parse-and-repair fallback covers it. The fetch
+      // is defensive: a throw / missing export degrades to repair rather than crashing the send.
+      const constrainOn = opts.getConstrainGrammar();
+      let gbnf: string | null = null;
+      if (constrainOn && opts.getGrammar && isGrammarCapable(provider, baseUrl)) {
+        try {
+          gbnf = await opts.getGrammar();
+        } catch {
+          gbnf = null;
+        }
+      }
+      const mechanism = chooseMechanism(constrainOn, provider, baseUrl, !!gbnf);
+
       full = await runAssistant({
         provider,
         baseUrl,
@@ -431,6 +605,8 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         system: buildSystem(ctx),
         messages,
         signal: aborter.signal,
+        // Attach the grammar only on the grammar-constrained path; a no-op for providers that ignore it.
+        ...(mechanism === 'gbnf' && gbnf ? { grammar: gbnf } : {}),
         onText: (delta) => {
           full += delta;
           replyBubble.textContent = full;
@@ -442,7 +618,9 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         onToolCall: addToolStatus,
       });
       commitAssistantTurn(full);
-      renderAssistantReply(replyBubble, full, offerApply);
+      // The apply-gate lives here: a constrained turn validates (and, on the repair path, re-prompts)
+      // before "Apply to editor" is enabled, so unparseable text can never be applied (#257).
+      await renderConstrainedReply(replyBubble, full, offerApply, mechanism, ctx);
     } catch (e) {
       // Keep the stored history in lock-step with the transcript on both failure paths.
       const aborted = aborter?.signal.aborted ?? false;

@@ -11,25 +11,10 @@
 // Both are pure / dependency-injected so they unit-test without a live LLM or the WASM compiler. The
 // `provider`/`baseUrl` inputs mirror Settings (`src/settings/persistence.ts`).
 
+import { isLocalProviderUrl } from '@/ai/ai';
+
 /** Which AI backend the assistant talks to — mirrors `Settings.aiProvider`. */
 export type AiProvider = 'anthropic' | 'openai';
-
-/** The hostname OpenAI proper is served from; an OpenAI-compatible endpoint here is the hosted API
- *  (no grammar field), not a local server. */
-const OPENAI_PROPER_HOST = 'api.openai.com';
-
-/**
- * True when a host is a loopback address — the only family we treat as a local, grammar-capable
- * server. Matched by EXACT label / IP, never by substring, so a spoof like `api.openai.com.localhost`
- * (whose hostname merely ends in `localhost`) is rejected.
- */
-function isLoopbackHost(host: string): boolean {
-  // `URL.hostname` keeps IPv6 in brackets (`[::1]`); strip them before comparing.
-  const h = host.replace(/^\[|\]$/g, '').toLowerCase();
-  if (h === 'localhost' || h === '::1') return true;
-  // Anything in 127.0.0.0/8 is loopback (127.0.0.1 is just the canonical one).
-  return /^127(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(h);
-}
 
 /**
  * Decide — from config alone, NOT by probing the endpoint — whether the configured backend can be
@@ -38,22 +23,47 @@ function isLoopbackHost(host: string): boolean {
  * Capable iff the provider is the OpenAI-compatible one AND the base URL points at a local (loopback)
  * server. Anthropic has no decode-time masking, and OpenAI proper (`api.openai.com`) ignores a grammar
  * field, so both are not capable. A malformed base URL is treated as not capable rather than throwing.
+ *
+ * The loopback test is delegated to {@link isLocalProviderUrl} (the same anchored check `ai.ts` already
+ * uses to decide whether an API key is required), so the "is this a local server?" rule lives in ONE
+ * place and the two can't drift. Its regex is anchored (`^https?://(localhost|127.0.0.1|[::1])…`), so a
+ * spoof like `https://api.openai.com.localhost/v1` — whose host merely ends in `localhost` — is rejected,
+ * and garbage / non-URL input simply fails to match (not capable) rather than throwing.
  */
 export function isGrammarCapable(provider: AiProvider, baseUrl: string): boolean {
-  if (provider !== 'openai') return false;
+  return provider === 'openai' && isLocalProviderUrl(baseUrl);
+}
 
-  let host: string;
-  try {
-    host = new URL(baseUrl).hostname;
-  } catch {
-    return false;
-  }
+/** Which constraint strategy a turn should use (see {@link chooseMechanism}). */
+export type ConstraintMechanism = 'gbnf' | 'repair' | 'off';
 
-  // Explicit deny for OpenAI proper (a loopback check alone would already exclude it, but spelling it
-  // out documents intent and guards against an accidental future allow-by-suffix rule).
-  if (host.toLowerCase() === OPENAI_PROPER_HOST) return false;
+/**
+ * Pure decision: given the setting and the active backend, which constraint strategy applies.
+ *  • `off`    — the toggle is off → behave exactly as before (no grammar, no gate).
+ *  • `gbnf`   — the backend is grammar-capable AND the GBNF is actually available to attach
+ *               (the browser WASM host exposes it; the desktop host does not) → constrain decoding.
+ *  • `repair` — the toggle is on but the backend can't be token-masked (Anthropic / OpenAI proper),
+ *               or the GBNF couldn't be fetched (desktop) → fall back to parse-and-repair.
+ */
+export function chooseMechanism(
+  constrainOn: boolean,
+  provider: AiProvider,
+  baseUrl: string,
+  gbnfAvailable: boolean,
+): ConstraintMechanism {
+  if (!constrainOn) return 'off';
+  if (gbnfAvailable && isGrammarCapable(provider, baseUrl)) return 'gbnf';
+  return 'repair';
+}
 
-  return isLoopbackHost(host);
+/**
+ * Adapt the `koine_validate` tool's formatted result string into a {@link ValidationOutcome}. The tool
+ * (see `formatValidate` in assistantTools.ts) returns `ok: true — no diagnostics. …` when the model
+ * compiles, or `ok: false — N error(s), … :\n- [error] L:C …` otherwise. The whole string is kept as
+ * `diagnostics` so the `line:column` detail can be fed straight back into a repair re-prompt.
+ */
+export function parseValidationOutcome(result: string): ValidationOutcome {
+  return { ok: result.trimStart().startsWith('ok: true'), diagnostics: result };
 }
 
 /** Outcome of one validation pass — the `ok` flag plus the human-readable `line:column` diagnostics

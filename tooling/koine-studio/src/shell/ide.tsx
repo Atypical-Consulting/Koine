@@ -1587,6 +1587,12 @@ export function init(): () => void {
       // Opt-in: advertising tools makes local servers (LM Studio) buffer instead of stream, so the
       // tools are only offered when the user enables them in Settings → Assistant.
       getUseTools: () => loadSettings().aiAgenticTools,
+      // On by default (#257): constrain a grammar-capable local model to the Koine GBNF, and
+      // validate-and-repair every other provider's output before "Apply to editor" is enabled.
+      getConstrainGrammar: () => loadSettings().aiConstrainGrammar,
+      // The GBNF comes from the host's resident compiler. Browser-host only — the desktop host omits
+      // gbnfGrammar(), so the panel falls back to parse-and-repair there.
+      getGrammar: platform.gbnfGrammar ? () => platform.gbnfGrammar!() : undefined,
     });
     return assistant;
   }

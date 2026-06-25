@@ -1,5 +1,11 @@
 import { describe, expect, test, vi } from 'vitest';
-import { isGrammarCapable, repairToValid, type RepairDeps } from '@/ai/grammarConstraint';
+import {
+  chooseMechanism,
+  isGrammarCapable,
+  parseValidationOutcome,
+  repairToValid,
+  type RepairDeps,
+} from '@/ai/grammarConstraint';
 
 describe('isGrammarCapable()', () => {
   test('local OpenAI-compatible endpoints accept a grammar field (capable)', () => {
@@ -27,6 +33,43 @@ describe('isGrammarCapable()', () => {
     // Garbage / non-URL input is treated as not capable rather than throwing.
     expect(isGrammarCapable('openai', 'not a url')).toBe(false);
     expect(isGrammarCapable('openai', '')).toBe(false);
+  });
+});
+
+describe('chooseMechanism()', () => {
+  test('off whenever the toggle is off, regardless of provider/url/availability', () => {
+    expect(chooseMechanism(false, 'openai', 'http://localhost:1234/v1', true)).toBe('off');
+    expect(chooseMechanism(false, 'anthropic', 'https://api.anthropic.com', false)).toBe('off');
+  });
+
+  test('gbnf only when on AND grammar-capable AND the GBNF is actually available', () => {
+    // Capable local backend with the grammar in hand → constrain decoding.
+    expect(chooseMechanism(true, 'openai', 'http://localhost:1234/v1', true)).toBe('gbnf');
+    // Capable, but the GBNF couldn't be fetched (e.g. desktop host has no accessor) → repair fallback.
+    expect(chooseMechanism(true, 'openai', 'http://localhost:1234/v1', false)).toBe('repair');
+  });
+
+  test('repair when on but the backend cannot be token-masked', () => {
+    // Anthropic is never capable; OpenAI proper ignores a grammar field — both repair.
+    expect(chooseMechanism(true, 'anthropic', 'https://api.anthropic.com', true)).toBe('repair');
+    expect(chooseMechanism(true, 'openai', 'https://api.openai.com/v1', true)).toBe('repair');
+  });
+});
+
+describe('parseValidationOutcome()', () => {
+  test('an ok:true validate string parses to a clean outcome carrying the whole text', () => {
+    const s = 'ok: true — no diagnostics. The model compiles.';
+    expect(parseValidationOutcome(s)).toEqual({ ok: true, diagnostics: s });
+  });
+
+  test('an ok:false validate string parses to a dirty outcome keeping the line:column detail', () => {
+    const s = 'ok: false — 1 error(s), 0 warning(s):\n- [error] 1:1 boom';
+    expect(parseValidationOutcome(s)).toEqual({ ok: false, diagnostics: s });
+  });
+
+  test('tolerates leading whitespace before the ok: prefix', () => {
+    expect(parseValidationOutcome('  ok: true — fine').ok).toBe(true);
+    expect(parseValidationOutcome('\nok: false — nope').ok).toBe(false);
   });
 });
 
