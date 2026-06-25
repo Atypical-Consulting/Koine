@@ -1234,13 +1234,45 @@ public sealed partial class CSharpEmitter : IEmitter
         && index.Classify(element.Name) == TypeKind.Value;
 
     /// <summary>
+    /// Classifies a member's type into the single <see cref="OwnedKind"/> that drives <b>both</b> the EF
+    /// Core persistence-constructor gate (this domain emitter) and the EF mapping
+    /// (<c>CSharpEmitter.Infrastructure</c>). The two decisions are the same domain question — <em>does
+    /// this member own a value object, and how is it persisted?</em> — answered once here so the gate and
+    /// the mapping can never drift (issue #344, deferred from the #276 review). The precedence mirrors the
+    /// mapping exactly: a <c>List&lt;T&gt;</c> is a value-object collection (<c>OwnsMany</c>) when its
+    /// element is a value object, otherwise an other collection (mapped by convention); a set/map is always
+    /// an other collection; otherwise the scalar is classified by its declared kind — value object
+    /// (<c>OwnsOne</c>), smart enum (<c>HasConversion</c>), foreign strongly-typed id (<c>HasConversion</c>),
+    /// or plain primitive (<c>Property</c>).
+    /// </summary>
+    internal static OwnedKind ClassifyMember(TypeRef type, ModelIndex index)
+    {
+        if (CSharpTypeMapper.IsList(type))
+        {
+            return IsValueObjectList(type, index) ? OwnedKind.ValueObjectCollection : OwnedKind.OtherCollection;
+        }
+
+        if (CSharpTypeMapper.IsSet(type) || CSharpTypeMapper.IsMap(type))
+        {
+            return OwnedKind.OtherCollection;
+        }
+
+        return index.Classify(type.Name) switch
+        {
+            TypeKind.Value => OwnedKind.ScalarValueObject,
+            TypeKind.Enum => OwnedKind.SmartEnum,
+            _ => index.IdTypeNames.Contains(type.Name) ? OwnedKind.ForeignId : OwnedKind.Primitive,
+        };
+    }
+
+    /// <summary>
     /// True when a member's type is an owned value object — a scalar value object the EF Core
     /// Infrastructure layer maps with <c>OwnsOne</c>, or a <c>List&lt;T&gt;</c> of value objects it maps
     /// with <c>OwnsMany</c> (issue #171). Scalars and set/map collections are deliberately excluded.
+    /// Defined in terms of <see cref="ClassifyMember"/> so the ctor gate cannot diverge from the mapping.
     /// </summary>
     private static bool OwnsValueObject(TypeRef type, ModelIndex index) =>
-        IsValueObjectList(type, index)
-        || (!CSharpTypeMapper.IsList(type) && index.Classify(type.Name) == TypeKind.Value);
+        ClassifyMember(type, index) is OwnedKind.ScalarValueObject or OwnedKind.ValueObjectCollection;
 
     /// <summary>
     /// True when an entity needs the parameterless EF persistence constructor (issue #276, generalizing
@@ -2258,4 +2290,30 @@ public sealed partial class CSharpEmitter : IEmitter
 
         return map;
     }
+}
+
+/// <summary>
+/// How a persisted member is owned and mapped — the single classification both the domain
+/// persistence-constructor gate and the infrastructure EF mapping consume, so they cannot drift
+/// (issue #344). Produced by <see cref="CSharpEmitter.ClassifyMember"/>.
+/// </summary>
+internal enum OwnedKind
+{
+    /// <summary>A plain primitive scalar — mapped with an explicit <c>Property</c>.</summary>
+    Primitive,
+
+    /// <summary>A foreign strongly-typed id (e.g. <c>customer: CustomerId</c>) — mapped with a value <c>HasConversion</c>.</summary>
+    ForeignId,
+
+    /// <summary>A smart-enum scalar — mapped with the shared <c>ValueConverter</c> via <c>HasConversion</c>.</summary>
+    SmartEnum,
+
+    /// <summary>A scalar value object — mapped as an owned type with <c>OwnsOne</c>.</summary>
+    ScalarValueObject,
+
+    /// <summary>A <c>List&lt;T&gt;</c> of value objects — mapped as an owned collection with <c>OwnsMany</c> (issue #171).</summary>
+    ValueObjectCollection,
+
+    /// <summary>Any other collection (primitive list, set, or map) — mapped by EF Core convention.</summary>
+    OtherCollection,
 }
