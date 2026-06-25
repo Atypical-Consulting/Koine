@@ -116,6 +116,50 @@ public class LspServerTests
         return [];
     }
 
+    /// <summary>
+    /// Parses the <c>initialize</c> response for <paramref name="id"/> and returns the advertised
+    /// semantic-tokens legend (token-type names, modifier names) and the <c>full</c> flag, so a test
+    /// can assert the wire legend equals <see cref="SemanticTokenProvider"/>'s own constants.
+    /// </summary>
+    private static (string[] TokenTypes, string[] TokenModifiers, bool Full) SemanticTokensLegend(string output, int id)
+    {
+        foreach (var body in TestSupport.JsonRpcFrames(output))
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number && idEl.GetInt32() == id
+                && root.TryGetProperty("result", out var result)
+                && result.TryGetProperty("capabilities", out var caps)
+                && caps.TryGetProperty("semanticTokensProvider", out var stp))
+            {
+                var legend = stp.GetProperty("legend");
+                var types = legend.GetProperty("tokenTypes").EnumerateArray().Select(e => e.GetString()!).ToArray();
+                var mods = legend.GetProperty("tokenModifiers").EnumerateArray().Select(e => e.GetString()!).ToArray();
+                return (types, mods, stp.GetProperty("full").GetBoolean());
+            }
+        }
+
+        return ([], [], false);
+    }
+
+    /// <summary>Parses the <c>textDocument/semanticTokens/full</c> response for <paramref name="id"/> into its <c>data</c> int stream.</summary>
+    private static int[] SemanticTokensData(string output, int id)
+    {
+        foreach (var body in TestSupport.JsonRpcFrames(output))
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number && idEl.GetInt32() == id
+                && root.TryGetProperty("result", out var result)
+                && result.TryGetProperty("data", out var data))
+            {
+                return data.EnumerateArray().Select(e => e.GetInt32()).ToArray();
+            }
+        }
+
+        return [];
+    }
+
     [Fact]
     public void ToRange_underlines_the_offending_token()
     {
@@ -786,10 +830,14 @@ public class LspServerTests
     {
         var output = RunSession(Initialize());
         output.ShouldContain("\"semanticTokensProvider\"");
-        output.ShouldContain("\"legend\"");
-        output.ShouldContain("\"tokenTypes\":[\"type\",\"enum\",\"enumMember\",\"property\",\"keyword\",\"parameter\"]");
-        output.ShouldContain("\"tokenModifiers\":[\"declaration\"]");
-        output.ShouldContain("\"full\":true");
+
+        // The advertised legend must BE the provider's own legend constants (not a hand-copied
+        // literal), and `full` must be true — so the stdio LSP and the wasm interop (#329) decode
+        // the same tokenType/modifier ints. Asserting against the constants pins that contract.
+        var (tokenTypes, tokenModifiers, full) = SemanticTokensLegend(output, 1);
+        tokenTypes.ShouldBe(SemanticTokenProvider.TokenTypeNames);
+        tokenModifiers.ShouldBe(SemanticTokenProvider.TokenModifierNames);
+        full.ShouldBeTrue();
     }
 
     [Fact]
@@ -797,8 +845,12 @@ public class LspServerTests
     {
         var doc = "context C {\n  value Money { amount: Decimal }\n}\n";
         var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), SemanticTokensFull("file:///t.koi"));
-        output.ShouldContain("\"data\":[");
-        output.ShouldNotContain("\"data\":[]"); // a parsing model produces tokens
+
+        // The wire `data` must be EXACTLY the provider's encoded stream — the contract the wasm
+        // interop will mirror byte-for-byte (#329), not merely "some non-empty array".
+        var expected = SemanticTokenProvider.Encode(new SemanticTokenProvider().Tokenize(doc));
+        SemanticTokensData(output, 25).ShouldBe(expected);
+        expected.ShouldNotBeEmpty(); // a parsing model produces tokens
     }
 
     [Fact]
