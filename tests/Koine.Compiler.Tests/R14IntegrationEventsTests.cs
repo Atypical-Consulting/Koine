@@ -1,4 +1,5 @@
 using System.Reflection;
+using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Services;
@@ -288,8 +289,11 @@ public class R14IntegrationEventsTests
     }
 
     [Fact]
-    public void Subscribing_to_two_same_named_events_from_different_publishers_is_reported()
+    public void Subscribing_to_two_same_named_events_from_different_publishers_is_allowed()
     {
+        // Two upstream contexts legitimately publish a same-named integration event; a downstream
+        // context that integrates with both is a valid DDD shape (#420). KOI1417 no longer fires —
+        // each emitter qualifies the colliding handler seam by publisher instead.
         const string src = """
             context Sales { publishes Changed  integration event Changed { id: OrderId } }
             context Inventory { publishes Changed  integration event Changed { id: ItemId } }
@@ -299,6 +303,31 @@ public class R14IntegrationEventsTests
               Inventory -> Hub : open-host
             }
             """;
-        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.SubscribeHandlerNameCollision);
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.SubscribeHandlerNameCollision);
+    }
+
+    [Fact]
+    public void The_ambiguity_query_flags_only_same_named_cross_publisher_subscriptions()
+    {
+        const string src = """
+            context Sales { publishes Changed  integration event Changed { id: OrderId } }
+            context Inventory {
+              publishes Changed  publishes Restocked
+              integration event Changed { id: ItemId }
+              integration event Restocked { id: ItemId }
+            }
+            context Hub { subscribes Sales.Changed  subscribes Inventory.Changed  subscribes Inventory.Restocked }
+            contextmap {
+              Sales -> Hub : open-host
+              Inventory -> Hub : open-host
+            }
+            """;
+        ModelIndex index = new SemanticModel(new KoineCompiler().Parse(src).Model!).Index;
+        // 'Changed' reaches Hub from both Sales and Inventory → the bare IHandleChanged seam collides.
+        index.SubscriptionEventNameIsAmbiguous("Hub", "Changed").ShouldBeTrue();
+        // 'Restocked' reaches Hub from a single publisher → no collision.
+        index.SubscriptionEventNameIsAmbiguous("Hub", "Restocked").ShouldBeFalse();
+        // A context that does not subscribe to 'Changed' at all → never ambiguous.
+        index.SubscriptionEventNameIsAmbiguous("Sales", "Changed").ShouldBeFalse();
     }
 }
