@@ -12,6 +12,7 @@ import { loadSecret, saveSecret } from '@/ai/secrets';
 import type { ChatMessage } from '@/ai/ai';
 import { sanitizeGroups, sanitizeNotes, type DiagramGroup, type DiagramNote } from '@/diagrams/diagramContract';
 import { isEmitTarget } from '@/shared/emitTargets';
+import { DEFAULT_BINDINGS, type BindingId } from '@/editor/keybindings';
 
 // --- settings model ----------------------------------------------------------
 
@@ -107,6 +108,8 @@ const SETTINGS_KEY = 'koine.studio.settings';
 const RECENT_KEY = 'koine.studio.recentFolders';
 const SCRATCH_KEY = 'koine.studio.scratch';
 const WORKSPACE_CENTER_KEY = 'koine.studio.workspaceCenter';
+// Editor keybinding overrides (#266): a small Partial<Record<BindingId, string>> of user remaps.
+const KEYBINDINGS_KEY = 'koine.studio.keybindings';
 // Per-workspace active context scope (#146): the folder's storage key is appended (see loadActiveContext).
 const ACTIVE_CONTEXT_KEY_PREFIX = 'koine.studio.activeContext.';
 const RECENT_CAP = 25;
@@ -733,4 +736,75 @@ export function effectiveSettings(user: Settings, workspaceKey: string | null): 
   const overrides = loadWorkspaceOverrides(workspaceKey);
   if (Object.keys(overrides).length === 0) return user;
   return { ...user, ...overrides };
+}
+
+// --- editor keybinding overrides (#266) --------------------------------------
+// The Settings → Keyboard panel can remap any of the editor's LSP-action shortcuts. Only the user's
+// REMAPS live here (a sparse Partial keyed by BindingId); the defaults stay in keybindings.ts so the
+// two can't drift. resolveKeybindings() layers the overrides over DEFAULT_BINDINGS for the editor to
+// load. An empty-string value is a deliberate "unbound" override (kept), distinct from "no override".
+
+/**
+ * The user's keybinding remaps. Drops unknown ids (not a BindingId) and non-string values so a
+ * hand-edited or stale key can never feed the editor a bad map; an absent/corrupt blob returns {}.
+ */
+export function loadKeybindingOverrides(): Partial<Record<BindingId, string>> {
+  const raw = readRaw(KEYBINDINGS_KEY);
+  if (raw === null) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const blob = parsed as Record<string, unknown>;
+    const out: Partial<Record<BindingId, string>> = {};
+    for (const [id, value] of Object.entries(blob)) {
+      // Keep only known BindingIds with a string value ('' is the deliberate "unbound" override).
+      // hasOwnProperty, not `in` — `in` is true for inherited Object keys ('toString', 'constructor'),
+      // which would let a hand-edited blob smuggle a bogus id past the "drop unknown ids" guard.
+      if (Object.prototype.hasOwnProperty.call(DEFAULT_BINDINGS, id) && typeof value === 'string') {
+        out[id as BindingId] = value;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** The full keybinding map the editor loads: defaults with the user's overrides layered on top. */
+export function resolveKeybindings(): Record<BindingId, string> {
+  return { ...DEFAULT_BINDINGS, ...loadKeybindingOverrides() };
+}
+
+/**
+ * Set (or clear) a single keybinding override. Passing `null` REMOVES the remap so the default wins
+ * again. Reads the current blob, applies the change, and writes it back via writeRaw.
+ */
+export function saveKeybindingOverride(id: BindingId, key: string | null): void {
+  const raw = readRaw(KEYBINDINGS_KEY);
+  let blob: Record<string, unknown> = {};
+  if (raw !== null) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        blob = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // corrupt blob — start fresh
+    }
+  }
+  if (key === null) {
+    delete blob[id];
+  } else {
+    blob[id] = key;
+  }
+  writeRaw(KEYBINDINGS_KEY, JSON.stringify(blob));
+}
+
+/** Forget all keybinding overrides — resolveKeybindings() then returns pure defaults. */
+export function clearKeybindingOverrides(): void {
+  try {
+    localStorage.removeItem(KEYBINDINGS_KEY);
+  } catch {
+    // storage unavailable — nothing to clear
+  }
 }
