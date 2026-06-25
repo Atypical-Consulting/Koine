@@ -691,6 +691,15 @@ describe('keybinding overrides', () => {
     expect(resolved.rename).toBe(DEFAULT_BINDINGS.rename);
   });
 
+  test('an inherited Object key (e.g. "toString") is NOT treated as a valid binding id', () => {
+    // `id in DEFAULT_BINDINGS` would be true for prototype keys; the guard must use hasOwnProperty.
+    localStorage.setItem('koine.studio.keybindings', JSON.stringify({ toString: 'Mod-q' }));
+    const overrides = loadKeybindingOverrides();
+    // `.toString` is inherited from Object.prototype, so assert it was not picked up as an OWN key.
+    expect(Object.prototype.hasOwnProperty.call(overrides, 'toString')).toBe(false);
+    expect(resolveKeybindings()).toEqual(DEFAULT_BINDINGS);
+  });
+
   test('clearKeybindingOverrides returns the resolved map to pure defaults', () => {
     saveKeybindingOverride('rename', 'Ctrl-r');
     expect(resolveKeybindings().rename).toBe('Ctrl-r');

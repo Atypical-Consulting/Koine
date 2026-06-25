@@ -749,7 +749,11 @@ export function loadKeybindingOverrides(): Partial<Record<BindingId, string>> {
     const out: Partial<Record<BindingId, string>> = {};
     for (const [id, value] of Object.entries(blob)) {
       // Keep only known BindingIds with a string value ('' is the deliberate "unbound" override).
-      if (id in DEFAULT_BINDINGS && typeof value === 'string') out[id as BindingId] = value;
+      // hasOwnProperty, not `in` — `in` is true for inherited Object keys ('toString', 'constructor'),
+      // which would let a hand-edited blob smuggle a bogus id past the "drop unknown ids" guard.
+      if (Object.prototype.hasOwnProperty.call(DEFAULT_BINDINGS, id) && typeof value === 'string') {
+        out[id as BindingId] = value;
+      }
     }
     return out;
   } catch {

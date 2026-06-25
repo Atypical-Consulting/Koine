@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { chordFromEvent, createPreferences, type PrefsCallbacks } from '@/settings/prefs';
 import {
   DEFAULT_SETTINGS,
@@ -409,6 +409,13 @@ describe('keyboard settings', () => {
     saveSettings({ ...DEFAULT_SETTINGS });
   });
 
+  // A test that intentionally leaves a row armed (the min-modifier guard) would leak its document-level
+  // keydown listener into the next test. Escape disarms an armed recorder and is a harmless no-op
+  // otherwise, so dispatch it between tests to guarantee no listener survives.
+  afterEach(() => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  });
+
   const rows = () =>
     [...document.querySelectorAll<HTMLElement>('#koi-settings-panel-keyboard .koi-kbd-row')];
   const rowFor = (id: string) =>
@@ -436,17 +443,17 @@ describe('keyboard settings', () => {
   it('recording a chord persists the override, updates the display, and fires onKeybindingsChanged', () => {
     const onKeybindingsChanged = vi.fn();
     openPrefs({ onKeybindingsChanged });
-    record('format', { key: 'd', ctrlKey: true });
-    expect(loadKeybindingOverrides().format).toBe('Mod-d');
+    record('format', { key: 'j', ctrlKey: true });
+    expect(loadKeybindingOverrides().format).toBe('Mod-j');
     expect(onKeybindingsChanged).toHaveBeenCalled();
-    expect(chordOf('format').textContent).toBe('Ctrl+D');
+    expect(chordOf('format').textContent).toBe('Ctrl+J');
   });
 
   it('per-row Reset restores the default and fires onKeybindingsChanged', () => {
     const onKeybindingsChanged = vi.fn();
     openPrefs({ onKeybindingsChanged });
-    record('format', { key: 'd', ctrlKey: true });
-    expect(loadKeybindingOverrides().format).toBe('Mod-d');
+    record('format', { key: 'j', ctrlKey: true });
+    expect(loadKeybindingOverrides().format).toBe('Mod-j');
 
     onKeybindingsChanged.mockClear();
     resetBtn('format').click();
@@ -480,8 +487,8 @@ describe('keyboard settings', () => {
   it('Reset all clears every override and fires onKeybindingsChanged', () => {
     const onKeybindingsChanged = vi.fn();
     openPrefs({ onKeybindingsChanged });
-    record('format', { key: 'd', ctrlKey: true });
-    expect(loadKeybindingOverrides().format).toBe('Mod-d');
+    record('format', { key: 'j', ctrlKey: true });
+    expect(loadKeybindingOverrides().format).toBe('Mod-j');
 
     onKeybindingsChanged.mockClear();
     document.querySelector<HTMLButtonElement>('#koi-settings-panel-keyboard .koi-kbd-reset-all')!.click();
@@ -498,5 +505,50 @@ describe('keyboard settings', () => {
     danger.click(); // confirm
     expect(loadKeybindingOverrides()).toEqual({});
     expect(resolveKeybindings()).toEqual(DEFAULT_BINDINGS);
+  });
+
+  it('ignores a modifier-less printable key (binding it would make the character un-typeable)', () => {
+    const onKeybindingsChanged = vi.fn();
+    openPrefs({ onKeybindingsChanged });
+    record('format', { key: 'g' }); // a bare letter, no modifier — must be rejected
+    expect(loadKeybindingOverrides().format).toBeUndefined();
+    expect(onKeybindingsChanged).not.toHaveBeenCalled();
+    expect(chordOf('format').textContent).toBe('Ctrl+S'); // unchanged
+  });
+
+  it('warns before letting a remap shadow a reserved editor shortcut, then applies on confirm', () => {
+    const onKeybindingsChanged = vi.fn();
+    openPrefs({ onKeybindingsChanged });
+    // Mod-f (Find) is a loaded built-in the registry compartment would shadow — not a rebindable command.
+    record('format', { key: 'f', ctrlKey: true });
+    const conflict = conflictOf('format');
+    expect(conflict.hidden).toBe(false);
+    expect(conflict.textContent).toContain('Find');
+    expect(loadKeybindingOverrides().format).toBeUndefined(); // deferred until confirmed
+
+    reassignBtn('format').click();
+    expect(loadKeybindingOverrides().format).toBe('Mod-f');
+    expect(onKeybindingsChanged).toHaveBeenCalled();
+  });
+
+  it('recording a command’s own default drops the override instead of persisting a redundant one', () => {
+    openPrefs();
+    record('format', { key: 'j', ctrlKey: true }); // override away from the default
+    expect(loadKeybindingOverrides().format).toBe('Mod-j');
+    record('format', { key: 's', ctrlKey: true }); // record the default (Mod-s) back
+    expect(loadKeybindingOverrides().format).toBeUndefined();
+    expect(resolveKeybindings().format).toBe('Mod-s');
+  });
+
+  it('disarms the recorder when the dialog closes, so no leaked listener rebinds a hidden row', () => {
+    const onKeybindingsChanged = vi.fn();
+    const prefs = createPreferences({ onChange: () => {}, onKeybindingsChanged });
+    prefs.open();
+    recordBtn('format').click(); // arm, but never deliver a key
+    prefs.close();
+    // The post-close keystroke must be ignored — the document listener was torn down on close.
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+    expect(loadKeybindingOverrides().format).toBeUndefined();
+    expect(onKeybindingsChanged).not.toHaveBeenCalled();
   });
 });
