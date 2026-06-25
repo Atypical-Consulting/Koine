@@ -14,12 +14,8 @@ namespace Koine.Compiler.Tests.Conformance;
 /// </summary>
 public class RustSmartEnumNamingTests
 {
-    private readonly ITestOutputHelper _output;
-
-    public RustSmartEnumNamingTests(ITestOutputHelper output) => _output = output;
-
     private const string NoToolchainNotice =
-        "INCONCLUSIVE: no usable Rust toolchain (cargo, networked) available; cargo check not run.";
+        "No usable Rust toolchain (cargo, networked) available; cargo check not run.";
 
     /// <summary>
     /// The minimal repro from #315: an enum with two members distinguished only by an inner
@@ -65,11 +61,7 @@ public class RustSmartEnumNamingTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
