@@ -4,6 +4,7 @@
 // download-as-zip, a mobile editor/output toggle, and the "Open in Studio" handoff.
 import { createKoineEditor, createOutputView, type KoineEditor, type OutputView, type OutputLang } from './editor';
 import { compile, preloadCompiler, type CompileResult, type Target } from './koine';
+import { registerPlaygroundServiceWorker } from './sw-register';
 import { DEFAULT_SAMPLE } from './samples';
 import { makeZip, downloadBlob } from './zip';
 import { encodeCode } from './encode';
@@ -252,6 +253,9 @@ export function mountPlayground(root: HTMLElement): void {
       mobileBtns.forEach((b) => b.classList.toggle('is-active', b === btn));
     };
   }
+
+  // Cache-first the multi-MB wasm runtime so repeat visits boot instantly + offline (issue #328).
+  registerPlaygroundServiceWorker();
 
   // Kick off the runtime download and first compile (landing on a meaningful file).
   setStatus('loading compiler…', 'busy');
