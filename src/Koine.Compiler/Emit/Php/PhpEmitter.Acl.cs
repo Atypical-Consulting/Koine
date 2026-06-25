@@ -53,9 +53,6 @@ public sealed partial class PhpEmitter
             var upstreamType = PhpNaming.ClassName(m.UpstreamType);
             var method = "translate" + upstreamType + "To" + localType;
 
-            // The return (local) type always resolves to its declaring context.
-            symbolContext[localType] = m.LocalContext;
-
             // The param (upstream) hint: aliased when it collides with the local short name in a
             // different context, otherwise the bare name resolved against the upstream context.
             string paramHint;
@@ -69,8 +66,17 @@ public sealed partial class PhpEmitter
             else
             {
                 paramHint = upstreamType;
-                symbolContext[upstreamType] = m.UpstreamContext;
+                // Don't pin the bare name to the upstream context when it shares the local short name
+                // (the alias path was unavailable) — the local/return hint below must win it instead.
+                if (upstreamType != localType)
+                {
+                    symbolContext[upstreamType] = m.UpstreamContext;
+                }
             }
+
+            // The return (local) type always resolves to its declaring context — set last so a
+            // same-named bare reference resolves to the file's own (downstream) copy, never the upstream.
+            symbolContext[localType] = m.LocalContext;
 
             if (!first)
             {
