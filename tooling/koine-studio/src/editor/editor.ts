@@ -44,7 +44,7 @@ import {
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { showMinimap } from '@replit/codemirror-minimap';
 import { csharp } from '@codemirror/legacy-modes/mode/clike';
-import { typescript } from '@codemirror/legacy-modes/mode/javascript';
+import { typescript, json } from '@codemirror/legacy-modes/mode/javascript';
 import { python } from '@codemirror/legacy-modes/mode/python';
 import { rust } from '@codemirror/legacy-modes/mode/rust';
 import { php } from '@codemirror/lang-php';
@@ -1214,6 +1214,9 @@ const LANG_MODES: Record<string, () => Extension> = {
   typescript: () => StreamLanguage.define(typescript),
   python: () => StreamLanguage.define(python),
   rust: () => StreamLanguage.define(rust),
+  // JSON powers the read-only MCP configuration recipe in Settings (createJsonView); the
+  // legacy-modes JSON tokenizer is already bundled, so highlighting it adds no new dependency.
+  json: () => StreamLanguage.define(json),
   // PHP uses the Lezer-based grammar (lang-php); emitted files open with `<?php`, so the
   // default mixed-mode config highlights them correctly.
   php: () => php(),
