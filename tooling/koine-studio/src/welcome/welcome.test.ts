@@ -400,6 +400,52 @@ describe('mountHome (routed Home view)', () => {
   });
 });
 
+describe('Home colophon footer', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  /** The colophon footer inside a welcome root, asserted present. */
+  function footerOf(root: HTMLElement): HTMLElement {
+    const footer = root.querySelector<HTMLElement>('.koi-home-colophon');
+    expect(footer).not.toBeNull();
+    return footer!;
+  }
+
+  function linkLabels(footer: HTMLElement): (string | undefined)[] {
+    return Array.from(footer.querySelectorAll<HTMLElement>('.koi-home-colophon-link')).map((a) => a.textContent?.trim());
+  }
+
+  test('the overlay Home (createWelcome) carries the four links, byline and a hidden version chip', () => {
+    createWelcome(makeCallbacks(), SAMPLE);
+    const footer = footerOf(document.querySelector<HTMLElement>('.koi-welcome')!);
+    expect(linkLabels(footer)).toEqual(['GitHub', 'Home', 'Docs', 'Blog']);
+    expect(footer.querySelector('.koi-home-colophon-credit')?.textContent).toContain('Philippe Matray');
+    // The chip stays hidden until the async version fetch resolves (mirrors the About chip).
+    expect(footer.querySelector<HTMLElement>('.koi-home-colophon-chip')!.hidden).toBe(true);
+  });
+
+  test('the routed Home (mountHome) carries the same colophon footer', () => {
+    const el = document.createElement('div');
+    mountHome(el, makeCallbacks(), SAMPLE);
+    const footer = footerOf(el.querySelector<HTMLElement>('.koi-welcome')!);
+    expect(linkLabels(footer)).toEqual(['GitHub', 'Home', 'Docs', 'Blog']);
+    expect(footer.querySelector('.koi-home-colophon-credit')?.textContent).toContain('Philippe Matray');
+  });
+
+  test('each colophon link is a real external anchor (href + target + rel)', () => {
+    createWelcome(makeCallbacks(), SAMPLE);
+    const footer = footerOf(document.querySelector<HTMLElement>('.koi-welcome')!);
+    const links = Array.from(footer.querySelectorAll<HTMLAnchorElement>('a.koi-home-colophon-link'));
+    expect(links.length).toBe(4);
+    for (const a of links) {
+      expect(a.getAttribute('href')).toMatch(/^https:\/\//);
+      expect(a.target).toBe('_blank');
+      expect(a.rel).toBe('noopener noreferrer');
+    }
+  });
+});
+
 describe('mountHome — Resume editing control', () => {
   test('with { canResume: true } renders a [data-action="resume"] control that fires onResume', () => {
     const el = document.createElement('div');
