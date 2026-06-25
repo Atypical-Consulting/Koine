@@ -151,7 +151,9 @@ That discipline is also why [Koine Studio](/Koine/studio/) can show C#, TypeScri
 glossary side by side from one model: it's the same compile, three emitters. C# is the most complete
 target today; TypeScript is emitting now, **Python** (Phase 1: tactical core — value objects,
 smart enums, identity entities, events, and repository protocols, all dependency-free and
-`mypy --strict`-clean) and **PHP 8.1** (Phase 1: the same tactical core, dependency-free, using typed
+`mypy --strict`-clean) and **PHP 8.1** (the tactical core *and* the strategic/CQRS layer — read models,
+query handler seams, application services/use cases/operations, specifications, policies, context-map
+ACL translators and integration-event subscriber seams — dependency-free, using typed
 properties and readonly promoted properties) are available today via the CLI and MCP server. A **Rust**
 target ships too (Phase 1: an idiomatic crate — smart constructors returning `Result<_, DomainError>`,
 exhaustively-matched enums, repository `trait`s, proved by a `cargo check` meta-test). Your existing

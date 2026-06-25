@@ -1,13 +1,13 @@
 ---
 title: "Roadmap"
-description: "What Koine ships today (R1–R18: full DDD toolkit; C#, TypeScript, Python, PHP (Phase 1), and Rust (multi-context + CQRS) emitters; editor tooling; and model-as-spec coverage) and what comes next."
+description: "What Koine ships today (R1–R18: full DDD toolkit; C#, TypeScript, Python, PHP (tactical + strategic/CQRS), and Rust (multi-context + CQRS) emitters; editor tooling; and model-as-spec coverage) and what comes next."
 ---
 
 Koine is built as a sequence of **epics** (R1–R18), each a cohesive slice of Domain-Driven Design
 capability. The compiler ships the **full tactical and strategic toolkit (R1–R15)**, the
-**R16 multi-target emitters** (C#, TypeScript, Python, PHP, and Rust — PHP at Phase 1 (tactical
-core), Rust now covering multi-context references and the CQRS read side, with Python covering the
-full tactical-and-strategic construct set), the
+**R16 multi-target emitters** (C#, TypeScript, Python, PHP, and Rust — PHP now covering the tactical
+core *and* the strategic/CQRS layer, Rust now covering multi-context references and the CQRS read side,
+with Python covering the full tactical-and-strategic construct set), the
 **R17 editor tooling** — the TextMate grammar, the `koine lsp` language server, and the
 `fmt`/`init`/`watch` commands — and **R18 model-as-spec coverage** (`koine coverage` proves
 declared == emitted). Every construct described in the reference is implemented, tested,

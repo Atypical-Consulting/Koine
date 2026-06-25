@@ -88,9 +88,59 @@ public sealed partial class PhpEmitter : IEmitter
             {
                 EmitType(emit, files, type, ctx.Name, typeMapper);
             }
+
+            // Application services and pure domain operations: a `service` lives on
+            // `ContextNode.Services` (not in `Types`), so iterate it separately.
+            // Each emits a stateless domain-service class (operations) and/or an interface
+            // (use cases), mirroring PythonEmitter.EmitServiceFiles.
+            foreach (ServiceDecl svc in ctx.Services)
+            {
+                EmitServiceFiles(emit, files, svc, ctx.Name, typeMapper);
+            }
+
+            // Specifications (R10.1): a context's `spec` declarations (plus specs nested inside
+            // aggregates) gather into a single <Context>Specifications final class of static
+            // boolean predicate methods — mirrors C# and TypeScript spec emission.
+            var contextSpecs = ctx.Specs
+                .Concat(ctx.Types.OfType<AggregateDecl>().SelectMany(a => a.Specs))
+                .ToList();
+            if (contextSpecs.Count > 0)
+            {
+                files.Add(EmitSpecifications(emit, contextSpecs, ctx.Name, typeMapper));
+            }
+
+            // Policies (R10.3): an event→command reactor lives on `ContextNode.Policies` (not in
+            // `Types`), so iterate it separately. Each emits a reactor `interface` seam the consumer
+            // wires — the intended cross-aggregate call is documented, never generated.
+            foreach (PolicyDecl policy in ctx.Policies)
+            {
+                files.Add(EmitPolicy(emit, policy, ctx.Name, typeMapper));
+            }
+
+            // Integration-event subscriber seams (R14.3): each `subscribes <Pub>.<Event>` emits a
+            // `Handle<Event>` interface into THIS (subscriber) context's `Abstractions/` folder. The
+            // published integration-event class itself already emits via the regular event path.
+            foreach (SubscribeDecl sub in ctx.Subscribes)
+            {
+                files.Add(EmitIntegrationSubscriber(emit, sub, ctx.Name));
+            }
         }
 
-        // 3. Self-containment: emit a minimal branded id value object for any id type referenced by
+        // 3. Anti-corruption-layer translator seams (R14.2): one per ACL relation carrying a mapping
+        //    block, emitted into the downstream context. Cross-context refs resolve to qualified
+        //    `use` imports via the shared type catalog.
+        if (model.ContextMap is { } map)
+        {
+            foreach (ContextRelation r in map.Relations)
+            {
+                if (r.Kind == ContextRelationKind.AntiCorruptionLayer && r.AclMappings.Count > 0)
+                {
+                    files.Add(EmitAclTranslator(emit, r));
+                }
+            }
+        }
+
+        // 4. Self-containment: emit a minimal branded id value object for any id type referenced by
         //    the model but not emitted from a declared entity (e.g. a foreign aggregate's id).
         EmitUnownedIds(emit, model, files);
 
@@ -133,6 +183,12 @@ public sealed partial class PhpEmitter : IEmitter
                 {
                     files.Add(repo);
                 }
+                break;
+            case ReadModelDecl rm:
+                files.Add(EmitReadModel(emit, rm, contextName, typeMapper));
+                break;
+            case QueryDecl q:
+                files.Add(EmitQuery(emit, q, contextName, typeMapper));
                 break;
         }
     }
