@@ -28,6 +28,10 @@ function homeCallbacks(): WelcomeCallbacks {
     onOpenFolder: () => go({ kind: 'open-folder' }),
     onOpenRecent: (path) => go({ kind: 'open-recent', path }),
     onOpenExample: (template) => go({ kind: 'open-example', template }),
+    // Resume (#392): step straight back into the already-live editor session. Unlike the start actions
+    // it sets no start-intent and opens no workspace — the IDE stayed initialised behind the route
+    // (#368), so this is a pure route swap that leaves the session exactly as it was.
+    onResume: () => appStore.getState().navigate('editor'),
   };
 }
 
@@ -83,7 +87,10 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
     if (appEl) appEl.hidden = true;
     if (homeRoot) {
       homeRoot.hidden = false;
-      if (!home) home = mountHome(homeRoot, homeCallbacks());
+      // A session is "live" once the IDE has booted (#392): `ideStarted` never resets, so every Home
+      // entry after the first editor visit offers a Resume-editing control, while a pristine first-load
+      // Home (ideStarted still false) stays clean.
+      if (!home) home = mountHome(homeRoot, homeCallbacks(), undefined, undefined, { canResume: ideStarted });
     }
   }
 
