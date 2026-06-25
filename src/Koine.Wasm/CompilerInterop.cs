@@ -153,8 +153,10 @@ public static partial class CompilerInterop
         nameof(Model), nameof(ModelMembers), nameof(EmitKoine), nameof(ApplyModelEdit),
         nameof(Hover), nameof(Completions), nameof(SignatureHelp), nameof(Definition),
         nameof(DocumentSymbols), nameof(WorkspaceSymbols), nameof(FoldingRanges), nameof(SelectionRanges),
-        nameof(CodeLenses), nameof(Format), nameof(Check), nameof(References), nameof(InlayHints),
+        nameof(DocumentHighlightsAt), nameof(CodeLenses), nameof(Format), nameof(FormatRange),
+        nameof(Check), nameof(References), nameof(InlayHints),
         nameof(PrepareCallHierarchy), nameof(IncomingCalls), nameof(OutgoingCalls),
+        nameof(PrepareTypeHierarchy), nameof(Supertypes), nameof(Subtypes),
         nameof(PrepareRename), nameof(Rename), nameof(CodeActions), nameof(Docs),
         nameof(RunScenario), nameof(ScenarioCatalog),
     ];
