@@ -72,7 +72,8 @@ import { dismissFloating, showActionMenu, showRenameInput } from '@/editor/actio
 import { createInlineState } from '@/editor/inlineCompletionState';
 import { inlineCompletionExtension, type EditorInlineContext } from '@/editor/inlineCompletion';
 import { requestInline } from '@/ai/inlineCompletionClient';
-import { loadSettings } from '@/settings/persistence';
+import { loadSettings, resolveKeybindings } from '@/settings/persistence';
+import { buildExtraKeys, type BindingId } from '@/editor/keybindings';
 // The markdown renderer lives in ./markdown (extracted so it can be unit-tested without a CodeMirror
 // view). Re-exported below so existing importers keep resolving it from `@/editor/editor`.
 import { renderMarkdown } from '@/editor/markdown';
@@ -798,6 +799,8 @@ export interface KoineEditor {
   setLineWrap(on: boolean): void;
   /** Show/hide the document-overview minimap (reconfigures a compartment; no state loss). */
   setMinimap(on: boolean): void;
+  /** Rebuild the editor keymap from the persisted keybinding overrides (reconfigures a compartment; no state loss). */
+  reconfigureKeybindings(): void;
   destroy(): void;
 }
 
@@ -989,52 +992,44 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
       ]
     : [];
 
-  // F12 (go-to-definition) and Cmd/Ctrl-S (format) keybindings.
-  const extraKeys = keymap.of([
-    {
-      key: 'F12',
-      run: () => {
-        if (!opts.onDefinition) return false;
-        void gotoDefinition(view.state.selection.main.head);
-        return true;
-      },
+  // The five LSP-action shortcuts are now registry-driven (keybindings.ts) and live in a compartment so
+  // Settings can remap them live. Each handler keeps its exact provider guard + body from the old literals;
+  // they reference `view`/`editorHandle` (declared below) but only fire on keypress, so the late binding is
+  // fine — exactly as the prior literals did.
+  const keybindingHandlers: Record<BindingId, () => boolean> = {
+    goToDefinition: () => {
+      if (!opts.onDefinition) return false;
+      void gotoDefinition(view.state.selection.main.head);
+      return true;
     },
-    {
-      key: 'Mod-s',
-      preventDefault: true,
-      run: () => {
-        if (!opts.onFormat) return false;
-        void opts.onFormat().then((edits) => editorHandle.applyEdits(edits));
-        return true;
-      },
+    format: () => {
+      if (!opts.onFormat) return false;
+      void opts.onFormat().then((edits) => editorHandle.applyEdits(edits));
+      return true;
     },
-    {
-      key: 'F2',
-      preventDefault: true,
-      run: () => {
-        if (!opts.onPrepareRename || !opts.onRename) return false;
-        void startRename(view.state.selection.main.head);
-        return true;
-      },
+    rename: () => {
+      if (!opts.onPrepareRename || !opts.onRename) return false;
+      void startRename(view.state.selection.main.head);
+      return true;
     },
-    {
-      key: 'Shift-F12',
-      preventDefault: true,
-      run: () => {
-        if (!opts.onReferences || !opts.onNavigateLocation) return false;
-        void findReferences(view.state.selection.main.head);
-        return true;
-      },
+    findReferences: () => {
+      if (!opts.onReferences || !opts.onNavigateLocation) return false;
+      void findReferences(view.state.selection.main.head);
+      return true;
     },
-    {
-      key: 'Mod-.',
-      preventDefault: true,
-      run: () => {
-        if (!opts.onCodeActions) return false;
-        void showCodeActions();
-        return true;
-      },
+    codeActions: () => {
+      if (!opts.onCodeActions) return false;
+      void showCodeActions();
+      return true;
     },
+  };
+  // The resolved (defaults + persisted overrides) keymap lives in its own compartment so Settings can
+  // reconfigure it live (reconfigureKeybindings, below) without rebuilding the editor — same pattern as
+  // lineWrap/minimap.
+  const keybindingCompartment = new Compartment();
+  // Call hierarchy (Mod-Alt-h) is NOT user-customizable yet (#266 scopes the five LSP actions); keep it
+  // as its own literal keymap so it survives the move to the registry-driven compartment.
+  const callHierarchyKeys = keymap.of([
     {
       key: 'Mod-Alt-h',
       preventDefault: true,
@@ -1137,7 +1132,8 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         }),
         // LSP inlay hints (inferred type / parameter-name annotations) over the visible viewport.
         ...(opts.onInlayHints ? [inlayHintsExtension(opts.onInlayHints)] : []),
-        extraKeys,
+        keybindingCompartment.of(buildExtraKeys(resolveKeybindings(), keybindingHandlers)),
+        callHierarchyKeys,
         keymap.of([
           ...closeBracketsKeymap,
           ...completionKeymap,
@@ -1209,6 +1205,9 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     },
     setMinimap(on: boolean) {
       view.dispatch({ effects: minimap.reconfigure(on ? minimapExtension() : []) });
+    },
+    reconfigureKeybindings() {
+      view.dispatch({ effects: keybindingCompartment.reconfigure(buildExtraKeys(resolveKeybindings(), keybindingHandlers)) });
     },
     destroy() {
       viewDestroyed = true; // stop any queued caret-reveal frame from touching a torn-down view

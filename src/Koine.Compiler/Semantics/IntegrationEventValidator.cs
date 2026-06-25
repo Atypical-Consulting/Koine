@@ -48,10 +48,12 @@ internal static class IntegrationEventValidator
         }
 
         // 3. subscribes: declared publisher context, actually published, map-authorized; no duplicates.
-        //    The handler seam is named IHandle<Event> from the simple event name, so two events that
-        //    share a name (from different publishers) would collide — reject that case (KOI1417).
+        //    Two subscriptions to a same-named event from different publishers used to be rejected
+        //    (KOI1417) because every emitter named the handler seam IHandle<Event> from the bare event
+        //    name, so they'd collide on one path. That's now legal (#420): the emitters qualify the
+        //    colliding seam by publisher (IHandle<Pub><Event>), driven by
+        //    ModelIndex.SubscriptionEventNameIsAmbiguous — so the shape is allowed here.
         var subscribed = new HashSet<(string, string)>();
-        var handlerNames = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (SubscribeDecl s in ctx.Subscribes)
         {
             if (!subscribed.Add((s.Context, s.EventName)))
@@ -59,15 +61,6 @@ internal static class IntegrationEventValidator
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateSubscribe,
                     $"context '{ctx.Name}' subscribes to '{s.Context}.{s.EventName}' more than once", s.Span));
                 continue;
-            }
-            if (handlerNames.TryGetValue(s.EventName, out var otherPublisher) && otherPublisher != s.Context)
-            {
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SubscribeHandlerNameCollision,
-                    $"context '{ctx.Name}' subscribes to '{s.EventName}' from both '{otherPublisher}' and '{s.Context}'; the generated IHandle{s.EventName} handler would collide", s.Span));
-            }
-            else
-            {
-                handlerNames[s.EventName] = s.Context;
             }
 
             if (!index.IsContext(s.Context))

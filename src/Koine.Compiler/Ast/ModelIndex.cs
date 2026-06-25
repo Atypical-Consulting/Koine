@@ -836,6 +836,35 @@ public sealed class ModelIndex
         return false;
     }
 
+    /// <summary>
+    /// True when subscriber context <paramref name="subscriberContext"/> subscribes to integration
+    /// events sharing the short name <paramref name="eventShortName"/> from two or more distinct
+    /// publishers (R14.3, #420). Every emitter derives the subscriber handler seam from the bare event
+    /// short name (<c>IHandle&lt;Event&gt;</c> / <c>Handle&lt;Event&gt;</c>), so such a model would emit
+    /// two seams at one path unless the colliding ones are qualified by their publisher. This is the
+    /// single, target-agnostic detection each emitter consults before deciding to qualify; the naming
+    /// convention stays in each <c>Emit/&lt;Target&gt;/</c>. Deterministic; a pure model query.
+    /// </summary>
+    public bool SubscriptionEventNameIsAmbiguous(string subscriberContext, string eventShortName)
+    {
+        ContextNode? ctx = Model.Contexts.FirstOrDefault(c => c.Name == subscriberContext);
+        if (ctx is null)
+        {
+            return false;
+        }
+
+        var publishers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (SubscribeDecl s in ctx.Subscribes)
+        {
+            if (s.EventName == eventShortName)
+            {
+                publishers.Add(s.Context);
+            }
+        }
+
+        return publishers.Count >= 2;
+    }
+
     // ---- Call graph (derived: command emits & policy reactions) ------------
 
     /// <summary>

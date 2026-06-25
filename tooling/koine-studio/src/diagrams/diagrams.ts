@@ -11,6 +11,10 @@ import { createMaxGraphRenderer } from '@/diagrams/diagrams-maxgraph';
 // without importing the concrete maxGraph module.
 export { getActiveDomainExport } from '@/diagrams/diagrams-maxgraph';
 
+// The model-derived event-flow (event-storming) canvas behind the seam (#270): the Events panel mounts it
+// for its Flow view without importing the concrete maxGraph module.
+export { renderEventFlowGraph, type EventFlowGraphHandle } from '@/diagrams/diagrams-maxgraph';
+
 /** The renderer seam: `ide.ts` renders diagrams through this stable signature. */
 export interface DiagramRenderer {
   render(

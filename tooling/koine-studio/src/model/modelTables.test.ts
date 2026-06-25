@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
+  extractEventFlow,
   extractEvents,
   extractRelationships,
   mergeDiagramGraphs,
@@ -124,6 +125,61 @@ describe('extractEvents', () => {
     const rows = extractEvents(docs);
     expect(rows.find((r) => r.name === 'Placed')!.when).toBe('Raised when an order is placed.');
     expect(rows.find((r) => r.name === 'Lost')!.when).toBe('');
+  });
+});
+
+describe('extractEventFlow', () => {
+  test('a domain event yields a domain-event node + a flow edge from its publishing aggregate', () => {
+    const { nodes, edges } = extractEventFlow(combined);
+
+    const placed = nodes.find((n) => n.qualifiedName === 'Sales.OrderPlaced')!;
+    expect(placed.kind).toBe('domain-event');
+    expect(placed.label).toBe('OrderPlaced'); // simple name, not the qualified name
+    expect(placed.context).toBe('Sales');
+    expect(placed.span!.line).toBe(12); // carried from the DiagramNode for click-to-source
+
+    // The publishing aggregate becomes an `aggregate` card…
+    const order = nodes.find((n) => n.label === 'Order')!;
+    expect(order.kind).toBe('aggregate');
+    // …with a `flow` edge aggregate → domain event.
+    const flow = edges.find((e) => e.kind === 'flow' && e.to === placed.id)!;
+    expect(flow.from).toBe(order.id);
+  });
+
+  test('an integration event yields an integration-event node + publish/subscribe edges bridging contexts', () => {
+    const { nodes, edges } = extractEventFlow(combined);
+
+    const shipped = nodes.find((n) => n.kind === 'integration-event')!;
+    expect(shipped.qualifiedName).toBe('Sales.OrderShipped');
+    expect(shipped.label).toBe('OrderShipped');
+    expect(shipped.context).toBe('Sales');
+
+    // A `publish` edge FROM the publishing context (a swimlane the renderer synthesizes, not a card).
+    const publish = edges.find((e) => e.kind === 'publish' && e.to === shipped.id)!;
+    expect(publish.from).toBe('Sales');
+
+    // A `subscribe` edge TO the consuming context (the cross-context arrow).
+    const subscribe = edges.find((e) => e.kind === 'subscribe' && e.from === shipped.id)!;
+    expect(subscribe.to).toBe('Shipping');
+  });
+
+  test('an orphan event (no edges) still yields one node and zero edges', () => {
+    const orphan: DiagramGraph = {
+      nodes: [node('Loose', 'Loose', 'event', 'Sales.Loose', span(5))],
+      edges: [],
+    };
+    const { nodes, edges } = extractEventFlow(orphan);
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].kind).toBe('domain-event');
+    expect(edges).toHaveLength(0);
+  });
+
+  test('a graph with no events yields an empty flow', () => {
+    const noEvents: DiagramGraph = {
+      nodes: [node('Order', 'Order', 'aggregate-root', 'Sales.Order', span(3))],
+      edges: [],
+    };
+    expect(extractEventFlow(noEvents)).toEqual({ nodes: [], edges: [] });
   });
 });
 

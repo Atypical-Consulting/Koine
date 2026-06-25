@@ -1544,6 +1544,12 @@ export function init(): () => void {
     // The current workspace's override key (null when no folder is open) — drives the per-row
     // User/Workspace scope toggle and routes scoped commits to the workspace override store.
     workspaceKey: () => wsKey(),
+    // Live-apply a keybinding remap from Settings → Keyboard: reconfigure each open editor's keymap
+    // compartment in place. Group A is always present; group B exists only when the split view is open.
+    onKeybindingsChanged: () => {
+      editor.reconfigureKeybindings();
+      editorSession.groupBEditor()?.reconfigureKeybindings();
+    },
   });
   const help = createHelpOverlay(helpRows());
   // Guards the user-initiated New command against silently discarding unsaved work.

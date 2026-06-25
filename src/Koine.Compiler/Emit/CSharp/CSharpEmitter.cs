@@ -687,15 +687,23 @@ public sealed partial class CSharpEmitter : IEmitter
         // publisher namespace honors any configured context→namespace remap (R16.1).
         var publisherNs = emit.RemapNamespace(index.NamespaceOfTypeIn(sub.Context, sub.EventName) ?? sub.Context);
         var eventType = publisherNs + "." + sub.EventName;
+
+        // When the subscriber consumes the same event short name from two or more publishers (#420),
+        // the bare IHandle<Event> seam would collide on one path — qualify it by the publisher context
+        // (IHandle<Pub><Event>) so each subscription gets its own seam. The common single-publisher
+        // case keeps the bare name, byte-identical to before.
+        var seam = index.SubscriptionEventNameIsAmbiguous(subscriberContext, sub.EventName)
+            ? "IHandle" + sub.Context + sub.EventName
+            : "IHandle" + sub.EventName;
         var sb = new StringBuilder();
 
         sb.Append("/// <summary>Handles the ").Append(sub.Context).Append('.').Append(sub.EventName)
           .Append(" integration event published by context ").Append(sub.Context).Append(".</summary>\n");
-        sb.Append("public interface IHandle").Append(sub.EventName).Append("\n{\n");
+        sb.Append("public interface ").Append(seam).Append("\n{\n");
         sb.Append(Indent).Append("Task Handle(").Append(eventType).Append(" theEvent, CancellationToken ct = default);\n");
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(emit, subscriberContext, KindFolder.Abstractions, $"IHandle{sub.EventName}.cs"),
+        return new EmittedFile(PathFor(emit, subscriberContext, KindFolder.Abstractions, $"{seam}.cs"),
             Assemble(emit, subscriberContext, sb.ToString(), usesLinq: false));
     }
 
