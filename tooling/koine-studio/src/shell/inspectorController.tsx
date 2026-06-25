@@ -45,8 +45,13 @@ import type { PreviewTarget } from '@/settings/persistence';
 import { renderDiagrams } from '@/diagrams/diagrams';
 import { renderContextMapGraph, type ContextMapGraphHandle } from '@/diagrams/diagrams-maxgraph';
 import { buildContextMapGraph, type ContextMapEdge } from '@/diagrams/contextMapGraph';
-import { setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
-import type { AddNodeKind, CanvasAnnotationKind, AggregateMemberKind } from '@/diagrams/diagramContract';
+import { NODE_NAVIGATE_EVENT, setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
+import type {
+  AddNodeKind,
+  CanvasAnnotationKind,
+  AggregateMemberKind,
+  DiagramNodeNavigateDetail,
+} from '@/diagrams/diagramContract';
 import { createLayoutStore } from '@/diagrams/layoutStore';
 import { mergeDiagramGraphs } from '@/model/modelTables';
 import { type GlossaryHandlers } from '@/model/glossary';
@@ -1429,6 +1434,20 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     goto: (span: SourceSpan) => deps.gotoSourceSpan(span),
     onSelect: (qualifiedName: string, context: string) => selection.set({ qualifiedName, context }),
   };
+
+  // The Events panel's Flow canvas (#270) bubbles the canvas's own NODE_NAVIGATE_EVENT up to this host when
+  // a card is clicked (the bottom strip isn't under the diagrams container ide.tsx listens on, so the event
+  // is routed here, like the context-map graph). Route it to the SAME select-and-goto path the Events table
+  // uses: jump to the declaration AND select it so the Properties inspector loads it. Attached once on the
+  // stable host, so it survives the panel's re-mounts on every scope/view change. The card's context is its
+  // qualified-name prefix (the canvas detail carries no separate context field).
+  eventsPanel.addEventListener(NODE_NAVIGATE_EVENT, (e) => {
+    const d = (e as CustomEvent<DiagramNodeNavigateDetail>).detail;
+    if (!d) return;
+    deps.gotoSourceSpan({ file: d.file, line: d.line, column: d.column, endLine: d.endLine, endColumn: d.endColumn });
+    const dot = d.qualifiedName.indexOf('.');
+    selection.set({ qualifiedName: d.qualifiedName, context: dot < 0 ? '' : d.qualifiedName.slice(0, dot) });
+  });
 
   // The merged DiagramGraph projection behind both tables: every per-diagram graph from livingDocs fused
   // into one (node ids disambiguated) so the extractors see all aggregates + the integration-event flow
