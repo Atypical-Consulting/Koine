@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { Platform } from '@/host';
 import {
   PROJECT_LINKS,
   CREATOR_NAME,
   CREDIT_PREFIX,
   fillVersionChip,
+  wireExternalLink,
 } from '@/shared/colophon';
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -43,5 +44,21 @@ describe('fillVersionChip', () => {
     fillVersionChip(chip, platformWithVersion(() => Promise.reject(new Error('no version'))));
     await flush();
     expect(chip.hidden).toBe(true);
+  });
+});
+
+describe('wireExternalLink', () => {
+  it('routes a left-click through platform.openExternal and suppresses the navigation', () => {
+    const openExternal = vi.fn();
+    const platform = { openExternal } as unknown as Platform;
+    const a = document.createElement('a');
+    a.href = 'https://example.test/docs';
+    wireExternalLink(a, a.href, platform);
+
+    const click = new MouseEvent('click', { cancelable: true });
+    a.dispatchEvent(click);
+
+    expect(openExternal).toHaveBeenCalledWith('https://example.test/docs');
+    expect(click.defaultPrevented).toBe(true);
   });
 });

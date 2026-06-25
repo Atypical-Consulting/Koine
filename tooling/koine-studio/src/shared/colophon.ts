@@ -64,3 +64,16 @@ export function fillVersionChip(chip: HTMLElement, platform: Platform): void {
       chip.hidden = true;
     });
 }
+
+/**
+ * Wire a project-link anchor to open its href through the platform — a new tab in the browser, an OS
+ * handoff on desktop — instead of letting the `<a>` navigate the webview. The `href`/`target`/`rel`
+ * stay real for a11y / copy-link / middle-click; only the left-click is intercepted. Shared by the
+ * About panel and the Home footer so the open-in-browser contract lives in one place.
+ */
+export function wireExternalLink(a: HTMLAnchorElement, href: string, platform: Platform): void {
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    platform.openExternal(href);
+  });
+}

@@ -10,7 +10,7 @@ import { getRecentFolders, removeRecentFolder, pinRecentFolder, clearRecentFolde
 import { getPlatform } from '@/host';
 import { LOGO_SVG } from '@/shared/logo';
 import { registerOverlay, koiConfirm } from '@/shared/overlay';
-import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, fillVersionChip } from '@/shared/colophon';
+import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, fillVersionChip, wireExternalLink } from '@/shared/colophon';
 import { TEMPLATES, type Template } from '@/welcome/templates';
 
 /** What the welcome actions delegate to; the host (ide.ts) performs the real work. */
@@ -366,13 +366,8 @@ function buildWelcome(
       icon.setAttribute('aria-hidden', 'true');
       icon.innerHTML = link.icon;
 
-      // href stays real for a11y / copy-link / middle-click; the click routes through the platform so it
-      // opens in the system browser (new tab on web, OS handoff on desktop) instead of the webview.
       a.append(icon, link.label);
-      a.addEventListener('click', (e) => {
-        e.preventDefault();
-        platform.openExternal(link.href);
-      });
+      wireExternalLink(a, link.href, platform); // open in the system browser, not the webview
       links.append(a);
     }
 
@@ -385,10 +380,7 @@ function buildWelcome(
     author.target = '_blank';
     author.rel = 'noopener noreferrer';
     author.textContent = CREATOR_NAME;
-    author.addEventListener('click', (e) => {
-      e.preventDefault();
-      platform.openExternal(CREATOR_URL);
-    });
+    wireExternalLink(author, CREATOR_URL, platform);
     credit.append(author, '.');
 
     footer.append(colophonChip, links, credit);

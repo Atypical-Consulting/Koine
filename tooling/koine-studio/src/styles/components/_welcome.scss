@@ -939,15 +939,11 @@
   }
 }
 
-/* The icons carry .tb-ico for the shared stroke recipe (filled for GitHub); only the tile size differs. */
+/* The icons carry .tb-ico, which supplies the shared stroke recipe AND the 15px tile size (filled for
+   GitHub) — so this wrapper only needs to lay them out inline. */
 .koi-home-colophon-link-icon {
   display: inline-flex;
   color: currentColor;
-
-  svg {
-    width: 15px;
-    height: 15px;
-  }
 }
 
 /* The byline drops to its own full-width line below the chip + links row. */

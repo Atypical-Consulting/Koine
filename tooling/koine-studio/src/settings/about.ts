@@ -8,7 +8,7 @@
 // through `platform.openExternal` so they open in the system browser on both the desktop and web hosts.
 import { getPlatform } from '@/host';
 import { koineMark } from '@/shared/logo';
-import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, TAGLINE, fillVersionChip } from '@/shared/colophon';
+import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, TAGLINE, fillVersionChip, wireExternalLink } from '@/shared/colophon';
 
 /** A built About panel: the content element plus a hook to refresh the version chip. */
 export interface AboutPanel {
@@ -48,13 +48,6 @@ export function createAboutPanel(): AboutPanel {
   tagline.className = 'koi-about-tagline';
   tagline.textContent = TAGLINE;
 
-  // Open an external link through the platform (new tab in the browser, OS handoff on desktop)
-  // rather than letting the <a> navigate the webview. href stays real for a11y / copy-link / middle-click.
-  function openLink(e: MouseEvent, href: string): void {
-    e.preventDefault();
-    platform.openExternal(href);
-  }
-
   const links = document.createElement('div');
   links.className = 'koi-about-links';
   for (const link of PROJECT_LINKS) {
@@ -80,7 +73,7 @@ export function createAboutPanel(): AboutPanel {
     text.append(label, hint);
 
     a.append(icon, text);
-    a.addEventListener('click', (e) => openLink(e, link.href));
+    wireExternalLink(a, link.href, platform);
     links.append(a);
   }
 
@@ -94,7 +87,7 @@ export function createAboutPanel(): AboutPanel {
   author.target = '_blank';
   author.rel = 'noopener noreferrer';
   author.textContent = CREATOR_NAME;
-  author.addEventListener('click', (e) => openLink(e, CREATOR_URL));
+  wireExternalLink(author, CREATOR_URL, platform);
   credit.append(author, '.');
 
   root.append(logo, wordmark, chip, tagline, links, credit);
