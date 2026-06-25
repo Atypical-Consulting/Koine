@@ -323,22 +323,36 @@ export function __setEsModuleImporterForTests(importer: EsModuleImporter | null)
 }
 
 /**
- * Acquire the dotnet.js ES module for the main-thread fallback — CSP-safe and faster-failing (issue #359):
+ * Acquire the dotnet.js ES module for the main-thread fallback — CSP-safe and faster-failing
+ * (issues #359, #365):
  *  1. Try a direct `import(/* @vite-ignore *​/ url)` — the same CSP-neutral path the worker already
  *     uses. In the built / deployed bundle (the only place that matters for production) this is the
  *     canonical path: it succeeds and never touches the DOM, so a strict CSP can't block it.
- *  2. Only if it throws — Vite's dev-server public-asset transform breaks a direct app-code import, and
- *     the spec keeps the inline loader as a production safety net for a host that blocks the direct
- *     import — fall back to the inline-`<script>` loader (invisible to Vite's transform). A genuine
- *     total load failure then rejects via that loader's shortened ~8s timeout rather than the old 30s.
+ *  2. Only if it throws AND we're under Vite's dev server (`import.meta.env.DEV`) — the one case the
+ *     inline loader exists for: the dev-server public-asset (`?import`) transform breaks a direct
+ *     app-code import, and an inline `<script type="module">` is invisible to that transform — fall
+ *     back to the inline-`<script>` loader.
+ *  3. In a built / deployed bundle (`import.meta.env.DEV === false`) there is no such transform, so a
+ *     thrown direct import is a *genuine* load error (dotnet.js 404, network failure, a host that
+ *     blocks `import()`). Rethrow it PROMPTLY (#365) instead of stalling on the inline loader's blind
+ *     ~8s timeout — and since an inline `<script>` that itself calls `import()` can't bypass a CSP that
+ *     blocks `import()`, the inline path was never a real production safety net anyway. `import.meta.env.DEV`
+ *     is statically `false` in a Vite production build, so the inline branch is dead-code-eliminated
+ *     from the deployed bundle.
  */
 async function importDotnetModule(url: string): Promise<Record<string, unknown>> {
   try {
     return await esModuleImporter(url);
   } catch (directErr: unknown) {
+    // The inline loader exists ONLY for Vite's dev-server `?import` transform. In a built/deployed
+    // bundle there is no such transform, so a thrown direct import is a genuine load error — reject
+    // promptly with it instead of waiting out the inline loader's blind timeout (#365).
+    if (!import.meta.env.DEV) throw directErr;
     const reason = directErr instanceof Error ? directErr.message : String(directErr);
     // The dev-server case the inline loader exists for. Note it, then take the inline path.
-    console.warn(`Koine: direct dotnet.js import failed (${reason}); using the inline-script loader.`);
+    console.warn(
+      `Koine: direct dotnet.js import failed under the dev server (${reason}); using the inline-script loader.`,
+    );
     return importEsModuleViaScript(url);
   }
 }
