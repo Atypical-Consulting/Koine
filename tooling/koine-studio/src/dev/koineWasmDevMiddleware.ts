@@ -34,7 +34,16 @@ export function createKoineWasmDevMiddleware(publicDir: string): Connect.NextHan
     const seg = pathOnly.indexOf(SEGMENT);
     if (seg < 0) return next(); // not a koine-wasm asset
     const rel = pathOnly.slice(seg + 1); // "koine-wasm/_framework/dotnet.js"
-    const file = normalize(join(root, decodeURIComponent(rel)));
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(rel);
+    } catch {
+      // Malformed percent-encoding (e.g. `…/foo%zz.js`). decodeURIComponent throws URIError — DON'T let
+      // it propagate: an uncaught throw here lands in Vite's error middleware as a 500 + overlay, the
+      // exact failure this plugin exists to prevent (issue #384). Pass it through instead.
+      return next();
+    }
+    const file = normalize(join(root, decoded));
     // Path-traversal guard: the resolved file must live strictly under publicDir. `root + sep` (not a
     // bare `startsWith(root)`) avoids a sibling-prefix false positive (e.g. `/pub-2` vs `/pub`).
     if (!file.startsWith(root + sep) || !existsSync(file) || !statSync(file).isFile()) return next();

@@ -47,8 +47,10 @@ describe('koineWasmDevPlugin (dev-server integration)', () => {
     root = makeRoot();
     const port = await start([]);
     const resp = await fetch(`http://localhost:${port}${IMPORT_URL}`);
-    // ERR_LOAD_PUBLIC_URL — "This file is in /public … should not be imported from source code."
-    expect(resp.status).toBe(500);
+    // ERR_LOAD_PUBLIC_URL — "This file is in /public … should not be imported from source code." Vite
+    // serves this as a 500 today; assert "rejected" (>= 400) rather than pinning the exact status so the
+    // control survives a future Vite that picks a different error code, while still proving the bug.
+    expect(resp.status).toBeGreaterThanOrEqual(400);
   });
 
   it('serves /koine-wasm/_framework/dotnet.js?import as 200 with the plugin (no ERR_LOAD_PUBLIC_URL)', async () => {

@@ -12,10 +12,6 @@ function mockRes() {
     setHeader(k: string, v: string) {
       this.headers[k.toLowerCase()] = v;
     },
-    writeHead(code: number) {
-      this.statusCode = code;
-      return this;
-    },
     end(b?: Buffer) {
       this.body = b as Buffer;
     },
@@ -80,6 +76,23 @@ describe('createKoineWasmDevMiddleware', () => {
         nexted = true;
       },
     );
+    expect(nexted).toBe(true);
+    expect(res.statusCode).toBe(0);
+  });
+
+  it('passes through a malformed percent-encoded URL instead of throwing a 500 (issue #384 regression)', () => {
+    const mw = createKoineWasmDevMiddleware(publicDir);
+    const res = mockRes();
+    let nexted = false;
+    expect(() =>
+      mw(
+        { method: 'GET', url: '/koine-wasm/_framework/dotnet%.js?import' } as never,
+        res as never,
+        () => {
+          nexted = true;
+        },
+      ),
+    ).not.toThrow();
     expect(nexted).toBe(true);
     expect(res.statusCode).toBe(0);
   });
