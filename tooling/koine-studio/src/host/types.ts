@@ -62,6 +62,29 @@ export interface LspTransport {
   stop(): Promise<void>;
 }
 
+/**
+ * Transport for the integrated terminal's pseudo-terminal (PTY). The desktop host brokers a real
+ * shell over Tauri IPC (`pty_start`/`pty_write`/`pty_resize`/`pty_stop` + `pty://data`/`pty://exit`
+ * events); the browser has no host shell, so it offers no transport at all (see
+ * {@link Platform.createTerminal}). The panel (src/shell/terminal) drives this: it attaches the
+ * `onData`/`onExit` handlers, then `start`s; feeds keystrokes via `write`; reflows on `resize`; and
+ * `stop`s on teardown.
+ */
+export interface TerminalTransport {
+  /** Spawn the shell, rooted at `cwd` when given (null lets the host pick the default). */
+  start(cwd: string | null): Promise<void>;
+  /** Feed keystrokes / pasted text to the shell. */
+  write(data: string): Promise<void>;
+  /** Tell the shell the viewport changed so it (and full-screen TUIs) re-flow. */
+  resize(cols: number, rows: number): Promise<void>;
+  /** Register the handler for a chunk of shell output. Call before `start`. */
+  onData(cb: (data: string) => void): void;
+  /** Register the handler for the shell exiting (its exit code). Call before `start`. */
+  onExit(cb: (code: number) => void): void;
+  /** Kill the shell and detach listeners. */
+  stop(): Promise<void>;
+}
+
 /** The host environment the studio runs in, and its capabilities. */
 export interface Platform {
   readonly kind: 'tauri' | 'browser';
@@ -70,6 +93,20 @@ export interface Platform {
 
   /** Create the LSP transport for this host (one per KoineLsp instance). */
   createLspTransport(): LspTransport;
+
+  /**
+   * Whether this host can run a real shell in an integrated terminal. True on the Tauri desktop
+   * (it brokers a PTY); false in the browser, where the terminal panel shows a graceful
+   * "desktop only" placeholder instead. Gates {@link createTerminal} — true iff that factory exists.
+   */
+  readonly canRunShell: boolean;
+
+  /**
+   * Create a terminal transport (one per terminal session) for hosts that {@link canRunShell}. The
+   * browser host omits it entirely, so callers must guard on `canRunShell` (or the optional chain)
+   * before invoking it.
+   */
+  createTerminal?(): TerminalTransport;
 
   /** The application version, for the About dialog. */
   appVersion(): Promise<string>;

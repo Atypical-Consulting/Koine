@@ -84,6 +84,7 @@ import { resolveInspectableQn } from '@/model/modelIndex';
 import { type InspectorElement } from '@/model/inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
 import { createScenarioPanel, type ScenarioPanel } from '@/scenarios/scenarioPanel';
+import { createTerminalPanel, type TerminalPanel } from '@/shell/terminal/terminalPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from '@/export/share';
 import { handleBeforeUnload } from '@/shell/dirty';
 import { render } from 'preact';
@@ -610,6 +611,7 @@ export function init(): () => void {
     gotoSourceSpan: (span) => void gotoSourceSpan(span),
     ensureAssistant: () => ensureAssistant(),
     ensureScenarios: () => ensureScenarios(),
+    ensureTerminal: () => ensureTerminal(),
     initEdgeResizer,
   });
   // Thin shims over the app store (the single source of truth) for the two state reads ide.ts needs:
@@ -1242,6 +1244,11 @@ export function init(): () => void {
   // wired separately in the Tauri host.
   window.addEventListener('beforeunload', (e) => handleBeforeUnload(e, () => workspace.anyDirty()));
 
+  // Stop the brokered shell when the page genuinely goes away (#256). `pagehide` (not the cancellable
+  // `beforeunload`) is used so aborting a close doesn't kill a live terminal; the desktop PTY also
+  // gets SIGHUP when the process exits, but this disposes cleanly on a webview reload too.
+  window.addEventListener('pagehide', () => terminal?.dispose());
+
   // --- new model ----------------------------------------------------
   // Reset the default workspace to a single untouched BLANK model: empty it on disk, recreate
   // model.koi, close every open doc, and reopen. The raw reset with no confirmation; user-initiated
@@ -1610,6 +1617,20 @@ export function init(): () => void {
       setStatus: (message) => setStatus(message, 'green'),
     });
     return scenarios;
+  }
+
+  // The integrated terminal panel (#256), created lazily the first time its bottom-panel tab is shown
+  // (the scenarios/assistant pattern). It is rooted at the opened workspace folder (or no cwd in
+  // no-folder mode); the desktop host brokers a real PTY, the browser host renders a placeholder.
+  let terminal: TerminalPanel | null = null;
+  function ensureTerminal(): TerminalPanel {
+    if (terminal) return terminal;
+    terminal = createTerminalPanel({
+      parent: el('panel-terminal'),
+      platform,
+      cwd: () => workspace.folderRootToken() || null,
+    });
+    return terminal;
   }
 
   // Diagrams are rendered with a theme-matched Mermaid palette; re-render on a theme flip (covers
@@ -2111,6 +2132,7 @@ export function init(): () => void {
   // setAutoSave(false) cancels the workspace's idle auto-save timer for the same reason.
   return () => {
     controller.dispose();
+    terminal?.dispose(); // stop the brokered shell + dispose xterm (#256)
     workspace.setAutoSave(false);
     unsubRouteIntent();
   };
