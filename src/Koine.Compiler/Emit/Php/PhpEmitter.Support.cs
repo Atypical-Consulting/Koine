@@ -44,6 +44,8 @@ public sealed partial class PhpEmitter
         public const string Repositories = "Repositories";
         public const string ReadModels = "ReadModels";
         public const string Queries = "Queries";
+        public const string Services = "Services";
+        public const string Specifications = "Specifications";
     }
 
     /// <summary>

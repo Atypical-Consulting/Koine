@@ -88,6 +88,26 @@ public sealed partial class PhpEmitter : IEmitter
             {
                 EmitType(emit, files, type, ctx.Name, typeMapper);
             }
+
+            // Application services and pure domain operations: a `service` lives on
+            // `ContextNode.Services` (not in `Types`), so iterate it separately.
+            // Each emits a stateless domain-service class (operations) and/or an interface
+            // (use cases), mirroring PythonEmitter.EmitServiceFiles.
+            foreach (ServiceDecl svc in ctx.Services)
+            {
+                EmitServiceFiles(emit, files, svc, ctx.Name, typeMapper);
+            }
+
+            // Specifications (R10.1): a context's `spec` declarations (plus specs nested inside
+            // aggregates) gather into a single <Context>Specifications final class of static
+            // boolean predicate methods — mirrors C# and TypeScript spec emission.
+            var contextSpecs = ctx.Specs
+                .Concat(ctx.Types.OfType<AggregateDecl>().SelectMany(a => a.Specs))
+                .ToList();
+            if (contextSpecs.Count > 0)
+            {
+                files.Add(EmitSpecifications(emit, contextSpecs, ctx.Name, typeMapper));
+            }
         }
 
         // 3. Self-containment: emit a minimal branded id value object for any id type referenced by
