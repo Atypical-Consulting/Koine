@@ -117,4 +117,73 @@ public class PhpCrossContextTests
         var content = FileContent(files, "src/Downstream/Abstractions/UpstreamToDownstreamTranslator.php");
         return Verify(content);
     }
+
+    // -----------------------------------------------------------------------
+    // Task 3 — subscriber events resolve to the publisher they were declared in
+    // -----------------------------------------------------------------------
+    //
+    // The issue also describes a subscriber that subscribes to *two* same-named events from different
+    // publishers producing two colliding Handle<Event>.php. That model is already rejected outright,
+    // model-wide and for every emitter, by the target-agnostic validator KOI1417
+    // (SubscribeHandlerNameCollision) — so it can never reach the PHP emitter, and relaxing that
+    // validator would reintroduce the same collision for the C#/TS/Python seams. What *is* reachable in
+    // a valid model — and was genuinely wrong — is a subscriber to one publisher's event whose short
+    // name a different, non-subscribed context also declares: the flat catalog imported whichever copy
+    // sorted first, not the publisher the subscription actually names.
+
+    /// <summary>
+    /// Hub subscribes only to <c>Beta.Shipped</c>, but <c>Alpha</c> also declares a same-named
+    /// <c>Shipped</c> event (and sorts first in the catalog). The handler must import Beta's event — the
+    /// publisher the subscription names — not Alpha's, or <c>handle(Shipped $event)</c> binds the wrong
+    /// class under <c>declare(strict_types=1)</c>.
+    /// </summary>
+    private const string SameNamedEventFixture = """
+        context Alpha {
+          publishes Shipped
+          integration event Shipped { reference: String }
+        }
+        context Beta {
+          publishes Shipped
+          integration event Shipped { code: String }
+        }
+        context Hub {
+          subscribes Beta.Shipped
+        }
+        contextmap {
+          Alpha -> Hub : open-host
+          Beta  -> Hub : open-host
+        }
+        """;
+
+    [Fact]
+    public void Subscriber_imports_the_publisher_it_subscribes_to_not_a_same_named_sibling()
+    {
+        var files = Emit(SameNamedEventFixture);
+        var content = FileContent(files, "src/Hub/Abstractions/HandleShipped.php");
+
+        // The subscription names Beta — the import must be Beta's Shipped, never Alpha's.
+        content.ShouldContain("use Koine\\Beta\\Events\\Shipped;");
+        content.ShouldNotContain("use Koine\\Alpha\\Events\\Shipped;");
+        content.ShouldContain("public function handle(Shipped $event): void;");
+    }
+
+    [Fact]
+    public void Single_publisher_subscriber_emits_the_expected_handler()
+    {
+        // The common (globally-unique event name) case still emits the bare handler unchanged.
+        const string single = """
+            context Sales {
+              publishes OrderPlaced
+              integration event OrderPlaced { reference: String }
+            }
+            context Shipping {
+              subscribes Sales.OrderPlaced
+            }
+            contextmap { Sales -> Shipping : open-host }
+            """;
+        var files = Emit(single);
+        var content = FileContent(files, "src/Shipping/Abstractions/HandleOrderPlaced.php");
+        content.ShouldContain("use Koine\\Sales\\Events\\OrderPlaced;");
+        content.ShouldContain("public function handle(OrderPlaced $event): void;");
+    }
 }

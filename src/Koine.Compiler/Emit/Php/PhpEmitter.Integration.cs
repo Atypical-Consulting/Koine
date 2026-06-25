@@ -26,6 +26,15 @@ public sealed partial class PhpEmitter
         var eventType = PhpNaming.ClassName(sub.EventName);
         var iface = "Handle" + eventType;
 
+        // The subscribed event resolves to the publisher the subscription names — not whichever
+        // same-named copy a different context's declaration sorts first in the catalog. (A subscriber
+        // can't legally subscribe to two same-named events from different publishers — the validator
+        // KOI1417 rejects that model-wide — so one hint per file is always unambiguous.)
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [eventType] = sub.Context,
+        };
+
         var sb = new StringBuilder();
         sb.Append("/** Handles the ").Append(EscapeDoc(sub.Context)).Append('.').Append(EscapeDoc(sub.EventName))
           .Append(" integration event published by context ").Append(EscapeDoc(sub.Context)).Append(". */\n");
@@ -36,6 +45,6 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(subscriberContext, KindFolder.Abstractions, iface),
-            Assemble(subscriberContext, KindFolder.Abstractions, sb.ToString(), iface));
+            Assemble(subscriberContext, KindFolder.Abstractions, sb.ToString(), iface, symbolContext));
     }
 }
