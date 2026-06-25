@@ -42,6 +42,8 @@ public sealed partial class PhpEmitter
         public const string Enums = "Enums";
         public const string Events = "Events";
         public const string Repositories = "Repositories";
+        public const string ReadModels = "ReadModels";
+        public const string Queries = "Queries";
     }
 
     /// <summary>
@@ -235,6 +237,12 @@ public sealed partial class PhpEmitter
                     case IntegrationEventDecl iev:
                         Add(ctx.Name, KindFolder.Events, iev.Name);
                         break;
+                    case ReadModelDecl rm:
+                        Add(ctx.Name, KindFolder.ReadModels, rm.Name);
+                        break;
+                    case QueryDecl q:
+                        Add(ctx.Name, KindFolder.Queries, q.Name);
+                        break;
                 }
             }
 
@@ -257,6 +265,9 @@ public sealed partial class PhpEmitter
 
         // The runtime Range is referenced by its short name (`public readonly Range $window`).
         catalog["Range"] = @"Koine\Runtime\Range";
+
+        // The runtime QueryHandler interface is referenced by handler seams.
+        catalog["QueryHandler"] = @"Koine\Runtime\QueryHandler";
 
         return catalog;
     }

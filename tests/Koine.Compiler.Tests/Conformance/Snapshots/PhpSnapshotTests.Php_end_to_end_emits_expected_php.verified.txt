@@ -157,6 +157,20 @@ class Decimal
     }
 }
 
+/**
+ * Generic query-handler contract: handles a typed query and returns a typed result.
+ *
+ * Implement this interface for each query handler in the application layer.
+ *
+ * @template TQuery
+ * @template TResult
+ */
+interface QueryHandler
+{
+    /** @param TQuery $query @return TResult */
+    public function handle(mixed $query): mixed;
+}
+
 // ==== composer.json ====
 {
     "name": "koine/generated",

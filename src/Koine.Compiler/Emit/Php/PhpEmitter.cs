@@ -134,6 +134,12 @@ public sealed partial class PhpEmitter : IEmitter
                     files.Add(repo);
                 }
                 break;
+            case ReadModelDecl rm:
+                files.Add(EmitReadModel(emit, rm, contextName, typeMapper));
+                break;
+            case QueryDecl q:
+                files.Add(EmitQuery(emit, q, contextName, typeMapper));
+                break;
         }
     }
 }
