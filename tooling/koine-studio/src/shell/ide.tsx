@@ -403,18 +403,27 @@ export function init(): () => void {
   const setStatus = editorSession.setStatus;
 
   // The buffer/dirty/tree half of the editor's onChange (the editor↔LSP sync runs inside
-  // editorSession; the buffer text+dirty update lives in workspace.syncActiveBuffer). Preserves the
-  // original effect order: welcome.hide → buffer text+dirty → onDocEdited → renderTree (only when the
-  // active file's dirty dot just appeared).
-  editorSession.onChange((doc) => {
-    // First edit dismisses the welcome overlay (shown only on a pristine first-run workspace).
+  // editorSession; the buffer text+dirty update lives in workspace.syncBuffer). The callback carries
+  // the EDITING group's uri (group A's active uri, or group B's current uri) so the edit syncs into
+  // the right buffer — a group-B edit must never write group A's (active) buffer (#265). Preserves the
+  // original effect order: welcome.hide → buffer text+dirty → onDocEdited → renderTree (only when that
+  // file's dirty dot just appeared). The active-file-only side effects (recompile via onDocEdited,
+  // history.noteEdit) are gated on `uri === activeUri()`: they are group-A/active-file concerns and a
+  // background B edit must not drive the active file's recompile or undo history.
+  editorSession.onChange((doc, uri) => {
+    // First edit dismisses the welcome overlay (shown only on a pristine first-run workspace). Both
+    // groups dismiss it.
     if (welcome.visible) welcome.hide();
-    const becameDirty = workspace.syncActiveBuffer(doc);
-    controller.onDocEdited();
-    if (!history.isRestoring) history.noteEdit();
-    // Re-render the tree only when the active file's dirty dot just appeared (cheap path).
+    // Sync into the EDITING group's own buffer (active or B), flipping its dirty flag on first change.
+    const becameDirty = workspace.syncBuffer(uri, doc);
+    if (uri === workspace.activeUri()) {
+      // Active-file-only effects: recompile the active doc views + record the edit in undo history.
+      controller.onDocEdited();
+      if (!history.isRestoring) history.noteEdit();
+    }
+    // Re-render the tree only when THIS file's dirty dot just appeared — so B's dirty badge shows too.
     if (becameDirty) workspace.renderTree();
-    // Arm the idle auto-save debounce (a no-op unless Settings → Editor → Auto-save is on).
+    // Arm the idle auto-save debounce for both groups (a no-op unless Auto-save is on); B autosaves too.
     workspace.scheduleAutoSave();
   });
 
@@ -496,7 +505,10 @@ export function init(): () => void {
   async function openFileInFocusedGroup(token: string): Promise<void> {
     if (editorSession.focusedGroup() === 'b' && editorSession.groupBEditor()) {
       const uri = await workspace.ensureBuffer(token);
-      if (uri) editorSession.openFocusedGroup(uri);
+      if (uri) {
+        editorSession.openFocusedGroup(uri);
+        persistGroupBUri(uri); // remember B's new file so reload restores it (#265)
+      }
       return;
     }
     await workspace.openFileToken(token);
@@ -508,6 +520,7 @@ export function init(): () => void {
   function openUriInFocusedGroup(uri: string): void {
     if (editorSession.focusedGroup() === 'b' && editorSession.groupBEditor()) {
       editorSession.openFocusedGroup(uri);
+      persistGroupBUri(uri); // remember B's new file so reload restores it (#265)
     } else {
       workspace.activateFile(uri);
     }
@@ -1630,7 +1643,9 @@ export function init(): () => void {
   // which uri), persisted in localStorage via layoutStore — it NEVER round-trips into the .koi model.
   // On boot we read it, paint #split's data-* attributes (CSS reflows the grid), open group B if it
   // was split, and anchor the inspector / left-rail resizers on the side each pane currently sits.
-  const layout = loadLayout();
+  // `let` (not const): each layout action below reassigns it from saveLayout's MERGED return value, so
+  // that return is the single source of truth the next action reads (no per-field manual shadow).
+  let layout = loadLayout();
 
   // Mirror the layout enums onto #split as data-* attributes; _split.scss keys the grid off them
   // (data-orientation lays the two editor groups side-by-side or stacked; data-panel-side docks the
@@ -1727,38 +1742,51 @@ export function init(): () => void {
   // arrangement survives a reload too.
   const layoutActions: LayoutActions = {
     split() {
-      // Open group B (or focus it if already open) and remember it in the persisted layout. Group B
-      // mirrors group A's active uri so the user immediately sees a second view to retarget; openGroupB
-      // leaves focus on B so the next file-open lands there (the manual-check flow).
+      // Open group B (or focus it if already open) and remember it in the persisted layout. A fresh
+      // split mirrors group A's active uri into B so the user immediately sees a second view to retarget;
+      // openGroupB leaves focus on B so the next file-open lands there (the manual-check flow). Persist
+      // B's CURRENT uri, not blindly A's: if B is already open on another file (re-split), keep that
+      // file so reload restores it (#265). The group resizer was disposed on the last closeGroup — wire
+      // it again so the divider drags on this open.
       editorSession.openGroupB(workspace.activeUri());
-      layout.splitOpen = true;
-      applyLayoutAttrs(
-        saveLayout({ splitOpen: true, groupActiveUris: [workspace.activeUri(), workspace.activeUri()] }),
-      );
+      const bUri = editorSession.groupBUri() || workspace.activeUri();
+      layout = saveLayout({ splitOpen: true, groupActiveUris: [workspace.activeUri(), bUri] });
+      applyLayoutAttrs(layout);
+      wireGroupResizer(layout.orientation);
     },
     toggleOrientation() {
       const next = layout.orientation === 'horizontal' ? 'vertical' : 'horizontal';
-      layout.orientation = next;
-      applyLayoutAttrs(saveLayout({ orientation: next }));
+      layout = saveLayout({ orientation: next });
+      applyLayoutAttrs(layout);
       wireGroupResizer(next); // re-point the divider to the new axis live
     },
     closeGroup() {
       editorSession.closeGroupB();
-      layout.splitOpen = false;
-      applyLayoutAttrs(saveLayout({ splitOpen: false }));
+      disposeGroupResizer?.(); // tear down the group divider's listeners so a re-split doesn't stack them (#265)
+      layout = saveLayout({ splitOpen: false });
+      applyLayoutAttrs(layout);
     },
     togglePanelSide() {
       const next = layout.panelSide === 'bottom' ? 'right' : 'bottom';
-      layout.panelSide = next;
-      applyLayoutAttrs(saveLayout({ panelSide: next }));
+      layout = saveLayout({ panelSide: next });
+      applyLayoutAttrs(layout);
     },
     toggleSideRail() {
       const next = layout.sideRail === 'right' ? 'left' : 'right';
-      layout.sideRail = next;
-      applyLayoutAttrs(saveLayout({ sideRail: next }));
+      layout = saveLayout({ sideRail: next });
+      applyLayoutAttrs(layout);
       wireRailResizers(next); // re-point the inspector + left-rail handles to their swapped anchors live
     },
   };
+
+  // Persist group B's re-pointed file so reload restores B to the file the user last opened into it,
+  // not the stale split-open file (#265). Only the B slot of groupActiveUris moves; A's slot tracks the
+  // live active uri. A no-op shape when the split isn't open (B isn't shown), but the callers only
+  // invoke this on the B-routing branch, so the split is open by construction. Declared as a hoisted
+  // function so the earlier openFileInFocusedGroup / openUriInFocusedGroup can call it.
+  function persistGroupBUri(bUri: string): void {
+    layout = saveLayout({ groupActiveUris: [workspace.activeUri(), bUri] });
+  }
 
   // Left-sidebar section disclosure: clicking a header collapses/expands its body (routed through
   // setRailSectionOpen, the single source of truth for section state).

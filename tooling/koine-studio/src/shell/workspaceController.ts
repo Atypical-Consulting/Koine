@@ -173,6 +173,14 @@ export interface WorkspaceController {
    * re-renders the tree only on that cheap transition). The editor↔LSP sync runs in editorSession.
    */
   syncActiveBuffer(doc: string): boolean;
+  /**
+   * The uri-keyed buffer/dirty sync: write `doc` into `uri`'s buffer and flip it dirty on first
+   * change, returning whether that buffer's dirty dot just appeared. {@link syncActiveBuffer}
+   * delegates here with the active uri; the second editor group (group B) routes its edits here with
+   * B's CURRENT uri so a B edit never corrupts group A's (active) buffer (#265). A no-op (returns
+   * false) when `uri` is not an open buffer.
+   */
+  syncBuffer(uri: string, doc: string): boolean;
 
   // --- mutations (explorer-driven) ---
   handleNewFile(parentDirToken: string, name: string): Promise<void>;
@@ -687,8 +695,10 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
 
   // The buffer/dirty half of the editor's onChange. ide.ts keeps welcome.hide + controller.onDocEdited
   // around this and re-renders the tree on the returned becameDirty (preserving the original order).
-  function syncActiveBuffer(doc: string): boolean {
-    const buf = buffers.get(activeUriValue);
+  // Uri-keyed so the second editor group (group B) can sync its OWN file's buffer without touching the
+  // active (group-A) buffer (#265): a no-op when `uri` is not an open buffer.
+  function syncBuffer(uri: string, doc: string): boolean {
+    const buf = buffers.get(uri);
     let becameDirty = false;
     if (buf) {
       if (!buf.dirty && buf.text !== doc) becameDirty = true;
@@ -696,6 +706,12 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       if (becameDirty) buf.dirty = true;
     }
     return becameDirty;
+  }
+
+  // The active-buffer convenience wrapper used by group A's onChange: identical behavior to the
+  // pre-#265 syncActiveBuffer, now expressed as syncBuffer(activeUri, doc).
+  function syncActiveBuffer(doc: string): boolean {
+    return syncBuffer(activeUriValue, doc);
   }
 
   // --- save (format + write to disk) ----------------------------------------
@@ -845,6 +861,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     scheduleAutoSave,
     anyDirty,
     syncActiveBuffer,
+    syncBuffer,
     handleNewFile,
     handleNewFolder,
     handleDelete,

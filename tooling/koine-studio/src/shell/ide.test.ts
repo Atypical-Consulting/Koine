@@ -468,6 +468,20 @@ function groupBDoc(): string | null {
   return EditorView.findFromDOM(dom)?.state.doc.toString() ?? null;
 }
 
+/** The live group-B EditorView, reached from its DOM. Throws when the split is closed. */
+function groupBView(): EditorView {
+  const dom = document.querySelector<HTMLElement>('#editor-pane-b .cm-editor');
+  const view = dom ? EditorView.findFromDOM(dom) : null;
+  if (!view) throw new Error('no EditorView mounted in #editor-pane-b');
+  return view;
+}
+
+/** Simulate a user edit IN GROUP B — the same docChanged → onChange path a keystroke drives, but on B. */
+function typeIntoGroupB(text: string): void {
+  const view = groupBView();
+  view.dispatch({ changes: { from: view.state.doc.length, insert: text } });
+}
+
 /** Open the command palette and click the (first) command row whose title matches `title` exactly. */
 function runPaletteCommand(title: string): void {
   const hint = document.querySelector<HTMLElement>('.palette-hint');
@@ -685,6 +699,75 @@ describe('ide init() — editor split routes file-open to the focused group (#26
       runPaletteCommand('billing.koi');
       expect(groupADoc()).toContain('context Billing');
       expect(groupBDoc()).toContain('context Orders'); // B still shows what the split seeded
+    } finally {
+      localStorage.clear();
+    }
+  });
+
+  test('typing in group B (showing a DIFFERENT file) edits B’s buffer, NOT group A’s — #265 data-loss guard', async () => {
+    localStorage.clear();
+    try {
+      setWorkspaceShareHash(FILES, 'orders.koi');
+      const { platform } = await boot();
+
+      // Split, then open billing.koi into the focused group B (group A stays on orders.koi).
+      runPaletteCommand('Split editor');
+      runPaletteCommand('billing.koi');
+      expect(groupBDoc()).toContain('context Billing');
+      expect(groupADoc()).toContain('context Orders');
+
+      // Type a unique marker into group B. The OLD bug routed this through syncActiveBuffer → it wrote
+      // B's text into group A's (active) buffer + marked A dirty + autosaved A → orders.koi got billing's
+      // content. With the fix, the edit syncs into B's OWN buffer.
+      typeIntoGroupB('\n// EDIT_IN_B_MARKER\n');
+
+      // Group A's editor doc is untouched — it never received B's keystrokes.
+      expect(groupADoc()).not.toContain('EDIT_IN_B_MARKER');
+      expect(groupADoc()).toContain('context Orders');
+
+      // Persist all open buffers to disk (Save to disk maps each buffer's text by relPath); this is the
+      // observable proof the right BUFFER was edited. orders.koi (group A) must NOT carry B's marker;
+      // billing.koi (group B) must.
+      (document.getElementById('btn-save-project') as HTMLButtonElement).click();
+      await settleBoot();
+      const input = document.querySelector('.koi-prompt-input') as HTMLInputElement;
+      input.value = 'split-save';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      (document.querySelector('.koi-confirm-btn-primary') as HTMLButtonElement).click();
+      await settleBoot();
+
+      const saveSpy = platform.saveProjectToRoot;
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+      const [, files] = saveSpy.mock.calls[0] as [string, { relPath: string; contents: string }[]];
+      const orders = files.find((f) => f.relPath === 'orders.koi')!;
+      const billing = files.find((f) => f.relPath === 'billing.koi')!;
+      // The data-loss assertion: group A's file is uncorrupted, group B's file holds B's edit.
+      expect(orders.contents).not.toContain('EDIT_IN_B_MARKER');
+      expect(orders.contents).toContain('context Orders');
+      expect(billing.contents).toContain('EDIT_IN_B_MARKER');
+    } finally {
+      localStorage.clear();
+    }
+  });
+
+  test('routing a file into group B persists B’s uri so reload restores the right file — #265', async () => {
+    localStorage.clear();
+    try {
+      setWorkspaceShareHash(FILES, 'orders.koi');
+      await boot();
+
+      runPaletteCommand('Split editor'); // splitOpen + B seeded with A's orders.koi
+      runPaletteCommand('billing.koi'); // re-point B at billing.koi (the focused group)
+
+      // The persisted layout's group-B slot now tracks billing.koi (not the stale split-open orders.koi),
+      // so a reload would restore B to billing.koi. A's slot stays on the active orders.koi.
+      const persisted = JSON.parse(localStorage.getItem('koine.studio.layout')!) as {
+        splitOpen: boolean;
+        groupActiveUris: [string, string?];
+      };
+      expect(persisted.splitOpen).toBe(true);
+      expect(persisted.groupActiveUris[0]).toMatch(/orders\.koi$/);
+      expect(persisted.groupActiveUris[1]).toMatch(/billing\.koi$/);
     } finally {
       localStorage.clear();
     }

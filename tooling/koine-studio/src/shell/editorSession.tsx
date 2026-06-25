@@ -138,8 +138,13 @@ export interface EditorSession {
   /** Re-derive the status pill from a diagnostics set (green ✓ / N errors / N warnings). */
   updateStatus(diags: LspDiagnostic[]): void;
 
-  /** Register the downstream onChange callback ide.ts uses for buffer/dirty/tree side effects. */
-  onChange(cb: (doc: string) => void): void;
+  /**
+   * Register the downstream onChange callback ide.ts uses for buffer/dirty/tree side effects. The
+   * callback receives the new full text AND the uri of the editing group (group A's active uri, or
+   * group B's current uri) so ide.ts syncs the edit into the RIGHT buffer — a group-B edit must never
+   * write group A's buffer (#265).
+   */
+  onChange(cb: (doc: string, uri: string) => void): void;
 
   // The editor's LSP forwarders, exposed so callers (and tests) can reach the wall directly.
   hover(line: number, character: number): Promise<HoverResult | null>;
@@ -163,6 +168,8 @@ export interface EditorSession {
   closeGroupB(): void;
   /** The live group-B editor handle, or null when B is not open. */
   groupBEditor(): KoineEditor | null;
+  /** The uri group B currently shows ('' when B is closed). ide.ts persists this so reload restores B. */
+  groupBUri(): string;
   /** Which editor group currently has focus (the routing target for {@link openFocusedGroup}). */
   focusedGroup(): 'a' | 'b';
   /** Set the focused group (the routing target). Does not move DOM focus; ide.ts owns that. */
@@ -186,8 +193,9 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   const diagFor = (uri: string): LspDiagnostic[] => appStore.getState().diagnosticsFor(uri);
 
   // The registered downstream onChange callback (ide.ts: welcome.hide / buffer+dirty / onDocEdited /
-  // renderTree). The session's own onChange does the editor↔LSP sync, then invokes this.
-  let downstreamOnChange: ((doc: string) => void) | null = null;
+  // renderTree). The session's own onChange does the editor↔LSP sync, then invokes this with the
+  // editing group's uri so ide.ts syncs the edit into the right buffer (#265).
+  let downstreamOnChange: ((doc: string, uri: string) => void) | null = null;
 
   // --- the editor LSP forwarders ---------------------------------------------
   // The hover/completion forwarders are also exposed on the session so callers/tests can reach them.
@@ -205,10 +213,10 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     minimap: deps.minimap,
     onChange: (doc) => {
       // The editor↔LSP half of the old init() onChange: keep the server's document snapshot current
-      // (debounced inside the client), then hand the new full text to ide.ts for the buffer/dirty/
-      // tree side effects it still owns.
+      // (debounced inside the client), then hand the new full text + the active uri to ide.ts for the
+      // buffer/dirty/tree side effects it still owns.
       lsp.changeDoc(deps.activeUri(), doc);
-      downstreamOnChange?.(doc);
+      downstreamOnChange?.(doc, deps.activeUri());
     },
     onHover: hover,
     onCompletion: completion,
@@ -261,6 +269,10 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     return groupB;
   }
 
+  function groupBUriValue(): string {
+    return groupBUri;
+  }
+
   function openGroupB(uri?: string): void {
     // No mount point → single-group host; nothing to open.
     if (!deps.groupBParent) return;
@@ -277,8 +289,10 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
         lineWrap: deps.lineWrap,
         minimap: deps.minimap,
         onChange: (doc) => {
+          // B syncs the LSP + reports downstream for B's CURRENT uri (groupBUri), NOT group A's active
+          // uri — so a B edit dirties/saves B's own buffer and never corrupts group A's buffer (#265).
           lsp.changeDoc(groupBUri, doc);
-          downstreamOnChange?.(doc);
+          downstreamOnChange?.(doc, groupBUri);
         },
         onHover: hover,
         onCompletion: completion,
@@ -297,6 +311,10 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
         onOutgoingCalls: (item) => lsp.outgoingCalls(item),
       });
     } else {
+      // groupBUri is already the new target (set above), and editor.setDoc dispatches a doc change that
+      // FIRES this editor's onChange — which runs lsp.changeDoc(groupBUri, doc). So re-pointing B already
+      // notifies the language service of B's new uri/doc; no separate changeDoc needed here (#265). (The
+      // onChange also reports downstream(doc, groupBUri), a no-op resync of B's own buffer.)
       groupB.setDoc(docFor(target));
     }
     focused = 'b';
@@ -312,7 +330,9 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   // Route a buffer load to the focused group: group B when it is focused AND open, else group A.
   function openFocusedGroup(uri: string): void {
     if (focused === 'b' && groupB) {
-      groupBUri = uri;
+      groupBUri = uri; // set BEFORE setDoc so the resulting onChange targets the new uri
+      // editor.setDoc dispatches a doc change that fires B's onChange → lsp.changeDoc(groupBUri, doc),
+      // so re-pointing B notifies the language service of B's new uri/doc; no separate changeDoc needed.
       groupB.setDoc(docFor(uri));
     } else {
       editor.setDoc(docFor(uri));
@@ -464,6 +484,7 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     openGroupB,
     closeGroupB,
     groupBEditor,
+    groupBUri: groupBUriValue,
     focusedGroup,
     focusGroup,
     openFocusedGroup,

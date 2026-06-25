@@ -230,20 +230,73 @@ describe('createEditorSession — the editor callback wall forwards to the LSP',
 });
 
 describe('createEditorSession — onChange split', () => {
-  test('an editor edit syncs the LSP (changeDoc) and invokes the registered downstream callback', () => {
+  test('an editor edit syncs the LSP (changeDoc) and invokes the registered downstream callback with the ACTIVE uri', () => {
     const lsp = makeLsp();
     const session = createEditorSession(makeDeps(lsp));
-    const seen: string[] = [];
-    session.onChange((doc) => seen.push(doc));
+    const seen: { doc: string; uri: string }[] = [];
+    session.onChange((doc, uri) => seen.push({ doc, uri }));
 
     session.editor.view.dispatch({ changes: { from: session.editor.view.state.doc.length, insert: '\n// edit' } });
 
     // editor↔LSP forwarding happened inside the session…
     expect(lsp.changeDoc).toHaveBeenCalledTimes(1);
     expect(lsp.changeDoc.mock.calls[0][0]).toBe(ACTIVE);
-    // …and the downstream callback got the new full text (ide.ts does buffer/dirty/tree there).
+    // …and the downstream callback got the new full text PLUS group A's active uri (ide.ts uses the uri
+    // to sync the edit into the right buffer — #265).
     expect(seen.length).toBe(1);
-    expect(seen[0]).toContain('// edit');
+    expect(seen[0].doc).toContain('// edit');
+    expect(seen[0].uri).toBe(ACTIVE);
+  });
+
+  test('a group-B edit fires the downstream callback with B’s OWN uri (not group A’s) — #265 data-loss guard', () => {
+    const lsp = makeLsp();
+    const session = createEditorSession(makeDeps(lsp));
+    const seen: { doc: string; uri: string }[] = [];
+    session.onChange((doc, uri) => seen.push({ doc, uri }));
+
+    // Open group B on a DIFFERENT file than group A's active uri, then type into B.
+    session.openGroupB(OTHER);
+    const groupB = session.groupBEditor()!;
+    groupB.view.dispatch({ changes: { from: groupB.view.state.doc.length, insert: '\n// B edit' } });
+
+    // The LSP changeDoc + the downstream callback both carry OTHER (B's uri), NOT ACTIVE — so ide.ts
+    // syncs the edit into B's buffer and never corrupts group A's (active) buffer.
+    expect(lsp.changeDoc).toHaveBeenLastCalledWith(OTHER, expect.stringContaining('// B edit'));
+    expect(seen.length).toBe(1);
+    expect(seen[0].uri).toBe(OTHER);
+    expect(seen[0].doc).toContain('// B edit');
+  });
+});
+
+describe('createEditorSession — group B re-point notifies the LSP (#265)', () => {
+  // NOTE: in this codebase setDoc DISPATCHES a doc change that fires the editor's onChange, so re-pointing
+  // B (groupBUri set first, then setDoc) drives lsp.changeDoc(groupBUri, newDoc) through that onChange.
+  // These tests pin that the LSP ends up knowing B's NEW uri/doc after a re-point (exactly one push, with
+  // the new uri) — so hover/completion/definition in B resolve against the right file immediately.
+  test('re-pointing group B via openGroupB (reuse-branch) notifies the LSP with the new uri/doc', () => {
+    const lsp = makeLsp();
+    const session = createEditorSession(makeDeps(lsp));
+
+    session.openGroupB(OTHER); // first open: builds B (initial doc is constructor-seeded, no changeDoc)
+    lsp.changeDoc.mockClear();
+    session.openGroupB(ACTIVE); // reuse-branch: re-point B at a DIFFERENT uri
+
+    expect(lsp.changeDoc).toHaveBeenCalledTimes(1);
+    expect(lsp.changeDoc).toHaveBeenCalledWith(ACTIVE, DOCS[ACTIVE]);
+    expect(session.groupBUri()).toBe(ACTIVE);
+  });
+
+  test('re-pointing group B via openFocusedGroup (B focused) notifies the LSP with the new uri/doc', () => {
+    const lsp = makeLsp();
+    const session = createEditorSession(makeDeps(lsp));
+
+    session.openGroupB(ACTIVE); // open + focus B
+    lsp.changeDoc.mockClear();
+    session.openFocusedGroup(OTHER); // route a different file into the focused (B) group
+
+    expect(lsp.changeDoc).toHaveBeenCalledTimes(1);
+    expect(lsp.changeDoc).toHaveBeenCalledWith(OTHER, DOCS[OTHER]);
+    expect(session.groupBUri()).toBe(OTHER);
   });
 });
 

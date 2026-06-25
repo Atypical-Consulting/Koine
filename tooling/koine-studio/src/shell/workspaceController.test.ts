@@ -576,6 +576,63 @@ describe('createWorkspaceController — anyDirty', () => {
   });
 });
 
+describe('createWorkspaceController — syncBuffer (uri-keyed; group-B safety, #265)', () => {
+  test('syncBuffer(uriB, text) touches ONLY uriB and leaves the active buffer untouched', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp(trace), makeEditor(trace)));
+    await ws.openFolderPath(ROOT, { recent: false });
+
+    const aUri = uriOf('a.koi'); // the active buffer (first by relPath)
+    const bUri = uriOf('b.koi');
+    expect(ws.activeUri()).toBe(aUri);
+
+    // Edit B's buffer through the uri-keyed sync (the path group B's onChange takes in ide.tsx).
+    const becameDirty = ws.syncBuffer(bUri, 'context B { value V {} }\n');
+
+    // B's dirty dot just appeared, and B holds the new text…
+    expect(becameDirty).toBe(true);
+    expect(ws.buffers.get(bUri)!.dirty).toBe(true);
+    expect(ws.buffers.get(bUri)!.text).toBe('context B { value V {} }\n');
+    // …while the ACTIVE (group-A) buffer is completely untouched — no text change, not marked dirty.
+    expect(ws.buffers.get(aUri)!.text).toBe('context A {}\n');
+    expect(ws.buffers.get(aUri)!.dirty).toBe(false);
+  });
+
+  test('syncActiveBuffer delegates to syncBuffer(activeUri) — unchanged active-buffer behavior', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    const trace: string[] = [];
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp(trace), makeEditor(trace)));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const aUri = ws.activeUri();
+
+    const becameDirty = ws.syncActiveBuffer('context A { entity E {} }\n');
+
+    expect(becameDirty).toBe(true);
+    expect(ws.buffers.get(aUri)!.text).toBe('context A { entity E {} }\n');
+    expect(ws.buffers.get(aUri)!.dirty).toBe(true);
+    // A second sync with no change does not re-flip / re-report dirty.
+    expect(ws.syncActiveBuffer('context A { entity E {} }\n')).toBe(false);
+  });
+
+  test('syncBuffer for an unknown uri is a safe no-op (returns false, mutates nothing)', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    const trace: string[] = [];
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp(trace), makeEditor(trace)));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const aUri = ws.activeUri();
+
+    expect(ws.syncBuffer(uriOf('ghost.koi'), 'nope')).toBe(false);
+    // The active buffer is untouched by a write to a uri that isn't open.
+    expect(ws.buffers.get(aUri)!.text).toBe('context A {}\n');
+    expect(ws.buffers.get(aUri)!.dirty).toBe(false);
+  });
+});
+
 describe('createWorkspaceController — listWorkspaceFiles', () => {
   // Make the host walk apply fs.ts's SKIP_DIRS, so the test proves listWorkspaceFiles surfaces a
   // skip-list-filtered walk (the controller delegates the skip-list to the host, like listKoiFiles).
