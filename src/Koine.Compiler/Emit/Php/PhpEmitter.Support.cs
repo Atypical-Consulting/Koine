@@ -22,13 +22,21 @@ public sealed partial class PhpEmitter
         IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds);
 
     /// <summary>
-    /// Short class name → fully-qualified PHP name (e.g. <c>OrderId → Koine\Sales\ValueObjects\OrderId</c>)
-    /// for every emitted user type plus the runtime types referenced by short name. Built once per
-    /// <see cref="Emit(KoineModel, SemanticModel?)"/> and consulted by <see cref="CollectUses"/> so each
-    /// file imports the cross-namespace types it references.
+    /// Short class name → every <c>(FQN, declaring context)</c> that name resolves to — e.g.
+    /// <c>Money → [(Koine\Menu\ValueObjects\Money, Menu), (Koine\Payment\ValueObjects\Money, Payment)]</c>.
+    /// A short name shared across bounded contexts keeps an entry per context (mirroring the Python
+    /// emitter's <c>PyTypeLocation</c> list) so a reference resolves against the context it was
+    /// <em>declared</em> in, not whichever copy a flat last-writer-wins map happened to keep. Built once
+    /// per <see cref="Emit(KoineModel, SemanticModel?)"/> and consulted by <see cref="CollectUses"/> so
+    /// each file imports the cross-namespace types it references.
     /// </summary>
-    private IReadOnlyDictionary<string, string> _typeCatalog =
-        new Dictionary<string, string>(StringComparer.Ordinal);
+    private IReadOnlyDictionary<string, IReadOnlyList<(string Fqn, string Context)>> _typeCatalog =
+        new Dictionary<string, IReadOnlyList<(string Fqn, string Context)>>(StringComparer.Ordinal);
+
+    /// <summary>The synthetic "context" stamped on runtime types (<c>Range</c>, <c>QueryHandler</c>) in
+    /// the catalog — they are globally unique, so resolution always falls through to the lone entry; the
+    /// value only needs to never collide with a real declared context name.</summary>
+    private const string RuntimeContext = "@runtime";
 
     // -------------------------------------------------------------------------
     // File / PSR-4 layout
@@ -72,7 +80,18 @@ public sealed partial class PhpEmitter
     /// Writes a PHP file header: <c>&lt;?php\ndeclare(strict_types=1);\n\nnamespace Koine\…;\n</c>
     /// followed by any <c>use</c> declarations derived from the body, then the body itself.
     /// </summary>
-    private string Assemble(string contextName, string kindFolder, string body, string className)
+    /// <param name="contextName">The bounded context this file is declared in — the default context a
+    /// referenced short name resolves against when no per-symbol override applies.</param>
+    /// <param name="symbolContext">
+    /// Optional per-symbol context override for cross-namespace import resolution. By default a short
+    /// name shared across contexts resolves to THIS file's context; an emitter that references a type
+    /// from another bounded context (an ACL translator, a cross-context read-model field, a subscriber's
+    /// publisher event) maps that symbol to the context it was DECLARED in so a same-named local type
+    /// never silently shadows it. Maps a short class name to its declaring context.
+    /// </param>
+    private string Assemble(
+        string contextName, string kindFolder, string body, string className,
+        IReadOnlyDictionary<string, string>? symbolContext = null)
     {
         var fileNs = NamespaceFor(contextName);
         if (kindFolder.Length > 0)
@@ -88,7 +107,7 @@ public sealed partial class PhpEmitter
         sb.Append("namespace ").Append(fileNs).Append(";\n");
 
         // Collect use lines that the body actually references.
-        var uses = CollectUses(body, fileNs, className);
+        var uses = CollectUses(body, fileNs, contextName, className, symbolContext);
         if (uses.Count > 0)
         {
             sb.Append('\n');
@@ -128,16 +147,28 @@ public sealed partial class PhpEmitter
     /// deterministic emission.
     /// </para>
     /// </summary>
-    private List<string> CollectUses(string body, string fileNamespace, string className)
+    private List<string> CollectUses(
+        string body, string fileNamespace, string fileContext, string className,
+        IReadOnlyDictionary<string, string>? symbolContext = null)
     {
         var uses = new SortedSet<string>(StringComparer.Ordinal);
 
-        foreach (var (shortName, fqn) in _typeCatalog)
+        foreach (var (shortName, locations) in _typeCatalog)
         {
             if (shortName == className)
             {
                 continue; // never import the file's own class
             }
+
+            if (!ReferencesType(body, shortName))
+            {
+                continue;
+            }
+
+            // A short name shared across contexts has several candidates; resolve to the one the
+            // reference means — the per-symbol declaring-context hint, else this file's own context,
+            // else the first declaration (catalog order is deterministic).
+            var fqn = ResolveReference(shortName, locations, fileContext, symbolContext);
 
             // The type's namespace is everything before the final `\` in its FQN.
             var lastSep = fqn.LastIndexOf('\\');
@@ -147,13 +178,38 @@ public sealed partial class PhpEmitter
                 continue; // same namespace — no import needed
             }
 
-            if (ReferencesType(body, shortName))
-            {
-                uses.Add(fqn);
-            }
+            uses.Add(fqn);
         }
 
         return uses.ToList();
+    }
+
+    /// <summary>
+    /// Resolves a referenced short name to a single FQN among its catalog <paramref name="locations"/>:
+    /// the per-symbol declaring-context hint wins, else the referencing file's own
+    /// <paramref name="fileContext"/>, else the first declaration. The fallback chain matches the Python
+    /// emitter's <c>Assemble</c> resolution so the two backends agree on which context a shared name
+    /// belongs to.
+    /// </summary>
+    private static string ResolveReference(
+        string shortName,
+        IReadOnlyList<(string Fqn, string Context)> locations,
+        string fileContext,
+        IReadOnlyDictionary<string, string>? symbolContext)
+    {
+        var preferred = symbolContext is not null && symbolContext.TryGetValue(shortName, out var hinted)
+            ? hinted
+            : fileContext;
+
+        foreach (var loc in locations)
+        {
+            if (loc.Context == preferred)
+            {
+                return loc.Fqn;
+            }
+        }
+
+        return locations[0].Fqn;
     }
 
     /// <summary>
@@ -204,9 +260,9 @@ public sealed partial class PhpEmitter
     /// <c>Range</c> (the only runtime type referenced by short name; <c>Decimal</c> and the
     /// exceptions are emitted fully-qualified, so they need no import).
     /// </summary>
-    private Dictionary<string, string> BuildTypeCatalog(KoineModel model, ModelIndex index)
+    private Dictionary<string, IReadOnlyList<(string Fqn, string Context)>> BuildTypeCatalog(KoineModel model, ModelIndex index)
     {
-        var catalog = new Dictionary<string, string>(StringComparer.Ordinal);
+        var catalog = new Dictionary<string, List<(string Fqn, string Context)>>(StringComparer.Ordinal);
 
         void Add(string ctx, string kindFolder, string rawName)
         {
@@ -216,7 +272,19 @@ public sealed partial class PhpEmitter
             {
                 ns += "\\" + kindFolder;
             }
-            catalog[cls] = ns + "\\" + cls;
+            var fqn = ns + "\\" + cls;
+
+            if (!catalog.TryGetValue(cls, out List<(string Fqn, string Context)>? locations))
+            {
+                catalog[cls] = locations = new List<(string Fqn, string Context)>();
+            }
+
+            // De-dup on FQN — the same type can be reached from several catalog passes (e.g. an
+            // entity's branded id and an unowned-id sweep) within one context.
+            if (!locations.Any(l => l.Fqn == fqn))
+            {
+                locations.Add((fqn, ctx));
+            }
         }
 
         foreach (ContextNode ctx in model.Contexts)
@@ -268,12 +336,15 @@ public sealed partial class PhpEmitter
         }
 
         // The runtime Range is referenced by its short name (`public readonly Range $window`).
-        catalog["Range"] = @"Koine\Runtime\Range";
+        catalog["Range"] = new List<(string, string)> { (@"Koine\Runtime\Range", RuntimeContext) };
 
         // The runtime QueryHandler interface is referenced by handler seams.
-        catalog["QueryHandler"] = @"Koine\Runtime\QueryHandler";
+        catalog["QueryHandler"] = new List<(string, string)> { (@"Koine\Runtime\QueryHandler", RuntimeContext) };
 
-        return catalog;
+        return catalog.ToDictionary(
+            kv => kv.Key,
+            kv => (IReadOnlyList<(string Fqn, string Context)>)kv.Value,
+            StringComparer.Ordinal);
     }
 
     /// <summary>
