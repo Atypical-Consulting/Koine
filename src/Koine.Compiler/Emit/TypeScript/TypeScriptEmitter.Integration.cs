@@ -83,7 +83,14 @@ public sealed partial class TypeScriptEmitter
     private EmittedFile EmitIntegrationEventHandler(TsEmitContext emit, SubscribeDecl sub, string subscriberContext)
     {
         var eventType = TypeScriptNaming.ToPascalCase(sub.EventName);
-        var iface = "IHandle" + eventType;
+
+        // When the subscriber consumes the same event short name from two or more publishers (#420),
+        // the bare IHandle<Event> seam would collide on one path — qualify it by the publisher context
+        // (IHandle<Pub><Event>), mirroring the C# emitter. The single-publisher case keeps the bare
+        // name, byte-identical to before.
+        var iface = emit.Index.SubscriptionEventNameIsAmbiguous(subscriberContext, sub.EventName)
+            ? "IHandle" + TypeScriptNaming.ToPascalCase(sub.Context) + eventType
+            : "IHandle" + eventType;
         var folder = FolderFor(subscriberContext) + "/" + KindFolder.Abstractions;
 
         // Resolve the import module for the event as declared in the publisher context, preferring a

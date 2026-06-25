@@ -1,6 +1,7 @@
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit.CSharp;
+using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
@@ -174,5 +175,30 @@ public class R14ContextMapsTests
             contextmap { Legacy -> Billing : anti-corruption-layer }
             """;
         Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.AclDirectUpstreamReference && d.Severity == DiagnosticSeverity.Warning);
+    }
+
+    // ---- #420: same-named cross-publisher subscriber seams (TypeScript) -----
+
+    [Fact]
+    public void TypeScript_qualifies_same_named_cross_publisher_handler_seams_by_publisher()
+    {
+        var result = new KoineCompiler().Compile(
+            R14IntegrationEventsTests.SameNameCrossPublisher, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Two distinct, non-clobbering handler modules — one per publisher, each importing its event.
+        var sales = result.Files
+            .Single(f => f.RelativePath.EndsWith("Fulfillment/abstractions/IHandleSalesShipped.ts", StringComparison.Ordinal)).Contents;
+        sales.ShouldContain("export interface IHandleSalesShipped");
+        sales.ShouldContain("import { Shipped } from '");
+        sales.ShouldContain("handle(event: Shipped): Promise<void>;");
+
+        var returns = result.Files
+            .Single(f => f.RelativePath.EndsWith("Fulfillment/abstractions/IHandleReturnsShipped.ts", StringComparison.Ordinal)).Contents;
+        returns.ShouldContain("export interface IHandleReturnsShipped");
+
+        // The bare IHandleShipped seam must NOT be emitted — it would clobber across publishers.
+        result.Files.ShouldNotContain(f =>
+            f.RelativePath.EndsWith("Fulfillment/abstractions/IHandleShipped.ts", StringComparison.Ordinal));
     }
 }
