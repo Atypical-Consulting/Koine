@@ -14,12 +14,15 @@
 // suppresses the restart so teardown stays clean. `lsp://exit` is emitted only once
 // the retry budget is exhausted (or after a clean stop).
 
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+// `portable-pty` (WezTerm) abstracts Unix openpty + Windows ConPTY behind one API. Its `Child`
+// trait collides by name with `std::process::Child`, so it is imported under an alias.
+use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Maximum number of relaunch attempts after an unexpected sidecar exit.
@@ -49,6 +52,29 @@ struct McpState {
     /// the scraped `http://HOST:PORT/mcp` endpoint, once the sidecar announces it on stderr. An
     /// `Arc` so the stderr-reader thread can own a clone (managed `State` is not `'static`).
     endpoint: Arc<Mutex<Option<String>>>,
+}
+
+/// State for the integrated terminal's pseudo-terminal (PTY). Unlike the LSP child this is a raw
+/// byte stream with no framing and — deliberately — no supervision: a shell that exits should just
+/// close the terminal (`pty://exit`), never relaunch. We keep the master end (to resize and feed
+/// keystrokes) plus the spawned child (to kill on stop and reap its exit code) behind Mutexes so the
+/// Tauri commands and the reader thread can share them. `Box<dyn Trait + Send>` boxes erase the
+/// platform-specific PTY backend; `Mutex<Option<_>>::default()` is `None` regardless of the inner
+/// type, so `#[derive(Default)]` still applies.
+#[derive(Default)]
+struct PtyState {
+    /// The master side of the PTY; `None` until `pty_start`. Held so `pty_resize` can resize it and
+    /// so it is dropped (closing the PTY) on stop.
+    master: Mutex<Option<Box<dyn MasterPty + Send>>>,
+    /// The writer onto the PTY master (taken once from `master.take_writer()`); `pty_write` feeds
+    /// keystrokes through it. Kept separate so writing does not contend the master lock with resize.
+    writer: Mutex<Option<Box<dyn Write + Send>>>,
+    /// The spawned shell child; kept so `pty_stop` can kill it and the reader thread can `wait()` it
+    /// to recover the real exit code for `pty://exit`.
+    child: Mutex<Option<Box<dyn PtyChild + Send + Sync>>>,
+    /// Set once the user/app asks to stop; tells the reader thread the EOF was intentional so it
+    /// reports a clean exit (0) rather than trying to reap a child `pty_stop` already took.
+    shutting_down: Arc<AtomicBool>,
 }
 
 // --- pure framing functions (the cargo test gate) ---------------------------
@@ -177,6 +203,28 @@ fn parse_mcp_endpoint(line: &str) -> Option<String> {
     }
 }
 
+// --- terminal shell resolution ----------------------------------------------
+
+/// Decide which shell program (and args) the integrated terminal should spawn. Pure so the policy is
+/// unit-tested without opening a PTY: a caller-supplied `os_shell` (e.g. the user's `$SHELL`) is used
+/// verbatim; with `None` we fall back to a platform default — `$SHELL` (then `/bin/sh`) on Unix, and
+/// `cmd` on Windows. We launch the bare interactive shell with no synthetic args, so the program
+/// is returned alongside an (currently always empty) arg vector that keeps the call site uniform and
+/// leaves room for future per-shell flags.
+fn resolve_shell_command(os_shell: Option<&str>) -> (String, Vec<String>) {
+    if let Some(shell) = os_shell {
+        return (shell.to_string(), Vec::new());
+    }
+    // No shell named: pick a sensible platform default. `cfg!(windows)` is a const so the unused
+    // branch is dead-code-eliminated rather than a warning.
+    if cfg!(windows) {
+        ("cmd".to_string(), Vec::new())
+    } else {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        (shell, Vec::new())
+    }
+}
+
 // --- sidecar spawning + supervision -----------------------------------------
 
 /// Spawn the sidecar process with the broker's standard stdio wiring and detach
@@ -276,6 +324,92 @@ fn spawn_reader_thread(
             let _ = app.emit("lsp://restart", ());
             // loop continues, reading the relaunched child's stdout.
         }
+    });
+}
+
+// --- terminal PTY reader thread ---------------------------------------------
+
+/// Pull the longest immediately-decodable UTF-8 prefix out of `carry`, returning it as a `String` and
+/// leaving behind only a trailing *incomplete* multibyte sequence (at most 3 bytes) for the next read
+/// to complete. This is what keeps a multibyte code point that straddles a 4 KB read boundary from
+/// being corrupted: a naive per-read `from_utf8_lossy` would replace the split halves with U+FFFD,
+/// but here the partial tail is retained until its continuation bytes arrive. Genuinely *invalid*
+/// bytes (not a boundary split) are emitted lossily and drained, so `carry` can never grow unbounded
+/// on malformed input. Returns `None` when nothing is emittable yet (empty, or only an incomplete
+/// tail). Pure, so the boundary policy is unit-tested without opening a PTY.
+fn take_decodable(carry: &mut Vec<u8>) -> Option<String> {
+    let end = match std::str::from_utf8(carry) {
+        Ok(s) => s.len(),
+        Err(e) => match e.error_len() {
+            None => e.valid_up_to(),            // incomplete trailing sequence — keep it for next read
+            Some(bad) => e.valid_up_to() + bad, // genuinely invalid bytes — emit lossily, don't retain
+        },
+    };
+    if end == 0 {
+        return None;
+    }
+    let chunk = String::from_utf8_lossy(&carry[..end]).into_owned();
+    carry.drain(..end);
+    Some(chunk)
+}
+
+/// Spawn the reader thread that drains the PTY master and relays it to the frontend. It reads raw
+/// bytes (terminal output is not line- or frame-delimited) into a carry buffer and emits the longest
+/// valid-UTF-8 prefix as `pty://data`, holding back any partial multibyte tail until its continuation
+/// bytes arrive (see [`take_decodable`]) so non-ASCII output (TUIs, emoji/CJK filenames) is not
+/// mojibake'd at read boundaries. When the read hits EOF the shell has gone: we flush any trailing
+/// bytes, reap the child to recover its exit code, and emit `pty://exit` exactly once. Unlike the LSP
+/// sidecar there is **no** supervision/relaunch — an exited shell simply closes the terminal.
+/// `std::thread` + `std::io` only; no async runtime.
+fn spawn_pty_reader_thread(
+    app: AppHandle,
+    mut reader: Box<dyn Read + Send>,
+    shutting_down: Arc<AtomicBool>,
+) {
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        let mut carry: Vec<u8> = Vec::new();
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break, // EOF: the shell closed its end of the PTY
+                Ok(n) => {
+                    carry.extend_from_slice(&buf[..n]);
+                    while let Some(chunk) = take_decodable(&mut carry) {
+                        let _ = app.emit("pty://data", chunk);
+                    }
+                }
+                Err(_) => break, // a read error means the PTY is gone; treat it as EOF
+            }
+        }
+        // Flush any trailing bytes (an incomplete sequence at the very end) lossily so nothing the
+        // shell wrote before closing is silently dropped.
+        if !carry.is_empty() {
+            let _ = app.emit("pty://data", String::from_utf8_lossy(&carry).into_owned());
+        }
+
+        // The PTY reached EOF. Recover the exit code and announce it once, then clear the managed
+        // handles so a later `pty_start` is a clean fresh start.
+        let state = app.state::<PtyState>();
+        let reaped = state.child.lock().ok().and_then(|mut g| g.take());
+        let code = if shutting_down.load(Ordering::SeqCst) {
+            // Intentional stop: `pty_stop` already took and killed the child, so there is nothing to
+            // reap — report a clean exit.
+            0i32
+        } else {
+            // Natural exit: wait the child for its real status (defaulting to 0 if it was already
+            // reaped or the wait fails).
+            reaped
+                .and_then(|mut child| child.wait().ok())
+                .map(|status| status.exit_code() as i32)
+                .unwrap_or(0)
+        };
+        if let Ok(mut g) = state.writer.lock() {
+            *g = None;
+        }
+        if let Ok(mut g) = state.master.lock() {
+            *g = None;
+        }
+        let _ = app.emit("pty://exit", code);
     });
 }
 
@@ -971,6 +1105,123 @@ fn mcp_stop(state: State<'_, McpState>) -> Result<(), String> {
     Ok(())
 }
 
+// --- terminal PTY commands --------------------------------------------------
+
+/// Open a PTY, spawn the user's shell into it (rooted at `cwd` when given), and start the reader
+/// thread that relays output as `pty://data`. Idempotent: holding the `child` lock across the whole
+/// check-spawn-store means two concurrent calls cannot both pass the guard and open duplicate
+/// terminals (the second blocks until the first stores `Some`, then returns early).
+#[tauri::command]
+fn pty_start(
+    app: AppHandle,
+    state: State<'_, PtyState>,
+    cwd: Option<String>,
+) -> Result<(), String> {
+    let mut child_guard = state.child.lock().map_err(|e| e.to_string())?;
+    if child_guard.is_some() {
+        return Ok(());
+    }
+
+    // A fresh start clears any prior shutdown intent so the reader reports a real exit code.
+    state.shutting_down.store(false, Ordering::SeqCst);
+
+    // Open the PTY pair at a conventional default size; the frontend re-syncs it via `pty_resize`
+    // as soon as the terminal element is measured.
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("failed to open pty: {e}"))?;
+
+    // Resolve the shell from `$SHELL` (Unix) — `resolve_shell_command` falls back to a platform
+    // default when it is unset (and on Windows, where `$SHELL` is absent, that yields `cmd`).
+    let (program, args) = resolve_shell_command(std::env::var("SHELL").ok().as_deref());
+    let mut cmd = CommandBuilder::new(program);
+    cmd.args(args);
+    if let Some(dir) = cwd {
+        cmd.cwd(dir);
+    }
+
+    let child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| format!("failed to spawn shell: {e}"))?;
+    // Drop the slave now the child holds it: otherwise our retained slave handle would keep the PTY
+    // open and the reader would never see EOF when the shell exits.
+    drop(pair.slave);
+
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("failed to clone pty reader: {e}"))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|e| format!("failed to take pty writer: {e}"))?;
+
+    // Store the handles, then store the child while still holding its guard => the start is atomic.
+    *state.writer.lock().map_err(|e| e.to_string())? = Some(writer);
+    *state.master.lock().map_err(|e| e.to_string())? = Some(pair.master);
+    *child_guard = Some(child);
+
+    spawn_pty_reader_thread(app.clone(), reader, state.shutting_down.clone());
+
+    Ok(())
+}
+
+/// Feed keystrokes (or pasted text) to the shell by writing the bytes to the PTY master. Errors if
+/// the terminal has not been started.
+#[tauri::command]
+fn pty_write(state: State<'_, PtyState>, data: String) -> Result<(), String> {
+    let mut guard = state.writer.lock().map_err(|e| e.to_string())?;
+    let writer = guard.as_mut().ok_or("PTY not started")?;
+    writer.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
+    writer.flush().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Resize the PTY so the shell (and full-screen TUIs) re-flow to the new viewport. Errors if the
+/// terminal has not been started.
+#[tauri::command]
+fn pty_resize(state: State<'_, PtyState>, cols: u16, rows: u16) -> Result<(), String> {
+    let guard = state.master.lock().map_err(|e| e.to_string())?;
+    let master = guard.as_ref().ok_or("PTY not started")?;
+    master
+        .resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("failed to resize pty: {e}"))?;
+    Ok(())
+}
+
+/// Intentional shutdown: arm the no-reap flag, drop the writer (so the shell sees stdin EOF), kill
+/// the child to be certain it exits, and drop the master. The reader thread then emits `pty://exit`
+/// (code 0). Idempotent and safe to call when nothing is running.
+#[tauri::command]
+fn pty_stop(state: State<'_, PtyState>) -> Result<(), String> {
+    state.shutting_down.store(true, Ordering::SeqCst);
+    if let Ok(mut g) = state.writer.lock() {
+        *g = None;
+    }
+    if let Ok(mut g) = state.child.lock() {
+        if let Some(mut child) = g.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+    if let Ok(mut g) = state.master.lock() {
+        *g = None;
+    }
+    Ok(())
+}
+
 /// Return the application version (from Cargo metadata) so the About panel can
 /// display it.
 #[tauri::command]
@@ -985,6 +1236,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(LspState::default())
         .manage(McpState::default())
+        .manage(PtyState::default())
         .setup(|app| {
             // Make the Koine logo show in the macOS Dock even under `tauri dev`
             // (an unbundled run has no Info.plist/icns to source it from).
@@ -1019,6 +1271,10 @@ pub fn run() {
             lsp_stop,
             mcp_endpoint,
             mcp_stop,
+            pty_start,
+            pty_write,
+            pty_resize,
+            pty_stop,
             app_version,
             list_koi_files,
             read_text_file,
@@ -1573,5 +1829,66 @@ mod tests {
         let got = std::fs::read(&path).unwrap();
         assert_eq!(got, body);
         let _ = std::fs::remove_file(&path);
+    }
+
+    // --- PTY shell resolution (pure) ----------------------------------------
+
+    #[test]
+    fn resolve_shell_command_honours_an_explicit_shell() {
+        // An explicit shell path is used verbatim as the program, with no extra args — the
+        // terminal launches exactly what the caller (or `$SHELL`) named.
+        let (program, args) = resolve_shell_command(Some("/bin/zsh"));
+        assert_eq!(program, "/bin/zsh");
+        assert!(args.is_empty(), "an explicit shell takes no synthetic args");
+    }
+
+    #[test]
+    fn resolve_shell_command_falls_back_to_a_platform_default() {
+        // With no shell named, a non-empty platform default must be chosen ($SHELL/`/bin/sh`
+        // on Unix, `cmd` on Windows) so `pty_start` always has something to spawn.
+        let (program, _args) = resolve_shell_command(None);
+        assert!(!program.is_empty(), "a platform default shell must be chosen");
+    }
+
+    // --- PTY chunk decoding (pure) ------------------------------------------
+
+    #[test]
+    fn take_decodable_passes_ascii_whole() {
+        let mut carry = b"git status\r\n".to_vec();
+        assert_eq!(take_decodable(&mut carry).as_deref(), Some("git status\r\n"));
+        assert!(carry.is_empty(), "a fully-valid buffer is drained entirely");
+    }
+
+    #[test]
+    fn take_decodable_holds_back_a_split_multibyte_tail() {
+        // '€' is the 3 bytes E2 82 AC. A read boundary that splits it after E2 must NOT corrupt it:
+        // nothing is emittable yet, and the partial byte is retained for the next read.
+        let mut carry = vec![0xE2];
+        assert_eq!(take_decodable(&mut carry), None);
+        assert_eq!(carry, vec![0xE2], "the incomplete sequence is kept, not lossily emitted");
+
+        // The continuation bytes arrive on the next read → the whole code point decodes.
+        carry.extend_from_slice(&[0x82, 0xAC]);
+        assert_eq!(take_decodable(&mut carry).as_deref(), Some("€"));
+        assert!(carry.is_empty());
+    }
+
+    #[test]
+    fn take_decodable_emits_valid_prefix_and_keeps_tail() {
+        // "ab" + the first byte of '€': the ASCII prefix is emitted now, the partial tail held back.
+        let mut carry = vec![b'a', b'b', 0xE2];
+        assert_eq!(take_decodable(&mut carry).as_deref(), Some("ab"));
+        assert_eq!(carry, vec![0xE2]);
+    }
+
+    #[test]
+    fn take_decodable_drains_genuinely_invalid_bytes() {
+        // A lone 0xFF is invalid (not an incomplete sequence): it is emitted lossily and drained
+        // rather than retained, so the buffer can't grow unbounded waiting for a continuation that
+        // will never come. The valid byte that follows is then emitted on the next pull.
+        let mut carry = vec![0xFF, b'x'];
+        assert_eq!(take_decodable(&mut carry).as_deref(), Some("\u{FFFD}"));
+        assert_eq!(take_decodable(&mut carry).as_deref(), Some("x"));
+        assert!(carry.is_empty());
     }
 }

@@ -99,7 +99,7 @@ const SYMBOL_KIND_NAMESPACE = 3;
 type CenterView = 'visual' | 'technical' | 'docs' | 'assistant';
 type TechView = 'editor' | 'preview' | 'check' | 'scenarios';
 type DocsView = 'glossary' | 'adr' | 'notes';
-type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap';
+type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap' | 'terminal';
 
 /**
  * The slice of {@link import('@/lsp/lsp').KoineLsp} the loaders call (content requests only). A
@@ -184,6 +184,13 @@ export interface InspectorControllerDeps {
 
   /** The scenario-runner panel (#149), created lazily by ide.ts the first time its tab is shown. */
   ensureScenarios?(): { refresh(): void };
+
+  /**
+   * The integrated terminal panel (#256), created lazily by ide.ts the first time its tab is shown.
+   * `fit()` reflows xterm to the (now-visible) panel. Desktop-only — the browser host omits it, and
+   * the panel renders a placeholder instead.
+   */
+  ensureTerminal?(): { fit(): void };
 
   /** Bind a fixed-height resizer to a panel (ide.ts's resize.ts, injected to keep this DOM-infra-free). */
   initEdgeResizer(opts: {
@@ -349,6 +356,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const eventsPanel = el('panel-events');
   const relationshipsPanel = el('panel-relationships');
   const contextMapView = el('panel-contextmap');
+  const terminalPanel = el('panel-terminal');
 
   // --- center pane restore ---------------------------------------------------
   // Restore the persisted center pane, defaulting to Visual when absent/invalid.
@@ -1464,6 +1472,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     eventsPanel.hidden = tab !== 'events';
     relationshipsPanel.hidden = tab !== 'relationships';
     contextMapView.hidden = tab !== 'contextmap';
+    terminalPanel.hidden = tab !== 'terminal';
     diagCountEl.hidden = tab !== 'problems';
     if (diagEl.classList.contains('collapsed')) applyDiagCollapsed(false);
     ensureBottomLoaded(tab);
@@ -1513,6 +1522,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (tab === 'events' && appStore.getState().isStale('events')) void loadEventsPanel();
     if (tab === 'relationships' && appStore.getState().isStale('relationships')) void loadRelationshipsPanel();
     if (tab === 'contextmap' && appStore.getState().isStale('contextmap')) void loadContextMapPanel();
+    // The terminal panel is created lazily by ide.ts the first time its tab is shown (mirrors the
+    // assistant/scenarios panels); fit() reflows xterm now that the panel has layout. Desktop-only —
+    // the browser host omits ensureTerminal and the panel shows its placeholder.
+    if (tab === 'terminal') deps.ensureTerminal?.().fit();
   }
 
   // --- the "Context Map" tab: the strategic context map, as an interactive GRAPH or the dense TABLE ----
