@@ -1,6 +1,8 @@
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit.CSharp;
+using Koine.Compiler.Emit.Python;
+using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
@@ -174,5 +176,51 @@ public class R14ContextMapsTests
             contextmap { Legacy -> Billing : anti-corruption-layer }
             """;
         Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.AclDirectUpstreamReference && d.Severity == DiagnosticSeverity.Warning);
+    }
+
+    // ---- #420: same-named cross-publisher subscriber seams (TypeScript) -----
+
+    [Fact]
+    public void TypeScript_qualifies_same_named_cross_publisher_handler_seams_by_publisher()
+    {
+        var result = new KoineCompiler().Compile(
+            R14IntegrationEventsTests.SameNameCrossPublisher, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Two distinct, non-clobbering handler modules — one per publisher, each importing its event.
+        var sales = result.Files
+            .Single(f => f.RelativePath.EndsWith("Fulfillment/abstractions/IHandleSalesShipped.ts", StringComparison.Ordinal)).Contents;
+        sales.ShouldContain("export interface IHandleSalesShipped");
+        sales.ShouldContain("import { Shipped } from '");
+        sales.ShouldContain("handle(event: Shipped): Promise<void>;");
+
+        var returns = result.Files
+            .Single(f => f.RelativePath.EndsWith("Fulfillment/abstractions/IHandleReturnsShipped.ts", StringComparison.Ordinal)).Contents;
+        returns.ShouldContain("export interface IHandleReturnsShipped");
+
+        // The bare IHandleShipped seam must NOT be emitted — it would clobber across publishers.
+        result.Files.ShouldNotContain(f =>
+            f.RelativePath.EndsWith("Fulfillment/abstractions/IHandleShipped.ts", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Python_emits_same_named_cross_publisher_events_without_collision()
+    {
+        var result = new KoineCompiler().Compile(
+            R14IntegrationEventsTests.SameNameCrossPublisher, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Each publisher's same-named event DTO lands in its own context package — no clobbering.
+        result.Files
+            .Single(f => f.RelativePath.EndsWith("sales/events/shipped.py", StringComparison.Ordinal))
+            .Contents.ShouldContain("class Shipped:");
+        result.Files
+            .Single(f => f.RelativePath.EndsWith("returns/events/shipped.py", StringComparison.Ordinal))
+            .Contents.ShouldContain("class Shipped:");
+
+        // The Python emitter ships no per-subscription handler seam (integration events emit only as
+        // per-context DTOs), so this model is collision-safe by construction: no two emitted files
+        // share a path. There is therefore nothing for the publisher-qualification (#420) to qualify.
+        result.Files.Select(f => f.RelativePath).ShouldBeUnique();
     }
 }

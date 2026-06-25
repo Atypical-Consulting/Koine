@@ -231,6 +231,11 @@ The event type is fully qualified back to its publisher (`Ordering.OrderPlaced`)
 on it but never redefines it. Implement `IHandleOrderPlaced` in `Shipping` and `Payments` to wire each
 context's reaction.
 
+If a context subscribes to **two same-named events from different publishers** — say both
+`Sales.Shipped` and `Returns.Shipped` — the bare `IHandleShipped` seam would collide, so each is
+qualified by its publisher instead: `IHandleSalesShipped` and `IHandleReturnsShipped`, each typed on its
+own publisher's event. The single-publisher case keeps the plain `IHandle<Event>` name.
+
 :::note
 A `subscribes` only compiles when the publisher actually `publishes` that event **and** a permitting
 relation (`open-host` here) exists. The map and the events are checked together — wiring that the

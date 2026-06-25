@@ -179,6 +179,13 @@ cross-boundary-safe (primitives, enums, `*Id`s, other integration events) — le
 event is an error.
 :::
 
+A context may even subscribe to **two same-named events from different publishers** (e.g. both
+`Sales.Shipped` and `Returns.Shipped`). The bare `IHandleShipped` seam would collide, so each colliding
+handler is **qualified by its publisher** — `IHandleSalesShipped` and `IHandleReturnsShipped`, each typed
+on its own publisher's event. The common single-publisher case keeps the bare `IHandle<Event>` name
+unchanged. The same publisher-qualification applies in the TypeScript and PHP emitters; Python emits no
+per-subscription handler seam, so its same-named events simply live in their distinct context packages.
+
 ## Model versioning & evolution (R15)
 
 See [model versioning](/Koine/reference/versioning/) and the
