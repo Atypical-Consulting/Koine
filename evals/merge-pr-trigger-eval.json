@@ -1,0 +1,21 @@
+[
+  {"query": "merge PR 281", "should_trigger": true, "note": "'merge PR N'"},
+  {"query": "land #281", "should_trigger": true, "note": "'land #N'"},
+  {"query": "ship this PR: https://github.com/Atypical-Consulting/Koine/pull/300", "should_trigger": true, "note": "bare PR link + 'ship'"},
+  {"query": "get 281 in", "should_trigger": true, "note": "loose 'get N in'"},
+  {"query": "wrap up PR 281 and open follow-ups for the deferred bits", "should_trigger": true, "note": "'wrap up ... open follow-ups'"},
+  {"query": "can you get that PR merged once CI's green — it's #281", "should_trigger": true, "note": "loose 'get merged once CI green'"},
+  {"query": "close out PR 281 by squash-merging it", "should_trigger": true, "note": "'close out ... squash-merge'"},
+  {"query": "finish landing PR 281 — fix the red CI and merge it", "should_trigger": true, "note": "'finish landing ... fix red CI'"},
+  {"query": "land PR 281: resolve its conflicts with main as part of merging it now", "should_trigger": true, "note": "land-now conflict sync (boundary, → merge-pr)"},
+  {"query": "merge 281 and tear down its branch afterward", "should_trigger": true, "note": "'merge ... tear down branch'"},
+
+  {"query": "implement issue 47", "should_trigger": false, "note": "→ implement-issue"},
+  {"query": "open a PR for issue 47", "should_trigger": false, "note": "→ implement-issue (open, not land)"},
+  {"query": "file an issue to track a parser bug", "should_trigger": false, "note": "→ create-issue"},
+  {"query": "review PR 281 but don't merge it", "should_trigger": false, "note": "→ review/code-review"},
+  {"query": "my in-flight PR conflicts with main — sync it while I keep building the feature", "should_trigger": false, "note": "in-flight sync (boundary, → implement-issue)"},
+  {"query": "set up the repo profile", "should_trigger": false, "note": "→ get-repo-profile"},
+  {"query": "what's the squash-merge title convention here?", "should_trigger": false, "note": "doc question — no lifecycle skill"},
+  {"query": "build the feature from issue 129 and open the PR", "should_trigger": false, "note": "→ implement-issue"}
+]
