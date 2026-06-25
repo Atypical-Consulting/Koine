@@ -41,6 +41,10 @@ internal sealed class PhpExpressionTranslator
     private readonly TypeResolver _resolver;
     private readonly TypeScope _scope;
     private readonly ISet<string> _memberNames;
+
+    // The in-scope members keyed by name, so a reference can tell a stored member from a DERIVED
+    // (computed) one — the latter is emitted as a getter method, so a reference is a method call.
+    private readonly IReadOnlyDictionary<string, Member> _membersByName;
     private readonly IReadOnlyDictionary<string, string> _enumMemberToType;
 
     private readonly HashSet<string> _locals = new(StringComparer.Ordinal);
@@ -65,6 +69,15 @@ internal sealed class PhpExpressionTranslator
         _resolver = new TypeResolver(index, context);
         _scope = TypeScope.FromMembers(members, index);
         _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
+
+        // Last-wins so a duplicate (e.g. a synthetic `id` appended over a declared one) doesn't throw.
+        var byName = new Dictionary<string, Member>(StringComparer.Ordinal);
+        foreach (Member m in members)
+        {
+            byName[m.Name] = m;
+        }
+
+        _membersByName = byName;
         _enumMemberToType = enumMemberToType;
         _memberReceiver = memberReceiver;
     }
@@ -632,6 +645,20 @@ internal sealed class PhpExpressionTranslator
         if (_memberNames.Contains(name))
         {
             var camel = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(name));
+
+            // A DERIVED (computed) member is emitted as a getter METHOD (see EmitValueObject /
+            // EmitEntity), so a reference to it is a method CALL, not a property access — emitting
+            // `$x->camel` would fatally read an undefined property in PHP. In Property mode the call
+            // roots at the configured receiver (`$this`, `$target`, `$src`); in Parameter mode
+            // (constructor/invariant) the stored siblings are bare params, but the computed getter
+            // must still be called on the instance under construction (`$this`).
+            if (IsDerivedMember(name))
+            {
+                var receiver = _mode == NameMode.Property ? _memberReceiver : "this";
+                sb.Append('$').Append(receiver).Append("->").Append(camel).Append("()");
+                return;
+            }
+
             if (_mode == NameMode.Property)
             {
                 sb.Append('$').Append(_memberReceiver).Append("->").Append(camel);
@@ -653,6 +680,16 @@ internal sealed class PhpExpressionTranslator
         // (5) Unknown identifier: emit as $camelCase (best effort).
         sb.Append('$').Append(PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(name)));
     }
+
+    /// <summary>
+    /// True when the named in-scope member is <b>derived</b> — its initializer references a sibling
+    /// member — so the emitter renders it as a getter method (and a reference must be a call). Uses
+    /// the same <see cref="MemberAnalysis.IsDerived"/> the value-object/entity emitters use, over the
+    /// translator's in-scope members, so classification stays identical to how the member was emitted.
+    /// </summary>
+    private bool IsDerivedMember(string name) =>
+        _membersByName.TryGetValue(name, out Member? member)
+        && MemberAnalysis.IsDerived(member, _memberNames);
 
     private void WriteMemberAccess(MemberAccessExpr ma, StringBuilder sb)
     {
