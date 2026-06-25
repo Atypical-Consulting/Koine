@@ -512,19 +512,27 @@
   gap: var(--koi-space-2);
 }
 
+// Hosts a read-only CodeMirror JSON view (createJsonView). Keep the recipe box (paper, border,
+// radius, scroll, max-height); the CM view paints its own background and the JSON is coloured by
+// the shared `koineHighlight` style from the `--koi-hl-*` theme tokens — so no single-colour
+// `color`/`white-space: pre` rule here any more.
 .koi-mcp-snippet {
   margin: 0;
   padding: var(--koi-space-2-5) var(--koi-space-3);
   background: var(--koi-paper-2);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
-  font-family: var(--koi-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.78rem;
-  line-height: 1.45;
-  color: var(--koi-fg);
-  white-space: pre;
   overflow-x: auto;
   max-height: 220px;
+
+  .cm-editor {
+    background: transparent;
+  }
+
+  .cm-content {
+    font-family: var(--koi-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 0.78rem;
+  }
 }
 
 .koi-mcp-hint,

@@ -44,7 +44,7 @@ import {
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { showMinimap } from '@replit/codemirror-minimap';
 import { csharp } from '@codemirror/legacy-modes/mode/clike';
-import { typescript } from '@codemirror/legacy-modes/mode/javascript';
+import { typescript, json } from '@codemirror/legacy-modes/mode/javascript';
 import { python } from '@codemirror/legacy-modes/mode/python';
 import { rust } from '@codemirror/legacy-modes/mode/rust';
 import { php } from '@codemirror/lang-php';
@@ -1214,6 +1214,9 @@ const LANG_MODES: Record<string, () => Extension> = {
   typescript: () => StreamLanguage.define(typescript),
   python: () => StreamLanguage.define(python),
   rust: () => StreamLanguage.define(rust),
+  // JSON powers the read-only MCP configuration recipe in Settings (createJsonView); the
+  // legacy-modes JSON tokenizer is already bundled, so highlighting it adds no new dependency.
+  json: () => StreamLanguage.define(json),
   // PHP uses the Lezer-based grammar (lang-php); emitted files open with `<?php`, so the
   // default mixed-mode config highlights them correctly.
   php: () => php(),
@@ -1263,6 +1266,45 @@ export function createOutputView(parent: HTMLElement, lineWrap = false): OutputV
     setLineWrap(on: boolean) {
       view.dispatch({ effects: wrap.reconfigure(on ? EditorView.lineWrapping : []) });
     },
+    destroy: () => view.destroy(),
+  };
+}
+
+export interface ConfigView {
+  setContent(text: string): void;
+  getText(): string;
+  destroy(): void;
+}
+
+/**
+ * A compact, read-only JSON viewer for config snippets — the Settings → MCP recipe. Unlike
+ * `createOutputView` it drops line numbers, search and selection-match decorations (it's a small
+ * display/copy surface, not a code pane), but shares the same `koineHighlight` style so the JSON is
+ * coloured from the existing `--koi-hl-*` theme tokens. `getText()` returns the document verbatim,
+ * which is what the recipe's Copy button writes to the clipboard.
+ */
+export function createJsonView(parent: HTMLElement): ConfigView {
+  const view = new EditorView({
+    parent,
+    state: EditorState.create({
+      doc: '',
+      extensions: [
+        EditorView.contentAttributes.of({ 'aria-label': 'MCP client configuration snippet' }),
+        EditorState.readOnly.of(true),
+        EditorView.editable.of(false),
+        langExt('json'),
+        syntaxHighlighting(koineHighlight),
+        syntaxHighlighting(defaultHighlightStyle),
+        sharedTheme,
+      ],
+    }),
+  });
+
+  return {
+    setContent(text) {
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+    },
+    getText: () => view.state.doc.toString(),
     destroy: () => view.destroy(),
   };
 }
