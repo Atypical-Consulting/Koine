@@ -45,6 +45,7 @@ class FakePlatform implements Platform {
   readonly kind = 'browser' as const;
   readonly canOpenFolders = true;
   readonly canSaveProjects = true;
+  readonly canRunShell = false;
   readonly persistsWorkspace = true;
 
   /** Per-root store: rootToken -> (relPath -> UTF-8 contents). */

@@ -97,6 +97,7 @@ const APP_HTML = `
               <button type="button" class="diag-tab" id="tab-events" role="tab" data-panel="events" aria-selected="false">Events</button>
               <button type="button" class="diag-tab" id="tab-relationships" role="tab" data-panel="relationships" aria-selected="false">Relationships</button>
               <button type="button" class="diag-tab" id="tab-contextmap" role="tab" data-panel="contextmap" aria-selected="false">Context Map</button>
+              <button type="button" class="diag-tab" id="tab-terminal" role="tab" data-panel="terminal" aria-selected="false">Terminal</button>
             </div>
             <span id="diag-count" class="diag-count"></span>
           </div>
@@ -104,6 +105,7 @@ const APP_HTML = `
           <div id="panel-events" class="diag-panel" role="tabpanel" hidden></div>
           <div id="panel-relationships" class="diag-panel" role="tabpanel" hidden></div>
           <div id="panel-contextmap" class="diag-panel doc-view" role="tabpanel" hidden></div>
+          <div id="panel-terminal" class="diag-panel diag-panel-terminal" role="tabpanel" hidden></div>
         </footer>
       </section>
       <aside id="right" class="pane">

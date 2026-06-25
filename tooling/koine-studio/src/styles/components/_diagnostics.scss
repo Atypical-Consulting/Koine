@@ -347,3 +347,33 @@ th[aria-sort='descending'] .koi-th-sort::after {
   padding: var(--koi-space-2) 7px;
   font-style: italic;
 }
+
+/* --- integrated terminal panel (issue #256) ---
+   Unlike the list/table panels, the terminal fills its box edge-to-edge (xterm.js owns the padding
+   and its own internal scroll), so the shared `.diag-panel` horizontal padding is dropped and the
+   host element stretches to the draggable strip height. The browser placeholder reuses the muted,
+   centred empty-state treatment. */
+.diag-panel-terminal {
+  padding: 0;
+  overflow: hidden;
+}
+.terminal-host {
+  width: 100%;
+  height: 100%;
+}
+/* Docked right (#265), the panel height is `auto`; make the terminal fill its grid cell instead so
+   xterm's fit-addon measures a real height. */
+#split[data-panel-side='right'] .diag-panel-terminal {
+  height: 100%;
+  min-height: 0;
+}
+.terminal-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: var(--koi-space-3);
+  color: var(--koi-muted);
+  font-style: italic;
+  text-align: center;
+}

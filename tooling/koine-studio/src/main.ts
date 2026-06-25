@@ -4,6 +4,7 @@ import '@fontsource-variable/archivo';
 import '@fontsource-variable/hanken-grotesk';
 import '@fontsource-variable/jetbrains-mono';
 import '@maxgraph/core/css/common.css';
+import '@xterm/xterm/css/xterm.css';
 import '@/styles/main.scss';
 import { init } from '@/shell/ide';
 import { mountHome, type WelcomeCallbacks } from '@/welcome/welcome';
