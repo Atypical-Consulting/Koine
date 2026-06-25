@@ -54,16 +54,11 @@ function bootRuntime(): Promise<InteropSurface> {
 }
 
 // ---------------------------------------------------------------------------
-// Boot, then broadcast ready / boot-failure (with a watchdog against a silent hang).
-// ---------------------------------------------------------------------------
-
-broadcastBootSignal(bootRuntime(), (signal: WorkerSignal) => self.postMessage(signal), BOOT_WATCHDOG_MS);
-
-// ---------------------------------------------------------------------------
 // Message loop: dispatch { id, method, args } → { id, ok, result/error }.
 // ---------------------------------------------------------------------------
 
-self.onmessage = async (ev: MessageEvent<WorkerRequest>): Promise<void> => {
+/** Dispatch one `{ id, method, args }` request → `{ id, ok, result/error }` reply. */
+async function handleMessage(ev: MessageEvent<WorkerRequest>): Promise<void> {
   const { id, method, args } = ev.data;
   try {
     const interop = await bootRuntime();
@@ -77,4 +72,23 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>): Promise<void> => {
     const error = err instanceof Error ? err.message : String(err);
     self.postMessage({ id, ok: false, error } satisfies WorkerResponse);
   }
-};
+}
+
+// ---------------------------------------------------------------------------
+// Boot, then wire the message loop and broadcast ready / boot-failure.
+//
+// CRITICAL (issue #357): the message loop is installed via `addEventListener('message', …)` AFTER the
+// runtime has booted — NOT as a top-level `self.onmessage = …`. Assigning `self.onmessage`
+// synchronously at worker startup clobbers the `message` channel the .NET WebAssembly runtime relies
+// on while `dotnet.create()` boots inside a Worker, which deadlocks the boot: `import(dotnet.js)`
+// resolves but `create()` never settles (no ready, no failure). Wiring the handler only once boot has
+// resolved leaves that channel untouched during the boot. The host sends RPC only after it receives
+// `ready`, so installing the handler just before `ready` loses no messages.
+// ---------------------------------------------------------------------------
+
+broadcastBootSignal(
+  bootRuntime(),
+  (signal: WorkerSignal) => self.postMessage(signal),
+  BOOT_WATCHDOG_MS,
+  () => self.addEventListener('message', (ev: MessageEvent) => void handleMessage(ev as MessageEvent<WorkerRequest>)),
+);

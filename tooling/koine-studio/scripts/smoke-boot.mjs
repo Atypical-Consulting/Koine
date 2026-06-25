@@ -74,8 +74,10 @@ try {
   const page = await browser.newPage();
   page.on('pageerror', (e) => console.error('[pageerror]', String(e)));
 
-  // Tee the compiler worker's boot signals before any app code runs. The worker posts
-  // `{ type: 'ready' }` when the runtime has booted, or `{ type: 'boot-failure', error }`.
+  // Tee the compiler worker before any app code runs. The worker posts `{ type: 'ready' }` when the
+  // runtime has booted (or `{ type: 'boot-failure', error }`), then services id-correlated RPC
+  // (`{ id, ok, result }`). We assert BOTH: the boot reaches `ready` AND a real compiler call round-
+  // trips — so the gate catches a silent boot hang (#357) and a broken post-boot message channel.
   await page.addInitScript(() => {
     window.__bootT0 = performance.now();
     window.__bootSignals = [];
@@ -88,6 +90,7 @@ try {
         this.addEventListener('message', (e) => {
           const d = e.data;
           if (d && typeof d === 'object' && 'type' in d) window.__bootSignals.push({ t: at(), ev: d.type, error: d.error });
+          else if (d && typeof d === 'object' && 'ok' in d) window.__bootSignals.push({ t: at(), ev: 'rpc', ok: d.ok });
         });
         this.addEventListener('error', (e) => window.__bootSignals.push({ t: at(), ev: 'worker-error', error: e.message }));
       }
@@ -97,13 +100,14 @@ try {
   console.log(`▸ serving ${distDir}\n▸ loading ${url}`);
   await page.goto(url, { waitUntil: 'load', timeout: 30_000 });
 
-  // Wait until the worker posts `ready` (success) or `boot-failure`/`worker-error`, or we time out.
+  // Wait until the worker reaches `ready` AND an `ok` RPC reply round-trips (the app issues compiler
+  // calls automatically after boot), or it fails / times out.
   const verdict = await page
     .waitForFunction(
       () => {
         const s = window.__bootSignals || [];
-        if (s.some((x) => x.ev === 'ready')) return 'ready';
         if (s.some((x) => x.ev === 'boot-failure' || x.ev === 'worker-error')) return 'failed';
+        if (s.some((x) => x.ev === 'ready') && s.some((x) => x.ev === 'rpc' && x.ok === true)) return 'ready';
         return false;
       },
       { timeout: BOOT_TIMEOUT_MS, polling: 250 },
@@ -116,12 +120,21 @@ try {
     const el = document.querySelector('[data-kind]');
     return { kind: el?.getAttribute('data-kind') ?? null, text: el?.textContent?.trim() ?? null };
   });
+  const reachedReady = timeline.some((x) => x.ev === 'ready');
+  const okReplies = timeline.filter((x) => x.ev === 'rpc' && x.ok === true).length;
 
   if (verdict === 'ready') {
-    console.log(`✓ compiler worker booted (ready) — studio status: ${status.kind} "${status.text}"`);
+    console.log(`✓ compiler worker booted (ready) and RPC round-trips (${okReplies} ok replies).`);
+    console.log(`  studio status: ${status.kind} "${status.text}"`);
     ok = true;
   } else if (verdict === 'failed') {
     fail('the compiler worker reported a boot failure.', JSON.stringify(timeline, null, 2));
+  } else if (reachedReady) {
+    fail(
+      `the worker reached "ready" but no compiler call round-tripped within ${BOOT_TIMEOUT_MS / 1000}s ` +
+        `(the post-boot message channel is broken). Studio status: ${status.kind} "${status.text}".`,
+      JSON.stringify(timeline, null, 2),
+    );
   } else {
     fail(
       `the compiler worker never reached "ready" within ${BOOT_TIMEOUT_MS / 1000}s (boot hung). ` +
