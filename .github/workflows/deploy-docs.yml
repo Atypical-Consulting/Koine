@@ -73,13 +73,12 @@ jobs:
       - name: Install wasm workloads
         run: dotnet workload install wasm-tools wasm-experimental
 
-      # Publishes src/Koine.Wasm and copies the AppBundle into website/public/koine-wasm/,
-      # so the subsequent `astro build` bundles it into dist/. (Only needs dotnet + Node, no
-      # npm deps — the Astro step below installs those.)
-      - name: Build Koine wasm compiler module
-        working-directory: ./website
-        run: node scripts/build-wasm.mjs
-
+      # NOTE: no explicit wasm-publish step here on purpose. The Astro build below runs the website
+      # `prebuild` chain (npm run build → prebuild → scripts/build-wasm.mjs), which publishes the AOT
+      # bundle into website/public/koine-wasm/; build-studio.mjs then drives the studio's prebuild:web
+      # → its own build-wasm.mjs, which REUSES that bundle via the `bundleIsFresh` guard (issue #342).
+      # Net: the AOT bundle is published exactly once per deploy. Don't re-add an explicit publish
+      # step — the guard would just skip it.
       - name: Build site
         # withastro/action installs deps (auto-detects the package manager), runs the build,
         # and uploads the Pages artifact from website/dist.

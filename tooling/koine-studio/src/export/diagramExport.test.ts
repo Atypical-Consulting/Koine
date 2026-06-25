@@ -381,6 +381,28 @@ describe('diagramToMermaid → renders in Mermaid (issue #340)', () => {
     const result = await mermaid.parse(broken, { suppressErrors: true });
     expect(result).toBe(false);
   });
+
+  // issue #343: the edge-label path has the identical latent defect #340 fixed for member rows. Mermaid's
+  // classDiagram edge syntax is `A --> B : label`, so a colon INSIDE the label is a second separator that
+  // aborts the parse — symmetric to the member bug. Routing the edge label through the same colon-safe
+  // sanitizer keeps the document parseable for any label.
+  it('parses an edge whose label contains a colon (issue #343)', async () => {
+    const g = graph(
+      [node({ id: 'A', label: 'A' }), node({ id: 'B', label: 'B' })],
+      [edge({ from: 'A', to: 'B', arrowKind: 'association', label: 'tagged: urgent' })],
+    );
+    const out = diagramToMermaid(g);
+    const result = await mermaid.parse(out, { suppressErrors: true });
+    // Before the fix the row emits `A --> B : tagged: urgent` and Mermaid rejects the second colon.
+    expect(result).not.toBe(false);
+  });
+
+  it('would reject the pre-fix colon-bearing edge label (the guard has teeth)', async () => {
+    // Confirm Mermaid actually rejects `A --> B : a:b`, so the test above is a real regression guard.
+    const broken = 'classDiagram\n  class A["A"]\n  class B["B"]\n  A --> B : a:b\n';
+    const result = await mermaid.parse(broken, { suppressErrors: true });
+    expect(result).toBe(false);
+  });
 });
 
 // --- canvasToSvg: standalone SVG from the live maxGraph canvas (issue #271 Task 2) -------------------------

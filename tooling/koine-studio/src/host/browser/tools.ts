@@ -30,13 +30,13 @@ export async function runWasmTool(name: string, argsJson: string): Promise<strin
   const api = await loadWasmApi();
   switch (name) {
     case 'koine_validate':
-      return formatValidate(JSON.parse(api.DiagnoseWorkspace(filesJson(source))));
+      return formatValidate(JSON.parse(await api.DiagnoseWorkspace(filesJson(source))));
     case 'koine_compile':
-      return formatCompile(JSON.parse(api.EmitPreview(filesJson(source), normalizeCompileTarget(args.target))));
+      return formatCompile(JSON.parse(await api.EmitPreview(filesJson(source), normalizeCompileTarget(args.target))));
     case 'koine_format': {
       // Format returns LSP TextEdits: either [] (already canonical) or a single whole-document edit
       // whose newText IS the formatted source.
-      const edits = JSON.parse(api.Format(source)) as { newText: string }[];
+      const edits = JSON.parse(await api.Format(source)) as { newText: string }[];
       return Array.isArray(edits) && edits.length ? edits[0].newText : source;
     }
     default:
