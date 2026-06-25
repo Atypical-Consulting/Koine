@@ -44,6 +44,28 @@ public class R14IntegrationEventsTests
         }
         """;
 
+    // Two upstream contexts legitimately publish a same-named integration event; a downstream
+    // context subscribes to both (#420). The bare IHandleShipped seam would collide, so each emitter
+    // qualifies the colliding handler by its publisher (IHandleSalesShipped / IHandleReturnsShipped).
+    public const string SameNameCrossPublisher = """
+        context Sales {
+          publishes Shipped
+          integration event Shipped { orderId: OrderId }
+        }
+        context Returns {
+          publishes Shipped
+          integration event Shipped { rmaId: RmaId }
+        }
+        context Fulfillment {
+          subscribes Sales.Shipped
+          subscribes Returns.Shipped
+        }
+        contextmap {
+          Sales   -> Fulfillment : open-host
+          Returns -> Fulfillment : open-host
+        }
+        """;
+
     // ---- emission ----------------------------------------------------------
 
     [Fact]
@@ -286,6 +308,27 @@ public class R14IntegrationEventsTests
         var handler = asm.GetType("Shipping.IHandleOrderPlaced")!;
         var param = handler.GetMethod("Handle")!.GetParameters()[0];
         param.ParameterType.FullName.ShouldBe("Sales.OrderPlaced");
+    }
+
+    [Fact]
+    public void Same_named_events_from_different_publishers_emit_publisher_qualified_handlers()
+    {
+        var (asm, files) = Build(SameNameCrossPublisher);
+
+        // Two distinct, non-clobbering handler seams — one per publisher, each typed on its own event.
+        var sales = FileContents(files, "Fulfillment/Abstractions/IHandleSalesShipped.cs");
+        sales.ShouldContain("public interface IHandleSalesShipped");
+        sales.ShouldContain("Task Handle(Sales.Shipped theEvent, CancellationToken ct = default);");
+
+        var returns = FileContents(files, "Fulfillment/Abstractions/IHandleReturnsShipped.cs");
+        returns.ShouldContain("public interface IHandleReturnsShipped");
+        returns.ShouldContain("Task Handle(Returns.Shipped theEvent, CancellationToken ct = default);");
+
+        // The bare IHandleShipped seam must NOT be emitted — it would clobber across publishers.
+        files.ShouldNotContain(f => f.RelativePath == "Fulfillment/Abstractions/IHandleShipped.cs");
+
+        asm.GetType("Fulfillment.IHandleSalesShipped").ShouldNotBeNull();
+        asm.GetType("Fulfillment.IHandleReturnsShipped").ShouldNotBeNull();
     }
 
     [Fact]
