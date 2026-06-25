@@ -1,0 +1,63 @@
+// Event Flow view (event storming; #270) — the Table | Flow toggle in the bottom Events panel and the
+// model-derived flow canvas it mounts. Each card's fill/border colour is set INLINE by the renderer
+// (per event-storming kind: blue command, yellow aggregate, orange event, lilac policy, teal integration
+// event); these rules own the layout, the toggle chrome, and the card's text/padding only.
+
+.koi-events-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+// A toggle-button group (Table | Flow), pinned above the view it switches.
+.koi-events-toolbar {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 4px;
+  padding-bottom: var(--koi-space-2);
+}
+
+.koi-events-view-btn {
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 2px 10px;
+  border: 1px solid var(--koi-line);
+  border-radius: 999px;
+  background: var(--koi-paper);
+  color: var(--koi-muted);
+  cursor: pointer;
+}
+.koi-events-view-btn:hover {
+  color: var(--koi-fg);
+  border-color: var(--koi-accent);
+}
+.koi-events-view-btn[aria-pressed='true'] {
+  background: var(--koi-accent);
+  border-color: var(--koi-accent);
+  color: #fff;
+}
+.koi-events-view-btn:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+
+// The flow canvas fills the remaining panel height (the renderer's `.koi-diagrams-single` / `.koi-canvas`
+// are already height:100%); a min-height keeps the canvas visible when the bottom strip is short.
+.koi-event-flow {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+.koi-event-flow-mount {
+  height: 100%;
+  min-height: 220px;
+}
+
+// An event-storming card overlays the inline-coloured cell shape: dark, slightly bolder text and a touch
+// more padding so the sticky reads like a card rather than a plain node chip.
+.koi-eventflow-card {
+  color: #1f2937;
+  font-weight: 600;
+  padding: 6px 10px;
+}
