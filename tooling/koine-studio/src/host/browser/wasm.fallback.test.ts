@@ -223,6 +223,6 @@ describe('loadWasmApi — main-thread fallback (issue #357)', () => {
 
     createSpy.mockRestore();
     appendSpy.mockRestore();
-    vi.unstubAllEnvs();
+    // env restore is handled by the describe-level afterEach (matches the house devMode.test.ts pattern).
   });
 });
