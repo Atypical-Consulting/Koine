@@ -72,10 +72,10 @@ describe('loadWasmApi — main-thread fallback (issue #357)', () => {
 
     const wasm = await import('@/host/browser/wasm');
     let attempt = 0;
-    wasm.__setDotnetModuleLoaderForTests(async (url) => {
+    wasm.__setDotnetModuleLoaderForTests(async () => {
       attempt += 1;
       if (attempt === 1) throw new Error('dotnet.js 404 (transient)'); // first boot: main-thread also fails
-      return fakeDotnetModule({ ListEmitTargets: () => '{"targets":[]}' })(url);
+      return fakeDotnetModule({ ListEmitTargets: () => '{"targets":[]}' })();
     });
 
     // First call: worker rejects AND main-thread rejects → total failure, propagated to the caller.
