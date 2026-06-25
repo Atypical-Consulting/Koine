@@ -85,6 +85,8 @@ export interface KoineWasmApi {
     endLine: number,
     endChar: number,
   ): Promise<string>;
+  /** Semantic tokens for ONE source document → JSON `{data:[int...], resultId}` (LSP delta stream). */
+  SemanticTokens(source: string): Promise<string>;
   /** Prepare call hierarchy at a 0-based position → JSON CallHierarchyItem[]. */
   PrepareCallHierarchy(filesJson: string, activeUri: string, line: number, character: number): Promise<string>;
   /** Incoming calls into a CallHierarchyItem (passed as JSON) → JSON CallHierarchyIncomingCall[]. */
@@ -135,6 +137,7 @@ const KOINE_WASM_EXPORT_MAP: Record<keyof KoineWasmApi, true> = {
   RunScenario: true,
   ScenarioCatalog: true,
   InlayHints: true,
+  SemanticTokens: true,
   PrepareCallHierarchy: true,
   IncomingCalls: true,
   OutgoingCalls: true,

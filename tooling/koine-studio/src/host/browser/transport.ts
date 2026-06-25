@@ -263,6 +263,12 @@ export class WasmLspTransport implements LspTransport {
         ];
       }
 
+      case 'textDocument/semanticTokens/full':
+        // Unlike the other handlers, the WASM SemanticTokens export takes a SINGLE source string (not
+        // filesJson) — it returns the LSP delta-encoded int stream for one .koi document. Feed it the
+        // active document's text from the open-document set.
+        return [result(JSON.parse(await api.SemanticTokens(this.docs.get(uri ?? '') ?? '')))];
+
       case 'textDocument/prepareCallHierarchy':
         return [result(JSON.parse(await api.PrepareCallHierarchy(this.filesJson(), uri ?? '', pos?.line ?? 0, pos?.character ?? 0)))];
 
