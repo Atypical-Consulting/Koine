@@ -335,12 +335,13 @@ const APP_HTML = `
           <footer id="diagnostics">
             <div class="koi-resizer koi-resizer-y" id="diag-resizer"></div>
             <div id="diag-header">
-              <button type="button" id="diag-collapse" class="diag-collapse" aria-expanded="true" aria-controls="diag-body panel-events panel-relationships panel-contextmap">collapse</button>
+              <button type="button" id="diag-collapse" class="diag-collapse" aria-expanded="true" aria-controls="diag-body panel-events panel-relationships panel-contextmap panel-terminal">collapse</button>
               <div class="diag-tabs" role="tablist">
                 <button type="button" class="diag-tab" id="tab-problems" role="tab" data-panel="problems" aria-selected="true" aria-controls="diag-body">Problems</button>
                 <button type="button" class="diag-tab" id="tab-events" role="tab" data-panel="events" aria-selected="false" aria-controls="panel-events">Events</button>
                 <button type="button" class="diag-tab" id="tab-relationships" role="tab" data-panel="relationships" aria-selected="false" aria-controls="panel-relationships">Relationships</button>
                 <button type="button" class="diag-tab" id="tab-contextmap" role="tab" data-panel="contextmap" aria-selected="false" aria-controls="panel-contextmap">Context Map</button>
+                <button type="button" class="diag-tab" id="tab-terminal" role="tab" data-panel="terminal" aria-selected="false" aria-controls="panel-terminal">Terminal</button>
               </div>
               <span id="diag-count" class="diag-count"></span>
             </div>
@@ -348,6 +349,7 @@ const APP_HTML = `
             <div id="panel-events" class="diag-panel" role="tabpanel" aria-labelledby="tab-events" hidden></div>
             <div id="panel-relationships" class="diag-panel" role="tabpanel" aria-labelledby="tab-relationships" hidden></div>
             <div id="panel-contextmap" class="diag-panel doc-view" role="tabpanel" aria-labelledby="tab-contextmap" hidden></div>
+            <div id="panel-terminal" class="diag-panel diag-panel-terminal" role="tabpanel" aria-labelledby="tab-terminal" hidden></div>
           </footer>
         </section>
         <div class="koi-resizer" id="split-resizer"></div>
