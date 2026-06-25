@@ -40,9 +40,17 @@ def main():
 
     project_root = te.find_project_root()
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    skills = [s.strip() for s in args.skills.split(",")] if args.skills else SKILLS
+    selected = args.skills is not None
+    skills = [s.strip() for s in args.skills.split(",")] if selected else SKILLS
 
-    baseline = {"runs_per_query": args.runs_per_query, "threshold": args.threshold, "skills": {}}
+    # Merge into the existing baseline rather than overwrite it, so a scoped run
+    # (`--skills create-issue`) refreshes only that entry and leaves the other
+    # committed skills/boundary intact instead of dropping them.
+    baseline_path = RESULTS_DIR / "baseline.json"
+    baseline = json.loads(baseline_path.read_text()) if baseline_path.exists() else {}
+    baseline["runs_per_query"] = args.runs_per_query
+    baseline["threshold"] = args.threshold
+    baseline.setdefault("skills", {})
 
     for skill in skills:
         eval_path = EVALS_DIR / f"{skill}-trigger-eval.json"
@@ -61,8 +69,12 @@ def main():
         print(f"[{skill}] {s['passed']}/{s['total']}  recall={s['recall']}  specificity={s['specificity']}")
 
     # Boundary: same queries, both skills. Each query carries a per-skill expectation.
+    # Skip it on a scoped run that excludes both boundary skills, so `--skills
+    # create-issue` doesn't fire the real boundary queries or churn its artifacts.
     boundary_path = EVALS_DIR / "boundary-trigger-eval.json"
-    if boundary_path.exists():
+    run_boundary = boundary_path.exists() and (
+        not selected or bool({"implement-issue", "merge-pr"} & set(skills)))
+    if run_boundary:
         boundary = json.loads(boundary_path.read_text())
         bres = {}
         for skill in ("implement-issue", "merge-pr"):

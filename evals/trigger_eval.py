@@ -61,6 +61,25 @@ def find_project_root(start: Path | None = None) -> Path:
     return current
 
 
+def sweep_stale_command_files(project_root: Path) -> int:
+    """Remove leftover synthetic command files (`*-skill-*.md`) from `.claude/commands/`.
+
+    Each run cleans up its own file, but a hard interrupt (Ctrl-C SIGKILLs the
+    pool's workers, so their `finally` never runs) can orphan them in the live
+    repo's command namespace. Sweeping at the start/end of a run keeps it clean."""
+    commands_dir = project_root / ".claude" / "commands"
+    if not commands_dir.is_dir():
+        return 0
+    removed = 0
+    for stale in commands_dir.glob("*-skill-*.md"):
+        try:
+            stale.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
 def read_skill_description(project_root: Path, skill_name: str) -> str:
     """Pull the `description:` block scalar out of the installed SKILL.md."""
     skill_md = project_root / ".claude" / "skills" / skill_name / "SKILL.md"
@@ -75,10 +94,42 @@ def read_skill_description(project_root: Path, skill_name: str) -> str:
     return m.group(1).strip() if m else ""
 
 
-def _fired_skill(accumulated_json: str, known: list[str]) -> str | None:
-    """Best-effort: which known skill name appears in the tool-use input JSON."""
-    for name in known:
-        if name in accumulated_json:
+def _tool_target(acc: str, tool: str) -> str:
+    """Extract the structured value a Skill/Read tool-use refers to, from the
+    (possibly still-streaming, unterminated) input JSON.
+
+    For `Skill` that is the `"skill"` argument (a skill/command name); for `Read`
+    it is the `"file_path"`. Matching this *field* — not a bare substring of the
+    whole JSON blob — avoids counting an incidental mention of a skill name as a
+    trigger (e.g. a Read whose path happens to contain another skill's name)."""
+    if tool == "Skill":
+        m = re.search(r'"skill"\s*:\s*"([^"]*)', acc)
+        return m.group(1) if m else ""
+    if tool == "Read":
+        m = re.search(r'"file_path"\s*:\s*"([^"]*)', acc)
+        return m.group(1) if m else ""
+    return ""
+
+
+def _names_match(target: str, tool: str, name: str) -> bool:
+    """Does a Skill/Read `target` name/path invoke the skill `name`?
+
+    Skill: the arg equals the name (allowing a `plugin:name` prefix). Read: the
+    path is under that skill's own dir (or the synthetic command file)."""
+    if not target:
+        return False
+    if tool == "Skill":
+        return target == name or target.split(":")[-1] == name
+    if tool == "Read":
+        return (f"/skills/{name}/" in target) or (f"/commands/{name}." in target) or target.endswith(f"/{name}.md")
+    return False
+
+
+def _fired_name(acc: str, tool: str, candidates: list[str]) -> str | None:
+    """Which of `candidates` the Skill/Read tool-use actually invoked (or None)."""
+    target = _tool_target(acc, tool)
+    for name in candidates:
+        if _names_match(target, tool, name):
             return name
     return None
 
@@ -104,8 +155,10 @@ def run_single_query(
     project_commands_dir = Path(project_root) / ".claude" / "commands"
     command_file = project_commands_dir / f"{clean_name}.md"
 
-    def result(triggered: bool, fired: str | None, first_tool: str | None) -> dict:
-        return {"triggered": triggered, "fired": fired, "first_tool": first_tool}
+    def result(triggered: bool, fired: str | None, first_tool: str | None,
+               timed_out: bool = False) -> dict:
+        return {"triggered": triggered, "fired": fired,
+                "first_tool": first_tool, "timed_out": timed_out}
 
     try:
         project_commands_dir.mkdir(parents=True, exist_ok=True)
@@ -119,6 +172,13 @@ def run_single_query(
             "claude", "-p", query,
             "--output-format", "stream-json",
             "--verbose", "--include-partial-messages",
+            # Defense-in-depth: even if the early kill ever lost the race (e.g. a
+            # future CLI stopped emitting partial tool_use events, so detection
+            # fell to the buffered `assistant` fallback), the action skills could
+            # not actually mutate anything — the tools that do are denied. This
+            # does not change which *skill* the model invokes (what we measure);
+            # the Skill tool itself stays allowed and fires before any of these.
+            "--disallowedTools", "Bash", "Edit", "Write", "NotebookEdit",
         ]
         if model:
             cmd.extend(["--model", model])
@@ -134,15 +194,22 @@ def run_single_query(
         buffer = ""
         pending_tool = None
         acc = ""
+        targets = (skill_name, clean_name)
 
-        def matched(a: str) -> bool:
-            return (skill_name in a) or (clean_name in a)
+        def matched(a: str, tool: str) -> bool:
+            """Did the pending Skill/Read tool-use invoke OUR target skill?"""
+            return any(_names_match(_tool_target(a, tool), tool, t) for t in targets)
 
         try:
             while time.time() - start < timeout:
                 if process.poll() is not None:
-                    rest = process.stdout.read()
-                    if rest:
+                    # Drain via os.read on the same fd we stream from — never mix
+                    # buffered `.read()` here, or bytes already pulled into the
+                    # stdio buffer would be lost and a JSON line silently dropped.
+                    while True:
+                        rest = os.read(process.stdout.fileno(), 8192)
+                        if not rest:
+                            break
                         buffer += rest.decode("utf-8", errors="replace")
                     break
                 ready, _, _ = select.select([process.stdout], [], [], 1.0)
@@ -182,11 +249,13 @@ def run_single_query(
                             delta = se.get("delta", {})
                             if delta.get("type") == "input_json_delta":
                                 acc += delta.get("partial_json", "")
-                                if matched(acc):
+                                if matched(acc, pending_tool):
                                     return result(True, skill_name, pending_tool)
                         elif se_type in ("content_block_stop", "message_stop"):
                             if pending_tool:
-                                return result(matched(acc), _fired_skill(acc, known), pending_tool)
+                                m = matched(acc, pending_tool)
+                                fired = skill_name if m else _fired_name(acc, pending_tool, known)
+                                return result(m, fired, pending_tool)
                             if se_type == "message_stop":
                                 return result(False, None, None)
 
@@ -198,7 +267,8 @@ def run_single_query(
                             tool = c.get("name", "")
                             inp = json.dumps(c.get("input", {}))
                             if tool in ("Skill", "Read"):
-                                return result(matched(inp), _fired_skill(inp, known), tool)
+                                m = matched(inp, tool)
+                                return result(m, skill_name if m else _fired_name(inp, tool, known), tool)
                             return result(False, None, tool)
                     elif etype == "result":
                         return result(False, None, None)
@@ -207,7 +277,9 @@ def run_single_query(
                 process.kill()
                 process.wait()
 
-        return result(False, None, None)
+        # Reached without a decisive event: distinguish a real timeout (slow run,
+        # reported so it can be retried) from a clean stream that simply ended.
+        return result(False, None, None, timed_out=(time.time() - start >= timeout))
     finally:
         if command_file.exists():
             command_file.unlink()
@@ -215,24 +287,41 @@ def run_single_query(
 
 def run_eval(eval_set, skill_name, description, known, workers, timeout,
              project_root, runs_per_query, threshold, model):
-    futures = {}
-    with ProcessPoolExecutor(max_workers=workers) as ex:
-        for item in eval_set:
-            for run_idx in range(runs_per_query):
-                fut = ex.submit(
-                    run_single_query, item["query"], skill_name, description,
-                    timeout, str(project_root), known, model,
-                )
-                futures[fut] = item["query"]
+    seen = set()
+    for it in eval_set:
+        if it["query"] in seen:
+            print(f"Warning: duplicate query collapses runs/expectations: {it['query'][:60]!r}",
+                  file=sys.stderr)
+        seen.add(it["query"])
 
-        per_query: dict[str, list[dict]] = {}
-        for fut in as_completed(futures):
-            q = futures[fut]
-            try:
-                per_query.setdefault(q, []).append(fut.result())
-            except Exception as e:  # noqa: BLE001 - a crashed run counts as no-trigger
-                print(f"Warning: query failed: {e}", file=sys.stderr)
-                per_query.setdefault(q, []).append({"triggered": False, "fired": None, "first_tool": None})
+    sweep_stale_command_files(Path(project_root))
+    futures = {}
+    per_query: dict[str, list[dict]] = {}
+    try:
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            for item in eval_set:
+                for run_idx in range(runs_per_query):
+                    fut = ex.submit(
+                        run_single_query, item["query"], skill_name, description,
+                        timeout, str(project_root), known, model,
+                    )
+                    futures[fut] = item["query"]
+
+            for fut in as_completed(futures):
+                q = futures[fut]
+                try:
+                    per_query.setdefault(q, []).append(fut.result())
+                except Exception as e:  # noqa: BLE001 - a crashed run counts as no-trigger
+                    print(f"Warning: query failed: {e}", file=sys.stderr)
+                    per_query.setdefault(q, []).append(
+                        {"triggered": False, "fired": None, "first_tool": None, "timed_out": False})
+    finally:
+        sweep_stale_command_files(Path(project_root))
+
+    timed_out = sum(1 for runs in per_query.values() for r in runs if r.get("timed_out"))
+    if timed_out:
+        print(f"Warning: {timed_out} run(s) timed out (counted as no-trigger) — "
+              f"raise --timeout if recall looks low", file=sys.stderr)
 
     by_query = {it["query"]: it for it in eval_set}
     results = []
