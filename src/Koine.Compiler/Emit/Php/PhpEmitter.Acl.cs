@@ -32,6 +32,14 @@ public sealed partial class PhpEmitter
         var className = $"{upstream}To{downstream}Translator";
         var ns = r.Downstream;
 
+        // Each mapped type is resolved against the context it was declared in (upstream vs local), not
+        // this file's context — so a name collision across the two contexts can't mis-resolve. When the
+        // upstream and local types share a short name (a normal ACL `X -> X` shape), PHP cannot `use`
+        // both bare, so the local (file's own) copy stays bare and the upstream copy is imported
+        // `use … as <UpCtx><Name>` with its param hint rewritten to that alias.
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
+        var aliasImports = new Dictionary<string, string>(StringComparer.Ordinal);
+
         var sb = new StringBuilder();
         sb.Append("/** Anti-corruption translator from upstream context ").Append(EscapeDoc(r.Upstream))
           .Append(" into ").Append(EscapeDoc(r.Downstream)).Append(". */\n");
@@ -44,6 +52,32 @@ public sealed partial class PhpEmitter
             var localType = PhpNaming.ClassName(m.LocalType);
             var upstreamType = PhpNaming.ClassName(m.UpstreamType);
             var method = "translate" + upstreamType + "To" + localType;
+
+            // The param (upstream) hint: aliased when it collides with the local short name in a
+            // different context, otherwise the bare name resolved against the upstream context.
+            string paramHint;
+            if (upstreamType == localType
+                && m.UpstreamContext != m.LocalContext
+                && FqnIn(upstreamType, m.UpstreamContext) is { } upstreamFqn)
+            {
+                paramHint = PhpNaming.ToPascalCase(m.UpstreamContext) + upstreamType;
+                aliasImports[paramHint] = upstreamFqn;
+            }
+            else
+            {
+                paramHint = upstreamType;
+                // Don't pin the bare name to the upstream context when it shares the local short name
+                // (the alias path was unavailable) — the local/return hint below must win it instead.
+                if (upstreamType != localType)
+                {
+                    symbolContext[upstreamType] = m.UpstreamContext;
+                }
+            }
+
+            // The return (local) type always resolves to its declaring context — set last so a
+            // same-named bare reference resolves to the file's own (downstream) copy, never the upstream.
+            symbolContext[localType] = m.LocalContext;
+
             if (!first)
             {
                 sb.Append('\n');
@@ -51,13 +85,13 @@ public sealed partial class PhpEmitter
 
             first = false;
             sb.Append(Indent).Append("public function ").Append(method).Append('(')
-              .Append(upstreamType).Append(" $source): ").Append(localType).Append(";\n");
+              .Append(paramHint).Append(" $source): ").Append(localType).Append(";\n");
         }
 
         sb.Append("}\n");
 
         return new EmittedFile(
             PathFor(ns, KindFolder.Abstractions, className),
-            Assemble(ns, KindFolder.Abstractions, sb.ToString(), className));
+            Assemble(ns, KindFolder.Abstractions, sb.ToString(), className, symbolContext, aliasImports));
     }
 }
