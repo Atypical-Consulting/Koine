@@ -116,9 +116,31 @@ public sealed partial class PhpEmitter : IEmitter
             {
                 files.Add(EmitPolicy(emit, policy, ctx.Name, typeMapper));
             }
+
+            // Integration-event subscriber seams (R14.3): each `subscribes <Pub>.<Event>` emits a
+            // `Handle<Event>` interface into THIS (subscriber) context's `Abstractions/` folder. The
+            // published integration-event class itself already emits via the regular event path.
+            foreach (SubscribeDecl sub in ctx.Subscribes)
+            {
+                files.Add(EmitIntegrationSubscriber(emit, sub, ctx.Name));
+            }
         }
 
-        // 3. Self-containment: emit a minimal branded id value object for any id type referenced by
+        // 3. Anti-corruption-layer translator seams (R14.2): one per ACL relation carrying a mapping
+        //    block, emitted into the downstream context. Cross-context refs resolve to qualified
+        //    `use` imports via the shared type catalog.
+        if (model.ContextMap is { } map)
+        {
+            foreach (ContextRelation r in map.Relations)
+            {
+                if (r.Kind == ContextRelationKind.AntiCorruptionLayer && r.AclMappings.Count > 0)
+                {
+                    files.Add(EmitAclTranslator(emit, r));
+                }
+            }
+        }
+
+        // 4. Self-containment: emit a minimal branded id value object for any id type referenced by
         //    the model but not emitted from a declared entity (e.g. a foreign aggregate's id).
         EmitUnownedIds(emit, model, files);
 

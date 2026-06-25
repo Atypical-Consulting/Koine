@@ -47,6 +47,7 @@ public sealed partial class PhpEmitter
         public const string Services = "Services";
         public const string Specifications = "Specifications";
         public const string Policies = "Policies";
+        public const string Abstractions = "Abstractions";
     }
 
     /// <summary>
