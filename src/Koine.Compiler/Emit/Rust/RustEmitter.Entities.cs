@@ -40,7 +40,7 @@ public sealed partial class RustEmitter
         var bodyMembers = entity.Members
             .Append(new Member("id", new TypeRef(entity.IdentityName), null))
             .ToList();
-        var translator = new RustExpressionTranslator(emit.Index, bodyMembers, emit.EnumMemberToType, typeMapper, context);
+        var translator = new RustExpressionTranslator(emit.Index, bodyMembers, emit.EnumMemberToType, emit.EnumVariants, typeMapper, context);
 
         // The struct (identity equality, so only Debug/Clone are derived).
         body.Append('\n');

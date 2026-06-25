@@ -16,13 +16,19 @@ public sealed partial class RustEmitter
     {
         var name = RustNaming.ToPascalCase(@enum.Name);
 
+        // Per-enum member→variant names, de-duplicated so members that PascalCase-collapse (e.g. `EUR`
+        // and `Eur` both fold to `Eur`) emit distinct, compiling variants instead of a duplicate
+        // definition (#323). Computed once and used at every variant-emission site below; member
+        // references resolve through the same shared map in RustExpressionTranslator.
+        IReadOnlyList<string> variants = RustNaming.UniqueVariants(@enum.MemberNames);
+
         WriteDoc(sb, @enum.Doc, string.Empty);
         sb.Append("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\n");
         sb.Append("pub enum ").Append(name).Append(" {\n");
-        foreach (EnumMember member in @enum.Members)
+        for (var i = 0; i < @enum.Members.Count; i++)
         {
-            WriteDoc(sb, member.Doc, Indent);
-            sb.Append(Indent).Append(RustNaming.Variant(member.Name)).Append(",\n");
+            WriteDoc(sb, @enum.Members[i].Doc, Indent);
+            sb.Append(Indent).Append(variants[i]).Append(",\n");
         }
         sb.Append("}\n");
 
@@ -37,17 +43,18 @@ public sealed partial class RustEmitter
             sb.Append(Indent).Append("pub fn ").Append(RustNaming.Field(field.Name))
               .Append("(&self) -> ").Append(returnType).Append(" {\n");
             sb.Append(Indent).Append(Indent).Append("match self {\n");
-            foreach (EnumMember member in @enum.Members)
+            for (var m = 0; m < @enum.Members.Count; m++)
             {
+                EnumMember member = @enum.Members[m];
                 sb.Append(Indent).Append(Indent).Append(Indent)
-                  .Append(name).Append("::").Append(RustNaming.Variant(member.Name)).Append(" => ")
+                  .Append(name).Append("::").Append(variants[m]).Append(" => ")
                   .Append(EnumDataValue(field.Type, member.Args.Count > i ? member.Args[i] : null)).Append(",\n");
             }
             sb.Append(Indent).Append(Indent).Append("}\n");
             sb.Append(Indent).Append("}\n\n");
         }
 
-        EmitEnumApi(sb, name, @enum);
+        EmitEnumApi(sb, name, @enum, variants);
 
         sb.Append("}\n");
     }
@@ -59,12 +66,13 @@ public sealed partial class RustEmitter
     /// variant, dispatched by a wildcard-free <c>match</c> so adding a member is a compile error at every
     /// call site — the closed-set safety a bare Rust <c>enum</c> match already gives, surfaced as a fluent API).
     /// </summary>
-    private void EmitEnumApi(StringBuilder sb, string name, EnumDecl @enum)
+    private void EmitEnumApi(StringBuilder sb, string name, EnumDecl @enum, IReadOnlyList<string> variants)
     {
         IReadOnlyList<EnumMember> members = @enum.Members;
         // Closure parameter names, one per member and shared by both the match_ and switch folds.
         // De-duplicated per enum so members that snake_case-collapse (e.g. `userID`/`userId` → both
-        // `user_id`) still bind distinct, compiling Rust identifiers (#315).
+        // `user_id`) still bind distinct, compiling Rust identifiers (#315). The PascalCase variant names
+        // (`variants`) are de-duplicated the same way (#323) and shared across every site below.
         IReadOnlyList<string> arms = RustNaming.UniqueBindings(members.Select(m => m.Name));
 
         // from_name — the non-throwing name lookup (`TryFromName` -> Option). The `_ => None` arm
@@ -72,10 +80,10 @@ public sealed partial class RustEmitter
         sb.Append(Indent).Append("/// Looks up a variant by its declared name (a non-throwing `TryFromName`).\n");
         sb.Append(Indent).Append("pub fn from_name(name: &str) -> Option<Self> {\n");
         sb.Append(Indent).Append(Indent).Append("match name {\n");
-        foreach (EnumMember m in members)
+        for (var i = 0; i < members.Count; i++)
         {
             sb.Append(Indent).Append(Indent).Append(Indent)
-              .Append('"').Append(EscapeRustString(m.Name)).Append("\" => Some(").Append(name).Append("::").Append(RustNaming.Variant(m.Name)).Append("),\n");
+              .Append('"').Append(EscapeRustString(members[i].Name)).Append("\" => Some(").Append(name).Append("::").Append(variants[i]).Append("),\n");
         }
 
         sb.Append(Indent).Append(Indent).Append(Indent).Append("_ => None,\n");
@@ -89,7 +97,7 @@ public sealed partial class RustEmitter
         for (var i = 0; i < members.Count; i++)
         {
             sb.Append(Indent).Append(Indent).Append(Indent)
-              .Append(i).Append(" => Some(").Append(name).Append("::").Append(RustNaming.Variant(members[i].Name)).Append("),\n");
+              .Append(i).Append(" => Some(").Append(name).Append("::").Append(variants[i]).Append("),\n");
         }
 
         sb.Append(Indent).Append(Indent).Append(Indent).Append("_ => None,\n");
@@ -110,7 +118,7 @@ public sealed partial class RustEmitter
         for (var i = 0; i < members.Count; i++)
         {
             sb.Append(Indent).Append(Indent).Append(Indent)
-              .Append(name).Append("::").Append(RustNaming.Variant(members[i].Name)).Append(" => ").Append(arms[i]).Append("(),\n");
+              .Append(name).Append("::").Append(variants[i]).Append(" => ").Append(arms[i]).Append("(),\n");
         }
 
         sb.Append(Indent).Append(Indent).Append("}\n");
@@ -130,7 +138,7 @@ public sealed partial class RustEmitter
         for (var i = 0; i < members.Count; i++)
         {
             sb.Append(Indent).Append(Indent).Append(Indent)
-              .Append(name).Append("::").Append(RustNaming.Variant(members[i].Name)).Append(" => ").Append(arms[i]).Append("(),\n");
+              .Append(name).Append("::").Append(variants[i]).Append(" => ").Append(arms[i]).Append("(),\n");
         }
 
         sb.Append(Indent).Append(Indent).Append("}\n");
