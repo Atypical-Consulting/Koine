@@ -56,6 +56,26 @@ console.log('diagnostics (broken):', JSON.stringify(bad));
 const semtok = JSON.parse(api.SemanticTokens(SOURCE));
 console.log('semantic tokens: data length', semtok.data.length, '(', semtok.data.length / 5, 'tokens )');
 
+// 6. Capabilities() → the module's self-description: version + [JSExport] names + emit targets (issue #330).
+// This is the single source of truth Koine Studio verifies its surface against at boot, so the smoke test
+// guards that a trimmed bundle actually ships it with a real version, the export list (incl. Capabilities
+// itself), and the registry's targets carrying full metadata.
+const caps = JSON.parse(api.Capabilities());
+console.log(
+  'capabilities: version', caps.version,
+  '| exports', caps.exports.length,
+  '| targets', caps.targets.map((t) => t.id).join(','),
+);
+const capsOk =
+  typeof caps.version === 'string' &&
+  caps.version.length > 0 &&
+  Array.isArray(caps.exports) &&
+  caps.exports.includes('Capabilities') &&
+  caps.exports.includes('Compile') &&
+  Array.isArray(caps.targets) &&
+  caps.targets.length > 0 &&
+  caps.targets.every((t) => t.id && t.displayName && t.fileExtension);
+
 // Assert the happy path.
 const ok =
   diags.length === 0 &&
@@ -65,10 +85,11 @@ const ok =
   glossary.ok &&
   Array.isArray(semtok.data) &&
   semtok.data.length > 0 &&
-  semtok.data.length % 5 === 0;
+  semtok.data.length % 5 === 0 &&
+  capsOk;
 console.log(ok ? '\nSMOKE TEST PASSED' : '\nSMOKE TEST FAILED');
 
-// 6. Optional benchmark: time compiling the pizzeria template and report bundle size (issue #327).
+// 7. Optional benchmark: time compiling the pizzeria template and report bundle size (issue #327).
 let benchOk = true;
 if (BENCH) {
   benchOk = runBenchmark();

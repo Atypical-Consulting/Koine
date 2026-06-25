@@ -41,6 +41,19 @@ export interface CompileResult {
 
 export type Target = 'csharp' | 'typescript' | 'python' | 'php' | 'glossary' | 'asyncapi' | 'openapi';
 
+export interface EmitTarget {
+  id: string;
+  displayName: string;
+  fileExtension: string;
+}
+
+/** The compiler module's self-description (issue #330) — mirrors `WCapabilities` in CompilerInterop.cs. */
+export interface Capabilities {
+  version: string;
+  exports: string[];
+  targets: EmitTarget[];
+}
+
 // ---------------------------------------------------------------------------
 // Singleton worker client — booted once, reused for all calls.
 // ---------------------------------------------------------------------------
@@ -82,4 +95,11 @@ export async function diagnose(source: string, opts?: CallOptions): Promise<Koin
 export async function compile(source: string, target: Target, opts?: CallOptions): Promise<CompileResult> {
   const client = await loadApi();
   return JSON.parse(await client.call('Compile', [source, target], opts)) as CompileResult;
+}
+
+/** The module's self-description (#330): version + [JSExport] names + emit targets — the single source
+ *  of truth the status line reads its version from (no hard-coded string). */
+export async function capabilities(opts?: CallOptions): Promise<Capabilities> {
+  const client = await loadApi();
+  return JSON.parse(await client.call('Capabilities', [], opts)) as Capabilities;
 }

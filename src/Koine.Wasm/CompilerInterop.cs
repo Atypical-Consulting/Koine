@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.InteropServices.JavaScript;
 using System.Runtime.Versioning;
 using System.Text.Json;
@@ -99,6 +100,64 @@ public static partial class CompilerInterop
             return JsonSerializer.Serialize(dto, InteropJson.Default.CompileResultDto);
         }
     }
+
+    /// <summary>
+    /// The module's self-description (issue #330): its <c>version</c>, the <c>exports</c> names of every
+    /// <c>[JSExport]</c> it ships, and the <c>targets</c> it can emit — one call that answers "what is this
+    /// bundle?". Returns <c>{ version, exports:[string], targets:[{id, displayName, fileExtension}] }</c> as
+    /// JSON. The single source of truth Koine Studio verifies its surface against at boot (so the browser
+    /// host drops its hand-maintained export list) and the docs-site reads its version line from.
+    /// </summary>
+    [JSExport]
+    public static string Capabilities()
+    {
+        // targets: the SAME mapping ListEmitTargets (#282) serves — shared via SupportedEmitTargets() so
+        // there is no second target list.
+        var dto = new WCapabilities(CompilerVersion(), JsExportNames, SupportedEmitTargets());
+        return JsonSerializer.Serialize(dto, LangJson.Default.WCapabilities);
+    }
+
+    /// <summary>
+    /// The compiler version from <see cref="AssemblyInformationalVersionAttribute"/> (set from
+    /// <c>Directory.Build.props</c>'s <c>&lt;Version&gt;</c>), trimming any SDK-appended
+    /// <c>+&lt;commit&gt;</c> build-metadata suffix — the same logic as <c>Koine.Cli.Program.GetVersion()</c>,
+    /// so the wasm bundle and <c>koine --version</c> stay in lock-step. Falls back to the four-part assembly
+    /// version (then <c>0.0.0</c>) only if the attribute is absent.
+    /// </summary>
+    private static string CompilerVersion()
+    {
+        var asm = typeof(CompilerInterop).Assembly;
+        var info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (string.IsNullOrEmpty(info))
+        {
+            return asm.GetName().Version?.ToString() ?? "0.0.0";
+        }
+
+        var plus = info.IndexOf('+');
+        return plus < 0 ? info : info[..plus];
+    }
+
+    /// <summary>
+    /// The names of every <c>[JSExport]</c> this module ships — the staleness signal Koine Studio builds
+    /// its boot-time guard set from (issue #330), letting the browser host drop its hand-maintained copy.
+    /// Curated rather than reflected on purpose: under <c>TrimMode=full</c>, reflecting <c>[JSExport]</c>
+    /// attributes off the trimmed wasm assembly is fragile — so this is the ONE authoritative list, built
+    /// with <c>nameof</c> so a rename can't leave a dangling string, and <c>CapabilitiesTests</c> reflects
+    /// the real (un-trimmed) surface to assert it never drifts. Must include <c>Capabilities</c> itself.
+    /// </summary>
+    private static readonly string[] JsExportNames =
+    [
+        nameof(Diagnose), nameof(Compile), nameof(Capabilities),
+        nameof(DiagnoseWorkspace), nameof(EmitPreview), nameof(ListEmitTargets), nameof(SemanticTokens),
+        nameof(Glossary), nameof(ContextMap), nameof(GlossaryModel), nameof(SetDoc),
+        nameof(Model), nameof(ModelMembers), nameof(EmitKoine), nameof(ApplyModelEdit),
+        nameof(Hover), nameof(Completions), nameof(SignatureHelp), nameof(Definition),
+        nameof(DocumentSymbols), nameof(WorkspaceSymbols), nameof(FoldingRanges), nameof(SelectionRanges),
+        nameof(CodeLenses), nameof(Format), nameof(Check), nameof(References), nameof(InlayHints),
+        nameof(PrepareCallHierarchy), nameof(IncomingCalls), nameof(OutgoingCalls),
+        nameof(PrepareRename), nameof(Rename), nameof(CodeActions), nameof(Docs),
+        nameof(RunScenario), nameof(ScenarioCatalog),
+    ];
 
     private static DiagnosticDto ToDto(Diagnostic d) => new(
         Severity: d.Severity == DiagnosticSeverity.Error ? "error" : "warning",

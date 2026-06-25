@@ -13,7 +13,11 @@
   </head>
 
   <body>
-    <div id="app">
+    <!-- Starts hidden so the editor never paints before the boot switch (main.ts) resolves the route:
+         on a pristine load the Home route shows and #app is revealed only on the editor route. This is
+         the belt-and-braces half of the IDE→Home flash fix (#368) — even if a frame slips in before
+         bootStudio runs, it can't be a frame of the wrong view. -->
+    <div id="app" hidden>
       <header id="toolbar">
         <button type="button" id="btn-home" class="brand" title="Back to the start screen" aria-label="Back to the start screen">
           <!-- Monogram injected from the shared koineMark() template at startup (see ide.ts) so the
@@ -300,5 +304,10 @@
            writes the uiChrome slice's mobileZone, which is mirrored onto #split[data-mobile-zone]. -->
       <nav id="mobile-zone-bar-host" aria-label="Studio zone switcher"></nav>
     </div>
+
+    <!-- The routed Home view mounts here (mountHome). The boot switch (main.ts) shows exactly one of
+         #app / #home-root per route, so Home and the editor never paint at once (issue #368). Starts
+         hidden; the boot reveals whichever the resolved route needs before first paint. -->
+    <div id="home-root" hidden></div>
   </body>
 </html>

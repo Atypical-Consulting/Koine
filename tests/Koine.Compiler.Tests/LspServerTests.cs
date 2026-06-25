@@ -592,8 +592,10 @@ public class LspServerTests
     {
         var output = RunSession(Initialize());
         output.ShouldContain("\"documentFormattingProvider\":true");
+        output.ShouldContain("\"documentRangeFormattingProvider\":true");
         output.ShouldContain("\"documentSymbolProvider\":true");
         output.ShouldContain("\"referencesProvider\":true");
+        output.ShouldContain("\"documentHighlightProvider\":true");
         output.ShouldContain("\"renameProvider\":{\"prepareProvider\":true}");
         // codeActionProvider is now an object advertising the supported code-action kinds (so
         // editors surface the refactors), not a bare boolean.
@@ -606,6 +608,7 @@ public class LspServerTests
         var output = RunSession(Initialize());
         output.ShouldContain("\"inlayHintProvider\":true");
         output.ShouldContain("\"callHierarchyProvider\":true");
+        output.ShouldContain("\"typeHierarchyProvider\":true");
     }
 
     // A read model whose direct field `total` infers its type (`Money`) from the source entity `Order`.

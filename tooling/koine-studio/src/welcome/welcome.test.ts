@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { createWelcome, filterTemplates, DIFFICULTY_ORDER, type WelcomeCallbacks } from '@/welcome/welcome';
+import { createWelcome, mountHome, filterTemplates, DIFFICULTY_ORDER, type WelcomeCallbacks } from '@/welcome/welcome';
 import type { Template } from '@/welcome/templates';
 
 // Each test mounts a fresh welcome overlay on document.body; clear it between tests so stale
@@ -372,6 +372,31 @@ describe('welcome recent management', () => {
     await new Promise((r) => setTimeout(r, 0)); // let koiConfirm's promise resolve + re-render
 
     expect(document.querySelector('.koi-welcome-empty')).not.toBeNull();
+  });
+});
+
+describe('mountHome (routed Home view)', () => {
+  test('renders the welcome card into the given container, not document.body', () => {
+    const el = document.createElement('div');
+    mountHome(el, makeCallbacks(), SAMPLE);
+    expect(el.querySelector('.koi-welcome')).not.toBeNull();
+    // Unlike the legacy overlay, the routed Home does not self-mount on the body.
+    expect(document.body.querySelector('.koi-welcome')).toBeNull();
+  });
+
+  test('wires the open-folder action through to the callback', () => {
+    const el = document.createElement('div');
+    const cb = makeCallbacks();
+    mountHome(el, cb, SAMPLE);
+    el.querySelector<HTMLButtonElement>('[data-action="open-folder"]')!.click();
+    expect(cb.onOpenFolder).toHaveBeenCalledTimes(1);
+  });
+
+  test('destroy() removes the mounted view', () => {
+    const el = document.createElement('div');
+    const home = mountHome(el, makeCallbacks(), SAMPLE);
+    home.destroy();
+    expect(el.querySelector('.koi-welcome')).toBeNull();
   });
 });
 

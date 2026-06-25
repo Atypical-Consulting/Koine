@@ -59,6 +59,30 @@ describe('playground koine.ts — worker proxy', () => {
     expect(result).toEqual(compileResult);
   });
 
+  it('capabilities() round-trips through the mocked worker client and JSON.parses the result (#330)', async () => {
+    const caps = {
+      version: '0.17.3',
+      exports: ['Diagnose', 'Compile', 'Capabilities'],
+      targets: [{ id: 'csharp', displayName: 'C#', fileExtension: '.cs' }],
+    };
+    const mockCall = vi.fn<(method: string, args: unknown[]) => Promise<string>>();
+    mockCall.mockResolvedValue(JSON.stringify(caps));
+
+    const { createKoineWorkerClient } = await import('./workerClient');
+    (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
+      call: mockCall,
+      whenReady: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+    });
+
+    const { capabilities } = await import('./koine');
+    const result = await capabilities();
+
+    expect(mockCall).toHaveBeenCalledWith('Capabilities', [], undefined);
+    expect(result).toEqual(caps);
+    expect(result.version).toBe('0.17.3'); // the version the playground renders comes from here
+  });
+
   it('preloadCompiler() returns void synchronously (fire and forget — does not block)', async () => {
     // The whenReady mock that delays resolution; preloadCompiler must not await it
     let resolveWhenReady!: () => void;

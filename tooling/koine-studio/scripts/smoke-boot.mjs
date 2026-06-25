@@ -149,6 +149,11 @@ async function main() {
   await new Promise((r) => server.listen(0, r));
   const { port } = server.address();
   const url = `http://localhost:${port}${base}`;
+  // The compiler worker boots on the EDITOR route. Since #368 split Studio Web into distinct Home and
+  // editor routes, a bare load lands on Home (no editor, hence no compiler worker) — so this gate,
+  // whose whole job is to assert the compiler worker boots in a real browser, must enter the editor
+  // route explicitly. `#/editor` is a refresh-stable deep link that resolves to the editor at boot.
+  const bootUrl = `${url}#/editor`;
 
   const browser = await chromium.launch({ headless: true });
   let ok = false;
@@ -189,8 +194,8 @@ async function main() {
       };
     });
 
-    console.log(`▸ serving ${distDir}\n▸ loading ${url}`);
-    await page.goto(url, { waitUntil: 'load', timeout: 30_000 });
+    console.log(`▸ serving ${distDir}\n▸ loading ${bootUrl}`);
+    await page.goto(bootUrl, { waitUntil: 'load', timeout: 30_000 });
 
     // Wait until the worker reaches `ready` AND an `ok` RPC reply round-trips (the app issues compiler
     // calls automatically after boot), or it fails / times out. A `worker-error` is reported distinctly
