@@ -370,6 +370,31 @@ export function init(): () => void {
     return rs.length ? workspaceKeyOf(rs) : null;
   }
 
+  // Apply the workspace-scoped fields that need a LIVE push (word-wrap on both surfaces, the preview
+  // target relabel) from an already-resolved effective Settings. Shared by the prefs onChange, a folder
+  // open, and a root-set change so the three call sites can never drift. (format-on-save reads through
+  // the live getFormatOnSave thunk; lspTrace has no live consumer — see #264.)
+  function applyEffectiveScoped(eff: Settings): void {
+    editor.setLineWrap(eff.wordWrap);
+    output.setLineWrap(eff.wordWrap);
+    controller.onPreviewTargetChanged(eff.previewTarget);
+  }
+
+  // Adding or removing a workspace root changes the workspace identity: folderRootToken() may now point
+  // at a different primary folder and wsKey() hashes a different root set, so every folder-derived view
+  // and every workspace-scoped behavior must re-sync — exactly like a folder open, minus restoreActive-
+  // Context (an additive root change keeps the user's current bounded-context scope rather than resetting
+  // it). Without this, removing the primary root strands the Docs/layout/diagram stores on the dead key
+  // (#174) and a per-workspace word-wrap/preview-target override goes stale until an unrelated event.
+  function onRootSetChanged(): void {
+    appStore.getState().setFolderRootToken(workspace.folderRootToken());
+    controller.invalidateDocViews();
+    controller.invalidateDocsPanel();
+    void controller.refreshContextList();
+    controller.refreshActiveSurfaces();
+    applyEffectiveScoped(effectiveSettings(settings, wsKey()));
+  }
+
   // The editor ↔ LSP + diagnostics wiring (issue #180, Task 3): owns the CodeMirror editor and its
   // callback wall (hover/completion/definition/rename/references/code-actions → lsp.*), the per-uri
   // diagnostics cache, the status pill + diagnostics strip, and the LSP publishDiagnostics/exit
@@ -470,7 +495,10 @@ export function init(): () => void {
     // Multi-root workspace: the head "Add folder" affordance unions a second folder in as a new root;
     // each group's "Remove" affordance drops just that root's files.
     onAddRoot: () => void addRootViaPicker(),
-    onRemoveRoot: (root) => workspace.removeRoot(root),
+    onRemoveRoot: (root) => {
+      workspace.removeRoot(root);
+      onRootSetChanged();
+    },
   });
   treeBodyEl.appendChild(explorer.el);
 
@@ -913,7 +941,10 @@ export function init(): () => void {
       return;
     }
     if (!folder) return; // cancelled
-    await workspace.addRoot(folder);
+    const result = await workspace.addRoot(folder);
+    // Only re-sync the folder-derived views + scoped behaviors when the root set actually changed; an
+    // unreadable/empty pick (or an already-open root) leaves the workspace untouched.
+    if (result.ok) onRootSetChanged();
   }
 
   // The workspace lifecycle (buffers + open/save/dirty + file mutations, src/workspaceController.ts,
@@ -963,10 +994,7 @@ export function init(): () => void {
       // this folder's overrides for word-wrap and preview target take effect immediately. (format-on-
       // save reads through the live getFormatOnSave thunk, so it auto-picks up; lspTrace has no live
       // re-application site here — its override surfaces on next read.)
-      const eff = effectiveSettings(settings, wsKey());
-      editor.setLineWrap(eff.wordWrap);
-      output.setLineWrap(eff.wordWrap);
-      controller.onPreviewTargetChanged(eff.previewTarget);
+      applyEffectiveScoped(effectiveSettings(settings, wsKey()));
     },
     // The active buffer was deleted and the workspace is now empty: reset to a fresh blank model.
     onWorkspaceEmptied: () => void newModel(),
@@ -1382,13 +1410,11 @@ export function init(): () => void {
       // onChange is the single re-skin path: apply the document-level appearance, then sync the
       // pieces prefs can't reach — soft-wrap on both the source editor and the output preview.
       applyAppearance(s);
-      editor.setLineWrap(eff.wordWrap);
-      output.setLineWrap(eff.wordWrap);
       editor.setMinimap(s.enableMinimap);
       workspace.setAutoSave(s.autoSave);
-      // Destination language now lives in Settings → Output. The controller relabels the Generated
-      // tab, marks the preview stale, and re-emits it when that sub-view is the one showing.
-      controller.onPreviewTargetChanged(eff.previewTarget);
+      // The scoped fields (word-wrap on both surfaces + the Generated-tab relabel via the preview
+      // target) apply from the EFFECTIVE view so a Workspace override drives live behavior.
+      applyEffectiveScoped(eff);
     },
     // Desktop hosts launch a `koine mcp --http` sidecar and return its loopback URL; the browser
     // returns null, so Settings hides the MCP affordance there.

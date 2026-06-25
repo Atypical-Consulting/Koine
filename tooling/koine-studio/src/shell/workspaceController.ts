@@ -629,6 +629,12 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     entriesByRoot.delete(folder);
     roots.splice(idx, 1);
     if (activeRemoved) activateFallback();
+    // Re-render the explorer (and re-sync the dirty indicator via renderTree → refreshDirtyIndicator)
+    // so the removed root's group + rows disappear immediately. Unlike handleDelete, removeRoot has no
+    // trailing refreshEntries; without this the removed group would linger (clickable, but its buffers
+    // are gone) until some unrelated render fires. A now-empty workspace renders nothing (roots.length
+    // === 0), and onWorkspaceEmptied's fresh-model open will render once it seeds a new root.
+    renderTree();
   }
 
   // --- workspace mutations (create / rename / delete / move) -----------------

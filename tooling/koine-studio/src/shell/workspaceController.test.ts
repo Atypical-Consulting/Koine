@@ -990,7 +990,8 @@ describe('createWorkspaceController — multi-root', () => {
     const lsp = makeLsp(trace);
     const editor = makeEditor(trace);
     const dropDiagnostics = vi.fn();
-    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { dropDiagnostics }));
+    const renderRoots = vi.fn();
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { dropDiagnostics, explorer: { renderRoots } }));
     await ws.openFolderPath(ROOT_A, { recent: false });
     await ws.addRoot(ROOT_B);
     // a.koi is active (primary root's first file). Switch active to b.koi so removing ROOT_B exercises
@@ -1000,6 +1001,7 @@ describe('createWorkspaceController — multi-root', () => {
     const bUri = uriUnder(ROOT_B, 'b.koi');
     expect(ws.activeUri()).toBe(aUri);
     lsp.closeDoc.mockClear();
+    renderRoots.mockClear();
 
     ws.removeRoot(ROOT_B);
 
@@ -1013,6 +1015,13 @@ describe('createWorkspaceController — multi-root', () => {
     expect(ws.buffers.has(bUri)).toBe(false);
     expect(ws.buffers.has(aUri)).toBe(true);
     expect(ws.activeUri()).toBe(aUri);
+    // A non-active removal must STILL re-render the explorer (regression: removeRoot once skipped this,
+    // so the removed root's group + rows lingered, clickable, until an unrelated render fired). The
+    // re-render names only the surviving root.
+    expect(renderRoots).toHaveBeenCalled();
+    const calls = renderRoots.mock.calls;
+    const lastGroups = calls[calls.length - 1][0] as { root: string }[];
+    expect(lastGroups.map((g) => g.root)).toEqual([ROOT_A]);
   });
 
   test('removing the active buffer’s root re-points active via the fallback', async () => {
