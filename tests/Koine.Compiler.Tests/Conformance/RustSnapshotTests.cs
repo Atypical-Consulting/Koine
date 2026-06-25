@@ -746,10 +746,16 @@ public class RustSnapshotTests
         // The factory parameter snake_cases to `domain_events`...
         reservations.ShouldContain("pub fn open(domain_events: i64) -> Result<Self, DomainError>");
         // ...so the collector *local* must be disambiguated away from it (else the `let` shadows the
-        // param). It lands on a numbered, unique name.
+        // param). It lands on a numbered, unique name — and the field is assigned from THAT local.
+        // These two are the discriminating assertions: pre-fix the local is `domain_events`, so both
+        // go red (as does the verified snapshot).
         reservations.ShouldContain("let domain_events_2: Vec<DomainEvent> = vec![");
         reservations.ShouldContain("instance.domain_events = domain_events_2;");
-        // The unshadowed parameter survives into the emit payload AND the smart constructor.
+        // The factory body still references the `domain_events` parameter in the emit payload and the
+        // ctor call. NB: this text is byte-identical with and without the fix — what changes is which
+        // binding `domain_events` resolves to (the i64 param vs. the Vec local). That the param is the
+        // one that survives — i.e. it is genuinely unshadowed — is proved by the rustc compile gate in
+        // Rust_factory_event_collector_local_shadow_model_compiles, not by these string matches.
         reservations.ShouldContain("OrderOpened::new(id.clone(), domain_events))");
         reservations.ShouldContain("let mut instance = Self::new(id, None, domain_events)?;");
 
@@ -918,5 +924,54 @@ public class RustSnapshotTests
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The pre-existing default-name case the issue calls out: an entity with NO member named
+    /// <c>events</c>, so the synthetic collector keeps its idiomatic default name <c>events</c> — and a
+    /// factory parameter literally named <c>events</c> that the <c>let events</c> binding would shadow.
+    /// (This shadow predates #314: a factory param named <c>events</c> shadowed the default local on
+    /// <c>main</c> already.) The collector local must disambiguate to <c>events_2</c> while the struct
+    /// field / accessor / <c>drain_</c> keep the default <c>events</c>, and the parameter survives into
+    /// <c>Self::new(…)</c>. This exercises <see cref="RustNaming.FactoryEventsLocal"/>'s default branch,
+    /// which the <c>domain_events</c> fixture (which forces the fallback name) routes around.
+    /// </summary>
+    [Fact]
+    public void Rust_factory_event_collector_local_does_not_shadow_a_default_named_parameter()
+    {
+        const string model = """
+            context Audit {
+              event Logged { entryId: EntryId  count: Int }
+              aggregate Logs root Entry {
+                entity Entry identified by EntryId {
+                  count: Int
+                  create record(events: Int) {
+                    count -> events
+                    emit Logged(entryId: id, count: events)
+                  }
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var audit = result.Files.Single(f => f.RelativePath.EndsWith("audit.rs", StringComparison.Ordinal)).Contents;
+        // The collector keeps its default name on the struct field, accessor, and drain.
+        audit.ShouldContain("\n    events: Vec<DomainEvent>,");
+        audit.ShouldContain("pub fn events(&self) -> &[DomainEvent]");
+        audit.ShouldContain("pub fn drain_events(&mut self) -> Vec<DomainEvent>");
+        // The factory parameter is named `events`...
+        audit.ShouldContain("pub fn record(events: i64) -> Result<Self, DomainError>");
+        // ...so the collector *local* disambiguates to `events_2` (else the `let events` shadows it),
+        // and the field is assigned from that local — the discriminating, toolchain-independent pin.
+        audit.ShouldContain("let events_2: Vec<DomainEvent> = vec![");
+        audit.ShouldContain("instance.events = events_2;");
+        // The unshadowed parameter reaches `Self::new(…)` (semantic proof is the compile gate below).
+        audit.ShouldContain("let mut instance = Self::new(id, events)?;");
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 }

@@ -361,8 +361,9 @@ public sealed partial class RustEmitter
         // <eventsField>` that shadows a same-named parameter would make the subsequent `Self::new(…)`
         // and `instance.<eventsField> = …` read the Vec local instead of the parameter (issue #325).
         var emits = factory.Body.OfType<EmitClause>().ToList();
-        var eventsLocal = RustNaming.FactoryEventsLocal(
-            eventsField, factory.Parameters.Select(p => RustNaming.Field(p.Name)));
+        var eventsLocal = emits.Count > 0
+            ? RustNaming.FactoryEventsLocal(eventsField, factory.Parameters.Select(p => RustNaming.Field(p.Name)))
+            : eventsField;
         if (emits.Count > 0)
         {
             body.Append(Indent).Append(Indent).Append("let ").Append(eventsLocal).Append(": Vec<DomainEvent> = vec![\n");
