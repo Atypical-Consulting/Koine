@@ -89,7 +89,9 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
       homeRoot.hidden = false;
       // A session is "live" once the IDE has booted (#392): `ideStarted` never resets, so every Home
       // entry after the first editor visit offers a Resume-editing control, while a pristine first-load
-      // Home (ideStarted still false) stays clean.
+      // Home (ideStarted still false) stays clean. The two `undefined`s keep mountHome's `templates`
+      // and `canOpenFolders` defaults (a default param applies when the arg is undefined) — we only
+      // want to set the trailing `opts`.
       if (!home) home = mountHome(homeRoot, homeCallbacks(), undefined, undefined, { canResume: ideStarted });
     }
   }
