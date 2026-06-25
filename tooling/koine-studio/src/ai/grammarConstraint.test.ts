@@ -71,6 +71,16 @@ describe('parseValidationOutcome()', () => {
     expect(parseValidationOutcome('  ok: true — fine').ok).toBe(true);
     expect(parseValidationOutcome('\nok: false — nope').ok).toBe(false);
   });
+
+  test('a warning-only model parses (zero errors) so it stays applicable — warnings do not block', () => {
+    const s = 'ok: false — 0 error(s), 2 warning(s):\n- [warning] 3:5 unused';
+    // The gate asks "does it parse?", not "is it warning-free?": 0 errors ⇒ ok.
+    expect(parseValidationOutcome(s)).toEqual({ ok: true, diagnostics: s });
+  });
+
+  test('a model with errors (any count) does not parse', () => {
+    expect(parseValidationOutcome('ok: false — 2 error(s), 1 warning(s):\n- [error] 1:1 x').ok).toBe(false);
+  });
 });
 
 describe('repairToValid()', () => {

@@ -332,6 +332,23 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     expect(container.querySelector('.koi-assistant-invalid')).toBeNull();
   });
 
+  test('gbnf path: a BARE .koi reply (no ```koine fence — the grammar can\'t emit one) still chips + applies', async () => {
+    // A genuinely grammar-constrained backend returns the model itself, not a fenced block.
+    mockReply('context X {}');
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getGrammar: () => Promise.resolve('root ::= "x"'),
+        runCompilerTool: () => Promise.resolve(CLEAN),
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
+    expect(container.querySelector('.koi-assistant-chip')?.textContent).toBe('grammar-constrained');
+    expect(container.querySelector<HTMLButtonElement>('.koi-assistant-apply')!.disabled).toBe(false);
+  });
+
   test('repair path (Anthropic): never valid → "repair k/N" counter, notice, Apply stays disabled', async () => {
     mockReply();
     const container = document.createElement('div');

@@ -150,16 +150,24 @@ public static class GbnfExporter
         ("decimal", "[0-9]+ \".\" [0-9]+"),
         ("bool", "\"true\" | \"false\""),
         ("string", "[\"] ([^\"\\\\] | [\\\\] .)* [\"]"),
-        // The regex literal: opened and closed by `/`, one token (lexer REGEX_MODE).
-        ("regex", "[/] ([^/\\\\] | [\\\\] .)* [/]"),
+        // The regex literal: opened and closed by `/`, one token (lexer REGEX_MODE). The body excludes
+        // `\r`/`\n` to mirror the lexer's `Regex : '/' ( ~[/\r\n\\] | '\\' . )* '/'` — a regex literal
+        // is single-line, so the GBNF must not over-generate multi-line ones.
+        ("regex", "[/] ([^/\\r\\n\\\\] | [\\\\] .)* [/]"),
         ("ws", "[ \\t\\r\\n]*"),
     };
+
+    /// <summary>The projected GBNF, built once: <see cref="Rules"/> is a compile-time-constant table,
+    /// so the output never differs between calls — cache it rather than re-concatenating per call.</summary>
+    private static readonly string Cached = Build();
 
     /// <summary>
     /// Projects the pragmatic Koine grammar subset to a self-contained GBNF string.
     /// </summary>
     /// <returns>A syntactically valid, deterministic GBNF grammar with a <c>root</c> rule.</returns>
-    public static string Export()
+    public static string Export() => Cached;
+
+    private static string Build()
     {
         var sb = new StringBuilder();
 

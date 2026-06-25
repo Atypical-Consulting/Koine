@@ -13,8 +13,10 @@
 
 import { isLocalProviderUrl } from '@/ai/ai';
 
-/** Which AI backend the assistant talks to — mirrors `Settings.aiProvider`. */
-export type AiProvider = 'anthropic' | 'openai';
+// `AiProvider` has ONE definition (in `ai.ts`); re-export it here so callers of this module keep a
+// single source of truth and the union can't drift between the two files.
+export type { AiProvider } from '@/ai/ai';
+import type { AiProvider } from '@/ai/ai';
 
 /**
  * Decide — from config alone, NOT by probing the endpoint — whether the configured backend can be
@@ -58,12 +60,21 @@ export function chooseMechanism(
 
 /**
  * Adapt the `koine_validate` tool's formatted result string into a {@link ValidationOutcome}. The tool
- * (see `formatValidate` in assistantTools.ts) returns `ok: true — no diagnostics. …` when the model
- * compiles, or `ok: false — N error(s), … :\n- [error] L:C …` otherwise. The whole string is kept as
- * `diagnostics` so the `line:column` detail can be fed straight back into a repair re-prompt.
+ * (see `formatValidate` in assistantTools.ts) returns `ok: true — no diagnostics. …` when the model is
+ * clean, or `ok: false — N error(s), M warning(s):\n- [error] L:C …` otherwise. The whole string is
+ * kept as `diagnostics` so the `line:column` detail can be fed straight back into a repair re-prompt.
+ *
+ * The apply-gate asks "does it PARSE?" (#257), so the model is acceptable when it has **zero errors** —
+ * a model that parses and compiles but only emits WARNINGS still gets `ok: false` from the tool, yet must
+ * be applicable (and must not burn repair rounds "fixing" a non-error). So we read the error count, not
+ * the bare `ok:` flag.
  */
 export function parseValidationOutcome(result: string): ValidationOutcome {
-  return { ok: result.trimStart().startsWith('ok: true'), diagnostics: result };
+  const trimmed = result.trimStart();
+  if (trimmed.startsWith('ok: true')) return { ok: true, diagnostics: result };
+  // `ok: false — N error(s), …` → it parses iff N === 0 (warnings alone don't block Apply).
+  const errors = trimmed.match(/(\d+)\s+error\(s\)/);
+  return { ok: errors !== null && Number(errors[1]) === 0, diagnostics: result };
 }
 
 /** Outcome of one validation pass — the `ok` flag plus the human-readable `line:column` diagnostics

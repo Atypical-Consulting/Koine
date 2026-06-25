@@ -374,6 +374,8 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
   function addChip(bubble: HTMLElement, label: string): void {
     const chip = document.createElement('span');
     chip.className = 'koi-assistant-chip';
+    // Status indicator, not decoration: expose the mechanism to assistive tech (WCAG 2.1 AA 4.1.3).
+    chip.setAttribute('role', 'status');
     chip.textContent = label;
     bubble.appendChild(chip);
   }
@@ -411,7 +413,11 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     bubble.innerHTML = `<div class="koi-md">${renderMarkdown(content)}</div>`;
     if (!offerApply) return; // explanatory turn — no model to apply, no chip, no gate
 
-    const candidate = extractKoine(content);
+    // On the grammar-constrained path the GBNF root is a BARE `.koi` program — the grammar can't emit a
+    // ```` ```koine ```` fence — so a genuinely constrained reply is the model itself with no fence.
+    // Fall back to the whole body there; the other paths still require a fenced block (prose ⇒ nothing).
+    const candidate =
+      extractKoine(content) ?? (mechanism === 'gbnf' ? content.trim() || null : null);
     if (!candidate) return; // prose reply — nothing to apply or gate
 
     const validate = makeValidate();
@@ -430,6 +436,9 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     if (mechanism === 'repair') {
       counter = document.createElement('div');
       counter.className = 'koi-assistant-repair-counter';
+      // A live region so a screen reader announces each "repair k/N" tick (WCAG 2.1 AA 4.1.3).
+      counter.setAttribute('role', 'status');
+      counter.setAttribute('aria-live', 'polite');
       bubble.appendChild(counter);
     }
 
@@ -469,6 +478,8 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     } else {
       const notice = document.createElement('div');
       notice.className = 'koi-assistant-invalid';
+      // The failure + disabled-Apply state is conveyed only by this text, so announce it (WCAG 2.1 AA 4.1.3).
+      notice.setAttribute('role', 'alert');
       notice.textContent =
         mechanism === 'repair'
           ? `Couldn't produce valid Koine after ${maxRounds} repair attempt${maxRounds === 1 ? '' : 's'} — Apply is disabled.`
@@ -586,7 +597,11 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       // on AND the backend is grammar-capable (a local OpenAI-compatible server) AND the host exposes a
       // grammar accessor (browser only) — otherwise the parse-and-repair fallback covers it. The fetch
       // is defensive: a throw / missing export degrades to repair rather than crashing the send.
-      const constrainOn = opts.getConstrainGrammar();
+      //
+      // Gate the whole mechanism on `offerApply`: only GENERATIVE turns produce a `.koi` model to
+      // constrain. An explanatory turn (Explain, `offerApply:false`) must stay plain prose — constraining
+      // it to the grammar would force the model to answer with a `.koi` model instead of an explanation.
+      const constrainOn = opts.getConstrainGrammar() && offerApply;
       let gbnf: string | null = null;
       if (constrainOn && opts.getGrammar && isGrammarCapable(provider, baseUrl)) {
         try {
