@@ -7,8 +7,10 @@
 // be removed; a search filter appears once the history grows past a threshold, a clear-all control
 // forgets everything, and the list scrolls within its own container so a long history never grows the card.
 import { getRecentFolders, removeRecentFolder, pinRecentFolder, clearRecentFolders } from '@/settings/persistence';
+import { getPlatform } from '@/host';
 import { LOGO_SVG } from '@/shared/logo';
 import { registerOverlay, koiConfirm } from '@/shared/overlay';
+import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, fillVersionChip } from '@/shared/colophon';
 import { TEMPLATES, type Template } from '@/welcome/templates';
 
 /** What the welcome actions delegate to; the host (ide.ts) performs the real work. */
@@ -332,6 +334,70 @@ function buildWelcome(
   recent.className = 'koi-welcome-recent';
   launch.appendChild(recent);
   hero.appendChild(launch);
+
+  // --- colophon footer: version + project links + byline (issue #403) --------
+  // The onboarding essentials a newcomer needs at first contact — what version am I on, where are the
+  // docs, who made this — surfaced from the shared colophon (settings/about.ts shows the same content).
+  // It sits in the persistent console card (a sibling of the hero), not gated on opts.embedded, so it
+  // renders in both the overlay Home (createWelcome) and the routed Home (mountHome).
+  const colophonChip = document.createElement('span');
+  colophonChip.className = 'koi-home-colophon-chip';
+  colophonChip.hidden = true; // filled lazily by fillVersionChip; stays hidden until a version resolves
+
+  function buildColophonFooter(): HTMLElement {
+    const platform = getPlatform();
+
+    const footer = document.createElement('footer');
+    footer.className = 'koi-home-colophon';
+
+    const links = document.createElement('nav');
+    links.className = 'koi-home-colophon-links';
+    links.setAttribute('aria-label', 'Koine project links');
+    for (const link of PROJECT_LINKS) {
+      const a = document.createElement('a');
+      a.className = 'koi-home-colophon-link';
+      a.href = link.href;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.title = link.hint;
+
+      const icon = document.createElement('span');
+      icon.className = 'koi-home-colophon-link-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.innerHTML = link.icon;
+
+      // href stays real for a11y / copy-link / middle-click; the click routes through the platform so it
+      // opens in the system browser (new tab on web, OS handoff on desktop) instead of the webview.
+      a.append(icon, link.label);
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        platform.openExternal(link.href);
+      });
+      links.append(a);
+    }
+
+    const credit = document.createElement('p');
+    credit.className = 'koi-home-colophon-credit';
+    credit.append(CREDIT_PREFIX);
+    const author = document.createElement('a');
+    author.className = 'koi-home-colophon-author';
+    author.href = CREATOR_URL;
+    author.target = '_blank';
+    author.rel = 'noopener noreferrer';
+    author.textContent = CREATOR_NAME;
+    author.addEventListener('click', (e) => {
+      e.preventDefault();
+      platform.openExternal(CREATOR_URL);
+    });
+    credit.append(author, '.');
+
+    footer.append(colophonChip, links, credit);
+    // Fill the chip on build so a slow/absent version command never blocks construction; show() retries.
+    fillVersionChip(colophonChip, platform);
+    return footer;
+  }
+
+  consoleView.appendChild(buildColophonFooter());
 
   function renderRecent(): void {
     recent.innerHTML = '';
@@ -786,6 +852,7 @@ function buildWelcome(
     if (shown) return;
     resetGallery(); // always open on the console, even if the gallery was last on screen
     renderRecent();
+    fillVersionChip(colophonChip, getPlatform()); // retry the version on each open (mirrors About)
     root.hidden = false;
     shown = true;
     unregister = registerOverlay(hide);
