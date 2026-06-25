@@ -80,25 +80,33 @@ public sealed class KoineFormatter
         var orig = SplitLines(source);
         var fmt = SplitLines(result.Text);
 
+        // Render() terminates every line with '\n', so the formatted text ALWAYS ends in a newline
+        // (a trailing empty line). A source that does NOT would otherwise differ on that last element
+        // alone, forcing suffix=0 and expanding every edit to EOF. Diff against copies normalized to a
+        // common trailing empty line so the content lines align; reconstruct edits against the real
+        // `orig` below (so the EOF anchor stays valid and no past-EOF position is ever emitted).
+        var od = orig.Length > 0 && orig[^1].Length == 0 ? orig : [.. orig, ""];
+        var fd = fmt.Length > 0 && fmt[^1].Length == 0 ? fmt : [.. fmt, ""];
+
         // Minimal changed line-region: collapse the longest common leading/trailing run of identical lines.
         var prefix = 0;
-        while (prefix < orig.Length && prefix < fmt.Length
-            && string.Equals(orig[prefix], fmt[prefix], StringComparison.Ordinal))
+        while (prefix < od.Length && prefix < fd.Length
+            && string.Equals(od[prefix], fd[prefix], StringComparison.Ordinal))
         {
             prefix++;
         }
 
         var suffix = 0;
-        while (suffix < orig.Length - prefix && suffix < fmt.Length - prefix
-            && string.Equals(orig[^(suffix + 1)], fmt[^(suffix + 1)], StringComparison.Ordinal))
+        while (suffix < od.Length - prefix && suffix < fd.Length - prefix
+            && string.Equals(od[^(suffix + 1)], fd[^(suffix + 1)], StringComparison.Ordinal))
         {
             suffix++;
         }
 
         var changedStart = prefix;                  // inclusive original-line index
-        var changedEnd = orig.Length - suffix;      // exclusive original-line index
+        var changedEnd = od.Length - suffix;        // exclusive original-line index
         var fmtStart = prefix;
-        var fmtEnd = fmt.Length - suffix;
+        var fmtEnd = fd.Length - suffix;
 
         // The selection as an inclusive [first, last] line span. A selection ending at column 0 of a
         // later line (the "select N whole lines" gesture) does not include that trailing line.
@@ -133,12 +141,14 @@ public sealed class KoineFormatter
             fmtTo = fmtEnd;
         }
 
-        var replacement = string.Join("\n", fmt[fmtFrom..fmtTo]);
+        // The trailing "" added to `fd` for diffing is always part of the common suffix (suffix >= 1),
+        // so [fmtFrom, fmtTo) never reaches it — the replacement carries only real formatted lines.
+        var replacement = string.Join("\n", fd[fmtFrom..fmtTo]);
 
         // Whole-line replacement of original lines [editStart, editEnd). The span runs from the start of
         // line editStart to the start of line editEnd, so the replacement carries a trailing newline.
-        // When editEnd is past the last line (the change reaches EOF, which has no following newline),
-        // anchor the end at the last line's end and drop the trailing newline instead.
+        // When editEnd reaches the real last line (a source with no trailing newline), there is no
+        // following newline to consume, so anchor the end at that line's end and drop the trailing one.
         if (editEnd < orig.Length)
         {
             return new FormatRangeEdit(editStart, 0, editEnd, 0, replacement + "\n");

@@ -1808,7 +1808,10 @@ public sealed class KoineLanguageService
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var targetName in DeclaredTargets(decl))
         {
-            if (seen.Add(targetName)
+            // Skip a self-edge (a recursive type — e.g. `entity Tree { parent: Tree }`): a type is not
+            // its own supertype, and a self-loop would make a client's hierarchy tree expand forever.
+            if (!string.Equals(targetName, item.Name, StringComparison.Ordinal)
+                && seen.Add(targetName)
                 && FindTypeDecl(model, targetName) is { } target
                 && ItemFor(index, target) is { } ti)
             {
@@ -1834,7 +1837,9 @@ public sealed class KoineLanguageService
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var decl in model.Contexts.SelectMany(c => c.AllTypeDecls()))
         {
-            if (DeclaredTargets(decl).Contains(item.Name, StringComparer.Ordinal)
+            // Skip the self-edge of a recursive type (it is not its own subtype), mirroring Supertypes.
+            if (!string.Equals(decl.Name, item.Name, StringComparison.Ordinal)
+                && DeclaredTargets(decl).Contains(item.Name, StringComparer.Ordinal)
                 && seen.Add(decl.Name)
                 && ItemFor(index, decl) is { } ti)
             {

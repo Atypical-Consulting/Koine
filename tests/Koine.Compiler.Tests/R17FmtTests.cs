@@ -165,4 +165,56 @@ public class R17FmtTests
         dir.ShouldNotBeNull();
         return dir.FullName;
     }
+
+    // ---- range formatting (#331) -------------------------------------------
+
+    [Fact]
+    public void FormatRange_clips_the_edit_to_the_selected_line()
+    {
+        // Line 2 is over-indented; every other line is canonical. Selecting only line 2 must yield a
+        // single whole-line edit that re-indents it and reaches no further than the start of line 3.
+        const string src = "context S {\n  entity O identified by OId {\n        total: M\n  }\n}\n";
+        var edit = Fmt.FormatRange(src, startLine: 2, startCharacter: 0, endLine: 2, endCharacter: 20);
+
+        edit.ShouldNotBeNull();
+        edit.NewText.ShouldBe("    total: M\n");
+        edit.StartLine.ShouldBe(2);
+        edit.EndLine.ShouldBe(3); // whole-line replacement spans [line 2, line 3)
+    }
+
+    [Fact]
+    public void FormatRange_does_not_expand_past_the_selection_when_the_source_lacks_a_trailing_newline()
+    {
+        // No trailing newline: Render() still appends one, but that difference must be normalized away
+        // before diffing so it does NOT pull the unselected canonical last line `}` into the edit.
+        const string src = "context S {\n  entity O identified by OId {\n        total: M\n  }\n}";
+        var edit = Fmt.FormatRange(src, startLine: 2, startCharacter: 0, endLine: 2, endCharacter: 20);
+
+        edit.ShouldNotBeNull();
+        edit.NewText.ShouldBe("    total: M\n");
+        edit.EndLine.ShouldBe(3); // ends at the start of line 3 — without the fix this expanded to EOF (line 4)
+    }
+
+    [Fact]
+    public void FormatRange_returns_null_when_the_selection_is_already_canonical()
+    {
+        // The whole document is canonical → Format makes no change, so range formatting yields no edit.
+        const string src = "context S {\n  entity O identified by OId {\n    total: M\n  }\n}\n";
+        Fmt.FormatRange(src, startLine: 2, startCharacter: 0, endLine: 2, endCharacter: 20).ShouldBeNull();
+    }
+
+    [Fact]
+    public void FormatRange_reindents_an_unterminated_last_line_with_an_in_line_range()
+    {
+        // The mis-indented line IS the last line and the source has no trailing newline: the edit must
+        // anchor inside that line (end at its length), never emitting a past-EOF position or a new newline.
+        const string src = "context S {\n  entity O identified by OId {\n  }\n        }";
+        var edit = Fmt.FormatRange(src, startLine: 3, startCharacter: 0, endLine: 3, endCharacter: 9);
+
+        edit.ShouldNotBeNull();
+        edit.NewText.ShouldBe("}"); // canonical close at depth 0, no trailing newline appended
+        edit.StartLine.ShouldBe(3);
+        edit.EndLine.ShouldBe(3); // anchored within the last line (no line 4 exists)
+        edit.EndCharacter.ShouldBe("        }".Length);
+    }
 }
