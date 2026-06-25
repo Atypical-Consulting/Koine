@@ -17,10 +17,10 @@ For each entry in the template's `body:` array:
 | `checkboxes`| `## <attributes.label>` heading + a `- [x]` / `- [ ]` list |
 
 Honor `validations.required: true` — every required field needs real, specific content. The
-template's top-level `labels:` (e.g. `enhancement`) and the triage labels (`priority: *`, `effort: *`,
-`studio`) are **not** written into the body — they're applied via `--label` when the issue is created
-in SKILL.md Step 7, picked from the repo's live taxonomy. The body is just the form fields below,
-which become the visible top of the description (the brainstorm/spec/plan sections follow).
+template's top-level `labels:` and the triage labels (the profile's priority / effort / scope) are
+**not** written into the body — they're applied via `--label` when the issue is created in SKILL.md
+Step 7, picked from the repo's live taxonomy (the profile's *Labels*). The body is just the form fields
+below, which become the visible top of the description (the brainstorm/spec/plan sections follow).
 
 ## Worked example — `feature_request.yml`
 
@@ -65,13 +65,14 @@ all known by SKILL.md Step 7, since the plan already exists:
 
 ```bash
 gh issue create --title "Add Python emitter target" \
-  --label enhancement --label "priority: medium" --label "effort: L" \
+  --label "<type>" --label "<priority tier>" --label "<effort size>" \
   --body-file /tmp/koine-issue-python.md
 ```
 
 ## Area dropdown values (feature_request)
 
-Pick exactly one, copied verbatim:
+Pick exactly one, copied verbatim from the option list in the live `feature_request.yml`. For this repo
+they currently are:
 
 - `Language / grammar`
 - `Semantic model / validation`

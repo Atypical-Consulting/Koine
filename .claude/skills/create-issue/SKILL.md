@@ -59,20 +59,20 @@ per idea.
 6. **Implementation plan** (via `superpowers:writing-plans`) — a *visible* body section whose `- [ ]`
    checkboxes feed the issue's progress meter; never tuck it inside a `<details>`.
 7. **Assemble the description, choose labels, create the issue** — one body, one `gh issue create`,
-   labels (type + priority + effort, plus `studio` when it fits) applied at creation, then read the
-   issue back to confirm it rendered.
+   labels (type + priority + effort, plus any scope label) from the profile's *Labels* taxonomy applied
+   at creation, then read the issue back to confirm it rendered.
 8. **Report** — list each issue with its URL, and point the user at `/implement-issue` to build it.
 
 ---
 
 ## Step 1 — Preconditions
 
-**Load the repo profile first.** This skill shows Koine's values inline (the commit identity, the label
-taxonomy, build/test commands, the architecture grain) — those are really the *Koine profile* used as a
-worked example. Run the **`get-repo-profile`** skill; it returns `.claude/skills/repo-profile.md`
-(generating it on first use). Prefer the profile's values wherever they differ from what's shown here, so
-this skill works unchanged in any repo. If no profile exists and you genuinely can't generate one, fall
-back to the inline Koine values and note that in the report.
+**Load the repo profile first.** Every repo-specific fact this skill needs — the label taxonomy, the
+issue-template defaults, the architecture grain a plan must respect — lives in the repo profile, not
+inline here. Run the **`get-repo-profile`** skill; it returns `.claude/skills/repo-profile.md`
+(generating it on first use), and the steps below cite its named sections (*Labels*, *Issue templates*,
+*Architecture grain*). If no profile exists and you genuinely can't generate one, say so in the report
+rather than inventing repo specifics.
 
 ```bash
 gh api user --jq .login      # must print a login; if 401, the token is invalid
@@ -82,7 +82,7 @@ If this fails with an auth error, stop and tell the user to run `! gh auth login
 in the prompt (the `!` prefix runs it in this session so the token lands in your environment).
 Re-check before continuing — don't draft issues you can't file.
 
-Confirm the working directory is the Koine repo (the `gh` commands target the repo's `origin`).
+Confirm the working directory is the repo you mean to file in (the `gh` commands target its `origin`).
 
 ## Step 2 — Capture the idea(s)
 
@@ -132,11 +132,9 @@ cat .github/ISSUE_TEMPLATE/feature_request.yml
   only if the user is clearly filing a defect.
 - For each `textarea`/`input` field in the YAML, emit a `## <label>` heading and fill it from the
   idea. Honor `validations.required` — every required field must have real content.
-- For each `dropdown`, pick the single option that best fits and write it under its heading. The
-  feature_request `Area` options are: *Language / grammar*, *Semantic model / validation*,
-  *C# emitter*, *TypeScript emitter*, *New emitter target*, *CLI / LSP / tooling*, *Docs / website*.
-- The template's declared `labels:` (feature_request declares `enhancement`) are applied at creation
-  in Step 7, not written into the body.
+- For each `dropdown`, pick the single option that best fits and write it under its heading, copied
+  verbatim from the option list in the live YAML you just read.
+- The template's declared `labels:` are applied at creation in Step 7, not written into the body.
 
 See `references/issue-template.md` for a worked feature_request example and the exact field→heading
 mapping. Hold this markdown — you'll stitch it together with the rest in Step 7.
@@ -186,9 +184,9 @@ click away, not a slab of text sitting on top of the plan. GitHub needs a blank 
 ## Step 6 — Implementation plan (visible, with checkboxes)
 
 Invoke `superpowers:writing-plans` to load its current guidance, then apply it autonomously to the
-spec from Step 5, with the project's grain in mind (grammar → builder visitor → semantic model →
-validators → emitter → tests; never leak a C# concept into `Ast/`). Keep tasks bite-sized and each
-one independently testable.
+spec from Step 5, shaping the tasks to the repo profile's *Architecture grain* (the layer order a
+change walks through, and the invariants a plan must not break). Keep tasks bite-sized and each one
+independently testable.
 
 **Preserve the plan's checkbox task-list format, and keep this section OUTSIDE any `<details>`.**
 `writing-plans` emits a plan whose every actionable step is a Markdown checkbox (`- [ ]`), and
@@ -205,8 +203,9 @@ Concretely, the plan MUST carry all three of these (issue #21's plan is the refe
 1. The writing-plans **header note, verbatim**, so an executor knows how to run it:
    `> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.`
 2. A short **Goal / Architecture / Tech Stack** preamble and a **Global Constraints** list (version
-   floors, the `Ast/`-stays-target-agnostic invariant, the commit-identity line, "no
-   `TreatWarningsAsErrors`") — exact values copied from the spec.
+   floors, the architecture invariants from the profile's *Architecture grain*, the commit identity
+   from the profile's *Commit identity*, and any build constraints it records) — exact values copied
+   from the spec and the profile.
 3. One `### Task N: <name>` per task, each with **Files** + **Interfaces** lines, then **every step
    as its own `- [ ]` checkbox** (write the failing test → run it red → implement → run it green →
    commit). The final step of each task is a `- [ ]` checkbox with the commit message.
@@ -220,14 +219,14 @@ Shape (abbreviated — keep the checkboxes, never flatten them into prose):
 
 ### Task 1: Runtime module + skeleton emitter wired into the CLI
 
-**Files:** create `Emit/Python/PyRuntime.cs`, `PythonEmitter.cs`; modify `src/Koine.Cli/Program.cs`; test `…/PythonRuntimeTests.cs`.
+**Files:** create `Emit/Python/PyRuntime.cs`, `PythonEmitter.cs`; modify the CLI's target switch; test `…/PythonRuntimeTests.cs`.
 
 **Interfaces:** `PythonEmitter : IEmitter`, `sealed partial`, `TargetName => "python"`, `Emit(KoineModel)` returning the root files.
 
 - [ ] **Step 1:** Write the failing test in `PythonRuntimeTests.cs` — assert `TargetName == "python"` and `Emit` contains `koine_runtime.py`.
-- [ ] **Step 2:** `dotnet test --filter "FullyQualifiedName~PythonRuntimeTests"` → FAIL (types not found).
+- [ ] **Step 2:** Run that suite via the profile's *Build & test* single-suite filter → FAIL (types not found).
 - [ ] **Step 3:** Implement `PyRuntime.cs` — fixed-string `Source` modeled on `TsRuntime.cs`, stdlib-only.
-- [ ] **Step 4:** `dotnet test --filter "FullyQualifiedName~PythonRuntimeTests"` → PASS.
+- [ ] **Step 4:** Re-run the suite filter → PASS.
 - [ ] **Step 5:** Commit: `feat(emit-py): Python backend skeleton + runtime`.
 ```
 
@@ -236,10 +235,9 @@ back as one clean artifact instead of competing with this skill's own framing mi
 which kept the checkboxes, was generated that way). Inline generation is fine too. Either way, hold
 the plan markdown for Step 7, where the verify-checkboxes gate runs before anything is filed.
 
-**You now know the real scope**, so settle on the **effort** size from what you just wrote — a
-one-task tweak is `effort: S`, a few tasks within one layer `effort: M`, a cross-layer feature
-(grammar → … → emitter → tests, the usual new-construct shape) `effort: L`, a phased multi-week
-effort `effort: XL`. You'll apply it alongside the other labels in Step 7.
+**You now know the real scope**, so settle on the **effort** size from what you just wrote, matching it
+to the sizes in the profile's *Labels* taxonomy (a one-task tweak is the smallest; a cross-layer feature
+or a phased multi-week effort the largest). You'll apply it alongside the other labels in Step 7.
 
 ## Step 7 — Assemble the description, choose labels, and create the issue
 
@@ -260,31 +258,26 @@ dropped into prose, and you must reformat into the task/checkbox structure from 
 grep -c '^- \[ \]' /tmp/koine-issue-<slug>.md   # must be > 0; expect one per actionable plan step
 ```
 
-**Choose labels.** This repo carries a small, deliberate label taxonomy that the maintainer actually
-uses for triage — applying it is the difference between an issue that lands sorted and one that sits
-unlabelled. Read the **live** set first (labels drift; never apply one that isn't there):
+**Choose labels.** The repo's label taxonomy lives in the profile's *Labels* section — the exact
+strings, the priority tiers and their meanings, the effort sizes, and any scope label. Applying it is
+the difference between an issue that lands sorted and one that sits unlabelled. Read the **live** set
+first (labels drift; never apply one the profile lists but the repo no longer has):
 
 ```bash
 gh label list --limit 100
 ```
 
-Pick across these axes — none of them are guesses, they're the labels your own analysis already
-implies:
+Pick one label per axis from the profile's taxonomy — none are guesses, they're the labels your own
+analysis already implies:
 
-- **Type** — `enhancement` for an idea/feature (the common case, and what the feature_request
-  template declares) or `bug` for a defect. Match whichever template you built the body from.
+- **Type** — the feature/idea type for the common case (what the feature_request template declares), or
+  the bug type for a defect. Match whichever template you built the body from.
 - **Priority** — exactly one tier, read from how essential the idea is (the same judgment your
-  brainstorm's Recommendation makes):
-  - `priority: high` — Tier 1: below a universal bar / a core deliverable the product needs.
-  - `priority: medium` — Tier 2: an expected capability that's partial or absent. The safe default
-    when an idea is clearly worth doing but not load-bearing.
-  - `priority: low` — Tier 3: a differentiator or polish.
-- **Effort** — exactly one size, the one you settled on at the end of Step 6 now that the plan
-  reveals the real scope. (`effort: S` ≈ hours–1 day · `effort: M` ≈ a few days · `effort: L` ≈
-  ~1-2 weeks / cross-layer · `effort: XL` ≈ multi-week / phased.)
-- **Scope** — add `studio` when the idea concerns the Koine Studio IDE (`tooling/koine-studio`).
-  It's the one area label that's earned its keep; don't invent new area labels — the feature_request
-  *Area* dropdown already captures finer scope inside the body.
+  brainstorm's Recommendation makes); pick the tier whose meaning in the profile fits.
+- **Effort** — exactly one size, the one you settled on at the end of Step 6 now that the plan reveals
+  the real scope; map it to the matching size in the profile.
+- **Scope** — add a scope label from the profile when the idea falls in its area; don't invent new area
+  labels — the feature_request *Area* dropdown already captures finer scope inside the body.
 
 Per the Autonomy contract, just **decide** — pick the labels your framing implies and note the call
 in the final report; don't open a Q&A about triage. Create with all of them at once:
@@ -292,9 +285,9 @@ in the final report; don't open a Q&A about triage. Create with all of them at o
 ```bash
 gh issue create \
   --title "Add Python emitter target" \
-  --label enhancement \
-  --label "priority: medium" \
-  --label "effort: L" \
+  --label "<type>" \
+  --label "<priority tier>" \
+  --label "<effort size>" \
   --body-file /tmp/koine-issue-<slug>.md
 ```
 
@@ -322,7 +315,7 @@ report. Only once the readback is clean do you move on.
 ## Step 8 — Report
 
 List every issue created with its title, URL, and the labels you applied (type / priority / effort /
-`studio`), and flag anything you assumed or skipped (a chosen label that wasn't in the live list, a
+scope), and flag anything you assumed or skipped (a chosen label that wasn't in the live list, a
 duplicate you declined to refile, a field you defaulted). Surfacing the labels lets the maintainer
 re-triage with one glance if your call was off.
 
@@ -339,9 +332,9 @@ command per issue. Keep the report short — the issues themselves carry the det
   could drift. The body's top section's job is to satisfy the template the maintainers chose.
 - **Ground the content in the repo.** Generic feature-request boilerplate is worthless; reference
   real files, the layered pipeline, and the roadmap so the issue reads like it belongs here.
-- **Respect the architecture invariant.** Koine keeps `Ast/` target-agnostic. Specs and plans for
-  new emitters must add an emitter under `Emit/<Target>/` and must not push target concepts into the
-  shared model.
+- **Respect the architecture invariant.** Shape specs and plans to the profile's *Architecture grain* —
+  its layer order and its "keep X target-agnostic" rules — so a plan reads like it belongs in this repo
+  and doesn't break an invariant the maintainers rely on.
 - **The plan is a tracked checklist, not an essay.** It exists so someone can execute it task-by-task
   and tick off progress *on the issue itself*. Preserve `writing-plans`' `- [ ]` checkboxes all the
   way into the body, and keep the plan section visible (Step 6) — a plan flattened into prose, or
