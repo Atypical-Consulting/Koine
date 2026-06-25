@@ -408,10 +408,12 @@ export function __setEsModuleImporterForTests(importer: EsModuleImporter | null)
  *  1. Try a direct `import(/* @vite-ignore *​/ url)` — the same CSP-neutral path the worker already
  *     uses. In the built / deployed bundle (the only place that matters for production) this is the
  *     canonical path: it succeeds and never touches the DOM, so a strict CSP can't block it.
- *  2. Only if it throws AND we're under Vite's dev server (`import.meta.env.DEV`) — the one case the
- *     inline loader exists for: the dev-server public-asset (`?import`) transform breaks a direct
- *     app-code import, and an inline `<script type="module">` is invisible to that transform — fall
- *     back to the inline-`<script>` loader.
+ *  2. Only if it throws AND we're under Vite's dev server (`import.meta.env.DEV`) — fall back to the
+ *     inline-`<script>` loader (invisible to Vite's transform, so it's the CSP/transform escape). NOTE:
+ *     with `koineWasmDevPlugin` (vite.config.ts, issue #384) now serving `/koine-wasm/**` `?import`
+ *     requests as raw assets, the direct import in step 1 already SUCCEEDS under the dev server — so
+ *     this inline path is now a DEEPER fallback (a strict CSP blocking the direct `import()`, or a
+ *     non-Vite host), not the routine dev path it was before #384.
  *  3. In a built / deployed bundle (`import.meta.env.DEV === false`) there is no such transform, so a
  *     thrown direct import is a *genuine* load error (dotnet.js 404, network failure, a host that
  *     blocks `import()`). Rethrow it PROMPTLY (#365) instead of stalling on the inline loader's blind

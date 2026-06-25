@@ -8,6 +8,10 @@ import {
   generate as generateTemplates,
   resolveTemplatesDir,
 } from "./scripts/generate-templates.mjs";
+// Dev-only plugin: serve `/koine-wasm/**` `?import` requests as raw assets so the browser WASM host's
+// dynamic import of the published dotnet.js loader (a /public asset) doesn't trip Vite's transform
+// middleware and pop the error overlay under the dev server (issue #384).
+import { koineWasmDevPlugin } from "./src/dev/koineWasmDevMiddleware";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
@@ -59,7 +63,7 @@ function templateManifestPlugin(): Plugin {
 export default defineConfig(({ mode }) => {
   const web = mode === "web";
   return {
-    plugins: [templateManifestPlugin()],
+    plugins: [templateManifestPlugin(), koineWasmDevPlugin()],
 
     // Alias React's runtime to Preact's compat layer so the `zustand` React hook (`useStore`) and
     // any React-shaped deps resolve to Preact. Vanilla Zustand (`zustand/vanilla`) needs none of this;
