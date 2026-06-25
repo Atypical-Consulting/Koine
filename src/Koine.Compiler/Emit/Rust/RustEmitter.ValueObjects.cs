@@ -25,7 +25,7 @@ public sealed partial class RustEmitter
         var required = stored.Where(m => !HasConstantDefault(m)).ToList();
 
         var typeMapper = new RustTypeMapper(emit.Index, context, _options);
-        var translator = new RustExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, typeMapper, context);
+        var translator = new RustExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, emit.EnumVariants, typeMapper, context);
 
         // The struct.
         WriteDoc(sb, vo.Doc, string.Empty);
