@@ -51,11 +51,24 @@ console.log('glossary ok:', glossary.ok, 'files:', glossary.files.length);
 const bad = JSON.parse(api.Diagnose('context X { value M { amount: Decimal invariant amount >= 0 } }'));
 console.log('diagnostics (broken):', JSON.stringify(bad));
 
+// 5. Semantic tokens for a parsing source → expect a non-empty delta-encoded int stream (issue #329).
+// Five ints per classified identifier; the same stream the stdio LSP emits (wire-parity tested).
+const semtok = JSON.parse(api.SemanticTokens(SOURCE));
+console.log('semantic tokens: data length', semtok.data.length, '(', semtok.data.length / 5, 'tokens )');
+
 // Assert the happy path.
-const ok = diags.length === 0 && csharp.ok && csharp.files.length > 0 && ts.ok && glossary.ok;
+const ok =
+  diags.length === 0 &&
+  csharp.ok &&
+  csharp.files.length > 0 &&
+  ts.ok &&
+  glossary.ok &&
+  Array.isArray(semtok.data) &&
+  semtok.data.length > 0 &&
+  semtok.data.length % 5 === 0;
 console.log(ok ? '\nSMOKE TEST PASSED' : '\nSMOKE TEST FAILED');
 
-// 5. Optional benchmark: time compiling the pizzeria template and report bundle size (issue #327).
+// 6. Optional benchmark: time compiling the pizzeria template and report bundle size (issue #327).
 let benchOk = true;
 if (BENCH) {
   benchOk = runBenchmark();

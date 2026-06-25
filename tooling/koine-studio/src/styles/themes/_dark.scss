@@ -112,4 +112,12 @@
   --koi-hl-comment: #6a7484;
   --koi-hl-meta: #ff9bce;
   --koi-hl-punct: #9aa6b6;
+
+  /* semantic-token highlighting (LSP-driven, issue #329): distinct hues for the token types the
+     server resolves — value/type reuses --koi-hl-type; enum / enumMember / property / parameter get
+     their own colours so they read distinctly from each other and from the static grammar. */
+  --koi-hl-sem-enum: #ffd866;
+  --koi-hl-sem-enum-member: #fc9867;
+  --koi-hl-sem-property: #83e8c4;
+  --koi-hl-sem-parameter: #ff9d8a;
 }
