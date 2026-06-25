@@ -3,8 +3,17 @@
 // reports which path won. Happy-dom has no real Worker and no real .NET runtime, so we mock the
 // worker client and inject a fake dotnet module loader (the __setDotnetModuleLoaderForTests seam).
 import { describe, expect, test, vi, beforeEach, afterEach } from 'vitest';
+import { HOST_DECLARED_EXPORTS } from '@/host/browser/wasm';
 
 vi.mock('@/host/browser/workerClient', () => ({ createKoineWorkerClient: vi.fn() }));
+
+// A faithful Capabilities() payload (issue #330): the boot path verifies the surface against it. Reporting
+// the full expected surface keeps these boot-mode tests on the happy path (no staleness warning).
+const CAPABILITIES_JSON = JSON.stringify({
+  version: '9.9.9-test',
+  exports: [...HOST_DECLARED_EXPORTS],
+  targets: [],
+});
 
 /** A fake dotnet ES module *value* whose CompilerInterop exposes the given methods. */
 function dotnetModuleValue(interop: Record<string, unknown>) {
@@ -12,7 +21,11 @@ function dotnetModuleValue(interop: Record<string, unknown>) {
     dotnet: {
       create: async () => ({
         getConfig: () => ({ mainAssemblyName: 'Koine.Wasm.dll' }),
-        getAssemblyExports: async () => ({ Koine: { Wasm: { CompilerInterop: interop } } }),
+        // Inject a faithful Capabilities() (#330) so the boot-time surface check passes; a test can
+        // override it by including its own Capabilities in `interop`.
+        getAssemblyExports: async () => ({
+          Koine: { Wasm: { CompilerInterop: { Capabilities: () => CAPABILITIES_JSON, ...interop } } },
+        }),
       }),
     },
   };
@@ -99,7 +112,9 @@ describe('loadWasmApi — main-thread fallback (issue #357)', () => {
   });
 
   test('uses the worker fast-path when the worker boot succeeds (no fallback, loader untouched)', async () => {
-    const mockCall = vi.fn<(m: string, a: unknown[]) => Promise<string>>().mockResolvedValue('{"ok":true}');
+    const mockCall = vi
+      .fn<(m: string, a: unknown[]) => Promise<string>>()
+      .mockImplementation((m) => Promise.resolve(m === 'Capabilities' ? CAPABILITIES_JSON : '{"ok":true}'));
     const { createKoineWorkerClient } = await import('@/host/browser/workerClient');
     (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
       call: mockCall,
