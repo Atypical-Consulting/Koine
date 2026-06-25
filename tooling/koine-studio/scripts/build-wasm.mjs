@@ -21,6 +21,28 @@ function run(cmd, args) {
   execFileSync(cmd, args, { stdio: 'inherit', cwd: repoRoot });
 }
 
+// Preflight the .NET wasm-tools workload (issue #366; mirrors the run-ide-web guard from #363). The
+// `dotnet publish` below hard-requires it — without it the publish dies with a cryptic NETSDK1147
+// buried under this script's Node stack trace, hiding the one-line fix. Check up front and point at
+// it instead. `dotnet`-not-on-PATH is left to the publish to surface (catch → skip): the preflight
+// only ever ADDS a clearer message, it must never block a working setup. Called on the publish branch
+// only, so the fresh-bundle reuse path (which needs no workload) is never gated.
+function ensureWasmWorkload() {
+  try {
+    const out = execFileSync('dotnet', ['workload', 'list'], { encoding: 'utf8' });
+    if (!/wasm-tools/i.test(out)) {
+      console.error(
+        "\nERROR: the .NET 'wasm-tools' workload is required to build the in-browser compiler, but it\n" +
+          '       is not installed. Install it once (alongside wasm-experimental), then re-run:\n\n' +
+          '    dotnet workload install wasm-tools wasm-experimental\n',
+      );
+      process.exit(1);
+    }
+  } catch {
+    // dotnet not on PATH → skip the preflight; the publish below surfaces its own error.
+  }
+}
+
 // The wasm SDK writes the browser AppBundle to bin/Release/net10.0/browser-wasm/AppBundle — the
 // directory that contains `_framework`. Search broadly and prefer the AppBundle/publish output.
 const searchRoot = join(repoRoot, 'src', 'Koine.Wasm', 'bin', 'Release');
@@ -107,6 +129,7 @@ if (bundleDir && bundleIsFresh(join(bundleDir, '_framework'), srcDir)) {
   console.log(`Koine wasm: reusing fresh bundle (${bundleDir})`);
 } else {
   console.log(`Koine wasm: publishing — AOT ${aot ? 'ON (KOINE_WASM_AOT)' : 'off (interpreter)'}`);
+  ensureWasmWorkload();
   run('dotnet', ['publish', project, '-c', 'Release', '--nologo', `-p:KoineWasmAot=${aot}`]);
   bundleDir = locateBundle(); // re-locate: the publish may have created the output path
 }
