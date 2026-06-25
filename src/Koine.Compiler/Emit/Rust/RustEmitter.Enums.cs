@@ -18,8 +18,9 @@ public sealed partial class RustEmitter
 
         // Per-enum member→variant names, de-duplicated so members that PascalCase-collapse (e.g. `EUR`
         // and `Eur` both fold to `Eur`) emit distinct, compiling variants instead of a duplicate
-        // definition (#323). Computed once and used at every variant-emission site below; member
-        // references resolve through the same shared map in RustExpressionTranslator.
+        // definition (#323). Computed once here and reused at every variant-emission site below. Member
+        // references resolve through BuildEnumVariantMap, which runs the same pure UniqueVariants over the
+        // same member list — so a declaration and its references always render identical variants.
         IReadOnlyList<string> variants = RustNaming.UniqueVariants(@enum.MemberNames);
 
         WriteDoc(sb, @enum.Doc, string.Empty);

@@ -139,7 +139,13 @@ public class RustSmartEnumNamingTests
         var money = result.Files
             .Single(f => f.RelativePath.EndsWith("money.rs", StringComparison.Ordinal)).Contents;
 
-        money.ShouldContain("Currency::Eur2", customMessage:
+        // Scope the assertion to the `is_legacy` accessor body: a whole-file `Eur2` check would pass
+        // even on a regressed reference, because the enum API (from_name/from_value/match_/switch) emits
+        // `Currency::Eur2` independently. Only the translator produces the variant inside this accessor.
+        var isLegacyBody = Regex.Match(money, @"fn is_legacy\(&self\) -> bool \{(.*?)\}", RegexOptions.Singleline)
+            .Groups[1].Value;
+        isLegacyBody.ShouldNotBeEmpty("could not locate the `is_legacy` accessor in the emitted Rust");
+        isLegacyBody.ShouldContain("Currency::Eur2", customMessage:
             "the `currency == Currency.Eur` reference must lower to the disambiguated `Currency::Eur2`");
     }
 
