@@ -34,6 +34,21 @@ describe('broadcastBootSignal (issue #357 worker watchdog)', () => {
     expect(ft.clearTimeout).toHaveBeenCalled();
   });
 
+  it('runs onReady BEFORE emitting `ready` — the message loop must be wired before the host is told it is up', async () => {
+    // The whole #357 fix hinges on this ordering: the worker installs its `message` listener (onReady)
+    // before posting `ready`, so no RPC the host sends on `ready` can arrive before a listener exists.
+    const order: string[] = [];
+    const onReady = vi.fn(() => order.push('onReady'));
+    const emit = (s: WorkerSignal) => order.push(`emit:${s.type}`);
+    const ft = fakeTimers();
+
+    broadcastBootSignal(Promise.resolve(), emit, 20_000, onReady, ft.timers);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(order).toEqual(['onReady', 'emit:ready']);
+  });
+
   it('emits `boot-failure` with the error message when boot rejects', async () => {
     const signals: WorkerSignal[] = [];
     const ft = fakeTimers();

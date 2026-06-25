@@ -6,6 +6,7 @@
 // typed id-correlated request/response protocol implemented in workerClient.ts.
 
 import { createKoineWorkerClient, type WorkerClient } from '@/host/browser/workerClient';
+import { dotnetEntryUrl } from '@/host/browser/dotnetAsset';
 
 /** The JS-callable language-service surface (matches src/Koine.Wasm/CompilerInterop.LanguageService.cs). */
 export interface KoineWasmApi {
@@ -237,12 +238,6 @@ function buildWorkerProxy(call: (method: string, args: unknown[]) => Promise<str
 
 let loaderSeq = 0;
 
-/** Base-aware URL of the published dotnet.js loader (respects Vite's `base`, e.g. `/Koine/studio/`). */
-function dotnetEntryUrl(): string {
-  const base = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '');
-  return `${base}/koine-wasm/_framework/dotnet.js`;
-}
-
 /**
  * Import the dotnet.js ES module by URL via an injected inline module script. We deliberately do NOT
  * call `import(url)` from app code: under Vite's dev server a dynamic import of a `public/` asset is
@@ -322,7 +317,7 @@ async function bootMainThread(): Promise<KoineWasmApi> {
  */
 export function loadWasmApi(): Promise<KoineWasmApi> {
   if (apiPromise) return apiPromise;
-  apiPromise = (async () => {
+  const attempt = (async () => {
     const client = createKoineWorkerClient();
     workerClientInstance = client;
     try {
@@ -343,7 +338,14 @@ export function loadWasmApi(): Promise<KoineWasmApi> {
       return api;
     }
   })();
-  return apiPromise;
+  apiPromise = attempt;
+  // Don't cache a TOTAL boot failure (both the worker AND the main-thread boot rejected — e.g. a
+  // transient asset-serving hiccup). Clearing the cache lets a later call retry from scratch instead
+  // of forever re-awaiting a permanently-rejected promise. The caller still sees this attempt reject.
+  attempt.catch(() => {
+    if (apiPromise === attempt) apiPromise = null;
+  });
+  return attempt;
 }
 
 /**

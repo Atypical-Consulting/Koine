@@ -7,8 +7,14 @@
 //
 // This script serves the built `dist/` exactly as the deploy does — under the sub-path base
 // (KOINE_STUDIO_BASE, e.g. /Koine/studio/) — launches headless Chromium, and asserts the compiler
-// worker actually reaches `ready` (and is not stuck in the error state). It exits non-zero with a
-// timeline diagnostic when the boot hangs, so CI fails instead of shipping a dead studio.
+// worker actually reaches `ready` and a real RPC round-trips. It exits non-zero with a timeline
+// diagnostic when the boot hangs, so CI fails instead of shipping a dead studio.
+//
+// Scope: this gate deliberately guards the WORKER fast-path. A worker boot-failure fails the gate
+// EVEN THOUGH `loadWasmApi()` would fall back to a working main-thread boot — that fallback is the
+// user-facing safety net (covered by wasm.fallback.test.ts), but it must not let a worker-boot
+// regression ship silently. (On a true hang, the worker's own ~20s watchdog posts `boot-failure`
+// first, so the gate usually fails via that signal rather than the longer KOINE_SMOKE_TIMEOUT_MS.)
 //
 // Run: `npm run test:browser` (after `npm run build:web`). Needs Chromium:
 //   npx playwright install --with-deps chromium

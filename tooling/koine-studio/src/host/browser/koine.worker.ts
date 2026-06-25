@@ -12,6 +12,7 @@
 
 import type { WorkerRequest, WorkerResponse, WorkerSignal } from './workerClient';
 import { broadcastBootSignal } from './bootWatchdog';
+import { dotnetEntryUrl } from './dotnetAsset';
 
 /**
  * Watchdog ceiling for the in-worker runtime boot. If `dotnet.create()` neither resolves nor rejects
@@ -20,12 +21,6 @@ import { broadcastBootSignal } from './bootWatchdog';
  * boot completes in well under a second once the bundle is cached.
  */
 const BOOT_WATCHDOG_MS = 20_000;
-
-/** Base-aware URL of the published dotnet.js loader (respects Vite's `base`, e.g. `/Koine/studio/`). */
-function dotnetEntryUrl(): string {
-  const base = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '');
-  return `${base}/koine-wasm/_framework/dotnet.js`;
-}
 
 // ---------------------------------------------------------------------------
 // Boot the .NET runtime once.

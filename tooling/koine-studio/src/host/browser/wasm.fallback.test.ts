@@ -62,6 +62,31 @@ describe('loadWasmApi — main-thread fallback (issue #357)', () => {
     expect(await api.Glossary('[]')).toBe('{"markdown":"ok"}');
   });
 
+  test('a TOTAL boot failure (worker AND main-thread) is not cached — a later call retries from scratch', async () => {
+    const { createKoineWorkerClient } = await import('@/host/browser/workerClient');
+    (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
+      call: vi.fn(),
+      whenReady: vi.fn<() => Promise<void>>().mockRejectedValue(new Error('worker boot failed')),
+      dispose: vi.fn(),
+    });
+
+    const wasm = await import('@/host/browser/wasm');
+    let attempt = 0;
+    wasm.__setDotnetModuleLoaderForTests(async (url) => {
+      attempt += 1;
+      if (attempt === 1) throw new Error('dotnet.js 404 (transient)'); // first boot: main-thread also fails
+      return fakeDotnetModule({ ListEmitTargets: () => '{"targets":[]}' })(url);
+    });
+
+    // First call: worker rejects AND main-thread rejects → total failure, propagated to the caller.
+    await expect(wasm.loadWasmApi()).rejects.toThrow(/dotnet\.js 404/);
+
+    // The rejection must NOT be cached: a second call retries and succeeds.
+    const api = await wasm.loadWasmApi();
+    expect(wasm.getWasmBootMode()).toBe('main-thread');
+    expect(await api.ListEmitTargets()).toBe('{"targets":[]}');
+  });
+
   test('uses the worker fast-path when the worker boot succeeds (no fallback, loader untouched)', async () => {
     const mockCall = vi.fn<(m: string, a: unknown[]) => Promise<string>>().mockResolvedValue('{"ok":true}');
     const { createKoineWorkerClient } = await import('@/host/browser/workerClient');
