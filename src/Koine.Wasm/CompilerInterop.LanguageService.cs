@@ -38,6 +38,9 @@ public static partial class CompilerInterop
 {
     private static readonly KoineLanguageService LanguageService = new();
 
+    // Held statically like LanguageService — the classifier reuses its own KoineCompiler across calls.
+    private static readonly SemanticTokenProvider SemanticProvider = new();
+
     /// <summary>
     /// Diagnoses the merged workspace (every open <c>.koi</c> parsed together, as the build does)
     /// and returns diagnostics bucketed per file, so the caller can publish one
@@ -140,6 +143,30 @@ public static partial class CompilerInterop
             .Select(i => new WEmitTarget(i.Id, i.DisplayName, i.FileExtension))
             .ToArray();
         return JsonSerializer.Serialize(new WEmitTargetsResult(targets), LangJson.Default.WEmitTargetsResult);
+    }
+
+    /// <summary>
+    /// Full-document LSP semantic tokens for a single <c>.koi</c> <paramref name="source"/> — the
+    /// in-browser counterpart of the stdio LSP's <c>textDocument/semanticTokens/full</c>
+    /// (<c>LspServer.SemanticTokensResultJson</c>). Returns <c>{ data, resultId }</c> where <c>data</c>
+    /// is the LSP delta-encoded int stream from <see cref="SemanticTokenProvider.Encode"/> over
+    /// <see cref="SemanticTokenProvider.Tokenize"/>; the two backends emit the <b>same</b> stream
+    /// (asserted in <c>SemanticTokensWireParityTests</c>). <c>resultId</c> is reserved (always null) for
+    /// a later additive delta pass. A non-parsing source degrades to empty <c>data</c> — the editor
+    /// keeps its regex highlighting rather than showing wrong colors.
+    /// </summary>
+    [JSExport]
+    public static string SemanticTokens(string source)
+    {
+        try
+        {
+            var data = SemanticTokenProvider.Encode(SemanticProvider.Tokenize(source)).ToArray();
+            return JsonSerializer.Serialize(new WSemanticTokens(data), LangJson.Default.WSemanticTokens);
+        }
+        catch
+        {
+            return JsonSerializer.Serialize(new WSemanticTokens([]), LangJson.Default.WSemanticTokens);
+        }
     }
 
     /// <summary>
@@ -1489,6 +1516,14 @@ public sealed record WCheckChange(string Impact, string Code, string Message);
 /// <summary>Model-versioning compatibility result.</summary>
 public sealed record WCheckResult(string? Error, bool HasBreakingChanges, WCheckChange[] Changes);
 
+/// <summary>
+/// LSP SemanticTokens: the delta-encoded int stream (five ints per token —
+/// deltaLine/deltaStart/length/tokenType/tokenModifiers) decoded against the legend the
+/// <c>initialize</c> handshake advertises. <see cref="ResultId"/> is reserved (always null) for a
+/// later additive <c>semanticTokens/full/delta</c> pass; full-document tokens only for now.
+/// </summary>
+public sealed record WSemanticTokens(int[] Data, string? ResultId = null);
+
 /// <summary>Input shape: one open document (uri + full text).</summary>
 public sealed record WSourceFileDto(string Uri, string Text);
 
@@ -1537,4 +1572,5 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WSourceSpan))]
 [JsonSerializable(typeof(WInDiagnostic[]))]
 [JsonSerializable(typeof(WCheckResult))]
+[JsonSerializable(typeof(WSemanticTokens))]
 internal sealed partial class LangJson : JsonSerializerContext;
