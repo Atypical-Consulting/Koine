@@ -1,9 +1,15 @@
 import type { StoreApi } from 'zustand/vanilla';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { AppState } from '@/store/index';
 import { useAppStore } from '@/store/hooks';
 import type { DiagramGraph } from '@/lsp/lsp';
-import { extractEventFlow, extractEvents, renderEventsTable, type TableHandlers } from '@/model/modelTables';
+import {
+  extractEventFlow,
+  extractEvents,
+  renderEventsTable,
+  type EventFlowNode,
+  type TableHandlers,
+} from '@/model/modelTables';
 import { scopeGraph } from '@/model/activeContext';
 import { renderEventFlowGraph, type EventFlowGraphHandle } from '@/diagrams/diagrams';
 
@@ -63,24 +69,33 @@ export function EventsPanel(props: {
   );
 }
 
+// A short human phrase per card kind, for the screen-reader text alternative below.
+const KIND_LABEL: Record<EventFlowNode['kind'], string> = {
+  command: 'command',
+  aggregate: 'aggregate',
+  'domain-event': 'domain event',
+  policy: 'policy',
+  'integration-event': 'integration event',
+};
+
 // The Flow view: the event-storming canvas (a maxGraph render, mounted + disposed via an effect so a scope
 // change re-derives and re-mounts it) plus a screen-reader text alternative listing the flow's cards — the
-// canvas isn't AT-navigable, so the legend is its accessible content (and a stable test target). A card
-// click bubbles NODE_NAVIGATE_EVENT, which `inspectorController` routes to select-and-goto (like a diagram
-// node) — so the navigation wiring lives there, not here.
+// canvas isn't AT-navigable, so the legend is its accessible content (and a stable test target); the
+// keyboard-accessible Table view is the alternative for reaching click-to-source. A card click bubbles
+// NODE_NAVIGATE_EVENT, which `inspectorController` routes to select-and-goto (like a diagram node) — so the
+// navigation wiring lives there, not here.
 function EventFlowView(props: { graph: DiagramGraph; scope: string }) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const flow = extractEventFlow(scopeGraph(props.graph, props.scope));
+  // Derive the scoped flow ONCE; the memo gives a stable reference, so the mount effect re-runs only when
+  // the graph or scope actually changes (not on every parent re-render), and the legend reuses the result.
+  const flow = useMemo(() => extractEventFlow(scopeGraph(props.graph, props.scope)), [props.graph, props.scope]);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     let current = true;
     let handle: EventFlowGraphHandle | null = null;
-    // Re-derive inside the effect so the dependency list is the stable (graph, scope) pair, not the
-    // freshly-built flow object (which changes identity every render).
-    const scoped = extractEventFlow(scopeGraph(props.graph, props.scope));
-    void renderEventFlowGraph(host, scoped, () => current).then((h) => {
+    void renderEventFlowGraph(host, flow, () => current).then((h) => {
       if (current) handle = h;
       else h?.dispose();
     });
@@ -88,7 +103,7 @@ function EventFlowView(props: { graph: DiagramGraph; scope: string }) {
       current = false;
       handle?.dispose();
     };
-  }, [props.graph, props.scope]);
+  }, [flow]);
 
   return (
     <div class="koi-event-flow">
@@ -98,7 +113,12 @@ function EventFlowView(props: { graph: DiagramGraph; scope: string }) {
         {flow.nodes.length === 0 ? (
           <li>No events to chart for this context.</li>
         ) : (
-          flow.nodes.map((n) => <li key={n.id}>{n.label}</li>)
+          flow.nodes.map((n) => (
+            <li key={n.id}>
+              {n.label} — {KIND_LABEL[n.kind]}
+              {n.context ? ` in ${n.context}` : ''}
+            </li>
+          ))
         )}
       </ul>
     </div>

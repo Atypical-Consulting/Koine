@@ -32,10 +32,13 @@
   color: var(--koi-fg);
   border-color: var(--koi-accent);
 }
+// The pressed (selected) state uses the app's accent-TINTED pill pattern (accent text on a faint
+// accent-tinted background), not a solid accent fill: white-on-accent fails WCAG AA contrast (the accent
+// is a mid-blue), whereas accent text on the dark paper clears it — and it matches the toolbar/docs pills.
 .koi-events-view-btn[aria-pressed='true'] {
-  background: var(--koi-accent);
+  background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
   border-color: var(--koi-accent);
-  color: #fff;
+  color: var(--koi-accent);
 }
 .koi-events-view-btn:focus-visible {
   outline: 2px solid var(--koi-accent);
