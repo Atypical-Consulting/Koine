@@ -18,7 +18,7 @@ description: >-
   `code-review` / `review`), or to creating a standalone issue with no PR to land (that's `create-issue`).
 ---
 
-# Merge a Koine pull request
+# Merge a pull request
 
 ## What this does and why
 
@@ -29,7 +29,7 @@ leave comments. So this skill closes the gap: it waits for CI, fixes whatever is
 merge, squashes the PR in, turns deferred work into tracked issues, and removes the throwaway branch
 and worktree so nothing lingers.
 
-The shape mirrors `implement-issue`'s tail (sync-with-`main`, the Koine conflict hot-spots, the
+The shape mirrors `implement-issue`'s tail (sync-with-`main`, the profile's conflict hot-spots, the
 commit identity) — reuse that machinery rather than reinventing it. The one genuinely new piece is the
 **corrections loop**: keep clearing blockers and re-waiting until GitHub reports the PR `CLEAN`, then
 merge.
@@ -47,7 +47,7 @@ going. Only stop for a genuine blocker you cannot honestly work past:
   stop and show the failing output.
 - **A merge conflict you can't resolve with confidence** — both `main` and the branch rewrote the
   *same logic* and picking a side would silently drop a sibling PR's work. The mechanical conflicts
-  (version, `CHANGELOG`, snapshots, lockfiles) have known-correct fixes (Step 4) — handle those;
+  (version, changelog, snapshots, lockfiles) have known-correct fixes (Step 4) — handle those;
   stop only for the genuinely ambiguous ones, showing both sides.
 - **A reviewer requested changes you can't satisfy** without guessing at intent, or the merge is
   blocked by a branch-protection rule you can't legitimately clear (required approvals you can't give
@@ -71,7 +71,7 @@ issue and deleting a local branch are reversible and cheap — those you can do 
 Create a task (todo) for each item and work them in order. Step 4 is a loop — repeat until the PR is
 mergeable.
 
-1. **Preconditions & resolve the PR** — `gh` works, you're in the Koine repo, normalize the PR number,
+1. **Preconditions & resolve the PR** — `gh` works, you're in the target repo, normalize the PR number,
    confirm it's open and capture its head branch + merge state.
 2. **Locate (or create) the branch's worktree** — find the local worktree/branch for the PR's head so
    corrections land in the right checkout; create one tracking the remote branch if none exists.
@@ -92,16 +92,17 @@ follow-ups, clean up). If the worktree/branch is already gone, skip Step 7.
 
 ## Step 1 — Preconditions & resolve the PR
 
-**Load the repo profile first.** This skill shows Koine's values inline (the commit identity, the CI
-gate commands, the squash integration style, the conflict hot-spots) — those are really the *Koine
-profile* used as a worked example. Run the **`get-repo-profile`** skill; it returns
-`.claude/skills/repo-profile.md` (generating it on first use). Prefer the profile's values wherever they
-differ from what's shown here, so this skill works unchanged in any repo. If no profile exists and you
-genuinely can't generate one, fall back to the inline Koine values and note that in the report.
+**Load the repo profile first.** This skill reads every repo-specific fact from the repo profile, never
+inline: the commit identity, the CI gate commands, the integration style, and the conflict hot-spots.
+Run the **`get-repo-profile`** skill; it returns `.claude/skills/repo-profile.md` (generating it on
+first use), and the steps below cite its named sections. Throughout, **`git <commit-identity>`** stands
+for the author line from the profile's *Commit identity* (its `-c user.email=… -c user.name="…"` flags)
+— substitute it in the commit/merge commands below. If no profile exists and you genuinely can't
+generate one, say so in the report rather than guessing repo specifics.
 
 ```bash
 gh api user --jq .login                                  # prints a login, or 401 → not authed
-gh repo view --json nameWithOwner --jq .nameWithOwner    # confirm Atypical-Consulting/Koine
+gh repo view --json nameWithOwner --jq .nameWithOwner    # confirm it's the repo the profile names
 ```
 
 If auth fails, stop and tell the user to run `! gh auth login -h github.com` in the prompt (the `!`
@@ -191,28 +192,24 @@ gh pr view "$PR" --json mergeStateStatus,mergeable,reviewDecision \
 | `BLOCKED` | a branch-protection gate is unmet | Usually `reviewDecision == CHANGES_REQUESTED` → **address review** (below). If it's *required approvals* you can't self-give, that's a genuine blocker — surface it. |
 
 **Fix a red CI check.** Reproduce the failure locally in the branch's worktree, fix it for real, then
-commit + push. The usual Koine culprits and the exact gates CI runs:
-
-```bash
-dotnet build                                                  # compile errors
-dotnet test --filter "FullyQualifiedName~<Suite>"             # the failing suite (full suite needs wasm workloads — see CLAUDE.md)
-dotnet format Koine.slnx                                       # apply; then ↓ is the CI gate
-dotnet format Koine.slnx --verify-no-changes --no-restore     # must exit 0 — CI fails the build on any diff
-```
+commit + push. Run the profile's *Build & test* commands and its *CI gates* — the same ones CI runs: the
+**build** to catch compile errors, the **single-suite test filter** for the failing suite (the full
+suite may need a CI-only prerequisite the profile flags), then the format/lint **apply** command
+followed by its **verify** command (which must exit clean — CI fails the build on any diff).
 
 Commit with the project identity, push, and loop back to Step 3 to let CI re-run:
 
 ```bash
-git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit -am "fix: <what you fixed for CI>"
+git <commit-identity> commit -am "fix: <what you fixed for CI>"
 git push
 ```
 
-**Sync with `main` (for `BEHIND`/`DIRTY`).** Merge the latest base in and resolve conflicts. The
-project **squash-merges**, so a `merge` (not a rebase) is right — one pass per conflict, no force-push,
-and the throwaway merge commit vanishes when the PR squashes. The Koine hot-spots (version,
-`CHANGELOG`, README/docs, Verify snapshots, lockfiles, emitter partials) have known-correct
-resolutions — **union** additive files, **regenerate** derived files (snapshots, `package-lock.json`),
-**take the higher** version. The full table and finish/verify sequence live in
+**Sync with `main` (for `BEHIND`/`DIRTY`).** Merge the latest base in and resolve conflicts. When the
+profile's *Integration style* is squash-merge, a `merge` (not a rebase) is right — one pass per
+conflict, no force-push, and the throwaway merge commit vanishes when the PR squashes. The profile's
+*Conflict hot-spots* (version, changelog, README/docs, snapshots, lockfiles, additive code) have
+known-correct resolutions — **union** additive files, **regenerate** derived files (snapshots,
+lockfiles), **take the higher** version. The full table and finish/verify sequence live in
 `references/merge-mechanics.md` §4 (identical to `implement-issue`'s Step 8). A clean *text* merge can
 still break the build — re-build/re-test before pushing.
 
@@ -232,8 +229,8 @@ normal, just re-sync; a re-sync right before the merge is the surest path to a c
 
 ## Step 5 — Merge (squash)
 
-Only once CI is green **and** `mergeStateStatus == CLEAN`. The repo's integration style is squash (the
-`(#NNN)` commits on `main`), so:
+Only once CI is green **and** `mergeStateStatus == CLEAN`. The profile's *Integration style* sets how to
+land it; for squash-merge (the `(#NNN)` commits on `main`):
 
 ```bash
 gh pr merge "$PR" --squash --delete-branch \
@@ -320,8 +317,8 @@ Short and concrete:
   review comments addressed. "None needed — merged clean" is a perfectly good report.
 - **Follow-ups filed** — each new issue's title + URL, or "none."
 - **Cleanup** — worktree removed and local branch deleted (or "already gone").
-- Anything you assumed, deferred, or couldn't verify (e.g. full test suite skipped for missing wasm
-  workloads — see CLAUDE.md). Keep detail in the PR/issues; the report just points there.
+- Anything you assumed, deferred, or couldn't verify (e.g. full test suite skipped for a missing local
+  prerequisite the profile flags). Keep detail in the PR/issues; the report just points there.
 
 ---
 
