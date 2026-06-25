@@ -30,12 +30,15 @@ jobs:
           dotnet-version: '10.0.x'
           dotnet-quality: preview
 
-      # Node + TypeScript so the TypeScript conformance harness
-      # (tests/Koine.Compiler.Tests/TestSupport.cs) can resolve `tsc` on PATH and
-      # actually run `tsc --noEmit --strict` against emitted TypeScript. Without
-      # this the harness returns Skipped and every TS check passes as INCONCLUSIVE
-      # without ever type-checking. ResolveTsc() finds `tsc` on PATH, which a
-      # global `npm i -g typescript` install satisfies (KOINE_TSC is the override).
+      # Conformance toolchains (issue #240). Each non-C# emitter's conformance suite type-checks
+      # its emitted output with the target's real tool. TestSupport.RequireOrSkip reports a SKIPPED
+      # test when the tool is absent and — because the Test step sets KOINE_REQUIRE_CONFORMANCE=1 —
+      # a hard FAILURE in CI. So every toolchain installed below must be present, or the build
+      # reddens (no more silent INCONCLUSIVE passes). Versions are pinned so a tool release can't
+      # redden the suite on an unrelated day with no source change.
+      #
+      # Node + TypeScript: ResolveTsc() finds `tsc` on PATH (KOINE_TSC overrides), which a global
+      # `npm i -g typescript` install satisfies, so `tsc --noEmit --strict` runs against emitted TS.
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -45,6 +48,33 @@ jobs:
         # Pin the major so a future tsc release tightening `--strict` inference
         # can't redden the conformance suite on an unrelated day with no source change.
         run: npm install -g typescript@6
+
+      # PHP + phpstan: the PHP conformance suite runs `php -l` (syntax) and
+      # `phpstan analyse --level max` (type-check) over emitted PHP. setup-php puts both `php`
+      # and `phpstan` on PATH (KOINE_PHP / KOINE_PHPSTAN override).
+      - name: Setup PHP + phpstan
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: phpstan:2
+
+      # Python + mypy: the Python conformance suite runs `ast.parse` (syntax) and
+      # `mypy --strict` (type-check) over emitted Python. ResolvePython() prefers python3.13
+      # (KOINE_PYTHON overrides); ResolveMypy() finds `mypy` on PATH (KOINE_MYPY overrides).
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install mypy
+        # Pin exactly so a future mypy release tightening `--strict` inference can't redden
+        # the conformance suite on an unrelated day with no source change.
+        run: python -m pip install mypy==1.13.0
+
+      # Rust: the Rust conformance suite runs `cargo check` over an emitted crate.
+      # ResolveCargo() finds `cargo` on PATH (KOINE_CARGO overrides).
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
 
       # Koine.Wasm targets the browser-wasm RID and is part of the solution, so the
       # `dotnet build`/`dotnet test` over Koine.slnx below need the WebAssembly SDK.
@@ -87,9 +117,14 @@ jobs:
         run: dotnet format Koine.slnx --verify-no-changes --no-restore
 
       # Run the whole solution so both test projects execute: the compiler suite
-      # (including the TypeScript conformance harness, which now type-checks for real
-      # against the tsc installed above) and tests/Koine.Mcp.Tests.
+      # (including every emitter's conformance harness, which now type-checks for real
+      # against the toolchains installed above) and tests/Koine.Mcp.Tests.
+      # KOINE_REQUIRE_CONFORMANCE=1 makes a missing toolchain a hard FAILURE here (issue #240):
+      # since all four toolchains are installed above, no conformance test may report Skipped in CI,
+      # so a toolchain quietly dropping off the runner reddens the build instead of passing silently.
       - name: Test
+        env:
+          KOINE_REQUIRE_CONFORMANCE: 1
         run: dotnet test Koine.slnx -c Release --no-build
 
       # End-to-end guard: the demo regenerates C# from .koi and compiles it.
