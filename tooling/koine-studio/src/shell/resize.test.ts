@@ -5,7 +5,7 @@
 // (both restore-on-init and save-on-drag-end). happy-dom supplies PointerEvent, setPointerCapture,
 // and getBoundingClientRect; test-setup.ts installs the in-memory localStorage shim.
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { initEdgeResizer, initSplitResizer, type EdgeResizerOptions } from '@/shell/resize';
+import { initEdgeResizer, initGroupResizer, initSplitResizer, type EdgeResizerOptions } from '@/shell/resize';
 
 // ---------------------------------------------------------------------------
 // Test scaffolding
@@ -624,6 +624,131 @@ describe('initEdgeResizer — persistence', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Disposer: tear down the listeners + re-init with a new anchor (live re-point)
+// ---------------------------------------------------------------------------
+// initEdgeResizer captures its anchor at wire time, so a layout toggle (side-rail / panel / split
+// orientation) that reflows the grid must dispose the stale wiring and re-init with the new anchor —
+// otherwise the handle drags against its OLD anchor until reload (the bug these guard). ide.tsx keeps
+// the disposers and calls them on the relevant toggle.
+
+describe('initEdgeResizer — disposer', () => {
+  test('the disposer removes the listeners: a post-dispose pointer drag does nothing', () => {
+    const { target, handle, container } = mount();
+    stubRect(container, { left: 0, right: 800, width: 800 });
+    const dispose = initEdgeResizer({
+      target,
+      handle,
+      container,
+      cssVar: CSS_VAR,
+      anchor: 'right',
+      storageKey: 'k',
+      min: 10,
+      max: 1000,
+    });
+
+    // It works before dispose.
+    pointerdown(handle, 800, 0);
+    pointermove(handle, 500, 0);
+    expect(sizeOf(target, CSS_VAR)).toBe(300);
+    pointerup(handle, 500, 0);
+
+    dispose();
+
+    // After dispose, a fresh drag is inert — pointerdown's listener is gone, so `dragging` never
+    // flips and pointermove writes nothing new (the CSS var stays at the last committed size).
+    pointerdown(handle, 800, 0);
+    pointermove(handle, 100, 0); // would be 700px if the listeners were still live
+    expect(sizeOf(target, CSS_VAR)).toBe(300);
+    // The body 'resizing' class is also untouched — pointerdown no longer fires.
+    expect(document.body.classList.contains('resizing')).toBe(false);
+  });
+
+  test('the disposer is idempotent (a second call is a harmless no-op)', () => {
+    const { target, handle, container } = mount();
+    stubRect(container, { left: 0, right: 800, width: 800 });
+    const dispose = initEdgeResizer({
+      target,
+      handle,
+      container,
+      cssVar: CSS_VAR,
+      anchor: 'right',
+      storageKey: 'k',
+      min: 10,
+      max: 1000,
+    });
+    expect(() => {
+      dispose();
+      dispose();
+    }).not.toThrow();
+  });
+
+  test('re-init after dispose wires the NEW anchor (live re-point, no reload)', () => {
+    const { target, handle, container } = mount();
+    // 800px-wide container: right edge at 800, left edge at 0.
+    stubRect(container, { left: 0, right: 800, width: 800 });
+
+    // First wiring: anchored right. Drag to 300px in from the right.
+    const disposeRight = initEdgeResizer({
+      target,
+      handle,
+      container,
+      cssVar: CSS_VAR,
+      anchor: 'right',
+      storageKey: 'k',
+      min: 10,
+      max: 1000,
+    });
+    pointerdown(handle, 800, 0);
+    pointermove(handle, 500, 0); // right − 500 = 300
+    expect(sizeOf(target, CSS_VAR)).toBe(300);
+    pointerup(handle, 500, 0);
+
+    // Toggle: dispose the right wiring and re-init anchored LEFT (the side-rail swap).
+    disposeRight();
+    initEdgeResizer({
+      target,
+      handle,
+      container,
+      cssVar: CSS_VAR,
+      anchor: 'left',
+      storageKey: 'k2',
+      min: 10,
+      max: 1000,
+    });
+
+    // The SAME pointer position now computes against the LEFT edge: clientX − left = 500 − 0 = 500.
+    pointerdown(handle, 800, 0);
+    pointermove(handle, 500, 0);
+    expect(sizeOf(target, CSS_VAR)).toBe(500);
+  });
+});
+
+describe('initGroupResizer — disposer (re-point on an orientation flip)', () => {
+  test('disposing the horizontal divider and re-initing vertical retargets the axis live', () => {
+    const split = document.createElement('div');
+    const handle = document.createElement('div');
+    document.body.appendChild(split);
+    document.body.appendChild(handle);
+    // Square container so both axes have the same extent — the size difference is purely the axis.
+    stubRect(split, { left: 0, right: 800, top: 0, bottom: 800, width: 800, height: 800 });
+
+    // Horizontal: vertical divider, drives --koi-group-w off clientX vs the right edge.
+    const disposeH = initGroupResizer({ split, handle, orientation: 'horizontal' });
+    pointerdown(handle, 800, 0);
+    pointermove(handle, 600, 0); // 800 − 600 = 200 wide
+    expect(sizeOf(split, '--koi-group-w')).toBe(200);
+    pointerup(handle, 600, 0);
+
+    // Flip to vertical: horizontal divider, drives --koi-group-h off clientY vs the bottom edge.
+    disposeH();
+    initGroupResizer({ split, handle, orientation: 'vertical' });
+    pointerdown(handle, 0, 800);
+    pointermove(handle, 0, 500); // 800 − 500 = 300 tall, on the new --koi-group-h var
+    expect(sizeOf(split, '--koi-group-h')).toBe(300);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // initSplitResizer — the thin wrapper for the editor/inspector split
 // ---------------------------------------------------------------------------
 
@@ -686,5 +811,103 @@ describe('initSplitResizer', () => {
 
     initSplitResizer({ split, handle });
     expect(sizeOf(split, '--koi-inspector-w')).toBe(450);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// initGroupResizer — the thin wrapper for the editor-group divider
+// ---------------------------------------------------------------------------
+
+describe('initGroupResizer — horizontal orientation (side-by-side, vertical divider)', () => {
+  test('drives --koi-group-w anchored to the right of split and persists under the default key', () => {
+    const split = document.createElement('div');
+    const handle = document.createElement('div');
+    document.body.appendChild(split);
+    document.body.appendChild(handle);
+    stubRect(split, { left: 0, right: 1000, width: 1000 });
+
+    initGroupResizer({ split, handle, orientation: 'horizontal' });
+
+    pointerdown(handle, 1000, 0);
+    pointermove(handle, 600, 0); // 400px in from the right edge
+    expect(sizeOf(split, '--koi-group-w')).toBe(400);
+
+    pointerup(handle, 600, 0);
+    // Default storageKey is 'koine.studio.groupSize'.
+    expect(localStorage.getItem('koine.studio.groupSize')).toBe('400');
+  });
+
+  test('honours an explicit storageKey', () => {
+    const split = document.createElement('div');
+    const handle = document.createElement('div');
+    document.body.appendChild(split);
+    document.body.appendChild(handle);
+    stubRect(split, { left: 0, right: 1000, width: 1000 });
+
+    initGroupResizer({ split, handle, orientation: 'horizontal', storageKey: 'custom.group.key' });
+
+    pointerdown(handle, 1000, 0);
+    pointermove(handle, 500, 0); // 500px
+    pointerup(handle, 500, 0);
+    expect(localStorage.getItem('custom.group.key')).toBe('500');
+  });
+
+  test('restores a persisted group width under the default key on init', () => {
+    const split = document.createElement('div');
+    const handle = document.createElement('div');
+    document.body.appendChild(split);
+    document.body.appendChild(handle);
+    stubRect(split, { left: 0, right: 1000, width: 1000 });
+    localStorage.setItem('koine.studio.groupSize', '350');
+
+    initGroupResizer({ split, handle, orientation: 'horizontal' });
+    expect(sizeOf(split, '--koi-group-w')).toBe(350);
+  });
+});
+
+describe('initGroupResizer — vertical orientation (stacked, horizontal divider)', () => {
+  test('drives --koi-group-h anchored to the bottom of split and persists under the default key', () => {
+    const split = document.createElement('div');
+    const handle = document.createElement('div');
+    document.body.appendChild(split);
+    document.body.appendChild(handle);
+    stubRect(split, { top: 0, bottom: 800, height: 800 });
+
+    initGroupResizer({ split, handle, orientation: 'vertical' });
+
+    pointerdown(handle, 0, 800);
+    pointermove(handle, 0, 500); // 300px up from the bottom edge
+    expect(sizeOf(split, '--koi-group-h')).toBe(300);
+
+    pointerup(handle, 0, 500);
+    // Default storageKey is 'koine.studio.groupSize'.
+    expect(localStorage.getItem('koine.studio.groupSize')).toBe('300');
+  });
+
+  test('honours an explicit storageKey', () => {
+    const split = document.createElement('div');
+    const handle = document.createElement('div');
+    document.body.appendChild(split);
+    document.body.appendChild(handle);
+    stubRect(split, { top: 0, bottom: 800, height: 800 });
+
+    initGroupResizer({ split, handle, orientation: 'vertical', storageKey: 'custom.group.h.key' });
+
+    pointerdown(handle, 0, 800);
+    pointermove(handle, 0, 600); // 200px
+    pointerup(handle, 0, 600);
+    expect(localStorage.getItem('custom.group.h.key')).toBe('200');
+  });
+
+  test('restores a persisted group height under the default key on init', () => {
+    const split = document.createElement('div');
+    const handle = document.createElement('div');
+    document.body.appendChild(split);
+    document.body.appendChild(handle);
+    stubRect(split, { top: 0, bottom: 800, height: 800 });
+    localStorage.setItem('koine.studio.groupSize', '250');
+
+    initGroupResizer({ split, handle, orientation: 'vertical' });
+    expect(sizeOf(split, '--koi-group-h')).toBe(250);
   });
 });
