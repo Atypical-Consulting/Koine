@@ -93,24 +93,40 @@ public class LspServerTests
         targets.ShouldNotContain(t => t.id == "glossary" || t.id == "docs");
     }
 
-    /// <summary>Parses the <c>koine/emitTargets</c> response for <paramref name="id"/> into its target list.</summary>
-    private static List<(string id, string displayName, string fileExtension)> ResultTargets(string output, int id)
+    /// <summary>
+    /// The <c>result</c> element of the JSON-RPC response correlated to <paramref name="id"/>, or
+    /// <c>false</c> when no such response carries a result. The element is <see cref="JsonElement.Clone"/>d
+    /// so it outlives the per-frame <see cref="JsonDocument"/> — callers project their own fields off it.
+    /// </summary>
+    private static bool TryResultForId(string output, int id, out JsonElement result)
     {
         foreach (var body in TestSupport.JsonRpcFrames(output))
         {
             using var doc = JsonDocument.Parse(body);
             var root = doc.RootElement;
             if (root.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number && idEl.GetInt32() == id
-                && root.TryGetProperty("result", out var result)
-                && result.TryGetProperty("targets", out var arr))
+                && root.TryGetProperty("result", out var r))
             {
-                return arr.EnumerateArray()
-                    .Select(t => (
-                        t.GetProperty("id").GetString()!,
-                        t.GetProperty("displayName").GetString()!,
-                        t.GetProperty("fileExtension").GetString()!))
-                    .ToList();
+                result = r.Clone();
+                return true;
             }
+        }
+
+        result = default;
+        return false;
+    }
+
+    /// <summary>Parses the <c>koine/emitTargets</c> response for <paramref name="id"/> into its target list.</summary>
+    private static List<(string id, string displayName, string fileExtension)> ResultTargets(string output, int id)
+    {
+        if (TryResultForId(output, id, out var result) && result.TryGetProperty("targets", out var arr))
+        {
+            return arr.EnumerateArray()
+                .Select(t => (
+                    t.GetProperty("id").GetString()!,
+                    t.GetProperty("displayName").GetString()!,
+                    t.GetProperty("fileExtension").GetString()!))
+                .ToList();
         }
 
         return [];
@@ -123,20 +139,14 @@ public class LspServerTests
     /// </summary>
     private static (string[] TokenTypes, string[] TokenModifiers, bool Full) SemanticTokensLegend(string output, int id)
     {
-        foreach (var body in TestSupport.JsonRpcFrames(output))
+        if (TryResultForId(output, id, out var result)
+            && result.TryGetProperty("capabilities", out var caps)
+            && caps.TryGetProperty("semanticTokensProvider", out var stp))
         {
-            using var doc = JsonDocument.Parse(body);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number && idEl.GetInt32() == id
-                && root.TryGetProperty("result", out var result)
-                && result.TryGetProperty("capabilities", out var caps)
-                && caps.TryGetProperty("semanticTokensProvider", out var stp))
-            {
-                var legend = stp.GetProperty("legend");
-                var types = legend.GetProperty("tokenTypes").EnumerateArray().Select(e => e.GetString()!).ToArray();
-                var mods = legend.GetProperty("tokenModifiers").EnumerateArray().Select(e => e.GetString()!).ToArray();
-                return (types, mods, stp.GetProperty("full").GetBoolean());
-            }
+            var legend = stp.GetProperty("legend");
+            var types = legend.GetProperty("tokenTypes").EnumerateArray().Select(e => e.GetString()!).ToArray();
+            var mods = legend.GetProperty("tokenModifiers").EnumerateArray().Select(e => e.GetString()!).ToArray();
+            return (types, mods, stp.GetProperty("full").GetBoolean());
         }
 
         return ([], [], false);
@@ -145,16 +155,9 @@ public class LspServerTests
     /// <summary>Parses the <c>textDocument/semanticTokens/full</c> response for <paramref name="id"/> into its <c>data</c> int stream.</summary>
     private static int[] SemanticTokensData(string output, int id)
     {
-        foreach (var body in TestSupport.JsonRpcFrames(output))
+        if (TryResultForId(output, id, out var result) && result.TryGetProperty("data", out var data))
         {
-            using var doc = JsonDocument.Parse(body);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number && idEl.GetInt32() == id
-                && root.TryGetProperty("result", out var result)
-                && result.TryGetProperty("data", out var data))
-            {
-                return data.EnumerateArray().Select(e => e.GetInt32()).ToArray();
-            }
+            return data.EnumerateArray().Select(e => e.GetInt32()).ToArray();
         }
 
         return [];

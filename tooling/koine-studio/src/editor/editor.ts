@@ -651,10 +651,10 @@ export function semanticTokensExtension(provider: SemanticTokensFn, debounceMs =
       }
 
       private build(view: EditorView): DecorationSet {
-        const data = this.tokens?.data ?? [];
-        // Empty stream → no decorations, so the static grammar highlighting stays authoritative.
-        if (data.length === 0) return Decoration.none;
-        return semanticTokensToDecorations(decodeSemanticTokens(data, view.state.doc));
+        // An empty/absent stream decodes to [], which semanticTokensToDecorations turns into
+        // Decoration.none — so the static grammar highlighting stays authoritative (single source of
+        // truth for the empty-stream contract; no separate early return needed).
+        return semanticTokensToDecorations(decodeSemanticTokens(this.tokens?.data ?? [], view.state.doc));
       }
 
       destroy(): void {
