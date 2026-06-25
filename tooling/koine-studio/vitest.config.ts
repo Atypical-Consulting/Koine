@@ -6,12 +6,27 @@ import { playwright } from '@vitest/browser-playwright';
 
 const dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 
+// On the Windows runner, `vitest run`'s storybook browser project starts a Vite dev server whose
+// file watcher falls back to Node's libuv `fs.watch` (src/win/fs-event.c). That native watcher
+// aborts during teardown — `Assertion failed: !_wcsnicmp(filename, dir, dirlen), file
+// src\win\fs-event.c, line 72` — failing the whole job *after* a fully green suite (#414). A one-shot
+// run never needs to watch files, so disable the dev-server watcher for `vitest run` only, leaving
+// human watch-mode (`npm run test:watch` → bare `vitest`) free to watch and re-run on change. The
+// `test` npm script is `vitest run`, so the literal `run` arg is the reliable run-vs-watch signal.
+// @ts-expect-error process is a nodejs global
+const isOneShotRun = process.argv.includes('run');
+
 // Unit/integration tests run under happy-dom: the overlay/modal chrome (focus, keydown, document.body
 // mounting) and the file explorer's role=tree (focus, keyboard nav, DOM rebuild) behave as they do in
 // the browser; the browser fs ops are driven against mocked File-System-Access handles. The second
 // `storybook` project runs every story as a browser test via @storybook/addon-vitest (Playwright/Chromium).
 // More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
 export default defineConfig({
+  // Disable the Vite dev-server file watcher for the non-interactive `vitest run` (see the note on
+  // `isOneShotRun` above) so no native libuv `fs-event` watcher is carried into teardown on Windows.
+  // `extends: true` propagates this root server config into BOTH projects below — the happy-dom
+  // unit run and the storybook browser run (which spins up the Vite server that owns the watcher).
+  server: isOneShotRun ? { watch: null } : {},
   // Transpile JSX with the Preact automatic runtime so .tsx tests (and the panels they exercise)
   // compile without a React import — matches tsconfig's jsx/jsxImportSource. Vite 8 / Vitest 4 use
   // oxc (not esbuild) as the default transformer, so the JSX runtime is configured under `oxc.jsx`
