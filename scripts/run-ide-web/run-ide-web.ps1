@@ -16,7 +16,21 @@ Set-Location (Join-Path $PSScriptRoot "../..")
 
 $studio = "tooling/koine-studio"
 
-# 1. Install the frontend deps when missing or out of date (mirrors run-ide.ps1).
+# 1. Preflight the .NET wasm workload. `npm run dev:web` (step 3) publishes src/Koine.Wasm via its
+#    predev:web hook, and that `dotnet publish` hard-requires the wasm-tools workload. Without it the
+#    publish fails with NETSDK1147 deep inside build-wasm.mjs, surfacing as a cryptic Node stack
+#    trace — so check up front and point at the one-time fix instead.
+$workloads = (& dotnet workload list 2>$null | Out-String)
+if ($workloads -notmatch 'wasm-tools') {
+    Write-Host "ERROR: the .NET 'wasm-tools' workload is required to build the in-browser compiler, but it" -ForegroundColor Red
+    Write-Host "       is not installed. Install it once (alongside wasm-experimental), then re-run:" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "    dotnet workload install wasm-tools wasm-experimental"
+    Write-Host ""
+    exit 1
+}
+
+# 2. Install the frontend deps when missing or out of date (mirrors run-ide.ps1).
 $nodeModules = Join-Path $studio "node_modules"
 $stamp = Join-Path $nodeModules ".package-lock.json"
 $lockFile = Join-Path $studio "package-lock.json"
@@ -30,7 +44,7 @@ if ($needsInstall) {
     if ($code -ne 0) { exit $code }
 }
 
-# 2. Launch the web dev server (Vite on http://localhost:1430). The predev:web hook publishes
+# 3. Launch the web dev server (Vite on http://localhost:1430). The predev:web hook publishes
 #    src/Koine.Wasm and refreshes public/koine-wasm/ first — slow on the first run / after a
 #    compiler change, fast (incremental) otherwise.
 Push-Location $studio
