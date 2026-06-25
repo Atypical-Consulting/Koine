@@ -17,8 +17,8 @@ user.name="…"` flags in the commit/merge commands below.
 The user may pass a bare number, an issue URL, or a link to the plan comment. Normalize to a number.
 
 ```bash
-ARG="$1"   # e.g. 21  |  https://github.com/Atypical-Consulting/Koine/issues/21
-           #          |  https://github.com/Atypical-Consulting/Koine/issues/21#issuecomment-3098…
+ARG="$1"   # e.g. 21  |  https://github.com/<owner>/<repo>/issues/21
+           #          |  https://github.com/<owner>/<repo>/issues/21#issuecomment-3098…
 ISSUE=$(printf '%s' "$ARG" | grep -oE '[0-9]+' | head -1)   # first run of digits = issue number
 ```
 

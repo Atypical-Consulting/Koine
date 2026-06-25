@@ -88,8 +88,8 @@ Confirm the working directory is the repo you mean to file in (the `gh` commands
 
 Pull the idea(s) straight from the user's request. They may give one ("add Rust generation") or
 several at once ("add python gen, add php gen, build an IDE"). Do **not** open a Q&A — infer scope
-from the prompt, the README, `USER-STORIES.md`, and the codebase. If the user named several ideas,
-treat each as its own issue and loop.
+from the prompt, the README, the project's roadmap docs, and the codebase. If the user named several
+ideas, treat each as its own issue and loop.
 
 For each idea, settle on a crisp **title** (imperative, e.g. "Add Python emitter target") before
 writing anything.
@@ -147,8 +147,8 @@ brainstorming skill explores context, weighs approaches, and writes a design doc
 output into two sections so the trail reads brainstorm → spec.
 
 **🧠 Brainstorm.** A focused exploration, not a wall of text:
-- *Problem / context* — what need this serves, who the persona is, what exists today (cite README /
-  `USER-STORIES.md` / relevant code where it helps).
+- *Problem / context* — what need this serves, who the persona is, what exists today (cite the README /
+  the project's roadmap docs / relevant code where it helps).
 - *Approaches* — 2-3 options, each with honest trade-offs.
 - *Recommendation* — pick one and say why. This decision drives the spec and plan.
 

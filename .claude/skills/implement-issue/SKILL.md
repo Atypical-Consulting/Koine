@@ -311,10 +311,10 @@ git <commit-identity> merge origin/main
   Most conflicts are mechanical with a known-correct fix; the profile's *Conflict hot-spots* table (and
   `references/github-mechanics.md` §7) lists them by file — version bump, changelog, docs, snapshots,
   lockfiles, additive code/tests. Two rules keep you from silent damage:
-  - **Regenerate derived files; don't hand-merge them.** Verify `*.verified.txt` snapshots and
-    `package-lock.json` must not be merged line-by-line — take one side to clear the conflict, then
-    regenerate (re-run the affected tests and accept the fresh snapshot; `npm install` to rebuild the
-    lockfile). A hand-stitched snapshot or lockfile will simply be wrong.
+  - **Regenerate derived files; don't hand-merge them.** Snapshots and lockfiles must not be merged
+    line-by-line — take one side to clear the conflict, then regenerate (re-run the affected tests and
+    accept the fresh snapshot; reinstall dependencies to rebuild the lockfile). A hand-stitched snapshot
+    or lockfile will simply be wrong.
   - **A textual merge is not a semantic merge.** Don't trust a resolved merge until it builds and
     passes — `main` may have renamed a symbol your branch still calls. Step 9 is the proof.
 

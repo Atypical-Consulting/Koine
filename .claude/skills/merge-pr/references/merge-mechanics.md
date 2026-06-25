@@ -12,7 +12,7 @@ profile names) — paste it as-is. And `git <commit-identity>` is the author lin
 A bare number, a PR/issue URL, or a `gh` link all reduce to the first run of digits:
 
 ```bash
-ARG="$1"   # e.g. 279 | https://github.com/Atypical-Consulting/Koine/pull/279 | "#279"
+ARG="$1"   # e.g. 279 | https://github.com/<owner>/<repo>/pull/279 | "#279"
 PR=$(printf '%s' "$ARG" | grep -oE '[0-9]+' | head -1)
 ```
 
