@@ -152,6 +152,11 @@ jobs:
 
       # Frontend tests: happy-dom unit/DOM logic (project-name/zip helpers, the wizard flow)
       # plus the Storybook story + a11y checks running headless in Chromium.
+      #
+      # `npm test` is `vitest run` (one-shot). vitest.config.ts disables the Vite dev-server file
+      # watcher for that non-interactive run so no native libuv `fs.watch` (src/win/fs-event.c) is
+      # carried into teardown — previously that watcher aborted this step on windows-latest *after*
+      # a fully green suite (`_wcsnicmp` assertion, fs-event.c:72). See #414.
       - name: Test frontend (npm)
         working-directory: tooling/koine-studio
         run: npm test

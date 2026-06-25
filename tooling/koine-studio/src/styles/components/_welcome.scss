@@ -911,11 +911,112 @@
   color: var(--koi-muted);
 }
 
+/* --- Home colophon footer (issue #403): version + project links + byline ---
+   A quiet strip pinned to the bottom of the console card — deliberately distinct from the centered
+   Settings → About colophon (_about.scss): here it reads as a horizontal page footer, not a brand
+   tile. The hero scrolls above it (flex:1, overflow-y:auto); this stays put (flex:none). */
+.koi-home-colophon {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--koi-space-2) var(--koi-space-3);
+  margin-top: clamp(16px, 2vw, 24px);
+  padding-top: var(--koi-space-3);
+  border-top: 1px solid var(--koi-line);
+  color: var(--koi-muted);
+}
+
+/* Mono build chip — same recipe as the About chip (.koi-about-chip), inline rather than centered. */
+.koi-home-colophon-chip {
+  flex: none;
+  padding: var(--koi-space-0-5) var(--koi-space-2-25);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-xs-plus);
+  letter-spacing: 0.02em;
+  color: var(--koi-accent);
+  background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 35%, transparent);
+  border-radius: var(--koi-radius-pill);
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.koi-home-colophon-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--koi-space-1) var(--koi-space-3);
+}
+
+.koi-home-colophon-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1-5);
+  text-decoration: none;
+  font-size: var(--koi-text-sm-plus);
+  color: var(--koi-ink-soft);
+  transition: color var(--koi-dur-fast) ease;
+
+  &:hover {
+    color: var(--koi-accent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 2px;
+    border-radius: var(--koi-radius-2xs);
+  }
+}
+
+/* The icons carry .tb-ico, which supplies the shared stroke recipe AND the 15px tile size (filled for
+   GitHub) — so this wrapper only needs to lay them out inline. */
+.koi-home-colophon-link-icon {
+  display: inline-flex;
+  color: currentColor;
+}
+
+/* The byline drops to its own full-width line below the chip + links row. */
+.koi-home-colophon-credit {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--koi-text-sm);
+  line-height: 1.5;
+  color: var(--koi-muted);
+}
+
+.koi-home-colophon-author {
+  color: var(--koi-fg);
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--koi-accent) 50%, transparent);
+
+  &:hover {
+    color: var(--koi-accent);
+    border-bottom-color: var(--koi-accent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 2px;
+    border-radius: var(--koi-radius-2xs);
+  }
+}
+
 /* --- responsive: collapse the hero to one column, then tighten chrome ----- */
 @media (max-width: 760px) {
   .koi-welcome-hero {
     grid-template-columns: 1fr;
     gap: clamp(20px, 5vw, 28px);
+  }
+
+  /* Stack the colophon so it doesn't crowd the hero: chip → links → byline, top-aligned. */
+  .koi-home-colophon {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--koi-space-2);
   }
 
   .koi-welcome-search {

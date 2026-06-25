@@ -199,6 +199,34 @@ internal static class RustNaming
         !used.Contains(name) && !used.Contains("drain_" + name);
 
     /// <summary>
+    /// The name of a factory's event-collector <em>local</em> (<c>let &lt;name&gt;: Vec&lt;DomainEvent&gt; = …</c>),
+    /// guaranteed not to shadow any of that factory's <paramref name="parameterFieldNames"/>. The
+    /// entity-wide synthetic field name <paramref name="eventsField"/> (from <see cref="SyntheticEventsField"/>)
+    /// is reused verbatim — keeping the struct field, accessor, and <c>drain_</c> names unchanged — unless a
+    /// parameter snake_cases to the same identifier, in which case the binding would shadow that parameter
+    /// for the rest of the factory body (so a later <c>Self::new(…)</c> / field assignment would read the
+    /// <c>Vec</c> local instead of the parameter). Only then is it disambiguated with a numbered suffix.
+    /// The public field keeps <paramref name="eventsField"/>; this is purely the local it is assigned from.
+    /// </summary>
+    public static string FactoryEventsLocal(string eventsField, IEnumerable<string> parameterFieldNames)
+    {
+        var used = new HashSet<string>(parameterFieldNames, StringComparer.Ordinal);
+        if (!used.Contains(eventsField))
+        {
+            return eventsField;
+        }
+
+        for (var i = 2; ; i++)
+        {
+            var candidate = eventsField + "_" + i;
+            if (!used.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    /// <summary>
     /// Maps an enum's members (in declaration order) to DISTINCT Rust binding names for the
     /// smart-enum <c>match_</c>/<c>switch</c> closure parameters. Each binding is the member's
     /// <see cref="Field"/> form; when two members collapse to the same snake_case identifier —

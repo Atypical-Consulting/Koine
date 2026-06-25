@@ -19,13 +19,6 @@ namespace Koine.Compiler.Tests.Conformance;
 /// </summary>
 public class FactoryGeneratorConformanceTests
 {
-    private readonly ITestOutputHelper _output;
-
-    public FactoryGeneratorConformanceTests(ITestOutputHelper output) => _output = output;
-
-    private const string NoToolchainNotice =
-        "INCONCLUSIVE: no usable Rust toolchain (cargo) available; emitted crate not cargo-checked.";
-
     /// <summary>A Guid-identity aggregate with a <c>create</c> factory — the path that legitimately
     /// emits both a generator definition and a call to it.</summary>
     private const string GuidFactoryModel = """
@@ -100,7 +93,7 @@ public class FactoryGeneratorConformanceTests
     {
         if (FindTemplateDir(folder) is not { } sources)
         {
-            _output.WriteLine($"INCONCLUSIVE: template '{folder}' not found from the test assembly.");
+            Assert.Skip($"Template '{folder}' not found from the test assembly; corpus scan not run.");
             return;
         }
 

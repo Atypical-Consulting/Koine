@@ -98,11 +98,11 @@ public static partial class CompilerInterop
             // too, and a new registry target emits its own code instead of silently falling back to C#.
             // SupportedTargetInfos excludes glossary/docs (they have dedicated exports). No koine.config
             // options in the browser, so EmitterOptions.Empty → byte-identical to a parameterless emitter.
-            var registry = new EmitterRegistry();
-            if (!registry.SupportedTargetInfos.Any(i => string.Equals(i.Id, target, StringComparison.OrdinalIgnoreCase))
-                || !registry.TryCreate(target, EmitterOptions.Empty, out var emitter))
+            // Reuse the shared Registry (see CompilerInterop.cs) — Compile resolves through the same one.
+            if (!Registry.SupportedTargetInfos.Any(i => string.Equals(i.Id, target, StringComparison.OrdinalIgnoreCase))
+                || !Registry.TryCreate(target, EmitterOptions.Empty, out var emitter))
             {
-                var expected = string.Join(", ", registry.SupportedTargetInfos.Select(i => $"'{i.Id}'"));
+                var expected = string.Join(", ", Registry.SupportedTargetInfos.Select(i => $"'{i.Id}'"));
                 return SerializeEmit(new WEmitPreviewResult(
                     target, [], [], $"unknown target '{target}'; expected one of {expected}"));
             }
@@ -146,7 +146,7 @@ public static partial class CompilerInterop
     /// <see cref="Capabilities"/> (#330) so the two can never report a different target list.
     /// </summary>
     private static WEmitTarget[] SupportedEmitTargets() =>
-        new EmitterRegistry().SupportedTargetInfos
+        Registry.SupportedTargetInfos
             .Select(i => new WEmitTarget(i.Id, i.DisplayName, i.FileExtension))
             .ToArray();
 

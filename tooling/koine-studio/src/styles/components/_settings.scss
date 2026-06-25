@@ -512,19 +512,27 @@
   gap: var(--koi-space-2);
 }
 
+// Hosts a read-only CodeMirror JSON view (createJsonView). Keep the recipe box (paper, border,
+// radius, scroll, max-height); the CM view paints its own background and the JSON is coloured by
+// the shared `koineHighlight` style from the `--koi-hl-*` theme tokens — so no single-colour
+// `color`/`white-space: pre` rule here any more.
 .koi-mcp-snippet {
   margin: 0;
   padding: var(--koi-space-2-5) var(--koi-space-3);
   background: var(--koi-paper-2);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
-  font-family: var(--koi-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.78rem;
-  line-height: 1.45;
-  color: var(--koi-fg);
-  white-space: pre;
   overflow-x: auto;
   max-height: 220px;
+
+  .cm-editor {
+    background: transparent;
+  }
+
+  .cm-content {
+    font-family: var(--koi-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 0.78rem;
+  }
 }
 
 .koi-mcp-hint,
@@ -570,13 +578,81 @@
   color: var(--koi-error);
 }
 
+/* Keyboard panel: each row pairs a chord chip with Record / Reset (and a confirmable conflict). */
+.koi-set-row:has(.koi-kbd-control) .koi-set-control {
+  flex: 0 0 auto;
+}
+
+.koi-kbd-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--koi-space-1-5);
+}
+
+/* The current combo, rendered as a compact monospace key chip. */
+.koi-kbd-chord {
+  display: inline-flex;
+  align-items: center;
+  min-width: 64px;
+  justify-content: center;
+  padding: var(--koi-space-0-5) var(--koi-space-2);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  background: var(--koi-paper-2);
+  font-family: var(--koi-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.78rem;
+  color: var(--koi-fg);
+  white-space: nowrap;
+}
+
+.koi-kbd-record.is-recording {
+  border-color: var(--koi-accent);
+  color: var(--koi-accent);
+}
+
+/* Reset / Cancel: quiet link-style buttons so Record stays the row's primary affordance. */
+.koi-kbd-reset,
+.koi-kbd-cancel {
+  border: none;
+  background: none;
+  padding: var(--koi-space-0-5) var(--koi-space-1);
+  font-family: inherit;
+  font-size: 0.78rem;
+  color: var(--koi-muted);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.koi-kbd-reset:hover:not(:disabled),
+.koi-kbd-cancel:hover {
+  color: var(--koi-accent);
+}
+
+.koi-kbd-reset:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+/* Conflict alert: name the clashing command in the error hue beside a Reassign / Cancel prompt. */
+.koi-kbd-conflict {
+  flex: 1 1 100%;
+  text-align: right;
+  font-size: 0.78rem;
+  color: var(--koi-error);
+}
+
 /* visible keyboard focus for the dialog's bespoke controls */
 .koi-settings-tab:focus-visible,
 .koi-switch:focus-visible,
 .koi-seg:focus-visible,
 .koi-accent-swatch:focus-visible,
 .koi-set-danger:focus-visible,
-.koi-set-action:focus-visible {
+.koi-set-action:focus-visible,
+.koi-kbd-reset:focus-visible,
+.koi-kbd-cancel:focus-visible {
   outline: 2px solid var(--koi-accent);
   outline-offset: 2px;
 }

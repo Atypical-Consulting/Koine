@@ -8,16 +8,14 @@ namespace Koine.Compiler.Tests.Conformance;
 /// <see cref="PythonSnapshotTests"/>. Each milestone fixture is snapshot-tested (the diff is the review
 /// of the generated Rust) AND compiled with <see cref="TestSupport.CompileRust"/> when a usable Rust
 /// toolchain is present — so a green build proves the emitted crate compiles. When the toolchain is
-/// absent/offline the compile is reported INCONCLUSIVE rather than failing.
+/// absent/offline the compile is funneled through <see cref="TestSupport.RequireOrSkip"/>, which reports
+/// the test as <c>Skipped</c> (not a false Passed) — and a hard <c>Failed</c> in CI, where
+/// <c>KOINE_REQUIRE_CONFORMANCE</c> is set and the toolchain installed.
 /// </summary>
 public class RustSnapshotTests
 {
-    private readonly ITestOutputHelper _output;
-
-    public RustSnapshotTests(ITestOutputHelper output) => _output = output;
-
     private const string NoToolchainNotice =
-        "INCONCLUSIVE: no usable Rust toolchain (cargo, networked) available; cargo check not run.";
+        "No usable Rust toolchain (cargo, networked) available; cargo check not run.";
 
     /// <summary>Value objects + a smart enum with associated data + a regex-validated value object.</summary>
     private const string ValueObjectFixture = """
@@ -66,11 +64,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -118,11 +112,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -174,11 +164,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -234,11 +220,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -267,11 +249,7 @@ public class RustSnapshotTests
         d.ShouldContain("self.subtotal() * self.unit_price");   // derived ref → method call
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
@@ -302,11 +280,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -320,7 +294,7 @@ public class RustSnapshotTests
     {
         if (FindTemplate(relativePath) is not { } source)
         {
-            _output.WriteLine($"INCONCLUSIVE: template '{relativePath}' not found from the test assembly.");
+            Assert.Skip($"Template '{relativePath}' not found from the test assembly; cargo check not run.");
             return;
         }
 
@@ -328,11 +302,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -397,11 +367,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -416,7 +382,7 @@ public class RustSnapshotTests
     {
         if (FindTemplateDir("pizzeria") is not { } sources)
         {
-            _output.WriteLine("INCONCLUSIVE: pizzeria template not found from the test assembly.");
+            Assert.Skip("Pizzeria template not found from the test assembly; cargo check not run.");
             return;
         }
 
@@ -424,11 +390,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -485,11 +447,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -542,11 +500,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -604,11 +558,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -647,11 +597,7 @@ public class RustSnapshotTests
         reservations.ShouldContain("self.domain_events_2.push(DomainEvent::TableReserved(");
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
@@ -678,11 +624,7 @@ public class RustSnapshotTests
         audit.ShouldNotContain("domain_events");
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
@@ -739,11 +681,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -759,6 +697,83 @@ public class RustSnapshotTests
         cargo.ShouldContain("rust_decimal = \"1\"");
         cargo.ShouldContain("regex = \"1\"");
         cargo.ShouldNotContain("uuid");
+    }
+
+    // ------------------------------------------------------------------
+    // Factory event-collector local vs. a factory parameter (issue #325, a #314 follow-up).
+    // The factory builds its creation events into a `let <collector>: Vec<DomainEvent> = …` local
+    // and assigns it after `Self::new`. `<collector>` is the entity-wide synthetic field name —
+    // which dodges member/command/factory *names* but NOT a factory *parameter* whose snake_case
+    // equals it. When a member named `events` forces the collector to `domain_events` AND a factory
+    // parameter also snake_cases to `domain_events`, the `let domain_events` binding shadows the
+    // parameter for the rest of the body: `Self::new(…)` then sees the Vec, not the param (rustc
+    // E0308). The collector *local* must take a name no factory parameter can shadow.
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// A member named <c>events</c> forces the collector to <c>domain_events</c>; the factory's
+    /// <c>domainEvents</c> parameter snake_cases to the same — and is used both in the emit payload
+    /// and a field initialization (so it must survive into <c>Self::new(…)</c>).
+    /// </summary>
+    private const string FactoryParamShadowsCollectorFixture = """
+        context Reservations {
+          event OrderOpened { bookingId: BookingId  count: Int }
+          aggregate Bookings root Booking {
+            entity Booking identified by BookingId {
+              events: List<String>?
+              count:  Int
+              create open(domainEvents: Int) {
+                count -> domainEvents
+                emit OrderOpened(bookingId: id, count: domainEvents)
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Rust_factory_event_collector_local_does_not_shadow_a_factory_parameter()
+    {
+        var result = new KoineCompiler().Compile(FactoryParamShadowsCollectorFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var reservations = result.Files.Single(f => f.RelativePath.EndsWith("reservations.rs", StringComparison.Ordinal)).Contents;
+        // The public field/accessors keep the entity-wide synthetic name (`domain_events`) — the fix
+        // does not churn the struct shape, only the factory's local.
+        reservations.ShouldContain("\n    domain_events: Vec<DomainEvent>,");
+        reservations.ShouldContain("pub fn domain_events(&self) -> &[DomainEvent]");
+        reservations.ShouldContain("pub fn drain_domain_events(&mut self) -> Vec<DomainEvent>");
+        // The factory parameter snake_cases to `domain_events`...
+        reservations.ShouldContain("pub fn open(domain_events: i64) -> Result<Self, DomainError>");
+        // ...so the collector *local* must be disambiguated away from it (else the `let` shadows the
+        // param). It lands on a numbered, unique name — and the field is assigned from THAT local.
+        // These two are the discriminating assertions: pre-fix the local is `domain_events`, so both
+        // go red (as does the verified snapshot).
+        reservations.ShouldContain("let domain_events_2: Vec<DomainEvent> = vec![");
+        reservations.ShouldContain("instance.domain_events = domain_events_2;");
+        // The factory body still references the `domain_events` parameter in the emit payload and the
+        // ctor call. NB: this text is byte-identical with and without the fix — what changes is which
+        // binding `domain_events` resolves to (the i64 param vs. the Vec local). That the param is the
+        // one that survives — i.e. it is genuinely unshadowed — is proved by the rustc compile gate in
+        // Rust_factory_event_collector_local_shadow_model_compiles, not by these string matches.
+        reservations.ShouldContain("OrderOpened::new(id.clone(), domain_events))");
+        reservations.ShouldContain("let mut instance = Self::new(id, None, domain_events)?;");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_factory_event_collector_local_shadow_model_compiles()
+    {
+        var result = new KoineCompiler().Compile(FactoryParamShadowsCollectorFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        // With the shadow bug, `Self::new(id, None, domain_events)` passes the `Vec<DomainEvent>` local
+        // where an `i64` is expected — a rustc E0308 the compile gate catches when a toolchain is present.
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
     // ------------------------------------------------------------------
@@ -802,11 +817,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -870,11 +881,7 @@ public class RustSnapshotTests
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileRust(result.Files);
-        if (!check.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
@@ -917,5 +924,54 @@ public class RustSnapshotTests
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The pre-existing default-name case the issue calls out: an entity with NO member named
+    /// <c>events</c>, so the synthetic collector keeps its idiomatic default name <c>events</c> — and a
+    /// factory parameter literally named <c>events</c> that the <c>let events</c> binding would shadow.
+    /// (This shadow predates #314: a factory param named <c>events</c> shadowed the default local on
+    /// <c>main</c> already.) The collector local must disambiguate to <c>events_2</c> while the struct
+    /// field / accessor / <c>drain_</c> keep the default <c>events</c>, and the parameter survives into
+    /// <c>Self::new(…)</c>. This exercises <see cref="RustNaming.FactoryEventsLocal"/>'s default branch,
+    /// which the <c>domain_events</c> fixture (which forces the fallback name) routes around.
+    /// </summary>
+    [Fact]
+    public void Rust_factory_event_collector_local_does_not_shadow_a_default_named_parameter()
+    {
+        const string model = """
+            context Audit {
+              event Logged { entryId: EntryId  count: Int }
+              aggregate Logs root Entry {
+                entity Entry identified by EntryId {
+                  count: Int
+                  create record(events: Int) {
+                    count -> events
+                    emit Logged(entryId: id, count: events)
+                  }
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var audit = result.Files.Single(f => f.RelativePath.EndsWith("audit.rs", StringComparison.Ordinal)).Contents;
+        // The collector keeps its default name on the struct field, accessor, and drain.
+        audit.ShouldContain("\n    events: Vec<DomainEvent>,");
+        audit.ShouldContain("pub fn events(&self) -> &[DomainEvent]");
+        audit.ShouldContain("pub fn drain_events(&mut self) -> Vec<DomainEvent>");
+        // The factory parameter is named `events`...
+        audit.ShouldContain("pub fn record(events: i64) -> Result<Self, DomainError>");
+        // ...so the collector *local* disambiguates to `events_2` (else the `let events` shadows it),
+        // and the field is assigned from that local — the discriminating, toolchain-independent pin.
+        audit.ShouldContain("let events_2: Vec<DomainEvent> = vec![");
+        audit.ShouldContain("instance.events = events_2;");
+        // The unshadowed parameter reaches `Self::new(…)` (semantic proof is the compile gate below).
+        audit.ShouldContain("let mut instance = Self::new(id, events)?;");
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 }

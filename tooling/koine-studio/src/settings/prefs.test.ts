@@ -1,14 +1,19 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createPreferences, type PrefsCallbacks } from '@/settings/prefs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { chordFromEvent, createPreferences, type PrefsCallbacks } from '@/settings/prefs';
 import {
   DEFAULT_SETTINGS,
   loadSettings,
   saveSettings,
   workspaceKeyOf,
   loadWorkspaceOverrides,
+  loadKeybindingOverrides,
+  resolveKeybindings,
+  saveKeybindingOverride,
 } from '@/settings/persistence';
+import { DEFAULT_BINDINGS } from '@/editor/keybindings';
 import { BUILTIN_EMIT_TARGETS } from '@/shared/emitTargets';
+import { MCP_CLIENTS } from '@/mcp/mcp';
 
 // Flush queued microtasks + timers so the panel's async steps (mcpEndpoint, mcpStop, probe) settle.
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -17,6 +22,8 @@ async function settle(): Promise<void> {
 }
 
 const URL = 'http://127.0.0.1:51000/mcp';
+// Mirrors the placeholder used by createPreferences when no live endpoint has resolved (prefs.ts).
+const MCP_URL_PLACEHOLDER = 'http://127.0.0.1:PORT/mcp';
 
 function openPrefs(over: Partial<PrefsCallbacks> = {}): void {
   const prefs = createPreferences({
@@ -33,7 +40,7 @@ const mcpToggle = () =>
   document.querySelector<HTMLButtonElement>('.koi-switch[aria-label="Enable MCP server"]')!;
 const mcpClientSelect = () =>
   document.querySelector<HTMLSelectElement>('#koi-settings-panel-mcp .koi-select')!;
-const snippet = () => document.querySelector<HTMLPreElement>('.koi-mcp-snippet')!;
+const snippet = () => document.querySelector<HTMLDivElement>('.koi-mcp-snippet')!;
 const status = () => document.querySelector<HTMLElement>('.koi-mcp-status')!;
 const endpointUrl = () => document.querySelector<HTMLInputElement>('.koi-mcp-control .koi-text')!;
 const testBtn = () =>
@@ -134,6 +141,31 @@ describe('Settings → MCP panel', () => {
     await settle();
     expect(endpointUrl().value).toBe('');
     expect(status().dataset.state).toBe('fail');
+  });
+
+  it('renders the recipe as a highlighted CodeMirror view and Copy writes the exact snippet', async () => {
+    // The recipe is now a read-only CodeMirror view (.koi-mcp-snippet .cm-editor), not a bare <pre>.
+    // Copy must round-trip the exact snippet JSON through the view, preserving JSON.parse for clients.
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+    openPrefs();
+    await settle();
+    const sel = mcpClientSelect();
+    sel.value = 'lm-studio';
+    sel.dispatchEvent(new Event('change'));
+    await settle();
+
+    expect(document.querySelector('.koi-mcp-snippet .cm-editor')).not.toBeNull();
+
+    const expected = MCP_CLIENTS.find((c) => c.id === 'lm-studio')!.snippet(MCP_URL_PLACEHOLDER);
+    const copyBtn = [
+      ...document.querySelectorAll<HTMLButtonElement>('#koi-settings-panel-mcp .koi-set-action'),
+    ].find((b) => b.textContent === 'Copy')!;
+    copyBtn.click();
+    await settle();
+
+    expect(writeText).toHaveBeenCalledWith(expected);
   });
 });
 
@@ -340,5 +372,183 @@ describe('Settings → User/Workspace scope toggle', () => {
     expect(scopeBtn(WORD_WRAP_SCOPE, 'workspace').getAttribute('aria-checked')).toBe('true');
     // The value control shows the EFFECTIVE (override) value, not the user value.
     expect(wordWrapToggle().getAttribute('aria-checked')).toBe('true');
+  });
+});
+
+// chordFromEvent is a pure keydown→CodeMirror-key normalizer; unit-test it directly (no DOM/UI).
+describe('chordFromEvent', () => {
+  const ev = (init: KeyboardEventInit) => new KeyboardEvent('keydown', init);
+
+  it('maps a plain function key', () => {
+    expect(chordFromEvent(ev({ key: 'F2' }))).toBe('F2');
+  });
+  it('maps Ctrl+D to a portable Mod chord', () => {
+    expect(chordFromEvent(ev({ key: 'd', ctrlKey: true }))).toBe('Mod-d');
+  });
+  it('maps Shift+F12', () => {
+    expect(chordFromEvent(ev({ key: 'F12', shiftKey: true }))).toBe('Shift-F12');
+  });
+  it('maps Ctrl+. (a punctuation key)', () => {
+    expect(chordFromEvent(ev({ key: '.', ctrlKey: true }))).toBe('Mod-.');
+  });
+  it('returns null for a bare modifier (keep waiting for a real key)', () => {
+    expect(chordFromEvent(ev({ key: 'Shift', shiftKey: true }))).toBeNull();
+    expect(chordFromEvent(ev({ key: 'Control', ctrlKey: true }))).toBeNull();
+    expect(chordFromEvent(ev({ key: 'Alt', altKey: true }))).toBeNull();
+    expect(chordFromEvent(ev({ key: 'Meta', metaKey: true }))).toBeNull();
+  });
+  it('lowercases the base and orders modifiers Mod-Shift', () => {
+    expect(chordFromEvent(ev({ key: 'K', ctrlKey: true, shiftKey: true }))).toBe('Mod-Shift-k');
+  });
+});
+
+describe('keyboard settings', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+    saveSettings({ ...DEFAULT_SETTINGS });
+  });
+
+  // A test that intentionally leaves a row armed (the min-modifier guard) would leak its document-level
+  // keydown listener into the next test. Escape disarms an armed recorder and is a harmless no-op
+  // otherwise, so dispatch it between tests to guarantee no listener survives.
+  afterEach(() => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  });
+
+  const rows = () =>
+    [...document.querySelectorAll<HTMLElement>('#koi-settings-panel-keyboard .koi-kbd-row')];
+  const rowFor = (id: string) =>
+    document.querySelector<HTMLElement>(`#koi-settings-panel-keyboard .koi-kbd-row[data-binding-id="${id}"]`)!;
+  const chordOf = (id: string) => rowFor(id).querySelector<HTMLElement>('.koi-kbd-chord')!;
+  const recordBtn = (id: string) => rowFor(id).querySelector<HTMLButtonElement>('.koi-kbd-record')!;
+  const resetBtn = (id: string) => rowFor(id).querySelector<HTMLButtonElement>('.koi-kbd-reset')!;
+  const conflictOf = (id: string) => rowFor(id).querySelector<HTMLElement>('.koi-kbd-conflict')!;
+  const reassignBtn = (id: string) => rowFor(id).querySelector<HTMLButtonElement>('.koi-kbd-reassign')!;
+
+  // Simulate the recording flow: arm the row, then deliver a keydown to the document-level listener.
+  function record(id: string, init: KeyboardEventInit): void {
+    recordBtn(id).click();
+    document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ...init }));
+  }
+
+  it('lists all five rebindable commands, each showing its resolved key', () => {
+    openPrefs();
+    expect(rows()).toHaveLength(5);
+    // happy-dom is a non-mac platform, so "Mod" renders as "Ctrl"; F12 has no modifier.
+    expect(chordOf('goToDefinition').textContent).toBe('F12');
+    expect(chordOf('format').textContent).toBe('Ctrl+S');
+  });
+
+  it('recording a chord persists the override, updates the display, and fires onKeybindingsChanged', () => {
+    const onKeybindingsChanged = vi.fn();
+    openPrefs({ onKeybindingsChanged });
+    record('format', { key: 'j', ctrlKey: true });
+    expect(loadKeybindingOverrides().format).toBe('Mod-j');
+    expect(onKeybindingsChanged).toHaveBeenCalled();
+    expect(chordOf('format').textContent).toBe('Ctrl+J');
+  });
+
+  it('per-row Reset restores the default and fires onKeybindingsChanged', () => {
+    const onKeybindingsChanged = vi.fn();
+    openPrefs({ onKeybindingsChanged });
+    record('format', { key: 'j', ctrlKey: true });
+    expect(loadKeybindingOverrides().format).toBe('Mod-j');
+
+    onKeybindingsChanged.mockClear();
+    resetBtn('format').click();
+    expect(loadKeybindingOverrides().format).toBeUndefined();
+    expect(resolveKeybindings().format).toBe('Mod-s');
+    expect(onKeybindingsChanged).toHaveBeenCalled();
+  });
+
+  it('a chord already bound to another command surfaces a conflict and defers the save until confirmed', () => {
+    const onKeybindingsChanged = vi.fn();
+    openPrefs({ onKeybindingsChanged });
+    // F12 is go-to-definition's default — recording it onto rename collides.
+    record('rename', { key: 'F12' });
+
+    const conflict = conflictOf('rename');
+    expect(conflict.hidden).toBe(false);
+    expect(conflict.getAttribute('role')).toBe('alert');
+    expect(conflict.textContent).toContain('Go to definition');
+    // Until confirmed, nothing is written.
+    expect(loadKeybindingOverrides().rename).toBeUndefined();
+
+    onKeybindingsChanged.mockClear();
+    reassignBtn('rename').click();
+    expect(loadKeybindingOverrides().rename).toBe('F12');
+    // The prior owner is now explicitly unbound ('').
+    expect(loadKeybindingOverrides().goToDefinition).toBe('');
+    expect(chordOf('goToDefinition').textContent).toBe('Unbound');
+    expect(onKeybindingsChanged).toHaveBeenCalled();
+  });
+
+  it('Reset all clears every override and fires onKeybindingsChanged', () => {
+    const onKeybindingsChanged = vi.fn();
+    openPrefs({ onKeybindingsChanged });
+    record('format', { key: 'j', ctrlKey: true });
+    expect(loadKeybindingOverrides().format).toBe('Mod-j');
+
+    onKeybindingsChanged.mockClear();
+    document.querySelector<HTMLButtonElement>('#koi-settings-panel-keyboard .koi-kbd-reset-all')!.click();
+    expect(loadKeybindingOverrides()).toEqual({});
+    expect(resolveKeybindings()).toEqual(DEFAULT_BINDINGS);
+    expect(onKeybindingsChanged).toHaveBeenCalled();
+  });
+
+  it('Advanced "Reset to defaults" also clears keybinding overrides', () => {
+    saveKeybindingOverride('format', 'Mod-d');
+    openPrefs();
+    const danger = document.querySelector<HTMLButtonElement>('#koi-settings-panel-advanced .koi-set-danger')!;
+    danger.click(); // arm
+    danger.click(); // confirm
+    expect(loadKeybindingOverrides()).toEqual({});
+    expect(resolveKeybindings()).toEqual(DEFAULT_BINDINGS);
+  });
+
+  it('ignores a modifier-less printable key (binding it would make the character un-typeable)', () => {
+    const onKeybindingsChanged = vi.fn();
+    openPrefs({ onKeybindingsChanged });
+    record('format', { key: 'g' }); // a bare letter, no modifier — must be rejected
+    expect(loadKeybindingOverrides().format).toBeUndefined();
+    expect(onKeybindingsChanged).not.toHaveBeenCalled();
+    expect(chordOf('format').textContent).toBe('Ctrl+S'); // unchanged
+  });
+
+  it('warns before letting a remap shadow a reserved editor shortcut, then applies on confirm', () => {
+    const onKeybindingsChanged = vi.fn();
+    openPrefs({ onKeybindingsChanged });
+    // Mod-f (Find) is a loaded built-in the registry compartment would shadow — not a rebindable command.
+    record('format', { key: 'f', ctrlKey: true });
+    const conflict = conflictOf('format');
+    expect(conflict.hidden).toBe(false);
+    expect(conflict.textContent).toContain('Find');
+    expect(loadKeybindingOverrides().format).toBeUndefined(); // deferred until confirmed
+
+    reassignBtn('format').click();
+    expect(loadKeybindingOverrides().format).toBe('Mod-f');
+    expect(onKeybindingsChanged).toHaveBeenCalled();
+  });
+
+  it('recording a command’s own default drops the override instead of persisting a redundant one', () => {
+    openPrefs();
+    record('format', { key: 'j', ctrlKey: true }); // override away from the default
+    expect(loadKeybindingOverrides().format).toBe('Mod-j');
+    record('format', { key: 's', ctrlKey: true }); // record the default (Mod-s) back
+    expect(loadKeybindingOverrides().format).toBeUndefined();
+    expect(resolveKeybindings().format).toBe('Mod-s');
+  });
+
+  it('disarms the recorder when the dialog closes, so no leaked listener rebinds a hidden row', () => {
+    const onKeybindingsChanged = vi.fn();
+    const prefs = createPreferences({ onChange: () => {}, onKeybindingsChanged });
+    prefs.open();
+    recordBtn('format').click(); // arm, but never deliver a key
+    prefs.close();
+    // The post-close keystroke must be ignored — the document listener was torn down on close.
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+    expect(loadKeybindingOverrides().format).toBeUndefined();
+    expect(onKeybindingsChanged).not.toHaveBeenCalled();
   });
 });
