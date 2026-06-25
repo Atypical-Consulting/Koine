@@ -1,8 +1,9 @@
 # GitHub / git mechanics for `merge-pr`
 
 The fiddly `gh`/`git`/`jq`/GraphQL snippets the main workflow leans on. Read the section you need when
-you hit it. `{owner}/{repo}` is a literal `gh` placeholder it resolves from `origin` (here
-`Atypical-Consulting/Koine`) — paste it as-is.
+you hit it. `{owner}/{repo}` is a literal `gh` placeholder it resolves from `origin` (the repo the
+profile names) — paste it as-is. And `git <commit-identity>` is the author line from the profile's
+*Commit identity* (SKILL.md Step 1) — substitute its `-c user.email=… -c user.name="…"` flags below.
 
 ---
 
@@ -11,7 +12,7 @@ you hit it. `{owner}/{repo}` is a literal `gh` placeholder it resolves from `ori
 A bare number, a PR/issue URL, or a `gh` link all reduce to the first run of digits:
 
 ```bash
-ARG="$1"   # e.g. 279 | https://github.com/Atypical-Consulting/Koine/pull/279 | "#279"
+ARG="$1"   # e.g. 279 | https://github.com/<owner>/<repo>/pull/279 | "#279"
 PR=$(printf '%s' "$ARG" | grep -oE '[0-9]+' | head -1)
 ```
 
@@ -79,47 +80,43 @@ gh pr view "$PR" --json statusCheckRollup \
   open, poll instead: read the rollup, and if anything is `IN_PROGRESS`/`QUEUED`, come back later
   (e.g. via `ScheduleWakeup`) rather than busy-looping.
 
-Koine's CI gates (so you can reproduce a red check locally — see `.github/workflows/ci.yml`): restore
-with the `wasm-tools wasm-experimental` workloads, `dotnet build`, `dotnet test`, and
-`dotnet format Koine.slnx --verify-no-changes --no-restore`. The format gate trips on style/analyzer
-diffs that compile fine (e.g. `IDE0011` missing braces); run `dotnet format Koine.slnx` to apply, then
-the `--verify-no-changes` form to confirm it's clean. A few analyzer diagnostics (e.g. `IDE1006`
-naming) can't be auto-fixed — `dotnet format` prints "doesn't support Fix All"; rename by hand.
+The repo's CI gates (so you can reproduce a red check locally) are the profile's *CI gates* — its build,
+test, and format/lint **verify** commands, plus any prerequisite the profile flags (a workload, a
+toolchain). The format/lint gate trips on style/analyzer diffs that compile fine; run the profile's
+format/lint **apply** command, then its **verify** command to confirm it's clean. Heed the profile's
+caveats — some analyzer diagnostics can't be auto-fixed and must be hand-corrected.
 
 ---
 
 ## 4. Sync with `main` and resolve conflicts (`BEHIND` / `DIRTY`)
 
-Mirrors `implement-issue`'s Step 8 (same resolutions — the two hot-spot tables are maintained in
-parallel, so keep them in sync when either changes). The project squash-merges, so **merge, don't
-rebase**: one pass per conflict, no force-push, merge commit squashed away at landing.
+Mirrors `implement-issue`'s Step 8 (same resolutions, both sourced from the profile's *Conflict
+hot-spots*). When the profile's *Integration style* is squash-merge, **merge, don't rebase**: one pass
+per conflict, no force-push, merge commit squashed away at landing.
 
 ```bash
 git fetch origin main
-git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" merge origin/main
+git <commit-identity> merge origin/main
 ```
 
-Passing `-c user.email/-c user.name` on the merge means the auto-created merge commit carries the
-GitHub identity too.
+Passing the profile's `-c user.email/-c user.name` flags on the merge means the auto-created merge
+commit carries the right identity too.
 
-### Koine conflict hot-spots — known-correct resolutions
+### Conflict hot-spots — known-correct resolutions
 
-The great majority of conflicts here are mechanical with one right answer:
+The great majority of conflicts are mechanical with one right answer. The profile's *Conflict hot-spots*
+table lists them per file with the resolution for each — read it and resolve those yourself. The
+recurring shapes:
 
-| File | Why it collides | Resolution |
-|------|-----------------|------------|
-| `Directory.Build.props` — `<Version>` **and** `<InformationalVersion>` | every feature bumps the patch version | Keep the **higher** of the two (both lines must match). Never stack both bumps into a double increment. |
-| `CHANGELOG.md` | everyone appends an entry | **Union** — keep *both* entries under the current heading. |
-| `README.md`, `USER-STORIES.md`, feature catalogue, `website/` docs | parallel features document themselves | **Union** — keep both sides' sections. |
-| Verify snapshots `*.verified.txt` | two branches changed emitted output | **Don't hand-merge.** Take *either* side to clear the conflict, then re-run that test and accept the fresh `*.received.txt` → `.verified.txt`. The regenerated snapshot is ground truth. |
-| `tooling/koine-studio/package-lock.json` | lockfiles conflict constantly | **Don't hand-merge.** Take either side, then `npm install` in `tooling/koine-studio` to regenerate; commit the result. |
-| `tooling/koine-studio/package.json` | both add deps/scripts | Union deps/scripts, then regenerate the lockfile (above). |
-| Emitter partials (`Emit/CSharp/CSharpEmitter.*.cs`), `UsingCollector`, `CSharpNaming` | both add methods/usings to the same partial | **Union** — keep both; let the build catch a genuine clash. |
-| Test files (`R##…Tests.cs`, focused suites) | both append tests to the same class | **Union** — keep both sets of tests. |
-| `.csproj`, `Koine.slnx` | both add files/projects | **Union** the item groups. |
-| Studio front-end (`tooling/koine-studio/src/**`) | parallel Studio features touch shared components | **Union** where additive (new components, new routes); for the same component edited both ways, understand both intents — don't blindly take one side. |
+- **Version file** — take the **higher** of the two bumps (never stack both into a double increment).
+- **Changelog** — **union**: keep *both* entries under the current heading.
+- **Docs** (README, roadmap, feature catalogue, site) — **union**: keep both sides' sections.
+- **Derived files** — snapshots and lockfiles must **not** be hand-merged: take *either* side, then
+  regenerate (re-run the affected test and accept the fresh snapshot; reinstall to rebuild the lockfile).
+- **Additive code/tests** — **union**: keep both sides' new methods/usings/tests; let the build catch a
+  genuine clash.
 
-Rule of thumb: **union** additive files (docs, tests, `CHANGELOG`), **regenerate** derived files
+Rule of thumb: **union** additive files (docs, tests, changelog), **regenerate** derived files
 (snapshots, lockfiles), **take-the-higher** for the version. Anything where both sides edited the *same
 logic* is a real semantic conflict — resolve by understanding both intents, or stop and surface it with
 both sides shown (Autonomy contract).
@@ -130,8 +127,8 @@ A clean text merge can still break the build. Prove it before pushing:
 
 ```bash
 git add -A
-git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit --no-edit   # completes the merge
-dotnet build                          # + the affected test filters; full suite needs wasm workloads
+git <commit-identity> commit --no-edit   # completes the merge
+# run the profile's Build command (+ the affected test filters); the full suite may need a CI-only prerequisite
 git push
 ```
 
