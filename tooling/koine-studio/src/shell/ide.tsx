@@ -26,6 +26,7 @@ import { initTheme, onThemeChange, toggleTheme } from '@/settings/theme';
 import {
   peekLegacyScratch,
   clearLegacyScratch,
+  effectiveSettings,
   initSecrets,
   loadActiveContext,
   loadSettings,
@@ -34,6 +35,7 @@ import {
   removeRecentFolder,
   saveActiveContext,
   saveWorkspaceCenter,
+  workspaceKeyOf,
   type Settings,
 } from '@/settings/persistence';
 import { createWelcome } from '@/welcome/welcome';
@@ -359,6 +361,40 @@ export function init(): () => void {
   // the other and there's no circular import. `workspace` is forward-declared here for those thunks.
   let workspace: WorkspaceController;
 
+  // The current workspace's stable override key (a hash of its sorted roots), or null when no folder
+  // is open — the workspace-scoped settings (previewTarget/formatOnSave/wordWrap/lspTrace) merge over
+  // the user settings under this key. A `function` declaration so it can reference `workspace` (assigned
+  // below): every call happens at runtime, long after construction, so the hoisted binding is safe.
+  function wsKey(): string | null {
+    const rs = workspace.rootsList();
+    return rs.length ? workspaceKeyOf(rs) : null;
+  }
+
+  // Apply the workspace-scoped fields that need a LIVE push (word-wrap on both surfaces, the preview
+  // target relabel) from an already-resolved effective Settings. Shared by the prefs onChange, a folder
+  // open, and a root-set change so the three call sites can never drift. (format-on-save reads through
+  // the live getFormatOnSave thunk; lspTrace has no live consumer — see #264.)
+  function applyEffectiveScoped(eff: Settings): void {
+    editor.setLineWrap(eff.wordWrap);
+    output.setLineWrap(eff.wordWrap);
+    controller.onPreviewTargetChanged(eff.previewTarget);
+  }
+
+  // Adding or removing a workspace root changes the workspace identity: folderRootToken() may now point
+  // at a different primary folder and wsKey() hashes a different root set, so every folder-derived view
+  // and every workspace-scoped behavior must re-sync — exactly like a folder open, minus restoreActive-
+  // Context (an additive root change keeps the user's current bounded-context scope rather than resetting
+  // it). Without this, removing the primary root strands the Docs/layout/diagram stores on the dead key
+  // (#174) and a per-workspace word-wrap/preview-target override goes stale until an unrelated event.
+  function onRootSetChanged(): void {
+    appStore.getState().setFolderRootToken(workspace.folderRootToken());
+    controller.invalidateDocViews();
+    controller.invalidateDocsPanel();
+    void controller.refreshContextList();
+    controller.refreshActiveSurfaces();
+    applyEffectiveScoped(effectiveSettings(settings, wsKey()));
+  }
+
   // The editor ↔ LSP + diagnostics wiring (issue #180, Task 3): owns the CodeMirror editor and its
   // callback wall (hover/completion/definition/rename/references/code-actions → lsp.*), the per-uri
   // diagnostics cache, the status pill + diagnostics strip, and the LSP publishDiagnostics/exit
@@ -456,6 +492,13 @@ export function init(): () => void {
     isActive: (token) => pathToFileUri(token) === workspace.activeUri(),
     isDirty: (token) => workspace.buffers.get(pathToFileUri(token))?.dirty ?? false,
     diagCounts: (token) => diagCounts(pathToFileUri(token)),
+    // Multi-root workspace: the head "Add folder" affordance unions a second folder in as a new root;
+    // each group's "Remove" affordance drops just that root's files.
+    onAddRoot: () => void addRootViaPicker(),
+    onRemoveRoot: (root) => {
+      workspace.removeRoot(root);
+      onRootSetChanged();
+    },
   });
   treeBodyEl.appendChild(explorer.el);
 
@@ -881,6 +924,29 @@ export function init(): () => void {
     await workspace.openFolderPath(folder);
   }
 
+  // ADDITIVE multi-root open (the explorer's "Add folder" affordance): pick a folder and union its
+  // .koi files into the current workspace as a new root WITHOUT closing the open buffers — mirrors
+  // openFolder's guard/picker/try-catch, but calls addRoot instead of openFolderPath.
+  async function addRootViaPicker(): Promise<void> {
+    if (!platform.canOpenFolders) {
+      setStatus('opening a folder needs a Chromium-based browser', 'error');
+      return;
+    }
+    let folder: string | null;
+    try {
+      folder = await platform.pickFolder('Add a folder to the workspace');
+    } catch (e) {
+      setStatus('could not open folder picker', 'error');
+      console.error('Add folder dialog failed:', e);
+      return;
+    }
+    if (!folder) return; // cancelled
+    const result = await workspace.addRoot(folder);
+    // Only re-sync the folder-derived views + scoped behaviors when the root set actually changed; an
+    // unreadable/empty pick (or an already-open root) leaves the workspace untouched.
+    if (result.ok) onRootSetChanged();
+  }
+
   // The workspace lifecycle (buffers + open/save/dirty + file mutations, src/workspaceController.ts,
   // Task 5). It OWNS buffers/activeUri/folderRootToken/entriesCache and reaches back into the editor /
   // LSP / explorer / status / diagnostics-cache through these deps, while its own effects surface
@@ -910,7 +976,7 @@ export function init(): () => void {
       editorSession.clearDiagnostics();
       diagCountGate.reset();
     },
-    getFormatOnSave: () => settings.formatOnSave,
+    getFormatOnSave: () => effectiveSettings(settings, wsKey()).formatOnSave,
     // A folder finished opening: restore this workspace's bounded-context scope (#146) BEFORE the
     // first scoped render and refresh the switcher's options from the new model. The bus value drives
     // the render paths, so the initial ensureLoaded is already scoped even before the dropdown
@@ -924,6 +990,11 @@ export function init(): () => void {
       controller.invalidateDocsPanel();
       void controller.refreshContextList();
       controller.refreshActiveSurfaces();
+      // Switching folders changes wsKey(), so re-apply the now-effective workspace-scoped behaviors:
+      // this folder's overrides for word-wrap and preview target take effect immediately. (format-on-
+      // save reads through the live getFormatOnSave thunk, so it auto-picks up; lspTrace has no live
+      // re-application site here — its override surfaces on next read.)
+      applyEffectiveScoped(effectiveSettings(settings, wsKey()));
     },
     // The active buffer was deleted and the workspace is now empty: reset to a fresh blank model.
     onWorkspaceEmptied: () => void newModel(),
@@ -1330,17 +1401,20 @@ export function init(): () => void {
 
   const prefs = createPreferences({
     onChange: (s) => {
+      // `s` is the USER/global settings (prefs keeps the global value untouched when a row is scoped to
+      // Workspace), so it stays the user-level source of truth here.
       settings = s;
+      // The workspace-scoped fields (wordWrap, previewTarget) must apply from the EFFECTIVE view so a
+      // Workspace override drives the live behavior even though `settings` stays user-level.
+      const eff = effectiveSettings(s, wsKey());
       // onChange is the single re-skin path: apply the document-level appearance, then sync the
       // pieces prefs can't reach — soft-wrap on both the source editor and the output preview.
       applyAppearance(s);
-      editor.setLineWrap(s.wordWrap);
-      output.setLineWrap(s.wordWrap);
       editor.setMinimap(s.enableMinimap);
       workspace.setAutoSave(s.autoSave);
-      // Destination language now lives in Settings → Output. The controller relabels the Generated
-      // tab, marks the preview stale, and re-emits it when that sub-view is the one showing.
-      controller.onPreviewTargetChanged(s.previewTarget);
+      // The scoped fields (word-wrap on both surfaces + the Generated-tab relabel via the preview
+      // target) apply from the EFFECTIVE view so a Workspace override drives live behavior.
+      applyEffectiveScoped(eff);
     },
     // Desktop hosts launch a `koine mcp --http` sidecar and return its loopback URL; the browser
     // returns null, so Settings hides the MCP affordance there.
@@ -1352,6 +1426,9 @@ export function init(): () => void {
     canSaveProjects: platform.canSaveProjects,
     workspaceRootName: () => platform.workspaceRootName(),
     pickWorkspaceRoot: () => platform.pickWorkspaceRoot(),
+    // The current workspace's override key (null when no folder is open) — drives the per-row
+    // User/Workspace scope toggle and routes scoped commits to the workspace override store.
+    workspaceKey: () => wsKey(),
   });
   const help = createHelpOverlay(helpRows());
   // Guards the user-initiated New command against silently discarding unsaved work.

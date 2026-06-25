@@ -4,7 +4,7 @@ import { createWorkspaceSlice, type WorkspaceSlice } from '@/store/slices/worksp
 import type { Buffer } from '@/shell/workspaceController';
 
 const buf = (uri: string, dirty: boolean): Buffer =>
-  ({ uri, path: uri, relPath: uri, name: uri, text: '', dirty });
+  ({ uri, path: uri, relPath: uri, name: uri, text: '', dirty, rootToken: '' });
 
 const make = () => createStore<WorkspaceSlice>((set, get) => createWorkspaceSlice(set, get));
 

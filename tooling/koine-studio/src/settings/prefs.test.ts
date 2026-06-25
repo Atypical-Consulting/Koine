@@ -1,7 +1,13 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createPreferences, type PrefsCallbacks } from '@/settings/prefs';
-import { DEFAULT_SETTINGS, loadSettings, saveSettings } from '@/settings/persistence';
+import {
+  DEFAULT_SETTINGS,
+  loadSettings,
+  saveSettings,
+  workspaceKeyOf,
+  loadWorkspaceOverrides,
+} from '@/settings/persistence';
 import { BUILTIN_EMIT_TARGETS } from '@/shared/emitTargets';
 
 // Flush queued microtasks + timers so the panel's async steps (mcpEndpoint, mcpStop, probe) settle.
@@ -205,5 +211,134 @@ describe('Settings → About panel', () => {
     const chip = document.querySelector<HTMLElement>('#koi-settings-panel-about .koi-about-chip')!;
     expect(chip.hidden).toBe(false);
     expect(chip.textContent).toMatch(/^v/);
+  });
+});
+
+describe('Settings → User/Workspace scope toggle', () => {
+  const ROOTS = ['/Users/me/projects/billing'];
+  const KEY = workspaceKeyOf(ROOTS);
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+    saveSettings({ ...DEFAULT_SETTINGS });
+  });
+
+  // The scope segmented for a given field's accessible label (e.g. "Word wrap scope").
+  const scopeGroup = (label: string) =>
+    document.querySelector<HTMLElement>(`.koi-segmented[aria-label="${label}"]`)!;
+  const scopeBtn = (label: string, value: 'user' | 'workspace') =>
+    scopeGroup(label).querySelector<HTMLButtonElement>(`.koi-seg[data-value="${value}"]`)!;
+  // The Word wrap value toggle (role=switch) — distinct from the scope segmented.
+  const wordWrapToggle = () =>
+    document.querySelector<HTMLButtonElement>('.koi-switch[aria-label="Word wrap"]')!;
+  const formatOnSaveToggle = () =>
+    document.querySelector<HTMLButtonElement>('.koi-switch[aria-label="Format on save"]')!;
+  const WORD_WRAP_SCOPE = 'Word wrap scope';
+
+  it('hides/disables every scope control when no workspace is open', () => {
+    openPrefs({ workspaceKey: () => null });
+    for (const label of [
+      'Output language scope',
+      'Format on save scope',
+      'Word wrap scope',
+      'Language server trace scope',
+    ]) {
+      const group = scopeGroup(label);
+      // Unambiguous, testable state: aria-disabled on the group and disabled on its option buttons.
+      expect(group.getAttribute('aria-disabled')).toBe('true');
+      for (const b of group.querySelectorAll<HTMLButtonElement>('.koi-seg')) {
+        expect(b.disabled).toBe(true);
+      }
+    }
+  });
+
+  it('enables the scope control when a workspace is open, defaulting to User', () => {
+    openPrefs({ workspaceKey: () => KEY });
+    const group = scopeGroup(WORD_WRAP_SCOPE);
+    expect(group.getAttribute('aria-disabled')).toBe('false');
+    expect(scopeBtn(WORD_WRAP_SCOPE, 'user').getAttribute('aria-checked')).toBe('true');
+    expect(scopeBtn(WORD_WRAP_SCOPE, 'workspace').getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('flipping a row to Workspace persists the current value as an override, leaving the user value untouched', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, wordWrap: false });
+    const onChange = vi.fn();
+    openPrefs({ workspaceKey: () => KEY, onChange });
+
+    // Flip the Word wrap row's scope to Workspace.
+    scopeBtn(WORD_WRAP_SCOPE, 'workspace').click();
+
+    // The current value (false) is now an explicit workspace override...
+    expect(loadWorkspaceOverrides(KEY)).toHaveProperty('wordWrap', false);
+    // ...and the user/global value is unchanged.
+    expect(loadSettings().wordWrap).toBe(false);
+    expect(scopeBtn(WORD_WRAP_SCOPE, 'workspace').getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('editing the value while scope=Workspace writes to the override, NOT the user settings', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, wordWrap: false });
+    const onChange = vi.fn();
+    openPrefs({ workspaceKey: () => KEY, onChange });
+
+    scopeBtn(WORD_WRAP_SCOPE, 'workspace').click();
+    onChange.mockClear();
+    // Turn word wrap on — this must hit the workspace override, not the user blob.
+    wordWrapToggle().click();
+
+    expect(loadWorkspaceOverrides(KEY)).toHaveProperty('wordWrap', true);
+    expect(loadSettings().wordWrap).toBe(false); // user value stays put
+    // The host is notified with the UNCHANGED user settings (it re-applies effective behaviors itself).
+    expect(onChange).toHaveBeenCalled();
+    const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0];
+    expect(last.wordWrap).toBe(false);
+  });
+
+  it('editing the value while scope=User writes to the user settings (the existing path)', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, wordWrap: false });
+    const onChange = vi.fn();
+    openPrefs({ workspaceKey: () => KEY, onChange });
+
+    // Scope defaults to User; toggling commits to the global blob.
+    wordWrapToggle().click();
+    expect(loadSettings().wordWrap).toBe(true);
+    expect(loadWorkspaceOverrides(KEY)).not.toHaveProperty('wordWrap');
+    const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0];
+    expect(last.wordWrap).toBe(true);
+  });
+
+  it('flipping back to User clears the override and restores the user value in the control', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, formatOnSave: true });
+    openPrefs({ workspaceKey: () => KEY });
+    const FOS_SCOPE = 'Format on save scope';
+
+    // Go to Workspace, change the override to false.
+    scopeBtn(FOS_SCOPE, 'workspace').click();
+    formatOnSaveToggle().click(); // override now false
+    expect(loadWorkspaceOverrides(KEY)).toHaveProperty('formatOnSave', false);
+
+    // Flip back to User: the override is cleared and the control resets to the user value (true).
+    scopeBtn(FOS_SCOPE, 'user').click();
+    expect(loadWorkspaceOverrides(KEY)).not.toHaveProperty('formatOnSave');
+    expect(loadSettings().formatOnSave).toBe(true); // user value never moved
+    expect(formatOnSaveToggle().getAttribute('aria-checked')).toBe('true');
+    expect(scopeBtn(FOS_SCOPE, 'user').getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('on reopen, a row with an existing override shows Workspace scope and the override value', () => {
+    // Seed an override directly, then open with the workspace key.
+    saveSettings({ ...DEFAULT_SETTINGS, wordWrap: false });
+    const prefs = createPreferences({ onChange: () => {}, workspaceKey: () => KEY });
+    prefs.open();
+    // No override yet → User.
+    expect(scopeBtn(WORD_WRAP_SCOPE, 'user').getAttribute('aria-checked')).toBe('true');
+    // Create the override, reopen.
+    scopeBtn(WORD_WRAP_SCOPE, 'workspace').click();
+    wordWrapToggle().click(); // override = true
+    prefs.close();
+    prefs.open();
+    expect(scopeBtn(WORD_WRAP_SCOPE, 'workspace').getAttribute('aria-checked')).toBe('true');
+    // The value control shows the EFFECTIVE (override) value, not the user value.
+    expect(wordWrapToggle().getAttribute('aria-checked')).toBe('true');
   });
 });

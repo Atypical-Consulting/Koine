@@ -17,6 +17,7 @@ const buf = (uri: string, dirty: boolean): Buffer => ({
   name: uri,
   text: '',
   dirty,
+  rootToken: '',
 });
 
 /** The static index.html host the indicator drives: a `<button class="unsaved-indicator">`. */

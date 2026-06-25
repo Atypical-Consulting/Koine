@@ -7,7 +7,7 @@ const last = <T>(arr: T[]): T | undefined => arr[arr.length - 1];
 function setup(opts: { maxDepth?: number; debounceMs?: number } = {}) {
   const buffers = new Map<string, Buffer>();
   const mk = (uri: string, text: string, dirty = false): Buffer =>
-    ({ uri, path: uri, relPath: uri, name: uri, text, dirty });
+    ({ uri, path: uri, relPath: uri, name: uri, text, dirty, rootToken: '' });
   buffers.set('a', mk('a', 'A0'));
   let active = 'a';
   // Mutable hooks let individual tests simulate the real onChange re-entrancy.

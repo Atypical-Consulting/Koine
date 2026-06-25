@@ -18,15 +18,27 @@ import type { FsEntry, KoiFile, Platform, SourceDoc } from '@/host/types';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
 
 // --- in-memory Platform ------------------------------------------------------
-// A browser-like host backed by a Map<relPath, contents> under a single workspace folder. Implements
-// exactly the surface the workspace open/save/mutation paths touch; unexercised desktop-only ops are
-// left as harmless stubs. Tokens are `${ROOT}/${relPath}` so relOf round-trips them.
+// A browser-like host backed by a per-root Map<relPath, contents>. Implements exactly the surface the
+// workspace open/save/mutation paths touch; unexercised desktop-only ops are left as harmless stubs.
+// Tokens are `${root}/${relPath}` so relOf round-trips them.
+//
+// The fake is ROOT-AWARE so the multi-root tests (addRoot / removeRoot) can open TWO distinct roots and
+// prove buffers stay namespaced per root. For backward compatibility with the original single-root
+// tests, `files` is a live alias of the primary `ROOT` bucket: `platform.files.set('a.koi', …)` seeds
+// `ROOT` exactly as before, and every op resolves a token's owning root by longest matching prefix.
 const ROOT = 'mem://workspace';
+const ROOT_A = 'mem://wsA';
+const ROOT_B = 'mem://wsB';
 
-/** The file:// uri the controller keys a relPath under — via the SAME helper production uses, so the
- *  test never hand-rolls an encoding (pathToFileUri percent-encodes the token's characters). */
+/** The file:// uri the controller keys a relPath under, under the primary ROOT — via the SAME helper
+ *  production uses, so the test never hand-rolls an encoding (pathToFileUri percent-encodes the token). */
 function uriOf(relPath: string): string {
   return pathToFileUri(`${ROOT}/${relPath}`);
+}
+
+/** The file:// uri for a relPath under an arbitrary root token (for the multi-root tests). */
+function uriUnder(root: string, relPath: string): string {
+  return pathToFileUri(`${root}/${relPath}`);
 }
 
 class FakePlatform implements Platform {
@@ -35,17 +47,41 @@ class FakePlatform implements Platform {
   readonly canSaveProjects = true;
   readonly persistsWorkspace = true;
 
-  /** relPath (forward-slashed) -> UTF-8 contents. */
-  files = new Map<string, string>();
-  /** Paths whose writeTextFile must reject, to exercise the failed-write path of Save all. */
+  /** Per-root store: rootToken -> (relPath -> UTF-8 contents). */
+  roots = new Map<string, Map<string, string>>();
+  /** Live alias of the primary ROOT bucket so existing tests' `platform.files.set('a.koi', …)` work. */
+  readonly files: Map<string, string>;
+  /** relPaths (under ROOT) whose writeTextFile must reject, to exercise Save all's failed-write path. */
   failWrites = new Set<string>();
   writes: { path: string; contents: string }[] = [];
 
-  private tokenFor(relPath: string): string {
-    return `${ROOT}/${relPath}`;
+  constructor() {
+    const primary = new Map<string, string>();
+    this.roots.set(ROOT, primary);
+    this.files = primary;
+  }
+
+  /** Seed a (root, relPath) entry — the multi-root tests use this to populate ROOT_A / ROOT_B. */
+  seed(root: string, relPath: string, contents: string): void {
+    let bucket = this.roots.get(root);
+    if (!bucket) {
+      bucket = new Map<string, string>();
+      this.roots.set(root, bucket);
+    }
+    bucket.set(relPath, contents);
+  }
+
+  /** The root token a path lives under (longest matching prefix), defaulting to ROOT for a bare relPath. */
+  private rootOf(token: string): string {
+    let best = '';
+    for (const root of this.roots.keys()) {
+      if ((token === root || token.startsWith(root + '/')) && root.length > best.length) best = root;
+    }
+    return best || ROOT;
   }
   private relOf(token: string): string {
-    return token.startsWith(ROOT + '/') ? token.slice(ROOT.length + 1) : token;
+    const root = this.rootOf(token);
+    return token.startsWith(root + '/') ? token.slice(root.length + 1) : token;
   }
 
   createLspTransport(): never {
@@ -82,29 +118,36 @@ class FakePlatform implements Platform {
     if (this.files.size === 0) this.files.set('model.koi', seed);
     return Promise.resolve(ROOT);
   }
-  folderName(): string {
-    return 'workspace';
+  folderName(token?: string): string {
+    return token ? token.split('/').pop()! : 'workspace';
   }
-  listKoiFiles(): Promise<KoiFile[]> {
+  listKoiFiles(folder: string): Promise<KoiFile[]> {
+    const bucket = this.roots.get(folder);
     const out: KoiFile[] = [];
-    for (const relPath of this.files.keys()) {
-      if (!relPath.toLowerCase().endsWith('.koi')) continue;
-      out.push({ path: this.tokenFor(relPath), name: relPath.split('/').pop()!, relPath });
+    if (bucket) {
+      for (const relPath of bucket.keys()) {
+        if (!relPath.toLowerCase().endsWith('.koi')) continue;
+        out.push({ path: `${folder}/${relPath}`, name: relPath.split('/').pop()!, relPath });
+      }
     }
     out.sort((a, b) => a.relPath.localeCompare(b.relPath));
     return Promise.resolve(out);
   }
   readTextFile(path: string): Promise<string> {
+    const root = this.rootOf(path);
     const rel = this.relOf(path);
-    if (!this.files.has(rel)) return Promise.reject(new Error(`no such file: ${path}`));
-    return Promise.resolve(this.files.get(rel)!);
+    const bucket = this.roots.get(root);
+    if (!bucket || !bucket.has(rel)) return Promise.reject(new Error(`no such file: ${path}`));
+    return Promise.resolve(bucket.get(rel)!);
   }
   gitLogForRange(): Promise<null> {
     return Promise.resolve(null);
   }
   writeTextFile(path: string, contents: string): Promise<void> {
-    if (this.failWrites.has(this.relOf(path))) return Promise.reject(new Error(`write failed: ${path}`));
-    this.files.set(this.relOf(path), contents);
+    const rel = this.relOf(path);
+    if (this.failWrites.has(rel)) return Promise.reject(new Error(`write failed: ${path}`));
+    const bucket = this.roots.get(this.rootOf(path))!;
+    bucket.set(rel, contents);
     this.writes.push({ path, contents });
     return Promise.resolve();
   }
@@ -114,11 +157,14 @@ class FakePlatform implements Platform {
   readFolderSources(): Promise<SourceDoc[]> {
     return Promise.resolve([]);
   }
-  listEntries(): Promise<FsEntry[]> {
+  listEntries(folder: string): Promise<FsEntry[]> {
+    const bucket = this.roots.get(folder);
     const out: FsEntry[] = [];
-    for (const relPath of this.files.keys()) {
-      if (!relPath.toLowerCase().endsWith('.koi')) continue;
-      out.push({ token: this.tokenFor(relPath), name: relPath.split('/').pop()!, relPath, kind: 'file' });
+    if (bucket) {
+      for (const relPath of bucket.keys()) {
+        if (!relPath.toLowerCase().endsWith('.koi')) continue;
+        out.push({ token: `${folder}/${relPath}`, name: relPath.split('/').pop()!, relPath, kind: 'file' });
+      }
     }
     out.sort((a, b) => a.relPath.localeCompare(b.relPath));
     return Promise.resolve(out);
@@ -126,26 +172,28 @@ class FakePlatform implements Platform {
   listDir(): Promise<FsEntry[]> {
     return Promise.reject(new Error('listDir not used'));
   }
-  createFile(_folderToken: string, relPath: string, contents = ''): Promise<string> {
-    this.files.set(relPath, contents);
-    return Promise.resolve(this.tokenFor(relPath));
+  createFile(folderToken: string, relPath: string, contents = ''): Promise<string> {
+    (this.roots.get(folderToken) ?? this.files).set(relPath, contents);
+    return Promise.resolve(`${folderToken}/${relPath}`);
   }
-  createFolder(_folderToken: string, relPath: string): Promise<string> {
-    return Promise.resolve(this.tokenFor(relPath));
+  createFolder(folderToken: string, relPath: string): Promise<string> {
+    return Promise.resolve(`${folderToken}/${relPath}`);
   }
   renameEntry(token: string, newName: string): Promise<string> {
+    const root = this.rootOf(token);
+    const bucket = this.roots.get(root)!;
     const rel = this.relOf(token);
-    const text = this.files.get(rel);
+    const text = bucket.get(rel);
     const parent = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/') + 1) : '';
     const newRel = parent + newName;
     if (text != null) {
-      this.files.delete(rel);
-      this.files.set(newRel, text);
+      bucket.delete(rel);
+      bucket.set(newRel, text);
     }
-    return Promise.resolve(this.tokenFor(newRel));
+    return Promise.resolve(`${root}/${newRel}`);
   }
   deleteEntry(token: string): Promise<void> {
-    this.files.delete(this.relOf(token));
+    this.roots.get(this.rootOf(token))!.delete(this.relOf(token));
     return Promise.resolve();
   }
   moveEntry(): Promise<string> {
@@ -196,7 +244,7 @@ function makeDeps(
     platform: platform as unknown as Platform,
     lsp: lsp as unknown as WorkspaceControllerDeps['lsp'],
     editor: editor as unknown as WorkspaceControllerDeps['editor'],
-    explorer: { render: vi.fn() },
+    explorer: { renderRoots: vi.fn() },
     setStatus: vi.fn(),
     refreshDirtyIndicator: vi.fn(),
     showDiagnostics: vi.fn(),
@@ -830,5 +878,216 @@ describe('createWorkspaceController — idle auto-save', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// Multi-root workspace (Task 2): the controller owns an ORDERED LIST of roots. `rootsList()` exposes
+// them (a copy); `addRoot` unions a folder's .koi buffers WITHOUT closing/touching the existing ones;
+// `removeRoot` closes ONLY that root's buffers (dropping their diagnostics), splices it out, and falls
+// back / empties via the existing activateFallback. Driven across TWO distinct roots so per-root
+// namespacing is provable: ROOT (the existing single-root path) plus ROOT_A / ROOT_B.
+describe('createWorkspaceController — multi-root', () => {
+  test('opening one folder yields a rootsList of length 1 (the opened folder is the primary root)', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([])));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+
+    expect(ws.rootsList()).toEqual([ROOT_A]);
+    expect(ws.folderRootToken()).toBe(ROOT_A); // back-compat: primary root === folderRootToken
+  });
+
+  test('addRoot unions a second folder’s .koi buffers without closing the first', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    platform.seed(ROOT_B, 'b1.koi', 'context B1 {}\n');
+    platform.seed(ROOT_B, 'b2.koi', 'context B2 {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+
+    const aUri = uriUnder(ROOT_A, 'a.koi');
+    expect(ws.buffers.size).toBe(1);
+    expect(ws.activeUri()).toBe(aUri);
+    lsp.closeDoc.mockClear();
+    lsp.openDoc.mockClear();
+
+    const result = await ws.addRoot(ROOT_B);
+
+    expect(result).toEqual({ ok: true });
+    // Both roots are now in the workspace, ROOT_A still first (additive, ordered append).
+    expect(ws.rootsList()).toEqual([ROOT_A, ROOT_B]);
+    // ROOT_A's buffer survives untouched; ROOT_B's two .koi files are now open too.
+    expect(ws.buffers.size).toBe(3);
+    expect(ws.buffers.has(aUri)).toBe(true);
+    expect(ws.buffers.has(uriUnder(ROOT_B, 'b1.koi'))).toBe(true);
+    expect(ws.buffers.has(uriUnder(ROOT_B, 'b2.koi'))).toBe(true);
+    // The new buffers carry their owning rootToken; the existing one is unchanged.
+    expect(ws.buffers.get(uriUnder(ROOT_B, 'b1.koi'))!.rootToken).toBe(ROOT_B);
+    expect(ws.buffers.get(aUri)!.rootToken).toBe(ROOT_A);
+    // addRoot opened the new docs on the LSP (cross-root refs resolve) and closed NOTHING.
+    expect(lsp.openDoc).toHaveBeenCalledTimes(2);
+    expect(lsp.closeDoc).not.toHaveBeenCalled();
+    // The active buffer is unchanged — addRoot must not steal focus.
+    expect(ws.activeUri()).toBe(aUri);
+  });
+
+  test('addRoot of an already-open root is a no-op (no re-read, no close, no buffer churn)', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+
+    const listSpy = vi.spyOn(platform, 'listKoiFiles');
+    lsp.openDoc.mockClear();
+    lsp.closeDoc.mockClear();
+
+    const result = await ws.addRoot(ROOT_A);
+
+    expect(result).toEqual({ ok: true });
+    expect(ws.rootsList()).toEqual([ROOT_A]); // not duplicated
+    expect(ws.buffers.size).toBe(1);
+    expect(listSpy).not.toHaveBeenCalled(); // did not re-read the folder
+    expect(lsp.openDoc).not.toHaveBeenCalled();
+    expect(lsp.closeDoc).not.toHaveBeenCalled();
+  });
+
+  test('addRoot of an unreadable folder reports unreadable and does not append', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([])));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+
+    vi.spyOn(platform, 'listKoiFiles').mockRejectedValueOnce(new Error('gone'));
+    const result = await ws.addRoot(ROOT_B);
+
+    expect(result).toEqual({ ok: false, reason: 'unreadable' });
+    expect(ws.rootsList()).toEqual([ROOT_A]);
+  });
+
+  test('addRoot of an empty folder reports empty and does not append', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([])));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+
+    const result = await ws.addRoot(ROOT_B); // ROOT_B was never seeded → no .koi files
+
+    expect(result).toEqual({ ok: false, reason: 'empty' });
+    expect(ws.rootsList()).toEqual([ROOT_A]);
+  });
+
+  test('removeRoot closes ONLY that root’s buffers, drops their diagnostics, and leaves the others', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    platform.seed(ROOT_B, 'b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const dropDiagnostics = vi.fn();
+    const renderRoots = vi.fn();
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { dropDiagnostics, explorer: { renderRoots } }));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+    await ws.addRoot(ROOT_B);
+    // a.koi is active (primary root's first file). Switch active to b.koi so removing ROOT_B exercises
+    // the active-removed fallback in a LATER test; here keep active on ROOT_A so removeRoot(ROOT_B) is
+    // a pure non-active removal.
+    const aUri = uriUnder(ROOT_A, 'a.koi');
+    const bUri = uriUnder(ROOT_B, 'b.koi');
+    expect(ws.activeUri()).toBe(aUri);
+    lsp.closeDoc.mockClear();
+    renderRoots.mockClear();
+
+    ws.removeRoot(ROOT_B);
+
+    // ROOT_B spliced out; ROOT_A intact and still primary.
+    expect(ws.rootsList()).toEqual([ROOT_A]);
+    // Only b.koi closed + dropped; a.koi untouched and still active.
+    expect(lsp.closeDoc).toHaveBeenCalledTimes(1);
+    expect(lsp.closeDoc).toHaveBeenCalledWith(bUri);
+    expect(dropDiagnostics).toHaveBeenCalledWith(bUri);
+    expect(dropDiagnostics).not.toHaveBeenCalledWith(aUri);
+    expect(ws.buffers.has(bUri)).toBe(false);
+    expect(ws.buffers.has(aUri)).toBe(true);
+    expect(ws.activeUri()).toBe(aUri);
+    // A non-active removal must STILL re-render the explorer (regression: removeRoot once skipped this,
+    // so the removed root's group + rows lingered, clickable, until an unrelated render fired). The
+    // re-render names only the surviving root.
+    expect(renderRoots).toHaveBeenCalled();
+    const calls = renderRoots.mock.calls;
+    const lastGroups = calls[calls.length - 1][0] as { root: string }[];
+    expect(lastGroups.map((g) => g.root)).toEqual([ROOT_A]);
+  });
+
+  test('removing the active buffer’s root re-points active via the fallback', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    platform.seed(ROOT_B, 'b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const showDiagnostics = vi.fn();
+    const invalidateDocViews = vi.fn();
+    const onWorkspaceEmptied = vi.fn();
+    const ws = createWorkspaceController(
+      makeDeps(platform, lsp, editor, { showDiagnostics, invalidateDocViews, onWorkspaceEmptied }),
+    );
+    await ws.openFolderPath(ROOT_A, { recent: false });
+    await ws.addRoot(ROOT_B);
+
+    const aUri = uriUnder(ROOT_A, 'a.koi');
+    const bUri = uriUnder(ROOT_B, 'b.koi');
+    // Make b.koi (in ROOT_B) the active buffer, then remove ROOT_B.
+    ws.activateFile(bUri);
+    expect(ws.activeUri()).toBe(bUri);
+    showDiagnostics.mockClear();
+    invalidateDocViews.mockClear();
+
+    ws.removeRoot(ROOT_B);
+
+    // The fallback re-points to ROOT_A's surviving buffer via showDiagnostics + invalidateDocViews.
+    expect(ws.activeUri()).toBe(aUri);
+    expect(showDiagnostics).toHaveBeenCalledWith(aUri);
+    expect(invalidateDocViews).toHaveBeenCalled();
+    expect(onWorkspaceEmptied).not.toHaveBeenCalled(); // ROOT_A still has a buffer
+  });
+
+  test('removing the last root empties the workspace (onWorkspaceEmptied)', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const onWorkspaceEmptied = vi.fn();
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { onWorkspaceEmptied }));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+
+    ws.removeRoot(ROOT_A);
+
+    expect(ws.rootsList()).toEqual([]);
+    expect(ws.buffers.size).toBe(0);
+    expect(onWorkspaceEmptied).toHaveBeenCalledTimes(1);
+  });
+
+  test('removeRoot of a folder not in roots is a harmless no-op', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+    lsp.closeDoc.mockClear();
+
+    ws.removeRoot(ROOT_B); // never added
+
+    expect(ws.rootsList()).toEqual([ROOT_A]);
+    expect(ws.buffers.size).toBe(1);
+    expect(lsp.closeDoc).not.toHaveBeenCalled();
   });
 });
