@@ -1,5 +1,6 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
+import { unified } from '@astrojs/markdown-remark';
 import starlight from '@astrojs/starlight';
 import sitemap from '@astrojs/sitemap';
 import starlightBlog from 'starlight-blog';
@@ -27,6 +28,23 @@ export default defineConfig({
 	base: '/Koine/',
 	// Emit clean, trailing-slash URLs so canonical links and the sitemap agree.
 	trailingSlash: 'always',
+	// Astro 7's default Markdown processor is "satteri", which does NOT run the
+	// legacy `markdown.remarkPlugins`/`rehypePlugins`/`remarkRehype` arrays — so
+	// `astro build` warns "your satteri processor doesn't run them" and the
+	// remark/rehype plugins (including astro-mermaid's) would silently stop on a
+	// future astro that drops the legacy path. Opt back into the `unified()`
+	// processor from `@astrojs/markdown-remark` (a direct dependency of both astro
+	// and @astrojs/starlight, so reliably resolvable): astro-mermaid and Starlight
+	// are both processor-aware and route their plugins onto this processor's
+	// options, and astro auto-migrates any integration still using the legacy
+	// arrays (today only starlight-blog's remark plugin) onto it too. This silences
+	// the satteri mismatch warning and keeps every plugin — mermaid included —
+	// running on the supported path. (A softer generic "legacy arrays are
+	// deprecated" notice still prints until starlight-blog adopts the processor API
+	// upstream; its plugin runs regardless via the auto-migration.)
+	markdown: {
+		processor: unified(),
+	},
 	integrations: [
 		// Render ```mermaid fences (emitted by the `docs` target) as live SVG diagrams with
 		// light/dark theme switching. MUST come before Starlight so its rehype pass claims the

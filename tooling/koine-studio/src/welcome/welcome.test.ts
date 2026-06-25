@@ -400,6 +400,33 @@ describe('mountHome (routed Home view)', () => {
   });
 });
 
+describe('mountHome — Resume editing control', () => {
+  test('with { canResume: true } renders a [data-action="resume"] control that fires onResume', () => {
+    const el = document.createElement('div');
+    const cb: WelcomeCallbacks = { ...makeCallbacks(), onResume: vi.fn() };
+    mountHome(el, cb, SAMPLE, true, { canResume: true });
+
+    const resume = el.querySelector<HTMLButtonElement>('[data-action="resume"]');
+    expect(resume).not.toBeNull();
+    expect(resume!.tagName).toBe('BUTTON');
+
+    resume!.click();
+    expect(cb.onResume).toHaveBeenCalledTimes(1);
+  });
+
+  test('without canResume (pristine Home) there is no resume control', () => {
+    const el = document.createElement('div');
+    mountHome(el, makeCallbacks(), SAMPLE);
+    expect(el.querySelector('[data-action="resume"]')).toBeNull();
+  });
+
+  test('with { canResume: false } there is no resume control', () => {
+    const el = document.createElement('div');
+    mountHome(el, makeCallbacks(), SAMPLE, true, { canResume: false });
+    expect(el.querySelector('[data-action="resume"]')).toBeNull();
+  });
+});
+
 // The search input is debounced; tests enable fake timers and flush the debounce window.
 function setSearch(root: HTMLElement, value: string): void {
   vi.useFakeTimers();

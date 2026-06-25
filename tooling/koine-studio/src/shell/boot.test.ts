@@ -87,4 +87,32 @@ describe('bootStudio — a single routed view (no IDE→Home flash)', () => {
     expect(ideInit).toHaveBeenCalledTimes(1);
     expect(root.querySelector('.koi-welcome')).toBeNull();
   });
+
+  it('a pristine Home offers no Resume-editing control (no session to resume yet)', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+
+    dispose = bootStudio(root); // pristine → Home, IDE never booted
+
+    expect(root.querySelector('.koi-welcome')).not.toBeNull();
+    expect(root.querySelector('[data-action="resume"]')).toBeNull();
+  });
+
+  it('once the editor has booted, returning Home offers a Resume-editing control that navigates back without re-initing', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+
+    dispose = bootStudio(root); // pristine → Home
+    appStore.getState().navigate('editor'); // boot the IDE (a session is now live)
+    expect(ideInit).toHaveBeenCalledTimes(1);
+
+    appStore.getState().navigate('home'); // brand → Home, with the session still alive behind the route
+    const resume = root.querySelector<HTMLButtonElement>('[data-action="resume"]');
+    expect(resume).not.toBeNull();
+
+    resume!.click();
+    expect(appStore.getState().route).toBe('editor'); // resumed into the live session
+    expect(ideInit).toHaveBeenCalledTimes(1); // resumed, not re-initialised
+    expect(root.querySelector('.koi-welcome')).toBeNull();
+  });
 });
