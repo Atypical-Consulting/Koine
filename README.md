@@ -32,8 +32,10 @@ compile one domain model to many targets. **C# is the primary, most complete tar
 **TypeScript** emitter ships (`--target typescript`), a **Python** emitter ships (`--target python` →
 dependency-free Python 3.11+, `mypy --strict`-clean; the tactical core *and* the strategic/CQRS layer
 — read models, queries, policies, state machines, context maps/ACL), a **PHP 8.1**
-emitter ships (`--target php` → dependency-free PHP 8.1, typed properties, readonly promoted properties; Phase 1
-covers the tactical core), a **Rust** emitter ships (`--target rust` → an idiomatic crate: value
+emitter ships (`--target php` → dependency-free PHP 8.1, typed properties, readonly promoted properties;
+the tactical core *and* the strategic/CQRS layer — read models, query handler seams, application
+services/use cases/operations, specifications, policies, context-map ACL translators and
+integration-event subscriber seams), a **Rust** emitter ships (`--target rust` → an idiomatic crate: value
 objects as structs with smart constructors returning `Result<_, DomainError>`, smart enums as Rust
 `enum`s matched exhaustively (with `Match`/`Switch`/`from_name`/`from_value` lookups), entities and
 aggregates with invariant-checked behaviors, factories that mint identities, domain events raised into
@@ -179,7 +181,7 @@ dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.k
 # transactional outbox, validation/transaction behaviors, a provider/composition helper)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target python --out ./generated_py --layers domain,infrastructure
 
-# Or to PHP 8.1 (Phase 1: tactical core — value objects, smart enums, entities, events, repositories)
+# Or to PHP 8.1 (tactical core + strategic/CQRS: read models, queries, services, policies, ACL)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target php --out ./generated_php
 
 # Or to Rust (multi-context + CQRS — an idiomatic crate; `cargo build` proves it compiles)
@@ -375,7 +377,7 @@ Koine.slnx
 │   │   │   ├── CSharp/     # CSharpEmitter (primary target)
 │   │   │   ├── TypeScript/ # TypeScriptEmitter
 │   │   │   ├── Python/     # PythonEmitter (tactical core + strategic/CQRS layer)
-│   │   │   ├── Php/        # PhpEmitter (Phase 1: tactical core, PHP 8.1)
+│   │   │   ├── Php/        # PhpEmitter (tactical core + strategic/CQRS layer, PHP 8.1)
 │   │   │   ├── Rust/       # RustEmitter (multi-context + CQRS read side)
 │   │   │   ├── Glossary/   # ubiquitous-language glossary
 │   │   │   ├── Docs/       # living documentation (Markdown + Mermaid diagrams)
@@ -562,8 +564,8 @@ as a CI gate). See the
 
 Koine is at **v0.17.x** and has shipped through **R1–R18** of the roadmap: the full tactical *and*
 strategic DDD toolkit, four more emitter targets (**TypeScript**, **Python**, **PHP 8.1**, and
-**Rust**) alongside C# — **PHP** at Phase 1 (tactical core), **Rust** now covering multi-context
-references and the CQRS read side — a **docs** target that emits living
+**Rust**) alongside C# — **PHP** now covering the tactical core *and* the strategic/CQRS layer,
+**Rust** now covering multi-context references and the CQRS read side — a **docs** target that emits living
 documentation (Markdown + Mermaid diagrams), the editor tooling (TextMate grammar,
 `koine lsp` language server, and the `fmt` / `init` / `watch` commands), and **model-as-spec
 coverage** (`koine coverage` proves declared == emitted and doubles as a CI gate, also exposed as the
