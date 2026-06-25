@@ -7,31 +7,24 @@ namespace Koine.Compiler.Tests.Conformance;
 /// <see cref="TestSupport.TypeCheckPhp"/> plumbing (write emitted <c>.php</c> → run
 /// <c>phpstan analyse --level max</c>) plus the always-on <see cref="TestSupport.SyntaxCheckPhp"/>
 /// (<c>php -l</c> over every emitted <c>.php</c> file) so it is ready to validate the PHP emitter
-/// as it lands. When no <c>phpstan</c>/<c>php</c> toolchain is present locally the type-check is
-/// reported as INCONCLUSIVE (a notice on the test output, no assertion) rather than failing —
-/// keeping <c>dotnet test</c> green without a PHP toolchain. It NEVER silently passes a real
-/// error: a real error is only assertable when <c>phpstan</c> is present, and then it IS asserted.
-/// CI is expected to provide the toolchain and therefore actually run the check.
+/// as it lands. When no <c>phpstan</c>/<c>php</c> toolchain is present locally the check is funneled
+/// through <see cref="TestSupport.RequireOrSkip"/>, which reports the test as <c>Skipped</c> (not a
+/// false Passed) — keeping <c>dotnet test</c> green without a PHP toolchain while surfacing the gap.
+/// It NEVER silently passes a real error: a real error is only assertable when <c>phpstan</c> is
+/// present, and then it IS asserted. CI sets <c>KOINE_REQUIRE_CONFORMANCE</c> and installs the
+/// toolchain, so a missing one there is a hard <c>Failed</c> rather than a silent skip.
 /// </summary>
-/// <remarks>
-/// Dynamic skip (<c>Assert.Skip</c>) is an xUnit v3 feature; on the v2 (2.9.x) runner here it is
-/// reported as a failure, so an absent toolchain is surfaced as a logged inconclusive notice.
-/// </remarks>
 public class PhpConformanceTests
 {
-    private readonly ITestOutputHelper _output;
-
-    public PhpConformanceTests(ITestOutputHelper output) => _output = output;
-
     private const string NoToolchainNotice =
-        "INCONCLUSIVE: no PHP toolchain (phpstan) available locally; type-check not run. " +
+        "No PHP toolchain (phpstan) available locally; type-check not run. " +
         "Install phpstan (or set KOINE_PHPSTAN) — CI runs this for real.";
 
     private const string NoInterpreterNotice =
-        "INCONCLUSIVE: no PHP interpreter available locally; syntax check not run. " +
+        "No PHP interpreter available locally; syntax check not run. " +
         "Install PHP (or set KOINE_PHP) — CI runs this for real.";
 
-    /// <summary>Clean, valid PHP must type-check (inconclusive if no toolchain).</summary>
+    /// <summary>Clean, valid PHP must type-check (skipped if no toolchain).</summary>
     [Fact]
     public void Harness_accepts_valid_php()
     {
@@ -46,11 +39,7 @@ public class PhpConformanceTests
         };
 
         var r = TestSupport.TypeCheckPhp(files);
-        if (!r.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
@@ -74,17 +63,18 @@ public class PhpConformanceTests
         };
 
         var r = TestSupport.TypeCheckPhp(files);
-        if (!r.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
 
         r.Ok.ShouldBeFalse();
         r.Errors.ShouldNotBeEmpty();
     }
 
-    /// <summary>A missing toolchain yields an inconclusive-shaped result rather than a false pass.</summary>
+    /// <summary>
+    /// The outcome contract <see cref="TestSupport.RequireOrSkip"/> relies on: a missing toolchain
+    /// yields a <see cref="TestSupport.PhpCheck.Skipped"/> result whose <c>ToolchainAvailable</c> and
+    /// <c>Ok</c> are both <c>false</c> (and no errors) — so it can never be mistaken for a real pass,
+    /// and the skip/fail branch is reached exactly when the toolchain is absent.
+    /// </summary>
     [Fact]
     public void Skipped_result_does_not_claim_success()
     {
@@ -95,8 +85,7 @@ public class PhpConformanceTests
 
     /// <summary>
     /// The always-on syntax gate: a valid PHP snippet must pass <c>php -l</c>.
-    /// Inconclusive (logged, not failed) only when no interpreter is present; with one it MUST
-    /// parse cleanly.
+    /// Skipped (not failed) only when no interpreter is present; with one it MUST parse cleanly.
     /// </summary>
     [Fact]
     public void Syntax_check_parses_valid_php()
@@ -115,11 +104,7 @@ public class PhpConformanceTests
         };
 
         var r = TestSupport.SyntaxCheckPhp(files);
-        if (!r.ToolchainAvailable)
-        {
-            _output.WriteLine(NoInterpreterNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoInterpreterNotice);
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }

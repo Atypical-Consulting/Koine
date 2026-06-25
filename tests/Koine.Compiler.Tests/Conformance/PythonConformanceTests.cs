@@ -9,31 +9,24 @@ namespace Koine.Compiler.Tests.Conformance;
 /// <see cref="TestSupport.TypeCheckPython"/> plumbing (write emitted <c>.py</c> → run
 /// <c>mypy --strict</c>) plus the always-on <see cref="TestSupport.SyntaxCheckPython"/>
 /// (<c>ast.parse</c> over every emitted module) so it is ready to validate the Python emitter as it
-/// lands. When no <c>mypy</c>/Python toolchain is present locally the type-check is reported as
-/// INCONCLUSIVE (a notice on the test output, no assertion) rather than failing — keeping
-/// <c>dotnet test</c> green without a Python toolchain. It NEVER silently passes a real error: a real
-/// error is only assertable when <c>mypy</c> is present, and then it IS asserted. CI is expected to
-/// provide the toolchain and therefore actually run the check.
+/// lands. When no <c>mypy</c>/Python toolchain is present locally the check is funneled through
+/// <see cref="TestSupport.RequireOrSkip"/>, which reports the test as <c>Skipped</c> (not a false
+/// Passed) — keeping <c>dotnet test</c> green without a Python toolchain while surfacing the gap. It
+/// NEVER silently passes a real error: a real error is only assertable when <c>mypy</c> is present,
+/// and then it IS asserted. CI sets <c>KOINE_REQUIRE_CONFORMANCE</c> and installs the toolchain, so a
+/// missing one there is a hard <c>Failed</c> rather than a silent skip.
 /// </summary>
-/// <remarks>
-/// Dynamic skip (<c>Assert.Skip</c>) is an xUnit v3 feature; on the v2 (2.9.x) runner here it is
-/// reported as a failure, so an absent toolchain is surfaced as a logged inconclusive notice.
-/// </remarks>
 public class PythonConformanceTests
 {
-    private readonly ITestOutputHelper _output;
-
-    public PythonConformanceTests(ITestOutputHelper output) => _output = output;
-
     private const string NoToolchainNotice =
-        "INCONCLUSIVE: no Python toolchain (mypy) available locally; type-check not run. " +
+        "No Python toolchain (mypy) available locally; type-check not run. " +
         "Install mypy (or set KOINE_MYPY) — CI runs this for real.";
 
     private const string NoInterpreterNotice =
-        "INCONCLUSIVE: no Python interpreter available locally; syntax check not run. " +
+        "No Python interpreter available locally; syntax check not run. " +
         "Install Python 3.11+ (or set KOINE_PYTHON) — CI runs this for real.";
 
-    /// <summary>Clean, <c>--strict</c>-correct Python must type-check (inconclusive if no toolchain).</summary>
+    /// <summary>Clean, <c>--strict</c>-correct Python must type-check (skipped if no toolchain).</summary>
     [Fact]
     public void Harness_accepts_well_typed_python()
     {
@@ -43,11 +36,7 @@ public class PythonConformanceTests
         };
 
         var r = TestSupport.TypeCheckPython(files);
-        if (!r.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
@@ -66,17 +55,17 @@ public class PythonConformanceTests
         };
 
         var r = TestSupport.TypeCheckPython(files);
-        if (!r.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
 
         r.Ok.ShouldBeFalse();
         r.Errors.ShouldNotBeEmpty();
     }
 
-    /// <summary>A missing toolchain yields an inconclusive-shaped result rather than a false pass.</summary>
+    /// <summary>
+    /// The outcome contract <see cref="TestSupport.RequireOrSkip"/> relies on: a missing toolchain
+    /// yields a <see cref="TestSupport.PythonCheck.Skipped"/> result whose <c>ToolchainAvailable</c> and
+    /// <c>Ok</c> are both <c>false</c> — so it can never be mistaken for a real pass.
+    /// </summary>
     [Fact]
     public void Skipped_result_does_not_claim_success()
     {
@@ -87,8 +76,8 @@ public class PythonConformanceTests
 
     /// <summary>
     /// The always-on syntax gate: a snippet using 3.11+ syntax (a <c>match</c> statement and a
-    /// PEP&#160;604 <c>int | None</c> union) must parse via <c>ast.parse</c>. Inconclusive (logged,
-    /// not failed) only when no interpreter is present; with one it MUST parse cleanly.
+    /// PEP&#160;604 <c>int | None</c> union) must parse via <c>ast.parse</c>. Skipped (not failed)
+    /// only when no interpreter is present; with one it MUST parse cleanly.
     /// </summary>
     [Fact]
     public void Syntax_check_parses_well_formed_python()
@@ -105,11 +94,7 @@ public class PythonConformanceTests
         };
 
         var r = TestSupport.SyntaxCheckPython(files);
-        if (!r.ToolchainAvailable)
-        {
-            _output.WriteLine(NoInterpreterNotice);
-            return;
-        }
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoInterpreterNotice);
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
@@ -119,7 +104,7 @@ public class PythonConformanceTests
     /// fixture must parse (<c>ast.parse</c>) and type-check cleanly under <c>mypy --strict</c>. In this
     /// task only the regular value objects emit (the quantity/enum/entity/event constructs land
     /// later), so the tree is the runtime + root files + value-object modules + their <c>__init__.py</c>s
-    /// — and it must be dangling-import-free and strict-clean. Inconclusive (logged, not failed) only
+    /// — and it must be dangling-import-free and strict-clean. Skipped (not failed) only
     /// when no toolchain is present; with one it MUST pass with zero diagnostics.
     /// </summary>
     [Fact]
@@ -129,22 +114,11 @@ public class PythonConformanceTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         TestSupport.PythonCheck syntax = TestSupport.SyntaxCheckPython(result.Files);
-        if (!syntax.ToolchainAvailable)
-        {
-            _output.WriteLine(NoInterpreterNotice);
-        }
-        else
-        {
-            syntax.Ok.ShouldBeTrue("emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
-        }
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
 
         TestSupport.PythonCheck types = TestSupport.TypeCheckPython(result.Files);
-        if (!types.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
-
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
         types.Ok.ShouldBeTrue("emitted Python should type-check under mypy --strict:\n" + string.Join("\n", types.Errors));
     }
 
@@ -316,22 +290,11 @@ public class PythonConformanceTests
 
         // Also gate with the toolchain: syntax + mypy --strict must pass.
         TestSupport.PythonCheck syntax = TestSupport.SyntaxCheckPython(result.Files);
-        if (!syntax.ToolchainAvailable)
-        {
-            _output.WriteLine(NoInterpreterNotice);
-        }
-        else
-        {
-            syntax.Ok.ShouldBeTrue("emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
-        }
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
 
         TestSupport.PythonCheck types = TestSupport.TypeCheckPython(result.Files);
-        if (!types.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
-
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
         types.Ok.ShouldBeTrue("emitted Python should type-check under mypy --strict:\n" + string.Join("\n", types.Errors));
     }
 
@@ -434,7 +397,7 @@ public class PythonConformanceTests
     /// Issue #241 acceptance: the full emitted set for a multi-aggregate context with a declarative finder
     /// — domain + the opt-in Infrastructure layer (concrete repository impls over the in-memory store, the
     /// unit of work, the pipeline behaviors and the provider) — must parse and type-check under
-    /// <c>mypy --strict</c>. Inconclusive (logged, not failed) only when no toolchain is present.
+    /// <c>mypy --strict</c>. Skipped (not failed) only when no toolchain is present.
     /// </summary>
     [Fact]
     public void Emitted_infrastructure_typechecks_under_strict()
@@ -450,7 +413,7 @@ public class PythonConformanceTests
     /// <summary>
     /// Issue #241: a publishing context's infrastructure (the transactional outbox + dispatcher and the
     /// provider that wires them, plus the enqueue-on-save unit of work) must also parse and type-check
-    /// under <c>mypy --strict</c>. Inconclusive (logged, not failed) when no toolchain is present.
+    /// under <c>mypy --strict</c>. Skipped (not failed) when no toolchain is present.
     /// </summary>
     [Fact]
     public void Emitted_publishing_infrastructure_typechecks_under_strict()
@@ -473,27 +436,16 @@ public class PythonConformanceTests
 
     /// <summary>
     /// Runs the always-on syntax gate and the mypy <c>--strict</c> type-check over the emitted tree.
-    /// Inconclusive (logged, not failed) when no toolchain is present; with one, BOTH must pass.
+    /// Skipped (not failed) when no toolchain is present; with one, BOTH must pass.
     /// </summary>
-    private void AssertStrictlyTypeChecks(IReadOnlyList<EmittedFile> files)
+    private static void AssertStrictlyTypeChecks(IReadOnlyList<EmittedFile> files)
     {
         TestSupport.PythonCheck syntax = TestSupport.SyntaxCheckPython(files);
-        if (!syntax.ToolchainAvailable)
-        {
-            _output.WriteLine(NoInterpreterNotice);
-        }
-        else
-        {
-            syntax.Ok.ShouldBeTrue("emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
-        }
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
 
         TestSupport.PythonCheck types = TestSupport.TypeCheckPython(files);
-        if (!types.ToolchainAvailable)
-        {
-            _output.WriteLine(NoToolchainNotice);
-            return;
-        }
-
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
         types.Ok.ShouldBeTrue("emitted Python should type-check under mypy --strict:\n" + string.Join("\n", types.Errors));
     }
 }
