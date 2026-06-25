@@ -64,3 +64,39 @@ for should-not entries. Treat run-to-run flakiness with `--runs-per-query ≥ 3`
 
 To re-check after a description edit: re-run the affected skill's set and compare `recall` /
 `specificity` against the committed baseline in [`results/`](results).
+
+## Baseline
+
+Captured with `--runs-per-query 3`, threshold 0.5 (full data in [`results/`](results); summary in
+[`results/baseline.json`](results/baseline.json)). A description edit that moves any of these is the
+signal to look at.
+
+| Skill | Queries | Pass | Recall (should-trigger) | Specificity (should-not) |
+|-------|--------:|-----:|:-----------------------:|:------------------------:|
+| `create-issue`     | 18 | 18/18 | 1.0 | 1.0 |
+| `implement-issue`  | 18 | 18/18 | 1.0 | 1.0 |
+| `merge-pr`         | 18 | 18/18 | 1.0 | 1.0 |
+| `get-repo-profile` | 18 | 18/18 | 1.0 | 1.0 |
+
+Specificity is *real*, not just "nothing fired": each near-miss negative fires the **expected sibling**
+skill (e.g. `implement issue 47` → `implement-issue`, `file an issue …` → `create-issue`,
+`set up the repo profile` → `get-repo-profile`), recorded in each result's `fired` histogram.
+
+## The `implement-issue` ↔ `merge-pr` boundary (#370)
+
+The deliberately-close boundary #370's description edits targeted — sync an **in-flight** PR
+(→ `implement-issue`) vs sync **as part of landing** (→ `merge-pr`) — is measured by
+[`boundary-trigger-eval.json`](boundary-trigger-eval.json), run against **both** skills
+([`results/boundary-implement-issue.json`](results/boundary-implement-issue.json),
+[`results/boundary-merge-pr.json`](results/boundary-merge-pr.json)):
+
+| Intent framing | Example | Fires | Result |
+|----------------|---------|-------|--------|
+| **In-flight** ("still building it, sync the branch / rebase / keep it mergeable") | *"rebase my in-flight feature branch on main and resolve the conflicts while I keep adding tasks"* | `implement-issue` | 3/3 ✓ |
+| **Land-now** ("merge it now, resolve conflicts as part of landing / squash-merge") | *"land #281: fix the conflicts with main and squash-merge it"* | `merge-pr` | 3/3 ✓ |
+
+All six framings resolve to exactly one skill, 3/3 each — **#370's edits cleanly separate the two
+intents.** The genuinely *unmarked* query (no in-flight/land-now cue), `"the PR conflicts with main,
+fix it"`, defaults to **`implement-issue`** (the sync interpretation) — `merge-pr` never fired for it —
+so a bare "fix the conflicts" never accidentally *lands* a PR. No description gap found; no follow-up
+needed.
