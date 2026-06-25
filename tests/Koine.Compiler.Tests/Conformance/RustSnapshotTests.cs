@@ -700,6 +700,77 @@ public class RustSnapshotTests
     }
 
     // ------------------------------------------------------------------
+    // Factory event-collector local vs. a factory parameter (issue #325, a #314 follow-up).
+    // The factory builds its creation events into a `let <collector>: Vec<DomainEvent> = …` local
+    // and assigns it after `Self::new`. `<collector>` is the entity-wide synthetic field name —
+    // which dodges member/command/factory *names* but NOT a factory *parameter* whose snake_case
+    // equals it. When a member named `events` forces the collector to `domain_events` AND a factory
+    // parameter also snake_cases to `domain_events`, the `let domain_events` binding shadows the
+    // parameter for the rest of the body: `Self::new(…)` then sees the Vec, not the param (rustc
+    // E0308). The collector *local* must take a name no factory parameter can shadow.
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// A member named <c>events</c> forces the collector to <c>domain_events</c>; the factory's
+    /// <c>domainEvents</c> parameter snake_cases to the same — and is used both in the emit payload
+    /// and a field initialization (so it must survive into <c>Self::new(…)</c>).
+    /// </summary>
+    private const string FactoryParamShadowsCollectorFixture = """
+        context Reservations {
+          event OrderOpened { bookingId: BookingId  count: Int }
+          aggregate Bookings root Booking {
+            entity Booking identified by BookingId {
+              events: List<String>?
+              count:  Int
+              create open(domainEvents: Int) {
+                count -> domainEvents
+                emit OrderOpened(bookingId: id, count: domainEvents)
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Rust_factory_event_collector_local_does_not_shadow_a_factory_parameter()
+    {
+        var result = new KoineCompiler().Compile(FactoryParamShadowsCollectorFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var reservations = result.Files.Single(f => f.RelativePath.EndsWith("reservations.rs", StringComparison.Ordinal)).Contents;
+        // The public field/accessors keep the entity-wide synthetic name (`domain_events`) — the fix
+        // does not churn the struct shape, only the factory's local.
+        reservations.ShouldContain("\n    domain_events: Vec<DomainEvent>,");
+        reservations.ShouldContain("pub fn domain_events(&self) -> &[DomainEvent]");
+        reservations.ShouldContain("pub fn drain_domain_events(&mut self) -> Vec<DomainEvent>");
+        // The factory parameter snake_cases to `domain_events`...
+        reservations.ShouldContain("pub fn open(domain_events: i64) -> Result<Self, DomainError>");
+        // ...so the collector *local* must be disambiguated away from it (else the `let` shadows the
+        // param). It lands on a numbered, unique name.
+        reservations.ShouldContain("let domain_events_2: Vec<DomainEvent> = vec![");
+        reservations.ShouldContain("instance.domain_events = domain_events_2;");
+        // The unshadowed parameter survives into the emit payload AND the smart constructor.
+        reservations.ShouldContain("OrderOpened::new(id.clone(), domain_events))");
+        reservations.ShouldContain("let mut instance = Self::new(id, None, domain_events)?;");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Rust_factory_event_collector_local_shadow_model_compiles()
+    {
+        var result = new KoineCompiler().Compile(FactoryParamShadowsCollectorFixture, new RustEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        // With the shadow bug, `Self::new(id, None, domain_events)` passes the `Vec<DomainEvent>` local
+        // where an `i64` is expected — a rustc E0308 the compile gate catches when a toolchain is present.
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    // ------------------------------------------------------------------
     // Smart-enum API (issue #173, Task 5). Every Koine enum gains the Rust analogue of the
     // C# TryFromName/TryFromValue + Match/Switch: non-throwing `from_name`/`from_value`
     // lookups returning `Option`, and exhaustive `match_`/`switch` folds dispatched by a

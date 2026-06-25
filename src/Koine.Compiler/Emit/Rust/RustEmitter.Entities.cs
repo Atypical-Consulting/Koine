@@ -356,10 +356,16 @@ public sealed partial class RustEmitter
         }
 
         // 3. Creation events, built from the id + params *before* they are moved into the constructor.
+        // The collector *local* must not be named after a factory parameter (the entity-wide
+        // `eventsField` dodges member/command/factory names but not parameter names): a `let
+        // <eventsField>` that shadows a same-named parameter would make the subsequent `Self::new(…)`
+        // and `instance.<eventsField> = …` read the Vec local instead of the parameter (issue #325).
         var emits = factory.Body.OfType<EmitClause>().ToList();
+        var eventsLocal = RustNaming.FactoryEventsLocal(
+            eventsField, factory.Parameters.Select(p => RustNaming.Field(p.Name)));
         if (emits.Count > 0)
         {
-            body.Append(Indent).Append(Indent).Append("let ").Append(eventsField).Append(": Vec<DomainEvent> = vec![\n");
+            body.Append(Indent).Append(Indent).Append("let ").Append(eventsLocal).Append(": Vec<DomainEvent> = vec![\n");
             foreach (EmitClause emitClause in emits)
             {
                 if (BuildEmitExpression(emit, emitClause, translator, typeMapper) is { } expr)
@@ -376,7 +382,7 @@ public sealed partial class RustEmitter
         if (emits.Count > 0)
         {
             body.Append(Indent).Append(Indent).Append("let mut instance = Self::new(").Append(ctorArgs).Append(")?;\n");
-            body.Append(Indent).Append(Indent).Append("instance.").Append(eventsField).Append(" = ").Append(eventsField).Append(";\n");
+            body.Append(Indent).Append(Indent).Append("instance.").Append(eventsField).Append(" = ").Append(eventsLocal).Append(";\n");
             body.Append(Indent).Append(Indent).Append("Ok(instance)\n");
         }
         else
