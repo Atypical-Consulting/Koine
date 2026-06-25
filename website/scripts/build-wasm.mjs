@@ -2,6 +2,11 @@
 // into website/public/koine-wasm/ so Astro serves it as a static asset and bundles it into
 // dist/. Run via `npm run build:wasm`; invoked automatically by predev/prebuild.
 //
+// The published _framework/* assets are cache-first served by the Playground service worker
+// (public/koine-sw.js), keyed on the boot manifest's content hash, for instant repeat loads +
+// offline on GitHub Pages (which can't set Cache-Control/Brotli headers). See issue #328 and
+// src/playground/koine-wasm-caching.md.
+//
 // Cross-platform (Windows/Linux CI). No deps beyond Node's stdlib.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, cpSync, readdirSync, statSync } from 'node:fs';
