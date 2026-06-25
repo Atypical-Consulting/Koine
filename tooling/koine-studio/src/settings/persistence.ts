@@ -66,6 +66,10 @@ export interface Settings {
   /** LLM ghost-text completions in the editor (#263). Off by default — predicting while you type spends
    *  API tokens on every idle pause, so it stays opt-in and no-ops when no provider is configured. */
   aiInlineCompletions: boolean;
+  /** Constrain/guarantee the assistant's generated `.koi` parses (#257). On by default: grammar-capable
+   *  local models are decode-constrained to the Koine grammar; other providers validate-and-repair the
+   *  candidate before "Apply to editor" is enabled, so unparseable text can never be applied. */
+  aiConstrainGrammar: boolean;
   /** Whether the local MCP server (desktop sidecar) is enabled. Opt-in: no background server unless on. */
   mcpEnabled: boolean;
   /** Which client the Settings → MCP setup recipe is shown for. */
@@ -92,6 +96,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiModelOpenai: '',
   aiAgenticTools: false,
   aiInlineCompletions: false,
+  aiConstrainGrammar: true,
   mcpEnabled: false,
   mcpClient: 'lm-studio',
   previewTarget: 'csharp',
@@ -258,6 +263,10 @@ export function loadSettings(): Settings {
         typeof parsed.aiInlineCompletions === 'boolean'
           ? parsed.aiInlineCompletions
           : DEFAULT_SETTINGS.aiInlineCompletions,
+      aiConstrainGrammar:
+        typeof parsed.aiConstrainGrammar === 'boolean'
+          ? parsed.aiConstrainGrammar
+          : DEFAULT_SETTINGS.aiConstrainGrammar,
       mcpEnabled: typeof parsed.mcpEnabled === 'boolean' ? parsed.mcpEnabled : DEFAULT_SETTINGS.mcpEnabled,
       mcpClient: coerceMcpClient(parsed.mcpClient),
       previewTarget: coercePreviewTarget(parsed.previewTarget),

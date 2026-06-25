@@ -4,6 +4,7 @@
 import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from '@/host/types';
 import { WasmLspTransport } from '@/host/browser/transport';
 import { runWasmTool } from '@/host/browser/tools';
+import { loadWasmApi } from '@/host/browser/wasm';
 import * as fs from '@/host/browser/fs';
 import { saveMetaFor } from '@/host/saveMeta';
 
@@ -41,6 +42,13 @@ export class BrowserPlatform implements Platform {
   // The Assistant's koine tools run in-process against the resident Koine.Wasm compiler.
   runCompilerTool(name: string, argsJson: string): Promise<string> {
     return runWasmTool(name, argsJson);
+  }
+
+  // The GBNF grammar for grammar-constrained decoding (#257) comes straight from the resident
+  // Koine.Wasm module's `GbnfGrammar()` export. Browser-host only — the desktop host omits this.
+  async gbnfGrammar(): Promise<string> {
+    const api = await loadWasmApi();
+    return api.GbnfGrammar();
   }
 
   openExternal(url: string): void {

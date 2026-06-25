@@ -203,6 +203,7 @@ the deployed web playground.
 
 ## See also
 
+- [Local LLM in the Assistant](/Koine/guides/assistant-local-llm/) — point the built-in Assistant at a local model, and how grammar-constrained generation keeps its output valid `.koi`.
 - [Editor tooling](/Koine/guides/editor-tooling/) — the TextMate grammar, `koine lsp`, and the VS Code extension.
 - [CLI reference](/Koine/guides/cli/) — `koine build` and `koine check`, which share the server's parser and validator.
 - [Reading the generated C#](/Koine/start/reading-the-output/) — what the emitted-code preview shows you.

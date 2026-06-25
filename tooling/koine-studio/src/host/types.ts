@@ -137,6 +137,15 @@ export interface Platform {
   runCompilerTool?(name: string, argsJson: string): Promise<string>;
 
   /**
+   * The llama.cpp GBNF grammar for constrained `.koi` decoding (issue #257), used to constrain a
+   * grammar-capable local model so the assistant's generated model can only parse. Browser-host ONLY:
+   * the in-process Koine.Wasm module exposes `GbnfGrammar()`, so the web host implements this; the
+   * desktop host routes interop differently and omits it, in which case the Assistant falls back to
+   * validate-and-repair. Optional so a host that can't derive the grammar simply leaves it off.
+   */
+  gbnfGrammar?(): Promise<string>;
+
+  /**
    * Open an absolute http(s) URL in the user's default browser. In the browser host this is a new
    * tab; on the desktop it hands off to the OS via the opener plugin (a normal `<a>` navigation
    * would otherwise try to load the page inside the Tauri webview). Used by the About dialog's

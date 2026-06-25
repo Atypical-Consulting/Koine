@@ -944,6 +944,9 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
 
   const aiAgenticTools = toggle('Compiler tools', (on) => commit({ aiAgenticTools: on }));
   const aiInlineCompletions = toggle('AI inline completions', (on) => commit({ aiInlineCompletions: on }));
+  const aiConstrainGrammar = toggle('Constrain AI output to the Koine grammar', (on) =>
+    commit({ aiConstrainGrammar: on }),
+  );
 
   const baseUrlRow = row('Base URL', 'Endpoint for the OpenAI-compatible provider.', aiBaseUrlInput);
   const agenticToolsRow = row(
@@ -955,6 +958,11 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     'AI inline completions',
     'Predict the next line as ghost text while you type; Tab accepts, Esc dismisses. Off by default — it sends the surrounding buffer to the provider above on each idle pause, so it spends tokens and no-ops without a configured provider.',
     aiInlineCompletions.el,
+  );
+  const constrainGrammarRow = row(
+    'Constrain AI output to the Koine grammar',
+    "Guarantee the assistant's generated .koi parses: grammar-capable local models are constrained to the Koine grammar, while other providers validate-and-repair the model before Apply is enabled.",
+    aiConstrainGrammar.el,
   );
   function syncProviderFields(): void {
     const isOpenai = aiProviderSelect.value === 'openai';
@@ -995,6 +1003,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     row('Model', 'The model id the assistant requests.', aiModelInput),
     agenticToolsRow,
     inlineCompletionsRow,
+    constrainGrammarRow,
     presets,
   );
 
@@ -1414,6 +1423,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     aiModelInput.value = s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
     aiAgenticTools.set(s.aiAgenticTools);
     aiInlineCompletions.set(s.aiInlineCompletions);
+    aiConstrainGrammar.set(s.aiConstrainGrammar);
     mcpEnableToggle.set(s.mcpEnabled);
     mcpClientSelect.value = s.mcpClient;
     renderRecipe();
