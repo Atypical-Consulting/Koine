@@ -65,7 +65,7 @@ jobs:
       # `mypy --strict` (type-check) over emitted Python. ResolvePython() prefers python3.13
       # (KOINE_PYTHON overrides); ResolveMypy() finds `mypy` on PATH (KOINE_MYPY overrides).
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.14'
 
