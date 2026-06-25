@@ -39,6 +39,7 @@ import {
   type Settings,
 } from '@/settings/persistence';
 import { createWelcome } from '@/welcome/welcome';
+import { takeStartIntent, type StartIntent } from '@/shell/bootIntent';
 import { type Template } from '@/welcome/templates';
 import { createCommandPalette, type Command } from '@/shared/palette';
 import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
@@ -1125,11 +1126,14 @@ export function init(): () => void {
     history.noteEdit({ immediate: true });
   });
 
-  // Boot/empty-state: open the host's persistent default workspace, then surface the welcome overlay
-  // only when it is pristine (a single untouched SEED model). The clearLegacyScratch + the OPFS-error
-  // output line are ide-specific, so they wrap workspace.openDefaultWorkspaceFlow here.
+  // Boot/empty-state: open the host's persistent default workspace. The clearLegacyScratch + the
+  // OPFS-error output line are ide-specific, so they wrap workspace.openDefaultWorkspaceFlow here.
+  // NOTE: this no longer surfaces the welcome screen. Home is now a distinct route (#368) mounted by
+  // the boot switch (main.ts) — the IDE only runs on the editor route, so a pristine boot lands on the
+  // Home route and never paints the editor first. Showing the welcome overlay here is exactly the
+  // async-gated, post-paint reveal that caused the IDE→Home flash, so it's gone.
   async function openDefaultWorkspaceFlow(seed: string): Promise<void> {
-    const { opened, pristineSeed } = await workspace.openDefaultWorkspaceFlow(seed);
+    const { opened } = await workspace.openDefaultWorkspaceFlow(seed);
     if (!opened) {
       // The browser now falls back to an in-memory workspace, so this only fires if even that failed
       // (or a host that genuinely can't back one). An honest message beats a blank editor.
@@ -1142,7 +1146,28 @@ export function init(): () => void {
     // No-OPFS browsers (Safari / Firefox Private) run on the in-memory fallback: the editor + compiler
     // work, but a reload loses everything. Warn once so the user exports their work rather than losing it.
     if (!platform.persistsWorkspace) showMemoryOnlyBanner();
-    if (pristineSeed && pristineSeed.text === SEED) welcome.show();
+  }
+
+  // Perform the action the user chose on the Home route (#368), handed across via the start-intent.
+  // These reuse the same action functions the in-editor start console wires, so a Home "Open folder"
+  // behaves exactly like the editor's own — there's no second code path to keep in sync. No unsaved
+  // work can exist at a fresh boot, so these skip the confirm-and-replace guard the in-editor versions
+  // apply (newModel directly, not requestNewModel).
+  async function runStartIntent(intent: StartIntent): Promise<void> {
+    switch (intent.kind) {
+      case 'new':
+        await newModel();
+        break;
+      case 'open-folder':
+        await openFolder();
+        break;
+      case 'open-recent':
+        await openRecentFolder(intent.path);
+        break;
+      case 'open-example':
+        await openExample(intent.template);
+        break;
+    }
   }
 
   // A one-time, dismissible top banner shown when the workspace is memory-only (no OPFS) — so work
@@ -1318,10 +1343,12 @@ export function init(): () => void {
     }
   }
 
-  // Reopen the start screen ("home"). Non-destructive: it's an overlay over the current model, so
-  // showing it loses nothing — only its actions navigate. Wired to the brand logo and the palette.
+  // Return to the Home route (#368): Home and the editor are distinct routes now, so "back to start"
+  // navigates rather than popping an overlay over the editor. The boot switch (main.ts) swaps #app out
+  // and mounts the Home view; the editor stays initialised behind it for an instant return. Wired to
+  // the brand logo and the palette.
   function goHome(): void {
-    welcome.show();
+    appStore.getState().navigate('home');
   }
 
   // A start-screen action that swaps the workspace. Confirms unsaved work first. On cancel we do
@@ -2046,13 +2073,31 @@ export function init(): () => void {
           clearModelHash();
         }
       } else {
-        await openDefaultWorkspaceFlow(legacyScratch ?? SEED);
+        // A start action chosen on the Home route (#368) is queued as a one-shot intent and performed
+        // here, once, instead of opening the default workspace. A plain editor boot (cold `#/editor`
+        // deep link, or a returning user) has no intent and falls back to the default workspace.
+        const intent = takeStartIntent();
+        if (intent) await runStartIntent(intent);
+        else await openDefaultWorkspaceFlow(legacyScratch ?? SEED);
       }
     })
     .catch((e) => {
       setStatus('connection failed', 'error');
       output.setContent('// failed to start language server\n' + String(e), 'plain');
     });
+
+  // The IDE shell boots once and stays alive across Home↔Editor route swaps (main.ts toggles
+  // visibility, it doesn't re-init). The boot ladder above consumes a start-intent only on that first
+  // boot — so a start action taken on a *return* visit to Home (which navigates back here without
+  // re-initing) would otherwise be dropped. Consume any queued intent on every later transition INTO
+  // the editor route. The first transition already happened before this listener exists (init() runs
+  // synchronously from the navigate that flipped the route), so it never double-fires with the ladder.
+  const unsubRouteIntent = appStore.subscribe((s, prev) => {
+    if (s.route === 'editor' && prev.route !== 'editor') {
+      const intent = takeStartIntent();
+      if (intent) void runStartIntent(intent);
+    }
+  });
 
   // A teardown the host can call to release the IDE's deferred work. Production (main.ts) runs for the
   // page lifetime and ignores it; the test suite calls it between boots so the controller's pending
@@ -2061,5 +2106,6 @@ export function init(): () => void {
   return () => {
     controller.dispose();
     workspace.setAutoSave(false);
+    unsubRouteIntent();
   };
 }

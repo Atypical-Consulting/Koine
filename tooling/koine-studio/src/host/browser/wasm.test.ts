@@ -1,5 +1,19 @@
 import { describe, expect, test, vi, beforeEach } from 'vitest';
-import { guardWasmSurface } from '@/host/browser/wasm';
+import { guardWasmSurface, HOST_DECLARED_EXPORTS } from '@/host/browser/wasm';
+
+// A faithful Capabilities() payload (issue #330): loadWasmApi queries it at boot to build its forward
+// set. Reporting the full expected surface keeps the worker-proxy tests on the happy boot path (no
+// staleness warning) while exercising the real Capabilities-driven path rather than the fallback.
+const CAPABILITIES_JSON = JSON.stringify({
+  version: '9.9.9-test',
+  exports: [...HOST_DECLARED_EXPORTS],
+  targets: [],
+});
+
+/** A client.call() implementation that answers `Capabilities` with the faithful payload, else `canned`. */
+function withCapabilities(canned: string) {
+  return (method: string) => Promise.resolve(method === 'Capabilities' ? CAPABILITIES_JSON : canned);
+}
 
 // ---------------------------------------------------------------------------
 // guardWasmSurface — existing tests (unchanged)
@@ -16,7 +30,8 @@ describe('guardWasmSurface', () => {
 
   // Reproduces the reported bug: a stale public/koine-wasm/ bundle (built before #67) has no
   // GlossaryModel export, so `api.GlossaryModel(...)` would otherwise blow up with the cryptic
-  // "TypeError: api.GlossaryModel is not a function". The guard turns it into a fix-me message.
+  // "TypeError: api.GlossaryModel is not a function". The guard turns it into a fix-me message: the
+  // name is host-declared (a method this studio calls — HOST_DECLARED_EXPORTS) but absent on the bundle.
   test('a missing export throws an actionable rebuild message instead of a raw TypeError', () => {
     const api = guardWasmSurface({ Glossary: () => '{}' });
 
@@ -69,7 +84,7 @@ describe('loadWasmApi — worker proxy', () => {
 
   test('resolves to a proxy that forwards a known method to client.call and returns the result', async () => {
     const mockCall = vi.fn<(method: string, args: unknown[]) => Promise<string>>();
-    mockCall.mockResolvedValue('{"ok":true}');
+    mockCall.mockImplementation(withCapabilities('{"ok":true}'));
 
     const { createKoineWorkerClient } = await import('@/host/browser/workerClient');
     (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -82,14 +97,20 @@ describe('loadWasmApi — worker proxy', () => {
     const api = await loadWasmApi();
     const result = await api.DiagnoseWorkspace('[]');
 
+    expect(mockCall).toHaveBeenCalledWith('Capabilities', []); // surface verified at boot (#330)
     expect(mockCall).toHaveBeenCalledWith('DiagnoseWorkspace', ['[]']);
     expect(result).toBe('{"ok":true}');
   });
 
   test('a known export the worker rejects as missing still throws the stale-bundle message', async () => {
     const mockCall = vi.fn<(method: string, args: unknown[]) => Promise<string>>();
-    // The worker throws: 'Koine WASM export "GlossaryModel" is not a function'
-    mockCall.mockRejectedValue(new Error('Koine WASM export "GlossaryModel" is not a function'));
+    // The worker throws for every call EXCEPT the boot-time Capabilities() probe (which must resolve so
+    // the surface verifies): 'Koine WASM export "GlossaryModel" is not a function'.
+    mockCall.mockImplementation((method) =>
+      method === 'Capabilities'
+        ? Promise.resolve(CAPABILITIES_JSON)
+        : Promise.reject(new Error('Koine WASM export "GlossaryModel" is not a function')),
+    );
 
     const { createKoineWorkerClient } = await import('@/host/browser/workerClient');
     (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -105,7 +126,7 @@ describe('loadWasmApi — worker proxy', () => {
 
   test('non-export string props (then) pass through so the resolved proxy is not a fake thenable', async () => {
     const mockCall = vi.fn<(method: string, args: unknown[]) => Promise<string>>();
-    mockCall.mockResolvedValue('{}');
+    mockCall.mockImplementation(withCapabilities('{}'));
 
     const { createKoineWorkerClient } = await import('@/host/browser/workerClient');
     (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -121,15 +142,15 @@ describe('loadWasmApi — worker proxy', () => {
     expect(resolved).toBe(api);
   });
 
-  // Regression: the worker proxy forwards a method ONLY when its name is in KOINE_WASM_EXPORTS, so a
-  // KoineWasmApi method missing from that set silently resolves to `undefined` and breaks at runtime.
-  // Model / ModelMembers / EmitKoine / ApplyModelEdit (the #91 structured-editor LSP backend) were
-  // absent from the set; assert each now forwards to the worker client like any other export.
+  // Regression: the worker proxy forwards a method ONLY when its name is in the bundle's boot-reported
+  // export set (#330; previously the hand-maintained KOINE_WASM_EXPORTS), so a method the bundle doesn't
+  // report silently resolves to `undefined` and breaks at runtime. Model / ModelMembers / EmitKoine /
+  // ApplyModelEdit (the #91 structured-editor LSP backend) were once absent; assert each still forwards.
   test.each(['Model', 'ModelMembers', 'EmitKoine', 'ApplyModelEdit'] as const)(
     'forwards %s through the worker client (was previously dropped by the proxy)',
     async (method) => {
       const mockCall = vi.fn<(method: string, args: unknown[]) => Promise<string>>();
-      mockCall.mockResolvedValue('{"ok":true}');
+      mockCall.mockImplementation(withCapabilities('{"ok":true}'));
 
       const { createKoineWorkerClient } = await import('@/host/browser/workerClient');
       (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({

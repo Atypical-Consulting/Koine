@@ -16,6 +16,24 @@
   }
 }
 
+/* The routed Home view (#368): the same start console, but mounted as a full-page route inside
+   #home-root rather than the fixed, z-stacked overlay #app sits beneath. The boot switch shows exactly
+   one of #app / #home-root, so Home no longer needs to float above the editor — it fills its own route
+   container in normal stacking. */
+#home-root {
+  position: fixed;
+  inset: 0;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.koi-welcome.koi-welcome-embedded {
+  position: absolute; /* fill #home-root (which is the fixed full-window container) */
+  z-index: auto; /* not an overlay anymore — drop the overlay stacking context */
+}
+
 /* margin:auto centers the card; a FIXED height keeps the modal the same size across both views (console
    ↔ gallery) and across tab switches — the inner regions scroll instead of the box resizing. The card is
    one persistent frame: the console and gallery views swap *inside* it, so it animates in once (koi-rise)
