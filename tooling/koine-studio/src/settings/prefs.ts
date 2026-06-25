@@ -23,6 +23,7 @@ import {
 import { setTheme } from '@/settings/theme';
 import { ACCENTS, ACCENT_ORDER } from '@/settings/appearance';
 import { createAboutPanel } from '@/settings/about';
+import { createJsonView } from '@/editor/editor';
 import { createModal } from '@/shared/overlay';
 import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from '@/mcp/mcp';
 import { EMIT_TARGETS } from '@/shared/emitTargets';
@@ -764,10 +765,13 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   const mcpClientRow = row('Client', 'Pick your MCP client for its exact setup snippet.', mcpClientSelect);
 
   // The recipe body: a heading + Copy, the snippet, the config hint, and an optional caveat.
-  const mcpSnippet = document.createElement('pre');
+  // The snippet is a read-only CodeMirror JSON view (createJsonView) so it's syntax-highlighted like
+  // every other code surface in Studio; Copy reads its text back verbatim via getText().
+  const mcpSnippet = document.createElement('div');
   mcpSnippet.className = 'koi-mcp-snippet';
   mcpSnippet.tabIndex = 0;
   mcpSnippet.setAttribute('aria-label', 'MCP client configuration snippet');
+  const mcpSnippetView = createJsonView(mcpSnippet);
 
   const mcpRecipeCopy = document.createElement('button');
   mcpRecipeCopy.type = 'button';
@@ -776,7 +780,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   let mcpRecipeTimer: ReturnType<typeof setTimeout> | undefined;
   mcpRecipeCopy.addEventListener('click', () => {
     navigator.clipboard
-      .writeText(mcpSnippet.textContent ?? '')
+      .writeText(mcpSnippetView.getText())
       .then(() => (mcpRecipeCopy.textContent = 'Copied ✓'))
       .catch(() => (mcpRecipeCopy.textContent = 'Copy failed'))
       .finally(() => {
@@ -804,7 +808,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   function renderRecipe(): void {
     const client = MCP_CLIENTS.find((c) => c.id === mcpClientSelect.value) ?? MCP_CLIENTS[0];
     const url = mcpUrlInput.value.trim() || MCP_URL_PLACEHOLDER;
-    mcpSnippet.textContent = client.snippet(url);
+    mcpSnippetView.setContent(client.snippet(url));
     mcpRecipeHint.textContent = client.configHint;
     mcpRecipeNote.textContent = client.note ?? '';
     mcpRecipeNote.hidden = !client.note;
