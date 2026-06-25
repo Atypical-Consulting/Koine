@@ -76,6 +76,8 @@ import { CanvasPalette } from '@/diagrams/CanvasPalette';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 import { guardedLoad } from '@/shell/guardedLoad';
+import { createInspectorSheet, openInspectorSheet, type InspectorSheet } from '@/shell/inspectorSheet';
+import { BP_NARROW } from '@/shared/breakpoint';
 import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
@@ -303,6 +305,22 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const scenariosView = el('view-scenarios');
   // Right-rail host: the element inspector (Properties). Fixed — never torn down on a model reload.
   const inspectorHost = el('inspector-host');
+  // Below $bp-narrow the inspector lives in a bottom sheet instead of the fixed #right rail (#221). The
+  // sheet host is OPTIONAL: it's absent from the desktop-only test fixtures, and without it the
+  // controller keeps the original right-rail behaviour untouched (no sheet, no resize listener). When it
+  // exists the sheet is built once here; renderSelectedInspector mounts Properties into its body on a
+  // narrow viewport, and a selection raises it to half.
+  const sheetHostEl = document.getElementById('inspector-sheet-host');
+  const inspectorSheet: InspectorSheet | null = sheetHostEl ? createInspectorSheet(sheetHostEl) : null;
+  const isNarrowViewport = (): boolean => window.innerWidth <= BP_NARROW;
+  // Widening past the breakpoint dismisses the sheet and hands Properties back to the fixed right rail;
+  // narrowing re-mounts it into the sheet body on the next render. Registered only when the sheet exists.
+  function onViewportResize(): void {
+    if (!inspectorSheet) return;
+    if (!isNarrowViewport() && inspectorSheet.isOpen()) inspectorSheet.setDetent('peek');
+    renderSelectedInspector(); // re-mount into the now-correct host (sheet body vs #inspector-host)
+  }
+  if (inspectorSheet) window.addEventListener('resize', onViewportResize);
   // Top-bar "scope path" host (the ContextBreadcrumb Preact panel — the scope selector + selected
   // element) and its status-bar context mirror.
   const breadcrumbHost = el('breadcrumb-host');
@@ -851,9 +869,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // (the store subscriber below calls this when the `selection` slice changes). Preact's top-level
   // render() reconciles into the same host node, so the host keeps its identity across repaints.
   function renderSelectedInspector(): void {
+    // Mobile: mount Properties into the bottom-sheet body; desktop (or no sheet host): the fixed
+    // right-rail host. The PropertiesPanel itself is unchanged — only its mount target differs (#221).
+    const host = inspectorSheet && isNarrowViewport() ? inspectorSheet.contentNode() : inspectorHost;
     render(
       <PropertiesPanel store={appStore} index={modelIndex} handlers={inspectorHandlers} />,
-      inspectorHost,
+      host,
     );
     renderSelectedRules();
   }
@@ -943,6 +964,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // explicit repaint keeps the right-rail update synchronous for callers that read it immediately
     // after a set.
     renderSelectedInspector();
+    // Mobile: a fresh selection raises the inspector sheet into view (#221) so the just-selected
+    // element's Properties are visible without hunting for the Props tab. Only when a sheet exists, the
+    // viewport is narrow, and something is actually selected (clearing the selection leaves it be).
+    if (inspectorSheet && isNarrowViewport() && sel) openInspectorSheet('half');
     // Re-pass the current model index to the palette so its aggregate-scoped buttons (#254) re-gate against
     // the freshly-selected element — a diagram click rebuilds the index before setting the selection, so
     // resolving the selection's kind here uses the up-to-date index rather than a stale captured prop.
@@ -1700,6 +1725,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     clearTimeout(copyResetTimer);
     clearTimeout(editDebounce);
     clearTimeout(bottomPanelDebounce);
+    if (inspectorSheet) {
+      window.removeEventListener('resize', onViewportResize);
+      inspectorSheet.destroy();
+    }
   }
 
   return {

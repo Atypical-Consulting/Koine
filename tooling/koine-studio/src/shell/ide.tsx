@@ -18,6 +18,7 @@ import {
 } from '@/shell/ideUtils';
 import { createEditorSession } from '@/shell/editorSession';
 import { createInspectorController } from '@/shell/inspectorController';
+import { openInspectorSheet } from '@/shell/inspectorSheet';
 import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
 import { koineMark } from '@/shared/logo';
@@ -1093,6 +1094,14 @@ export function init(): () => void {
   // center tab decides which surface shows). The active zone is mirrored onto #split[data-mobile-zone]
   // so the @media rules can show/hide zones without remounting any DOM.
   function selectMobileZone(zone: MobileZone): void {
+    // Props is now a single inspector surface: the bottom sheet (#221), not a swapped-in #right rail.
+    // Tapping it raises the sheet OVER the current zone (it's a fixed overlay) rather than switching the
+    // single-column shell to the — now empty — right rail, so we keep the active zone and just open the
+    // sheet. The other three are real zones: write the slice and (for code/diagram) flip the center tab.
+    if (zone === 'props') {
+      openInspectorSheet('half');
+      return;
+    }
     appStore.getState().setMobileZone(zone);
     if (zone === 'diagram') controller.selectCenter('visual');
     else if (zone === 'code') controller.selectCenter('technical');

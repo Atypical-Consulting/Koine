@@ -303,6 +303,11 @@
            below $bp-narrow. The <MobileZoneBar> Preact panel renders here (see ide.tsx); selecting a tab
            writes the uiChrome slice's mobileZone, which is mirrored onto #split[data-mobile-zone]. -->
       <nav id="mobile-zone-bar-host" aria-label="Studio zone switcher"></nav>
+
+      <!-- Narrow-viewport (mobile) inspector bottom sheet (#221): the single Properties surface below
+           $bp-narrow, replacing the fixed #right rail on a phone. createInspectorSheet (inspectorController)
+           mounts its peek/half/full dialog + backdrop in here; hidden (display:none) on desktop. -->
+      <div id="inspector-sheet-host"></div>
     </div>
 
     <!-- The routed Home view mounts here (mountHome). The boot switch (main.ts) shows exactly one of

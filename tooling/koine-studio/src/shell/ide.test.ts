@@ -372,6 +372,7 @@ const APP_HTML = `
         <span class="sb-item" id="sb-version"></span>
       </footer>
       <nav id="mobile-zone-bar-host" aria-label="Studio zone switcher"></nav>
+      <div id="inspector-sheet-host"></div>
     </div>`;
 
 /** Seed document.body with the full app markup (mirrors index.html) so init()'s el() lookups resolve. */
