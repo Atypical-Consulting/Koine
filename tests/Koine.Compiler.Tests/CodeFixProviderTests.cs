@@ -194,4 +194,86 @@ public class CodeFixProviderTests
         var (_, afterDiags) = Validate(applied);
         afterDiags.ShouldNotContain(d => d.Code == DiagnosticCodes.DuplicateEnumMember);
     }
+
+    [Fact]
+    public void Rename_duplicate_enum_member_targets_the_declaration_not_a_string_literal_in_associated_data()
+    {
+        // 'Alpha' is declared twice (KOI0104). A LATER member's associated-data STRING also contains
+        // "Alpha"; because the KOI0104 span is the WHOLE enum, a naive last-occurrence text scan would
+        // rename that string. The fix must target the duplicate MEMBER declaration, not the literal.
+        var src =
+            "context C {\n" +
+            "  enum Sym(label: String) {\n" +
+            "    Alpha(\"x\")\n" +
+            "    Alpha(\"y\")\n" +
+            "    Beta(\"Alpha\")\n" +
+            "  }\n" +
+            "}\n";
+        var (model, diags) = Validate(src);
+        var dup = diags.Single(d => d.Code == DiagnosticCodes.DuplicateEnumMember);
+
+        var fix = Service.FixesForDiagnostic(src, model, dup with { Message = string.Empty })
+            .ShouldHaveSingleItem();
+        var edit = fix.Edits.ShouldHaveSingleItem();
+        var applied = src[..edit.Range.Offset] + edit.NewText + src[(edit.Range.Offset + edit.Range.Length)..];
+
+        // The unrelated member's associated-data string is untouched...
+        applied.ShouldContain("Beta(\"Alpha\")");
+        // ...and the duplicate member is actually resolved.
+        var (_, afterDiags) = Validate(applied);
+        afterDiags.ShouldNotContain(d => d.Code == DiagnosticCodes.DuplicateEnumMember);
+    }
+
+    [Fact]
+    public void Rename_duplicate_type_targets_the_name_not_a_string_in_a_leading_annotation()
+    {
+        // The duplicate type carries a @deprecated("Money") annotation whose STRING contains the type
+        // name. The diagnostic span starts at the '@', so a naive first-occurrence text scan would
+        // rewrite the annotation string. The fix must target the type NAME.
+        var src =
+            "context C {\n" +
+            "  value Money { a: Int }\n" +
+            "  @deprecated(\"Money\") value Money { b: Int }\n" +
+            "}\n";
+        var (model, diags) = Validate(src);
+        var dup = diags.Single(d => d.Code == DiagnosticCodes.DuplicateType);
+
+        var fix = Service.FixesForDiagnostic(src, model, dup with { Message = string.Empty })
+            .ShouldHaveSingleItem();
+        var edit = fix.Edits.ShouldHaveSingleItem();
+        var applied = src[..edit.Range.Offset] + edit.NewText + src[(edit.Range.Offset + edit.Range.Length)..];
+
+        // The annotation's string argument is untouched...
+        applied.ShouldContain("@deprecated(\"Money\")");
+        // ...and the duplicate type is actually resolved.
+        var (_, afterDiags) = Validate(applied);
+        afterDiags.ShouldNotContain(d => d.Code == DiagnosticCodes.DuplicateType);
+    }
+
+    [Fact]
+    public void Rename_duplicate_offers_a_fix_for_a_service_name_colliding_with_a_type()
+    {
+        // A service whose name collides with a value object raises KOI0102 at the service's span.
+        var src =
+            "context C {\n" +
+            "  value Foo { a: Int }\n" +
+            "  service Foo {\n" +
+            "    operation noop(): Int = 0\n" +
+            "  }\n" +
+            "}\n";
+        var (model, diags) = Validate(src);
+        var dup = diags.Single(d => d.Code == DiagnosticCodes.DuplicateType);
+
+        var fix = Service.FixesForDiagnostic(src, model, dup with { Message = string.Empty })
+            .ShouldHaveSingleItem();
+        fix.Title.ShouldBe("Rename to 'Foo2'");
+
+        var edit = fix.Edits.ShouldHaveSingleItem();
+        edit.NewText.ShouldBe("Foo2");
+        var applied = src[..edit.Range.Offset] + edit.NewText + src[(edit.Range.Offset + edit.Range.Length)..];
+        applied.ShouldContain("service Foo2");
+
+        var (_, afterDiags) = Validate(applied);
+        afterDiags.ShouldNotContain(d => d.Code == DiagnosticCodes.DuplicateType);
+    }
 }

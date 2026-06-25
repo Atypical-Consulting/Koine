@@ -78,14 +78,26 @@ public sealed class RenameDuplicateCodeFixProvider : ICodeFixProvider
         switch (diagnostic.Code)
         {
             case DiagnosticCodes.DuplicateType:
-                // The duplicate type's span starts where the type name sits; match by offset. Uniqueness is
-                // checked against every type name in the model.
+                // KOI0102 is raised both for a duplicate type (span = the type decl) and for a service
+                // whose name collides with a type/service (span = the service decl). Match by offset
+                // against both. Uniqueness is checked against every type AND service name (they share one
+                // namespace), so the replacement collides with neither.
                 foreach (TypeDecl type in AllTypes(model))
                 {
                     if (!type.Span.IsNone && type.Span.Offset == diagnostic.Span.Offset)
                     {
                         name = type.Name;
-                        existing = AllTypes(model).Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
+                        existing = DeclaredNames(model);
+                        return true;
+                    }
+                }
+
+                foreach (ServiceDecl svc in AllServices(model))
+                {
+                    if (!svc.Span.IsNone && svc.Span.Offset == diagnostic.Span.Offset)
+                    {
+                        name = svc.Name;
+                        existing = DeclaredNames(model);
                         return true;
                     }
                 }
@@ -144,9 +156,11 @@ public sealed class RenameDuplicateCodeFixProvider : ICodeFixProvider
 
     /// <summary>
     /// The span of the <paramref name="name"/> token within <paramref name="span"/> of
-    /// <paramref name="sourceText"/>: the FIRST occurrence normally, or the LAST when
-    /// <paramref name="lastOccurrence"/> is set (the coarse enum-member span). Returns <c>null</c> when no
-    /// whole-word occurrence is found inside the span.
+    /// <paramref name="sourceText"/>: the FIRST whole-word occurrence in CODE normally, or the LAST when
+    /// <paramref name="lastOccurrence"/> is set (the coarse enum-member span). String literals and
+    /// comments inside the span are skipped, so a name that also appears in a member's associated-data
+    /// string (<c>Beta("Alpha")</c>) or a leading annotation argument (<c>@deprecated("Money")</c>) never
+    /// mis-targets the rename onto the literal. Returns <c>null</c> when no code occurrence is found.
     /// </summary>
     private static SourceSpan? LocateName(string sourceText, SourceSpan span, string name, bool lastOccurrence)
     {
@@ -163,25 +177,66 @@ public sealed class RenameDuplicateCodeFixProvider : ICodeFixProvider
         }
 
         int found = -1;
-        var search = start;
-        while (search <= end - name.Length)
+        var i = start;
+        while (i < end)
         {
-            var at = sourceText.IndexOf(name, search, StringComparison.Ordinal);
-            if (at < 0 || at + name.Length > end)
+            var c = sourceText[i];
+
+            // Skip a string literal "..." (honoring \" escapes) so a name inside it is never matched.
+            if (c == '"')
             {
-                break;
+                i++;
+                while (i < end && sourceText[i] != '"')
+                {
+                    i += sourceText[i] == '\\' && i + 1 < end ? 2 : 1;
+                }
+
+                i++; // past the closing quote
+                continue;
             }
 
-            if (IsWholeWord(sourceText, at, name.Length))
+            // Skip a line comment //… to end of line.
+            if (c == '/' && i + 1 < end && sourceText[i + 1] == '/')
             {
-                found = at;
+                i += 2;
+                while (i < end && sourceText[i] != '\n')
+                {
+                    i++;
+                }
+
+                continue;
+            }
+
+            // Skip a block comment /* … */.
+            if (c == '/' && i + 1 < end && sourceText[i + 1] == '*')
+            {
+                i += 2;
+                while (i + 1 < end && !(sourceText[i] == '*' && sourceText[i + 1] == '/'))
+                {
+                    i++;
+                }
+
+                i += 2; // past the closing */
+                continue;
+            }
+
+            // A whole-word occurrence of `name` in code.
+            if (c == name[0]
+                && i + name.Length <= end
+                && string.CompareOrdinal(sourceText, i, name, 0, name.Length) == 0
+                && IsWholeWord(sourceText, i, name.Length))
+            {
+                found = i;
                 if (!lastOccurrence)
                 {
                     break;
                 }
+
+                i += name.Length;
+                continue;
             }
 
-            search = at + 1;
+            i++;
         }
 
         if (found < 0)
@@ -256,6 +311,24 @@ public sealed class RenameDuplicateCodeFixProvider : ICodeFixProvider
             }
         }
     }
+
+    /// <summary>Every service declared across all contexts (services share the type namespace).</summary>
+    private static IEnumerable<ServiceDecl> AllServices(KoineModel model)
+    {
+        foreach (ContextNode ctx in model.Contexts)
+        {
+            foreach (ServiceDecl svc in ctx.Services)
+            {
+                yield return svc;
+            }
+        }
+    }
+
+    /// <summary>Every type and service name in the model — the namespace a renamed type/service must avoid.</summary>
+    private static IReadOnlyCollection<string> DeclaredNames(KoineModel model) =>
+        AllTypes(model).Select(t => t.Name)
+            .Concat(AllServices(model).Select(s => s.Name))
+            .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>The field members of <paramref name="type"/>, or empty for a kind that carries none.</summary>
     private static IReadOnlyList<Member> MembersOf(TypeDecl type) => type switch
