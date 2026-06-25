@@ -244,17 +244,59 @@ internal static class RustNaming
         var bindings = new List<string>();
         foreach (var name in memberNames)
         {
-            var snake = ToSnakeCase(name);
-            var candidate = EscapeMember(snake);
-            for (var n = 2; !used.Add(candidate); n++)
-            {
-                candidate = EscapeMember(snake + "_" + n);
-            }
-
-            bindings.Add(candidate);
+            // Disambiguate on the pre-escape snake form (a `_2` suffix) so the re-escaped result stays
+            // keyword-safe.
+            bindings.Add(Disambiguate(used, ToSnakeCase(name), "_", EscapeMember));
         }
 
         return bindings;
+    }
+
+    /// <summary>
+    /// Maps an enum's members (in declaration order) to DISTINCT Rust enum-variant names. Each variant
+    /// is the member's <see cref="Variant"/> form; when two members collapse to the same variant — e.g.
+    /// <c>EUR</c> and <c>Eur</c> both fold to <c>Eur</c> — the later ones get a deterministic <c>2</c>,
+    /// <c>3</c>, … suffix (<c>Eur</c>, <c>Eur2</c>) so every variant is a distinct, compiling Rust
+    /// identifier (two identical variants are an <c>E0428</c> duplicate definition). The first occurrence
+    /// keeps the idiomatic un-suffixed name, so non-colliding enums are byte-for-byte unchanged, and the
+    /// suffix loop keeps incrementing past any member whose natural variant already equals a disambiguated
+    /// name (a member literally named <c>Eur2</c>). The suffix omits the underscore that
+    /// <see cref="UniqueBindings"/> uses so the result stays <c>PascalCase</c>-idiomatic; variants are
+    /// never keywords-as-raw-identifiers, so no <see cref="EscapeMember"/> step is needed (#323).
+    /// </summary>
+    public static IReadOnlyList<string> UniqueVariants(IEnumerable<string> memberNames)
+    {
+        var used = new HashSet<string>(StringComparer.Ordinal);
+        var variants = new List<string>();
+        foreach (var name in memberNames)
+        {
+            variants.Add(Disambiguate(used, Variant(name), separator: string.Empty));
+        }
+
+        return variants;
+    }
+
+    /// <summary>
+    /// Renders <paramref name="baseName"/> (through <paramref name="escape"/>) into a name not already in
+    /// <paramref name="used"/>, appending a <c><paramref name="separator"/>2</c>, <c>…3</c>, … suffix to
+    /// the pre-escape base until the escaped candidate is free, then records it. Shared by
+    /// <see cref="UniqueBindings"/> (snake_case, <c>_</c>-separated, keyword-escaped) and
+    /// <see cref="UniqueVariants"/> (PascalCase, no separator, identity escape).
+    /// </summary>
+    private static string Disambiguate(
+        HashSet<string> used,
+        string baseName,
+        string separator,
+        Func<string, string>? escape = null)
+    {
+        escape ??= static s => s;
+        var candidate = escape(baseName);
+        for (var n = 2; !used.Add(candidate); n++)
+        {
+            candidate = escape(baseName + separator + n);
+        }
+
+        return candidate;
     }
 
     private static bool IsAlreadySnakeCase(string name)
