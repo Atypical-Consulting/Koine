@@ -1315,6 +1315,13 @@ public sealed record WEmitTarget(string Id, string DisplayName, string FileExten
 /// <summary>The emit-target capability list (issue #282): the registry's code targets, in display order.</summary>
 public sealed record WEmitTargetsResult(WEmitTarget[] Targets);
 
+/// <summary>
+/// The module self-description (issue #330): the compiler <c>version</c>, the names of every
+/// <c>[JSExport]</c> the bundle ships (<c>exports</c>), and the emit <c>targets</c> it supports. Reuses
+/// <see cref="WEmitTarget"/> so the target shape is byte-identical to <c>ListEmitTargets</c>.
+/// </summary>
+public sealed record WCapabilities(string Version, string[] Exports, WEmitTarget[] Targets);
+
 /// <summary>Ubiquitous-language glossary as markdown.</summary>
 public sealed record WGlossaryResult(string Markdown);
 
@@ -1533,6 +1540,7 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WFileDiagnostics[]))]
 [JsonSerializable(typeof(WEmitPreviewResult))]
 [JsonSerializable(typeof(WEmitTargetsResult))]
+[JsonSerializable(typeof(WCapabilities))]
 [JsonSerializable(typeof(WGlossaryResult))]
 [JsonSerializable(typeof(WGlossaryModel))]
 [JsonSerializable(typeof(WModelNode))]
