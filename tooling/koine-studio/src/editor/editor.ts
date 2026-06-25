@@ -1269,3 +1269,42 @@ export function createOutputView(parent: HTMLElement, lineWrap = false): OutputV
     destroy: () => view.destroy(),
   };
 }
+
+export interface ConfigView {
+  setContent(text: string): void;
+  getText(): string;
+  destroy(): void;
+}
+
+/**
+ * A compact, read-only JSON viewer for config snippets — the Settings → MCP recipe. Unlike
+ * `createOutputView` it drops line numbers, search and selection-match decorations (it's a small
+ * display/copy surface, not a code pane), but shares the same `koineHighlight` style so the JSON is
+ * coloured from the existing `--koi-hl-*` theme tokens. `getText()` returns the document verbatim,
+ * which is what the recipe's Copy button writes to the clipboard.
+ */
+export function createJsonView(parent: HTMLElement): ConfigView {
+  const view = new EditorView({
+    parent,
+    state: EditorState.create({
+      doc: '',
+      extensions: [
+        EditorView.contentAttributes.of({ 'aria-label': 'MCP client configuration snippet' }),
+        EditorState.readOnly.of(true),
+        EditorView.editable.of(false),
+        langExt('json'),
+        syntaxHighlighting(koineHighlight),
+        syntaxHighlighting(defaultHighlightStyle),
+        sharedTheme,
+      ],
+    }),
+  });
+
+  return {
+    setContent(text) {
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+    },
+    getText: () => view.state.doc.toString(),
+    destroy: () => view.destroy(),
+  };
+}
