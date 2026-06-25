@@ -706,6 +706,31 @@ public static partial class CompilerInterop
     }
 
     /// <summary>
+    /// Same-file occurrence highlights for the name at a 0-based position in <paramref name="activeUri"/>
+    /// (LSP <c>textDocument/documentHighlight</c>): a JSON array of <c>{ range, kind }</c>. Reuses the
+    /// <c>ReferencesAt</c> binder filtered to the active document — <see cref="Reference"/> carries no
+    /// read/write distinction, so every highlight is <c>DocumentHighlightKind.Text</c> (1). Parity with
+    /// the stdio LSP's <c>DocumentHighlightResultJson</c>.
+    /// </summary>
+    [JSExport]
+    public static string DocumentHighlightsAt(string filesJson, string activeUri, int line, int character)
+    {
+        try
+        {
+            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
+            var highlights = LanguageService.ReferencesAt(docs, activeUri, line, character)
+                .Where(r => string.Equals(r.Uri, activeUri, StringComparison.Ordinal))
+                .Select(r => new WDocumentHighlight(RangeOf(r), 1)) // LSP DocumentHighlightKind.Text
+                .ToArray();
+            return JsonSerializer.Serialize(highlights, LangJson.Default.WDocumentHighlightArray);
+        }
+        catch
+        {
+            return "[]";
+        }
+    }
+
+    /// <summary>
     /// Inlay hints over the 0-based range in <paramref name="activeUri"/> (LSP <c>textDocument/inlayHint</c>):
     /// a JSON array of <c>{ position, label, kind }</c>, kind 1=Type/2=Parameter, positions 0-based.
     /// Parity with the stdio LSP's <c>InlayHintResultJson</c>.
@@ -1420,6 +1445,11 @@ public sealed record WCodeLens(WRange Range, string? Title);
 /// LSP <c>InlayHintKind</c> number (1=Type, 2=Parameter). Mirrors the LspServer wire shape.</summary>
 public sealed record WInlayHint(WPosition Position, string Label, int Kind);
 
+/// <summary>LSP DocumentHighlight: a 0-based <see cref="Range"/> and the LSP <c>DocumentHighlightKind</c>
+/// number (1=Text, 2=Read, 3=Write). Koine's <see cref="Reference"/> carries no read/write distinction,
+/// so <see cref="Kind"/> is always Text (1). Mirrors the LspServer wire shape.</summary>
+public sealed record WDocumentHighlight(WRange Range, int Kind);
+
 /// <summary>
 /// LSP CallHierarchyItem: <see cref="Name"/>, the LSP SymbolKind number <see cref="Kind"/> (Method=6
 /// Command / Event=24), the declaring <see cref="Uri"/>, the name <see cref="Range"/> and
@@ -1553,6 +1583,7 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WSelectionRange[]))]
 [JsonSerializable(typeof(WCodeLens[]))]
 [JsonSerializable(typeof(WInlayHint[]))]
+[JsonSerializable(typeof(WDocumentHighlight[]))]
 [JsonSerializable(typeof(WCallHierarchyItem))]
 [JsonSerializable(typeof(WCallHierarchyItem[]))]
 [JsonSerializable(typeof(WCallHierarchyIncomingCall[]))]

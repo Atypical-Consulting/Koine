@@ -177,6 +177,7 @@ internal sealed class LspServer
                                         ["resolveProvider"] = true,
                                     },
                                     ["referencesProvider"] = true,
+                                    ["documentHighlightProvider"] = true,
                                     ["inlayHintProvider"] = true,
                                     ["callHierarchyProvider"] = true,
                                     ["renameProvider"] = new Dictionary<string, object?>
@@ -376,6 +377,14 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, ReferencesResultJson(root));
+                            }
+
+                            break;
+
+                        case "textDocument/documentHighlight":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, DocumentHighlightResultJson(root));
                             }
 
                             break;
@@ -972,6 +981,30 @@ internal sealed class LspServer
 
         var refs = _ls.ReferencesAt(_compilation, uri, line, ch);
         return refs.Select(ToLocation).ToArray();
+    }
+
+    /// <summary>
+    /// Document highlights (<c>textDocument/documentHighlight</c>) at a 0-based position: every
+    /// same-file occurrence of the name under the cursor, as a JSON array of <c>{ range, kind }</c>.
+    /// Reuses the <c>ReferencesAt</c> binder filtered to the active document; <see cref="Reference"/>
+    /// carries no read/write distinction, so each <c>kind</c> is LSP <c>DocumentHighlightKind.Text</c>
+    /// (1). Parity with the WASM <c>DocumentHighlightsAt</c> export.
+    /// </summary>
+    private object? DocumentHighlightResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri) || !TryGetPosition(root, out var line, out var ch))
+        {
+            return null;
+        }
+
+        return _ls.ReferencesAt(_compilation, uri, line, ch)
+            .Where(r => string.Equals(r.Uri, uri, StringComparison.Ordinal))
+            .Select(r => (object)new Dictionary<string, object?>
+            {
+                ["range"] = RangeOf(r),
+                ["kind"] = 1, // LSP DocumentHighlightKind.Text
+            })
+            .ToArray();
     }
 
     // ---- Inlay hints & call hierarchy (#260, Task 4) ----------------------

@@ -594,6 +594,7 @@ public class LspServerTests
         output.ShouldContain("\"documentFormattingProvider\":true");
         output.ShouldContain("\"documentSymbolProvider\":true");
         output.ShouldContain("\"referencesProvider\":true");
+        output.ShouldContain("\"documentHighlightProvider\":true");
         output.ShouldContain("\"renameProvider\":{\"prepareProvider\":true}");
         // codeActionProvider is now an object advertising the supported code-action kinds (so
         // editors surface the refactors), not a bare boolean.
