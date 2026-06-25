@@ -162,6 +162,38 @@
   }
 }
 
+/* Resume editing — return to a live editor session (#392). A labelled pill, shown only when a session
+   exists; sits where the dismiss-✕ would, reading as the deliberate way back into the editor. */
+.koi-welcome-resume {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 var(--koi-space-3);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  font-family: var(--koi-font-body);
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--koi-dur-mid) ease, color var(--koi-dur-mid) ease, border-color var(--koi-dur-mid) ease;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--koi-accent) 60%, var(--koi-line));
+    color: var(--koi-accent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+}
+
 /* --- hero: thesis (left) + launch rail (right) ---------------------------- */
 .koi-welcome-hero {
   display: grid;
