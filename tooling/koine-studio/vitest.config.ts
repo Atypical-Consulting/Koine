@@ -6,15 +6,27 @@ import { playwright } from '@vitest/browser-playwright';
 
 const dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 
-// On the Windows runner, `vitest run`'s storybook browser project starts a Vite dev server whose
-// file watcher falls back to Node's libuv `fs.watch` (src/win/fs-event.c). That native watcher
-// aborts during teardown — `Assertion failed: !_wcsnicmp(filename, dir, dirlen), file
-// src\win\fs-event.c, line 72` — failing the whole job *after* a fully green suite (#414). A one-shot
-// run never needs to watch files, so disable the dev-server watcher for `vitest run` only, leaving
-// human watch-mode (`npm run test:watch` → bare `vitest`) free to watch and re-run on change. The
-// `test` npm script is `vitest run`, so the literal `run` arg is the reliable run-vs-watch signal.
+// The `studio (windows-latest)` runner intermittently failed `npm test` with a native libuv abort —
+// `Assertion failed: !_wcsnicmp(filename, dir, dirlen), file src\win\fs-event.c, line 72` — fired
+// *after* a fully green suite, exiting the process 1 during teardown (#414). Root cause: a Vitest
+// `forks`-pool worker holds a native `fs.watch` handle (Vite uses Node's libuv `fs.watch` directly on
+// Node >= 19 — vitejs/vite#12495), and the libuv Windows fs-event handle aborts on a path-case compare
+// (libuv#693). Vitest 4's default `forks` pool is itself flaky on Windows (vitest-dev/vitest#8861,
+// `os: windows`). Two layered measures below kill it:
+//
+//   1. `pool: 'threads'` on Windows (see `isWindows`) — the worker_threads pool has no per-fork child
+//      process whose teardown holds/aborts on the native fs-event handle. This is the operative fix.
+//   2. `server.watch: null` for the one-shot run (see `isOneShotRun`) — a `vitest run` never needs a
+//      file watcher, so don't start the Vite dev-server watcher at all. Hygiene/defense-in-depth that
+//      shrinks the native-watcher surface; not sufficient alone (the aborting watcher lives in the
+//      worker, which this root server config does not govern), but correct and cheap to keep.
+//
+// Both are scoped so human watch-mode (`npm run test:watch` → bare `vitest`) and non-Windows dev are
+// untouched, and the test set/count is identical on every OS leg.
 // @ts-expect-error process is a nodejs global
 const isOneShotRun = process.argv.includes('run');
+// @ts-expect-error process is a nodejs global
+const isWindows = process.platform === 'win32';
 
 // Unit/integration tests run under happy-dom: the overlay/modal chrome (focus, keydown, document.body
 // mounting) and the file explorer's role=tree (focus, keyboard nav, DOM rebuild) behave as they do in
@@ -22,10 +34,8 @@ const isOneShotRun = process.argv.includes('run');
 // `storybook` project runs every story as a browser test via @storybook/addon-vitest (Playwright/Chromium).
 // More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
 export default defineConfig({
-  // Disable the Vite dev-server file watcher for the non-interactive `vitest run` (see the note on
-  // `isOneShotRun` above) so no native libuv `fs-event` watcher is carried into teardown on Windows.
-  // `extends: true` propagates this root server config into BOTH projects below — the happy-dom
-  // unit run and the storybook browser run (which spins up the Vite server that owns the watcher).
+  // Measure 2 (see the header note): no Vite dev-server file watcher for the one-shot `vitest run`.
+  // `extends: true` propagates this root server config into both projects below.
   server: isOneShotRun ? { watch: null } : {},
   // Transpile JSX with the Preact automatic runtime so .tsx tests (and the panels they exercise)
   // compile without a React import — matches tsconfig's jsx/jsxImportSource. Vite 8 / Vitest 4 use
@@ -53,6 +63,11 @@ export default defineConfig({
       extends: true,
       test: {
         environment: 'happy-dom',
+        // Measure 1 (see the header note): the operative fix for the #414 Windows fs-event abort.
+        // On windows-latest the default `forks` pool's worker holds a native libuv `fs.watch` that
+        // aborts the process after a green suite; worker_threads has no such per-fork teardown. Scoped
+        // to Windows so Linux/macOS (local dev + CI) keep the faster default forks pool. Same tests run.
+        pool: isWindows ? 'threads' : 'forks',
         // The IDE boot tests do a cold `await import('@/shell/ide')` (a large module graph) + a full
         // init(); on slow CI runners (notably windows-latest) that first transform+import alone can
         // exceed the 5s default and time the test out. Give a generous ceiling that still catches a
