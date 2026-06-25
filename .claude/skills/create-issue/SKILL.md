@@ -67,6 +67,13 @@ per idea.
 
 ## Step 1 — Preconditions
 
+**Load the repo profile first.** This skill shows Koine's values inline (the commit identity, the label
+taxonomy, build/test commands, the architecture grain) — those are really the *Koine profile* used as a
+worked example. Run the **`get-repo-profile`** skill; it returns `.claude/skills/repo-profile.md`
+(generating it on first use). Prefer the profile's values wherever they differ from what's shown here, so
+this skill works unchanged in any repo. If no profile exists and you genuinely can't generate one, fall
+back to the inline Koine values and note that in the report.
+
 ```bash
 gh api user --jq .login      # must print a login; if 401, the token is invalid
 ```
