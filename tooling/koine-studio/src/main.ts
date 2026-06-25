@@ -9,19 +9,25 @@ import { init } from '@/shell/ide';
 import { mountHome, type WelcomeCallbacks } from '@/welcome/welcome';
 import { appStore } from '@/store';
 import { type Route, routeFromHash, hashFromRoute, resolveInitialRoute } from '@/store/slices/route';
-import { hasPersistedWorkspace } from '@/shell/workspaceFlag';
+import { hasPersistedWorkspace, markWorkspaceOpened } from '@/shell/workspaceFlag';
+import { setStartIntent, type StartIntent } from '@/shell/bootIntent';
 import { readModelFromHash } from '@/export/share';
 
-// Home actions, Task-4 placeholder: any start action simply lands the user in the editor (which opens
-// the default workspace). Task 5 replaces this with the real per-action behaviour — open a folder /
-// open the chosen template, and persist the "workspace opened" flag — instead of a blanket navigate.
+// Home actions: each queues what the editor should do on its next boot (the start-intent), remembers a
+// workspace was opened (so the next cold load returns to the editor), then navigates to the editor —
+// where the IDE consumes the intent and performs the real work. Home can't call the IDE directly
+// because, by design (#368), the editor isn't mounted while Home is showing.
 function homeCallbacks(): WelcomeCallbacks {
-  const toEditor = (): void => appStore.getState().navigate('editor');
+  const go = (intent: StartIntent): void => {
+    setStartIntent(intent);
+    markWorkspaceOpened();
+    appStore.getState().navigate('editor');
+  };
   return {
-    onNewModel: toEditor,
-    onOpenFolder: toEditor,
-    onOpenRecent: toEditor,
-    onOpenExample: toEditor,
+    onNewModel: () => go({ kind: 'new' }),
+    onOpenFolder: () => go({ kind: 'open-folder' }),
+    onOpenRecent: (path) => go({ kind: 'open-recent', path }),
+    onOpenExample: (template) => go({ kind: 'open-example', template }),
   };
 }
 

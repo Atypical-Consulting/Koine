@@ -39,6 +39,7 @@ import {
   type Settings,
 } from '@/settings/persistence';
 import { createWelcome } from '@/welcome/welcome';
+import { takeStartIntent, type StartIntent } from '@/shell/bootIntent';
 import { type Template } from '@/welcome/templates';
 import { createCommandPalette, type Command } from '@/shared/palette';
 import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
@@ -1147,6 +1148,28 @@ export function init(): () => void {
     if (!platform.persistsWorkspace) showMemoryOnlyBanner();
   }
 
+  // Perform the action the user chose on the Home route (#368), handed across via the start-intent.
+  // These reuse the same action functions the in-editor start console wires, so a Home "Open folder"
+  // behaves exactly like the editor's own — there's no second code path to keep in sync. No unsaved
+  // work can exist at a fresh boot, so these skip the confirm-and-replace guard the in-editor versions
+  // apply (newModel directly, not requestNewModel).
+  async function runStartIntent(intent: StartIntent): Promise<void> {
+    switch (intent.kind) {
+      case 'new':
+        await newModel();
+        break;
+      case 'open-folder':
+        await openFolder();
+        break;
+      case 'open-recent':
+        await openRecentFolder(intent.path);
+        break;
+      case 'open-example':
+        await openExample(intent.template);
+        break;
+    }
+  }
+
   // A one-time, dismissible top banner shown when the workspace is memory-only (no OPFS) — so work
   // that won't survive a reload is never lost silently. Points at the durable escape hatches.
   function showMemoryOnlyBanner(): void {
@@ -1320,10 +1343,12 @@ export function init(): () => void {
     }
   }
 
-  // Reopen the start screen ("home"). Non-destructive: it's an overlay over the current model, so
-  // showing it loses nothing — only its actions navigate. Wired to the brand logo and the palette.
+  // Return to the Home route (#368): Home and the editor are distinct routes now, so "back to start"
+  // navigates rather than popping an overlay over the editor. The boot switch (main.ts) swaps #app out
+  // and mounts the Home view; the editor stays initialised behind it for an instant return. Wired to
+  // the brand logo and the palette.
   function goHome(): void {
-    welcome.show();
+    appStore.getState().navigate('home');
   }
 
   // A start-screen action that swaps the workspace. Confirms unsaved work first. On cancel we do
@@ -2048,7 +2073,12 @@ export function init(): () => void {
           clearModelHash();
         }
       } else {
-        await openDefaultWorkspaceFlow(legacyScratch ?? SEED);
+        // A start action chosen on the Home route (#368) is queued as a one-shot intent and performed
+        // here, once, instead of opening the default workspace. A plain editor boot (cold `#/editor`
+        // deep link, or a returning user) has no intent and falls back to the default workspace.
+        const intent = takeStartIntent();
+        if (intent) await runStartIntent(intent);
+        else await openDefaultWorkspaceFlow(legacyScratch ?? SEED);
       }
     })
     .catch((e) => {

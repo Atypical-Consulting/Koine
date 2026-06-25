@@ -7,6 +7,7 @@ vi.mock('@/shell/ide', () => ({ init: ideInit }));
 
 import { bootStudio } from '../main';
 import { appStore } from '@/store';
+import { takeStartIntent } from '@/shell/bootIntent';
 
 let dispose: (() => void) | null = null;
 
@@ -16,6 +17,7 @@ beforeEach(() => {
   localStorage.clear();
   location.hash = '';
   document.body.innerHTML = '';
+  takeStartIntent(); // drain any intent a prior test queued (init() is mocked, so nothing consumes it)
 });
 
 afterEach(() => {
@@ -55,6 +57,33 @@ describe('bootStudio — a single routed view (no IDE→Home flash)', () => {
 
     dispose = bootStudio(root);
 
+    expect(ideInit).toHaveBeenCalledTimes(1);
+    expect(root.querySelector('.koi-welcome')).toBeNull();
+  });
+
+  it('a cold #/editor deep link (no persisted workspace) boots to the editor, not Home', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    location.hash = '#/editor';
+
+    dispose = bootStudio(root);
+
+    expect(ideInit).toHaveBeenCalledTimes(1);
+    expect(root.querySelector('.koi-welcome')).toBeNull();
+  });
+
+  it('a Home action persists the workspace flag and navigates to the editor', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+
+    dispose = bootStudio(root); // pristine → Home
+    expect(root.querySelector('.koi-welcome')).not.toBeNull();
+
+    // Clicking a start action sends the user into the editor and remembers a workspace was opened, so
+    // the next cold load boots straight to the editor (refresh-stable).
+    root.querySelector<HTMLButtonElement>('[data-action="open-folder"]')!.click();
+
+    expect(localStorage.getItem('koine.studio.workspace-opened')).toBe('1');
     expect(ideInit).toHaveBeenCalledTimes(1);
     expect(root.querySelector('.koi-welcome')).toBeNull();
   });

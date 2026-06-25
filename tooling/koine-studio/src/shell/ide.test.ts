@@ -922,14 +922,12 @@ describe('ide init() — Save to disk', () => {
 });
 
 describe('ide init() — Recent open recovery', () => {
-  test('clicking a Recent whose folder is gone keeps the start screen up and offers removal', async () => {
-    // Seed one recent BEFORE boot so the welcome renders a row for it.
+  test('opening a dead Recent (via the Home start-intent) keeps the start screen up and offers removal', async () => {
+    // Seed one recent so the recovered start screen renders a row for it.
     localStorage.setItem('koine.studio.recentFolders', JSON.stringify(['ghost']));
 
     const p = installPlatform();
-    // Make listKoiFiles throw only for the dead recent path ('ghost'); the default workspace
-    // uses ROOT = 'mem://workspace' and must succeed as normal so the boot ladder completes and
-    // the start screen can be opened with its recent list.
+    // Make listKoiFiles throw only for the dead recent path ('ghost').
     const realListKoiFiles = p.listKoiFiles.bind(p);
     // Cast is required: FakePlatform omits the token arg but the real Platform interface has it.
     (p as unknown as { listKoiFiles: (token: string) => Promise<KoiFile[]> }).listKoiFiles = vi.fn(
@@ -939,20 +937,20 @@ describe('ide init() — Recent open recovery', () => {
       },
     );
 
+    // Home opens a recent by queuing a start-intent then navigating to the editor (#368); the IDE
+    // consumes it once at boot. listKoiFiles throws → openRecentFolder shows the start screen and a
+    // "Remove from Recent?" confirm rather than stranding the user.
+    window.location.hash = '';
+    // Import setStartIntent AFTER beforeEach's vi.resetModules() so it shares the SAME bootIntent module
+    // instance that boot()'s dynamic import('@/shell/ide') will load — a static top-of-file import binds
+    // the pre-reset instance, whose `pending` the freshly-loaded IDE would never see.
+    const { setStartIntent } = await import('@/shell/bootIntent');
+    setStartIntent({ kind: 'open-recent', path: 'ghost' });
     await boot({ platform: p });
-    // The welcome no longer auto-shows on boot — Home is a distinct route now (#368). Open the start
-    // screen via the brand button (goHome → welcome.show()); its recent list renders the 'ghost' row.
-    document.getElementById('btn-home')!.click();
-    expect(document.querySelector('.koi-welcome-recent-open')).not.toBeNull();
-
-    // Click the dead recent row — welcome.ts's click handler calls hide() then onOpenRecent('ghost').
-    (document.querySelector('.koi-welcome-recent-open') as HTMLButtonElement).click();
-    // Drain: leaveHomeFor → confirmReplaceWork (no unsaved work → resolves immediately) →
-    // openRecentFolder → workspace.openFolderPath → listKoiFiles throws → { ok: false, reason: 'unreadable' }
-    // → welcome.show() re-shown → confirmDialog.ask() opens modal.
     await settleBoot();
 
-    // The confirm modal must now be visible (asking "Remove from Recent?").
+    // The start screen is up with the 'ghost' row, and the confirm modal must now be visible.
+    expect(document.querySelector('.koi-welcome-recent')).not.toBeNull();
     const okBtn = document.querySelector<HTMLButtonElement>('.koi-confirm-btn-danger');
     expect(okBtn).not.toBeNull();
 
