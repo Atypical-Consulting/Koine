@@ -68,3 +68,24 @@ changes" follow-up, same bucket as Brotli (see the docs note for #328).
 
 > Verified against the live deployed manifest rather than a local `npm run build:wasm`, because the wasm
 > publish requires the CI-only `wasm-tools`/`wasm-experimental` workloads.
+
+## Verifying it works
+
+**Automated** (`npm test` in `website/`): `koine-sw.test.ts` covers manifest parsing, cache-first
+serving, network-first manifest with offline fallback, generation eviction, idle precache, and an
+end-to-end offline smoke (warm the cache → drop the network → every framework request still resolves
+from cache). `sw-register.test.ts` covers the base-aware URL/scope, idempotent registration, and the
+idle-precache message.
+
+**Manual offline smoke** (needs the real wasm bundle, so run it on a deploy preview or after a local
+`npm run build:wasm`):
+
+1. Open the Playground (the landing page IDE) and let "loading compiler…" finish — the runtime boots.
+2. DevTools → Application → Cache Storage: a `koine-wasm-sha256-…` cache appears, populated with
+   `dotnet.boot.js`, `dotnet.js`, `dotnet.native.wasm`, and the assemblies (idle precache warms the
+   rest shortly after).
+3. DevTools → Network → check **Offline**, then reload. The compiler still boots and compiles `.koi`
+   live — served entirely from the cache, zero network.
+4. **Invalidation:** ship a new wasm build (new `resources.hash`). On the next online load the SW reads
+   the new manifest, opens `koine-wasm-<newhash>`, and the old `koine-wasm-<oldhash>` cache is evicted —
+   no half-old/half-new runtime, no manual cache-busting.

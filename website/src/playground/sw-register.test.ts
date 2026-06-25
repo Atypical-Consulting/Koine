@@ -27,7 +27,7 @@ describe('registerPlaygroundServiceWorker', () => {
 
   it('registers a module SW once with a base-aware url + scope', async () => {
     const register = vi.fn().mockResolvedValue({});
-    vi.stubGlobal('navigator', { serviceWorker: { register } });
+    vi.stubGlobal('navigator', { serviceWorker: { register, ready: Promise.resolve({ active: null }) } });
     vi.stubGlobal('document', { readyState: 'complete' });
 
     const mod = await import('./sw-register');
@@ -47,10 +47,24 @@ describe('registerPlaygroundServiceWorker', () => {
     expect(() => mod.registerPlaygroundServiceWorker()).not.toThrow();
   });
 
+  it('asks the active SW to precache on idle once it is ready', async () => {
+    const postMessage = vi.fn();
+    vi.stubGlobal('navigator', {
+      serviceWorker: { ready: Promise.resolve({ active: { postMessage } }) },
+    });
+    vi.stubGlobal('requestIdleCallback', (cb: () => void) => cb()); // run idle work immediately
+
+    const mod = await import('./sw-register');
+    mod.scheduleIdlePrecache();
+    await Promise.resolve(); // let navigator.serviceWorker.ready.then settle
+
+    expect(postMessage).toHaveBeenCalledWith({ type: 'precache' });
+  });
+
   it('defers registration to window load when the document is still loading', async () => {
     const register = vi.fn().mockResolvedValue({});
     const listeners: Record<string, () => void> = {};
-    vi.stubGlobal('navigator', { serviceWorker: { register } });
+    vi.stubGlobal('navigator', { serviceWorker: { register, ready: Promise.resolve({ active: null }) } });
     vi.stubGlobal('document', { readyState: 'loading' });
     vi.stubGlobal('window', {
       addEventListener: (evt: string, cb: () => void) => {

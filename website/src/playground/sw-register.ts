@@ -15,6 +15,26 @@ export function serviceWorkerUrls(base: string | undefined): { url: string; scop
   return { url: `${b}/koine-sw.js`, scope: `${b}/` };
 }
 
+/** Run `fn` when the browser is idle (so precaching never competes with first paint); setTimeout fallback. */
+function whenIdle(fn: () => void): void {
+  const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void })
+    .requestIdleCallback;
+  if (typeof ric === 'function') ric(fn, { timeout: 5000 });
+  else setTimeout(fn, 2000);
+}
+
+/**
+ * Once the SW is active, ask it (on idle) to precache the whole framework bundle so the *second*
+ * navigation is a pure cache hit. Best-effort: never throws, never blocks.
+ */
+export function scheduleIdlePrecache(): void {
+  navigator.serviceWorker.ready
+    .then((reg) => whenIdle(() => reg.active?.postMessage({ type: 'precache' })))
+    .catch(() => {
+      /* ignore — caching is opportunistic */
+    });
+}
+
 /**
  * Register the Playground service worker once, after the page has loaded (so it never competes with
  * first paint or the wasm download). No-op where service workers are unavailable.
@@ -29,6 +49,7 @@ export function registerPlaygroundServiceWorker(): void {
     navigator.serviceWorker.register(url, { type: 'module', scope }).catch(() => {
       registered = false; // let a later mount retry if this attempt failed
     });
+    scheduleIdlePrecache(); // warm the cache on idle so the next visit is instant + offline-ready
   };
 
   if (typeof document !== 'undefined' && document.readyState === 'complete') {

@@ -118,12 +118,17 @@ export async function handleManifestRequest(request, frameworkBase, deps) {
     if (response && response.ok) {
       const { generation } = parseBootManifest(await response.clone().text(), frameworkBase);
       if (generation) {
-        const cache = await deps.caches.open(cacheNameFor(generation));
+        const cacheName = cacheNameFor(generation);
+        const cache = await deps.caches.open(cacheName);
         try {
           await cache.put(request, response.clone());
         } catch {
           /* ignore — the live response is still returned below */
         }
+        // A new build ⇒ new resources.hash ⇒ new cache name ⇒ evict the stale generation(s) here, on
+        // the manifest re-read every boot does. (Eviction can't wait for `activate`: a byte-identical
+        // koine-sw.js never re-installs, so a bundle-only change would otherwise never be cleaned up.)
+        await evictStaleCaches(cacheName, deps);
       }
       return response;
     }
@@ -139,6 +144,51 @@ export async function handleManifestRequest(request, frameworkBase, deps) {
   return deps.fetch(request); // last resort (rejects offline, but a warmed boot never reaches here)
 }
 
+/** Names of stale koine-wasm-* caches (all ours except the current generation's) to delete. */
+export function staleCacheNames(existingNames, currentName) {
+  return existingNames.filter((name) => name.startsWith(CACHE_PREFIX) && name !== currentName);
+}
+
+/** Delete every koine-wasm-* cache except `currentCacheName`. Returns the evicted names. */
+export async function evictStaleCaches(currentCacheName, deps) {
+  const stale = staleCacheNames(await deps.caches.keys(), currentCacheName);
+  await Promise.all(stale.map((name) => deps.caches.delete(name)));
+  return stale;
+}
+
+/**
+ * Idle warm: precache the whole framework bundle into the current generation cache so the *next*
+ * navigation is a pure cache hit (without blocking the first paint — the page schedules this on idle).
+ * Reads the manifest for the generation + asset list, fetches anything not already cached, then evicts
+ * stale generations. Best-effort: a failed asset is skipped, and offline is a no-op.
+ */
+export async function precacheFramework(frameworkBase, deps) {
+  let manifestText;
+  try {
+    const res = await deps.fetch(frameworkBase + MANIFEST_NAME, { cache: 'no-store' });
+    if (!res || !res.ok) return;
+    manifestText = await res.text();
+  } catch {
+    return; // offline — nothing to warm
+  }
+  const { generation, assetUrls } = parseBootManifest(manifestText, frameworkBase);
+  if (!generation) return;
+  const cacheName = cacheNameFor(generation);
+  const cache = await deps.caches.open(cacheName);
+  await Promise.all(
+    assetUrls.map(async (url) => {
+      if (await cache.match(url)) return; // already warm
+      try {
+        const res = await deps.fetch(url);
+        if (res && res.ok) await cache.put(url, res.clone());
+      } catch {
+        /* best-effort — skip this asset */
+      }
+    }),
+  );
+  await evictStaleCaches(cacheName, deps);
+}
+
 // --- service-worker event wiring (attaches only inside a real ServiceWorkerGlobalScope) -------------
 
 if (
@@ -151,6 +201,14 @@ if (
   // Take control as soon as possible so even the first visit's later fetches are intercepted.
   self.addEventListener('install', () => self.skipWaiting());
   self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+
+  // Idle precache: the Playground posts { type: 'precache' } once warm (sw-register.ts), so the next
+  // navigation is a pure cache hit. The framework base is derived from the SW's own scope (…/<base>/).
+  self.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'precache') {
+      event.waitUntil(precacheFramework(`${self.registration.scope}koine-wasm/_framework/`, deps));
+    }
+  });
 
   self.addEventListener('fetch', (event) => {
     const request = event.request;

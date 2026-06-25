@@ -16,6 +16,9 @@ import {
   cacheFirst,
   handleAssetRequest,
   handleManifestRequest,
+  staleCacheNames,
+  evictStaleCaches,
+  precacheFramework,
 } from '../../public/koine-sw.js';
 
 // --- in-memory Cache Storage fake ------------------------------------------------------------------
@@ -189,5 +192,99 @@ describe('koine-sw — handleManifestRequest (network-first)', () => {
 
     const res = await handleManifestRequest(new Request(`${FW}dotnet.boot.js`), FW, deps);
     expect((await res.text()).includes('json-start')).toBe(true);
+  });
+
+  it('evicts the stale generation cache when the manifest reports a new hash', async () => {
+    const caches = new FakeCaches();
+    const oldName = cacheNameFor('sha256-OLD');
+    await caches.open(oldName); // a leftover from a previous build
+    const deps = { caches, fetch: async () => new Response(manifestText(GEN), { status: 200 }) };
+
+    await handleManifestRequest(new Request(`${FW}dotnet.boot.js`), FW, deps);
+
+    const names = await caches.keys();
+    expect(names).toContain(cacheNameFor(GEN)); // current generation kept
+    expect(names).not.toContain(oldName); // stale generation evicted
+  });
+});
+
+describe('koine-sw — eviction', () => {
+  it('staleCacheNames keeps only the current generation', () => {
+    const names = [cacheNameFor('sha256-a'), cacheNameFor('sha256-b'), 'unrelated-cache'];
+    expect(staleCacheNames(names, cacheNameFor('sha256-b'))).toEqual([cacheNameFor('sha256-a')]);
+  });
+
+  it('evictStaleCaches deletes other koine-wasm-* caches but never unrelated ones', async () => {
+    const caches = new FakeCaches();
+    await caches.open(cacheNameFor('sha256-old'));
+    await caches.open(cacheNameFor('sha256-new'));
+    await caches.open('starlight-pagefind'); // an unrelated cache must survive
+    const deps = { caches, fetch: async () => new Response() };
+
+    const evicted = await evictStaleCaches(cacheNameFor('sha256-new'), deps);
+
+    expect(evicted).toEqual([cacheNameFor('sha256-old')]);
+    const names = await caches.keys();
+    expect(names).toContain(cacheNameFor('sha256-new'));
+    expect(names).toContain('starlight-pagefind');
+    expect(names).not.toContain(cacheNameFor('sha256-old'));
+  });
+});
+
+describe('koine-sw — idle precache', () => {
+  it('warms every framework asset into the generation cache and evicts stale ones', async () => {
+    const caches = new FakeCaches();
+    await caches.open(cacheNameFor('sha256-OLD')); // previous generation to be evicted
+    const fetched: string[] = [];
+    const deps = {
+      caches,
+      fetch: async (url: string) => {
+        if (String(url).endsWith('dotnet.boot.js')) return new Response(manifestText(), { status: 200 });
+        fetched.push(String(url));
+        return new Response('asset', { status: 200 });
+      },
+    };
+
+    await precacheFramework(FW, deps);
+
+    const cache = await caches.open(cacheNameFor(GEN));
+    expect(await cache.match(`${FW}Koine.Compiler.wasm`)).toBeDefined();
+    expect(await cache.match(`${FW}dotnet.native.wasm`)).toBeDefined();
+    expect(await cache.match(`${FW}dotnet.js`)).toBeDefined();
+    expect(await caches.keys()).not.toContain(cacheNameFor('sha256-OLD')); // stale gen evicted
+  });
+
+  it('is a no-op when offline (manifest fetch fails)', async () => {
+    const caches = new FakeCaches();
+    const deps = { caches, fetch: async () => { throw new Error('offline'); } };
+    await precacheFramework(FW, deps); // must not throw
+    expect(await caches.keys()).toHaveLength(0);
+  });
+});
+
+describe('koine-sw — offline smoke (warm → go offline → still serves)', () => {
+  it('boots from cache with the network down once warmed', async () => {
+    const caches = new FakeCaches();
+    // 1. Warm online: manifest + every asset get cached under the generation cache.
+    const online = {
+      caches,
+      fetch: async (url: string) =>
+        String(url).endsWith('dotnet.boot.js')
+          ? new Response(manifestText(), { status: 200 })
+          : new Response(`net:${url}`, { status: 200 }),
+    };
+    await precacheFramework(FW, online);
+
+    // 2. Go offline: every network fetch throws.
+    const offline = { caches, fetch: async () => { throw new Error('offline'); } };
+
+    // The manifest still resolves (cached), and every framework asset still serves from cache.
+    const manifest = await handleManifestRequest(new Request(`${FW}dotnet.boot.js`), FW, offline);
+    expect((await manifest.text()).includes('json-start')).toBe(true);
+
+    for (const name of ['dotnet.js', 'dotnet.native.wasm', 'Koine.Compiler.wasm', 'System.Linq.wasm']) {
+      const res = await handleAssetRequest(new Request(`${FW}${name}`), offline);
+      expect(res.ok).toBe(true); // served from cache, not the (downed) network
+    }
   });
 });
