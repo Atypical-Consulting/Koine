@@ -80,6 +80,10 @@ import { renderMarkdown } from '@/editor/markdown';
 // LSP↔offset converters live in ./positions (pure, tested over a CodeMirror `Text`); call them with
 // `view.state.doc`.
 import { editsToChanges, lspPosToOffset, lspToCm } from '@/editor/positions';
+// The single source of truth for the narrow (phone) breakpoint — the JS mirror of $bp-narrow. Reused
+// here for the touch theme's media query and the keyboard-occlusion gate so the editor agrees with the
+// shell about what "narrow" means (do NOT re-derive 640 anywhere).
+import { BP_NARROW } from '@/shared/breakpoint';
 
 // --- .koi token highlighter -------------------------------------------------
 
@@ -291,6 +295,24 @@ const sharedTheme = EditorView.theme({
   '.cm-tooltip-autocomplete ul li[aria-selected]': {
     backgroundColor: 'var(--koi-accent)',
     color: 'var(--koi-on-accent)',
+  },
+});
+
+// Touch tuning for the .koi editor on a phone (#221). Scoped to the narrow breakpoint via a CSS media
+// query (interpolated from BP_NARROW so it tracks $bp-narrow), so DESKTOP IS UNTOUCHED — above the
+// breakpoint none of these rules match and the editor renders exactly as before. It is appended AFTER
+// sharedTheme in the extensions list, so on a narrow viewport these equal-specificity rules win the
+// cascade by source order. The font bump to 16px also stops iOS Safari from auto-zooming the page when
+// the field gains focus; the fatter caret and roomier line padding make the caret visible and the lines
+// comfortable tap targets under a fingertip.
+const narrowTouchTheme = EditorView.theme({
+  [`@media (max-width: ${BP_NARROW}px)`]: {
+    '&': { fontSize: '16px' },
+    '.cm-content': { lineHeight: 'var(--koi-editor-line-height, 1.8)' },
+    // Roomier rows: a few px of vertical padding so each line is a finger-friendly tap target.
+    '.cm-line': { paddingTop: '2px', paddingBottom: '2px' },
+    // A fatter caret reads on a high-DPI phone screen where the default 1.2px hairline disappears.
+    '.cm-cursor, .cm-dropCursor': { borderLeftWidth: '2px' },
   },
 });
 
@@ -1037,6 +1059,38 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     fetch: (ctx, signal) => requestInline(ctx, signal),
   });
 
+  // Keyboard-occlusion handling (#221): on a narrow viewport keep the caret visible above the soft
+  // keyboard. Dispatching scrollIntoView synchronously from an updateListener is illegal (an update is
+  // already in progress), so defer to the next animation frame — which also lets layout settle after
+  // the keyboard slides in. Coalesced (one reveal per frame) and guarded so a queued reveal can't fire
+  // on a destroyed view after teardown. `view` is assigned just below; this hoisted declaration only
+  // runs from rAF/event callbacks, i.e. always after the assignment.
+  let viewDestroyed = false;
+  let caretRevealQueued = false;
+  function scheduleCaretReveal(): void {
+    if (caretRevealQueued) return;
+    caretRevealQueued = true;
+    requestAnimationFrame(() => {
+      caretRevealQueued = false;
+      if (viewDestroyed || !view.hasFocus) return;
+      view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head) });
+    });
+  }
+
+  // Cache narrow-ness via a single matchMedia listener (#221) instead of measuring `window.innerWidth`
+  // on EVERY keystroke/selection inside the hot updateListener below. The MediaQueryList re-evaluates on
+  // a real viewport cross (its `change` event updates the cached flag); destroy() removes the listener.
+  // Falls back to a one-shot innerWidth read where matchMedia is unavailable (older happy-dom).
+  const narrowMql =
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(`(max-width: ${BP_NARROW}px)`)
+      : null;
+  let isNarrow = narrowMql ? narrowMql.matches : typeof window !== 'undefined' && window.innerWidth <= BP_NARROW;
+  const onNarrowChange = (e: MediaQueryListEvent): void => {
+    isNarrow = e.matches;
+  };
+  narrowMql?.addEventListener('change', onNarrowChange);
+
   const view = new EditorView({
     parent: opts.parent,
     state: EditorState.create({
@@ -1096,13 +1150,32 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         lintGutter(),
         ...(opts.onHover ? [koineHoverTooltip(opts.onHover)] : []),
         sharedTheme,
+        // Phone touch tuning, appended after sharedTheme so its narrow-only rules win the cascade
+        // (inert above $bp-narrow — no desktop change).
+        narrowTouchTheme,
         EditorView.updateListener.of((u) => {
           // Fire onChange immediately; the LSP client debounces didChange.
           if (u.docChanged && opts.onChange) opts.onChange(u.state.doc.toString());
+          // Keyboard occlusion: on a narrow viewport, keep the caret above the soft keyboard whenever a
+          // focused edit or selection move could have pushed it under the keyboard. Gated on the cached
+          // narrow flag (not a per-keystroke innerWidth read) so desktop scroll behavior is byte-for-byte
+          // unchanged.
+          if ((u.docChanged || u.selectionSet) && u.view.hasFocus && isNarrow) {
+            scheduleCaretReveal();
+          }
         }),
       ],
     }),
   });
+
+  // The soft keyboard opening/closing resizes the visual viewport; re-reveal the caret so it tracks the
+  // shrinking visible area and stays above the keyboard. Guarded for environments without visualViewport
+  // (happy-dom has none; some desktop browsers expose it only intermittently).
+  const visualViewport = typeof window !== 'undefined' ? window.visualViewport : null;
+  const onViewportResize = (): void => {
+    if (view.hasFocus && isNarrow) scheduleCaretReveal();
+  };
+  visualViewport?.addEventListener('resize', onViewportResize);
 
   const editorHandle: KoineEditor = {
     view,
@@ -1137,6 +1210,9 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
       view.dispatch({ effects: keybindingCompartment.reconfigure(buildExtraKeys(resolveKeybindings(), keybindingHandlers)) });
     },
     destroy() {
+      viewDestroyed = true; // stop any queued caret-reveal frame from touching a torn-down view
+      visualViewport?.removeEventListener('resize', onViewportResize);
+      narrowMql?.removeEventListener('change', onNarrowChange);
       dismissFloating();
       view.destroy();
     },
