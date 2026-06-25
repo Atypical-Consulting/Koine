@@ -39,6 +39,25 @@ public class R17GbnfExportTests
         gbnf.ShouldContain("root ::=");
     }
 
+    /// <summary>
+    /// Task 3 (issue #257) — the browser/desktop interop surface. Koine Studio fetches the grammar over
+    /// the WASM export <c>CompilerInterop.GbnfGrammar()</c>
+    /// (<c>src/Koine.Wasm/CompilerInterop.LanguageService.cs</c>), which is a verified one-line delegation
+    /// to <see cref="GbnfExporter.Export"/>. That <c>browser-wasm</c> <c>Exe</c> cannot be referenced from
+    /// this <c>net10.0</c> test project, so we cannot call the interop method directly; instead we pin the
+    /// exact contract it forwards: the grammar is non-empty and <b>deterministic</b> (repeated calls return
+    /// the identical string), which is precisely what a Studio fetch receives across calls.
+    /// </summary>
+    [Fact]
+    public void Export_is_non_empty_and_deterministic()
+    {
+        string first = GbnfExporter.Export();
+        string second = GbnfExporter.Export();
+
+        first.ShouldNotBeNullOrWhiteSpace();
+        second.ShouldBe(first);
+    }
+
     [Theory]
     [InlineData("context")]
     [InlineData("value")]

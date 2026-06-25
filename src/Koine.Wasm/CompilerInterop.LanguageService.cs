@@ -7,6 +7,7 @@ using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
+using Koine.Compiler.Emit.Grammar;
 using Koine.Compiler.Formatting;
 using Koine.Compiler.Services;
 
@@ -149,6 +150,15 @@ public static partial class CompilerInterop
         Registry.SupportedTargetInfos
             .Select(i => new WEmitTarget(i.Id, i.DisplayName, i.FileExtension))
             .ToArray();
+
+    /// <summary>
+    /// The llama.cpp GBNF grammar derived from Koine's ANTLR grammar (issue #257) — the grammar string a
+    /// constrained decoder is fed so it can only emit syntactically valid <c>.koi</c>. The browser counterpart
+    /// of the CLI surface; a one-line delegation to <see cref="GbnfExporter.Export"/> (the deterministic,
+    /// target-agnostic source of truth). Takes no input. Returns the grammar text verbatim.
+    /// </summary>
+    [JSExport]
+    public static string GbnfGrammar() => GbnfExporter.Export();
 
     /// <summary>
     /// Full-document LSP semantic tokens for a single <c>.koi</c> <paramref name="source"/> — the
