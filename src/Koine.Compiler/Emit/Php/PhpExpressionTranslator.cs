@@ -50,17 +50,23 @@ internal sealed class PhpExpressionTranslator
     // enum member where a comparison hint does not reach.
     private string? _expectedEnum;
 
+    // The receiver a `NameMode.Property` member renders against — `$this` inside a class body,
+    // or a supplied parameter name (e.g. `src`) for a read-model projection rooted at the source.
+    private readonly string _memberReceiver;
+
     public PhpExpressionTranslator(
         ModelIndex index,
         IReadOnlyList<Member> members,
         IReadOnlyDictionary<string, string> enumMemberToType,
-        string? context = null)
+        string? context = null,
+        string memberReceiver = "this")
     {
         _index = index;
         _resolver = new TypeResolver(index, context);
         _scope = TypeScope.FromMembers(members, index);
         _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         _enumMemberToType = enumMemberToType;
+        _memberReceiver = memberReceiver;
     }
 
     public void PushLocal(string name, TypeRef? type = null)
@@ -619,14 +625,16 @@ internal sealed class PhpExpressionTranslator
             }
         }
 
-        // (3) Member of the enclosing type: `$this->camel` in a body, `$camel` in a
-        // constructor/invariant (where the member is still the local parameter, not yet a field).
+        // (3) Member of the enclosing type: `$this->camel` (or `$<receiver>->camel`) in a body,
+        // `$camel` in a constructor/invariant (where the member is still the local parameter, not yet
+        // a field). The receiver is `this` by default; a custom receiver (e.g. `src` for a read-model
+        // projection) is set via the constructor parameter.
         if (_memberNames.Contains(name))
         {
             var camel = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(name));
             if (_mode == NameMode.Property)
             {
-                sb.Append("$this->").Append(camel);
+                sb.Append('$').Append(_memberReceiver).Append("->").Append(camel);
             }
             else
             {
