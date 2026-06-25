@@ -108,6 +108,14 @@ public sealed partial class PhpEmitter : IEmitter
             {
                 files.Add(EmitSpecifications(emit, contextSpecs, ctx.Name, typeMapper));
             }
+
+            // Policies (R10.3): an event→command reactor lives on `ContextNode.Policies` (not in
+            // `Types`), so iterate it separately. Each emits a reactor `interface` seam the consumer
+            // wires — the intended cross-aggregate call is documented, never generated.
+            foreach (PolicyDecl policy in ctx.Policies)
+            {
+                files.Add(EmitPolicy(emit, policy, ctx.Name, typeMapper));
+            }
         }
 
         // 3. Self-containment: emit a minimal branded id value object for any id type referenced by
