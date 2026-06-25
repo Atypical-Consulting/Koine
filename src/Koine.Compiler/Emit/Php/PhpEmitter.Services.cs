@@ -125,10 +125,6 @@ public sealed partial class PhpEmitter
                 sb.Append(Indent).Append("public function ").Append(method)
                   .Append('(').Append(paramList).Append("): ").Append(ret).Append("\n");
                 sb.Append(Indent).Append("{\n");
-                if (!string.IsNullOrEmpty(op.Doc))
-                {
-                    // doc already written above
-                }
                 sb.Append(Indent).Append(Indent).Append("return ").Append(body).Append(";\n");
                 sb.Append(Indent).Append("}\n");
             }
