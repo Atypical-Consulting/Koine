@@ -81,6 +81,11 @@ export interface AssistantRequest {
   model?: string;
   system: string;
   messages: ChatMessage[];
+  /**
+   * GBNF grammar to constrain decoding; attached to the OpenAI-compatible request body for
+   * grammar-capable local backends (llama.cpp / Ollama / LM Studio). Ignored for Anthropic.
+   */
+  grammar?: string;
   /** Called with each streamed text delta. */
   onText: (delta: string) => void;
   /** Optional abort signal so the caller can cancel an in-flight request. */
@@ -255,6 +260,10 @@ async function runOpenAiCompatible(req: AssistantRequest): Promise<string> {
           stream: true,
           messages,
           ...(offerTools ? { tools: koineTools(), tool_choice: 'auto' as const } : {}),
+          // `grammar` is the llama.cpp-server / Ollama GBNF body field (issue #257): a local backend
+          // that honours it can only decode tokens the grammar permits. Spread so the unknown-to-the-SDK
+          // key passes through the request body untouched; it is a no-op on providers that ignore it.
+          ...(req.grammar ? { grammar: req.grammar } : {}),
         },
         { signal: req.signal },
       );

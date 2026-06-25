@@ -510,7 +510,11 @@ emitters = ./build/Acme.GoEmitter.dll
 - **Web IDE.** [Koine Studio](https://atypical-consulting.github.io/Koine/studio/) and the
   [Playground](https://atypical-consulting.github.io/Koine/playground/) run the compiler in the
   browser (WebAssembly) — see [*See it run*](#see-it-run--in-your-browser) above. Studio also ships as
-  a native desktop app ([`tooling/koine-studio`](tooling/koine-studio)).
+  a native desktop app ([`tooling/koine-studio`](tooling/koine-studio)). Its built-in **AI copilot**
+  makes the `.koi` it generates valid by construction: a grammar-capable local model is constrained to
+  Koine's grammar (GBNF token masking), hosted APIs fall back to bounded parse-and-repair against the
+  real parser, and *Apply to editor* stays disabled until the model parses — see the
+  [Assistant guide](https://atypical-consulting.github.io/Koine/guides/assistant-local-llm/).
 - **Editor support.** [`tooling/koine-textmate`](tooling/) is a TextMate grammar for `.koi` that works
   in **JetBrains Rider** and **VS Code**. For **live error squiggles, completion, hover docs, and
   go-to-definition**, run the bundled language server (`koine lsp`) — it reuses the compiler's own

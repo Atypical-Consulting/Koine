@@ -95,6 +95,40 @@ OpenAI-compatible endpoints (OpenAI, Groq, Together, OpenRouter) work the same w
 **API key**. The Anthropic provider stays plain chat for now.
 :::
 
+## Grammar-constrained generation
+
+When you ask the Assistant to *generate* a model, Studio makes the `.koi` it produces **valid by
+construction, not by luck**. One switch controls it — **Settings → Assistant → Constrain AI output to
+the Koine grammar** — and it ships **on**. Which mechanism Studio uses is decided from the configured
+backend's capability; you don't pick it:
+
+| Backend | Mechanism | What it does |
+| --- | --- | --- |
+| **Grammar-capable local** — an OpenAI-compatible endpoint on a loopback host (Ollama `:11434`, LM Studio `:1234`) | **GBNF token masking** | The request carries a [GBNF](https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md) grammar derived from Koine's own ANTLR grammar, so the decoder can **only** emit tokens that keep a valid `.koi` parse. The reply gets a **`grammar-constrained`** chip. |
+| **Hosted API** — Anthropic, or OpenAI proper (`api.openai.com`) | **Parse-and-repair** | No decode-time hook exists on these, so Studio validates the candidate against the real Koine parser and, on failure, feeds the precise `line:column` diagnostics back for up to **3** repair rounds. A **`parse-and-repair`** chip and a live **`repair k/N`** counter show progress. |
+
+Either way, **"Apply to editor" stays disabled until the candidate parses** — Studio never drops
+unparseable text into your buffer. If parse-and-repair runs out of rounds, a *"couldn't produce valid
+Koine"* notice appears and Apply stays off.
+
+:::note[The guarantee, honestly]
+A grammar-capable **local** model gets a **hard syntactic guarantee**: the GBNF is a recogniser-grade
+projection of the language, so the decoder's output always *parses*. It is **not** a semantic checker —
+it can't enforce name resolution or type rules — so Studio still validates the result once and only
+enables Apply when it comes back clean. **Hosted** models get a **bounded best-effort** with a known
+ceiling (three repair rounds), never silent junk.
+
+Capability is inferred from your **provider + base URL** alone — a loopback OpenAI-compatible endpoint
+counts; `api.openai.com` and Anthropic don't — not by probing the server. The grammar itself is derived
+in the compiler (`GbnfExporter`) and stays target-agnostic.
+:::
+
+:::caution[Web vs desktop]
+The GBNF is served by Studio's **in-browser** WebAssembly compiler, so token masking is available in
+**Studio Web**. The **desktop** app doesn't expose it yet, so the same local model falls back to
+**parse-and-repair** there — still gated behind a clean parse, just without the hard guarantee.
+:::
+
 ## Inline completions (ghost text)
 
 The Assistant is a *chat* surface. Studio also has an **inline** one: as you type in a `.koi` buffer it

@@ -16,6 +16,8 @@ export interface KoineWasmApi {
   EmitPreview(filesJson: string, target: string): Promise<string>;
   /** The registry's emit-target capability list → JSON `{ targets:[{id,displayName,fileExtension}] }` (#282). */
   ListEmitTargets(): Promise<string>;
+  /** The llama.cpp GBNF grammar for constrained `.koi` decoding → grammar text (#257). */
+  GbnfGrammar(): Promise<string>;
   /** Glossary markdown for the merged workspace → JSON `{markdown}`. */
   Glossary(filesJson: string): Promise<string>;
   /** Structured glossary for the merged workspace → JSON `{entries}`. */
@@ -111,6 +113,7 @@ const KOINE_WASM_EXPORT_MAP: Record<keyof KoineWasmApi, true> = {
   DiagnoseWorkspace: true,
   EmitPreview: true,
   ListEmitTargets: true,
+  GbnfGrammar: true,
   Glossary: true,
   GlossaryModel: true,
   Model: true,

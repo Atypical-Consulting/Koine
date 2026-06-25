@@ -100,6 +100,30 @@ describe('Assistant inline-completions setting', () => {
   });
 });
 
+describe('Assistant constrain-grammar setting (#257)', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('defaults ON so generated .koi is guaranteed to parse out of the box', () => {
+    expect(DEFAULT_SETTINGS.aiConstrainGrammar).toBe(true);
+    expect(loadSettings().aiConstrainGrammar).toBe(true);
+  });
+
+  test('round-trips an opted-out state', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, aiConstrainGrammar: false });
+    expect(loadSettings().aiConstrainGrammar).toBe(false);
+  });
+
+  test('falls back to the default (true) when the stored value is not a boolean', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, aiConstrainGrammar: 'yes' as never });
+    expect(loadSettings().aiConstrainGrammar).toBe(true);
+  });
+
+  test('falls back to the default (true) when the field is absent from the stored blob', () => {
+    localStorage.setItem('koine.studio.settings', JSON.stringify({ theme: 'light' }));
+    expect(loadSettings().aiConstrainGrammar).toBe(true);
+  });
+});
+
 describe('Editor autoSave + enableMinimap settings', () => {
   beforeEach(() => localStorage.clear());
 

@@ -328,3 +328,5 @@ Koine.Compiler.Services.KoineLanguageService.PrepareTypeHierarchy(Koine.Compiler
 Koine.Compiler.Services.KoineLanguageService.Supertypes(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.TypeHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
 Koine.Compiler.Services.KoineLanguageService.Subtypes(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.TypeHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
 Koine.Compiler.Ast.ModelIndex.SubscriptionEventNameIsAmbiguous(string! subscriberContext, string! eventShortName) -> bool
+Koine.Compiler.Emit.Grammar.GbnfExporter
+static Koine.Compiler.Emit.Grammar.GbnfExporter.Export() -> string!

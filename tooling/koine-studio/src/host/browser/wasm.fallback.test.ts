@@ -67,6 +67,26 @@ describe('loadWasmApi — main-thread fallback (issue #357)', () => {
     expect(dispose).toHaveBeenCalledOnce(); // the dead worker is torn down
   });
 
+  test('exposes the GbnfGrammar surface — a call round-trips the bundle export (issue #257)', async () => {
+    const { createKoineWorkerClient } = await import('@/host/browser/workerClient');
+    (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
+      call: vi.fn(),
+      whenReady: vi.fn<() => Promise<void>>().mockRejectedValue(new Error('worker boot failed')),
+      dispose: vi.fn(),
+    });
+
+    const wasm = await import('@/host/browser/wasm');
+    const grammar = 'root ::= context+\ncontext ::= "context"';
+    const gbnfGrammar = vi.fn(() => grammar);
+    wasm.__setDotnetModuleLoaderForTests(fakeDotnetModule({ GbnfGrammar: gbnfGrammar }));
+
+    const api = await wasm.loadWasmApi();
+
+    expect(wasm.getWasmBootMode()).toBe('main-thread');
+    expect(await api.GbnfGrammar()).toBe(grammar);
+    expect(gbnfGrammar).toHaveBeenCalledOnce();
+  });
+
   test('falls back to a main-thread boot when the worker posts an explicit boot-failure', async () => {
     const { createKoineWorkerClient } = await import('@/host/browser/workerClient');
     (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
