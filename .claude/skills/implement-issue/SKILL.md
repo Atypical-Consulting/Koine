@@ -19,7 +19,7 @@ description: >-
   a PR purely to merge it now is `merge-pr`.
 ---
 
-# Implement a Koine issue from its plan
+# Implement an issue from its plan
 
 ## What this does and why
 
@@ -53,7 +53,7 @@ blocker you cannot reasonably work past:
   the wall you hit with the failing output.
 - A merge conflict you cannot resolve with confidence — both `main` and your branch rewrote the *same
   logic*, and choosing a side would silently drop a sibling PR's work. The mechanical conflicts
-  (version, `CHANGELOG`, snapshots, lockfiles) have known-correct resolutions (Step 8) — handle those
+  (version, changelog, snapshots, lockfiles) have known-correct resolutions (Step 8) — handle those
   yourself; stop only for the genuinely ambiguous ones, and show both sides.
 
 Never mark a checkbox, commit, or flip the PR to ready on the strength of an assumption. Those three
@@ -66,7 +66,7 @@ re-test on the merged tree before you trust it — a clean *textual* merge is no
 Create a task (todo) for each item and work them in order. Steps 6 is the loop — one pass per task
 in the plan.
 
-1. **Preconditions** — `gh` works, you're in the Koine repo, resolve the issue number.
+1. **Preconditions** — `gh` works, you're in the target repo, resolve the issue number.
 2. **Read the plan** — fetch the `🛠️ Implementation plan` from the issue body (or a comment, on older issues); save it and note where it lives.
 3. **Pick the execution mode** — assess complexity → *Inline (Extra)* or *Subagent-per-task (Ultracode)*.
 4. **Create the worktree** — via `superpowers:using-git-worktrees`; branch off `main`.
@@ -76,9 +76,10 @@ in the plan.
    → tick that task on the issue plan *and* the PR description → push.
 7. **Code review** — run the `code-review` skill, apply + commit the fixes, push.
 8. **Sync with `main`** — merge the latest `origin/main` into the branch and resolve any conflicts so
-   the PR merges clean (Koine hot-spots: version, `CHANGELOG`, snapshots, lockfiles — see reference).
-9. **Verify, format, then mark ready** — build/tests green on the merged tree AND
-   `dotnet format --verify-no-changes` clean (commit any fixes), then `gh pr ready`.
+   the PR merges clean (per the profile's *Conflict hot-spots* — version, changelog, snapshots,
+   lockfiles — see reference).
+9. **Verify, format, then mark ready** — build/tests green on the merged tree AND the profile's
+   format/lint verify gate clean (commit any fixes), then `gh pr ready`.
 10. **Report** — PR URL, what shipped, anything you assumed or deferred.
 
 Resume-safe: re-running mid-flight is fine. A task is "done" when **all** its step checkboxes read
@@ -89,16 +90,17 @@ rather than making a second one (see `references/github-mechanics.md`).
 
 ## Step 1 — Preconditions
 
-**Load the repo profile first.** This skill shows Koine's values inline (the commit identity, the
-build/test/`dotnet format` commands, the conflict hot-spots, the layered project grain) — those are
-really the *Koine profile* used as a worked example. Run the **`get-repo-profile`** skill; it returns
-`.claude/skills/repo-profile.md` (generating it on first use). Prefer the profile's values wherever they
-differ from what's shown here, so this skill works unchanged in any repo. If no profile exists and you
-genuinely can't generate one, fall back to the inline Koine values and note that in the report.
+**Load the repo profile first.** This skill reads every repo-specific fact from the repo profile, never
+inline: the commit identity, the build/test/format commands and CI gates, the conflict hot-spots, and
+the architecture grain. Run the **`get-repo-profile`** skill; it returns `.claude/skills/repo-profile.md`
+(generating it on first use), and the steps below cite its named sections. Throughout, **`git
+<commit-identity>`** stands for the author line from the profile's *Commit identity* (its `-c
+user.email=… -c user.name="…"` flags) — substitute it in every commit/merge command below. If no profile
+exists and you genuinely can't generate one, say so in the report rather than guessing repo specifics.
 
 ```bash
 gh api user --jq .login                       # prints a login, or 401 → not authed
-gh repo view --json nameWithOwner --jq .nameWithOwner   # confirm Atypical-Consulting/Koine
+gh repo view --json nameWithOwner --jq .nameWithOwner   # confirm it's the repo the profile names
 ```
 
 If auth fails, stop and tell the user to run `! gh auth login -h github.com` in the prompt (the `!`
@@ -138,8 +140,8 @@ Read `/tmp/koine-plan-$ISSUE.md` and parse it into tasks: each `### Task N: <nam
 `- [ ]`/`- [x]` lines beneath it up to the next `### Task` (or end). When the plan came from the body,
 the file also holds the template fields and the collapsed brainstorm/spec sitting above the plan —
 harmless, because you only ever flip checkbox lines under a `### Task` heading. Note the **Global
-Constraints** preamble — version floors, the `Ast/`-stays-target-agnostic invariant, the commit
-identity, "no `TreatWarningsAsErrors`" — these bind every task.
+Constraints** preamble — version floors, the architecture invariants from the profile's *Architecture
+grain*, the commit identity, and any build constraints the plan carries — these bind every task.
 
 ## Step 3 — Pick the execution mode
 
@@ -147,15 +149,15 @@ You can't change this session's reasoning-effort setting, so "Extra vs Ultracode
 **execution strategy**, sized to the plan. State which you picked and why, then proceed — don't ask.
 
 - **Inline ("Extra")** — implement here, one task at a time, in this session. Use for **small,
-  localized** plans: roughly ≤3 tasks, changes confined to one area (e.g. one emitter file + its
-  tests), no new grammar and no cross-layer churn.
+  localized** plans: roughly ≤3 tasks, changes confined to one area (e.g. one module + its tests), no
+  cross-layer churn against the profile's *Architecture grain*.
 
 - **Subagent-per-task ("Ultracode")** — invoke `superpowers:subagent-driven-development` and dispatch
   **one fresh-context subagent per task**, sequentially (tasks build on each other — the plan is a
   TDD chain, so do NOT parallelize them). Use for **broad or deep** plans: ~4+ tasks, OR touching
-  multiple pipeline layers (grammar → builder visitor → semantic model → validators → emitter),
-  OR introducing a new emitter target / language construct, OR a long file-touch list. In this mode
-  also escalate the Step 7 review to `/code-review high` (or `ultra` for a very large change).
+  multiple layers of the profile's *Architecture grain*, OR introducing a whole new subsystem/target,
+  OR a long file-touch list. In this mode also escalate the Step 7 review to `/code-review high` (or
+  `ultra` for a very large change).
 
 When it's a toss-up, prefer subagent-per-task — fresh context per task keeps quality high on the
 longer plans where it matters. Either way, **this skill stays the parent**: it owns the worktree,
@@ -175,14 +177,14 @@ The user wants the PR visible as a **draft before** the implementation loop, so 
 A PR needs the branch to be ahead of `main`, so land an empty scaffold commit, push, then open it:
 
 **The PR title must end with `(#<issue>)`** — the issue title followed by the issue number in
-parentheses, e.g. `Surface the Rust emitter target in Koine Studio (IDE) (#172)`. The repo
-**squash-merges** PRs, and GitHub appends the *PR* number to the squash commit's title — so titling the
-PR with the *issue* number makes the final `main` commit carry **both**, matching the repo's history
-(`… (#254) (#274)`, `… (#171) (#252)` — issue first, PR second). Drop it and the merged commit records
-only the PR number, losing the link back to the issue at a glance.
+parentheses, e.g. `Surface the Rust emitter target in the IDE (#172)`. When the repo's *Integration
+style* (in the profile) is squash-merge, GitHub appends the *PR* number to the squash commit's title —
+so titling the PR with the *issue* number makes the final `main` commit carry **both**, matching the
+repo's history (`… (#254) (#274)`, `… (#171) (#252)` — issue first, PR second). Drop it and the merged
+commit records only the PR number, losing the link back to the issue at a glance.
 
 ```bash
-git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" \
+git <commit-identity> \
   commit --allow-empty -m "chore(#$ISSUE): scaffold draft PR for <title>"
 git push -u origin <branch>
 gh pr create --draft --base main --head <branch> \
@@ -213,10 +215,9 @@ source of truth — it's what a resumed run reads — and the PR list is its syn
 For each task in plan order whose checkboxes aren't all `- [x]` yet:
 
 1. **Implement it.** Follow the task's own steps exactly — they're written TDD-first (write the
-   failing test → run it red → implement → run it green). Honor the Global Constraints and the
-   project's layering (touch grammar → builder → `Ast/` → validators → emitter in order; **never
-   leak a C# concept into `Ast/`**). Use the per-task `--filter` the plan gives so each task's tests
-   run fast.
+   failing test → run it red → implement → run it green). Honor the Global Constraints and the repo's
+   layering (the profile's *Architecture grain* — touch its layers in order and don't break its
+   invariants). Use the per-task test filter the plan gives so each task's tests run fast.
    - *Inline mode:* do this directly, using `superpowers:test-driven-development` discipline.
    - *Subagent-per-task mode:* dispatch a subagent with the task block, the Global Constraints, and
      the repo grain; have it implement to a green filtered test run and report a short diff summary.
@@ -227,7 +228,7 @@ For each task in plan order whose checkboxes aren't all `- [x]` yet:
 
 3. **Commit** with the project identity and the **commit message from the task's final step**:
    ```bash
-   git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" \
+   git <commit-identity> \
      commit -am "<message from the task's last - [ ] step>"
    ```
 
@@ -280,7 +281,7 @@ back (in your report) on any that are wrong rather than performatively complying
 fixes and push:
 
 ```bash
-git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" \
+git <commit-identity> \
   commit -am "fix: address code-review findings"
 git push
 ```
@@ -294,21 +295,22 @@ ready against a stale base and it merges with conflicts — or won't merge at al
 gate, pull the latest `main` into the branch, resolve anything that collides, *then* re-verify on the
 merged tree.
 
-The project **squash-merges** PRs (see the `(#NNN)` commits on `main`), so the branch's own history is
-collapsed at merge time — which makes a **merge** of `main` into the branch the right tool here, not a
-rebase: it resolves each conflict once, needs no force-push, and the throwaway merge commit disappears
-when the PR squashes.
+When the profile's *Integration style* is squash-merge (see the `(#NNN)` commits on `main`), the
+branch's own history is collapsed at merge time — which makes a **merge** of `main` into the branch the
+right tool here, not a rebase: it resolves each conflict once, needs no force-push, and the throwaway
+merge commit disappears when the PR squashes. (For a rebase- or merge-commit repo, follow the profile's
+*Integration style* instead.)
 
 ```bash
 git fetch origin main
-git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" merge origin/main
+git <commit-identity> merge origin/main
 ```
 
 - **"Already up to date" / clean merge** → nothing collided; go to Step 9.
 - **Conflicts** → resolve them favoring *both sides' intent* — a parallel PR's work is as real as yours.
-  Most Koine conflicts are mechanical with a known-correct fix; `references/github-mechanics.md` §7 has
-  the hot-spot table (`Directory.Build.props` version, `CHANGELOG.md`, `README`/`USER-STORIES`, Verify
-  snapshots, `package-lock.json`, emitter partials, test files). Two rules keep you from silent damage:
+  Most conflicts are mechanical with a known-correct fix; the profile's *Conflict hot-spots* table (and
+  `references/github-mechanics.md` §7) lists them by file — version bump, changelog, docs, snapshots,
+  lockfiles, additive code/tests. Two rules keep you from silent damage:
   - **Regenerate derived files; don't hand-merge them.** Verify `*.verified.txt` snapshots and
     `package-lock.json` must not be merged line-by-line — take one side to clear the conflict, then
     regenerate (re-run the affected tests and accept the fresh snapshot; `npm install` to rebuild the
@@ -320,7 +322,7 @@ Finish the merge with the project identity once it builds, then push:
 
 ```bash
 git add -A
-git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit --no-edit   # completes the merge
+git <commit-identity> commit --no-edit   # completes the merge
 git push
 ```
 
@@ -334,39 +336,27 @@ this step again — it's cheap, and a re-sync right before merge is the surest w
 ## Step 9 — Verify, format, then mark ready
 
 Marking a PR ready says "this is done." Earn it: build and tests green **on the just-merged tree**, and
-**the same gates CI runs** clean — a PR that goes red in CI the moment it's opened wasn't ready.
+**the same gates CI runs** clean — a PR that goes red in CI the moment it's opened wasn't ready. The
+exact commands are the profile's *Build & test* and *CI gates*; run those, not hardcoded ones.
 
-**1. Build + tests.**
+**1. Build + tests.** Run the profile's *Build* then *Full test* commands. If the profile flags a
+prerequisite that can't be satisfied locally (a workload, a toolchain), run the plan's per-task test
+filters plus the build instead, and say so in the report.
 
-```bash
-dotnet build
-dotnet test                 # full suite needs the wasm workloads (see CLAUDE.md); if absent,
-                            # run the plan's test filters + `dotnet build` and say so in the report
-```
-
-**2. Format gate (CI enforces it — so must you).** CI runs
-`dotnet format Koine.slnx --verify-no-changes --no-restore` and **fails the build** on any diff. New
-code routinely trips analyzer style rules (e.g. `IDE0011` missing braces) that compile fine but the
-formatter rejects. So before the ready-flip, run the formatter in **apply** mode and commit what it
-changes:
-
-```bash
-dotnet format Koine.slnx                                  # applies whitespace + style + analyzer fixes
-dotnet format Koine.slnx --verify-no-changes --no-restore # must now exit 0 — this is the CI check
-```
-
-Scope the apply to the projects you touched (e.g. `dotnet format src/Koine.Compiler/Koine.Compiler.csproj`)
-so you don't sweep unrelated files; then run the whole-solution `--verify-no-changes` to match CI
-exactly. Some analyzer diagnostics — notably `IDE1006` naming (a snake_case test method that must
-start uppercase) — **can't be auto-fixed** (`dotnet format` prints "doesn't support Fix All"); rename
-those by hand. Commit the result:
+**2. Format/lint gate (CI enforces it — so must you).** The profile's *CI gates* include a format/lint
+**verify** command that **fails the build** on any diff. New code routinely trips style/analyzer rules
+that compile fine but the gate rejects. So before the ready-flip, run the profile's format/lint **apply**
+command, then its **verify** command — verify must exit clean (that's the CI check). Scope the apply to
+the files/projects you touched so you don't sweep unrelated files, then run the whole-repo verify to
+match CI exactly. Heed the profile's caveats — some analyzer diagnostics can't be auto-fixed and must be
+hand-corrected. Commit the result:
 
 ```bash
-git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" \
-  commit -am "style: satisfy dotnet format" && git push
+git <commit-identity> \
+  commit -am "style: satisfy the format/lint gate" && git push
 ```
 
-**3. Mark ready** — only once build, tests, and `--verify-no-changes` are all green:
+**3. Mark ready** — only once build, tests, and the format/lint verify gate are all green:
 
 ```bash
 gh pr ready <pr-number>
@@ -379,8 +369,8 @@ Short and concrete:
 - One line per task shipped (and confirmation every checkbox is ticked).
 - Code-review outcome — what you fixed, what you consciously dismissed and why.
 - Merge sync — whether `main` merged clean or which conflicts you resolved (and how).
-- Anything you assumed, deferred, or couldn't verify (e.g. full suite skipped for missing wasm
-  workloads). Keep the detail in the PR/issue; the report just points there.
+- Anything you assumed, deferred, or couldn't verify (e.g. full suite skipped for a missing local
+  prerequisite the profile flags). Keep the detail in the PR/issue; the report just points there.
 
 Then **close the loop**: the PR is ready but not landed — a human still owns the decision to merge.
 Point the user at the sibling skill that lands it — **`/merge-pr #<pr>`** waits for CI, applies any
@@ -397,13 +387,13 @@ corrections to keep it mergeable, squash-merges, files follow-ups, and tears dow
   (its final step). Use it verbatim so the git history mirrors the plan and the issue.
 - **Stay resumable.** Everything keys off the issue's checkbox state and the existing branch/PR, so a
   re-run picks up where it left off instead of starting over or double-committing.
-- **Respect the architecture invariant.** Koine keeps `Ast/` target-agnostic and the pipeline
-  strictly layered. Implement tasks along that grain; a plan that says "add an emitter" means a new
-  `Emit/<Target>/`, never target concepts pushed into the shared model.
+- **Respect the architecture invariant.** Implement tasks along the profile's *Architecture grain* —
+  its layer order and its "keep X target-agnostic" rules. A plan that says "add a subsystem" means
+  following that grain, never smuggling concerns into a layer the invariant keeps clean.
 - **Draft until proven.** The PR stays a draft through the whole loop and review; it only goes ready
-  after the build/tests are green **and CI's own gates pass locally** — run `dotnet format
-  --verify-no-changes` (the formatter CI enforces) and fix what it flags. Reviewers should never see a
-  "ready" PR that doesn't compile, or that goes red in CI the instant it opens.
+  after the build/tests are green **and CI's own gates pass locally** — run the profile's format/lint
+  verify gate and fix what it flags. Reviewers should never see a "ready" PR that doesn't compile, or
+  that goes red in CI the instant it opens.
 - **Don't widen the blast radius.** Implement the plan, not your own ideas. If you spot adjacent work
   worth doing, record it under a `## Follow-ups` heading in the **PR description** (and call it out in
   your report) — that's the exact place `/merge-pr` harvests deferred work from and files as tracked
@@ -411,8 +401,9 @@ corrections to keep it mergeable, squash-merges, files follow-ups, and tears dow
   itself into this PR.
 - **Merge clean, or don't merge.** Issues run in parallel here, so `main` almost always moves under a
   draft PR. A ready PR that conflicts with `main` (or goes red once `main` advances) stalls everyone.
-  Merge the latest `main` into the branch right before the ready-flip and resolve the collisions —
-  *regenerate* derived files (snapshots, lockfiles) rather than hand-merging them, take the **higher**
-  version, **union** additive files (docs, tests, `CHANGELOG`), and re-verify. The mechanical 90% have
-  known-correct fixes (see `references/github-mechanics.md` §7); only the rare both-sides-rewrote-the-
-  same-logic case deserves a human.
+  Merge the latest `main` into the branch right before the ready-flip and resolve the collisions per the
+  profile's *Conflict hot-spots* — *regenerate* derived files (snapshots, lockfiles) rather than
+  hand-merging them, take the **higher** version, **union** additive files (docs, tests, changelog), and
+  re-verify. The mechanical 90% have known-correct fixes (the profile's table and
+  `references/github-mechanics.md` §7); only the rare both-sides-rewrote-the-same-logic case deserves a
+  human.
