@@ -2,7 +2,7 @@
 // main-thread boot when the worker boot rejects (boot-failure OR timeout), and getWasmBootMode()
 // reports which path won. Happy-dom has no real Worker and no real .NET runtime, so we mock the
 // worker client and inject a fake dotnet module loader (the __setDotnetModuleLoaderForTests seam).
-import { describe, expect, test, vi, beforeEach } from 'vitest';
+import { describe, expect, test, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('@/host/browser/workerClient', () => ({ createKoineWorkerClient: vi.fn() }));
 
@@ -26,6 +26,12 @@ function fakeDotnetModule(interop: Record<string, unknown>) {
 describe('loadWasmApi — main-thread fallback (issue #357)', () => {
   beforeEach(() => {
     vi.resetModules();
+  });
+
+  // Guard against an env stub (vi.stubEnv('DEV', …)) leaking into a sibling test if an assertion
+  // throws before the in-test restore runs — the dev-case tests rely on vitest's default DEV===true.
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   test('falls back to a main-thread boot when the worker boot rejects (timeout)', async () => {
@@ -181,5 +187,42 @@ describe('loadWasmApi — main-thread fallback (issue #357)', () => {
     expect(appendSpy).toHaveBeenCalled(); // the inline-<script> fallback WAS used
 
     appendSpy.mockRestore();
+  });
+
+  // Issue #365: the inline-<script> loader exists ONLY for Vite's dev-server public-asset (`?import`)
+  // transform. In a built/deployed bundle there is no such transform, so a thrown direct import is a
+  // genuine load error — it must reject PROMPTLY with the real error instead of stalling on the inline
+  // loader's 8s blind timeout. The inline fallback is gated on `import.meta.env.DEV`.
+
+  test('production build (DEV=false): a genuine direct-import failure rejects promptly — no inline <script> fallback', async () => {
+    const { createKoineWorkerClient } = await import('@/host/browser/workerClient');
+    (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
+      call: vi.fn(),
+      whenReady: vi.fn<() => Promise<void>>().mockRejectedValue(new Error('worker boot failed')),
+      dispose: vi.fn(),
+    });
+
+    // Simulate a built/deployed bundle: `import.meta.env.DEV` is statically false there (vitest
+    // defaults it to true). The inline loader is dev-server-only, so production must NOT take it.
+    vi.stubEnv('DEV', false);
+
+    const wasm = await import('@/host/browser/wasm');
+    // The direct import throws a *genuine* production load error (e.g. dotnet.js 404) — not the
+    // dev-server transform case — so it must propagate, not route through the inline loader.
+    wasm.__setEsModuleImporterForTests(() =>
+      Promise.reject(new Error('dotnet.js 404 (genuine production load failure)')),
+    );
+
+    const createSpy = vi.spyOn(document, 'createElement');
+    const appendSpy = vi.spyOn(document.head, 'appendChild');
+
+    // The real direct-import error propagates promptly; the inline-<script> loader is never reached.
+    await expect(wasm.loadWasmApi()).rejects.toThrow(/dotnet\.js 404 \(genuine production load failure\)/);
+    expect(createSpy).not.toHaveBeenCalledWith('script');
+    expect(appendSpy).not.toHaveBeenCalled();
+
+    createSpy.mockRestore();
+    appendSpy.mockRestore();
+    vi.unstubAllEnvs();
   });
 });
