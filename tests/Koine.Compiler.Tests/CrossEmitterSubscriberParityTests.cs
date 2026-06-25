@@ -1,4 +1,5 @@
 using Koine.Compiler.Emit;
+using Koine.Compiler.Emit.AsyncApi;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Php;
 using Koine.Compiler.Emit.Python;
@@ -10,10 +11,11 @@ namespace Koine.Compiler.Tests;
 /// <summary>
 /// #420 — a subscriber that consumes the same integration-event short name from two different
 /// publishers must get two distinct, non-clobbering handler seams in EVERY emitter that emits a
-/// subscriber seam (C#, TypeScript, PHP), each qualified by its publisher. The Python emitter ships no
-/// per-subscription seam (integration events emit only as per-context DTOs), so the model is
-/// collision-safe there by construction — asserted too, so a future Python subscriber seam can't
-/// silently reintroduce the collision. One model, four targets: the cross-emitter parity guard.
+/// subscriber seam (C#, TypeScript, PHP), each qualified by its publisher; AsyncAPI must likewise emit
+/// two distinct receive operations. The Python emitter ships no per-subscription seam (integration
+/// events emit only as per-context DTOs), so the model is collision-safe there by construction —
+/// asserted too, so a future Python subscriber seam can't silently reintroduce the collision. One
+/// model, every subscriber-consuming emitter: the cross-emitter parity guard.
 /// </summary>
 public class CrossEmitterSubscriberParityTests
 {
@@ -61,6 +63,17 @@ public class CrossEmitterSubscriberParityTests
             "Fulfillment/Abstractions/HandleSalesShipped.php",
             "Fulfillment/Abstractions/HandleReturnsShipped.php",
             "Fulfillment/Abstractions/HandleShipped.php");
+
+    [Fact]
+    public void AsyncApi_emits_two_distinct_publisher_qualified_receive_operations()
+    {
+        var yaml = Emit(new AsyncApiEmitter()).ShouldHaveSingleItem().Contents;
+
+        // Two distinct receive operations — one per publisher; the bare key would drop a subscription.
+        yaml.ShouldContain("  Fulfillment_receive_Sales_Shipped:");
+        yaml.ShouldContain("  Fulfillment_receive_Returns_Shipped:");
+        yaml.ShouldNotContain("  Fulfillment_receive_Shipped:");
+    }
 
     [Fact]
     public void Python_is_collision_safe_with_no_subscriber_seam()
