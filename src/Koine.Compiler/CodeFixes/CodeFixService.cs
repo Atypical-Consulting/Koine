@@ -30,6 +30,8 @@ public sealed class CodeFixService
     public static IReadOnlyList<ICodeFixProvider> DefaultProviders() =>
     [
         new ChangeToSuggestionCodeFixProvider(),
+        new AddOptionalMarkerCodeFixProvider(),
+        new RenameDuplicateCodeFixProvider(),
         new ExtractValueObjectCodeFixProvider(),
     ];
 
