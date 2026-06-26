@@ -617,6 +617,9 @@ export function init(): () => void {
     store: appStore,
     activeUri: () => workspace.activeUri(),
     folderRootToken: () => workspace.folderRootToken(),
+    // #470: the Source Control panel's save-all-before-commit prompt persists every dirty buffer through
+    // the shell's existing Save-all (#109). A thunk because `workspace` is constructed after the controller.
+    saveAllDirty: () => workspace.saveAllDirty(),
     initialTarget: settings.previewTarget,
     saveWorkspaceCenter,
     loadWorkspaceCenter,
@@ -1216,6 +1219,9 @@ export function init(): () => void {
     controller.onDocEdited();
     history.noteEdit({ immediate: true });
   });
+  // A save wrote buffer(s) to disk: the on-disk git status just changed, so live-refresh the Source
+  // Control panel when its tab is open (#470). A no-op otherwise — the next SC open re-fetches anyway.
+  workspace.onSaved(() => controller.refreshSourceControl());
 
   // Boot/empty-state: open the host's persistent default workspace. The clearLegacyScratch + the
   // OPFS-error output line are ide-specific, so they wrap workspace.openDefaultWorkspaceFlow here.

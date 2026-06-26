@@ -358,6 +358,7 @@ function makeDeps(lsp: Lsp): InspectorControllerDeps {
     store: createAppStore(),
     activeUri: () => 'file:///work/model.koi',
     folderRootToken: () => '',
+    saveAllDirty: vi.fn(async () => {}),
     initialTarget: 'csharp',
     saveWorkspaceCenter: vi.fn(),
     loadWorkspaceCenter: vi.fn(() => null),
