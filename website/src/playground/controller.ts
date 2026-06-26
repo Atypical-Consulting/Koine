@@ -1,9 +1,10 @@
 // Client controller for the Playground IDE. Wires the CodeMirror editor to the wasm compiler
 // and drives the landing-page taste: live diagnostics, compile-on-change + ⌘⏎ run, target
-// switching (C#/TS/Python/PHP/Rust/glossary/Docs/AsyncAPI/OpenAPI) with syntax-highlighted output, a grouped file tree, copy +
-// download-as-zip, a mobile editor/output toggle, and the "Open in Studio" handoff.
-import { createKoineEditor, createOutputView, type KoineEditor, type OutputView, type OutputLang } from './editor';
-import { capabilities, compile, preloadCompiler, terminateAndRespawn, type CompileResult, type Target } from './koine';
+// switching across whatever targets the compiler reports (derived from its ListEmitTargets export,
+// #438) with syntax-highlighted output, a grouped file tree, copy + download-as-zip, a mobile
+// editor/output toggle, and the "Open in Studio" handoff.
+import { createKoineEditor, createOutputView, highlightModeForTarget, type KoineEditor, type OutputView } from './editor';
+import { capabilities, compile, listEmitTargets, preloadCompiler, terminateAndRespawn, type CompileResult, type EmitTarget, type Target } from './koine';
 import { createSuperseder } from './supersede';
 import { registerPlaygroundServiceWorker } from './sw-register';
 import { DEFAULT_SAMPLE } from './samples';
@@ -11,17 +12,6 @@ import { makeZip, downloadBlob } from './zip';
 import { encodeCode } from './encode';
 import { basePath } from '../lib/base';
 
-const TARGET_LANG: Record<Target, OutputLang> = {
-  csharp: 'csharp',
-  typescript: 'typescript',
-  python: 'python',
-  php: 'plain',
-  rust: 'plain',
-  glossary: 'plain',
-  docs: 'plain',
-  asyncapi: 'plain',
-  openapi: 'plain',
-};
 /** Pick the most interesting file to show first: skip runtime + config boilerplate. */
 function defaultFileIndex(result: CompileResult): number {
   const isBoilerplate = (p: string) =>
@@ -46,7 +36,7 @@ export function mountPlayground(root: HTMLElement): void {
   const downloadBtn = $<HTMLButtonElement>('.koi-download');
   const stopBtn = $<HTMLButtonElement>('.koi-stop');
   const studioLink = $<HTMLAnchorElement>('.koi-studio');
-  const targetBtns = Array.from(root.querySelectorAll<HTMLButtonElement>('.koi-targets button'));
+  const targetsHost = $('.koi-targets')!; // the tablist is populated at runtime from the live target list (#438)
   const mobileBtns = Array.from(root.querySelectorAll<HTMLButtonElement>('.koi-mobile-tabs button'));
 
   let target: Target = 'csharp';
@@ -112,7 +102,7 @@ export function mountPlayground(root: HTMLElement): void {
 
   function renderCode(result: CompileResult) {
     const file = result.files[activeFile] ?? result.files[0];
-    output.setContent(file ? file.contents : '// no output — fix the errors on the left', TARGET_LANG[target]);
+    output.setContent(file ? file.contents : '// no output — fix the errors on the left', highlightModeForTarget(target));
     if (filePick && result.files.length) filePick.value = String(activeFile);
     if (copyBtn) copyBtn.disabled = !file;
     if (downloadBtn) downloadBtn.disabled = result.files.length === 0;
@@ -222,20 +212,36 @@ export function mountPlayground(root: HTMLElement): void {
     };
   }
 
-  // --- target tabs ---
-  for (const btn of targetBtns) {
-    btn.onclick = () => {
-      target = (btn.dataset.target as Target) ?? 'csharp';
-      activeFile = 0;
-      targetBtns.forEach((b) => {
-        const on = b === btn;
-        b.classList.toggle('is-active', on);
-        b.setAttribute('aria-selected', String(on));
-      });
-      run(true);
-    };
-    btn.setAttribute('aria-selected', String(btn.dataset.target === target));
-    btn.classList.toggle('is-active', btn.dataset.target === target);
+  // --- target tabs: rendered from the compiler's reported emit targets (#438) ---
+  // The `ListEmitTargets` export is the single source of truth (the same list Koine Studio derives
+  // from, #282/#293), so a newly-shipped backend target surfaces here with no website edit. Falls back
+  // to a built-in set offline. The button label is the target's displayName; the highlight mode comes
+  // from a presentation-only id→mode map (editor.ts), defaulting to plain text for unknown ids.
+  function renderTargetTabs(targets: EmitTarget[]) {
+    // Preserve the current selection if the list still offers it; otherwise pick the first target.
+    if (!targets.some((t) => t.id === target)) target = targets[0]?.id ?? target;
+    targetsHost.innerHTML = '';
+    for (const t of targets) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('role', 'tab');
+      btn.dataset.target = t.id;
+      btn.textContent = t.displayName;
+      btn.onclick = () => {
+        target = t.id;
+        activeFile = 0;
+        for (const b of targetsHost.querySelectorAll<HTMLButtonElement>('button')) {
+          const on = b === btn;
+          b.classList.toggle('is-active', on);
+          b.setAttribute('aria-selected', String(on));
+        }
+        run(true);
+      };
+      const on = t.id === target;
+      btn.classList.toggle('is-active', on);
+      btn.setAttribute('aria-selected', String(on));
+      targetsHost.appendChild(btn);
+    }
   }
 
   // --- Stop: abandon a runaway compile and re-boot a fresh worker (#353) ---
@@ -304,10 +310,16 @@ export function mountPlayground(root: HTMLElement): void {
   // Cache-first the multi-MB wasm runtime so repeat visits boot instantly + offline (issue #328).
   registerPlaygroundServiceWorker();
 
-  // Kick off the runtime download and first compile (landing on a meaningful file).
+  // Kick off the runtime download, build the target tabs from the compiler's reported targets (#438),
+  // then run the first compile (landing on a meaningful file). listEmitTargets() awaits the same worker
+  // boot the first compile does, so finalising the target before compiling adds no extra latency and
+  // avoids a default-target race. It always resolves (falls back to the built-in set on failure).
   setStatus('loading compiler…', 'busy');
   preloadCompiler();
-  void run(true);
+  void listEmitTargets().then((targets) => {
+    renderTargetTabs(targets);
+    void run(true);
+  });
 
   // Show the compiler version from the bundle's self-description (#330) — never a hard-coded string.
   // Persistent (its own element), so the transient compile status in `.koi-status` doesn't clobber it.

@@ -6,17 +6,10 @@
 
 <div class="koi-ide" data-view="editor">
   <div class="koi-ide__bar">
-    <div class="koi-targets" role="tablist" aria-label="Output target">
-      <button data-target="csharp" class="is-active" type="button" role="tab">C#</button>
-      <button data-target="typescript" type="button" role="tab">TypeScript</button>
-      <button data-target="python" type="button" role="tab">Python</button>
-      <button data-target="php" type="button" role="tab">PHP</button>
-      <button data-target="rust" type="button" role="tab">Rust</button>
-      <button data-target="glossary" type="button" role="tab">Glossary</button>
-      <button data-target="docs" type="button" role="tab">Docs</button>
-      <button data-target="asyncapi" type="button" role="tab">AsyncAPI</button>
-      <button data-target="openapi" type="button" role="tab">OpenAPI</button>
-    </div>
+    <!-- Target tabs are rendered at runtime from the compiler's reported emit targets (its
+         ListEmitTargets export — the single source of truth, #438). A newly-shipped backend target
+         appears here with no edit to this file. -->
+    <div class="koi-targets" role="tablist" aria-label="Output target"></div>
     <div class="koi-mobile-tabs" role="tablist" aria-label="Pane">
       <button data-mobile="editor" class="is-active" type="button">Model</button>
       <button data-mobile="output" type="button">Output</button>

@@ -39,7 +39,10 @@ export interface CompileResult {
   files: EmittedFile[];
 }
 
-export type Target = 'csharp' | 'typescript' | 'python' | 'php' | 'glossary' | 'docs' | 'asyncapi' | 'openapi' | 'rust';
+/** A backend emit-target id (e.g. `csharp`, `rust`). The authoritative set is whatever the loaded
+ *  compiler reports via {@link listEmitTargets} (#438) — no longer a hand-maintained union — so a
+ *  newly-shipped target is selectable with zero website edits. */
+export type Target = string;
 
 export interface EmitTarget {
   id: string;
@@ -53,6 +56,18 @@ export interface Capabilities {
   exports: string[];
   targets: EmitTarget[];
 }
+
+/** Minimal built-in target set used only as a fallback when the loaded compiler can't report its
+ *  targets (runtime not yet booted, `ListEmitTargets` export missing, or an empty/failed list). It is
+ *  NOT a second source of which targets exist — {@link listEmitTargets} always prefers the runtime's
+ *  list; this just keeps the Playground usable offline. Mirrors Studio's BUILTIN_EMIT_TARGETS
+ *  (#282/#293). */
+export const BUILTIN_EMIT_TARGETS: readonly EmitTarget[] = [
+  { id: 'csharp', displayName: 'C#', fileExtension: '.cs' },
+  { id: 'typescript', displayName: 'TypeScript', fileExtension: '.ts' },
+  { id: 'python', displayName: 'Python', fileExtension: '.py' },
+  { id: 'php', displayName: 'PHP', fileExtension: '.php' },
+];
 
 // ---------------------------------------------------------------------------
 // Singleton worker client — booted once, reused for all calls.
@@ -126,4 +141,23 @@ export async function compile(source: string, target: Target, opts?: CallOptions
 export async function capabilities(opts?: CallOptions): Promise<Capabilities> {
   const client = await loadApi();
   return JSON.parse(await client.call('Capabilities', [], opts)) as Capabilities;
+}
+
+/** The emit targets the loaded compiler actually ships — read from the `ListEmitTargets` export, the
+ *  single source of truth Koine Studio also derives its target list from (#282/#293/#438). Falls back
+ *  to {@link BUILTIN_EMIT_TARGETS} when the runtime can't report them (offline boot, missing export, or
+ *  an empty list) so the Playground always offers a usable set. */
+export async function listEmitTargets(opts?: CallOptions): Promise<EmitTarget[]> {
+  const fallback = () => BUILTIN_EMIT_TARGETS.map((t) => ({ ...t }));
+  try {
+    const client = await loadApi();
+    const parsed = JSON.parse(await client.call('ListEmitTargets', [], opts)) as { targets?: EmitTarget[] };
+    const targets = parsed.targets ?? [];
+    if (targets.length > 0) return targets.map((t) => ({ ...t }));
+    console.warn('Koine playground: compiler reported no emit targets — using the built-in fallback set.');
+    return fallback();
+  } catch (e) {
+    console.warn('Koine playground: could not read emit targets from the compiler — using the built-in fallback set.', e);
+    return fallback();
+  }
 }
