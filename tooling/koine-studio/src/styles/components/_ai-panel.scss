@@ -138,6 +138,13 @@
   background: var(--koi-paper-2);
   padding: var(--koi-space-2);
 }
+// A superseded change set (a newer turn retired it, issue #473) is dimmed so it reads as inert. The
+// meaning is carried by the disabled Apply/checkboxes and the status notice (not by the dim alone), and
+// the panel is an INACTIVE component — WCAG 2.1 AA 1.4.3 exempts those from the contrast minimum. The
+// 0.6 matches the existing `.koi-changeset-apply:disabled` dim, for a consistent "retired" look.
+.koi-changeset-superseded {
+  opacity: 0.6;
+}
 .koi-changeset-file {
   display: grid;
   grid-template-columns: auto auto 1fr;
@@ -224,6 +231,15 @@
 .koi-changeset-apply:disabled {
   opacity: 0.6;
   cursor: default;
+}
+// Per-row drift warning (issue #473): the file moved on between SEND and Apply, so it was skipped.
+// Sits on its own grid line under the diff; the error colour plus the explicit text carry the meaning.
+.koi-changeset-drift {
+  grid-column: 1 / -1;
+  margin-top: var(--koi-space-0-5);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  color: var(--koi-error);
 }
 .koi-changeset-status {
   margin-top: var(--koi-space-1);
