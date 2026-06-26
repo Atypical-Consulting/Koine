@@ -336,18 +336,26 @@ public sealed class SemanticValidator
     /// depending on the emitter and the pair). This target-agnostic check catches that once, at
     /// validation time, before any emitter runs.
     ///
-    /// <para>The collision key is deliberately the <b>strictest</b> fold any shipped emitter applies —
-    /// PHP's, which is case-insensitive (method names) and collapses underscores (see
-    /// <see cref="CanonicalPascalCase"/>). It therefore flags every pair that would collide in at least
-    /// one of PHP/TS, and may conservatively flag a pair that would <i>not</i> collide in C# (which omits
-    /// the <c>is</c> prefix and is case-sensitive).</para>
+    /// <para>Issue #539: detection is <b>per emitted-target keyspace</b>, not a single strict fold. A
+    /// genuine per-target duplicate can occur between two names the conservative strict fold sorts into
+    /// <i>different</i> groups (it collapses underscores <i>before</i> stripping a leading <c>Is</c> word,
+    /// so <c>IsIs_active</c> → <c>isactive</c> and <c>Is_active</c> → <c>active</c> never get compared —
+    /// yet both emit the same TypeScript predicate <c>isIs_active</c>). Each shipped predicate-emitting
+    /// target therefore gets its own keyspace: <b>PHP</b> = the strict, case- and separator-folding key
+    /// (its method names are case-insensitive and its PascalCase folds underscores — identical to the
+    /// historical KOI1007 key); <b>TypeScript</b> = the case- and separator-sensitive <c>is</c>+subject
+    /// key with a leading <c>Is</c> word stripped (<see cref="TypeScriptPredicateKey"/>); <b>C#</b> needs
+    /// no keyspace of its own — its predicates are extension methods keyed by name <i>and</i> receiver
+    /// type, so a folded pair only collides when it is already an exact same-target duplicate, which
+    /// KOI1005 owns. A pair collides iff it duplicates an earlier spec under <i>some</i> target's key.</para>
     ///
     /// <para>Issue #495 makes the <i>severity</i> target-aware via <paramref name="targets"/>: a pair
-    /// that collides only under the strict (cross-target) fold but breaks no <i>enabled</i> target's own
-    /// identifier rule is downgraded from an error to a warning, so a C#-only build is not blocked by a
-    /// PHP-only collision. A pair that genuinely breaks an enabled target (PHP for any collision;
-    /// TypeScript on the Is-strip axis) keeps the hard error, and the default
-    /// <see cref="EmitTargetSet.All"/> (no target context) reproduces the original always-strict error.</para>
+    /// that collides under some target's keyspace but breaks no <i>enabled</i> target's own identifier
+    /// rule is downgraded from an error to a warning, so a C#-only build is not blocked by a PHP-only
+    /// collision, nor a PHP-only build by a TypeScript-only one. A pair that genuinely breaks an enabled
+    /// target (PHP on any strict collision; TypeScript on the Is-strip axis) keeps the hard error, and
+    /// the default <see cref="EmitTargetSet.All"/> (no target context) enables every target, so it is a
+    /// strict superset of the pre-#539 behaviour — it catches <i>more</i>, never fewer.</para>
     ///
     /// <para>The spec surface gathered per context mirrors the emitters exactly: context-level
     /// <see cref="ContextNode.Specs"/> plus aggregate-nested <see cref="AggregateDecl.Specs"/>. The
@@ -357,20 +365,21 @@ public sealed class SemanticValidator
     internal static void ValidateUniqueSpecPredicateNames(
         KoineModel model, List<Diagnostic> diagnostics, EmitTargetSet targets)
     {
-        // Issue #495: which enabled targets would a strict-fold collision actually break?
-        //  • PHP folds case AND separators — its predicate key IS the strict key, so any strict
+        // Issue #495 severity: which enabled targets would a per-target collision actually break?
+        //  • PHP folds case AND separators — its predicate key IS the strict key, so a strict-key
         //    collision genuinely duplicates a PHP method → hard error whenever PHP is enabled.
-        //  • TypeScript keeps case and separators but strips a leading `Is` word, so it breaks only on
-        //    the Is-strip axis (IsActive+Active → isActive twice), never the underscore axis
-        //    (FreeOrder+free_order → isFreeOrder/isFree_order, distinct). Tracked per spec below.
+        //  • TypeScript keeps case and separators but strips a leading `Is` word, so it duplicates on
+        //    the Is-strip axis (IsActive+Active → isActive twice; IsIs_active+Is_active → isIs_active
+        //    twice) → hard error whenever TypeScript is enabled and the TS keys repeat.
         //  • C# predicates are extension methods keyed by name AND receiver type, so a folded pair only
         //    duplicates when it is already an exact same-target duplicate — which KOI1005 owns. C#
-        //    therefore never contributes a hard collision here, and needs no per-target tracking.
-        // When no enabled target breaks, the pair is valid for the chosen build (e.g. C#-only) and the
-        // collision is advisory — a warning, not a hard block. The default EmitTargetSet.All enables
-        // PHP, so the strict error fires on every collision exactly as before #495.
-        var phpBreaks = (targets & EmitTargetSet.Php) != 0;
-        var trackTypeScript = (targets & EmitTargetSet.TypeScript) != 0;
+        //    therefore never contributes a hard collision here, and needs no keyspace of its own.
+        // When no enabled target breaks, the pair is valid for the chosen build (e.g. C#-only, or a
+        // PHP-only build hitting a TypeScript-only collision) and the diagnostic is advisory — a
+        // warning, not a hard block. The default EmitTargetSet.All enables every target, so any
+        // per-target duplicate is a hard error — a strict superset of the pre-#539 behaviour.
+        var phpEnabled = (targets & EmitTargetSet.Php) != 0;
+        var typeScriptEnabled = (targets & EmitTargetSet.TypeScript) != 0;
 
         foreach (ContextNode ctx in model.Contexts)
         {
@@ -378,11 +387,16 @@ public sealed class SemanticValidator
             IEnumerable<SpecDecl> specs =
                 ctx.Specs.Concat(ctx.Types.OfType<AggregateDecl>().SelectMany(a => a.Specs));
 
-            var seen = new Dictionary<string, SpecDecl>(StringComparer.Ordinal);
+            // Issue #539: one `seen` map per emitted-target keyspace — PHP's strict, case/separator
+            // folding key, and TypeScript's case/separator-sensitive Is-strip key. A spec collides iff
+            // it duplicates an earlier spec under *either* (C# never collides except on KOI1005's exact
+            // duplicates, so it carries no keyspace). Each map keeps the first-seen spec for the message.
+            var seenPhp = new Dictionary<string, SpecDecl>(StringComparer.Ordinal);
+            var seenTypeScript = new Dictionary<string, SpecDecl>(StringComparer.Ordinal);
 
             // Issue #494: KOI1005 (DuplicateSpec, in ValidateSpecs) already reports — with the clearer
             // "duplicates another spec or a member" message — every spec whose name exactly/case-
-            // insensitively duplicates an *earlier* spec on the same target. KOI1007's fold is a strict
+            // insensitively duplicates an *earlier* spec on the same target. KOI1007's folds are a strict
             // superset of that, so it would double-report the very same span. Mirror KOI1005's detection
             // here (specs grouped by TargetType under Ordinal; names compared under OrdinalIgnoreCase)
             // and stay silent on exactly the spans it owns — order-independently, so a duplicate buried
@@ -390,21 +404,18 @@ public sealed class SemanticValidator
             // merely fold together (IsActive+Active), or an exact name on a *different* target, still fire.
             var namesByTarget = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
 
-            // Issue #495: the TypeScript predicate identities (its case- and separator-sensitive
-            // `is`+subject key) seen so far in this context — a repeat means TS would genuinely emit a
-            // duplicate function, a hard error even with PHP disabled. Only allocated when TS is enabled.
-            HashSet<string>? seenTypeScript = trackTypeScript ? new HashSet<string>(StringComparer.Ordinal) : null;
-
             foreach (SpecDecl spec in specs)
             {
-                // The PascalCase subject (with a leading `Is` word stripped) drives both the collision
-                // key and the displayed predicate, so compute it once.
+                // The strict PascalCase subject (with a leading `Is` word stripped) drives both the PHP
+                // collision key and the displayed predicate; the TypeScript key keeps case/separators.
                 var subject = SpecPredicateSubject(spec.Name);
-                var key = CanonicalKey(subject);
-                if (key.Length == 0)
+                var phpKey = CanonicalKey(subject);
+                if (phpKey.Length == 0)
                 {
                     continue; // a name with no alphanumeric content emits no usable predicate
                 }
+
+                var typeScriptKey = TypeScriptPredicateKey(spec.Name);
 
                 if (!namesByTarget.TryGetValue(spec.TargetType, out HashSet<string>? targetNames))
                 {
@@ -412,31 +423,46 @@ public sealed class SemanticValidator
                 }
 
                 // True when this spec exactly/case-insensitively duplicates an earlier same-target spec —
-                // precisely the case KOI1005 owns, so KOI1007 must stay silent for it.
+                // precisely the case KOI1005 owns, so KOI1007 must stay silent for it (on every axis).
                 var koi1005AlreadyReports = !targetNames.Add(spec.Name);
 
-                // Record this spec's TypeScript identity (so a later spec can spot a real TS duplicate)
-                // and learn whether it repeats an earlier one — `!Add` ⇒ already present ⇒ TS collision.
-                var typeScriptBreaks = seenTypeScript is not null && !seenTypeScript.Add(TypeScriptPredicateKey(spec.Name));
+                // Does this spec duplicate an earlier one under PHP's key? under TypeScript's?
+                var phpDuplicate = seenPhp.TryGetValue(phpKey, out SpecDecl? phpFirst);
+                var typeScriptDuplicate = seenTypeScript.TryGetValue(typeScriptKey, out SpecDecl? typeScriptFirst);
 
-                if (seen.TryGetValue(key, out SpecDecl? first))
+                if ((phpDuplicate || typeScriptDuplicate) && !koi1005AlreadyReports)
                 {
-                    if (!koi1005AlreadyReports)
-                    {
-                        diagnostics.Add(phpBreaks || typeScriptBreaks
-                            ? Diagnostic.FromSpan(DiagnosticCodes.DuplicateSpecPredicate,
-                                $"spec '{spec.Name}' emits the same predicate ('is{subject}') as spec '{first.Name}'",
-                                spec.Span)
-                            : Diagnostic.FromSpan(DiagnosticSeverity.Warning, DiagnosticCodes.DuplicateSpecPredicate,
-                                $"spec '{spec.Name}' would emit the same predicate ('is{subject}') as spec " +
-                                $"'{first.Name}' for case-insensitive or separator-folding targets (e.g. PHP), but " +
-                                "not for the enabled target(s); relaxed to a warning (issue #495)",
-                                spec.Span));
-                    }
+                    // Severity (#495): a hard error iff an *enabled* target genuinely duplicates; else the
+                    // collision survives only under a non-enabled target's fold → advisory warning.
+                    var enabledTargetBreaks = (phpDuplicate && phpEnabled) || (typeScriptDuplicate && typeScriptEnabled);
+
+                    // Describe the predicate/sibling for the axis that actually collides — prefer PHP's
+                    // strict subject (`isFreeOrder`) when it collides, else the TypeScript identity
+                    // (`isIs_active`) so the message names the predicate that genuinely duplicates.
+                    SpecDecl first = phpDuplicate ? phpFirst! : typeScriptFirst!;
+                    var predicate = phpDuplicate ? subject : typeScriptKey;
+
+                    diagnostics.Add(enabledTargetBreaks
+                        ? Diagnostic.FromSpan(DiagnosticCodes.DuplicateSpecPredicate,
+                            $"spec '{spec.Name}' emits the same predicate ('is{predicate}') as spec '{first.Name}'",
+                            spec.Span)
+                        : Diagnostic.FromSpan(DiagnosticSeverity.Warning, DiagnosticCodes.DuplicateSpecPredicate,
+                            $"spec '{spec.Name}' would emit the same predicate ('is{predicate}') as spec " +
+                            $"'{first.Name}' for another shipped target's identifier rule (PHP's case/separator " +
+                            "fold, or TypeScript's Is-strip fold), but not for the enabled target(s); relaxed to " +
+                            "a warning (issue #495)",
+                            spec.Span));
                 }
-                else
+
+                // Record the first spec seen under each key so a later collider reports against it.
+                if (!phpDuplicate)
                 {
-                    seen[key] = spec;
+                    seenPhp[phpKey] = spec;
+                }
+
+                if (!typeScriptDuplicate)
+                {
+                    seenTypeScript[typeScriptKey] = spec;
                 }
             }
         }
