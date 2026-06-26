@@ -733,10 +733,14 @@ fn git_checkout(dir: String, branch: String) -> Result<(), String> {
 
 /// `git log` newest first, optionally scoped to `rel_path`. Uses a US-delimited
 /// (`%H\x1f%an\x1f%aI\x1f%s`) one-record-per-line format so an author name or subject containing
-/// spaces/colons can't corrupt the split. `Err` on a non-repo dir or an unborn branch (no commits).
+/// spaces/colons can't corrupt the split. Capped at the most recent `LOG_MAX_COUNT` commits: the
+/// Source Control panel renders only a short recent-commit list, so streaming a long history over IPC
+/// on every status refresh would be pure waste. `Err` on a non-repo dir or an unborn branch (no commits).
 #[tauri::command]
 fn git_log(dir: String, rel_path: Option<String>) -> Result<Vec<GitLogEntry>, String> {
-    let mut args: Vec<&str> = vec!["log", "--pretty=format:%H%x1f%an%x1f%aI%x1f%s"];
+    /// Comfortably above what the panel shows, while bounding the IPC payload on a long-history repo.
+    const LOG_MAX_COUNT: &str = "--max-count=50";
+    let mut args: Vec<&str> = vec!["log", LOG_MAX_COUNT, "--pretty=format:%H%x1f%an%x1f%aI%x1f%s"];
     if let Some(ref p) = rel_path {
         args.push("--");
         args.push(p.as_str());
