@@ -11,6 +11,7 @@ import {
   type DomainIndex,
 } from '@/ai/aiPanel';
 import { runAssistant } from '@/ai/ai';
+import { saveChat } from '@/settings/persistence';
 
 // Stream a fenced ```koine block as the reply so a generative turn would normally offer "Apply"; the
 // Explain path must suppress that affordance while still rendering the reply bubble.
@@ -609,5 +610,152 @@ describe('multi-file change set (agentic edits)', () => {
     expect(container.querySelector('.koi-changeset-discard')).not.toBeNull();
     expect(applyBtn.textContent).not.toContain('✓');
     expect(applyBtn.disabled).toBe(false);
+  });
+});
+
+// --- apply-gate re-validation at the legacy entry points (#444) -------------------------------
+// #423 gates the LIVE generation path: validate the `.koi` before enabling "Apply to editor". Two
+// legacy entry points still reached `maybeOfferApply` WITHOUT re-validating — transcript replay
+// (`replayMessage` trusted the stored `offerApply` flag) and stop-mid-stream (the abort handler
+// committed the partial reply and offered Apply on it) — so a previously-rejected or truncated model
+// could be applied after a reload or a Stop. Both must now re-run the SAME validate adapter the live
+// path uses and offer Apply only when the model parses: fail closed when validation can't run, and
+// keep the legacy unguarded affordance when the constraint toggle is off (the gate only claims the
+// constrained contract).
+describe('apply-gate re-validation at legacy entry points (#444)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.mocked(runAssistant).mockReset();
+  });
+  afterEach(() => {
+    localStorage.clear();
+    vi.mocked(runAssistant).mockReset();
+  });
+
+  const CLEAN = 'ok: true — no diagnostics. The model compiles.';
+  const DIRTY = 'ok: false — 1 error(s), 0 warning(s):\n- [error] 1:1 boom';
+  // A persisted GENERATIVE turn (a fenced `.koi` block, no apply opt-out).
+  const MODEL_TURN = 'Here is your model:\n```koine\ncontext X {}\n```';
+
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  }
+
+  function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
+    return {
+      container,
+      getProvider: () => 'openai',
+      getBaseUrl: () => 'http://localhost:1234/v1',
+      getApiKey: () => 'sk',
+      getModel: () => '',
+      getContext: () => ({ fileName: 'm.koi', source: 'context X {}', diagnostics: [] }),
+      onApplyModel: () => {},
+      onOpenPrefs: () => {},
+      getWorkspaceKey: () => 'ws',
+      getSelection: () => null,
+      getUseTools: () => false,
+      getConstrainGrammar: () => true,
+      ...over,
+    };
+  }
+
+  // Seed a persisted generative turn under the panel's workspace key so a fresh mount replays it.
+  function seedModelTurn(): void {
+    saveChat('ws', [
+      { role: 'user', content: 'design a model' },
+      { role: 'assistant', content: MODEL_TURN },
+    ]);
+  }
+
+  // Drive a generative send via the first quick action (offerApply defaults true).
+  function fire(container: HTMLElement): void {
+    container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
+  }
+
+  test('replay of a turn whose .koi is INVALID re-validates and withholds Apply', async () => {
+    seedModelTurn();
+    const runCompilerTool = vi.fn(() => Promise.resolve(DIRTY));
+    const container = document.createElement('div');
+    createAssistantPanel(opts(container, { runCompilerTool }));
+
+    // The persisted turn replayed (its body rendered)…
+    expect(container.querySelector('.koi-md')).not.toBeNull();
+    // …and the gate RE-VALIDATED the stored `.koi` rather than trusting the stored flag…
+    await vi.waitFor(() => expect(runCompilerTool).toHaveBeenCalled());
+    await settle();
+    // …and because it doesn't parse, Apply is withheld (the #444 replay bypass is closed).
+    expect(container.querySelector('.koi-assistant-apply')).toBeNull();
+  });
+
+  test('replay of a turn whose .koi is VALID still offers Apply', async () => {
+    seedModelTurn();
+    const container = document.createElement('div');
+    createAssistantPanel(opts(container, { runCompilerTool: () => Promise.resolve(CLEAN) }));
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
+  });
+
+  test('constraint toggle OFF: replay keeps the legacy unguarded Apply, never consulting validate', async () => {
+    seedModelTurn();
+    const runCompilerTool = vi.fn(() => Promise.resolve(DIRTY));
+    const container = document.createElement('div');
+    // Toggle off → the gate makes no promises, so Apply is offered as it always was and the validate
+    // adapter is never even consulted.
+    createAssistantPanel(opts(container, { getConstrainGrammar: () => false, runCompilerTool }));
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
+    expect(runCompilerTool).not.toHaveBeenCalled();
+  });
+
+  test('constraint on but no validate seam: replay fails closed (no Apply)', async () => {
+    seedModelTurn();
+    const container = document.createElement('div');
+    // runCompilerTool omitted → can't prove the model parses → withhold Apply.
+    createAssistantPanel(opts(container));
+
+    expect(container.querySelector('.koi-md')).not.toBeNull(); // replayed…
+    await settle();
+    expect(container.querySelector('.koi-assistant-apply')).toBeNull(); // …without Apply (fail closed)
+  });
+
+  // --- stop-mid-stream (the abort partial-commit path) ---------------------------------------
+  // A Stop mid-generation commits the partial reply and offers Apply on it. A partial often holds a
+  // TRUNCATED/invalid model, so the abort branch must clear the same gate the live path enforces.
+
+  // Mock `runAssistant` to stream `body`, then have the user hit Stop (aborting the in-flight
+  // request) before it finishes — exactly the stop-mid-stream sequence.
+  function streamThenStop(container: HTMLElement, body: string): void {
+    vi.mocked(runAssistant).mockImplementation(async (req: { onText: (t: string) => void }) => {
+      req.onText(body);
+      container.querySelector<HTMLButtonElement>('.koi-assistant-stop')!.click(); // user Stops
+      throw new DOMException('aborted', 'AbortError'); // the fetch rejects on abort
+    });
+  }
+
+  test('stop mid-stream with a truncated/invalid .koi: re-validates and withholds Apply', async () => {
+    const runCompilerTool = vi.fn(() => Promise.resolve(DIRTY));
+    const container = document.createElement('div');
+    createAssistantPanel(opts(container, { runCompilerTool }));
+    // A fenced block whose model is incomplete (unbalanced braces) — the kind a Stop leaves behind.
+    streamThenStop(container, 'Working on it…\n```koine\ncontext X {\n```');
+    fire(container);
+
+    // The stop-partial branch ran (the "Stopped." note is shown)…
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-stopped')).not.toBeNull());
+    // …and it RE-VALIDATED the partial rather than offering Apply blindly…
+    await vi.waitFor(() => expect(runCompilerTool).toHaveBeenCalled());
+    await settle();
+    // …so the truncated model is NOT applicable (the #444 stop bypass is closed).
+    expect(container.querySelector('.koi-assistant-apply')).toBeNull();
+  });
+
+  test('stop mid-stream with a VALID complete .koi still offers Apply', async () => {
+    const container = document.createElement('div');
+    createAssistantPanel(opts(container, { runCompilerTool: () => Promise.resolve(CLEAN) }));
+    streamThenStop(container, 'Done early:\n```koine\ncontext X {}\n```');
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-stopped')).not.toBeNull());
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
   });
 });
