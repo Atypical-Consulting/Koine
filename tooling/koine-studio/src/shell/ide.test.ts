@@ -384,6 +384,7 @@ const APP_HTML = `
         <span class="sb-item" id="sb-validity">No errors</span>
         <span id="sb-problems-host"></span>
         <span class="sb-spacer"></span>
+        <span id="sb-compiling-host"></span>
         <span class="sb-item" id="sb-connection">Connecting…</span>
         <span class="sb-item" id="sb-version"></span>
       </footer>
