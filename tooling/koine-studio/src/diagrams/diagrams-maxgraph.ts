@@ -18,6 +18,7 @@ import {
   DIAGRAM_ANNOTATION_CREATE_EVENT,
   DIAGRAM_CONNECT_EVENT,
   DIAGRAM_DISCONNECT_EVENT,
+  DIAGRAM_REFIT_EVENT,
   DIAGRAM_RELAYOUT_EVENT,
   NODE_EDIT_EVENT,
   NODE_NAVIGATE_EVENT,
@@ -1030,7 +1031,7 @@ const ZOOM_PERSIST_KEY = 'koi-domain-diagram';
  * Ctrl/⌘+wheel zoom, and the Outline minimap. Returns a teardown that detaches them. Kept out of
  * buildCanvas so the model stays unit-testable; the visual chrome is verified in the running studio.
  */
-function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly = false): { dispose: () => void; fit: () => void } {
+function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly = false): { dispose: () => void; fit: () => void; refit: () => void } {
   const { Outline } = mx;
   const graph = handle.graph;
   // `readOnly` (the context-map canvas) is never an authoring surface regardless of the global editing
@@ -1150,19 +1151,74 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   outlineDiv.setAttribute('aria-hidden', 'true');
   host.appendChild(outlineDiv);
   let outline: { destroy(): void } | null = null;
-  try {
-    outline = new Outline(graph, outlineDiv);
-  } catch {
-    // Outline reads laid-out geometry; under a measure-less headless DOM it may fail — skip it there.
-    outlineDiv.remove();
+  const buildOutline = (): void => {
+    try {
+      outline = new Outline(graph, outlineDiv);
+    } catch {
+      // Outline reads laid-out geometry; under a measure-less headless DOM it may fail — skip it there.
+      outline = null;
+    }
+  };
+  buildOutline();
+  // If the host was zero-size at construction, the Outline read no geometry and `outlineDiv` stays empty
+  // (it renders as an oversized empty box). It's removed only if it could never construct; otherwise it's
+  // kept so `refit()` can rebuild it once the host is measurable.
+  if (!outline && outlineDiv.childElementCount === 0) outlineDiv.remove();
+
+  // Re-fit + re-lay-out the minimap once the surface is measurable again (#529). The canvas is built once
+  // and shown/hidden via CSS, so when a hidden zone (the mobile Diagram tab) is revealed nothing re-frames
+  // the content or re-measures the Outline. `refit()` re-frames the VIEW (scale/center) and rebuilds the
+  // Outline against the now-sized host — it never reloads the layout or rebuilds nodes, so manual node
+  // positions and pan are preserved.
+  const refit = (): void => {
+    fit();
+    // The Outline reads laid-out geometry at construction; rebuild it so a minimap built against a
+    // zero-size host (the oversized empty box) is replaced by a correct thumbnail. If it was removed
+    // because it could never construct, re-append a host so it has somewhere to live.
+    if (!outlineDiv.isConnected) host.appendChild(outlineDiv);
+    outline?.destroy();
+    buildOutline();
+  };
+
+  // A canvas first painted inside a hidden mobile zone mounts at zero size, so `fit()` no-op'd and the
+  // Outline read no geometry. Watch the host and refit ONCE when it transitions 0 → measurable, covering
+  // every reveal path (mobile zone switch, split toggle, orientation) — not just the mobile-zone event.
+  // Guarded to a genuine 0→non-zero transition so it never thrashes on a live user resize/pan/zoom.
+  let wasMeasurable = host.clientWidth > 0 && host.clientHeight > 0;
+  let ro: { disconnect(): void } | null = null;
+  if (typeof ResizeObserver !== 'undefined') {
+    const observer = new ResizeObserver(() => {
+      const measurable = host.clientWidth > 0 && host.clientHeight > 0;
+      if (measurable && !wasMeasurable) {
+        wasMeasurable = true;
+        refit();
+      } else if (!measurable) {
+        wasMeasurable = false;
+      }
+    });
+    try {
+      observer.observe(host);
+      ro = observer;
+    } catch {
+      /* environments without a working observer — the document event still drives refit */
+    }
   }
+
+  // The IDE asks the live canvas to refit when it reveals a hidden zone (#529). Dispatched on `document`
+  // (mirroring the annotation-create seam) so it reaches whichever canvas is mounted; a disposed chrome
+  // detaches its listener, so only the live canvas responds.
+  const onRefit = (): void => refit();
+  document.addEventListener(DIAGRAM_REFIT_EVENT, onRefit);
 
   return {
     dispose: () => {
       host.removeEventListener('wheel', onWheel);
+      document.removeEventListener(DIAGRAM_REFIT_EVENT, onRefit);
+      ro?.disconnect();
       outline?.destroy();
     },
     fit,
+    refit,
   };
 }
 

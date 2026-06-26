@@ -23,6 +23,7 @@ import { koiPrompt, koiConfirm } from '@/shared/overlay';
 import {
   isDiagramEditing,
   DIAGRAM_ANNOTATION_CREATE_EVENT,
+  DIAGRAM_REFIT_EVENT,
   setDiagramEditing,
   setDiagramTouchMode,
   setDiagramLayoutStore,
@@ -691,6 +692,38 @@ describe('authoring chrome (editing only)', () => {
     container.querySelector<HTMLButtonElement>('[aria-label="Auto-arrange layout"]')!.click();
     expect(relayouts).toBe(1);
     expect(loadDiagramPositions(positionKey())).toEqual({});
+  });
+});
+
+describe('refit on reveal (#529): re-fit + minimap re-layout when the canvas becomes measurable', () => {
+  const g: DiagramGraph = { nodes: [node({ id: 'Ordering.Order', qualifiedName: 'Ordering.Order', stereotype: 'aggregate root' })], edges: [] };
+
+  test('a DIAGRAM_REFIT_EVENT re-fits the live canvas and reconstructs the Outline minimap', async () => {
+    const container = makeContainer();
+    await createMaxGraphRenderer().render(container, [file([diagram('aggregate', g)])], 'dark', () => true);
+
+    // The minimap built at render time. On a real phone it would have mounted against a zero-size hidden
+    // zone (an oversized empty box); here it builds against the shimmed 800×600 host — what matters is that
+    // the refit REPLACES this instance with a fresh one once the zone is revealed.
+    const outlineDiv = container.querySelector('.koi-canvas-outline');
+    expect(outlineDiv).not.toBeNull();
+    const minimapBefore = outlineDiv!.firstElementChild;
+    expect(minimapBefore).not.toBeNull();
+
+    // Spy AFTER the initial render so only the refit's work is counted. `fit()` always calls graph.center()
+    // (re-frames the content off the top-left); a rebuilt Outline destroys the prior instance first — two
+    // independent proofs the refit ran on the live canvas.
+    const centerSpy = vi.spyOn(mx.Graph.prototype, 'center');
+    const destroySpy = vi.spyOn(mx.Outline.prototype, 'destroy');
+
+    // The IDE dispatches this on `document` when it reveals the hidden mobile Diagram zone (ide.tsx).
+    document.dispatchEvent(new Event(DIAGRAM_REFIT_EVENT));
+
+    expect(centerSpy).toHaveBeenCalled(); // content re-framed to fit — no longer jammed in the top-left
+    expect(destroySpy).toHaveBeenCalled(); // the stale minimap was torn down…
+    const minimapAfter = container.querySelector('.koi-canvas-outline')!.firstElementChild;
+    expect(minimapAfter).not.toBeNull();
+    expect(minimapAfter).not.toBe(minimapBefore); // …and rebuilt against the now-measurable host
   });
 });
 

@@ -64,6 +64,7 @@ import {
   DIAGRAM_ANNOTATION_CREATE_EVENT,
   DIAGRAM_CONNECT_EVENT,
   DIAGRAM_DISCONNECT_EVENT,
+  DIAGRAM_REFIT_EVENT,
   DIAGRAM_RELAYOUT_EVENT,
   EMPTY_STATE_PICK_EVENT,
   NODE_EDIT_EVENT,
@@ -1213,8 +1214,15 @@ export function init(): () => void {
     // three are real zones: writing the slice (plus, for code/diagram, the center tab) surfaces them.
     appStore.getState().setMobileZone(zone);
     if (zone === 'props') openInspectorSheet('half');
-    else if (zone === 'diagram') controller.selectCenter('visual');
-    else if (zone === 'code') controller.selectCenter('technical');
+    else if (zone === 'diagram') {
+      controller.selectCenter('visual');
+      // The Diagram zone was hidden (display:none) until this reveal, so the canvas mounted at zero size:
+      // `fit()` no-op'd and the Outline minimap read no geometry (#529). Ask the live canvas to re-fit and
+      // rebuild its minimap on the NEXT frame, once the zone's CSS reveal has applied and the surface is
+      // measurable. Dispatched on `document` (the renderer listens there) so it reaches whichever canvas is
+      // mounted, without ide.tsx holding a handle to it.
+      requestAnimationFrame(() => document.dispatchEvent(new Event(DIAGRAM_REFIT_EVENT)));
+    } else if (zone === 'code') controller.selectCenter('technical');
   }
   render(<MobileZoneBar store={appStore} onSelect={selectMobileZone} />, el('mobile-zone-bar-host'));
   // Mirror the active zone onto #split[data-mobile-zone] so the @media rules show/hide the single-column
