@@ -114,12 +114,22 @@ public class WasmWarmCompilationTests
     }
 
     [Fact]
-    public void Warm_ReorderedFiles_StillEqualsStateless()
+    public void Warm_ReorderedFiles_EqualsStateless_AndReusesUnits()
     {
-        var warm1 = KoineCompilation.Reconcile(null, Workspace(SrcA, SrcB, SrcC));
+        var counter = 0;
+        Func<SourceFile, ParsedUnit> counting = sf =>
+        {
+            Interlocked.Increment(ref counter);
+            return KoineCompilation.ParseUnit(sf);
+        };
 
-        // Reorder the open set (C, A, B): WithDocument keeps existing positions, so without the
-        // order-guard the reconciled context order would diverge from a cold build's first-seen order.
+        var warm1 = KoineCompilation.Create(Workspace(SrcA, SrcB, SrcC), counting);
+        var afterCreate = counter;
+
+        // Reorder the open set (C, A, B): WithDocument keeps existing positions, so the reconciled
+        // context order would diverge from a cold build's first-seen order — the order-guard rebuilds
+        // cold to restore it, but must still reuse the already-parsed units (a pure reorder changed no
+        // content). The default-parser cold reference below doesn't touch the counter.
         var reordered = new[] { new SourceFile(UriC, SrcC), new SourceFile(UriA, SrcA), new SourceFile(UriB, SrcB) };
         var warm2 = KoineCompilation.Reconcile(warm1, reordered);
         var cold = KoineCompilation.Create(reordered);
@@ -127,6 +137,7 @@ public class WasmWarmCompilationTests
         ContextNames(warm2).ShouldBe(ContextNames(cold)); // Shipping, Catalog, Payments — matches cold
         warm2.Fingerprint.ShouldBe(cold.Fingerprint);
         EmittedCSharp(warm2).ShouldBe(EmittedCSharp(cold));
+        counter.ShouldBe(afterCreate, "a pure reorder (no content change) must re-parse nothing");
     }
 
     // ---- helpers --------------------------------------------------------------------------------

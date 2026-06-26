@@ -1333,36 +1333,21 @@ public static partial class CompilerInterop
     /// </summary>
     private static KoineCompilation GetWarmCompilation(IReadOnlyList<WSourceFileDto> files)
     {
+        // One pass: materialize the SourceFiles and measure the retained size for the bound.
         var sources = new List<SourceFile>(files.Count);
-        foreach (var f in files)
-        {
-            sources.Add(new SourceFile(f.Uri, f.Text));
-        }
-
-        var comp = KoineCompilation.Reconcile(_warm, sources);
-        _warm = WithinWarmBound(files) ? comp : null;
-        return comp;
-    }
-
-    /// <summary>True when <paramref name="files"/> is small enough to retain as the warm snapshot.</summary>
-    private static bool WithinWarmBound(IReadOnlyList<WSourceFileDto> files)
-    {
-        if (files.Count > MaxWarmDocuments)
-        {
-            return false;
-        }
-
         long totalChars = 0;
         foreach (var f in files)
         {
+            sources.Add(new SourceFile(f.Uri, f.Text));
             totalChars += f.Text.Length;
-            if (totalChars > MaxWarmChars)
-            {
-                return false;
-            }
         }
 
-        return true;
+        var comp = KoineCompilation.Reconcile(_warm, sources);
+
+        // Retain as the warm snapshot only when small enough to keep on the single-threaded browser
+        // heap; a workspace past either cap is still served for this call but rebuilt cold next time.
+        _warm = files.Count <= MaxWarmDocuments && totalChars <= MaxWarmChars ? comp : null;
+        return comp;
     }
 
     private static string SerializeEmit(WEmitPreviewResult r) =>

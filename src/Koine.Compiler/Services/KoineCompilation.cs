@@ -257,9 +257,19 @@ public sealed class KoineCompilation
 
         // 3. The merged model lists contexts in first-seen uri order, so the reconciled order must
         //    equal a cold build's. WithDocument appends new uris and keeps existing positions, which
-        //    diverges from cold only on a mid-list insert or a reorder — rebuild cold (with previous's
-        //    parser) in that rare case so the output is byte-identical to the stateless path.
-        return comp.HasFirstSeenOrder(files) ? comp : Create(files, previous._parser);
+        //    diverges from cold only on a mid-list insert or a reorder.
+        if (comp.HasFirstSeenOrder(files))
+        {
+            return comp;
+        }
+
+        // Order diverged — rebuild cold so the merged model's first-seen order matches the stateless
+        // path exactly. Still reuse previous's already-parsed units for every byte-identical (uri, text)
+        // so a pure reorder re-parses nothing — only genuinely changed/new files pay a parse.
+        return Create(files, f =>
+            previous._texts.TryGetValue(f.Path, out var text) && string.Equals(text, f.Source, StringComparison.Ordinal)
+                ? previous._units[f.Path]
+                : previous._parser(f));
     }
 
     /// <summary>
