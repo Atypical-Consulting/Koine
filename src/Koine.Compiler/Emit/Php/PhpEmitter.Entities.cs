@@ -8,8 +8,8 @@ namespace Koine.Compiler.Emit.Php;
 /// <c>class</c> (mutable — later tasks' commands reassign properties) with typed properties, an
 /// explicit constructor that assigns the fields then evaluates invariants (throwing
 /// <c>\Koine\Runtime\DomainInvariantViolationException</c> on failure), derived members as getter
-/// methods, and identity <c>equals(self $other): bool</c> that compares runtime type and
-/// <c>id</c> alone.
+/// methods, and identity <c>equals(self $other): bool</c> that compares <c>id</c> alone (the
+/// <c>self</c> parameter type already guarantees the runtime type).
 /// <para>
 /// Each entity also emits its branded identity value object (<c>&lt;XId&gt;</c>) as a
 /// <c>final class</c> (immutable, value-object style) per the entity's
@@ -84,7 +84,7 @@ public sealed partial class PhpEmitter
 
         foreach (Member m in fields)
         {
-            WriteDoc(sb, m.Doc, Indent);
+            WritePropertyDoc(sb, m.Doc, typeMapper.DocType(m.Type), Indent);
             var propName = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
             var typeName = typeMapper.Map(m.Type);
             sb.Append(Indent).Append("public ").Append(typeName).Append(" $").Append(propName).Append(";\n");
@@ -99,7 +99,7 @@ public sealed partial class PhpEmitter
         foreach (Member m in derived)
         {
             sb.Append('\n');
-            WriteDoc(sb, m.Doc, Indent);
+            WriteMethodDoc(sb, Indent, typeMapper, NoDocParams, m.Type, m.Doc);
             var methodName = PhpNaming.MethodName(m.Name);
             var returnType = typeMapper.Map(m.Type);
             sb.Append(Indent).Append("public function ").Append(methodName).Append("(): ").Append(returnType).Append('\n');
@@ -109,9 +109,9 @@ public sealed partial class PhpEmitter
             sb.Append(Indent).Append("}\n");
         }
 
-        // Identity equality: compares runtime type (via instanceof) and id only.
+        // Identity equality: compares id only (the `self` parameter type guarantees the runtime type).
         sb.Append('\n');
-        WriteEntityEquals(sb, name);
+        WriteEntityEquals(sb);
 
         // checkInvariants() private helper — emitted when any command mutates state (so it can
         // re-check invariants after the transition, before recording events).
@@ -159,6 +159,13 @@ public sealed partial class PhpEmitter
         PhpExpressionTranslator translator,
         PhpTypeMapper typeMapper)
     {
+        // PHPDoc refines any collection-typed constructor parameter (e.g. `@param list<OrderLine> $lines`)
+        // so phpstan --level max sees the element type the bare `array` hint erases.
+        var docParams = fields
+            .Select(m => (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name)), m.Type))
+            .ToList();
+        WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null);
+
         sb.Append(Indent).Append("public function __construct(\n");
 
         // The identity parameter comes first.
@@ -216,12 +223,14 @@ public sealed partial class PhpEmitter
     // Identity equals
     // -------------------------------------------------------------------------
 
-    private static void WriteEntityEquals(StringBuilder sb, string className)
+    private static void WriteEntityEquals(StringBuilder sb)
     {
+        // The `self $other` parameter type already guarantees the runtime type, so an `instanceof`
+        // guard here is redundant (phpstan --level max flags it as always-true). Identity equality is
+        // the id comparison alone.
         sb.Append(Indent).Append("public function equals(self $other): bool\n");
         sb.Append(Indent).Append("{\n");
-        sb.Append(Indent).Append(Indent).Append("return $other instanceof ").Append(className)
-          .Append(" && $this->id === $other->id;\n");
+        sb.Append(Indent).Append(Indent).Append("return $this->id === $other->id;\n");
         sb.Append(Indent).Append("}\n");
     }
 

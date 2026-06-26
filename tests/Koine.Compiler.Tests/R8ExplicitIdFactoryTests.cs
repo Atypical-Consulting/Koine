@@ -253,18 +253,15 @@ public class R8ExplicitIdFactoryTests
         blob.ShouldNotContain("BookId::generate()"); // no client-side generate
         blob.ShouldContain("new self($id,");          // parameter threaded into construction
 
-        // Validate the emitted PHP with `php -l` (the syntax gate every PhpSnapshotTests model uses),
-        // not `phpstan --level max`. The runtime's bc-math operands are now numeric-string-typed and
-        // KoineRuntime.php type-checks clean at max level on its own (see PhpConformanceTests.
-        // Emitted_runtime_typechecks_at_phpstan_level_max, #478). But the PER-MODEL emitter
-        // (entities/enums/repositories/value objects) still has pre-existing level-max typing gaps
-        // unrelated to this factory feature — e.g. a redundant `instanceof` on the entity guard and
-        // untyped `array` shapes — so a whole-model phpstan gate is not yet green. Full emitted-model
-        // phpstan parity is tracked as a separate follow-up; syntax-checking here proves the factory
-        // we emit is well-formed, which is what this test is about.
-        var php = TestSupport.SyntaxCheckPhp(result.Files);
+        // Type-check the WHOLE emitted model with `phpstan --level max` (#496), the same strict bar the
+        // TypeScript (`tsc --strict`) and Python (`mypy --strict`) cases above hold — not just `php -l`
+        // syntax. The runtime is level-max clean (#478) and the per-model emitter now is too (typed
+        // iterable arrays, no redundant entity `instanceof`, exhaustive enum matches, generic `Range`),
+        // so a whole-model phpstan gate is green. Skipped (not failed) without a local phpstan; CI runs
+        // it for real.
+        var php = TestSupport.TypeCheckPhp(result.Files);
         TestSupport.RequireOrSkip(php.ToolchainAvailable,
-            "No php interpreter available; PHP syntax check skipped (CI runs it for real).");
+            "No phpstan toolchain available; PHP type-check skipped (CI runs it for real).");
         php.Ok.ShouldBeTrue(string.Join("\n", php.Errors));
     }
 

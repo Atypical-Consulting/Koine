@@ -242,7 +242,7 @@ class Product
 
     public function equals(self $other): bool
     {
-        return $other instanceof Product && $this->id === $other->id;
+        return $this->id === $other->id;
     }
 }
 
@@ -293,25 +293,23 @@ enum StockStatus: int
         return self::tryFrom($value);
     }
 
-    /** Dispatch to the handler for this member; throws if unhandled. */
+    /** Dispatch to the handler for this member (exhaustive over all cases). */
     public function match_(\Closure $available, \Closure $reserved, \Closure $outOfStock): mixed
     {
         return match($this) {
             self::AVAILABLE => ($available)(),
             self::RESERVED => ($reserved)(),
             self::OUT_OF_STOCK => ($outOfStock)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("StockStatus", "unhandled StockStatus {$this->name}"),
         };
     }
 
-    /** Dispatch to the side-effecting handler for this member; throws if unhandled. */
+    /** Dispatch to the side-effecting handler for this member (exhaustive over all cases). */
     public function switch_(\Closure $available, \Closure $reserved, \Closure $outOfStock): void
     {
         match($this) {
             self::AVAILABLE => ($available)(),
             self::RESERVED => ($reserved)(),
             self::OUT_OF_STOCK => ($outOfStock)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("StockStatus", "unhandled StockStatus {$this->name}"),
         };
     }
 }
