@@ -217,12 +217,12 @@ class Order
     public CustomerId $customer;
     /** @var list<OrderLine> */
     public array $lines;
-    /** @var array<string, array> */
+    /** @var array<string, list<OrderLine>> */
     public array $grouped;
 
     /**
      * @param list<OrderLine> $lines
-     * @param array<string, array> $grouped
+     * @param array<string, list<OrderLine>> $grouped
      */
     public function __construct(
         OrderId $id,
@@ -250,11 +250,12 @@ declare(strict_types=1);
 namespace Koine\Grouping\Events;
 
 use Koine\Grouping\ValueObjects\OrderId;
+use Koine\Grouping\ValueObjects\OrderLine;
 
 /** Raised when orders are grouped — its payload nests a List inside a Map. */
 final class OrdersGrouped
 {
-    /** @param array<string, array> $byCustomer */
+    /** @param array<string, list<OrderLine>> $byCustomer */
     public function __construct(
         public readonly OrderId $orderId,
         public readonly array $byCustomer
@@ -318,9 +319,9 @@ namespace Koine\Grouping\ValueObjects;
 final class OrderGrouping
 {
     /**
-     * @param array<string, array> $byCustomer
-     * @param list<array> $buckets
-     * @param array<Sku, array> $bySku
+     * @param array<string, list<OrderLine>> $byCustomer
+     * @param list<list<int>> $buckets
+     * @param array<Sku, list<int>> $bySku
      */
     public function __construct(
         public readonly array $byCustomer,
