@@ -677,13 +677,12 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     if (rootTokens.has(parentDirToken)) {
       // A top-level create for a workspace root: in single-root mode this is the tree itself; in
       // multi-root mode it's that group's own item list (matched by its data-root), so the inline row
-      // appears under the right group. Falls back to the tree if the group container isn't found.
-      const groupItems =
-        parentDirToken === rootToken
-          ? null
-          : tree.querySelector<HTMLElement>(
-              `.explorer-group[data-root="${cssEscape(parentDirToken)}"] > .explorer-group-items`,
-            );
+      // appears under the right group — including the PRIMARY root, which is also rendered as a group
+      // in multi-root mode. The single-root render is headerless (no group wrapper), so the lookup
+      // returns null there and we fall back to the bare tree, keeping that path byte-identical (#349).
+      const groupItems = tree.querySelector<HTMLElement>(
+        `.explorer-group[data-root="${cssEscape(parentDirToken)}"] > .explorer-group-items`,
+      );
       container = groupItems ?? tree;
     } else {
       const dirLi = tree.querySelector<HTMLLIElement>(
