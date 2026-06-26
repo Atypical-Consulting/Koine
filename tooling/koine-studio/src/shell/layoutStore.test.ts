@@ -28,6 +28,11 @@ describe('layoutStore defaults', () => {
     expect(DEFAULT_LAYOUT.groupActiveUris).toEqual(['', undefined]);
     expect(loadLayout().groupActiveUris).toEqual(['', undefined]);
   });
+
+  test('right rail is not collapsed by default', () => {
+    expect(DEFAULT_LAYOUT.rightCollapsed).toBe(false);
+    expect(loadLayout().rightCollapsed).toBe(false);
+  });
 });
 
 describe('layoutStore round-trip', () => {
@@ -60,6 +65,11 @@ describe('layoutStore round-trip', () => {
   test('saveLayout with only group-A uri (group-B omitted)', () => {
     saveLayout({ groupActiveUris: ['file:///a.koi'] });
     expect(loadLayout().groupActiveUris).toEqual(['file:///a.koi', undefined]);
+  });
+
+  test('rightCollapsed round-trips', () => {
+    saveLayout({ rightCollapsed: true });
+    expect(loadLayout().rightCollapsed).toBe(true);
   });
 
   test('saveLayout returns the full merged state', () => {
@@ -114,6 +124,11 @@ describe('layoutStore per-field coercion', () => {
   test('non-array groupActiveUris coerces to the default', () => {
     localStorage.setItem('koine.studio.layout', JSON.stringify({ groupActiveUris: 'file:///a.koi' }));
     expect(loadLayout().groupActiveUris).toEqual(['', undefined]);
+  });
+
+  test('bogus rightCollapsed value coerces to the default', () => {
+    localStorage.setItem('koine.studio.layout', JSON.stringify({ rightCollapsed: 'yes' }));
+    expect(loadLayout().rightCollapsed).toBe(false);
   });
 
   test('valid fields survive alongside a bogus field', () => {
