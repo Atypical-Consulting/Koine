@@ -18,15 +18,28 @@ public sealed class AnalyzerContext
 {
     private readonly Dictionary<string, TypeResolver> _resolvers = new(StringComparer.Ordinal);
 
-    /// <summary>Creates a context over <paramref name="semantic"/> that reports into <paramref name="sink"/>.</summary>
-    internal AnalyzerContext(SemanticModel semantic, List<Diagnostic> sink)
+    /// <summary>
+    /// Creates a context over <paramref name="semantic"/> that reports into <paramref name="sink"/>,
+    /// telling target-aware analyzers which <paramref name="enabledTargets"/> the compile is building
+    /// for (issue #495). Callers with no target context pass <see cref="EmitTargetSet.All"/> (the
+    /// conservative all-targets behaviour) explicitly — there is no silent default.
+    /// </summary>
+    internal AnalyzerContext(SemanticModel semantic, List<Diagnostic> sink, EmitTargetSet enabledTargets)
     {
         Semantic = semantic;
         Diagnostics = sink;
+        EnabledTargets = enabledTargets;
     }
 
     /// <summary>The resolved, shared semantic view of the model (name/type resolution computed once).</summary>
     public SemanticModel Semantic { get; }
+
+    /// <summary>
+    /// The emit target(s) this compile is building for (issue #495) — a hint that lets a target-aware
+    /// analyzer relax a conservative cross-target check. <see cref="EmitTargetSet.All"/> when the target
+    /// is unknown (the editor/LSP path), which keeps the strict, all-targets behaviour.
+    /// </summary>
+    internal EmitTargetSet EnabledTargets { get; }
 
     /// <summary>The immutable syntax model under analysis.</summary>
     public KoineModel Model => Semantic.Model;
