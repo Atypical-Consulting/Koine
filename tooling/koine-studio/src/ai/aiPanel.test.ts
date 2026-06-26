@@ -667,6 +667,11 @@ describe('apply-gate re-validation at legacy entry points (#444)', () => {
     ]);
   }
 
+  // Drive a generative send via the first quick action (offerApply defaults true).
+  function fire(container: HTMLElement): void {
+    container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
+  }
+
   test('replay of a turn whose .koi is INVALID re-validates and withholds Apply', async () => {
     seedModelTurn();
     const runCompilerTool = vi.fn(() => Promise.resolve(DIRTY));
@@ -711,5 +716,46 @@ describe('apply-gate re-validation at legacy entry points (#444)', () => {
     expect(container.querySelector('.koi-md')).not.toBeNull(); // replayed…
     await settle();
     expect(container.querySelector('.koi-assistant-apply')).toBeNull(); // …without Apply (fail closed)
+  });
+
+  // --- stop-mid-stream (the abort partial-commit path) ---------------------------------------
+  // A Stop mid-generation commits the partial reply and offers Apply on it. A partial often holds a
+  // TRUNCATED/invalid model, so the abort branch must clear the same gate the live path enforces.
+
+  // Mock `runAssistant` to stream `body`, then have the user hit Stop (aborting the in-flight
+  // request) before it finishes — exactly the stop-mid-stream sequence.
+  function streamThenStop(container: HTMLElement, body: string): void {
+    vi.mocked(runAssistant).mockImplementation(async (req: { onText: (t: string) => void }) => {
+      req.onText(body);
+      container.querySelector<HTMLButtonElement>('.koi-assistant-stop')!.click(); // user Stops
+      throw new DOMException('aborted', 'AbortError'); // the fetch rejects on abort
+    });
+  }
+
+  test('stop mid-stream with a truncated/invalid .koi: re-validates and withholds Apply', async () => {
+    const runCompilerTool = vi.fn(() => Promise.resolve(DIRTY));
+    const container = document.createElement('div');
+    createAssistantPanel(opts(container, { runCompilerTool }));
+    // A fenced block whose model is incomplete (unbalanced braces) — the kind a Stop leaves behind.
+    streamThenStop(container, 'Working on it…\n```koine\ncontext X {\n```');
+    fire(container);
+
+    // The stop-partial branch ran (the "Stopped." note is shown)…
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-stopped')).not.toBeNull());
+    // …and it RE-VALIDATED the partial rather than offering Apply blindly…
+    await vi.waitFor(() => expect(runCompilerTool).toHaveBeenCalled());
+    await settle();
+    // …so the truncated model is NOT applicable (the #444 stop bypass is closed).
+    expect(container.querySelector('.koi-assistant-apply')).toBeNull();
+  });
+
+  test('stop mid-stream with a VALID complete .koi still offers Apply', async () => {
+    const container = document.createElement('div');
+    createAssistantPanel(opts(container, { runCompilerTool: () => Promise.resolve(CLEAN) }));
+    streamThenStop(container, 'Done early:\n```koine\ncontext X {}\n```');
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-stopped')).not.toBeNull());
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
   });
 });
