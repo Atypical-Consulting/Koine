@@ -710,11 +710,13 @@ export function init(): () => void {
       // qualified name; applyWorkspaceEdit rebuilds the model under the NEW name but leaves the stored
       // selection on the OLD one — so the Properties panel's lookup misses (empty "Select an element…"
       // state) and the breadcrumb shows the stale name. The rename already validated (non-empty changes
-      // ⇒ a renameable symbol + a valid identifier), so the new qualified name is deterministic. The set
-      // is idempotent and the Properties panel + breadcrumb both subscribe to the selection slice, so
-      // they follow it (the panel repopulates once the model index rebuilds on onDocEdited's refresh).
+      // ⇒ a renameable symbol + a valid identifier), so the new qualified name is deterministic. `element`
+      // carries the identity (canonical qn + context + old name) needed to match a selection in either
+      // key form. The set is idempotent and the Properties panel + breadcrumb both subscribe to the
+      // selection slice, so they follow it (the panel repopulates once the model index rebuilds on
+      // onDocEdited's refresh).
       const current = appStore.getState().selection;
-      const reanchored = reanchorSelectionAfterRename(current, element.qualifiedName, newName);
+      const reanchored = reanchorSelectionAfterRename(current, element, newName);
       if (reanchored !== current) selection.set(reanchored);
       setStatus(`Renamed ${element.name} → ${newName}`, 'green');
     } catch (e) {

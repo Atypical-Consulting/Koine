@@ -61,7 +61,11 @@ describe('selection slice', () => {
     s.getState().setSelection({ qualifiedName: 'NewModel.NewAggregateRoot', context: 'NewModel' });
 
     const current = s.getState().selection;
-    const reanchored = reanchorSelectionAfterRename(current, 'NewModel.NewAggregateRoot', 'Order');
+    const reanchored = reanchorSelectionAfterRename(
+      current,
+      { qualifiedName: 'NewModel.NewAggregateRoot', context: 'NewModel', name: 'NewAggregateRoot' },
+      'Order',
+    );
     if (reanchored !== current) s.getState().setSelection(reanchored);
 
     expect(s.getState().selection).toEqual({ qualifiedName: 'NewModel.Order', context: 'NewModel' });
