@@ -369,14 +369,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // the sheet first) — mirroring ide.tsx's diagram-resize cross guard.
   let wasNarrow = isNarrowViewport();
   function onViewportResize(): void {
-    if (!inspectorSheet) return;
     const narrow = isNarrowViewport();
     if (narrow === wasNarrow) return; // not a cross — ignore the keyboard/address-bar resize churn
     wasNarrow = narrow;
+    // A narrow↔wide cross (rotate/resize) re-evaluates the bottom strip's viewport-aware default (#475) —
+    // Documentation/Assistant collapse the strip below BP_NARROW — without clobbering an explicit user
+    // preference (applyDefaultDiagCollapsed is itself gated on that). Runs whether or not the inspector
+    // sheet exists, so the reading views reclaim their height on a portrait rotate.
+    applyDefaultDiagCollapsed();
+    if (!inspectorSheet) return; // the remainder is the bottom-sheet's #221 narrow↔wide handling
     if (!narrow && inspectorSheet.isOpen()) inspectorSheet.setDetent('peek');
     renderSelectedInspector(); // re-mount into the now-correct host (sheet body vs #inspector-host)
   }
-  if (inspectorSheet) window.addEventListener('resize', onViewportResize);
+  window.addEventListener('resize', onViewportResize);
   // Top-bar "scope path" host (the ContextBreadcrumb Preact panel — the scope selector + selected
   // element) and its status-bar context mirror.
   const breadcrumbHost = el('breadcrumb-host');
@@ -1295,6 +1300,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // view. (Previously hidden on Documentation + Assistant for full-height reading/chat; the collapse
     // control reclaims that height on demand instead.)
     diagEl.hidden = false;
+    // …but on a NARROW viewport the two reading-heavy views (Documentation, Assistant) DEFAULT the strip
+    // collapsed so the reading/chat pane keeps full height on a phone (#475). Re-evaluated on every center
+    // switch and gated so an explicit user collapse preference always wins; desktop + Visual/Code keep the
+    // expanded default. Only the strip's *default collapse* changes here — its global visibility (above) does not.
+    applyDefaultDiagCollapsed();
     for (const t of centerTabs) t.setAttribute('aria-selected', String(t.dataset.center === center));
     const techVisible = center === 'technical';
     editorPaneEl.hidden = !(techVisible && tech === 'editor');
@@ -1637,7 +1647,28 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     diagEl.classList.toggle('collapsed', collapsed);
     diagCollapse.setAttribute('aria-expanded', String(!collapsed));
   }
+  // Whether the user has an EXPLICIT, persisted collapse choice (written by the #diag-collapse chevron
+  // below). `null` = unset, so the viewport-aware default may apply; a stored '0'/'1' is the user's own
+  // choice and always wins. localStorage can throw in locked-down hosts — treat a throw as "no preference".
+  function hasExplicitDiagCollapsePref(): boolean {
+    try {
+      return localStorage.getItem(DIAG_COLLAPSED_KEY) !== null;
+    } catch {
+      return false;
+    }
+  }
+  // The bottom strip's *default* collapsed state is viewport-aware (#475): below BP_NARROW the two
+  // reading-heavy center views (Documentation, Assistant) default the strip COLLAPSED so the reading/chat
+  // pane gets full height on a phone; Visual/Code and every desktop width keep the expanded default. This
+  // sets only a DEFAULT — an explicit user preference always wins, so it's gated on the absence of one.
+  // Re-evaluated whenever the center chrome is applied (a center switch / boot) and on a narrow↔wide cross.
+  function applyDefaultDiagCollapsed(): void {
+    if (hasExplicitDiagCollapsePref()) return; // the user's persisted choice wins
+    const center = activeCenter();
+    applyDiagCollapsed(isNarrowViewport() && (center === 'docs' || center === 'assistant'));
+  }
   applyDiagCollapsed((localStorage.getItem(DIAG_COLLAPSED_KEY) ?? '0') === '1');
+  applyDefaultDiagCollapsed(); // override the expanded default with the narrow Docs/Assistant default (#475)
   diagCollapse.addEventListener('click', () => {
     const collapsed = !diagEl.classList.contains('collapsed');
     applyDiagCollapsed(collapsed);
@@ -1983,10 +2014,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Drop the activeContext subscription (#531) too — its callback re-renders scoped surfaces, which
     // would throw into a torn-down host if a deferred slice change fired after dispose.
     unsubscribeActiveContext();
-    if (inspectorSheet) {
-      window.removeEventListener('resize', onViewportResize);
-      inspectorSheet.destroy();
-    }
+    // The viewport-resize listener is registered unconditionally now (#475 re-evaluates the strip default
+    // on a narrow↔wide cross even without the inspector sheet), so always detach it; the sheet teardown is
+    // still sheet-gated.
+    window.removeEventListener('resize', onViewportResize);
+    inspectorSheet?.destroy();
   }
 
   return {
