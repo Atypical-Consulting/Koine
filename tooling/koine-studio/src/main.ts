@@ -13,6 +13,7 @@ import { type Route, routeFromHash, hashFromRoute, resolveInitialRoute } from '@
 import { hasPersistedWorkspace, markWorkspaceOpened } from '@/shell/workspaceFlag';
 import { setStartIntent, type StartIntent } from '@/shell/bootIntent';
 import { readModelFromHash } from '@/export/share';
+import { connectInstallAffordance, createInstallController } from '@/shell/pwaInstall';
 
 // Home actions: each queues what the editor should do on its next boot (the start-intent), remembers a
 // workspace was opened (so the next cold load returns to the editor), then navigates to the editor —
@@ -47,6 +48,25 @@ function homeCallbacks(): WelcomeCallbacks {
  */
 export function bootStudio(homeRoot: HTMLElement | null = document.getElementById('home-root')): () => void {
   const appEl = document.getElementById('app');
+
+  // PWA install affordance (#442): wired here, at boot, rather than in the lazy IDE init() — the
+  // browser's one-shot `beforeinstallprompt` fires early in page load, often while a first-time visitor
+  // is still on Home (before the editor route ever activates init()). Capturing it here, regardless of
+  // route, means the deferred event isn't lost; connectInstallAffordance stashes it and reveals the
+  // toolbar's dismissible Install button once the editor is shown. The toolbar nodes live inside #app
+  // (present but hidden until the editor route), so they resolve at boot. A no-op where the event never
+  // fires (Safari/iOS, already installed, or a prior dismissal persisted in localStorage).
+  const installRoot = document.getElementById('install-affordance');
+  const installButton = document.getElementById('btn-install');
+  const installDismiss = document.getElementById('btn-install-dismiss');
+  const disposeInstall =
+    installRoot && installButton && installDismiss
+      ? connectInstallAffordance(createInstallController(), {
+          root: installRoot,
+          installButton: installButton as HTMLButtonElement,
+          dismissButton: installDismiss as HTMLButtonElement,
+        })
+      : null;
 
   // A shared playground link (`#model=…`) always opens the editor; otherwise the hash and the
   // synchronous "a workspace was open" flag decide. Resolved before any paint.
@@ -118,6 +138,7 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
     window.removeEventListener('hashchange', onHash);
     ideDispose?.();
     home?.destroy();
+    disposeInstall?.();
   };
 }
 
