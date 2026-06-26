@@ -243,23 +243,9 @@ function buildWelcome(
     bar.appendChild(closeBtn);
   }
 
-  // "Resume editing" — the purpose-built return-to-session control (issue #392). The routed Home
-  // suppresses the dismiss-✕, so once an editor session is live this is the only visible, keyboard-
-  // reachable way back into it *without* taking a workspace-changing start action. Rendered only when
-  // `canResume`, so a pristine first-load Home (no session yet) stays clean; it sits where the ✕ did.
-  if (opts.canResume) {
-    const resumeBtn = document.createElement('button');
-    resumeBtn.type = 'button';
-    resumeBtn.className = 'koi-welcome-resume';
-    resumeBtn.dataset.action = 'resume';
-    resumeBtn.title = 'Return to your editor session';
-    resumeBtn.textContent = 'Resume editing';
-    resumeBtn.addEventListener('click', () => cb.onResume?.());
-    bar.appendChild(resumeBtn);
-  }
-
-  // Only show the bar when it carries something: in embedded Home with no resume, it's empty (brand +
-  // ✕ suppressed) — appending it would leave a stray spacer above the hero (issue #490).
+  // Only show the bar when it carries something: on embedded Home both the brand and the ✕ are
+  // suppressed, leaving it empty — appending it would leave a stray spacer above the hero (issue #490).
+  // ("Resume editing" now lives on the "Start" rail-title row, built further down.)
   if (bar.childElementCount > 0) consoleView.appendChild(bar);
 
   // --- hero: the thesis (left) + get-to-work rail (right) -------------------
@@ -317,10 +303,31 @@ function buildWelcome(
   const launch = document.createElement('div');
   launch.className = 'koi-welcome-launch';
 
+  // The launch rail's heading row: the "Start" title on the left and — when a live editor session
+  // exists to return to — the "Resume editing" control aligned on its right (issue #490). The control
+  // is the purpose-built return-to-session affordance (issue #392); rendered only when `canResume`, so a
+  // pristine first-load Home stays clean. On embedded Home the card's own top bar is gone, so this row
+  // is the only place the control can live; the legacy overlay shows it here too for consistency.
+  const launchHead = document.createElement('div');
+  launchHead.className = 'koi-welcome-rail-head';
+
   const launchTitle = document.createElement('h2');
   launchTitle.className = 'koi-welcome-rail-title';
   launchTitle.textContent = 'Start';
-  launch.appendChild(launchTitle);
+  launchHead.appendChild(launchTitle);
+
+  if (opts.canResume) {
+    const resumeBtn = document.createElement('button');
+    resumeBtn.type = 'button';
+    resumeBtn.className = 'koi-welcome-resume';
+    resumeBtn.dataset.action = 'resume';
+    resumeBtn.title = 'Return to your editor session';
+    resumeBtn.textContent = 'Resume editing';
+    resumeBtn.addEventListener('click', () => cb.onResume?.());
+    launchHead.appendChild(resumeBtn);
+  }
+
+  launch.appendChild(launchHead);
 
   const actions = document.createElement('div');
   actions.className = 'koi-welcome-actions';

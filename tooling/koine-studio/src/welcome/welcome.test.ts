@@ -460,6 +460,20 @@ describe('mountHome — Resume editing control', () => {
     expect(cb.onResume).toHaveBeenCalledTimes(1);
   });
 
+  test('the resume control sits on the "Start" rail-title row, not in the (absent) top bar', () => {
+    const el = document.createElement('div');
+    const cb: WelcomeCallbacks = { ...makeCallbacks(), onResume: vi.fn() };
+    mountHome(el, cb, SAMPLE, true, { canResume: true });
+
+    const resume = el.querySelector<HTMLButtonElement>('[data-action="resume"]')!;
+    const head = resume.closest('.koi-welcome-rail-head');
+    expect(head).not.toBeNull();
+    // It shares its row with the "Start" rail title.
+    expect(head!.querySelector('.koi-welcome-rail-title')?.textContent).toBe('Start');
+    // It is no longer parked in the welcome card's own top bar.
+    expect(resume.closest('.koi-welcome-bar')).toBeNull();
+  });
+
   test('without canResume (pristine Home) there is no resume control', () => {
     const el = document.createElement('div');
     mountHome(el, makeCallbacks(), SAMPLE);
