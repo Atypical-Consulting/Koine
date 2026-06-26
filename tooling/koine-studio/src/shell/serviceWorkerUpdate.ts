@@ -8,6 +8,10 @@
 // the shell wires to its markup, so everything unit-tests under happy-dom without a real ServiceWorker.
 
 import { isTauri } from '@/host';
+import { announce as defaultAnnounce } from './liveRegion';
+
+/** What assistive tech hears when the update affordance slides into the toolbar (#522). */
+export const UPDATE_ANNOUNCEMENT = 'A new version is available — reload to update';
 
 /** SW script URL + scope for a Vite base (e.g. '/' → '/koine-studio-sw.js'; '/Koine/studio/' → …). */
 export function serviceWorkerUrl(base: string | undefined): { url: string; scope: string } {
@@ -102,6 +106,8 @@ export interface UpdateAffordanceDom {
   dismissButton: HTMLButtonElement;
   /** How to reload (defaults to a full page reload); injectable for tests. */
   reload?: () => void;
+  /** Polite live-region announcer for the reveal (defaults to the shared {@link defaultAnnounce}; injectable for tests). */
+  announce?: (message: string) => void;
 }
 
 /**
@@ -112,8 +118,16 @@ export interface UpdateAffordanceDom {
  */
 export function connectUpdateAffordance(controller: UpdateController, dom: UpdateAffordanceDom): () => void {
   const reload = dom.reload ?? ((): void => window.location.reload());
+  const announce = dom.announce ?? defaultAnnounce;
+
+  // Announce only on the hidden→visible edge (a new version landing), never on dismiss or repeat
+  // notifications. Seed from the current DOM state (the markup ships `hidden`) so the reveal fires once.
+  let wasVisible = !dom.root.hidden;
   const sync = (): void => {
-    dom.root.hidden = !controller.canReload();
+    const visible = controller.canReload();
+    dom.root.hidden = !visible;
+    if (visible && !wasVisible) announce(UPDATE_ANNOUNCEMENT);
+    wasVisible = visible;
   };
   const onReload = (): void => reload();
   const onDismiss = (): void => controller.dismiss();
