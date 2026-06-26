@@ -1,4 +1,6 @@
+using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
+using Koine.Compiler.Semantics;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
@@ -14,6 +16,38 @@ namespace Koine.Compiler.Tests;
 public class SpecPredicateCollisionTests
 {
     private static IReadOnlyList<Diagnostic> Diagnose(string source) => new KoineCompiler().Diagnose(source);
+
+    /// <summary>
+    /// Validates <paramref name="source"/> telling the semantic pass which emit target(s) are enabled
+    /// (issue #495). The no-target <see cref="Diagnose(string)"/> path stays conservative (all targets).
+    /// </summary>
+    private static IReadOnlyList<Diagnostic> Diagnose(string source, EmitTargetSet targets)
+    {
+        (KoineModel? model, _) = new KoineCompiler().Parse(source);
+        return new SemanticValidator().Validate(new SemanticModel(model!), targets);
+    }
+
+    [Fact]
+    public void Validator_accepts_enabled_targets_and_the_all_targets_default_stays_strict()
+    {
+        // Issue #495, Task 1: the validator can be *told* the enabled targets, and being told "all
+        // shipped targets" (the default when no target context exists) reproduces today's strict
+        // KOI1007 error — byte-identical to the no-target path.
+        const string src = """
+            context Promotions {
+              value Order { discountedTotal: Int }
+              spec FreeOrder  on Order = discountedTotal == 0
+              spec free_order on Order = discountedTotal == 0
+            }
+            """;
+
+        Diagnose(src, EmitTargetSet.All).ShouldContain(d =>
+            d.Code == DiagnosticCodes.DuplicateSpecPredicate && d.Severity == DiagnosticSeverity.Error);
+
+        // The no-target default must match the explicit all-targets request exactly.
+        Diagnose(src).Count(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate)
+            .ShouldBe(Diagnose(src, EmitTargetSet.All).Count(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate));
+    }
 
     [Fact]
     public void Is_prefixed_and_bare_spec_on_same_type_collide()

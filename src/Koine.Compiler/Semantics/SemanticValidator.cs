@@ -60,10 +60,20 @@ public sealed class SemanticValidator
     /// in a try/catch so a misbehaving plugin degrades to "no extra diagnostics" instead of crashing
     /// the host — the guarantee the <see cref="IModelAnalyzer"/> contract makes.
     /// </summary>
-    public IReadOnlyList<Diagnostic> Validate(SemanticModel semantic)
+    public IReadOnlyList<Diagnostic> Validate(SemanticModel semantic) =>
+        Validate(semantic, EmitTargetSet.All);
+
+    /// <summary>
+    /// Validates <paramref name="semantic"/> while telling target-aware analyzers which
+    /// <paramref name="targets"/> the compile is building for (issue #495). Identical to
+    /// <see cref="Validate(SemanticModel)"/> except the chosen targets are threaded into the shared
+    /// <see cref="AnalyzerContext"/>; <see cref="EmitTargetSet.All"/> (what the other overload passes)
+    /// reproduces the strict, all-targets behaviour exactly.
+    /// </summary>
+    internal IReadOnlyList<Diagnostic> Validate(SemanticModel semantic, EmitTargetSet targets)
     {
         var diagnostics = new List<Diagnostic>();
-        var context = new AnalyzerContext(semantic, diagnostics);
+        var context = new AnalyzerContext(semantic, diagnostics, targets);
 
         foreach (IModelAnalyzer analyzer in BuiltInAnalyzers)
         {
