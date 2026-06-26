@@ -15,8 +15,10 @@ import {
   formatListFiles,
   formatReadFile,
   formatWriteFile,
+  runEditToolStaging,
   summarizeForChip,
 } from '@/ai/assistantTools';
+import { createEditSession } from '@/ai/editSession';
 
 const ALL_SIX = [
   'koine_compile',
@@ -295,6 +297,62 @@ describe('formatCompile', () => {
     });
     expect(out.toLowerCase()).toContain('fail');
     expect(out).toContain('syntax error');
+  });
+});
+
+describe('runEditToolStaging — stage-only dispatch (issue #474)', () => {
+  test('koine_write_file stages the file and returns ONLY the staged confirmation (no per-write validation)', async () => {
+    const session = createEditSession({});
+    const result = await runEditToolStaging(
+      'koine_write_file',
+      JSON.stringify({ relPath: 'orders.koi', contents: 'context Orders {}' }),
+      session,
+    );
+    // The body is staged...
+    expect(session.staged()).toEqual([{ relPath: 'orders.koi', body: 'context Orders {}', isNew: true }]);
+    // ...and the result is EXACTLY the formatWriteFile confirmation — no appended `ok:` diagnostics. The
+    // whole-staged-workspace validation moved to a single end-of-turn pass (no O(M×N) per-write compile).
+    expect(result).toBe(formatWriteFile('orders.koi', true));
+    expect(result).not.toContain('ok:');
+  });
+
+  test('two consecutive koine_write_file calls stage both files, neither validates', async () => {
+    const session = createEditSession({ 'a.koi': 'context A {}' });
+    const r1 = await runEditToolStaging(
+      'koine_write_file',
+      JSON.stringify({ relPath: 'a.koi', contents: 'context A { /* v2 */ }' }),
+      session,
+    );
+    const r2 = await runEditToolStaging(
+      'koine_write_file',
+      JSON.stringify({ relPath: 'b.koi', contents: 'context B {}' }),
+      session,
+    );
+    expect(session.staged()).toEqual([
+      { relPath: 'a.koi', body: 'context A { /* v2 */ }', isNew: false },
+      { relPath: 'b.koi', body: 'context B {}', isNew: true },
+    ]);
+    expect(r1).toBe(formatWriteFile('a.koi', false));
+    expect(r2).toBe(formatWriteFile('b.koi', true));
+    expect(r1).not.toContain('ok:');
+    expect(r2).not.toContain('ok:');
+  });
+
+  test('list / read / unknown / bad-JSON / unsafe-relPath dispatch is preserved by the stage-only refactor', async () => {
+    const session = createEditSession({ 'a.koi': 'context A {}' });
+    expect(await runEditToolStaging('koine_list_files', '{}', session)).toContain('a.koi');
+    expect(await runEditToolStaging('koine_read_file', JSON.stringify({ relPath: 'a.koi' }), session)).toContain(
+      'context A {}',
+    );
+    expect(
+      await runEditToolStaging('koine_read_file', JSON.stringify({ relPath: 'missing.koi' }), session),
+    ).toContain('not found');
+    expect(await runEditToolStaging('frobnicate', '{}', session)).toContain('unknown tool');
+    expect(await runEditToolStaging('koine_write_file', 'not json', session)).toContain('not valid JSON');
+    // The session's stage guard rejects an out-of-workspace path; the dispatcher surfaces it as an Error.
+    expect(
+      await runEditToolStaging('koine_write_file', JSON.stringify({ relPath: '../escape.koi', contents: 'x' }), session),
+    ).toContain('Unsafe');
   });
 });
 

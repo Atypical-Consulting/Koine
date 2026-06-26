@@ -190,6 +190,20 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+.koi-changeset-diagnostics {
+  margin: var(--koi-space-1-5) 0 0;
+  max-height: 12rem;
+  overflow: auto;
+  border: 1px solid var(--koi-error);
+  border-radius: var(--koi-radius-sm);
+  background: var(--koi-surface);
+  padding: var(--koi-space-1-5);
+  color: var(--koi-error);
+  font-family: var(--koi-font-mono, monospace);
+  font-size: var(--koi-text-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .koi-changeset-apply,
 .koi-changeset-discard {
   margin-top: var(--koi-space-1-5);

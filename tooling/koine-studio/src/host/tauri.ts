@@ -199,18 +199,22 @@ export class TauriPlatform implements Platform {
   }
 
   // The host-local edit tools dispatch against the per-turn staging session via the host-independent
-  // runEditToolStaging; the desktop host supplies the whole-staged-workspace validation by running the
-  // `koine_validate` MCP tool (the sidecar's compiler) over the staged set after a write, mirroring the
-  // browser host's in-WASM DiagnoseWorkspace.
+  // runEditToolStaging. Writes are stage-only; the whole-staged-workspace validation runs once per
+  // agentic turn via validateStagedWorkspace (issue #474), not after every write.
   runEditTool(name: string, argsJson: string, session: EditSession): Promise<string> {
-    return runEditToolStaging(name, argsJson, session, async () => {
-      const url = await this.mcpEndpoint();
-      if (!url) return '(could not validate: the Koine MCP server is not available)';
-      const files = session.list().map((p) => ({ path: p, source: session.read(p) ?? '' }));
-      // Same MCP→browser `ok:` normalization as runCompilerTool, so the staged-write validation the
-      // model sees matches the browser host's formatValidate string (issue #445).
-      return normalizeMcpValidate(await mcpCall(url, 'koine_validate', { files }));
-    });
+    return runEditToolStaging(name, argsJson, session);
+  }
+
+  // Validate the WHOLE staged workspace by running the `koine_validate` MCP tool (the sidecar's
+  // compiler) over the staged set, mirroring the browser host's in-WASM DiagnoseWorkspace. Called ONCE
+  // at end of an agentic turn (issue #474) rather than after every staged write, so a multi-file
+  // refactor pays a single whole-model compile instead of one per write. The MCP→browser `ok:`
+  // normalization matches runCompilerTool, keeping ONE validation contract (issue #445).
+  async validateStagedWorkspace(session: EditSession): Promise<string> {
+    const url = await this.mcpEndpoint();
+    if (!url) return '(could not validate: the Koine MCP server is not available)';
+    const files = session.list().map((p) => ({ path: p, source: session.read(p) ?? '' }));
+    return normalizeMcpValidate(await mcpCall(url, 'koine_validate', { files }));
   }
 
   openExternal(url: string): void {

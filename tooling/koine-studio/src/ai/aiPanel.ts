@@ -100,6 +100,13 @@ export interface AssistantPanelOptions {
   /** Host executor for the list/read/write edit tools against the per-turn staging session. */
   runEditTool?: (name: string, argsJson: string, session: EditSession) => Promise<string>;
   /**
+   * Validate the WHOLE staged workspace once, at end of an agentic turn (host-supplied: browser WASM
+   * `DiagnoseWorkspace`, desktop MCP `koine_validate`). Wired into the request so `runToolLoop` runs it
+   * a SINGLE time after the turn instead of after each `koine_write_file` (issue #474); the resulting
+   * diagnostics are shown in the change-set panel for pre-apply review.
+   */
+  validateStaged?: (session: EditSession) => Promise<string>;
+  /**
    * Commit an accepted multi-file change set: write each accepted file through the workspace
    * controller (new files under the folder root), then re-validate. Resolves with the relPaths whose
    * write FAILED (empty when all succeeded) so the panel can report a partial apply instead of a
@@ -285,12 +292,17 @@ function lineDiff(oldText: string, newText: string): string {
  * the file's before-text vs the staged body), plus an "Apply N files" button (whose label/disabled
  * track the accepted count) and a "Discard" button. Apply commits only the still-accepted files via
  * `handlers.onApply`, then becomes a terminal "Applied ✓" and drops Discard; Discard removes the panel.
+ *
+ * `diagnostics` is the once-per-turn whole-staged-workspace validation summary (issue #474): when it
+ * reports errors (`ok: false …`), they're shown alongside the file rows so a write that broke the model
+ * is visible BEFORE the user applies; a clean (`ok: true …`) or absent result renders no extra noise.
  */
 function renderChangeSet(
   bubble: HTMLElement,
   staged: StagedEdit[],
   before: Record<string, string>,
   handlers: { onApply: (accepted: StagedEdit[]) => Promise<{ failed: string[] }>; onDiscard: () => void },
+  diagnostics?: string | null,
 ): void {
   const panel = document.createElement('div');
   panel.className = 'koi-changeset';
@@ -387,6 +399,19 @@ function renderChangeSet(
     handlers.onDiscard();
     panel.remove();
   });
+
+  // End-of-turn whole-staged-workspace validation diagnostics (issue #474): surface them whenever the
+  // single end-of-turn validation reported anything other than a CLEAN compile (`ok: true …`) — that
+  // covers errors, warnings, and a "could not validate" note (e.g. the desktop MCP sidecar briefly
+  // unreachable) — so a write that broke the model, or a validation that didn't actually run, is
+  // reviewable/discardable BEFORE apply. A clean compile (or no validation at all) shows nothing.
+  if (diagnostics && !diagnostics.startsWith('ok: true')) {
+    const diag = document.createElement('pre');
+    diag.className = 'koi-changeset-diagnostics';
+    diag.textContent = diagnostics;
+    diag.setAttribute('aria-label', 'Validation diagnostics for the staged changes');
+    panel.appendChild(diag);
+  }
 
   refreshApply();
   panel.append(applyBtn, discardBtn, status);
@@ -845,6 +870,11 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         offerApply && toolsEffective && opts.runEditTool && opts.getWorkspaceFiles ? opts.getWorkspaceFiles() : null;
       const editSession = wsFiles && Object.keys(wsFiles).length > 0 ? createEditSession(wsFiles) : null;
 
+      // The once-per-turn whole-staged-workspace validation (issue #474): the loop runs `validateStaged`
+      // a single time at end of turn and hands the diagnostics back here via `onStagedValidation`, so
+      // the change-set panel can show a write that broke the model BEFORE the user applies it.
+      let stagedDiagnostics: string | null = null;
+
       full = await runAssistant({
         provider,
         baseUrl,
@@ -869,6 +899,16 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         runCompilerTool: toolsEffective ? opts.runCompilerTool : undefined,
         // Offer the multi-file edit surface alongside the compiler tools when this is a workspace turn.
         ...(editSession && opts.runEditTool ? { editSession, runEditTool: opts.runEditTool } : {}),
+        // Validate the staged workspace ONCE at end of turn (issue #474): bind the host validator to
+        // this turn's session, and capture the diagnostics for the change-set panel below.
+        ...(editSession && opts.validateStaged
+          ? {
+              validateStaged: () => opts.validateStaged!(editSession),
+              onStagedValidation: (diagnostics: string) => {
+                stagedDiagnostics = diagnostics;
+              },
+            }
+          : {}),
         onToolCall: addToolStatus,
       });
       commitAssistantTurn(full);
@@ -876,10 +916,16 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         // The model staged a multi-file change: render the body, then a reviewable per-file change set
         // the user accepts before any disk write (the single-file Apply gate is for non-staged replies).
         replyBubble.innerHTML = `<div class="koi-md">${renderMarkdown(full)}</div>`;
-        renderChangeSet(replyBubble, editSession.staged(), wsFiles ?? {}, {
-          onApply: async (accepted) => (await opts.onApplyChangeSet?.(accepted)) ?? { failed: [] },
-          onDiscard: () => {},
-        });
+        renderChangeSet(
+          replyBubble,
+          editSession.staged(),
+          wsFiles ?? {},
+          {
+            onApply: async (accepted) => (await opts.onApplyChangeSet?.(accepted)) ?? { failed: [] },
+            onDiscard: () => {},
+          },
+          stagedDiagnostics,
+        );
       } else {
         // The apply-gate lives here: a constrained turn validates (and, on the repair path, re-prompts)
         // before "Apply to editor" is enabled, so unparseable text can never be applied (#257).

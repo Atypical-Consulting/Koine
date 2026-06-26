@@ -178,11 +178,21 @@ export interface Platform {
 
   /**
    * Run a host-local edit tool (koine_list_files/koine_read_file/koine_write_file) against the per-turn
-   * staging `session`. list/read are pure session reads; write stages a body (NO disk write) and
-   * validates the whole staged workspace (WASM DiagnoseWorkspace on browser, the MCP sidecar on
-   * desktop). Returns the model-facing text; never throws.
+   * staging `session`. list/read are pure session reads; write STAGES a body (NO disk write) and is
+   * stage-only — the whole-staged-workspace validation now runs once per turn via
+   * {@link validateStagedWorkspace}, not after every write (issue #474). Returns the model-facing text;
+   * never throws.
    */
   runEditTool?(name: string, argsJson: string, session: EditSession): Promise<string>;
+
+  /**
+   * Validate the WHOLE staged workspace once, at the end of an agentic turn (browser: in-process WASM
+   * `DiagnoseWorkspace`; desktop: the MCP `koine_validate` sidecar — both over the staged set). The
+   * Assistant calls this a single time per turn instead of after every staged write (issue #474), so a
+   * multi-file refactor pays one whole-model compile (O(N)) rather than one per write (≈O(M×N)).
+   * Returns the model-facing `ok:` diagnostics string; never throws. Paired with {@link runEditTool}.
+   */
+  validateStagedWorkspace?(session: EditSession): Promise<string>;
 
   /**
    * The llama.cpp GBNF grammar for constrained `.koi` decoding (issue #257), used to constrain a
