@@ -5,10 +5,11 @@ namespace Koine.Compiler.Tests;
 
 /// <summary>
 /// Issue #419: two specs in the same bounded context whose names normalize to the same emitted
-/// predicate (e.g. <c>IsActive</c> + <c>Active</c> → <c>isActive</c>, or <c>FreeOrder</c> +
-/// <c>free_order</c> → <c>isFreeOrder</c>) are rejected at validation time with a span-anchored
-/// <see cref="DiagnosticCodes.DuplicateSpecPredicate"/> diagnostic — caught once for every emitter —
-/// instead of silently emitting a duplicate predicate function/method.
+/// predicate (e.g. <c>IsActive</c> + <c>Active</c> → <c>isActive</c> in PHP/TS, or <c>FreeOrder</c> +
+/// <c>free_order</c> → <c>isFreeOrder</c> in PHP) are rejected at validation time with a span-anchored
+/// <see cref="DiagnosticCodes.DuplicateSpecPredicate"/> diagnostic — once, before any emitter runs.
+/// The key is the strictest (PHP-equivalent) fold, so it flags any pair that would collide in at least
+/// one shipped emitter instead of silently emitting a duplicate predicate function/method.
 /// </summary>
 public class SpecPredicateCollisionTests
 {
@@ -33,9 +34,26 @@ public class SpecPredicateCollisionTests
     }
 
     [Fact]
+    public void Every_collider_after_the_first_is_flagged()
+    {
+        // Three specs folding to the same key (`active`): the 2nd and 3rd are each flagged against the
+        // first-seen, so a triple collision yields two diagnostics — not just one for the first pair.
+        const string src = """
+            context Acct {
+              value Account { balance: Int }
+              spec IsActive on Account = balance > 0
+              spec Active   on Account = balance > 1
+              spec active   on Account = balance > 2
+            }
+            """;
+
+        Diagnose(src).Count(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate).ShouldBe(2);
+    }
+
+    [Fact]
     public void PascalCase_and_snake_case_spec_names_collide()
     {
-        // Pre-#396 collision via PascalCase folding: `FreeOrder` and `free_order` both → `isFreeOrder`.
+        // PHP's PascalCase underscore-folding collides `FreeOrder` and `free_order` (both → `isFreeOrder`).
         const string src = """
             context Promotions {
               value Order { discountedTotal: Int }

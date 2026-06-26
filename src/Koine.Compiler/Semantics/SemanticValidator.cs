@@ -322,8 +322,16 @@ public sealed class SemanticValidator
     /// emitted predicate. The spec emitters generate one boolean predicate per spec into a single
     /// per-context <c>&lt;Context&gt;Specifications</c> class (PHP/TS prepend <c>is</c> → <c>isFreeOrder</c>;
     /// C# uses the spec name directly), with no dedup guard — so two distinct spec names that fold to
-    /// the same identifier silently emit a duplicate function (a PHP fatal, a TS compile error). This
-    /// target-agnostic check catches that once, at validation time, before any emitter runs.
+    /// the same identifier silently emit a duplicate function (a PHP fatal or a TS compile error,
+    /// depending on the emitter and the pair). This target-agnostic check catches that once, at
+    /// validation time, before any emitter runs.
+    ///
+    /// <para>The collision key is deliberately the <b>strictest</b> fold any shipped emitter applies —
+    /// PHP's, which is case-insensitive (method names) and collapses underscores (see
+    /// <see cref="CanonicalPascalCase"/>). It therefore flags every pair that would collide in at least
+    /// one of PHP/TS, and may conservatively flag a pair that would <i>not</i> collide in C# (which omits
+    /// the <c>is</c> prefix and is case-sensitive) — an accepted trade-off (issue #419): rejecting a
+    /// model that would emit a broken artifact for <i>any</i> shipped target is the safe call.</para>
     ///
     /// <para>The spec surface gathered per context mirrors the emitters exactly: context-level
     /// <see cref="ContextNode.Specs"/> plus aggregate-nested <see cref="AggregateDecl.Specs"/>. The
@@ -341,7 +349,10 @@ public sealed class SemanticValidator
             var seen = new Dictionary<string, SpecDecl>(StringComparer.Ordinal);
             foreach (SpecDecl spec in specs)
             {
-                var key = SpecPredicateKey(spec.Name);
+                // The PascalCase subject (with a leading `Is` word stripped) drives both the collision
+                // key and the displayed predicate, so compute it once.
+                var subject = SpecPredicateSubject(spec.Name);
+                var key = CanonicalKey(subject);
                 if (key.Length == 0)
                 {
                     continue; // a name with no alphanumeric content emits no usable predicate
@@ -349,9 +360,8 @@ public sealed class SemanticValidator
 
                 if (seen.TryGetValue(key, out SpecDecl? first))
                 {
-                    var predicate = "is" + SpecPredicateSubject(spec.Name);
                     diagnostics.Add(Diagnostic.FromSpan(DiagnosticCodes.DuplicateSpecPredicate,
-                        $"spec '{spec.Name}' emits the same predicate ('{predicate}') as spec '{first.Name}'",
+                        $"spec '{spec.Name}' emits the same predicate ('is{subject}') as spec '{first.Name}'",
                         spec.Span));
                 }
                 else
@@ -363,17 +373,14 @@ public sealed class SemanticValidator
     }
 
     /// <summary>
-    /// The canonical, target-agnostic collision key for a spec name: PascalCase the name, strip a
-    /// leading <c>Is</c> word (only when the next char is uppercase — the same rule the spec emitters
-    /// apply, so <c>IsActive</c> → <c>Active</c> but <c>Island</c> stays <c>Island</c>), then lowercase
-    /// and drop every separator. Two specs collide iff their keys are equal (e.g. <c>IsActive</c>/<c>Active</c>
-    /// → <c>active</c>; <c>FreeOrder</c>/<c>free_order</c> → <c>freeorder</c>).
+    /// The canonical, case- and separator-insensitive collision key for a spec predicate
+    /// <paramref name="subject"/>: lowercase every letter/digit and drop everything else. Two specs
+    /// collide iff their keys are equal (e.g. <c>Active</c> → <c>active</c>; <c>FreeOrder</c> →
+    /// <c>freeorder</c>). This is the strictest (PHP-equivalent) fold — see
+    /// <see cref="ValidateUniqueSpecPredicateNames"/> for why that is the intended conservative choice.
     /// </summary>
-    private static string SpecPredicateKey(string name)
-    {
-        var subject = SpecPredicateSubject(name);
-        return new string(subject.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
-    }
+    private static string CanonicalKey(string subject) =>
+        new(subject.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
     /// <summary>
     /// The PascalCase spec subject with a redundant leading <c>Is</c> word stripped — mirrors the
@@ -390,10 +397,14 @@ public sealed class SemanticValidator
     }
 
     /// <summary>
-    /// Target-agnostic PascalCase canonicalization, matching the casing the spec emitters apply before
-    /// building the predicate name (<c>free_order</c> → <c>FreeOrder</c>, <c>freeOrder</c> → <c>FreeOrder</c>).
-    /// Kept here in <c>Semantics/</c> rather than reused from any <c>Emit/</c> naming helper so the check
-    /// stays layer-clean and target-agnostic.
+    /// Target-agnostic PascalCase canonicalization. It intentionally matches PHP's
+    /// <c>ToPascalCase</c> — the strictest of the shipped emitters — collapsing underscores
+    /// (<c>free_order</c> → <c>FreeOrder</c>) and upper-casing the first char (<c>freeOrder</c> →
+    /// <c>FreeOrder</c>). Note C#/TS only upper-case the first char (so <c>free_order</c> →
+    /// <c>Free_order</c> there); folding underscores here is what makes the key the conservative
+    /// least-common-denominator described on <see cref="ValidateUniqueSpecPredicateNames"/>. Kept in
+    /// <c>Semantics/</c> rather than reused from any <c>Emit/</c> naming helper so the check stays
+    /// layer-clean and target-agnostic.
     /// </summary>
     private static string CanonicalPascalCase(string name)
     {
