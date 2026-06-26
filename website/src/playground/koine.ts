@@ -10,8 +10,18 @@
 //   compile(source, target) — returns the full compile result
 
 import { createKoineWorkerClient, type WorkerClient, type CallOptions } from './workerClient';
+import { bootMainThreadCompiler } from './mainThreadBoot';
 
 export type Severity = 'error' | 'warning';
+
+/** Which boot path produced the live compiler — `worker` (fast path) or the `main-thread` fallback (#510). */
+export type BootMode = 'worker' | 'main-thread';
+let bootMode: BootMode | null = null;
+
+/** The boot path that won, or `null` before {@link whenReady} resolves. Mirrors Studio's `getWasmBootMode()`. */
+export function getBootMode(): BootMode | null {
+  return bootMode;
+}
 
 export interface KoineDiagnostic {
   severity: Severity;
@@ -79,10 +89,26 @@ let clientPromise: Promise<WorkerClient> | null = null;
 function loadApi(): Promise<WorkerClient> {
   if (clientPromise) return clientPromise;
   clientPromise = (async () => {
-    const client = createKoineWorkerClient();
+    // The worker boot is the FAST path (off the UI thread). If it never reaches `ready` — it hangs
+    // past the budget, or the watchdog posts `boot-failure` — fall back to a main-thread boot so the
+    // Playground still works (#510). `getBootMode()` reports which path won (mirrors Studio's wasm.ts).
+    let usedFallback = false;
+    const client = createKoineWorkerClient({
+      fallbackBoot: () => {
+        usedFallback = true;
+        return bootMainThreadCompiler();
+      },
+    });
     await client.whenReady();
+    bootMode = usedFallback ? 'main-thread' : 'worker';
     return client;
   })();
+  // Don't cache a TOTAL boot failure (worker AND main-thread both rejected): clear so a later
+  // preloadCompiler()/compile() retries from scratch instead of forever re-awaiting a rejected promise.
+  const attempt = clientPromise;
+  attempt.catch(() => {
+    if (clientPromise === attempt) clientPromise = null;
+  });
   return clientPromise;
 }
 

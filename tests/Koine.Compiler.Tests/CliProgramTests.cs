@@ -57,7 +57,7 @@ public class CliProgramTests
         stdout.Trim().ShouldBe(Program.GetVersion());
         // Regression: it must not fall back to the four-part AssemblyVersion default.
         stdout.Trim().ShouldNotBe("1.0.0.0");
-        stdout.Trim().ShouldBe("0.17.4");
+        stdout.Trim().ShouldBe("0.17.5");
     }
 
     // ---- global help / no args / unknown command ---------------------------
