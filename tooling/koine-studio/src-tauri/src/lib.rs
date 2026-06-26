@@ -236,29 +236,21 @@ fn resolve_shell_command(os_shell: Option<&str>, passwd_shell: Option<&str>) -> 
 }
 
 /// Recover the user's login shell from the password database (`getpwuid(getuid())->pw_shell`). Used
-/// when the GUI-stripped launch environment has no `$SHELL`. Returns `None` on any lookup failure or a
-/// blank entry, so the caller falls through to its own `/bin/sh` default. Non-Unix targets have no
-/// password database, so this is always `None` there.
+/// when the GUI-stripped launch environment has no `$SHELL`. Returns `None` on any lookup failure, a
+/// blank entry, or a non-UTF-8 path, so the caller falls through to its own `/bin/sh` default. Non-Unix
+/// targets have no password database, so this is always `None` there.
+///
+/// Uses `nix::unistd::User::from_uid`, which wraps the reentrant `getpwuid_r` — thread-safe and free of
+/// the static-buffer data race that raw `getpwuid` carries, with no `unsafe`.
 #[cfg(unix)]
 fn passwd_login_shell() -> Option<String> {
-    // SAFETY: `getpwuid` returns a pointer into a static buffer owned by libc; we read its `pw_shell`
-    // (a NUL-terminated C string) into an owned `String` before returning, never retaining the
-    // pointer. `getuid` cannot fail.
-    unsafe {
-        let pw = libc::getpwuid(libc::getuid());
-        if pw.is_null() {
-            return None;
-        }
-        let shell_ptr = (*pw).pw_shell;
-        if shell_ptr.is_null() {
-            return None;
-        }
-        let shell = std::ffi::CStr::from_ptr(shell_ptr).to_str().ok()?;
-        if shell.is_empty() {
-            None
-        } else {
-            Some(shell.to_string())
-        }
+    use nix::unistd::{Uid, User};
+    let user = User::from_uid(Uid::current()).ok().flatten()?;
+    let shell = user.shell.into_os_string().into_string().ok()?;
+    if shell.is_empty() {
+        None
+    } else {
+        Some(shell)
     }
 }
 
@@ -1914,6 +1906,17 @@ mod tests {
         let (program, args) = resolve_shell_command(None, None);
         assert_eq!(program, "/bin/sh", "/bin/sh is the final fallback");
         assert!(args.iter().any(|a| a == "-l"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn resolve_shell_command_defaults_to_cmd_on_windows() {
+        // The Windows spawn path is unchanged: with nothing named, `cmd` is the default and no login
+        // flag is added. (Guards the `os_shell.unwrap_or("cmd")` branch, which the Unix-gated tests
+        // above never exercise.)
+        let (program, args) = resolve_shell_command(None, None);
+        assert_eq!(program, "cmd", "Windows defaults to cmd when no shell is named");
+        assert!(args.is_empty(), "the Windows spawn path adds no login flag");
     }
 
     // --- PTY chunk decoding (pure) ------------------------------------------
