@@ -273,3 +273,140 @@ describe('connectInstallAffordance', () => {
     dispose();
   });
 });
+
+describe('connectInstallAffordance — perceivability gate (#573)', () => {
+  // Reuse the shell-mounted affordance DOM and a dispatchable beforeinstallprompt.
+  function makeDom() {
+    const root = document.createElement('div');
+    root.hidden = true;
+    const installButton = document.createElement('button');
+    const dismissButton = document.createElement('button');
+    root.append(installButton, dismissButton);
+    document.body.append(root);
+    const target = new EventTarget();
+    return { root, installButton, dismissButton, target };
+  }
+  function dispatchBip(target: EventTarget) {
+    const e = new Event('beforeinstallprompt', { cancelable: true }) as BeforeInstallPromptEvent;
+    (e as unknown as { prompt: () => Promise<void> }).prompt = () => Promise.resolve();
+    (e as unknown as { userChoice: Promise<unknown> }).userChoice = Promise.resolve({
+      outcome: 'accepted',
+      platform: 'web',
+    });
+    target.dispatchEvent(e);
+  }
+  // An injectable perceivability signal: a predicate + a subscription whose callbacks fire on demand.
+  function makePerceivable(initial: boolean) {
+    let perceivable = initial;
+    const cbs = new Set<() => void>();
+    return {
+      isPerceivable: () => perceivable,
+      subscribePerceivable: (cb: () => void) => {
+        cbs.add(cb);
+        return () => void cbs.delete(cb);
+      },
+      set(value: boolean) {
+        perceivable = value;
+        for (const cb of cbs) cb();
+      },
+    };
+  }
+
+  it('defers the announcement when revealed while not perceivable, then flushes once it becomes perceivable', () => {
+    const dom = makeDom();
+    const announce = vi.fn();
+    const p = makePerceivable(false);
+    const controller = createInstallController({ storage: memStorage() });
+    const dispose = connectInstallAffordance(controller, {
+      ...dom,
+      announce,
+      isPerceivable: p.isPerceivable,
+      subscribePerceivable: p.subscribePerceivable,
+    });
+
+    dispatchBip(dom.target); // revealed, but #app is route-hidden → defer
+    expect(dom.root.hidden).toBe(false);
+    expect(announce).not.toHaveBeenCalled();
+
+    p.set(true); // editor route shown → flush the deferred announcement exactly once
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith('Koine Studio can be installed');
+
+    // Further perceivability toggles never re-announce — one announcement per reveal.
+    p.set(false);
+    p.set(true);
+    expect(announce).toHaveBeenCalledTimes(1);
+
+    dispose();
+  });
+
+  it('announces immediately when revealed while already perceivable (no defer)', () => {
+    const dom = makeDom();
+    const announce = vi.fn();
+    const p = makePerceivable(true);
+    const controller = createInstallController({ storage: memStorage() });
+    const dispose = connectInstallAffordance(controller, {
+      ...dom,
+      announce,
+      isPerceivable: p.isPerceivable,
+      subscribePerceivable: p.subscribePerceivable,
+    });
+
+    dispatchBip(dom.target);
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith('Koine Studio can be installed');
+
+    dispose();
+  });
+
+  it('drops a deferred announcement when dismissed before it became perceivable', () => {
+    const dom = makeDom();
+    const announce = vi.fn();
+    const p = makePerceivable(false);
+    const controller = createInstallController({ storage: memStorage() });
+    const dispose = connectInstallAffordance(controller, {
+      ...dom,
+      announce,
+      isPerceivable: p.isPerceivable,
+      subscribePerceivable: p.subscribePerceivable,
+    });
+
+    dispatchBip(dom.target); // deferred
+    dom.dismissButton.click(); // dismissed while still route-hidden
+    p.set(true); // becoming perceivable must NOT resurrect the dropped announcement
+    expect(announce).not.toHaveBeenCalled();
+
+    dispose();
+  });
+
+  it('announces immediately by default when no perceivability gate is injected', () => {
+    const dom = makeDom();
+    const announce = vi.fn();
+    const controller = createInstallController({ storage: memStorage() });
+    const dispose = connectInstallAffordance(controller, { ...dom, announce });
+
+    dispatchBip(dom.target);
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith('Koine Studio can be installed');
+
+    dispose();
+  });
+
+  it('dispose unsubscribes the perceivability subscription', () => {
+    const dom = makeDom();
+    const announce = vi.fn();
+    const unsub = vi.fn();
+    const subscribePerceivable = vi.fn(() => unsub);
+    const controller = createInstallController({ storage: memStorage() });
+    const dispose = connectInstallAffordance(controller, {
+      ...dom,
+      announce,
+      isPerceivable: () => false,
+      subscribePerceivable,
+    });
+
+    expect(subscribePerceivable).toHaveBeenCalledTimes(1);
+    dispose();
+    expect(unsub).toHaveBeenCalledTimes(1);
+  });
+});
