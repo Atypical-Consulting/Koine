@@ -794,12 +794,21 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       }
       const mechanism = chooseMechanism(constrainOn, provider, baseUrl, !!gbnf);
 
+      // #447: the compiler/edit tools and a GBNF grammar are mutually exclusive at the decoder — a
+      // grammar that only accepts `.koi` can't also emit the tool-call JSON the agentic loop needs. So
+      // when the grammar is EFFECTIVE for this turn (mechanism === 'gbnf'), grammar wins: we withhold
+      // the tools entirely rather than advertise tools the GBNF would silently render uncallable. When
+      // the grammar isn't effective ('off'/'repair' — non-capable backend, no GBNF, or an explanatory
+      // turn) the tools run exactly as before. The settings UI also makes the two mutually exclusive
+      // (prefer.ts), so this is the belt-and-braces guard for any stale/legacy both-on state.
+      const toolsEffective = opts.getUseTools() && mechanism !== 'gbnf';
+
       // Build the per-turn multi-file staging session ONLY for a GENERATIVE workspace turn: offerApply
-      // (an Explain turn must never stage/apply edits) AND tools are on AND the host supplies the edit
-      // executor AND there are workspace files to edit across. The model's writes land in `editSession`;
-      // after the turn resolves, `editSession.staged()` holds the proposed full files.
+      // (an Explain turn must never stage/apply edits) AND tools are effective (so not a gbnf turn) AND
+      // the host supplies the edit executor AND there are workspace files to edit across. The model's
+      // writes land in `editSession`; after the turn resolves, `editSession.staged()` holds the files.
       const wsFiles =
-        offerApply && opts.getUseTools() && opts.runEditTool && opts.getWorkspaceFiles ? opts.getWorkspaceFiles() : null;
+        offerApply && toolsEffective && opts.runEditTool && opts.getWorkspaceFiles ? opts.getWorkspaceFiles() : null;
       const editSession = wsFiles && Object.keys(wsFiles).length > 0 ? createEditSession(wsFiles) : null;
 
       full = await runAssistant({
@@ -819,9 +828,11 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
           replyBubble.textContent = full;
           transcript.scrollTop = transcript.scrollHeight;
         },
-        // Withhold the tools when the user hasn't opted into the agentic loop, so the model gets a
-        // plain streaming request (no `tools` ⇒ local servers stream instead of buffering).
-        runCompilerTool: opts.getUseTools() ? opts.runCompilerTool : undefined,
+        // Withhold the tools when the user hasn't opted into the agentic loop (plain streaming request —
+        // no `tools` ⇒ local servers stream instead of buffering), AND whenever the grammar is effective
+        // for this turn (#447): a GBNF that only accepts `.koi` can't emit the tool-call JSON, so
+        // advertising tools alongside it would silently disable them. `toolsEffective` folds in both.
+        runCompilerTool: toolsEffective ? opts.runCompilerTool : undefined,
         // Offer the multi-file edit surface alongside the compiler tools when this is a workspace turn.
         ...(editSession && opts.runEditTool ? { editSession, runEditTool: opts.runEditTool } : {}),
         onToolCall: addToolStatus,
