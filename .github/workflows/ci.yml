@@ -140,3 +140,16 @@ jobs:
       # The build above re-emits the demo; verify the emitter's output conforms.
       - name: Verify generated code formatting
         run: dotnet format demo/Pizzeria.Domain/Pizzeria.Domain.csproj --include-generated --verify-no-changes
+
+      # Real-wasm smoke test (issue #333): publish the browser-wasm bundle, then drive the WHOLE
+      # [JSExport] surface under Node against the PUBLISHED module — the one thing the desktop
+      # wire-parity tests (tests/Koine.Wasm.Tests, which run on desktop .NET) cannot do: catch a
+      # trim/runtime failure in the reflection-rooted paths (Ast/NodeWalker reflects, ANTLR
+      # deserializes its ATN — both rooted whole in Koine.Wasm.csproj precisely because TrimMode=full
+      # would otherwise drop them). The same run benchmarks the pizzeria compile and prints its
+      # `elapsed=` perf number (issues #327/#219), failing on a gross regression. A red exit fails CI.
+      # Node is already on PATH from the Setup Node step above.
+      - name: Smoke-test the published wasm bundle
+        run: |
+          dotnet publish src/Koine.Wasm -c Release
+          node src/Koine.Wasm/smoke-test.mjs
