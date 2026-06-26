@@ -23,6 +23,18 @@ const dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(file
 //
 // Both are scoped so human watch-mode (`npm run test:watch` → bare `vitest`) and non-Windows dev are
 // untouched, and the test set/count is identical on every OS leg.
+//
+// A second, distinct studio flake (#493, observed on ubuntu-latest) has the same "green suite, crashing
+// teardown" shape: CodeMirror's EditorView captures its owning window as `this.win` and reads
+// `this.win.requestAnimationFrame` from a DEFERRED measure (its DOMObserver.onResize schedules a 50ms
+// setTimeout → view.requestMeasure()). When that timer fires after the owning test/file has ended and
+// happy-dom has torn the window's rAF down, the read throws an uncaught
+// `TypeError: this.win.requestAnimationFrame is not a function`, which Vitest counts as a run error and
+// exits the worker non-zero despite every test passing. The operative fix is teardown hygiene —
+// editor-mounting suites (editorSession.test.ts and the actions.test.ts peer) destroy() every
+// EditorView in `afterEach`, so no measure stays queued past a test. `src/test-setup.ts` also installs a
+// setTimeout-backed requestAnimationFrame shim as defense-in-depth (inert under happy-dom 20, which
+// already ships rAF; it guards a future happy-dom that drops it, and never clobbers a real browser rAF).
 // @ts-expect-error process is a nodejs global
 const isOneShotRun = process.argv.includes('run');
 // @ts-expect-error process is a nodejs global

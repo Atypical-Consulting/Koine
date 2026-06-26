@@ -107,10 +107,32 @@ function warn(line: number, message = 'careful'): LspDiagnostic {
   return { range: { start: { line, character: 0 }, end: { line, character: 4 } }, severity: 2, message };
 }
 
+// Every session mounts a real CodeMirror EditorView whose DOMObserver schedules a deferred measure
+// (a 50ms resize setTimeout -> view.requestMeasure() that reads this.win.requestAnimationFrame). If a
+// session is left alive when a test ends, that timer can fire after happy-dom tears the window down and
+// throw an uncaught `this.win.requestAnimationFrame is not a function`, crashing the studio job despite a
+// green suite (#493). Wrap createEditorSession so afterEach can destroy() every session it created — a
+// destroy() clears the pending measure, so nothing survives the test.
+const liveSessions: ReturnType<typeof createEditorSession>[] = [];
+function newSession(deps: EditorSessionDeps): ReturnType<typeof createEditorSession> {
+  const session = createEditorSession(deps);
+  liveSessions.push(session);
+  return session;
+}
+
 beforeEach(() => {
   seedDom();
 });
 afterEach(() => {
+  // Tear down every session so no deferred CodeMirror measure survives into happy-dom teardown (#493).
+  // try/catch tolerates a session a test already destroyed itself (the destroy() coverage below).
+  while (liveSessions.length) {
+    try {
+      liveSessions.pop()!.destroy();
+    } catch {
+      /* already destroyed */
+    }
+  }
   document.body.innerHTML = '';
   vi.restoreAllMocks();
 });
@@ -118,7 +140,7 @@ afterEach(() => {
 describe('createEditorSession — diagnostics for the active uri', () => {
   test('a published diagnostic for the active uri repaints the strip, status pill, and bar mirrors', () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
 
     // The strip body is now a Preact panel reading the diagnostics slice; act() flushes its
     // (async-batched) re-render so the rows are in the DOM before we assert.
@@ -145,7 +167,7 @@ describe('createEditorSession — diagnostics for the active uri', () => {
 
   test('a clean push for the active uri shows the green/clean state', () => {
     const lsp = makeLsp();
-    createEditorSession(makeDeps(lsp));
+    newSession(makeDeps(lsp));
 
     // act() flushes the strip panel's re-render so its empty-state span is in the DOM before we assert.
     act(() => lsp.firePublish(ACTIVE, []));
@@ -163,7 +185,7 @@ describe('createEditorSession — diagnostics for the active uri', () => {
 describe('createEditorSession — diagnostics for a non-active uri', () => {
   test('only caches: no strip / status repaint, but diagnosticsFor returns them', () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
 
     // Seed a known active strip first so we can prove a non-active push leaves it untouched.
     lsp.firePublish(ACTIVE, []);
@@ -182,7 +204,7 @@ describe('createEditorSession — diagnostics for a non-active uri', () => {
   test('every push notifies onDiagnostics so ide.ts can refresh the file tree badges', () => {
     const lsp = makeLsp();
     const onDiagnostics = vi.fn();
-    createEditorSession(makeDeps(lsp, { onDiagnostics }));
+    newSession(makeDeps(lsp, { onDiagnostics }));
 
     lsp.firePublish(OTHER, [err(1)]);
     lsp.firePublish(ACTIVE, []);
@@ -196,7 +218,7 @@ describe('createEditorSession — diagnostics for a non-active uri', () => {
 describe('createEditorSession — the editor callback wall forwards to the LSP', () => {
   test('hover / completion / definition forward to the lsp spy with 0-based coordinates', async () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
     const view = session.editor.view;
 
     // Put the cursor on line 1 (0-based line 0), column index 3, then drive the editor providers the
@@ -216,7 +238,7 @@ describe('createEditorSession — the editor callback wall forwards to the LSP',
 
   test('a code-action request scopes the LSP call to the active file diagnostics under the range', async () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
     // Cache an error on line 0 for the active file; a code action over line 0 must pass it through.
     lsp.firePublish(ACTIVE, [err(0, 'fixme')]);
 
@@ -232,7 +254,7 @@ describe('createEditorSession — the editor callback wall forwards to the LSP',
 describe('createEditorSession — onChange split', () => {
   test('an editor edit syncs the LSP (changeDoc) and invokes the registered downstream callback with the ACTIVE uri', () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
     const seen: { doc: string; uri: string }[] = [];
     session.onChange((doc, uri) => seen.push({ doc, uri }));
 
@@ -250,7 +272,7 @@ describe('createEditorSession — onChange split', () => {
 
   test('a group-B edit fires the downstream callback with B’s OWN uri (not group A’s) — #265 data-loss guard', () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
     const seen: { doc: string; uri: string }[] = [];
     session.onChange((doc, uri) => seen.push({ doc, uri }));
 
@@ -275,7 +297,7 @@ describe('createEditorSession — group B re-point notifies the LSP (#265)', () 
   // the new uri) — so hover/completion/definition in B resolve against the right file immediately.
   test('re-pointing group B via openGroupB (reuse-branch) notifies the LSP with the new uri/doc', () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
 
     session.openGroupB(OTHER); // first open: builds B (initial doc is constructor-seeded, no changeDoc)
     lsp.changeDoc.mockClear();
@@ -288,7 +310,7 @@ describe('createEditorSession — group B re-point notifies the LSP (#265)', () 
 
   test('re-pointing group B via openFocusedGroup (B focused) notifies the LSP with the new uri/doc', () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
 
     session.openGroupB(ACTIVE); // open + focus B
     lsp.changeDoc.mockClear();
@@ -303,7 +325,7 @@ describe('createEditorSession — group B re-point notifies the LSP (#265)', () 
 describe('createEditorSession — status + server exit', () => {
   test('setStatus writes the pill but does NOT drive the connection mirror (it tracks the LSP lifecycle)', () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
 
     session.setStatus('connecting…', 'connecting');
     expect(el('status').textContent).toBe('connecting…');
@@ -315,7 +337,7 @@ describe('createEditorSession — status + server exit', () => {
 
   test('the connection mirror tracks the LSP lifecycle: a server push reads Local, an exit reads Offline', () => {
     const lsp = makeLsp();
-    createEditorSession(makeDeps(lsp));
+    newSession(makeDeps(lsp));
 
     // A diagnostics push WITH a warning still proves the service is live → "Local" (not "Offline").
     act(() => lsp.firePublish(ACTIVE, [warn(0, 'meh')]));
@@ -327,7 +349,7 @@ describe('createEditorSession — status + server exit', () => {
 
   test('a server exit surfaces an error in the pill', () => {
     const lsp = makeLsp();
-    createEditorSession(makeDeps(lsp));
+    newSession(makeDeps(lsp));
 
     lsp.fireExit(137);
 
@@ -339,7 +361,7 @@ describe('createEditorSession — status + server exit', () => {
 describe('createEditorSession — second editor group (group B)', () => {
   test('focus starts on group A; there is no group-B editor until opened', () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
 
     expect(session.focusedGroup()).toBe('a');
     expect(session.groupBEditor()).toBeNull();
@@ -349,7 +371,7 @@ describe('createEditorSession — second editor group (group B)', () => {
 
   test('opening group B mounts a second editor showing the chosen buffer; A is untouched', () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
 
     session.openGroupB(OTHER);
 
@@ -367,7 +389,7 @@ describe('createEditorSession — second editor group (group B)', () => {
 
   test('openGroupB with no uri defaults to group A’s active uri', () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
 
     session.openGroupB();
 
@@ -376,7 +398,7 @@ describe('createEditorSession — second editor group (group B)', () => {
 
   test('opening group B twice reuses the same editor instance (lazy, once)', () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
 
     session.openGroupB(OTHER);
     const first = session.groupBEditor();
@@ -390,7 +412,7 @@ describe('createEditorSession — second editor group (group B)', () => {
 
   test('openFocusedGroup routes a buffer load to whichever group is focused', () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
 
     // Focus A by default: a routed load lands in A, not B.
     session.openFocusedGroup(OTHER);
@@ -406,7 +428,7 @@ describe('createEditorSession — second editor group (group B)', () => {
 
   test('focusGroup switches the routing target', () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
     session.openGroupB(ACTIVE); // focuses B
 
     session.focusGroup('a');
@@ -417,7 +439,7 @@ describe('createEditorSession — second editor group (group B)', () => {
 
   test('closing group B tears it down, returns focus to A, and leaves A intact', () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
     session.openGroupB(OTHER);
     const aDocBefore = session.editor.getDoc();
 
@@ -433,7 +455,7 @@ describe('createEditorSession — second editor group (group B)', () => {
 
   test('openGroupB is a graceful no-op when no groupBParent is provided', () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp, { groupBParent: undefined }));
+    const session = newSession(makeDeps(lsp, { groupBParent: undefined }));
 
     session.openGroupB(OTHER);
 
@@ -446,7 +468,7 @@ describe('createEditorSession — second editor group (group B)', () => {
 describe('createEditorSession — destroy() tears the session down (#221)', () => {
   test('destroy() removes the symbol-row host + the editor and a later window resize is inert', () => {
     const lsp = makeLsp();
-    const session = createEditorSession(makeDeps(lsp));
+    const session = newSession(makeDeps(lsp));
     const pane = el('editor-pane');
     // The session mounted the mobile DSL-symbol accessory row + a CodeMirror editor into its pane.
     expect(pane.querySelector('.koi-symbol-row-host')).not.toBeNull();
@@ -461,5 +483,35 @@ describe('createEditorSession — destroy() tears the session down (#221)', () =
     // The focusin/focusout/resize listeners were removed too, so a post-teardown resize is a no-op — it
     // neither throws nor re-shows the (removed) row.
     expect(() => window.dispatchEvent(new Event('resize'))).not.toThrow();
+  });
+});
+
+describe('createEditorSession — a destroyed session leaves no measure to crash teardown (#493 regression)', () => {
+  test('destroy() clears the pending resize-measure so a post-teardown rAF deref cannot throw', () => {
+    // Reproduces the exact #493 race deterministically: CodeMirror's DOMObserver.onResize schedules a
+    // 50ms setTimeout -> view.requestMeasure(), which reads this.win.requestAnimationFrame. Without the
+    // afterEach destroy(), that timer outlives the test; happy-dom then strips rAF from the captured
+    // window, and the late measure throws an uncaught `this.win.requestAnimationFrame is not a function`.
+    vi.useFakeTimers();
+    const lsp = makeLsp();
+    const session = newSession(makeDeps(lsp));
+
+    // A resize near the test's end queues the deferred measure.
+    window.dispatchEvent(new Event('resize'));
+    // Destroying the session (what afterEach now does for every session) clears that pending measure.
+    session.destroy();
+
+    // Simulate happy-dom teardown stripping rAF off the editor's captured window. Save + restore so this
+    // global mutation never leaks into sibling tests sharing the per-file happy-dom window.
+    const win = (session.editor.view.dom.ownerDocument?.defaultView ?? window) as unknown as Record<string, unknown>;
+    const savedRaf = win.requestAnimationFrame;
+    delete win.requestAnimationFrame;
+    try {
+      // With the measure cleared, draining the timer queue past the 50ms resize timeout is inert.
+      expect(() => vi.advanceTimersByTime(100)).not.toThrow();
+    } finally {
+      win.requestAnimationFrame = savedRaf;
+      vi.useRealTimers();
+    }
   });
 });

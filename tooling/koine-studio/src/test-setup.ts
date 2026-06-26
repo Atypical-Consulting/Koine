@@ -46,3 +46,26 @@ if (typeof g.sessionStorage?.clear !== 'function') g.sessionStorage = makeStorag
 // secrets.ts needs Web Crypto (crypto.subtle). happy-dom may not expose it; back it with Node's
 // WebCrypto so AES-GCM encrypt/decrypt behaves as it does in the browser.
 if (!g.crypto?.subtle) g.crypto = webcrypto as unknown as Crypto;
+
+// requestAnimationFrame shim (#493). CodeMirror's EditorView captures its owning window as `this.win`
+// and reads `this.win.requestAnimationFrame` from a DEFERRED measure (DOMObserver.onResize schedules a
+// 50ms setTimeout -> view.requestMeasure()). When that timer fires after the owning test/file has ended
+// and happy-dom has torn the window's rAF down, the read throws an uncaught
+// `TypeError: this.win.requestAnimationFrame is not a function`, which Vitest counts as a run error and
+// exits the worker non-zero — failing the studio job despite a fully green suite (same "green suite,
+// crashing teardown" shape as #414). Destroying every EditorView in test teardown (editorSession.test.ts
+// & peers) is the operative fix; this shim is the defense-in-depth net: it guarantees a setTimeout-backed
+// rAF/cAF whenever the host lacks one — e.g. a future happy-dom that ships without rAF — so a late measure
+// no-ops safely instead of crashing. INSTALLED ONLY WHEN ABSENT, so a real browser/Playwright run is
+// never clobbered (the storybook project doesn't load this setup file; the guard keeps that contract
+// explicit). happy-dom 20 already exposes rAF, so this is inert there today — kept for resilience.
+export function installRafShim(target: Record<string, unknown>): void {
+  if (typeof target.requestAnimationFrame === 'function') return; // a real rAF exists — leave it alone
+  target.requestAnimationFrame = (cb: FrameRequestCallback): number =>
+    setTimeout(() => cb(typeof performance !== 'undefined' ? performance.now() : Date.now()), 0) as unknown as number;
+  target.cancelAnimationFrame = (id: number): void =>
+    clearTimeout(id as unknown as ReturnType<typeof setTimeout>);
+}
+
+installRafShim(globalThis as unknown as Record<string, unknown>);
+if (typeof window !== 'undefined') installRafShim(window as unknown as Record<string, unknown>);
