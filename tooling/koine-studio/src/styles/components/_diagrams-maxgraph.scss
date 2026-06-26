@@ -339,7 +339,11 @@ $ddd-kinds: (
 
 .koi-export-menu {
   position: absolute;
-  z-index: 5;
+  // In-pane raised band, deliberately below --koi-z-modal (100) so a modal / command-palette scrim
+  // always occludes this anchored menu (#534). The JS dismissal closes it on overlay-open as the primary
+  // guard; this keeps it from ever painting above the backdrop in the interim. Still above the canvas
+  // chrome (.koi-canvas-controls / .koi-canvas-outline at z-index 2).
+  z-index: var(--koi-z-raised);
   top: calc(100% + 0.25rem);
   right: 0;
   display: flex;
