@@ -17,6 +17,11 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
+    // Let the service-worker spec import the hand-rolled public/koine-studio-sw.js (a plain-JS asset
+    // served verbatim, #443) and infer its types — no .d.ts to ship in the published bundle. Matches the
+    // docs-site Astro config, whose preset enables allowJs for the same public/koine-sw.js test (#328).
+    // checkJs stays off, so the JS asset is type-INFERRED for consumers but not strict-checked itself.
+    "allowJs": true,
 
     /* Linting */
     "strict": true,
