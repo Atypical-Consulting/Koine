@@ -1155,4 +1155,21 @@ describe('ide init() — last-workspace restore on reload (#535)', () => {
     expect(p.defaultWorkspaceSeed).not.toBeNull();
     expect(editorDoc()).toContain('context Billing');
   });
+
+  test('a stored (default) pointer opens the default flow without a doomed openFolderPath or error pill', async () => {
+    // The '(default)' handle is registered lazily (never in IndexedDB), so re-opening it via
+    // openFolderPath at cold boot would always fail and leave a red "could not read folder" status pill
+    // on the most common returning-user boot. Boot must route '(default)' straight to the default flow.
+    localStorage.setItem(LAST_WS_KEY, '(default)');
+    const p = installPlatform();
+    const opened: string[] = [];
+    captureOpened(p, opened);
+
+    await boot({ platform: p });
+
+    expect(p.defaultWorkspaceSeed).not.toBeNull();
+    expect(editorDoc()).toContain('context Billing');
+    expect(opened).not.toContain('(default)'); // never attempted a doomed openFolderPath('(default)')
+    expect(document.getElementById('status')!.dataset.kind).not.toBe('error');
+  });
 });

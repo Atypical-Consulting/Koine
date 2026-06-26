@@ -2276,24 +2276,30 @@ export function init(): () => void {
       } else {
         // A start action chosen on the Home route (#368) is queued as a one-shot intent and performed
         // here, once, instead of opening the default workspace. A plain editor boot (cold `#/editor`
-        // deep link, or a returning user) has no intent: restore the last OPFS workspace it was on
-        // (#535) — an opened example otherwise reverted to the empty default on reload (silent data
-        // loss). Only OPFS-internal tokens are auto-restored (picked folders need a gesture); on any
-        // failure (dir evicted / IndexedDB cleared) fall back to the default so the user is never
-        // stranded on a blank editor.
+        // deep link, or a returning user) has no intent: restore the workspace it was last on (#535) —
+        // an opened example otherwise reverted to the empty default on reload (silent data loss).
+        //
+        // Only an `example-*` dir is re-opened through openFolderPath here: it persists a handle in
+        // IndexedDB that re-acquires with NO permission prompt. A *picked* folder is not OPFS-internal
+        // (needs a user gesture) → never auto-restored, by design. The default workspace IS OPFS-internal
+        // but its '(default)' handle is registered lazily (never put in IndexedDB), so openFolderPath
+        // can't re-open it at cold boot — it flows through openDefaultWorkspaceFlow below instead, which
+        // is its proper path (seeds the model, migrates legacy scratch, shows the memory-only banner).
+        // On any restore failure (example dir evicted / IndexedDB cleared) we also fall through to the
+        // default, so the user is never stranded on a blank editor.
         const intent = takeStartIntent();
         if (intent) {
           await runStartIntent(intent);
         } else {
           const last = getLastWorkspace();
-          if (last && isOpfsInternalToken(last) && (await workspace.openFolderPath(last, { recent: false })).ok) {
-            // Restored — clear the legacy scratch buffer now that a workspace is confirmed open (the
-            // openDefaultWorkspaceFlow wrapper does this on its own path; mirror it here so the one-time
-            // migration still completes when boot restores an example instead of the default).
-            clearLegacyScratch();
-          } else {
-            await openDefaultWorkspaceFlow(legacyScratch ?? SEED);
-          }
+          const restoredExample =
+            !!last && last !== DEFAULT_WS_TOKEN && isOpfsInternalToken(last)
+              ? (await workspace.openFolderPath(last, { recent: false })).ok
+              : false;
+          // Legacy-scratch migration is deliberately NOT done on the example-restore path: the scratch
+          // content is only ever preserved by being seeded into the default workspace, so clearing it
+          // here (without seeding) would lose it. It stays untouched until a default-workspace open.
+          if (!restoredExample) await openDefaultWorkspaceFlow(legacyScratch ?? SEED);
         }
       }
     })
