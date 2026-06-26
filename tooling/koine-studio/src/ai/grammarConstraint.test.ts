@@ -6,6 +6,7 @@ import {
   repairToValid,
   type RepairDeps,
 } from '@/ai/grammarConstraint';
+import { normalizeMcpValidate } from '@/ai/assistantTools';
 
 describe('isGrammarCapable()', () => {
   test('local OpenAI-compatible endpoints accept a grammar field (capable)', () => {
@@ -156,5 +157,59 @@ describe('repairToValid()', () => {
     expect(result).toEqual({ source: 'bad', ok: false, rounds: 0 });
     expect(validate).toHaveBeenCalledTimes(1);
     expect(regenerate).not.toHaveBeenCalled();
+  });
+});
+
+describe('desktop apply-gate end-to-end (issue #445)', () => {
+  // The desktop host's validate seam is parseValidationOutcome ∘ normalizeMcpValidate over the MCP
+  // ValidateTool JSON. Before the normalization these tests would fail: the raw `{"ok":true,…}` JSON is
+  // not the browser `ok:` string, so parseValidationOutcome read it as not-parsing → spurious repair →
+  // Apply disabled. They lock the gate to the browser contract on desktop.
+  const VALID_MCP = JSON.stringify({ ok: true, errorCount: 0, warningCount: 0, diagnostics: [] });
+  const ERROR_MCP = JSON.stringify({
+    ok: false,
+    errorCount: 1,
+    warningCount: 0,
+    diagnostics: [{ severity: 'error', code: 'KOI0201', message: 'unknown type Mony', line: 1, column: 1, endLine: 1, endColumn: 5, file: 'model.koi' }],
+  });
+
+  test('a valid-model MCP payload passes the gate on the first try (ok, no repair rounds)', async () => {
+    // The desktop validate callback: run koine_validate over the MCP sidecar, normalize, then parse.
+    const validate = vi.fn(async (_source: string) => parseValidationOutcome(normalizeMcpValidate(VALID_MCP)));
+    const regenerate = vi.fn();
+
+    const result = await repairToValid('context Billing {}', { validate, regenerate }, 3);
+
+    expect(result.ok).toBe(true);
+    expect(result.rounds).toBe(0); // valid first try — the bug burned repair rounds here
+    expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  test('an error MCP payload is classified not-parsing and drives repair', async () => {
+    const validate = vi.fn(async (_source: string) => parseValidationOutcome(normalizeMcpValidate(ERROR_MCP)));
+    const regenerate = vi.fn().mockResolvedValue('context Billing {}');
+
+    const outcome = parseValidationOutcome(normalizeMcpValidate(ERROR_MCP));
+    expect(outcome.ok).toBe(false);
+    expect(outcome.diagnostics).toContain('1 error(s)');
+    expect(outcome.diagnostics).toContain('1:1 unknown type Mony');
+
+    const result = await repairToValid('bad', { validate, regenerate }, 2);
+    expect(result.ok).toBe(false);
+  });
+
+  test('malformed MCP text fails CLOSED — a single bounded failure, never an infinite repair loop', async () => {
+    // A non-JSON tool result (e.g. the sidecar-unavailable error string) must not be read as ok…
+    const malformed = 'Error: the Koine MCP server is not available.';
+    expect(parseValidationOutcome(normalizeMcpValidate(malformed)).ok).toBe(false);
+
+    // …and repair stays bounded by maxRounds rather than spinning forever.
+    const validate = vi.fn(async (_source: string) => parseValidationOutcome(normalizeMcpValidate(malformed)));
+    const regenerate = vi.fn().mockImplementation((prev: string) => Promise.resolve(prev + '?'));
+
+    const result = await repairToValid('seed', { validate, regenerate }, 2);
+    expect(result.ok).toBe(false);
+    expect(result.rounds).toBe(2);
+    expect(regenerate).toHaveBeenCalledTimes(2);
   });
 });
