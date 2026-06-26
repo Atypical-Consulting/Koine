@@ -75,6 +75,14 @@
   border-bottom: 1px solid var(--koi-line);
 }
 
+/* The Files pane (`#rail-files`, a `.rail-sect`) is toggled via the standard `hidden` attribute by the
+   axis switch (applyAxis). The `display: flex` above is an AUTHOR rule, so it outranks the UA
+   `[hidden] { display: none }` in the cascade and the Files tree would leak into the Domain axis (#485).
+   Restore the standard hide — same pattern as the toggleable containers in _toolbar/_center/_diagnostics. */
+#rail-files[hidden] {
+  display: none;
+}
+
 /* The Files section header pairs the disclosure with a workspace-name meta label. */
 .rail-sect-head-row {
   display: flex;
