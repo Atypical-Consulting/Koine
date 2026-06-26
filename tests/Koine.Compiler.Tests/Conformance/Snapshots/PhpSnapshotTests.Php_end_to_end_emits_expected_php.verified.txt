@@ -351,7 +351,7 @@ enum InvoiceStatus: int
         return self::tryFrom($value);
     }
 
-    /** Dispatch to the handler for this member; throws if unhandled. */
+    /** Dispatch to the handler for this member (exhaustive over all cases). */
     public function match_(\Closure $draft, \Closure $issued, \Closure $paid, \Closure $voided): mixed
     {
         return match($this) {
@@ -359,11 +359,10 @@ enum InvoiceStatus: int
             self::ISSUED => ($issued)(),
             self::PAID => ($paid)(),
             self::VOIDED => ($voided)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("InvoiceStatus", "unhandled InvoiceStatus {$this->name}"),
         };
     }
 
-    /** Dispatch to the side-effecting handler for this member; throws if unhandled. */
+    /** Dispatch to the side-effecting handler for this member (exhaustive over all cases). */
     public function switch_(\Closure $draft, \Closure $issued, \Closure $paid, \Closure $voided): void
     {
         match($this) {
@@ -371,7 +370,6 @@ enum InvoiceStatus: int
             self::ISSUED => ($issued)(),
             self::PAID => ($paid)(),
             self::VOIDED => ($voided)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("InvoiceStatus", "unhandled InvoiceStatus {$this->name}"),
         };
     }
 }

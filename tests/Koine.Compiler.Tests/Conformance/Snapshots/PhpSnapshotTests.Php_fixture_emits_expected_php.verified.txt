@@ -367,23 +367,21 @@ enum Currency: int
         return self::tryFrom($value);
     }
 
-    /** Dispatch to the handler for this member; throws if unhandled. */
+    /** Dispatch to the handler for this member (exhaustive over all cases). */
     public function match_(\Closure $eur, \Closure $usd): mixed
     {
         return match($this) {
             self::EUR => ($eur)(),
             self::USD => ($usd)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("Currency", "unhandled Currency {$this->name}"),
         };
     }
 
-    /** Dispatch to the side-effecting handler for this member; throws if unhandled. */
+    /** Dispatch to the side-effecting handler for this member (exhaustive over all cases). */
     public function switch_(\Closure $eur, \Closure $usd): void
     {
         match($this) {
             self::EUR => ($eur)(),
             self::USD => ($usd)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("Currency", "unhandled Currency {$this->name}"),
         };
     }
 }
@@ -435,23 +433,21 @@ enum MassUnit: int
         return self::tryFrom($value);
     }
 
-    /** Dispatch to the handler for this member; throws if unhandled. */
+    /** Dispatch to the handler for this member (exhaustive over all cases). */
     public function match_(\Closure $gram, \Closure $kilogram): mixed
     {
         return match($this) {
             self::GRAM => ($gram)(),
             self::KILOGRAM => ($kilogram)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("MassUnit", "unhandled MassUnit {$this->name}"),
         };
     }
 
-    /** Dispatch to the side-effecting handler for this member; throws if unhandled. */
+    /** Dispatch to the side-effecting handler for this member (exhaustive over all cases). */
     public function switch_(\Closure $gram, \Closure $kilogram): void
     {
         match($this) {
             self::GRAM => ($gram)(),
             self::KILOGRAM => ($kilogram)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("MassUnit", "unhandled MassUnit {$this->name}"),
         };
     }
 }
@@ -504,25 +500,23 @@ enum OrderStatus: int
         return self::tryFrom($value);
     }
 
-    /** Dispatch to the handler for this member; throws if unhandled. */
+    /** Dispatch to the handler for this member (exhaustive over all cases). */
     public function match_(\Closure $draft, \Closure $placed, \Closure $cancelled): mixed
     {
         return match($this) {
             self::DRAFT => ($draft)(),
             self::PLACED => ($placed)(),
             self::CANCELLED => ($cancelled)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("OrderStatus", "unhandled OrderStatus {$this->name}"),
         };
     }
 
-    /** Dispatch to the side-effecting handler for this member; throws if unhandled. */
+    /** Dispatch to the side-effecting handler for this member (exhaustive over all cases). */
     public function switch_(\Closure $draft, \Closure $placed, \Closure $cancelled): void
     {
         match($this) {
             self::DRAFT => ($draft)(),
             self::PLACED => ($placed)(),
             self::CANCELLED => ($cancelled)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("OrderStatus", "unhandled OrderStatus {$this->name}"),
         };
     }
 }
