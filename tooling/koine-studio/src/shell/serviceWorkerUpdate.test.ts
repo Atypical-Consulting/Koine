@@ -155,6 +155,23 @@ describe('serviceWorkerUpdate — connectUpdateAffordance', () => {
     expect(reload).toHaveBeenCalledTimes(1);
     dispose();
   });
+
+  it('announces once via the shared live region on the hidden→visible reveal (and not on dismiss)', () => {
+    const controller = createUpdateController();
+    const d = dom();
+    const announce = vi.fn();
+    const dispose = connectUpdateAffordance(controller, { ...d, announce, reload: vi.fn() });
+
+    expect(announce).not.toHaveBeenCalled(); // hidden → silent
+
+    controller.markUpdateReady(); // hidden → visible
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith('A new version is available — reload to update');
+
+    d.dismissButton.click(); // dismiss is silent (no re-announce)
+    expect(announce).toHaveBeenCalledTimes(1);
+    dispose();
+  });
 });
 
 describe('serviceWorkerUpdate — scheduleCompilerPrecache', () => {
