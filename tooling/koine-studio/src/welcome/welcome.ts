@@ -83,7 +83,7 @@ export function filterTemplates(templates: readonly Template[], filter: Template
 const HERO_SNIPPET = `<span class="koi-syn-kw">value</span> <span class="koi-syn-type">Money</span> <span class="koi-syn-punct">{</span>
   <span class="koi-syn-id">amount</span><span class="koi-syn-punct">:</span>   <span class="koi-syn-type">Decimal</span>
   <span class="koi-syn-id">currency</span><span class="koi-syn-punct">:</span> <span class="koi-syn-type">Currency</span>
-  <span class="koi-syn-kw">invariant</span> <span class="koi-syn-id">amount</span> <span class="koi-syn-punct">&gt;=</span> <span class="koi-syn-num">0</span>   <span class="koi-syn-str">"a monetary amount cannot be negative"</span>
+  <span class="koi-syn-kw">invariant</span> <span class="koi-syn-id">amount</span> <span class="koi-syn-punct">&gt;=</span> <span class="koi-syn-num">0</span> <span class="koi-syn-str">"a monetary amount cannot be negative"</span>
 <span class="koi-syn-punct">}</span>`;
 
 /** Plus / folder marks reused from the toolbar's New / Open buttons so the start actions read as the
@@ -204,56 +204,49 @@ function buildWelcome(
   card.appendChild(consoleView);
 
   // --- top bar: wordmark (left) + dismiss (right) ---------------------------
+  // On the routed Home (embedded), the IDE's own #toolbar provides the single brand and the way back,
+  // so the card's bar would only duplicate them — the wordmark and the dismiss-✕ are not built there at
+  // all (not merely hidden). It's appended to the console only if it ends up with children (issue #490).
   const bar = document.createElement('div');
   bar.className = 'koi-welcome-bar';
-  consoleView.appendChild(bar);
 
-  const brand = document.createElement('div');
-  brand.className = 'koi-welcome-brand';
-  const logo = document.createElement('span');
-  logo.className = 'koi-welcome-logo';
-  logo.setAttribute('aria-hidden', 'true');
-  logo.innerHTML = LOGO_SVG; // inline SVG (currentColor wordmark) themes with the surrounding text
-  const wordmark = document.createElement('span');
-  wordmark.className = 'koi-welcome-wordmark';
-  const wordName = document.createElement('span');
-  wordName.className = 'koi-welcome-wordmark-name';
-  wordName.textContent = 'Koine';
-  const wordKicker = document.createElement('span');
-  wordKicker.className = 'koi-welcome-wordmark-kicker';
-  wordKicker.textContent = 'Studio';
-  wordmark.append(wordName, wordKicker);
-  brand.append(logo, wordmark);
-  bar.appendChild(brand);
+  if (!opts.embedded) {
+    const brand = document.createElement('div');
+    brand.className = 'koi-welcome-brand';
+    const logo = document.createElement('span');
+    logo.className = 'koi-welcome-logo';
+    logo.setAttribute('aria-hidden', 'true');
+    logo.innerHTML = LOGO_SVG; // inline SVG (currentColor wordmark) themes with the surrounding text
+    const wordmark = document.createElement('span');
+    wordmark.className = 'koi-welcome-wordmark';
+    const wordName = document.createElement('span');
+    wordName.className = 'koi-welcome-wordmark-name';
+    wordName.textContent = 'Koine';
+    const wordKicker = document.createElement('span');
+    wordKicker.className = 'koi-welcome-wordmark-kicker';
+    wordKicker.textContent = 'Studio';
+    wordmark.append(wordName, wordKicker);
+    brand.append(logo, wordmark);
+    bar.appendChild(brand);
 
-  // Visible way back to the editor (Esc was the only exit before, which is invisible now that the
-  // screen is a deliberate destination).
-  const closeBtn = document.createElement('button');
-  closeBtn.type = 'button';
-  closeBtn.className = 'koi-welcome-close';
-  closeBtn.setAttribute('aria-label', 'Back to editor');
-  closeBtn.title = 'Back to editor';
-  closeBtn.textContent = '✕';
-  // The routed Home is a destination, not an overlay over a live editor — there's nothing to dismiss
-  // back to, so suppress the ✕ there (navigation is wired separately on the brand/toolbar).
-  closeBtn.hidden = opts.embedded;
-  closeBtn.addEventListener('click', () => hide());
-  bar.appendChild(closeBtn);
-
-  // "Resume editing" — the purpose-built return-to-session control (issue #392). The routed Home
-  // suppresses the dismiss-✕, so once an editor session is live this is the only visible, keyboard-
-  // reachable way back into it *without* taking a workspace-changing start action. Rendered only when
-  // `canResume`, so a pristine first-load Home (no session yet) stays clean; it sits where the ✕ did.
-  if (opts.canResume) {
-    const resumeBtn = document.createElement('button');
-    resumeBtn.type = 'button';
-    resumeBtn.className = 'koi-welcome-resume';
-    resumeBtn.dataset.action = 'resume';
-    resumeBtn.title = 'Return to your editor session';
-    resumeBtn.textContent = 'Resume editing';
-    resumeBtn.addEventListener('click', () => cb.onResume?.());
-    bar.appendChild(resumeBtn);
+    // Visible way back to the editor (Esc was the only exit before, which is invisible now that the
+    // screen is a deliberate destination). The routed Home is a destination, not an overlay over a live
+    // editor — there's nothing to dismiss back to — so it's omitted there (navigation lives on the
+    // toolbar); only the legacy body overlay builds it.
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'koi-welcome-close';
+    closeBtn.setAttribute('aria-label', 'Back to editor');
+    closeBtn.title = 'Back to editor';
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', () => hide());
+    bar.appendChild(closeBtn);
   }
+
+  // Only show the bar when it carries something: on embedded Home both the brand and the ✕ are
+  // suppressed, leaving it empty — appending it would leave a stray spacer above the hero (issue #490).
+  // ("Resume editing" now lives on the "Start" rail-title row, built further down.)
+  if (bar.childElementCount > 0) consoleView.appendChild(bar);
 
   // --- hero: the thesis (left) + get-to-work rail (right) -------------------
   const hero = document.createElement('section');
@@ -310,10 +303,31 @@ function buildWelcome(
   const launch = document.createElement('div');
   launch.className = 'koi-welcome-launch';
 
+  // The launch rail's heading row: the "Start" title on the left and — when a live editor session
+  // exists to return to — the "Resume editing" control aligned on its right (issue #490). The control
+  // is the purpose-built return-to-session affordance (issue #392); rendered only when `canResume`, so a
+  // pristine first-load Home stays clean. On embedded Home the card's own top bar is gone, so this row
+  // is the only place the control can live; the legacy overlay shows it here too for consistency.
+  const launchHead = document.createElement('div');
+  launchHead.className = 'koi-welcome-rail-head';
+
   const launchTitle = document.createElement('h2');
   launchTitle.className = 'koi-welcome-rail-title';
   launchTitle.textContent = 'Start';
-  launch.appendChild(launchTitle);
+  launchHead.appendChild(launchTitle);
+
+  if (opts.canResume) {
+    const resumeBtn = document.createElement('button');
+    resumeBtn.type = 'button';
+    resumeBtn.className = 'koi-welcome-resume';
+    resumeBtn.dataset.action = 'resume';
+    resumeBtn.title = 'Return to your editor session';
+    resumeBtn.textContent = 'Resume editing';
+    resumeBtn.addEventListener('click', () => cb.onResume?.());
+    launchHead.appendChild(resumeBtn);
+  }
+
+  launch.appendChild(launchHead);
 
   const actions = document.createElement('div');
   actions.className = 'koi-welcome-actions';
@@ -817,16 +831,20 @@ function buildWelcome(
   backBtn.append(backIcon, backText);
   backBtn.addEventListener('click', () => closeGallery());
 
-  const galleryClose = document.createElement('button');
-  galleryClose.type = 'button';
-  galleryClose.className = 'koi-welcome-close';
-  galleryClose.setAttribute('aria-label', 'Back to editor');
-  galleryClose.title = 'Back to editor';
-  galleryClose.textContent = '✕';
-  galleryClose.hidden = opts.embedded; // same as the console's ✕ — no overlay to dismiss in routed Home
-  galleryClose.addEventListener('click', () => hide());
-
-  galleryBar.append(backBtn, galleryClose);
+  // The gallery's dismiss-✕ mirrors the console's: the routed Home is a destination, not an overlay, so
+  // it's omitted there entirely (issue #490) — only the "Back to start" affordance remains. The legacy
+  // body overlay still builds it.
+  galleryBar.appendChild(backBtn);
+  if (!opts.embedded) {
+    const galleryClose = document.createElement('button');
+    galleryClose.type = 'button';
+    galleryClose.className = 'koi-welcome-close';
+    galleryClose.setAttribute('aria-label', 'Back to editor');
+    galleryClose.title = 'Back to editor';
+    galleryClose.textContent = '✕';
+    galleryClose.addEventListener('click', () => hide());
+    galleryBar.appendChild(galleryClose);
+  }
   galleryView.append(galleryBar, gallery);
   card.appendChild(galleryView); // sits beside the console view in the same card; only one shows at a time
 

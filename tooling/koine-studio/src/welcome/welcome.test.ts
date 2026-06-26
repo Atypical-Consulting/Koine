@@ -460,6 +460,20 @@ describe('mountHome — Resume editing control', () => {
     expect(cb.onResume).toHaveBeenCalledTimes(1);
   });
 
+  test('the resume control sits on the "Start" rail-title row, not in the (absent) top bar', () => {
+    const el = document.createElement('div');
+    const cb: WelcomeCallbacks = { ...makeCallbacks(), onResume: vi.fn() };
+    mountHome(el, cb, SAMPLE, true, { canResume: true });
+
+    const resume = el.querySelector<HTMLButtonElement>('[data-action="resume"]')!;
+    const head = resume.closest('.koi-welcome-rail-head');
+    expect(head).not.toBeNull();
+    // It shares its row with the "Start" rail title.
+    expect(head!.querySelector('.koi-welcome-rail-title')?.textContent).toBe('Start');
+    // It is no longer parked in the welcome card's own top bar.
+    expect(resume.closest('.koi-welcome-bar')).toBeNull();
+  });
+
   test('without canResume (pristine Home) there is no resume control', () => {
     const el = document.createElement('div');
     mountHome(el, makeCallbacks(), SAMPLE);
@@ -470,6 +484,36 @@ describe('mountHome — Resume editing control', () => {
     const el = document.createElement('div');
     mountHome(el, makeCallbacks(), SAMPLE, true, { canResume: false });
     expect(el.querySelector('[data-action="resume"]')).toBeNull();
+  });
+});
+
+describe('mountHome — embedded chrome suppression', () => {
+  test('embedded Home renders neither the duplicate brand nor the stray ✕', () => {
+    const el = document.createElement('div');
+    mountHome(el, makeCallbacks(), SAMPLE);
+    // The top-bar brand is the single logo on Home; the card must not duplicate it.
+    expect(el.querySelector('.koi-welcome-brand')).toBeNull();
+    // No overlay to dismiss on the routed Home — the close ✕ (console and gallery) is gone entirely.
+    expect(el.querySelector('.koi-welcome-close')).toBeNull();
+  });
+
+  test('the legacy overlay (createWelcome) keeps its brand and ✕', () => {
+    createWelcome(makeCallbacks(), SAMPLE);
+    const root = document.body.querySelector<HTMLElement>('.koi-welcome')!;
+    expect(root.querySelector('.koi-welcome-brand')).not.toBeNull();
+    expect(root.querySelector('.koi-welcome-close')).not.toBeNull();
+  });
+});
+
+describe('Home hero snippet', () => {
+  test('collapses the spacing before the invariant message to a single space', () => {
+    const el = document.createElement('div');
+    mountHome(el, makeCallbacks(), SAMPLE);
+    const code = el.querySelector('.koi-welcome-snippet-code')!.textContent ?? '';
+    // Exactly one space between the `0` literal and the invariant message string.
+    expect(code).toContain('0 "a monetary amount cannot be negative"');
+    // The old three-space gap is gone.
+    expect(code).not.toContain('0   "a monetary');
   });
 });
 

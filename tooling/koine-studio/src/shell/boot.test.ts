@@ -98,6 +98,20 @@ describe('bootStudio — a single routed view (no IDE→Home flash)', () => {
     expect(root.querySelector('[data-action="resume"]')).toBeNull();
   });
 
+  it('reflects the active route on document.body.dataset.route (so CSS can trim the toolbar on Home)', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+
+    dispose = bootStudio(root); // pristine → Home
+    expect(document.body.dataset.route).toBe('home');
+
+    appStore.getState().navigate('editor');
+    expect(document.body.dataset.route).toBe('editor');
+
+    appStore.getState().navigate('home');
+    expect(document.body.dataset.route).toBe('home');
+  });
+
   it('once the editor has booted, returning Home offers a Resume-editing control that navigates back without re-initing', () => {
     const root = document.createElement('div');
     document.body.appendChild(root);
