@@ -213,12 +213,23 @@ internal static class EntityBehaviorValidator
             // only for Guid (any non-Guid factory dangles an undefined `.New()` and the assembly won't
             // compile), while Rust either dangles `<Id>::generate()` (natural(Int)/sequence) or mints a
             // *random* v4 UUID for a key the user declared natural (natural(String)) — semantically wrong.
-            // Reject every non-Guid case here, before any emitter runs, with a source-located diagnostic
-            // (issue #317). One diagnostic per factory.
-            if (entity.IdStrategy != IdentityStrategy.Guid)
+            // The opt-out (#324) is to take the identity as an explicit identity-typed parameter, in which
+            // case no generator is needed; so reject only when a non-Guid factory provides NO explicit id,
+            // before any emitter runs, with a source-located diagnostic (issue #317). One per factory.
+            if (entity.IdStrategy != IdentityStrategy.Guid
+                && !MemberAnalysis.FactoryProvidesExplicitId(entity, factory))
             {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.FactoryNeedsGeneratableIdentity,
-                    $"factory '{factory.Name}' on '{entity.Name}' auto-generates the identity, but '{entity.IdentityName}' is a {DescribeIdentity(entity)} key with no meaningful client-side generator; pass the identity explicitly or use a Guid identity",
+                    $"factory '{factory.Name}' on '{entity.Name}' auto-generates the identity, but '{entity.IdentityName}' is a {DescribeIdentity(entity)} key with no meaningful client-side generator; pass the identity explicitly (a parameter of type '{entity.IdentityName}') or use a Guid identity",
+                    factory.Span));
+            }
+
+            // The explicit identity is bound by parameter TYPE, so more than one identity-typed
+            // parameter leaves it ambiguous which one is the id; at most one may serve (#324).
+            if (MemberAnalysis.IdentityParameters(entity, factory).Count > 1)
+            {
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.AmbiguousFactoryIdentity,
+                    $"factory '{factory.Name}' on '{entity.Name}' declares more than one parameter of the identity type '{entity.IdentityName}'; at most one may serve as the explicit identity",
                     factory.Span));
             }
 
@@ -237,12 +248,16 @@ internal static class EntityBehaviorValidator
                         $"duplicate parameter '{p.Name}' in factory '{factory.Name}'", p.Span));
                 }
 
-                // `id` is reserved for the auto-generated identity local; a parameter of
-                // that name would collide with it in the emitted method (CS0136).
-                if (string.Equals(p.Name, "id", StringComparison.OrdinalIgnoreCase))
+                // `id` is reserved for the synthetic identity local; a parameter of that name
+                // would collide with it in the emitted method (CS0136). The one exception (#324):
+                // an identity-typed `id` parameter IS the explicit identity and binds to that
+                // synthetic local, so there is no collision — allow it. A param named `id` whose
+                // type is not the identity type stays rejected.
+                if (string.Equals(p.Name, "id", StringComparison.OrdinalIgnoreCase)
+                    && !MemberAnalysis.IsIdentityTypeRef(p.Type, entity.IdentityName))
                 {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedFactoryParameter,
-                        $"factory parameter '{p.Name}' is reserved; the identity is generated automatically", p.Span));
+                        $"factory parameter '{p.Name}' is reserved; the identity is generated automatically unless declared as an explicit parameter of type '{entity.IdentityName}'", p.Span));
                 }
             }
 

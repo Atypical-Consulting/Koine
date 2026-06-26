@@ -91,4 +91,94 @@ public class R8FactoryIdentityTests
 
         Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.FactoryNeedsGeneratableIdentity);
     }
+
+    [Fact]
+    public void Create_factory_with_explicit_id_param_on_natural_string_is_accepted()
+    {
+        // #324: declaring the identity as an explicit identity-typed parameter opts out of
+        // auto-generation, so a `natural(String)` key needs no client-side generator. The param
+        // `id: BookId` is identity-typed, so it is the explicit id (and naming it `id` is fine).
+        const string src = """
+            context Catalog {
+              entity Book identified by BookId as natural(String) {
+                title: String
+                create register(id: BookId, title: String) { title -> title }
+              }
+            }
+            """;
+
+        IReadOnlyList<Diagnostic> diagnostics = Diagnose(src);
+        diagnostics.ShouldNotContain(d => d.Code == DiagnosticCodes.FactoryNeedsGeneratableIdentity);
+        diagnostics.ShouldNotContain(d => d.Code == DiagnosticCodes.ReservedFactoryParameter);
+    }
+
+    [Fact]
+    public void Create_factory_with_explicit_id_param_on_sequence_is_accepted()
+    {
+        // Binding is by parameter TYPE, not the literal name `id`: `no: InvoiceNo` is the
+        // identity-typed parameter, so it serves as the explicit id for the sequence key.
+        const string src = """
+            context Billing {
+              entity Invoice identified by InvoiceNo as sequence {
+                amount: Int
+                create raise(no: InvoiceNo, amount: Int) { amount -> amount }
+              }
+            }
+            """;
+
+        IReadOnlyList<Diagnostic> diagnostics = Diagnose(src);
+        diagnostics.ShouldNotContain(d => d.Code == DiagnosticCodes.FactoryNeedsGeneratableIdentity);
+        diagnostics.ShouldNotContain(d => d.Code == DiagnosticCodes.ReservedFactoryParameter);
+    }
+
+    [Fact]
+    public void Create_factory_on_natural_int_without_id_param_still_rejected()
+    {
+        // No identity-typed parameter, so the factory would have to auto-generate the
+        // non-generatable `natural(Int)` key: still rejected.
+        const string src = """
+            context Catalog {
+              entity Ticket identified by TicketNo as natural(Int) {
+                subject: String
+                create open(subject: String) { subject -> subject }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.FactoryNeedsGeneratableIdentity);
+    }
+
+    [Fact]
+    public void Two_identity_typed_params_on_one_factory_report_ambiguity()
+    {
+        // Two parameters of the identity type: at most one may serve as the explicit identity,
+        // so which one is the id is ambiguous.
+        const string src = """
+            context Catalog {
+              entity Book identified by BookId as natural(String) {
+                title: String
+                create register(id: BookId, other: BookId, title: String) { title -> title }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.AmbiguousFactoryIdentity);
+    }
+
+    [Fact]
+    public void Non_identity_param_named_id_is_still_rejected()
+    {
+        // A parameter literally named `id` whose type is NOT the identity type still collides
+        // with the synthetic identity local, so it stays rejected (KOI0807).
+        const string src = """
+            context Catalog {
+              entity Book identified by BookId {
+                title: String
+                create register(id: String, title: String) { title -> title }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ReservedFactoryParameter);
+    }
 }
