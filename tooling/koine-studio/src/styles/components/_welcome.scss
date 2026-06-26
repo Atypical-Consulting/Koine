@@ -345,6 +345,20 @@
   color: var(--koi-muted);
 }
 
+/* The "Start" heading row: title on the left, "Resume editing" aligned on its right when present
+   (issue #490). The launch rail's flex gap supplies the space below, so the title sheds its own
+   bottom margin here to keep the row tight and the two items sharing one baseline. */
+.koi-welcome-rail-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--koi-space-3);
+
+  .koi-welcome-rail-title {
+    margin-bottom: 0;
+  }
+}
+
 .koi-welcome-actions {
   display: flex;
   flex-direction: column;

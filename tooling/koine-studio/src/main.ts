@@ -148,6 +148,11 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
   }
 
   function apply(route: Route): void {
+    // Expose the active route to CSS so route-aware chrome is deliberate, not accidental: on Home the
+    // editor's #toolbar still paints (it shares #app, kept visible by #368's [hidden] override), but its
+    // model-action group (New/Open/Generate/Save/Check) is useless before a model exists — a stylesheet
+    // rule keyed on body[data-route="home"] trims it while keeping the brand + global controls (#490).
+    document.body.dataset.route = route;
     if (route === 'editor') showEditor();
     else showHome();
   }
@@ -166,6 +171,9 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
   return () => {
     unsub();
     window.removeEventListener('hashchange', onHash);
+    // Clear the route flag so a teardown leaves no stale body[data-route] behind to mis-style a later
+    // mount in the same document (symmetry with apply() setting it; #490).
+    delete document.body.dataset.route;
     ideDispose?.();
     home?.destroy();
     disposeInstall?.();
