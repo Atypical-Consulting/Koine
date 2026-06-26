@@ -358,7 +358,11 @@ final readonly class OrderById
     ) {}
 }
 
-/** Handles OrderById, returning OrderSummary. */
+/**
+ * Handles OrderById, returning OrderSummary.
+ *
+ * @extends QueryHandler<OrderById, OrderSummary>
+ */
 interface OrderByIdHandler extends QueryHandler
 {
     /** @return OrderSummary */
@@ -372,20 +376,27 @@ declare(strict_types=1);
 
 namespace Koine\Catalog\Queries;
 
+use Koine\Catalog\ReadModels\OrderSummary;
+use Koine\Catalog\ValueObjects\Sku;
 use Koine\Runtime\QueryHandler;
 
 /** A query whose criterion is a collection and whose result is a list. */
 final readonly class OrdersBySkus
 {
+    /** @param list<Sku> $skus */
     public function __construct(
         public array $skus
     ) {}
 }
 
-/** Handles OrdersBySkus, returning array. */
+/**
+ * Handles OrdersBySkus, returning list<OrderSummary>.
+ *
+ * @extends QueryHandler<OrdersBySkus, list<OrderSummary>>
+ */
 interface OrdersBySkusHandler extends QueryHandler
 {
-    /** @return array */
+    /** @return list<OrderSummary> */
     public function handle(mixed $query): mixed;
 }
 
@@ -399,10 +410,12 @@ namespace Koine\Catalog\ReadModels;
 use Koine\Catalog\Entities\Order;
 use Koine\Catalog\ValueObjects\CustomerId;
 use Koine\Catalog\ValueObjects\OrderId;
+use Koine\Catalog\ValueObjects\OrderLine;
 
 /** A read model exposing a collection field (lines) directly. */
 final readonly class OrderSummary
 {
+    /** @param list<OrderLine> $lines */
     public function __construct(
         public OrderId $id,
         public CustomerId $customer,

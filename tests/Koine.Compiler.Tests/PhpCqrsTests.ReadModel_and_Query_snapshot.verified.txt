@@ -41,6 +41,7 @@ namespace Koine\Sales\Queries;
 
 use Koine\Runtime\QueryHandler;
 use Koine\Sales\Enums\OrderStatus;
+use Koine\Sales\ReadModels\OrderSummary;
 
 /** Query returning array; handled by OrdersByStatusHandler. */
 final readonly class OrdersByStatus
@@ -50,10 +51,14 @@ final readonly class OrdersByStatus
     ) {}
 }
 
-/** Handles OrdersByStatus, returning array. */
+/**
+ * Handles OrdersByStatus, returning list<OrderSummary>.
+ *
+ * @extends QueryHandler<OrdersByStatus, list<OrderSummary>>
+ */
 interface OrdersByStatusHandler extends QueryHandler
 {
-    /** @return array */
+    /** @return list<OrderSummary> */
     public function handle(mixed $query): mixed;
 }
 ,
@@ -76,7 +81,11 @@ final readonly class OrderById
     ) {}
 }
 
-/** Handles OrderById, returning OrderSummary. */
+/**
+ * Handles OrderById, returning OrderSummary.
+ *
+ * @extends QueryHandler<OrderById, OrderSummary>
+ */
 interface OrderByIdHandler extends QueryHandler
 {
     /** @return OrderSummary */
