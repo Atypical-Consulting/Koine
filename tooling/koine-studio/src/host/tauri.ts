@@ -21,7 +21,7 @@ import type {
 } from '@/host/types';
 import { buildLogLArgs, parseLogL, type ChangeEntry } from '@/host/gitHistory';
 import { saveMetaFor } from '@/host/saveMeta';
-import { normalizeCompileTarget, runEditToolStaging } from '@/ai/assistantTools';
+import { normalizeCompileTarget, normalizeMcpValidate, runEditToolStaging } from '@/ai/assistantTools';
 import type { EditSession } from '@/ai/editSession';
 import { mcpCall } from '@/mcp/mcp';
 
@@ -189,7 +189,10 @@ export class TauriPlatform implements Platform {
           ? { files, target: normalizeCompileTarget(args.target) }
           : { files };
     try {
-      return await mcpCall(url, name, mcpArgs);
+      const text = await mcpCall(url, name, mcpArgs);
+      // The MCP `koine_validate` tool returns the ValidateTool JSON payload; normalize it to the browser
+      // `ok:` string so the apply-gate's parseValidationOutcome reads it correctly (issue #445).
+      return name === 'koine_validate' ? normalizeMcpValidate(text) : text;
     } catch (e) {
       return `Error: ${e instanceof Error ? e.message : String(e)}`;
     }
@@ -204,7 +207,9 @@ export class TauriPlatform implements Platform {
       const url = await this.mcpEndpoint();
       if (!url) return '(could not validate: the Koine MCP server is not available)';
       const files = session.list().map((p) => ({ path: p, source: session.read(p) ?? '' }));
-      return mcpCall(url, 'koine_validate', { files });
+      // Same MCP→browser `ok:` normalization as runCompilerTool, so the staged-write validation the
+      // model sees matches the browser host's formatValidate string (issue #445).
+      return normalizeMcpValidate(await mcpCall(url, 'koine_validate', { files }));
     });
   }
 
