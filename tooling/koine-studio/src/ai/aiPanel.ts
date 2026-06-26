@@ -546,10 +546,29 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     bubble.appendChild(apply);
   }
 
-  // Append an "Apply to editor" affordance when the assistant produced a model.
-  function maybeOfferApply(bubble: HTMLElement, markdown: string): void {
+  // Append an "Apply to editor" affordance when the assistant produced a model — re-validating the
+  // extracted `.koi` first so the two LEGACY entry points (transcript replay, stop-mid-stream) can't
+  // apply a model that never passed the live apply-gate (#444). Both reach here without the live
+  // path's validation, so we re-run the SAME adapter via {@link shouldOfferApply} before offering.
+  async function maybeOfferApply(bubble: HTMLElement, markdown: string): Promise<void> {
     const koine = extractKoine(markdown);
-    if (koine) attachApplyButton(bubble, koine);
+    if (koine && (await shouldOfferApply(koine))) attachApplyButton(bubble, koine);
+  }
+
+  // Should a model-bearing LEGACY turn (transcript replay / stop-mid-stream partial) offer Apply?
+  // With the constraint toggle OFF the apply-gate claims nothing, so behave as the legacy path always
+  // did — offer Apply for any extracted model. With it ON, run the live path's validate adapter and
+  // offer Apply only when the model parses; fail CLOSED (no Apply) when the adapter is unavailable or
+  // throws, since we then can't prove the model is valid (#444).
+  async function shouldOfferApply(koine: string): Promise<boolean> {
+    if (!opts.getConstrainGrammar()) return true;
+    const validate = makeValidate();
+    if (!validate) return false;
+    try {
+      return (await validate(koine)).ok;
+    } catch {
+      return false;
+    }
   }
 
   // A small status chip on an assistant turn ("grammar-constrained" / "parse-and-repair").
@@ -672,10 +691,12 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
 
   // Render a finished assistant reply into a bubble: the markdown body, plus the "Apply to editor"
   // affordance unless this turn opted out (an explanatory turn whose reply must not be applied).
-  // Shared by the live success path and transcript replay so the two never drift.
+  // Used by transcript replay. Apply is now gated on re-validation (#444): the bubble paints
+  // immediately and the button attaches asynchronously once the model is confirmed to parse (never
+  // if it doesn't) — fire-and-forget, so replay stays synchronous and bubble order is preserved.
   function renderAssistantReply(bubble: HTMLElement, content: string, offerApply: boolean): void {
     bubble.innerHTML = `<div class="koi-md">${renderMarkdown(content)}</div>`;
-    if (offerApply) maybeOfferApply(bubble, content);
+    if (offerApply) void maybeOfferApply(bubble, content);
   }
 
   // Render one stored turn into a bubble: user text verbatim, assistant markdown with the apply
@@ -863,7 +884,9 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         note.className = 'koi-assistant-stopped';
         note.textContent = 'Stopped.';
         replyBubble.appendChild(note);
-        if (offerApply) maybeOfferApply(replyBubble, full);
+        // Re-validate before offering Apply: a stopped stream can leave a truncated/invalid `.koi`,
+        // so the partial must clear the same gate the live path enforces (#444).
+        if (offerApply) await maybeOfferApply(replyBubble, full);
       } else {
         // Aborted with nothing, or a real error: roll the whole turn back from BOTH history and
         // transcript (no dangling user turn or orphaned tool lines), and restore the prompt to retry.
