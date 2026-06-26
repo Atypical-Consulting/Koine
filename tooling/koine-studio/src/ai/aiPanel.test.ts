@@ -798,3 +798,140 @@ describe('apply-gate re-validation at legacy entry points (#444)', () => {
     await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
   });
 });
+
+// --- bare grammar-constrained candidate recovery at the legacy entry points (#561) ------------
+// #444 routed the two legacy entry points (transcript replay, stop-mid-stream) through the apply-gate
+// so they can't offer Apply for a model that never passed validation — closing an OVER-offering bypass.
+// But both still locate the candidate with `extractKoine()` ONLY, which returns null for an UNFENCED
+// program. On the grammar-constrained (`gbnf`) path the GBNF root emits a BARE `.koi` program (no
+// ```koine fence), and the live path recovers it with a `mechanism === 'gbnf'` fallback — so a valid
+// bare model is applicable live but silently loses Apply on reload/Stop. This is the UNDER-offering
+// mirror image: when there's no fence and the constraint toggle is on, `maybeOfferApply` must fall back
+// to the trimmed body as the candidate and let the SAME `shouldOfferApply` gate decide (valid → Apply,
+// prose → no Apply), without persisting any mechanism and without reopening the #444 bypass.
+describe('bare grammar-constrained candidate recovery at legacy entry points (#561)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.mocked(runAssistant).mockReset();
+  });
+  afterEach(() => {
+    localStorage.clear();
+    vi.mocked(runAssistant).mockReset();
+  });
+
+  const CLEAN = 'ok: true — no diagnostics. The model compiles.';
+  const DIRTY = 'ok: false — 1 error(s), 0 warning(s):\n- [error] 1:1 boom';
+  // A genuinely grammar-constrained reply: a BARE `.koi` program with NO fence (the GBNF root can't
+  // emit a ```koine fence), so `extractKoine()` returns null for it.
+  const BARE_MODEL = 'context Billing {}';
+
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  }
+
+  function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
+    return {
+      container,
+      getProvider: () => 'openai',
+      getBaseUrl: () => 'http://localhost:1234/v1',
+      getApiKey: () => 'sk',
+      getModel: () => '',
+      getContext: () => ({ fileName: 'm.koi', source: 'context X {}', diagnostics: [] }),
+      onApplyModel: () => {},
+      onOpenPrefs: () => {},
+      getWorkspaceKey: () => 'ws',
+      getSelection: () => null,
+      getUseTools: () => false,
+      getConstrainGrammar: () => true,
+      ...over,
+    };
+  }
+
+  // Seed a persisted GENERATIVE turn whose assistant content is a BARE program (no fence, no opt-out)
+  // so a fresh mount replays it through `maybeOfferApply`.
+  function seedBareTurn(content: string = BARE_MODEL): void {
+    saveChat('ws', [
+      { role: 'user', content: 'design a model' },
+      { role: 'assistant', content },
+    ]);
+  }
+
+  // Drive a generative send via the first quick action (offerApply defaults true).
+  function fire(container: HTMLElement): void {
+    container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
+  }
+
+  // Mock `runAssistant` to stream `body`, then have the user hit Stop before it finishes — the
+  // stop-mid-stream sequence whose partial is committed and routed through `maybeOfferApply`.
+  function streamThenStop(container: HTMLElement, body: string): void {
+    vi.mocked(runAssistant).mockImplementation(async (req: { onText: (t: string) => void }) => {
+      req.onText(body);
+      container.querySelector<HTMLButtonElement>('.koi-assistant-stop')!.click(); // user Stops
+      throw new DOMException('aborted', 'AbortError'); // the fetch rejects on abort
+    });
+  }
+
+  test('replay of a BARE valid grammar-constrained .koi (no fence) offers Apply', async () => {
+    seedBareTurn();
+    const container = document.createElement('div');
+    // constraint ON + validate CLEAN: the bare program is recovered and passes the gate.
+    createAssistantPanel(opts(container, { runCompilerTool: () => Promise.resolve(CLEAN) }));
+
+    expect(container.querySelector('.koi-md')).not.toBeNull(); // replayed…
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
+  });
+
+  test('replay of a BARE INVALID grammar-constrained .koi (no fence) withholds Apply', async () => {
+    seedBareTurn();
+    const runCompilerTool = vi.fn(() => Promise.resolve(DIRTY));
+    const container = document.createElement('div');
+    createAssistantPanel(opts(container, { runCompilerTool }));
+
+    expect(container.querySelector('.koi-md')).not.toBeNull(); // replayed…
+    // The recovered candidate is gated: it doesn't parse → Apply withheld (#444 bypass stays closed).
+    await vi.waitFor(() => expect(runCompilerTool).toHaveBeenCalled());
+    await settle();
+    expect(container.querySelector('.koi-assistant-apply')).toBeNull();
+  });
+
+  test('constraint OFF: replay of a bare program stays fenced-only (no Apply, never validates)', async () => {
+    seedBareTurn();
+    const runCompilerTool = vi.fn(() => Promise.resolve(CLEAN));
+    const container = document.createElement('div');
+    // Toggle off → the bare-program fallback does NOT engage (today's "off ⇒ fenced-only" behavior),
+    // so an unfenced body yields no candidate and the validate adapter is never consulted.
+    createAssistantPanel(opts(container, { getConstrainGrammar: () => false, runCompilerTool }));
+
+    expect(container.querySelector('.koi-md')).not.toBeNull(); // replayed…
+    await settle();
+    expect(container.querySelector('.koi-assistant-apply')).toBeNull();
+    expect(runCompilerTool).not.toHaveBeenCalled();
+  });
+
+  test('replay of prose (no fence, constraint on) withholds Apply', async () => {
+    seedBareTurn('Sure — a billing context tracks invoices and payments.');
+    const runCompilerTool = vi.fn(() => Promise.resolve(DIRTY)); // prose doesn't parse
+    const container = document.createElement('div');
+    createAssistantPanel(opts(container, { runCompilerTool }));
+
+    expect(container.querySelector('.koi-md')).not.toBeNull(); // replayed…
+    await settle();
+    // The prose is gated like any candidate and rejected — Apply withheld (no spurious offer).
+    expect(container.querySelector('.koi-assistant-apply')).toBeNull();
+  });
+
+  // --- stop-mid-stream (the abort partial-commit path) ---------------------------------------
+  // A Stop mid-generation commits the partial reply and offers Apply on it via the SAME
+  // `maybeOfferApply` sink. When the streamed partial is a complete BARE grammar-constrained program
+  // (no fence), the candidate must be recovered there too, so a valid model stays applicable after Stop.
+  test('stop mid-stream with a complete BARE valid .koi (no fence) offers Apply', async () => {
+    const container = document.createElement('div');
+    createAssistantPanel(opts(container, { runCompilerTool: () => Promise.resolve(CLEAN) }));
+    // A fully-streamed bare grammar-constrained program, then a Stop on the in-flight request.
+    streamThenStop(container, BARE_MODEL);
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-stopped')).not.toBeNull());
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
+  });
+});
