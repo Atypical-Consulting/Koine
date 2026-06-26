@@ -53,7 +53,7 @@ classDiagram
     }
     class Order {
         <<aggregate root>>
-        +int version
+        +Int version
         +OrderId id
         +CustomerId customer
         +List~OrderLine~ lines

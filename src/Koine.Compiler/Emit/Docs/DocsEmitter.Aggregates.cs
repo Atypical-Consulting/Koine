@@ -126,13 +126,13 @@ public sealed partial class DocsEmitter
     /// One target-neutral row of a class body, walked once by <see cref="ClassRows"/> and formatted two
     /// ways: the Mermaid emitter renders types with <see cref="MermaidType"/> (tilde generics), the
     /// structured-graph builder with <see cref="KoineType"/> (readable, source-like). A field carries a
-    /// <see cref="Type"/> (null for the synthetic <c>version</c> row, which is a primitive name); a method
+    /// <see cref="Type"/> (null for the synthetic <c>version</c> row, which carries the Koine primitive name); a method
     /// carries <see cref="Parameters"/> and an optional <see cref="ReturnType"/>; a value is just a name.
     /// </summary>
     /// <param name="Name">The member/operation name, or the enum value name.</param>
     /// <param name="Kind">Which compartment the row belongs to.</param>
     /// <param name="Type">The field type, or <c>null</c> for a method/value/primitive-typed row.</param>
-    /// <param name="PrimitiveType">A bare primitive type name (the synthetic <c>version</c>: <c>"int"</c>); else null.</param>
+    /// <param name="PrimitiveType">A bare Koine primitive type name (the synthetic <c>version</c>: <c>"Int"</c>); else null.</param>
     /// <param name="Parameters">A method's parameters (empty for non-methods).</param>
     /// <param name="ReturnType">A method's return type, or <c>null</c> for a void method/non-method.</param>
     internal sealed record ClassRow(
@@ -159,7 +159,7 @@ public sealed partial class DocsEmitter
             case EntityDecl entity when owningAggregate is not null && entity.Name == owningAggregate.RootName:
                 if (owningAggregate.IsVersioned)
                 {
-                    yield return new ClassRow("version", ClassRowKind.Field, PrimitiveType: "int");
+                    yield return new ClassRow("version", ClassRowKind.Field, PrimitiveType: "Int");
                 }
 
                 yield return new ClassRow("id", ClassRowKind.Field, Type: new TypeRef(entity.IdentityName));
