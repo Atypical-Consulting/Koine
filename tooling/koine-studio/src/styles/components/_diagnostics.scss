@@ -13,7 +13,9 @@
   font-size: 0.76rem;
 }
 
-/* Hidden on the Documentation center tab (the display:flex above outranks the UA [hidden] rule). */
+/* Honor the standard [hidden] attribute despite the display:flex above (which would otherwise outrank
+   the UA rule). The strip is now global — applyCenterChrome no longer hides it per view — so this is a
+   defensive default rather than the per-view gate it once backed. */
 #diagnostics[hidden] {
   display: none;
 }
