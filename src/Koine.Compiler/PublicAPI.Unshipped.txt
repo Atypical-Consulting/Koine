@@ -335,3 +335,5 @@ Koine.Compiler.Ast.ModelIndex.SubscriptionEventNameIsAmbiguous(string! subscribe
 Koine.Compiler.Emit.Grammar.GbnfExporter
 static Koine.Compiler.Emit.Grammar.GbnfExporter.Export() -> string!
 static Koine.Compiler.Services.KoineCompilation.Reconcile(Koine.Compiler.Services.KoineCompilation? previous, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files) -> Koine.Compiler.Services.KoineCompilation!
+Koine.Compiler.Services.VersionInfo
+static Koine.Compiler.Services.VersionInfo.Display(System.Reflection.Assembly! assembly) -> string!
