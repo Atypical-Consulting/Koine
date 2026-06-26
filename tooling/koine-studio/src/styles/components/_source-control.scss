@@ -1,0 +1,251 @@
+/* --- Source Control right-rail panel (#272) ---------------------------------------------------
+   The git surface in the Properties rail: a branch header + switcher, the changed files grouped into
+   Staged / Changes / Untracked with per-row Stage/Unstage + inline diff, a commit box, and the recent
+   commit log. Shares the docs/rview vocabulary (empty states reuse `.koi-rview-empty`, buttons reuse
+   `.koi-docs-new-btn` / `.koi-docs-save`) so it reads of a piece with the other rail panels. */
+.koi-sc {
+  padding: 0.6rem 0.7rem 1.25rem;
+  font-size: var(--koi-text-base-plus);
+}
+
+.koi-sc-empty {
+  padding: 0;
+}
+
+.koi-sc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.7rem;
+}
+
+.koi-sc-branch {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.koi-sc-branch-icon {
+  color: var(--koi-muted);
+}
+
+.koi-sc-branch-select {
+  font: inherit;
+  font-size: var(--koi-text-md);
+  color: var(--koi-fg);
+  background: var(--koi-surface);
+  border: 1px solid color-mix(in srgb, var(--koi-fg) 16%, transparent);
+  border-radius: var(--koi-radius-sm);
+  padding: 0.15rem 0.35rem;
+  max-width: 100%;
+}
+
+.koi-sc-branch-name {
+  font-weight: 600;
+  color: var(--koi-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.koi-sc-error {
+  margin: 0 0 0.6rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--koi-radius-sm);
+  color: var(--koi-error, #b00020);
+  background: color-mix(in srgb, var(--koi-error, #b00020) 12%, transparent);
+  font-size: var(--koi-text-sm);
+}
+
+/* Commit box: a labelled textarea over a primary Commit button. */
+.koi-sc-commit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.koi-sc-commit-input {
+  font: inherit;
+  font-size: var(--koi-text-md);
+  color: var(--koi-fg);
+  background: var(--koi-surface);
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 38%, transparent);
+  border-radius: var(--koi-radius-sm);
+  padding: 0.4rem 0.5rem;
+  resize: vertical;
+  min-height: 2.4rem;
+}
+
+.koi-sc-commit-btn {
+  align-self: flex-end;
+}
+
+/* File groups. */
+.koi-sc-group {
+  margin-bottom: 1rem;
+}
+
+.koi-sc-group-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin: 0 0 0.4rem;
+  font-size: var(--koi-text-base);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--koi-muted);
+}
+
+.koi-sc-count {
+  font-size: var(--koi-text-sm);
+}
+
+.koi-sc-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.koi-sc-file {
+  border-radius: var(--koi-radius-sm);
+
+  &:hover {
+    background: color-mix(in srgb, var(--koi-fg) 6%, transparent);
+  }
+}
+
+.koi-sc-file-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* The path is a button that toggles the inline diff — borderless so the row reads as a list, not a form. */
+.koi-sc-file-open {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  color: var(--koi-fg);
+  font: inherit;
+  font-size: var(--koi-text-md);
+  text-align: left;
+  padding: 0.25rem 0.3rem;
+  cursor: pointer;
+  border-radius: var(--koi-radius-sm);
+
+  &:hover {
+    color: var(--koi-accent);
+  }
+}
+
+.koi-sc-glyph {
+  flex: none;
+  width: 1.1em;
+  text-align: center;
+  font-weight: 700;
+  font-size: var(--koi-text-sm);
+  color: var(--koi-muted);
+}
+
+.koi-sc-glyph-modified,
+.koi-sc-glyph-renamed,
+.koi-sc-glyph-copied {
+  color: var(--koi-accent);
+}
+
+.koi-sc-glyph-added,
+.koi-sc-glyph-untracked {
+  color: var(--koi-ok, #16a34a);
+}
+
+.koi-sc-glyph-deleted,
+.koi-sc-glyph-conflicted {
+  color: var(--koi-error, #b00020);
+}
+
+.koi-sc-file-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.koi-sc-act {
+  flex: none;
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 35%, transparent);
+  color: var(--koi-accent);
+  border-radius: var(--koi-radius-sm);
+  padding: 0.1rem 0.45rem;
+  font: inherit;
+  font-size: var(--koi-text-sm);
+  cursor: pointer;
+
+  &:hover {
+    background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
+.koi-sc-diff {
+  margin: 0.2rem 0 0.5rem;
+  padding: 0.45rem 0.6rem;
+  max-height: 16rem;
+  overflow: auto;
+  border-radius: var(--koi-radius-sm);
+  background: color-mix(in srgb, var(--koi-fg) 5%, transparent);
+  font-family: var(--koi-font-mono, monospace);
+  font-size: var(--koi-text-sm);
+  white-space: pre;
+}
+
+/* Recent commits. */
+.koi-sc-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.koi-sc-log-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 0.2rem 0.45rem;
+  padding: 0.3rem 0.3rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--koi-fg) 8%, transparent);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.koi-sc-log-sha {
+  grid-row: 1;
+  color: var(--koi-muted);
+  font-family: var(--koi-font-mono, monospace);
+  font-size: var(--koi-text-sm);
+}
+
+.koi-sc-log-msg {
+  grid-row: 1;
+  color: var(--koi-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.koi-sc-log-meta {
+  grid-row: 2;
+  grid-column: 2;
+  font-size: var(--koi-text-sm);
+}
