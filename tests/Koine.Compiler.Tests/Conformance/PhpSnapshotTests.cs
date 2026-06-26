@@ -242,4 +242,110 @@ public class PhpSnapshotTests
         TestSupport.RequireOrSkip(typeCheck.ToolchainAvailable, NoToolchainNotice);
         typeCheck.Ok.ShouldBeTrue(string.Join("\n", typeCheck.Errors));
     }
+
+    // -----------------------------------------------------------------------
+    // #583: phpstan --level max coverage for the constructs #496's fixtures
+    // did NOT reach — event payloads and CQRS read-models/queries. Each carries
+    // a collection (`List`/`Set`/`Map`) or a generic (`Range<T>`), so before
+    // #583 the emitter produced a bare `array`/`Range` PHPDoc that
+    // `phpstan --level max` rejects (`missingType.iterableValue` /
+    // `missingType.generics`) — including the query-handler interface, whose
+    // `extends QueryHandler` was unbound (`missingType.generics`) because #496
+    // shipped no `query` fixture to exercise it. The fixture also carries an
+    // event `Map<Sku, Int>` with a non-scalar (value-object) key: that renders
+    // `array<Sku, int>`, which phpstan --level max accepts (it does not enforce
+    // the int|string array-key constraint inside a generic PHPDoc), so no
+    // key-type guard is needed for level-max parity.
+    //
+    // NOTE — enum associated-data collections are intentionally NOT covered:
+    // the semantic validator (KOI0909) restricts an enum associated-data field
+    // to String/Int/Decimal/Bool, so a `List`/`Range`-typed enum data field is
+    // unreachable through the compile pipeline and cannot be exercised by a
+    // fixture. The emitter still routes that accessor through the same
+    // `DocType` + `WriteMethodDoc` helper for consistency (a no-op for the only
+    // reachable, scalar case). See #583.
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// A fixture reaching the #583 constructs: a domain event carrying a <c>List</c>, a
+    /// <c>Range&lt;Instant&gt;</c>, and a <c>Map</c> with a non-scalar (<c>Sku</c>) key; a read model
+    /// projecting a collection field directly; and queries with a collection criterion and a
+    /// list-returning handler.
+    /// </summary>
+    internal const string LevelMaxCoverageFixture = """
+        context Catalog {
+          /// A stock-keeping unit (a non-scalar map key).
+          value Sku {
+            code: String
+          }
+
+          /// A line of an order.
+          value OrderLine {
+            product:  String
+            quantity: Int
+            invariant quantity >= 1 "a line needs at least one unit"
+          }
+
+          /// The lifecycle of an order.
+          enum OrderStatus { Draft, Placed, Shipped }
+
+          aggregate Sales root Order {
+            /// Raised when an order is placed — its payload carries a collection, a range, and a map.
+            event OrderPlaced {
+              orderId: OrderId
+              lines:   List<OrderLine>
+              window:  Range<Instant>
+              tallies: Map<Sku, Int>
+            }
+
+            entity Order identified by OrderId {
+              customer: CustomerId
+              lines:    List<OrderLine>
+              status:   OrderStatus = Draft
+
+              invariant !lines.isEmpty "an order must have at least one line"
+            }
+
+            repository {
+              find byCustomer(customer: CustomerId): List<Order>
+            }
+          }
+
+          /// A read model exposing a collection field (lines) directly.
+          readmodel OrderSummary from Order {
+            id
+            customer
+            lines
+            lineCount: Int = lines.count
+          }
+
+          /// A query whose criterion is a collection and whose result is a list.
+          query OrdersBySkus(skus: List<Sku>): List<OrderSummary>
+
+          /// A query returning a single read model.
+          query OrderById(id: OrderId): OrderSummary
+        }
+        """;
+
+    /// <summary>
+    /// Emitted PHP for <see cref="LevelMaxCoverageFixture"/> must match its reviewed snapshot AND
+    /// pass <c>phpstan analyse --level max</c> — the #583 gate over event/CQRS collection payloads
+    /// and a non-scalar <c>Map</c> key.
+    /// </summary>
+    [Fact]
+    public async Task Php_level_max_collection_coverage_emits_expected_php()
+    {
+        var result = new KoineCompiler().Compile(LevelMaxCoverageFixture, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // The snapshot is the always-on guarantee — it runs regardless of the PHP toolchain.
+        await Verify(TestSupport.Render(result.Files))
+            .UseDirectory("Snapshots");
+
+        // The phpstan --level max type-check gate (parity with TS/Python, #496) skips (or hard-fails
+        // under KOINE_REQUIRE_CONFORMANCE) when no phpstan toolchain is present.
+        var typeCheck = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(typeCheck.ToolchainAvailable, NoToolchainNotice);
+        typeCheck.Ok.ShouldBeTrue(string.Join("\n", typeCheck.Errors));
+    }
 }
