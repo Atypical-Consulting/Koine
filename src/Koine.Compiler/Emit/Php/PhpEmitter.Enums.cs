@@ -28,9 +28,10 @@ namespace Koine.Compiler.Emit.Php;
 ///   <item><c>tryFromValue(int $value): ?self</c> — thin alias for <c>tryFrom()</c>.</item>
 ///   <item>
 ///     Exhaustive <c>match_</c> (value-returning, escaped because <c>match</c> is a PHP reserved
-///     word) and <c>switch_</c> (side-effecting): one
-///     zero-arg callable per member, dispatched via <c>match($this)</c>, throwing
-///     <c>\Koine\Runtime\DomainInvariantViolationException</c> on an unhandled member.
+///     word) and <c>switch_</c> (side-effecting): one zero-arg callable per member, dispatched via
+///     <c>match($this)</c> with one arm per case and no <c>default</c> — the backed enum makes the
+///     dispatch exhaustive, and a <c>default</c> on an exhaustive enum match is dead code that
+///     <c>phpstan --level max</c> rejects.
 ///   </item>
 /// </list>
 /// </summary>
@@ -138,8 +139,8 @@ public sealed partial class PhpEmitter
         sb.Append(Indent).Append("}\n");
 
         // Exhaustive match (value-returning) and switch_ (side-effecting).
-        WriteEnumMatch(sb, name, @enum.Members, caseNames);
-        WriteEnumSwitch(sb, name, @enum.Members, caseNames);
+        WriteEnumMatch(sb, @enum.Members, caseNames);
+        WriteEnumSwitch(sb, @enum.Members, caseNames);
 
         sb.Append("}\n");
 
@@ -150,10 +151,15 @@ public sealed partial class PhpEmitter
 
     /// <summary>
     /// Emits the exhaustive value-returning <c>match</c> method: one zero-arg callable per member,
-    /// dispatched via PHP's <c>match($this)</c>, throwing on an unhandled member.
+    /// dispatched via PHP's <c>match($this)</c>. The match lists every enum case and has NO
+    /// <c>default</c> arm: a backed enum can only hold a declared case, so the dispatch is already
+    /// exhaustive — and a <c>default</c> on an exhaustive enum match is dead code that
+    /// <c>phpstan --level max</c> rejects (an always-true last arm + a <c>mixed</c> <c>$this->name</c>
+    /// in the unreachable throw). PHP still raises <c>\UnhandledMatchError</c> on the (impossible)
+    /// no-match, so the contract is unchanged for every valid value.
     /// </summary>
     private static void WriteEnumMatch(
-        StringBuilder sb, string name,
+        StringBuilder sb,
         IReadOnlyList<EnumMember> members, IReadOnlyList<string> caseNames)
     {
         sb.Append('\n');
@@ -161,7 +167,7 @@ public sealed partial class PhpEmitter
         var paramNames = members.Select(m =>
             "$" + PhpNaming.EscapeIdentifier(PhpNaming.MethodName(m.Name))).ToList();
         var paramList = string.Join(", ", paramNames.Select(p => "\\Closure " + p));
-        sb.Append(Indent).Append("/** Dispatch to the handler for this member; throws if unhandled. */\n");
+        sb.Append(Indent).Append("/** Dispatch to the handler for this member (exhaustive over all cases). */\n");
         sb.Append(Indent).Append("public function match_(").Append(paramList).Append("): mixed\n");
         sb.Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append("return match($this) {\n");
@@ -170,28 +176,27 @@ public sealed partial class PhpEmitter
             sb.Append(Indent).Append(Indent).Append(Indent)
               .Append("self::").Append(caseNames[i]).Append(" => (").Append(paramNames[i]).Append(")(),\n");
         }
-        // Default arm throws for safety (future members).
-        sb.Append(Indent).Append(Indent).Append(Indent)
-          .Append("default => throw new \\Koine\\Runtime\\DomainInvariantViolationException(\"")
-          .Append(name).Append("\", \"unhandled ").Append(name).Append(" {$this->name}\"),\n");
+
         sb.Append(Indent).Append(Indent).Append("};\n");
         sb.Append(Indent).Append("}\n");
     }
 
     /// <summary>
     /// Emits the exhaustive side-effecting <c>switch_</c> method (named <c>switch_</c> because
-    /// <c>switch</c> is a PHP reserved word): one zero-arg <c>\Closure</c> per member,
-    /// dispatched via <c>match($this)</c>.
+    /// <c>switch</c> is a PHP reserved word): one zero-arg <c>\Closure</c> per member, dispatched via
+    /// <c>match($this)</c>. As with <see cref="WriteEnumMatch"/>, the match lists every case and has NO
+    /// <c>default</c> arm — exhaustive over the backed enum, and free of the
+    /// <c>phpstan --level max</c> findings a dead <c>default</c> would raise.
     /// </summary>
     private static void WriteEnumSwitch(
-        StringBuilder sb, string name,
+        StringBuilder sb,
         IReadOnlyList<EnumMember> members, IReadOnlyList<string> caseNames)
     {
         sb.Append('\n');
         var paramNames = members.Select(m =>
             "$" + PhpNaming.EscapeIdentifier(PhpNaming.MethodName(m.Name))).ToList();
         var paramList = string.Join(", ", paramNames.Select(p => "\\Closure " + p));
-        sb.Append(Indent).Append("/** Dispatch to the side-effecting handler for this member; throws if unhandled. */\n");
+        sb.Append(Indent).Append("/** Dispatch to the side-effecting handler for this member (exhaustive over all cases). */\n");
         sb.Append(Indent).Append("public function switch_(").Append(paramList).Append("): void\n");
         sb.Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append("match($this) {\n");
@@ -200,9 +205,7 @@ public sealed partial class PhpEmitter
             sb.Append(Indent).Append(Indent).Append(Indent)
               .Append("self::").Append(caseNames[i]).Append(" => (").Append(paramNames[i]).Append(")(),\n");
         }
-        sb.Append(Indent).Append(Indent).Append(Indent)
-          .Append("default => throw new \\Koine\\Runtime\\DomainInvariantViolationException(\"")
-          .Append(name).Append("\", \"unhandled ").Append(name).Append(" {$this->name}\"),\n");
+
         sb.Append(Indent).Append(Indent).Append("};\n");
         sb.Append(Indent).Append("}\n");
     }

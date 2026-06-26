@@ -69,6 +69,41 @@ internal sealed class PhpTypeMapper
         }
     }
 
+    /// <summary>
+    /// The phpstan PHPDoc value-type for a (possibly generic) collection or generic type — so a
+    /// <c>@param</c>/<c>@var</c>/<c>@return</c> can refine the bare <c>array</c>/<c>Range</c> native hint
+    /// that <c>phpstan --level max</c> rejects as untyped:
+    /// <list type="bullet">
+    ///   <item><c>List&lt;T&gt;</c> / <c>Set&lt;T&gt;</c> → <c>list&lt;T&gt;</c></item>
+    ///   <item><c>Map&lt;K,V&gt;</c> → <c>array&lt;K, V&gt;</c></item>
+    ///   <item><c>Range&lt;T&gt;</c> → <c>Range&lt;T&gt;</c> (the native hint stays <c>Range</c>)</item>
+    /// </list>
+    /// Returns <c>null</c> for a type whose native hint (<see cref="Map"/>) already fully specifies it
+    /// (scalars, value objects, entities, enums). The element/value types reuse <see cref="Map"/>, so a
+    /// class element renders as its short name (imported via the file's body scan) while
+    /// <c>Instant</c>/<c>Decimal</c> stay fully-qualified. A nullable collection adds <c>|null</c>.
+    /// </summary>
+    public string? DocType(TypeRef type)
+    {
+        string? inner = type.Name switch
+        {
+            ModelIndex.ListTypeName or ModelIndex.SetTypeName when type.Element is not null
+                => $"list<{Map(type.Element)}>",
+            ModelIndex.MapTypeName when type.Element is not null && type.Value is not null
+                => $"array<{Map(type.Element)}, {Map(type.Value)}>",
+            ModelIndex.RangeTypeName when type.Element is not null
+                => $"Range<{Map(type.Element)}>",
+            _ => null,
+        };
+
+        if (inner is null)
+        {
+            return null;
+        }
+
+        return type.IsOptional ? inner + "|null" : inner;
+    }
+
     /// <summary>True when the member's type is a Koine <c>List&lt;T&gt;</c>.</summary>
     public static bool IsList(TypeRef type) => type.Name == ModelIndex.ListTypeName;
 

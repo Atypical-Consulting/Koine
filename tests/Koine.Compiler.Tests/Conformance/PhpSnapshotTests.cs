@@ -16,9 +16,9 @@ namespace Koine.Compiler.Tests.Conformance;
 /// </summary>
 public class PhpSnapshotTests
 {
-    private const string NoInterpreterNotice =
-        "No usable PHP interpreter (php) available; php -l syntax check not run. " +
-        "Install PHP (or set KOINE_PHP) — CI runs this for real.";
+    private const string NoToolchainNotice =
+        "No usable PHP toolchain (phpstan) available; phpstan --level max type-check not run. " +
+        "Install phpstan (or set KOINE_PHPSTAN) — CI runs this for real.";
 
     /// <summary>The Phase-1 domain fixture, emitted to PHP. Shared by Tasks 5+ (one growing snapshot).</summary>
     internal const string Fixture = """
@@ -112,10 +112,11 @@ public class PhpSnapshotTests
         await Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
 
-        // The php -l syntax gate skips (or hard-fails under KOINE_REQUIRE_CONFORMANCE) when php is absent.
-        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
-        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
-        syntax.Ok.ShouldBeTrue(string.Join("\n", syntax.Errors));
+        // The phpstan --level max type-check gate (parity with TS/Python, #496) skips (or hard-fails
+        // under KOINE_REQUIRE_CONFORMANCE) when no phpstan toolchain is present.
+        var typeCheck = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(typeCheck.ToolchainAvailable, NoToolchainNotice);
+        typeCheck.Ok.ShouldBeTrue(string.Join("\n", typeCheck.Errors));
     }
 
     /// <summary>
@@ -156,10 +157,11 @@ public class PhpSnapshotTests
         await Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
 
-        // The php -l syntax gate skips (or hard-fails under KOINE_REQUIRE_CONFORMANCE) when php is absent.
-        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
-        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
-        syntax.Ok.ShouldBeTrue(string.Join("\n", syntax.Errors));
+        // The phpstan --level max type-check gate (parity with TS/Python, #496) skips (or hard-fails
+        // under KOINE_REQUIRE_CONFORMANCE) when no phpstan toolchain is present.
+        var typeCheck = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(typeCheck.ToolchainAvailable, NoToolchainNotice);
+        typeCheck.Ok.ShouldBeTrue(string.Join("\n", typeCheck.Errors));
     }
 
     // -----------------------------------------------------------------------
@@ -234,9 +236,10 @@ public class PhpSnapshotTests
         await Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
 
-        // The php -l syntax gate skips (or hard-fails under KOINE_REQUIRE_CONFORMANCE) when php is absent.
-        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
-        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
-        syntax.Ok.ShouldBeTrue(string.Join("\n", syntax.Errors));
+        // The phpstan --level max type-check gate (parity with TS/Python, #496) skips (or hard-fails
+        // under KOINE_REQUIRE_CONFORMANCE) when no phpstan toolchain is present.
+        var typeCheck = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(typeCheck.ToolchainAvailable, NoToolchainNotice);
+        typeCheck.Ok.ShouldBeTrue(string.Join("\n", typeCheck.Errors));
     }
 }

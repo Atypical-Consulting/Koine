@@ -237,7 +237,7 @@ class Invoice
 
     public function equals(self $other): bool
     {
-        return $other instanceof Invoice && $this->id === $other->id;
+        return $this->id === $other->id;
     }
 
     private function checkInvariants(): void
@@ -247,16 +247,24 @@ class Invoice
         }
     }
 
-    /** @var array<object> */
+    /** @var list<object> */
     private array $domainEvents = [];
 
-    /** Returns a snapshot of recorded domain events (read-only). */
+    /**
+     * Returns a snapshot of recorded domain events (read-only).
+     *
+     * @return list<object>
+     */
     public function domainEvents(): array
     {
         return $this->domainEvents;
     }
 
-    /** Returns all recorded domain events and clears the buffer. */
+    /**
+     * Returns all recorded domain events and clears the buffer.
+     *
+     * @return list<object>
+     */
     public function releaseDomainEvents(): array
     {
         $events = $this->domainEvents;
@@ -343,7 +351,7 @@ enum InvoiceStatus: int
         return self::tryFrom($value);
     }
 
-    /** Dispatch to the handler for this member; throws if unhandled. */
+    /** Dispatch to the handler for this member (exhaustive over all cases). */
     public function match_(\Closure $draft, \Closure $issued, \Closure $paid, \Closure $voided): mixed
     {
         return match($this) {
@@ -351,11 +359,10 @@ enum InvoiceStatus: int
             self::ISSUED => ($issued)(),
             self::PAID => ($paid)(),
             self::VOIDED => ($voided)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("InvoiceStatus", "unhandled InvoiceStatus {$this->name}"),
         };
     }
 
-    /** Dispatch to the side-effecting handler for this member; throws if unhandled. */
+    /** Dispatch to the side-effecting handler for this member (exhaustive over all cases). */
     public function switch_(\Closure $draft, \Closure $issued, \Closure $paid, \Closure $voided): void
     {
         match($this) {
@@ -363,7 +370,6 @@ enum InvoiceStatus: int
             self::ISSUED => ($issued)(),
             self::PAID => ($paid)(),
             self::VOIDED => ($voided)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("InvoiceStatus", "unhandled InvoiceStatus {$this->name}"),
         };
     }
 }
@@ -424,6 +430,7 @@ interface InvoiceRepository
 
     public function remove(Invoice $aggregate): void;
 
+    /** @return list<Invoice> */
     public function byCustomer(string $customerId): array;
 
     public function latest(string $customerId): ?Invoice;
