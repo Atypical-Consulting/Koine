@@ -340,16 +340,38 @@ public sealed class SemanticValidator
     /// PHP's, which is case-insensitive (method names) and collapses underscores (see
     /// <see cref="CanonicalPascalCase"/>). It therefore flags every pair that would collide in at least
     /// one of PHP/TS, and may conservatively flag a pair that would <i>not</i> collide in C# (which omits
-    /// the <c>is</c> prefix and is case-sensitive) — an accepted trade-off (issue #419): rejecting a
-    /// model that would emit a broken artifact for <i>any</i> shipped target is the safe call.</para>
+    /// the <c>is</c> prefix and is case-sensitive).</para>
+    ///
+    /// <para>Issue #495 makes the <i>severity</i> target-aware via <paramref name="targets"/>: a pair
+    /// that collides only under the strict (cross-target) fold but breaks no <i>enabled</i> target's own
+    /// identifier rule is downgraded from an error to a warning, so a C#-only build is not blocked by a
+    /// PHP-only collision. A pair that genuinely breaks an enabled target (PHP for any collision;
+    /// TypeScript on the Is-strip axis) keeps the hard error, and the default
+    /// <see cref="EmitTargetSet.All"/> (no target context) reproduces the original always-strict error.</para>
     ///
     /// <para>The spec surface gathered per context mirrors the emitters exactly: context-level
     /// <see cref="ContextNode.Specs"/> plus aggregate-nested <see cref="AggregateDecl.Specs"/>. The
     /// predicate is per-context (not per-target), so two specs on different target types still collide.
     /// On the first colliding pair the diagnostic carries the second spec's span.</para>
     /// </summary>
-    internal static void ValidateUniqueSpecPredicateNames(KoineModel model, List<Diagnostic> diagnostics)
+    internal static void ValidateUniqueSpecPredicateNames(
+        KoineModel model, List<Diagnostic> diagnostics, EmitTargetSet targets)
     {
+        // Issue #495: which enabled targets would a strict-fold collision actually break?
+        //  • PHP folds case AND separators — its predicate key IS the strict key, so any strict
+        //    collision genuinely duplicates a PHP method → hard error whenever PHP is enabled.
+        //  • TypeScript keeps case and separators but strips a leading `Is` word, so it breaks only on
+        //    the Is-strip axis (IsActive+Active → isActive twice), never the underscore axis
+        //    (FreeOrder+free_order → isFreeOrder/isFree_order, distinct). Tracked per spec below.
+        //  • C# predicates are extension methods keyed by name AND receiver type, so a folded pair only
+        //    duplicates when it is already an exact same-target duplicate — which KOI1005 owns. C#
+        //    therefore never contributes a hard collision here, and needs no per-target tracking.
+        // When no enabled target breaks, the pair is valid for the chosen build (e.g. C#-only) and the
+        // collision is advisory — a warning, not a hard block. The default EmitTargetSet.All enables
+        // PHP, so the strict error fires on every collision exactly as before #495.
+        var phpBreaks = (targets & EmitTargetSet.Php) != 0;
+        var trackTypeScript = (targets & EmitTargetSet.TypeScript) != 0;
+
         foreach (ContextNode ctx in model.Contexts)
         {
             // Same spec surface the emitters gather: context-level specs + aggregate-nested specs.
@@ -367,6 +389,12 @@ public sealed class SemanticValidator
             // mid-chain (e.g. IsActive, Active, active) is suppressed too. Genuinely distinct names that
             // merely fold together (IsActive+Active), or an exact name on a *different* target, still fire.
             var namesByTarget = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
+            // Issue #495: the TypeScript predicate identities (its case- and separator-sensitive
+            // `is`+subject key) seen so far in this context — a repeat means TS would genuinely emit a
+            // duplicate function, a hard error even with PHP disabled. Only allocated when TS is enabled.
+            HashSet<string>? seenTypeScript = trackTypeScript ? new HashSet<string>(StringComparer.Ordinal) : null;
+
             foreach (SpecDecl spec in specs)
             {
                 // The PascalCase subject (with a leading `Is` word stripped) drives both the collision
@@ -387,13 +415,23 @@ public sealed class SemanticValidator
                 // precisely the case KOI1005 owns, so KOI1007 must stay silent for it.
                 var koi1005AlreadyReports = !targetNames.Add(spec.Name);
 
+                // Record this spec's TypeScript identity (so a later spec can spot a real TS duplicate)
+                // and learn whether it repeats an earlier one — `!Add` ⇒ already present ⇒ TS collision.
+                var typeScriptBreaks = seenTypeScript is not null && !seenTypeScript.Add(TypeScriptPredicateKey(spec.Name));
+
                 if (seen.TryGetValue(key, out SpecDecl? first))
                 {
                     if (!koi1005AlreadyReports)
                     {
-                        diagnostics.Add(Diagnostic.FromSpan(DiagnosticCodes.DuplicateSpecPredicate,
-                            $"spec '{spec.Name}' emits the same predicate ('is{subject}') as spec '{first.Name}'",
-                            spec.Span));
+                        diagnostics.Add(phpBreaks || typeScriptBreaks
+                            ? Diagnostic.FromSpan(DiagnosticCodes.DuplicateSpecPredicate,
+                                $"spec '{spec.Name}' emits the same predicate ('is{subject}') as spec '{first.Name}'",
+                                spec.Span)
+                            : Diagnostic.FromSpan(DiagnosticSeverity.Warning, DiagnosticCodes.DuplicateSpecPredicate,
+                                $"spec '{spec.Name}' would emit the same predicate ('is{subject}') as spec " +
+                                $"'{first.Name}' for case-insensitive or separator-folding targets (e.g. PHP), but " +
+                                "not for the enabled target(s); relaxed to a warning (issue #495)",
+                                spec.Span));
                     }
                 }
                 else
@@ -418,15 +456,41 @@ public sealed class SemanticValidator
     /// The PascalCase spec subject with a redundant leading <c>Is</c> word stripped — mirrors the
     /// emitters' <c>SpecPredicateSubject</c> (#396): <c>IsFreeOrder</c> → <c>FreeOrder</c>, but a name
     /// that merely starts with "Is" (e.g. <c>Island</c>) is left intact because the char after "Is"
-    /// must be uppercase to count as a word prefix.
+    /// must be uppercase to count as a word prefix. Uses the strict (underscore-folding)
+    /// <see cref="CanonicalPascalCase"/>, so it is the PHP/all-targets subject.
     /// </summary>
-    private static string SpecPredicateSubject(string name)
-    {
-        var pascal = CanonicalPascalCase(name);
-        return pascal.Length > 2 && pascal[0] == 'I' && pascal[1] == 's' && char.IsUpper(pascal[2])
+    private static string SpecPredicateSubject(string name) => StripLeadingIsWord(CanonicalPascalCase(name));
+
+    /// <summary>
+    /// Issue #495: the TypeScript predicate identity for <paramref name="name"/> (sans the constant
+    /// <c>is</c> prefix that every TS predicate shares): first-char-upper, separators <b>kept</b>,
+    /// case preserved, then the leading <c>Is</c> word stripped — exactly what
+    /// <c>TypeScriptEmitter.SpecPredicateSubject(TypeScriptNaming.ToPascalCase(name))</c> emits. Two
+    /// specs collide in TypeScript iff these keys are ordinally equal (so <c>IsActive</c>+<c>Active</c>
+    /// collide on the Is-strip axis, but <c>FreeOrder</c>+<c>free_order</c> stay distinct). Mirrored
+    /// here rather than reused from <c>Emit/</c> so the check stays layer-clean.
+    /// </summary>
+    private static string TypeScriptPredicateKey(string name) => StripLeadingIsWord(FirstCharUpper(name));
+
+    /// <summary>
+    /// Strips a redundant leading <c>Is</c> word from an already-PascalCased <paramref name="pascal"/>:
+    /// <c>IsFreeOrder</c> → <c>FreeOrder</c>, but <c>Island</c> is left intact (the char after "Is" must
+    /// be uppercase to count as a word prefix). Shared by the strict (<see cref="SpecPredicateSubject"/>)
+    /// and TypeScript (<see cref="TypeScriptPredicateKey"/>) folds.
+    /// </summary>
+    private static string StripLeadingIsWord(string pascal) =>
+        pascal.Length > 2 && pascal[0] == 'I' && pascal[1] == 's' && char.IsUpper(pascal[2])
             ? pascal[2..]
             : pascal;
-    }
+
+    /// <summary>
+    /// Upper-cases only the first character (separators and the rest of the casing left untouched) —
+    /// the case-sensitive PascalCase that the C# and TypeScript emitters apply (and, unlike
+    /// <see cref="CanonicalPascalCase"/>, does <i>not</i> fold underscores): <c>free_order</c> →
+    /// <c>Free_order</c>, <c>freeOrder</c> → <c>FreeOrder</c>.
+    /// </summary>
+    private static string FirstCharUpper(string name) =>
+        string.IsNullOrEmpty(name) || char.IsUpper(name[0]) ? name : char.ToUpperInvariant(name[0]) + name[1..];
 
     /// <summary>
     /// Target-agnostic PascalCase canonicalization. It intentionally matches PHP's

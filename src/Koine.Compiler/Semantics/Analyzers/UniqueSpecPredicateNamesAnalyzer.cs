@@ -13,5 +13,6 @@ internal sealed class UniqueSpecPredicateNamesAnalyzer : IModelAnalyzer
     public string Id => "koine.unique-spec-predicate-names";
 
     public void Analyze(AnalyzerContext context) =>
-        SemanticValidator.ValidateUniqueSpecPredicateNames(context.Model, context.Diagnostics);
+        SemanticValidator.ValidateUniqueSpecPredicateNames(
+            context.Model, context.Diagnostics, context.EnabledTargets);
 }
