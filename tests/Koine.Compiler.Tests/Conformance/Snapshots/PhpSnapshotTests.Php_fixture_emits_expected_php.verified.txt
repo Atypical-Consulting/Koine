@@ -722,6 +722,7 @@ use Koine\Runtime\Range;
 /** A bookable window over time (exercises Range<Instant>). */
 final class SalePeriod
 {
+    /** @param Range<\DateTimeImmutable> $window */
     public function __construct(
         public readonly Range $window
     ) {

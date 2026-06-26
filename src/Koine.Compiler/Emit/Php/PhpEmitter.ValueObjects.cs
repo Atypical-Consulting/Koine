@@ -45,7 +45,7 @@ public sealed partial class PhpEmitter
         foreach (Member m in derived)
         {
             sb.Append('\n');
-            WriteDoc(sb, m.Doc, Indent);
+            WriteMethodDoc(sb, Indent, typeMapper, NoDocParams, m.Type, m.Doc);
             var methodName = PhpNaming.MethodName(m.Name);
             var returnType = typeMapper.Map(m.Type);
             sb.Append(Indent).Append("public function ").Append(methodName).Append("(): ").Append(returnType).Append('\n');
@@ -99,6 +99,14 @@ public sealed partial class PhpEmitter
         PhpExpressionTranslator translator,
         PhpTypeMapper typeMapper)
     {
+        // PHPDoc refines a promoted property whose native hint loses type info: a generic `Range<T>`
+        // (e.g. `@param Range<\DateTimeImmutable> $window`) or a bare collection `array`. On a promoted
+        // constructor parameter the `@param` types both the parameter and the property for phpstan.
+        var docParams = fields
+            .Select(m => (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name)), m.Type))
+            .ToList();
+        WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null);
+
         sb.Append(Indent).Append("public function __construct(\n");
 
         // Constructor-promoted readonly properties for all stored fields.
