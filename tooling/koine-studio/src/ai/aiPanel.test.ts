@@ -420,3 +420,146 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     expect(container.querySelector('.koi-assistant-chip')).toBeNull();
   });
 });
+
+// --- multi-file change set (#... agentic edits): the per-file review/apply panel ----------------
+describe('multi-file change set (agentic edits)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.mocked(runAssistant).mockReset();
+  });
+  afterEach(() => {
+    localStorage.clear();
+    vi.mocked(runAssistant).mockReset();
+  });
+
+  function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
+    return {
+      container,
+      getProvider: () => 'anthropic',
+      getBaseUrl: () => '',
+      getApiKey: () => 'sk',
+      getModel: () => '',
+      getContext: () => ({ fileName: 'm.koi', source: 'context X {}', diagnostics: [] }),
+      onApplyModel: () => {},
+      onOpenPrefs: () => {},
+      getWorkspaceKey: () => 'ws',
+      getSelection: () => null,
+      getUseTools: () => true,
+      getConstrainGrammar: () => false,
+      ...over,
+    };
+  }
+
+  // Drive a normal generative send via the first quick action (offerApply defaults true).
+  function fire(container: HTMLElement): void {
+    container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
+  }
+
+  test('renders a per-file review for a staged multi-file turn, Apply writes only accepted files', async () => {
+    // The model stages two full-file edits into the per-turn session: one revising an existing file
+    // (orders.koi, present in the workspace snapshot → "modified") and one brand-new (events.koi → "new").
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }'); // modified (in initial)
+      req.editSession?.stage('events.koi', 'integration event OrderPlaced {}'); // new (absent from snapshot)
+      req.onText('Stationed two edits.');
+      return 'Stationed two edits.';
+    });
+
+    const onApplyChangeSet = vi.fn(
+      async (_files: { relPath: string; body: string; isNew: boolean }[]) => ({ failed: [] as string[] }),
+    );
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        runEditTool: vi.fn(async () => 'ok'), // stub — the mock stages directly
+        onApplyChangeSet,
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+
+    // Exactly two file rows, one badge of each kind, two checked accept boxes, apply labelled "2".
+    const rows = container.querySelectorAll('.koi-changeset-file');
+    expect(rows.length).toBe(2);
+    expect(container.querySelectorAll('.koi-changeset-badge-modified').length).toBe(1);
+    expect(container.querySelectorAll('.koi-changeset-badge-new').length).toBe(1);
+    const checks = container.querySelectorAll<HTMLInputElement>('.koi-changeset-accept');
+    expect(checks.length).toBe(2);
+    expect([...checks].every((c) => c.checked)).toBe(true);
+    const applyBtn = container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    expect(applyBtn.textContent).toContain('2');
+
+    // Uncheck the events.koi (new) row → the apply label drops to "1".
+    const eventsRow = [...rows].find((r) => r.textContent?.includes('events.koi'))!;
+    const eventsCheck = eventsRow.querySelector<HTMLInputElement>('.koi-changeset-accept')!;
+    eventsCheck.checked = false;
+    eventsCheck.dispatchEvent(new Event('change'));
+    expect(applyBtn.textContent).toContain('1');
+
+    // Apply writes ONLY the still-accepted file (orders.koi).
+    applyBtn.click();
+    await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+    const accepted = onApplyChangeSet.mock.calls[0][0];
+    expect(accepted.length).toBe(1);
+    expect(accepted[0].relPath).toBe('orders.koi');
+  });
+
+  test('a non-staged generative turn still shows single-file Apply (no change set)', async () => {
+    // An ordinary generative reply (a fenced koine block, nothing staged) → the legacy single-file gate.
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      const body = 'Here:\n```koine\ncontext X {}\n```';
+      req.onText(body);
+      return body;
+    });
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        runEditTool: vi.fn(async () => 'ok'),
+        onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
+    expect(container.querySelector('.koi-changeset')).toBeNull();
+  });
+
+  test('a partial-apply failure is surfaced (no false "Applied ✓"), and a successful apply locks the review', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      req.editSession?.stage('events.koi', 'integration event OrderPlaced {}');
+      req.onText('Two edits.');
+      return 'Two edits.';
+    });
+    // First apply fails to write events.koi; the panel must report it and NOT show a terminal "Applied ✓".
+    const onApplyChangeSet = vi.fn(async (_files: { relPath: string; body: string; isNew: boolean }[]) => ({
+      failed: ['events.koi'] as string[],
+    }));
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        runEditTool: vi.fn(async () => 'ok'),
+        onApplyChangeSet,
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset-apply')).not.toBeNull());
+    const applyBtn = container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    applyBtn.click();
+    await vi.waitFor(() =>
+      expect(container.querySelector('.koi-changeset-status')?.textContent).toContain('events.koi'),
+    );
+    // Discard is still present (the change set isn't terminal) and Apply re-opened for a retry.
+    expect(container.querySelector('.koi-changeset-discard')).not.toBeNull();
+    expect(applyBtn.textContent).not.toContain('✓');
+    expect(applyBtn.disabled).toBe(false);
+  });
+});

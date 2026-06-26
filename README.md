@@ -513,7 +513,10 @@ emitters = ./build/Acme.GoEmitter.dll
   a native desktop app ([`tooling/koine-studio`](tooling/koine-studio)). Its built-in **AI copilot**
   makes the `.koi` it generates valid by construction: a grammar-capable local model is constrained to
   Koine's grammar (GBNF token masking), hosted APIs fall back to bounded parse-and-repair against the
-  real parser, and *Apply to editor* stays disabled until the model parses — see the
+  real parser, and *Apply to editor* stays disabled until the model parses. In a folder workspace it
+  can also **edit across files in one turn** — the assistant reads the workspace and *stages* full-file
+  changes (new files land under the folder root) that you review as a per-file diff and apply together;
+  nothing touches disk until you accept. See the
   [Assistant guide](https://atypical-consulting.github.io/Koine/guides/assistant-local-llm/).
 - **Editor support.** [`tooling/koine-textmate`](tooling/) is a TextMate grammar for `.koi` that works
   in **JetBrains Rider** and **VS Code**. For **live error squiggles, completion, hover docs, and

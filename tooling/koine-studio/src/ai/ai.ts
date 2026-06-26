@@ -14,7 +14,8 @@ import type AnthropicSdk from '@anthropic-ai/sdk';
 import type { ContentBlock, MessageParam, Tool, ToolResultBlockParam, ToolUseBlock } from '@anthropic-ai/sdk/resources/messages';
 import type OpenAiSdk from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import { koineToolDefs, koineTools, summarizeForChip, toAnthropicTool } from '@/ai/assistantTools';
+import { KOINE_EDIT_TOOL_NAMES, koineToolDefs, summarizeForChip, toAnthropicTool, toOpenAiTool, type NeutralTool } from '@/ai/assistantTools';
+import type { EditSession } from '@/ai/editSession';
 
 /** A turn in the assistant transcript. */
 export interface ChatMessage {
@@ -96,8 +97,34 @@ export interface AssistantRequest {
    * loop (both providers) so the model can call them; absent → plain chat.
    */
   runCompilerTool?: (name: string, argsJson: string) => Promise<string>;
+  /**
+   * The per-turn multi-file edit STAGING area, created by the caller from the open workspace files.
+   * When present together with {@link runEditTool} (folder/workspace mode), the assistant also
+   * advertises the list/read/write edit tools and routes them here, so the model can edit across the
+   * workspace; the caller inspects `editSession.staged()` after the turn to review/apply. Absent ⇒ only
+   * the single-file compiler tools are offered.
+   */
+  editSession?: EditSession;
+  /**
+   * Execute a host-local edit tool (koine_list_files/koine_read_file/koine_write_file) against the
+   * per-turn {@link editSession}. Supplied by the host alongside {@link runCompilerTool}.
+   */
+  runEditTool?: (name: string, argsJson: string, session: EditSession) => Promise<string>;
   /** Notified each time the model invokes a tool, for transcript visibility (name + short status). */
   onToolCall?: (name: string, summary: string) => void;
+}
+
+/** Edit tools are offered only in workspace mode: the caller supplied BOTH a staging session and an
+ *  edit executor. */
+function editToolsActive(req: AssistantRequest): boolean {
+  return !!req.editSession && !!req.runEditTool;
+}
+
+/** The tool defs to advertise this turn: the compiler tools always, the edit tools only in workspace
+ *  mode (so single-doc chats never see list/read/write). */
+function activeToolDefs(req: AssistantRequest): NeutralTool[] {
+  const editActive = editToolsActive(req);
+  return koineToolDefs().filter((d) => editActive || !(KOINE_EDIT_TOOL_NAMES as readonly string[]).includes(d.name));
 }
 
 /**
@@ -148,7 +175,20 @@ interface ToolLoopAdapter {
  * text is returned, so the caller's transcript stays clean.
  */
 async function runToolLoop(req: AssistantRequest, adapter: ToolLoopAdapter): Promise<string> {
-  const exec = req.runCompilerTool;
+  const compilerExec = req.runCompilerTool;
+  const session = req.editSession;
+  const editExec = editToolsActive(req) ? req.runEditTool! : undefined;
+  // The loop runs whenever ANY executor is available; edit-tool names route to the edit executor
+  // (against the per-turn session), everything else to the compiler executor.
+  const exec: ((name: string, argsJson: string) => Promise<string>) | undefined =
+    compilerExec || editExec
+      ? (name, argsJson) =>
+          editExec && (KOINE_EDIT_TOOL_NAMES as readonly string[]).includes(name)
+            ? editExec(name, argsJson, session!)
+            : compilerExec
+              ? compilerExec(name, argsJson)
+              : Promise.resolve(`Error: no executor available for tool ${name}.`)
+      : undefined;
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     // Offer tools until the last allowed round, where we drop them so the model must answer in text —
     // a hard stop against a model that would otherwise keep requesting tools forever.
@@ -202,7 +242,7 @@ async function runAnthropic(req: AssistantRequest): Promise<string> {
           system: req.system,
           messages,
           // The cast bridges the neutral `object` schema to the SDK's `Tool.InputSchema`.
-          ...(offerTools ? { tools: koineToolDefs().map(toAnthropicTool) as Tool[] } : {}),
+          ...(offerTools ? { tools: activeToolDefs(req).map(toAnthropicTool) as Tool[] } : {}),
         },
         { signal: req.signal },
       );
@@ -259,7 +299,7 @@ async function runOpenAiCompatible(req: AssistantRequest): Promise<string> {
           model: req.model || DEFAULT_OPENAI_MODEL,
           stream: true,
           messages,
-          ...(offerTools ? { tools: koineTools(), tool_choice: 'auto' as const } : {}),
+          ...(offerTools ? { tools: activeToolDefs(req).map(toOpenAiTool), tool_choice: 'auto' as const } : {}),
           // `grammar` is the llama.cpp-server / Ollama GBNF body field (issue #257): a local backend
           // that honours it can only decode tokens the grammar permits. Spread so the unknown-to-the-SDK
           // key passes through the request body untouched; it is a no-op on providers that ignore it.

@@ -21,7 +21,8 @@ import type {
 } from '@/host/types';
 import { buildLogLArgs, parseLogL, type ChangeEntry } from '@/host/gitHistory';
 import { saveMetaFor } from '@/host/saveMeta';
-import { normalizeCompileTarget } from '@/ai/assistantTools';
+import { normalizeCompileTarget, runEditToolStaging } from '@/ai/assistantTools';
+import type { EditSession } from '@/ai/editSession';
 import { mcpCall } from '@/mcp/mcp';
 
 /** LSP transport over Tauri IPC. Mirrors the wiring previously inlined in lsp.ts. */
@@ -192,6 +193,19 @@ export class TauriPlatform implements Platform {
     } catch (e) {
       return `Error: ${e instanceof Error ? e.message : String(e)}`;
     }
+  }
+
+  // The host-local edit tools dispatch against the per-turn staging session via the host-independent
+  // runEditToolStaging; the desktop host supplies the whole-staged-workspace validation by running the
+  // `koine_validate` MCP tool (the sidecar's compiler) over the staged set after a write, mirroring the
+  // browser host's in-WASM DiagnoseWorkspace.
+  runEditTool(name: string, argsJson: string, session: EditSession): Promise<string> {
+    return runEditToolStaging(name, argsJson, session, async () => {
+      const url = await this.mcpEndpoint();
+      if (!url) return '(could not validate: the Koine MCP server is not available)';
+      const files = session.list().map((p) => ({ path: p, source: session.read(p) ?? '' }));
+      return mcpCall(url, 'koine_validate', { files });
+    });
   }
 
   openExternal(url: string): void {

@@ -1,5 +1,6 @@
 import { describe, expect, test, vi, beforeEach } from 'vitest';
 import { runAssistant, MAX_TOOL_ROUNDS, type AssistantRequest } from '@/ai/ai';
+import { createEditSession, type EditSession } from '@/ai/editSession';
 
 // Mock the dynamically-imported OpenAI SDK: `new OpenAI()` exposes chat.completions.create, which we
 // route to a per-test implementation so we can feed canned streamed chunks and inspect the params.
@@ -42,6 +43,13 @@ const TOOLCALL = [
   { choices: [{ delta: { tool_calls: [{ index: 0, id: '42', type: 'function', function: { name: 'koine_validate', arguments: '' } }] }, finish_reason: null }] },
   { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"source":' } }] }, finish_reason: null }] },
   { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"context X {}"}' } }] }, finish_reason: null }] },
+  { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+];
+
+// One streamed OpenAI tool-call round: the whole `arguments` JSON arrives in a single delta, then a
+// finish_reason='tool_calls' chunk closes the round. Used by the agentic edit-tool tests below.
+const callRound = (name: string, argsJson: string) => [
+  { choices: [{ delta: { tool_calls: [{ index: 0, id: 't', type: 'function', function: { name, arguments: argsJson } }] }, finish_reason: null }] },
   { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
 ];
 
@@ -304,5 +312,102 @@ describe('runAnthropic — agentic tool loop', () => {
     await expect(
       runAssistant(anthropicReq({ runCompilerTool: () => Promise.resolve('ok: true — no diagnostics.') })),
     ).rejects.toThrow('The model declined to respond to this request.');
+  });
+});
+
+describe('agentic edit tools (multi-file workspace mode)', () => {
+  test('routes list→read→write to runEditTool, populates staging, terminates with the final text', async () => {
+    const session = createEditSession({ 'a.koi': 'context A {}' });
+    const queue = [
+      streamFrom(callRound('koine_list_files', '{}')),
+      streamFrom(callRound('koine_read_file', '{"relPath":"a.koi"}')),
+      streamFrom(callRound('koine_write_file', '{"relPath":"b.koi","contents":"context B {}"}')),
+      streamFrom(TEXT),
+    ];
+    h.createImpl = () => Promise.resolve(queue.shift());
+
+    // A STUB edit executor (not the real WASM one): record the name and operate on the session.
+    const editCalls: string[] = [];
+    const runEditTool = (name: string, argsJson: string, s: EditSession) => {
+      editCalls.push(name);
+      if (name === 'koine_write_file') {
+        const { relPath, contents } = JSON.parse(argsJson) as { relPath: string; contents: string };
+        s.stage(relPath, contents);
+        return Promise.resolve(`staged ${relPath} (not yet written to disk).`);
+      }
+      return Promise.resolve('ok');
+    };
+    const compilerCalls: string[] = [];
+    const runCompilerTool = (name: string) => {
+      compilerCalls.push(name);
+      return Promise.resolve('compiler ran');
+    };
+
+    const out = await runAssistant(baseReq({ runCompilerTool, editSession: session, runEditTool }));
+
+    // The three edit tools were routed to runEditTool, in order; the compiler executor was untouched.
+    expect(editCalls).toEqual(['koine_list_files', 'koine_read_file', 'koine_write_file']);
+    expect(compilerCalls).toEqual([]);
+    // The write staged a brand-new file into the session, and the loop terminated with the final text.
+    expect(session.staged()).toEqual([{ relPath: 'b.koi', body: 'context B {}', isNew: true }]);
+    expect(out).toBe('All good ✓');
+  });
+
+  test('advertises all six tools in workspace mode, only the three compiler tools without a session', async () => {
+    const session = createEditSession({ 'a.koi': 'context A {}' });
+    const runEditTool = () => Promise.resolve('ok');
+    const runCompilerTool = () => Promise.resolve('ok');
+    const toolNames = (p: Record<string, unknown>) =>
+      (p.tools as { function: { name: string } }[]).map((t) => t.function.name);
+
+    // Workspace mode (session + executor present): all six tools, including the edit ones.
+    const wsParams: Record<string, unknown>[] = [];
+    h.createImpl = (p) => {
+      wsParams.push(p as Record<string, unknown>);
+      return Promise.resolve(streamFrom(TEXT));
+    };
+    await runAssistant(baseReq({ runCompilerTool, editSession: session, runEditTool }));
+    const wsNames = toolNames(wsParams[0]);
+    expect(wsNames).toHaveLength(6);
+    expect(wsNames).toEqual(
+      expect.arrayContaining([
+        'koine_validate', 'koine_compile', 'koine_format',
+        'koine_list_files', 'koine_read_file', 'koine_write_file',
+      ]),
+    );
+    expect(wsNames).toContain('koine_write_file');
+
+    // Single-doc mode (no session): exactly the three compiler tools — no list/read/write.
+    const soloParams: Record<string, unknown>[] = [];
+    h.createImpl = (p) => {
+      soloParams.push(p as Record<string, unknown>);
+      return Promise.resolve(streamFrom(TEXT));
+    };
+    await runAssistant(baseReq({ runCompilerTool }));
+    const soloNames = toolNames(soloParams[0]);
+    expect(soloNames).toEqual(['koine_validate', 'koine_compile', 'koine_format']);
+    expect(soloNames).not.toContain('koine_write_file');
+    expect(soloNames).not.toContain('koine_read_file');
+    expect(soloNames).not.toContain('koine_list_files');
+  });
+
+  test('Anthropic advertises the six tools via input_schema in workspace mode', async () => {
+    const session = createEditSession({ 'a.koi': 'context A {}' });
+    const params: Record<string, unknown>[] = [];
+    h.streamImpl = (p) => {
+      params.push(p as Record<string, unknown>);
+      return anthropicStream(A_TEXT);
+    };
+    await runAssistant(
+      anthropicReq({
+        runCompilerTool: () => Promise.resolve('ok'),
+        editSession: session,
+        runEditTool: () => Promise.resolve('ok'),
+      }),
+    );
+    const tools = params[0].tools as { name: string; input_schema?: unknown; parameters?: unknown }[];
+    expect(tools).toHaveLength(6);
+    expect(tools.map((t) => t.name)).toContain('koine_write_file');
+    expect(tools.every((t) => !!t.input_schema && t.parameters === undefined)).toBe(true);
   });
 });
