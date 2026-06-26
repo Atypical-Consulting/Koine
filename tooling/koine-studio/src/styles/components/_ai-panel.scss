@@ -138,10 +138,12 @@
   background: var(--koi-paper-2);
   padding: var(--koi-space-2);
 }
-// A superseded change set (a newer turn retired it, issue #473) is dimmed so it reads as inert; the
-// disabled Apply/checkboxes and the status notice carry the meaning, so this is not color-alone.
+// A superseded change set (a newer turn retired it, issue #473) is dimmed so it reads as inert. The
+// meaning is carried by the disabled Apply/checkboxes and the status notice (not by the dim alone), and
+// the panel is an INACTIVE component — WCAG 2.1 AA 1.4.3 exempts those from the contrast minimum. The
+// 0.6 matches the existing `.koi-changeset-apply:disabled` dim, for a consistent "retired" look.
 .koi-changeset-superseded {
-  opacity: 0.55;
+  opacity: 0.6;
 }
 .koi-changeset-file {
   display: grid;
