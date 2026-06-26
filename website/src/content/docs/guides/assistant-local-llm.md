@@ -86,8 +86,56 @@ The tools the model can call:
 | `koine_compile` | Compile to a target (`csharp` / `typescript` / `python`) and return the emitted files — so the model can inspect generated output. |
 | `koine_format` | Return canonically-formatted `.koi` source. |
 
-These are the same capabilities the [MCP server](/Koine/guides/mcp-server/) exposes, but executed by
-the IDE itself, grounded in whatever is on screen.
+The first three are the same capabilities the [MCP server](/Koine/guides/mcp-server/) exposes, but
+executed by the IDE itself, grounded in whatever is on screen. When you have a **folder workspace**
+open, the assistant gains three more tools for editing **across** files (see
+[Multi-file agentic editing](#multi-file-agentic-editing) below):
+
+| Tool | What it does |
+| --- | --- |
+| `koine_list_files` | List the workspace's `.koi` files (by workspace-relative path) the assistant may read or edit. |
+| `koine_read_file` | Read the current contents of one workspace file by its relative path. |
+| `koine_write_file` | **Stage** new full-file contents for one file (creating it if new). Staged — *not* written to disk — for you to review and apply. |
+
+## Multi-file agentic editing
+
+A real Domain-Driven Design change rarely fits in one file: adding an integration event touches the
+publisher context, the subscriber context, and the context map. With a **folder workspace** open and
+the agentic tools enabled, the assistant can make that change in **one turn** — it lists and reads the
+files it needs, then proposes full-file edits across as many `.koi` files as the change requires.
+
+How it works:
+
+1. **The model edits a *staging area*, not your files.** Each `koine_write_file` call records a
+   proposed full-file body in an in-memory staging area keyed by relative path. Nothing is written to
+   disk while the model works, and the whole staged workspace is re-validated together (via the
+   multi-file compile envelope) so a cross-file change is checked as a unit, not file-by-file.
+2. **You get a per-file review, not a single "Apply".** When the turn finishes with staged edits, the
+   reply shows a **change set**: one row per file with a **new** / **modified** badge, an inline diff,
+   and a per-file accept toggle (all on by default).
+3. **Nothing lands until you accept.** **Apply N files** writes only the still-accepted files through
+   the workspace — **new files are created under the folder root** — and the workspace re-validates
+   after the write. **Discard** drops the staging area and writes nothing.
+
+> **You:** Add an `OrderPlaced` integration event published by Ordering and consumed by Shipping, and
+> wire it in the context map.
+>
+> 🔧 `koine_list_files → 6 file(s)` 🔧 `koine_read_file → ordering/orders.koi` 🔧 `koine_write_file → staged changes to ordering/orders.koi` 🔧 `koine_write_file → staged changes to shipping/shipping.koi` 🔧 `koine_write_file → staged changes to context-map.koi`
+>
+> **Assistant:** Staged edits to three files — review and apply below.
+>
+> *(a change set with three rows — `ordering/orders.koi` **modified**, `shipping/shipping.koi`
+> **modified**, `context-map.koi` **modified** — each with a diff and an accept toggle, plus
+> **Apply 3 files** / **Discard**.)*
+
+:::note[When the edit tools appear]
+The edit tools are offered only when a folder workspace with at least one `.koi` file is open **and**
+the agentic tools are enabled (**Settings → Assistant**). A single-document chat keeps just the three
+single-file compiler tools and the usual one-click *Apply to editor*. The staging area lives in
+Studio's host layer and is provider-agnostic — the compiler and the target-agnostic model are
+untouched — so it works the same in **Studio Web** (writing through the browser file host) and on the
+**desktop** (through the Tauri file host).
+:::
 
 :::tip[Anthropic / remote endpoints]
 Tool-calling is wired for the **OpenAI-compatible** path (the local-LLM use case). Remote
