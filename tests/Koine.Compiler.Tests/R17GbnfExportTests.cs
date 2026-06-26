@@ -1,5 +1,7 @@
 using System.Text;
+using Antlr4.Runtime;
 using Koine.Compiler.Emit.Grammar;
+using Koine.Compiler.Grammar;
 
 namespace Koine.Compiler.Tests;
 
@@ -125,6 +127,118 @@ public class R17GbnfExportTests
             defined.ShouldContain(name, $"rule '{name}' is referenced but never defined");
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Issue #449 — the drift guard: every grammar keyword must reach the export.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The operator/punctuation/trivia tokens the GBNF models <i>structurally</i> — by position in a
+    /// rule body — rather than as a keyword the export must surface. They are intentionally exempt from
+    /// the keyword-coverage guard in <see cref="Export_surfaces_every_grammar_keyword_in_the_lexer"/>:
+    /// adding a token here is a conscious, documented decision, never a silent omission. Read against the
+    /// lexer's <b>real</b> vocabulary (<see cref="KoineLexer.DefaultVocabulary"/>), so the keyword set is
+    /// never a hand-maintained third copy.
+    /// </summary>
+    private static readonly HashSet<string> StructurallyHandledTokens = new(StringComparer.Ordinal)
+    {
+        "{", "}", "(", ")", ",", ":", ".", // braces, parens, separators
+        "=>",                              // lambda arrow
+        "??",                             // null-coalescing operator
+        "?",                              // optional-type marker (`type-ref` suffix)
+        "@",                              // annotation prefix
+        "=",                              // assignment / binding
+        "==", "!=", "<=", ">=", "<", ">", // comparison operators
+        "->", "<->",                      // state/init transition and bidirectional-relation arrows
+        "+", "-", "*", "/",               // arithmetic operators
+        "&&", "||", "!",                  // boolean operators
+    };
+
+    /// <summary>
+    /// The drift guard (issue #449). <see cref="GbnfExporter"/> hand-transcribes the ANTLR grammar into
+    /// its <c>Rules</c> table, so a keyword added to <c>KoineLexer.g4</c> without a covering rule/terminal
+    /// would <em>silently</em> vanish from the export — the grammar-constrained decoder would keep emitting
+    /// the old surface, with no failing test. This asserts every keyword literal declared in the lexer's
+    /// real token vocabulary appears as a quoted GBNF terminal (minus the documented
+    /// <see cref="StructurallyHandledTokens"/> allow-list), so the export can no longer lag the language
+    /// unnoticed.
+    /// </summary>
+    [Fact]
+    public void Export_surfaces_every_grammar_keyword_in_the_lexer()
+    {
+        string gbnf = GbnfExporter.Export();
+
+        // The lexer's real, generated token vocabulary — never a hand-maintained keyword copy.
+        var vocabulary = (Vocabulary)KoineLexer.DefaultVocabulary;
+        List<string> missing = KeywordsMissingFromExport(vocabulary, gbnf, StructurallyHandledTokens);
+
+        missing.ShouldBeEmpty(
+            "these keyword literal(s) are declared in KoineLexer.g4 but never surface in the GBNF export — "
+            + "add a covering rule/terminal to GbnfExporter.Rules, or (if deliberately unconstrained) add the "
+            + $"token to StructurallyHandledTokens with a comment: {string.Join(", ", missing)}");
+    }
+
+    /// <summary>
+    /// Proves the guard actually bites (it is not vacuously green): a synthetic vocabulary carrying a
+    /// keyword the export never defines must be reported as missing. Uses a fake
+    /// <see cref="Vocabulary"/> rather than mutating the real grammar, so the negative proof is permanent
+    /// and self-contained.
+    /// </summary>
+    [Fact]
+    public void Drift_guard_flags_a_keyword_absent_from_the_export()
+    {
+        // Token type 1 is a keyword no GBNF rule surfaces; token 2 is an allow-listed operator.
+        var fakeVocabulary = new Vocabulary(
+            [null, "'frobnicate'", "'+'"],
+            [null, "FROBNICATE", "PLUS"]);
+
+        List<string> missing = KeywordsMissingFromExport(fakeVocabulary, GbnfExporter.Export(), StructurallyHandledTokens);
+
+        // The fake keyword is flagged; the allow-listed operator is not — exactly the guard's contract.
+        missing.ShouldBe(["frobnicate"]);
+    }
+
+    /// <summary>
+    /// The keyword literals from <paramref name="vocabulary"/> that the exported <paramref name="gbnf"/>
+    /// fails to surface as a quoted terminal and that are not deliberately <paramref name="allowList"/>ed.
+    /// An empty result means the export is in sync with the grammar's keyword set.
+    /// </summary>
+    private static List<string> KeywordsMissingFromExport(Vocabulary vocabulary, string gbnf, ISet<string> allowList)
+    {
+        var missing = new List<string>();
+
+        for (int tokenType = 1; tokenType <= vocabulary.getMaxTokenType(); tokenType++)
+        {
+            string? literalName = vocabulary.GetLiteralName(tokenType);
+            if (literalName is null)
+            {
+                // No fixed literal: Identifier, IntLiteral/DecimalLiteral/StringLiteral, the
+                // BoolLiteral 'true'|'false' alternation, Regex, WS/trivia, EOF — nothing to surface.
+                continue;
+            }
+
+            string literal = Unquote(literalName);
+            if (allowList.Contains(literal))
+            {
+                continue; // structural token, modelled positionally — see StructurallyHandledTokens
+            }
+
+            // The export surfaces a keyword as a quoted GBNF terminal, e.g. `"context"`.
+            if (!gbnf.Contains($"\"{literal}\"", StringComparison.Ordinal))
+            {
+                missing.Add(literal);
+            }
+        }
+
+        return missing;
+    }
+
+    /// <summary>Strips the surrounding single quotes ANTLR wraps around a literal token name
+    /// (<c>'context'</c> → <c>context</c>); returns the input unchanged when it is not so quoted.</summary>
+    private static string Unquote(string literalName) =>
+        literalName.Length >= 2 && literalName[0] == '\'' && literalName[^1] == '\''
+            ? literalName[1..^1]
+            : literalName;
 
     // -------------------------------------------------------------------------
     // Task 2 — the acceptance floor: accept every template, reject malformed input.
