@@ -184,6 +184,42 @@ function writeRaw(key: string, value: string): void {
   }
 }
 
+// --- guarded JSON-object blob helpers ----------------------------------------
+// The shared read/parse/guard prologue and the guarded read-modify-write behind the override
+// stores (workspace overrides and keybinding remaps), so the two can't drift. Both treat anything
+// but a plain non-null, non-array object as "no blob" ({}), exactly like every other guarded read.
+
+/**
+ * Read a key as a JSON object, guarded: returns the parsed value only when it is a non-null,
+ * non-array object, else {} — an absent key, malformed JSON, or a primitive/array all fall back.
+ */
+function readJsonObject(storageKey: string): Record<string, unknown> {
+  const raw = readRaw(storageKey);
+  if (raw === null) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Set (or clear) a single field in the JSON-object blob at `storageKey`, then write it back.
+ * A `null` value DELETES the field; any other value sets it. Reads the current blob via
+ * {@link readJsonObject} (so a corrupt/array blob starts fresh) and persists best-effort.
+ */
+function patchJsonBlob(storageKey: string, field: string, value: unknown | null): void {
+  const blob = readJsonObject(storageKey);
+  if (value === null) {
+    delete blob[field];
+  } else {
+    blob[field] = value;
+  }
+  writeRaw(storageKey, JSON.stringify(blob));
+}
+
 // --- settings ----------------------------------------------------------------
 
 /** A valid theme string, else the default. */
@@ -676,24 +712,16 @@ export function workspaceKeyOf(roots: string[]): string {
  * A missing key, non-object blob, or unparseable JSON returns {}.
  */
 export function loadWorkspaceOverrides(key: string): Partial<Settings> {
-  const raw = readRaw(WORKSPACE_OVERRIDE_KEY_PREFIX + key);
-  if (raw === null) return {};
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    const blob = parsed as Record<string, unknown>;
-    const out: Partial<Settings> = {};
-    if ('previewTarget' in blob) out.previewTarget = coercePreviewTarget(blob.previewTarget);
-    if ('formatOnSave' in blob)
-      out.formatOnSave =
-        typeof blob.formatOnSave === 'boolean' ? blob.formatOnSave : DEFAULT_SETTINGS.formatOnSave;
-    if ('wordWrap' in blob)
-      out.wordWrap = typeof blob.wordWrap === 'boolean' ? blob.wordWrap : DEFAULT_SETTINGS.wordWrap;
-    if ('lspTrace' in blob) out.lspTrace = coerceTrace(blob.lspTrace);
-    return out;
-  } catch {
-    return {};
-  }
+  const blob = readJsonObject(WORKSPACE_OVERRIDE_KEY_PREFIX + key);
+  const out: Partial<Settings> = {};
+  if ('previewTarget' in blob) out.previewTarget = coercePreviewTarget(blob.previewTarget);
+  if ('formatOnSave' in blob)
+    out.formatOnSave =
+      typeof blob.formatOnSave === 'boolean' ? blob.formatOnSave : DEFAULT_SETTINGS.formatOnSave;
+  if ('wordWrap' in blob)
+    out.wordWrap = typeof blob.wordWrap === 'boolean' ? blob.wordWrap : DEFAULT_SETTINGS.wordWrap;
+  if ('lspTrace' in blob) out.lspTrace = coerceTrace(blob.lspTrace);
+  return out;
 }
 
 /**
@@ -706,24 +734,7 @@ export function saveWorkspaceOverride<K extends keyof Settings>(
   field: K,
   value: Settings[K] | null,
 ): void {
-  const raw = readRaw(WORKSPACE_OVERRIDE_KEY_PREFIX + key);
-  let blob: Record<string, unknown> = {};
-  if (raw !== null) {
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        blob = parsed as Record<string, unknown>;
-      }
-    } catch {
-      // corrupt blob — start fresh
-    }
-  }
-  if (value === null) {
-    delete blob[field as string];
-  } else {
-    blob[field as string] = value;
-  }
-  writeRaw(WORKSPACE_OVERRIDE_KEY_PREFIX + key, JSON.stringify(blob));
+  patchJsonBlob(WORKSPACE_OVERRIDE_KEY_PREFIX + key, field as string, value);
 }
 
 /**
@@ -749,25 +760,17 @@ export function effectiveSettings(user: Settings, workspaceKey: string | null): 
  * hand-edited or stale key can never feed the editor a bad map; an absent/corrupt blob returns {}.
  */
 export function loadKeybindingOverrides(): Partial<Record<BindingId, string>> {
-  const raw = readRaw(KEYBINDINGS_KEY);
-  if (raw === null) return {};
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    const blob = parsed as Record<string, unknown>;
-    const out: Partial<Record<BindingId, string>> = {};
-    for (const [id, value] of Object.entries(blob)) {
-      // Keep only known BindingIds with a string value ('' is the deliberate "unbound" override).
-      // hasOwnProperty, not `in` — `in` is true for inherited Object keys ('toString', 'constructor'),
-      // which would let a hand-edited blob smuggle a bogus id past the "drop unknown ids" guard.
-      if (Object.prototype.hasOwnProperty.call(DEFAULT_BINDINGS, id) && typeof value === 'string') {
-        out[id as BindingId] = value;
-      }
+  const blob = readJsonObject(KEYBINDINGS_KEY);
+  const out: Partial<Record<BindingId, string>> = {};
+  for (const [id, value] of Object.entries(blob)) {
+    // Keep only known BindingIds with a string value ('' is the deliberate "unbound" override).
+    // hasOwnProperty, not `in` — `in` is true for inherited Object keys ('toString', 'constructor'),
+    // which would let a hand-edited blob smuggle a bogus id past the "drop unknown ids" guard.
+    if (Object.prototype.hasOwnProperty.call(DEFAULT_BINDINGS, id) && typeof value === 'string') {
+      out[id as BindingId] = value;
     }
-    return out;
-  } catch {
-    return {};
   }
+  return out;
 }
 
 /** The full keybinding map the editor loads: defaults with the user's overrides layered on top. */
@@ -780,24 +783,7 @@ export function resolveKeybindings(): Record<BindingId, string> {
  * again. Reads the current blob, applies the change, and writes it back via writeRaw.
  */
 export function saveKeybindingOverride(id: BindingId, key: string | null): void {
-  const raw = readRaw(KEYBINDINGS_KEY);
-  let blob: Record<string, unknown> = {};
-  if (raw !== null) {
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        blob = parsed as Record<string, unknown>;
-      }
-    } catch {
-      // corrupt blob — start fresh
-    }
-  }
-  if (key === null) {
-    delete blob[id];
-  } else {
-    blob[id] = key;
-  }
-  writeRaw(KEYBINDINGS_KEY, JSON.stringify(blob));
+  patchJsonBlob(KEYBINDINGS_KEY, id, key);
 }
 
 /** Forget all keybinding overrides — resolveKeybindings() then returns pure defaults. */
