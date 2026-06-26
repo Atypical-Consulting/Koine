@@ -2131,23 +2131,15 @@ public sealed class KoineLanguageService
     /// </summary>
     public IReadOnlyList<Reference>? LinkedEditingRangeAt(KoineCompilation compilation, string activeUri, int line, int character)
     {
-        if (!compilation.Documents.TryGetValue(activeUri, out var source))
-        {
-            return null;
-        }
-
-        var ctx = TokenLocator.Locate(source, line, character);
-        var name = ctx.CurrentToken?.Text;
-        if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
-        {
-            return null;
-        }
-
-        // Resolve the symbol exactly as RenameAt does (offset + enclosing-type scope), then keep only
-        // the occurrences in the active file — linked editing edits a single file in place.
-        var offset = OffsetOf(source, line, character);
-        var refs = compilation.WorkspaceIndex.FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
-        var inFile = refs.Where(r => string.Equals(r.Uri, activeUri, StringComparison.Ordinal)).ToList();
+        // Resolve via the SAME path as find-references, then keep only the active-file occurrences —
+        // linked editing edits a single file in place. Delegating to ReferencesAt (rather than copying
+        // its string/regex/primitive guards and symbol resolution) keeps a future change to that
+        // resolution from silently desyncing linked editing, mirroring how RenamePreviewAt delegates to
+        // RenameAt. ReferencesAt already returns an empty list for every null case, so the filter yields
+        // an empty list there too, which collapses to null.
+        var inFile = ReferencesAt(compilation, activeUri, line, character)
+            .Where(r => string.Equals(r.Uri, activeUri, StringComparison.Ordinal))
+            .ToList();
         return inFile.Count == 0 ? null : inFile;
     }
 

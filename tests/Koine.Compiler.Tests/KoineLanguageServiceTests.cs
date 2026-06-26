@@ -891,6 +891,30 @@ public class KoineLanguageServiceTests
     }
 
     [Fact]
+    public void LinkedEditing_is_exactly_the_active_file_subset_of_references()
+    {
+        // Linked editing now delegates to ReferencesAt and filters to the active file (#356), so the two
+        // must agree occurrence-for-occurrence on the active-file slice — guarding against the symbol
+        // resolution paths silently drifting apart.
+        var ordering = "context Ordering {\n  value Line { product: ProductId }\n}\n";
+        var catalog = "context Catalog {\n  entity Product identified by ProductId { sku: String }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///ordering.koi"] = ordering,
+            ["file:///catalog.koi"] = catalog,
+        };
+        var col = ordering.Split('\n')[1].IndexOf("ProductId", StringComparison.Ordinal) + 1;
+
+        var linked = Svc.LinkedEditingRangeAt(docs, "file:///ordering.koi", line: 1, character: col);
+        var expected = Svc.ReferencesAt(docs, "file:///ordering.koi", line: 1, character: col)
+            .Where(r => r.Uri == "file:///ordering.koi")
+            .ToList();
+
+        linked.ShouldNotBeNull();
+        linked.ShouldBe(expected); // same occurrences, same order
+    }
+
+    [Fact]
     public void LinkedEditing_on_a_primitive_returns_null()
     {
         var src = "context C {\n  value V { x: Decimal }\n}\n";
