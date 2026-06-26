@@ -9,9 +9,13 @@
 // (ide.tsx) owns the markup and wires it via `connectInstallAffordance` below.
 
 import { localStorageFlag, type StorageLike } from './localStorageFlag';
+import { announce as defaultAnnounce } from './liveRegion';
 
 /** localStorage key recording that the user dismissed the in-app install affordance (non-nagging). */
 export const INSTALL_DISMISSED_KEY = 'koine.studio.installDismissed';
+
+/** What assistive tech hears when the install affordance slides into the toolbar (#522). */
+export const INSTALL_ANNOUNCEMENT = 'Koine Studio can be installed';
 
 /** The non-standard install-prompt event. Typed locally — lib.dom.d.ts ships no declaration for it. */
 export interface BeforeInstallPromptEvent extends Event {
@@ -130,6 +134,8 @@ export interface InstallAffordanceDom {
   dismissButton: HTMLButtonElement;
   /** The event source for `beforeinstallprompt`/`appinstalled` (defaults to `window`). */
   target?: EventTarget;
+  /** Polite live-region announcer for the reveal (defaults to the shared {@link defaultAnnounce}; injectable for tests). */
+  announce?: (message: string) => void;
 }
 
 /**
@@ -142,9 +148,17 @@ export function connectInstallAffordance(
   dom: InstallAffordanceDom,
 ): () => void {
   const target = dom.target ?? window;
+  const announce = dom.announce ?? defaultAnnounce;
 
+  // Announce only on the hidden→visible edge, so assistive tech hears about the affordance once when it
+  // appears — not on every controller notification, nor when it's hidden/dismissed. Seed from the
+  // current DOM state (the markup ships `hidden`) so a reveal during the initial `sync()` still fires.
+  let wasVisible = !dom.root.hidden;
   const sync = (): void => {
-    dom.root.hidden = !controller.canInstall();
+    const visible = controller.canInstall();
+    dom.root.hidden = !visible;
+    if (visible && !wasVisible) announce(INSTALL_ANNOUNCEMENT);
+    wasVisible = visible;
   };
   const onBip = (e: Event): void => controller.onBeforeInstallPrompt(e as BeforeInstallPromptEvent);
   const onInstalled = (): void => controller.onAppInstalled();
