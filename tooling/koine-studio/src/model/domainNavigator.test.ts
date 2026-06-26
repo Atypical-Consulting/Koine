@@ -158,6 +158,27 @@ describe('mountDomainNavigator', () => {
     expect(store.getState().navAltitude).toBe('strategic');
   });
 
+  it('a top-bar scope change lands on strategic — no surprise auto-drill (navAltitude reset)', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+    mountDomainNavigator(host, store, fakeLsp());
+    await flush(); // strategic context rows painted
+
+    // Drill into Ordering via the in-navigator row → tactical.
+    (host.querySelector('[data-ctx="Ordering"]') as HTMLButtonElement).click();
+    expect(store.getState().navAltitude).toBe('tactical');
+    await flush();
+
+    // A top-bar scope change drives the store's setActiveContext DIRECTLY (not the in-navigator drill).
+    // The navigator must reset to strategic — it shows what navAltitude says, never auto-drilling into
+    // the freshly-picked context with a stale 'tactical'.
+    store.getState().setActiveContext('Billing');
+    expect(store.getState().navAltitude).toBe('strategic');
+    expect(host.querySelector('.koi-breadcrumb-back')).toBeNull(); // not the tactical view
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeTruthy(); // the strategic context list is shown
+  });
+
   it('delegates the Context Map / Ubiquitous Language doorways to the caller', async () => {
     const host = document.createElement('div');
     document.body.appendChild(host);

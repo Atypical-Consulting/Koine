@@ -62,10 +62,14 @@ const node = (kind: string, title: string, children: ModelNode[] = []): ModelNod
 });
 
 // The Ordering bounded context as a model graph: one aggregate owning three constructs, plus a
-// context-level peer — enough rows for keyboard nav and for the per-level filter to narrow.
+// context-level peer — enough rows for keyboard nav and for the per-level filter to narrow. The
+// aggregate carries the realistic `<Ctx>.<Agg>` qualified name production emits (e.g. 'Ordering.Order').
 function orderingCtxNode(): ModelNode {
   return node('context', 'Ordering', [
-    node('aggregate', 'Order', [node('entity', 'Order'), node('value', 'Money'), node('event', 'OrderPlaced')]),
+    {
+      ...node('aggregate', 'Order', [node('entity', 'Order'), node('value', 'Money'), node('event', 'OrderPlaced')]),
+      qualifiedName: 'Ordering.Order',
+    },
     node('value', 'Currency'),
   ]);
 }
@@ -112,6 +116,22 @@ describe('Domain navigator a11y — tactical', () => {
     items[0].focus();
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
     expect(document.activeElement).toBe(items[1]);
+  });
+
+  it('the ContextMenu / Shift+F10 key opens the focused leaf row’s ⋯ overflow (keyboard-reachable)', () => {
+    const el = renderTactical(orderingCtxNode(), noopTacticalHandlers());
+    document.body.appendChild(el); // the ⋯ menu mounts to document.body; afterEach clears it
+
+    // Focus a tactical-leaf wrapper row (the one carrying a ⋯ overflow), then press the context-menu key.
+    const leafRow = el.querySelector<HTMLElement>('.koi-tactical-leaf-row')!;
+    leafRow.tabIndex = 0;
+    leafRow.focus();
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ContextMenu', bubbles: true }));
+
+    // The overflow menu is now open with its "Reveal in Files" item — reachable without a mouse.
+    const menu = document.querySelector('.koi-tactical-menu');
+    expect(menu).toBeTruthy();
+    expect(menu!.textContent).toContain('Reveal in Files');
   });
 });
 

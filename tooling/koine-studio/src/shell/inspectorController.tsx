@@ -1020,13 +1020,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Capture the 'model' stale-token before the await; markLoaded only takes if it's still current
     // after, so an edit mid-fetch leaves the surface stale for the next show (the slice discipline).
     const token = appStore.getState().currentToken('model');
+    // The navigator's strategic data is scope-INDEPENDENT and it repaints from its own cache on
+    // activeContext/outlineFilter store changes — so only re-fetch when the MODEL actually changed, not on
+    // a pure scope/filter re-render (rerenderScopedSurfaces keeps the model index, so a null index is the
+    // reliable "the model was (re)loaded" signal — an edit nulls it via invalidateDocViews). Captured
+    // BEFORE ensureModelIndex() rebuilds it.
+    const hadIndex = modelIndex != null;
     // Mount the navigator once (it paints a loading placeholder + its own empty state, and surfaces a
     // fetch failure in the pane itself); a reload re-fetches its strategic data. Kicking this off before
     // the await runs its fetch in parallel with the model index build, so the rail paints promptly. Its
     // Context Map / Ubiquitous Language doorways route to the same focuses the docs footer used.
     if (!domainNavigator) {
       domainNavigator = mountDomainNavigator(domainPane, appStore, lsp, modelOutlineHandlers, tacticalHandlers);
-    } else {
+    } else if (!hadIndex) {
       domainNavigator.reload();
     }
     try {

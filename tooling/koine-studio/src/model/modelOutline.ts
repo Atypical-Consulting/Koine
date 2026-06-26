@@ -286,8 +286,9 @@ export function constructForKind(kind: string): { slug: string; label: string } 
   };
 }
 
-/** A small shape-coded icon for a DDD construct; the shape + colour live in CSS keyed by `data-construct`. */
-function constructIcon(slug: string): HTMLElement {
+/** A small shape-coded icon for a DDD construct; the shape + colour live in CSS keyed by `data-construct`.
+ *  Exported so the Domain navigator (#453) wears the SAME glyph markup — one source for the icon shape. */
+export function constructIcon(slug: string): HTMLElement {
   const icon = document.createElement('span');
   icon.className = 'koi-model-icon';
   icon.dataset.construct = slug;

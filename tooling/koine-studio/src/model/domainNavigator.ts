@@ -9,7 +9,7 @@
 // independently: they reuse `countsByContext` (the one tally source shared with the Model outline), so
 // the two navigators can never disagree on a context's size.
 import type { ContextMapResult, GlossaryModel, ModelNode } from '@/lsp/lsp';
-import { constructForKind, countsByContext, type ModelOutlineHandlers } from '@/model/modelOutline';
+import { constructForKind, constructIcon, countsByContext, type ModelOutlineHandlers } from '@/model/modelOutline';
 import { filterGlossaryModel, isAllContexts } from '@/model/activeContext';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
@@ -139,6 +139,17 @@ function wireTreeNav(tree: HTMLElement): void {
       (ev.target as HTMLElement | null)?.closest<HTMLElement>('[role="treeitem"]') ??
       focused?.closest<HTMLElement>('[role="treeitem"]') ??
       null;
+    // Context-menu affordance: the dedicated ContextMenu key (or Shift+F10) opens the focused row's `⋯`
+    // overflow, so keyboard users reach its cross-axis actions ("Reveal in Files") the mouse gets from the
+    // `⋯` button (which roving tabindex keeps out of the tab order).
+    if (ev.key === 'ContextMenu' || (ev.shiftKey && ev.key === 'F10')) {
+      const more = current?.querySelector<HTMLElement>('.koi-tactical-more');
+      if (more) {
+        ev.preventDefault();
+        more.click();
+      }
+      return;
+    }
     const idx = current ? items.indexOf(current) : -1;
     switch (ev.key) {
       case 'ArrowDown':
@@ -187,6 +198,8 @@ export function renderStrategic(model: GlossaryModel, relLinks: number, h: Strat
 
   const doors = document.createElement('div');
   doors.className = 'koi-domain-doors';
+  // The doorway treeitems need an owning group (aria-required-parent) — mirror the tactical peers list.
+  doors.setAttribute('role', 'group');
   doors.appendChild(
     doorwayRow({ door: 'contextmap', symbol: '⤳', label: 'Context Map', count: relLinks, onOpen: h.onOpenContextMap }),
   );
@@ -273,13 +286,24 @@ export function mountDomainNavigator(
   let cache: { model: GlossaryModel; relLinks: number; tree: ModelNode | null } | null = null;
   let fetchSeq = 0;
 
+  // True only WHILE the in-navigator drill sets the scope+altitude together (onOpenContext below). It lets
+  // the store subscription tell that drill apart from an EXTERNAL `activeContext` change (the top-bar scope
+  // switcher), which must reset the altitude to strategic instead of surprise-drilling into the new scope.
+  let drilling = false;
+
   const strategicHandlers: StrategicHandlers = {
     // Drilling in is one gesture across two store fields: narrow the scope AND descend to tactical. The
-    // store subscription below repaints the navigator (the breadcrumb + the context's tactical body).
+    // store subscription below repaints the navigator (the breadcrumb + the context's tactical body); the
+    // `drilling` guard keeps that subscription from treating this paired write as an external scope change.
     onOpenContext: (ctx) => {
       const s = store.getState();
-      s.setActiveContext(ctx);
-      s.setNavAltitude('tactical');
+      drilling = true;
+      try {
+        s.setActiveContext(ctx);
+        s.setNavAltitude('tactical');
+      } finally {
+        drilling = false;
+      }
     },
     onOpenContextMap: () => handlers.onOpenContextMap?.(),
     onOpenGlossary: () => handlers.onOpenGlossary?.(),
@@ -311,12 +335,14 @@ export function mountDomainNavigator(
   // the ALTITUDE changed — so a drill / climb animates but a filter keystroke doesn't flicker. The
   // animation is CSS, gated behind `prefers-reduced-motion: no-preference` in `_leftrail.scss`.
   function paint(level: HTMLElement, altitude: typeof paintedAltitude): void {
+    closeLeafMenu(false); // a body swap orphans any open ⋯ menu; drop it (its trigger is about to be torn down)
     if (altitude !== paintedAltitude) level.classList.add('koi-domain-enter');
     paintedAltitude = altitude;
     body.replaceChildren(level);
   }
 
   function render(): void {
+    closeLeafMenu(false); // the loading/empty branches below replaceChildren directly — close any stale ⋯ menu first
     const s = store.getState();
     if (filterInput.value !== s.outlineFilter) filterInput.value = s.outlineFilter;
 
@@ -374,6 +400,14 @@ export function mountDomainNavigator(
   // filter — mirroring the controller's `subscribe((s, prev) => …)` discipline (an unrelated slice write
   // doesn't repaint the navigator).
   const unsubscribe = store.subscribe((s, prev) => {
+    // An EXTERNAL scope change (the top-bar switcher, not the in-navigator drill) must land on strategic:
+    // reset the altitude so the navigator shows what `navAltitude` says rather than auto-drilling into the
+    // freshly-picked context. Resetting re-enters this subscription with the altitude change, which paints
+    // the strategic level — so we return here and let that nested render do the work.
+    if (s.activeContext !== prev.activeContext && !drilling && s.navAltitude === 'tactical') {
+      store.getState().setNavAltitude('strategic');
+      return;
+    }
     if (
       s.navAltitude === prev.navAltitude &&
       s.activeContext === prev.activeContext &&
@@ -389,7 +423,10 @@ export function mountDomainNavigator(
 
   return {
     reload: () => void doFetch(),
-    unmount: () => unsubscribe(),
+    unmount: () => {
+      closeLeafMenu(false); // a torn-down host must not leave an orphaned floating menu + global listeners
+      unsubscribe();
+    },
   };
 }
 
@@ -453,17 +490,6 @@ function filterContextNode(ctx: ModelNode | null, query: string): ModelNode | nu
   return { ...ctx, children };
 }
 
-/** A small shape-coded construct glyph, keyed by the slug the shared grammar ({@link constructForKind})
- * resolves — the SAME `.koi-model-icon[data-construct]` the Explorer outline + diagram nodes wear, so a
- * value object reads as the same blue lozenge everywhere. */
-function constructGlyph(slug: string): HTMLElement {
-  const icon = document.createElement('span');
-  icon.className = 'koi-model-icon';
-  icon.dataset.construct = slug;
-  icon.setAttribute('aria-hidden', 'true');
-  return icon;
-}
-
 /** One tactical leaf — an owned construct (under an aggregate) or a context-level peer. The row IS the
  * `treeitem`; inside it the activation button (`.koi-tactical-leaf`, carrying `data-construct` + `data-name`
  * so a click resolves to the model element + cross-highlights) selects-and-jumps, and a trailing `⋯`
@@ -474,13 +500,16 @@ function tacticalLeaf(node: ModelNode, h: TacticalHandlers): HTMLElement {
   const row = document.createElement('div');
   row.className = 'koi-tactical-leaf-row';
   row.setAttribute('role', 'treeitem');
+  // The wrapper's accessible name is otherwise computed from ALL descendant text (the leaf + the `⋯`
+  // button's "Actions for …" label), so isolate it to the node title with an explicit aria-label.
+  row.setAttribute('aria-label', node.title);
 
   const leaf = document.createElement('button');
   leaf.type = 'button';
   leaf.className = 'koi-tactical-leaf';
   leaf.dataset.construct = slug;
   leaf.dataset.name = node.title;
-  leaf.append(constructGlyph(slug), node.title);
+  leaf.append(constructIcon(slug), node.title);
   leaf.addEventListener('click', () => {
     h.onSelect(node);
     h.goto(node);
@@ -516,7 +545,11 @@ function leafOverflowButton(node: ModelNode, h: TacticalHandlers): HTMLElement {
 let leafMenuEl: HTMLElement | null = null;
 let leafMenuTrigger: HTMLElement | null = null;
 
-function closeLeafMenu(): void {
+/** Tear down the floating leaf menu and its global listeners. Idempotent — a no-op when nothing is open,
+ *  so it's safe to call on every re-render / unmount. `refocus` returns focus to the `⋯` trigger (the
+ *  normal dismiss); the "Reveal in Files" action passes `false` because it immediately hides the Domain
+ *  pane (the trigger included), which would strand focus on `<body>` — the Files reveal owns focus then. */
+function closeLeafMenu(refocus = true): void {
   if (!leafMenuEl) return;
   leafMenuEl.remove();
   leafMenuEl = null;
@@ -526,7 +559,7 @@ function closeLeafMenu(): void {
   leafMenuTrigger = null;
   if (trigger) {
     trigger.setAttribute('aria-expanded', 'false');
-    if (trigger.isConnected) trigger.focus();
+    if (refocus && trigger.isConnected) trigger.focus();
   }
 }
 
@@ -567,7 +600,9 @@ function openLeafMenu(trigger: HTMLElement, node: ModelNode, h: TacticalHandlers
   item.setAttribute('role', 'menuitem');
   item.textContent = 'Reveal in Files';
   item.addEventListener('click', () => {
-    closeLeafMenu();
+    // Don't refocus the `⋯` trigger: setAxis('files') hides the Domain pane (the trigger with it), so a
+    // refocus would land on a hidden node and drop focus to <body>. Let the Files reveal own focus.
+    closeLeafMenu(false);
     h.setAxis('files');
     h.reveal(node);
   });
@@ -593,6 +628,9 @@ function aggregateNode(agg: ModelNode, h: TacticalHandlers): HTMLElement {
   node.dataset.qname = agg.qualifiedName;
   node.setAttribute('role', 'treeitem');
   node.setAttribute('aria-expanded', 'true');
+  // Isolate the accessible name to the aggregate title — otherwise it concatenates every owned child's
+  // text (the nested role="group" spine) into the aggregate's announced name.
+  node.setAttribute('aria-label', agg.title);
 
   const { slug } = constructForKind(agg.kind);
   const head = document.createElement('button');
@@ -602,7 +640,7 @@ function aggregateNode(agg: ModelNode, h: TacticalHandlers): HTMLElement {
   const headName = document.createElement('span');
   headName.className = 'koi-agg-name';
   headName.textContent = agg.title;
-  head.append(constructGlyph(slug), headName);
+  head.append(constructIcon(slug), headName);
   head.addEventListener('click', () => {
     h.onSelect(agg);
     h.goto(agg);
@@ -629,12 +667,25 @@ function aggregateNode(agg: ModelNode, h: TacticalHandlers): HTMLElement {
 export function renderTactical(ctxNode: ModelNode | null | undefined, h: TacticalHandlers): HTMLElement {
   const body = document.createElement('div');
   body.className = 'koi-domain-tactical-body';
-  body.setAttribute('role', 'tree');
-  if (ctxNode) body.setAttribute('aria-label', `${ctxNode.title} aggregates`);
 
   const children = ctxNode?.children ?? [];
   const aggregates = children.filter((c) => c.kind === 'aggregate');
   const peers = children.filter((c) => c.kind !== 'aggregate');
+
+  // An empty context (no aggregates/types, or the filter excluded everything) renders a plain status
+  // note — NOT an empty `role="tree"`, which would both violate aria-required-children AND leave a
+  // keyboard-unreachable tree (no tabbable treeitem). So the role is added only once there are rows.
+  if (!aggregates.length && !peers.length) {
+    body.setAttribute('role', 'note');
+    const note = document.createElement('p');
+    note.className = 'muted koi-tactical-empty';
+    note.textContent = 'No aggregates or types here yet.';
+    body.appendChild(note);
+    return body;
+  }
+
+  body.setAttribute('role', 'tree');
+  if (ctxNode) body.setAttribute('aria-label', `${ctxNode.title} aggregates`);
 
   for (const agg of aggregates) body.appendChild(aggregateNode(agg, h));
 
@@ -644,13 +695,6 @@ export function renderTactical(ctxNode: ModelNode | null | undefined, h: Tactica
     peerGroup.setAttribute('role', 'group');
     for (const peer of peers) peerGroup.appendChild(tacticalLeaf(peer, h));
     body.appendChild(peerGroup);
-  }
-
-  if (!aggregates.length && !peers.length) {
-    const note = document.createElement('p');
-    note.className = 'muted koi-tactical-empty';
-    note.textContent = 'No aggregates or types here yet.';
-    body.appendChild(note);
   }
 
   wireTreeNav(body); // roving tabindex + Arrow/Home/End across the aggregate + leaf rows

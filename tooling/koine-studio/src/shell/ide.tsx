@@ -485,15 +485,12 @@ export function init(): () => void {
     sect.querySelector('.rail-sect-head')?.setAttribute('aria-expanded', String(open));
   }
 
-  // The Files section of the single left sidebar is collapsible; the section header (and ⌘B) toggle
-  // it, and the choice is persisted. (The file tree no longer has its own column — it's one section
-  // of the unified rail.)
-  const FILETREE_VIS_KEY = 'koine.studio.filetree';
-  function applyFileTreeVisibility(visible: boolean): void {
-    setRailSectionOpen(filesSect, visible);
-  }
+  // Since #453 the rail's AXIS (Domain vs Files) is the single source of truth for the file tree's
+  // visibility — `controller.setAxis` owns + persists it (RAIL_AXIS_KEY) and `applyAxis` toggles the
+  // Files pane. So opening a folder/workspace surfaces the Files axis (matching the "Reveal in Files"
+  // path), rather than poking `dataset.open` on a pane the default Domain axis keeps hidden.
   function showFileTreeChrome(): void {
-    applyFileTreeVisibility((localStorage.getItem(FILETREE_VIS_KEY) ?? '1') !== '0');
+    controller.setAxis('files');
   }
   function toggleFileTree(): void {
     // ⌘B shows/hides "the file tree", which since #453 lives on the rail's Files axis — so this toggles
