@@ -176,6 +176,30 @@ describe('CanvasPalette', () => {
     expect(onCopyMermaid).toHaveBeenCalledTimes(1);
   });
 
+  // #534 facet (1): a native <details> only closes via its own <summary>, so picking an Export item used
+  // to leave the popover open. Selecting any item must now both fire its action AND close the disclosure.
+  test('selecting an export format closes the Export disclosure (#534)', () => {
+    const onExport = vi.fn();
+    const { container } = renderPalette(createAppStore(), { onExport });
+    const details = container.querySelector('details.koi-export') as HTMLDetailsElement;
+    details.setAttribute('open', '');
+    expect(details.hasAttribute('open')).toBe(true);
+    fireEvent.click(exportBtn(container, 'svg'));
+    expect(onExport).toHaveBeenCalledWith('svg');
+    expect(details.hasAttribute('open')).toBe(false);
+  });
+
+  test('clicking Copy Mermaid closes the Export disclosure (#534)', () => {
+    const onCopyMermaid = vi.fn();
+    const { container } = renderPalette(createAppStore(), { onCopyMermaid });
+    const details = container.querySelector('details.koi-export') as HTMLDetailsElement;
+    details.setAttribute('open', '');
+    expect(details.hasAttribute('open')).toBe(true);
+    fireEvent.click(exportBtn(container, 'mermaid'));
+    expect(onCopyMermaid).toHaveBeenCalledTimes(1);
+    expect(details.hasAttribute('open')).toBe(false);
+  });
+
   test('has no accessibility violations', async () => {
     const store = createAppStore();
     act(() => store.getState().setActiveContext('Ordering'));

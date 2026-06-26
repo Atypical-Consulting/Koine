@@ -78,6 +78,13 @@ export function CanvasPalette(props: {
   const hit = selection && props.index ? lookupElement(props.index, selection.qualifiedName) : null;
   const aggregateQn = hit && hit.element.entry.kind === 'aggregate' ? hit.canonicalQn : null;
 
+  // Close the enclosing Export <details> after an item is picked (#534). A native disclosure only
+  // toggles via its own <summary>, so without this the popover lingers open over the canvas (and could
+  // paint above a later modal scrim). Removing `open` is idempotent and keyboard-safe (Enter/Space on an
+  // item fires `click` too).
+  const closeMenu = (ev: Event) =>
+    (ev.currentTarget as HTMLElement).closest('details.koi-export')?.removeAttribute('open');
+
   return (
     <div class="koi-canvas-palette" role="toolbar" aria-label="Add domain construct">
       {CONSTRUCTS.map((c) => (
@@ -154,7 +161,10 @@ export function CanvasPalette(props: {
               data-export={e.format}
               key={e.format}
               title={e.tooltip}
-              onClick={() => props.onExport(e.format)}
+              onClick={(ev) => {
+                closeMenu(ev);
+                props.onExport(e.format);
+              }}
             >
               {e.label}
             </button>
@@ -164,7 +174,10 @@ export function CanvasPalette(props: {
             class="koi-export-item"
             data-export="mermaid"
             title="Copy the diagram's Mermaid source to the clipboard"
-            onClick={() => props.onCopyMermaid()}
+            onClick={(ev) => {
+              closeMenu(ev);
+              props.onCopyMermaid();
+            }}
           >
             Copy Mermaid
           </button>
