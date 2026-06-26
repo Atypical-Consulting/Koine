@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { chordFromEvent, createPreferences, type PrefsCallbacks } from '@/settings/prefs';
+import { createPreferences, type PrefsCallbacks } from '@/settings/prefs';
 import {
   DEFAULT_SETTINGS,
   loadSettings,
@@ -375,33 +375,9 @@ describe('Settings → User/Workspace scope toggle', () => {
   });
 });
 
-// chordFromEvent is a pure keydown→CodeMirror-key normalizer; unit-test it directly (no DOM/UI).
-describe('chordFromEvent', () => {
-  const ev = (init: KeyboardEventInit) => new KeyboardEvent('keydown', init);
-
-  it('maps a plain function key', () => {
-    expect(chordFromEvent(ev({ key: 'F2' }))).toBe('F2');
-  });
-  it('maps Ctrl+D to a portable Mod chord', () => {
-    expect(chordFromEvent(ev({ key: 'd', ctrlKey: true }))).toBe('Mod-d');
-  });
-  it('maps Shift+F12', () => {
-    expect(chordFromEvent(ev({ key: 'F12', shiftKey: true }))).toBe('Shift-F12');
-  });
-  it('maps Ctrl+. (a punctuation key)', () => {
-    expect(chordFromEvent(ev({ key: '.', ctrlKey: true }))).toBe('Mod-.');
-  });
-  it('returns null for a bare modifier (keep waiting for a real key)', () => {
-    expect(chordFromEvent(ev({ key: 'Shift', shiftKey: true }))).toBeNull();
-    expect(chordFromEvent(ev({ key: 'Control', ctrlKey: true }))).toBeNull();
-    expect(chordFromEvent(ev({ key: 'Alt', altKey: true }))).toBeNull();
-    expect(chordFromEvent(ev({ key: 'Meta', metaKey: true }))).toBeNull();
-  });
-  it('lowercases the base and orders modifiers Mod-Shift', () => {
-    expect(chordFromEvent(ev({ key: 'K', ctrlKey: true, shiftKey: true }))).toBe('Mod-Shift-k');
-  });
-});
-
+// chordFromEvent + prettyChord moved to shared/platform.ts (beside formatChord) and are unit-tested
+// there in platform.test.ts. The keyboard-settings tests below still exercise their behavior through
+// the dialog (e.g. the 'Ctrl+S' / 'Unbound' chord-display assertions, which run prettyChord).
 describe('keyboard settings', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
