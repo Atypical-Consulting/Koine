@@ -85,7 +85,7 @@ import { isAllContexts } from '@/model/activeContext';
 import { appStore } from '@/store/index';
 import { badgeCounts, createDiagCountGate } from '@/diagnostics/diagCountGate';
 import { severityErrorOrWarning } from '@/lsp/severity';
-import { type SelectedElement } from '@/model/selection';
+import { reanchorSelectionAfterRename, type SelectedElement } from '@/model/selection';
 import { resolveInspectableQn } from '@/model/modelIndex';
 import { type InspectorElement } from '@/model/inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
@@ -102,6 +102,7 @@ import { HistoryControls } from '@/shell/HistoryControls';
 import { MobileZoneBar } from '@/shell/MobileZoneBar';
 import { type MobileZone } from '@/store/slices/uiChrome';
 import { isNarrowViewport } from '@/shared/breakpoint';
+import { buildOverflowItems, toggleOverflowMenu } from '@/shell/toolbarOverflow';
 import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
 import { createWorkspaceController, type WorkspaceController } from '@/shell/workspaceController';
@@ -707,6 +708,18 @@ export function init(): () => void {
         return;
       }
       workspace.applyWorkspaceEdit(edit);
+      // Re-anchor the selection to the renamed element's new identity (#537). Selection is keyed by
+      // qualified name; applyWorkspaceEdit rebuilds the model under the NEW name but leaves the stored
+      // selection on the OLD one — so the Properties panel's lookup misses (empty "Select an element…"
+      // state) and the breadcrumb shows the stale name. The rename already validated (non-empty changes
+      // ⇒ a renameable symbol + a valid identifier), so the new qualified name is deterministic. `element`
+      // carries the identity (canonical qn + context + old name) needed to match a selection in either
+      // key form. The set is idempotent and the Properties panel + breadcrumb both subscribe to the
+      // selection slice, so they follow it (the panel repopulates once the model index rebuilds on
+      // onDocEdited's refresh).
+      const current = appStore.getState().selection;
+      const reanchored = reanchorSelectionAfterRename(current, element, newName);
+      if (reanchored !== current) selection.set(reanchored);
       setStatus(`Renamed ${element.name} → ${newName}`, 'green');
     } catch (e) {
       setStatus('Rename failed: ' + String(e), 'error');
@@ -2118,6 +2131,22 @@ export function init(): () => void {
   if (!platform.canSaveProjects) saveProjectBtn.hidden = true;
   el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
   el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => prefs.open());
+
+  // Mobile overflow "More" (⋮) menu (#528): at ≤ $bp-narrow the toolbar hides its secondary actions
+  // (Save/Check/Install/⌘K/theme/Settings) and reveals this kebab, which collects them into a floating
+  // menu. Items reuse the command-palette handlers (getCommands) so they never drift; Install is gated
+  // on its affordance being revealed (#442) and reuses the #btn-install handler.
+  const overflowBtn = el<HTMLButtonElement>('btn-toolbar-overflow');
+  overflowBtn.addEventListener('click', () =>
+    toggleOverflowMenu(overflowBtn, () =>
+      buildOverflowItems({
+        commands: getCommands(),
+        openPalette: () => palette.open(),
+        installAvailable: !el<HTMLElement>('install-affordance').hidden,
+        install: () => el<HTMLButtonElement>('btn-install').click(),
+      }),
+    ),
+  );
 
   // Format the active document via the LSP and apply the edits (shared by the palette command
   // and format-on-save). Degrades silently if the request fails.

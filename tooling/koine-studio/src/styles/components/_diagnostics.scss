@@ -1,3 +1,5 @@
+@use '../abstracts' as a;
+
 /* --- diagnostics strip ---
    A fixed header (always visible: title + counts + collapse chevron) over a scrollable body
    whose height is user-draggable (--koi-diag-h) via the top-edge resizer. Collapsing hides the
@@ -198,6 +200,20 @@ body.resizing #diag-resizer {
 .diag-tab:focus-visible {
   outline: 2px solid var(--koi-accent);
   outline-offset: -2px;
+}
+
+/* At phone width the six-tab strip (Problems / Events / Relationships / Context Map / Terminal / Review)
+   can't fit, so multi-word labels like "Context Map" broke onto a second line (#528). Keep each tab on
+   one line and let the WHOLE strip scroll horizontally instead — one row, swipeable, nothing clipped. */
+@media (max-width: a.$bp-narrow) {
+  .diag-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .diag-tab {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
 }
 
 /* All three bottom panels (Problems / Events / Relationships) share one draggable-height scroll box. */
