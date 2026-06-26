@@ -4,7 +4,7 @@
 // #438) with syntax-highlighted output, a grouped file tree, copy + download-as-zip, a mobile
 // editor/output toggle, and the "Open in Studio" handoff.
 import { createKoineEditor, createOutputView, highlightModeForTarget, type KoineEditor, type OutputView } from './editor';
-import { capabilities, compile, listEmitTargets, preloadCompiler, terminateAndRespawn, type CompileResult, type EmitTarget, type Target } from './koine';
+import { capabilities, compile, getBootMode, listEmitTargets, preloadCompiler, terminateAndRespawn, type CompileResult, type EmitTarget, type Target } from './koine';
 import { createSuperseder } from './supersede';
 import { registerPlaygroundServiceWorker } from './sw-register';
 import { DEFAULT_SAMPLE } from './samples';
@@ -319,6 +319,16 @@ export function mountPlayground(root: HTMLElement): void {
   void listEmitTargets().then((targets) => {
     renderTargetTabs(targets);
     void run(true);
+    // Surface a degraded (main-thread) boot so the page and a maintainer can see the fallback won
+    // (#510) — the worker boot failed but the compiler still came up on the UI thread. listEmitTargets()
+    // awaits the same boot, so getBootMode() is settled here.
+    if (getBootMode() === 'main-thread') {
+      root.dataset.bootMode = 'main-thread';
+      if (versionEl) {
+        versionEl.title =
+          'Compiler running on the main thread (the worker boot failed) — a large compile may briefly freeze the page.';
+      }
+    }
   });
 
   // Show the compiler version from the bundle's self-description (#330) — never a hard-coded string.
