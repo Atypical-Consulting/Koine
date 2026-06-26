@@ -85,7 +85,7 @@ import { isAllContexts } from '@/model/activeContext';
 import { appStore } from '@/store/index';
 import { badgeCounts, createDiagCountGate } from '@/diagnostics/diagCountGate';
 import { severityErrorOrWarning } from '@/lsp/severity';
-import { type SelectedElement } from '@/model/selection';
+import { reanchorSelectionAfterRename, type SelectedElement } from '@/model/selection';
 import { resolveInspectableQn } from '@/model/modelIndex';
 import { type InspectorElement } from '@/model/inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
@@ -97,6 +97,7 @@ import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from '@/ex
 import { handleBeforeUnload } from '@/shell/dirty';
 import { render } from 'preact';
 import { createHistoryController } from '@/shell/historyController';
+import { installExportMenuDismiss } from '@/shell/exportMenuDismiss';
 import { HistoryControls } from '@/shell/HistoryControls';
 import { MobileZoneBar } from '@/shell/MobileZoneBar';
 import { type MobileZone } from '@/store/slices/uiChrome';
@@ -707,6 +708,18 @@ export function init(): () => void {
         return;
       }
       workspace.applyWorkspaceEdit(edit);
+      // Re-anchor the selection to the renamed element's new identity (#537). Selection is keyed by
+      // qualified name; applyWorkspaceEdit rebuilds the model under the NEW name but leaves the stored
+      // selection on the OLD one — so the Properties panel's lookup misses (empty "Select an element…"
+      // state) and the breadcrumb shows the stale name. The rename already validated (non-empty changes
+      // ⇒ a renameable symbol + a valid identifier), so the new qualified name is deterministic. `element`
+      // carries the identity (canonical qn + context + old name) needed to match a selection in either
+      // key form. The set is idempotent and the Properties panel + breadcrumb both subscribe to the
+      // selection slice, so they follow it (the panel repopulates once the model index rebuilds on
+      // onDocEdited's refresh).
+      const current = appStore.getState().selection;
+      const reanchored = reanchorSelectionAfterRename(current, element, newName);
+      if (reanchored !== current) selection.set(reanchored);
       setStatus(`Renamed ${element.name} → ${newName}`, 'green');
     } catch (e) {
       setStatus('Rename failed: ' + String(e), 'error');
@@ -1318,6 +1331,10 @@ export function init(): () => void {
   function overlayOpen(): boolean {
     return document.querySelector('.koi-palette-backdrop:not([hidden]), .koi-modal-backdrop:not([hidden])') !== null;
   }
+
+  // Dismiss the diagram Export ▾ disclosure on an outside-click or when any overlay opens, so the
+  // native <details> menu can't linger above a modal scrim (#534). Teardown runs on IDE unmount.
+  const teardownExportMenuDismiss = installExportMenuDismiss();
 
   // --- save (format + write to disk) ----------------------------------------
   // The editor intercepts Cmd/Ctrl-S and calls onFormat; we additionally write the formatted
@@ -2351,5 +2368,6 @@ export function init(): () => void {
     unsubReviewStore(); // release the editor-repaint subscription (the editorSession is destroyed above)
     workspace.setAutoSave(false);
     unsubRouteIntent();
+    teardownExportMenuDismiss(); // drop the global Export-menu dismissal listeners (#534)
   };
 }
