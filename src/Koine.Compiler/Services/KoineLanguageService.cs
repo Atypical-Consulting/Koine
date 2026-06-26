@@ -1999,6 +1999,103 @@ public sealed class KoineLanguageService
     }
 
     /// <summary>
+    /// Rename edits for the name under the cursor, each occurrence paired with its own replacement text.
+    /// For an ordinary symbol this is just <see cref="RenameAt(KoineCompilation,string,int,int,string)"/>
+    /// with every occurrence mapped to <paramref name="newName"/>. The extra power: when the renamed symbol
+    /// is an <b>aggregate root entity</b> whose identity follows the <c>&lt;Root&gt;Id</c> convention, the
+    /// edit ALSO co-renames that identity type to <c>&lt;newName&gt;Id</c> in the same pass (#550) — so a
+    /// <c>PurchaseOrder</c> no longer ends up with an <c>OrderId</c>. Returns null in exactly the cases
+    /// <see cref="RenameAt(KoineCompilation,string,int,int,string)"/> does.
+    /// </summary>
+    public IReadOnlyList<RenameEdit>? RenameEditsAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character, string newName) =>
+        RenameEditsAt(ToCompilation(documents), activeUri, line, character, newName);
+
+    /// <summary>
+    /// Overload of <see cref="RenameEditsAt(IReadOnlyDictionary{string,string},string,int,int,string)"/>
+    /// that reuses a held <see cref="KoineCompilation"/> snapshot.
+    /// </summary>
+    public IReadOnlyList<RenameEdit>? RenameEditsAt(KoineCompilation compilation, string activeUri, int line, int character, string newName)
+    {
+        var refs = RenameAt(compilation, activeUri, line, character, newName);
+        if (refs is null)
+        {
+            return null;
+        }
+
+        var edits = new List<RenameEdit>(refs.Count);
+        foreach (Reference r in refs)
+        {
+            edits.Add(new RenameEdit(r, newName));
+        }
+
+        // The old name under the cursor (RenameAt already validated it resolves and differs from newName).
+        if (compilation.Documents.TryGetValue(activeUri, out var source))
+        {
+            var oldName = TokenLocator.Locate(source, line, character).CurrentToken?.Text;
+            if (!string.IsNullOrEmpty(oldName)
+                && IdentityCoRenameEdits(compilation, activeUri, oldName, newName) is { } idEdits)
+            {
+                edits.AddRange(idEdits);
+            }
+        }
+
+        return edits;
+    }
+
+    /// <summary>
+    /// The co-rename edits for an aggregate root's convention-linked identity type, or null when none apply.
+    /// Fires only when <paramref name="oldName"/> resolves, in the active file's model, to an aggregate
+    /// <b>root entity</b> whose identity type is literally <c>&lt;oldName&gt;Id</c> (the <c>&lt;Root&gt;Id</c>
+    /// convention) AND the proposed <c>&lt;newName&gt;Id</c> would not collide with an existing type. Each
+    /// occurrence of the identity type (its <c>identified by</c> declaration and every <c>: &lt;Root&gt;Id</c>
+    /// use across the workspace) is paired with <c>&lt;newName&gt;Id</c>. Returns null for a non-root entity,
+    /// a non-conventional identity (e.g. <c>identified by Guid</c>), or a name collision — the caller then
+    /// renames just the root and Studio surfaces the left-behind Id (#550, Approach 2 fallback).
+    /// </summary>
+    private static IReadOnlyList<RenameEdit>? IdentityCoRenameEdits(
+        KoineCompilation compilation, string activeUri, string oldName, string newName)
+    {
+        SemanticModel? model = compilation.SemanticModelFor(activeUri);
+        if (model is null)
+        {
+            return null;
+        }
+
+        ModelIndex index = model.Index;
+
+        // The renamed symbol must be the declared root of some aggregate (not a value object/event/etc).
+        if (!index.AllTypes().OfType<AggregateDecl>().Any(a => a.RootName == oldName))
+        {
+            return null;
+        }
+
+        EntityDecl? root = index.AllTypes().OfType<EntityDecl>().FirstOrDefault(e => e.Name == oldName);
+        if (root is null)
+        {
+            return null;
+        }
+
+        // The <Root>Id convention: only co-rename when the identity type is literally <oldName>Id. A
+        // non-conventional identity (a primitive like Guid, or a hand-named type) is left untouched.
+        var oldIdName = oldName + "Id";
+        if (root.IdentityName != oldIdName)
+        {
+            return null;
+        }
+
+        // Collision guard: if <newName>Id already names a type/spec/Id, do not co-rename (Approach 2 fallback).
+        var newIdName = newName + "Id";
+        if (compilation.WorkspaceIndex.DeclaresTypeLike(newIdName))
+        {
+            return null;
+        }
+
+        int? idOffset = root.IdentityNameSpan.IsNone ? null : root.IdentityNameSpan.Offset;
+        IReadOnlyList<Reference> idRefs = compilation.WorkspaceIndex.FindReferences(activeUri, oldIdName, idOffset, null);
+        return idRefs.Count == 0 ? null : idRefs.Select(r => new RenameEdit(r, newIdName)).ToList();
+    }
+
+    /// <summary>
     /// A preview-shaped rename: the same cross-file edits as <see cref="RenameAt(IReadOnlyDictionary{string,string},string,int,int,string)"/>,
     /// regrouped per file so an editor can show a file-by-file diff before applying. Returns null in
     /// exactly the cases <c>RenameAt</c> does (not on a renameable name, an invalid/unchanged identifier,

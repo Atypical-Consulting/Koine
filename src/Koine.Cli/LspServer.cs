@@ -1373,23 +1373,24 @@ internal sealed class LspServer
         }
 
         var newName = nn.GetString()!;
-        // Route through the preview-shaped service method (the single source of truth): it already
-        // groups the cross-file edits per file with the collision guard applied.
-        var preview = _ls.RenamePreviewAt(_compilation, uri, line, ch, newName);
-        if (preview is null)
+        // Route through the per-occurrence edit service method: each occurrence carries its OWN newText,
+        // so an aggregate-root rename can co-rename its convention-linked <Root>Id identity type in the
+        // same edit (#550) — the root takes newName, the identity type takes <newName>Id.
+        var edits = _ls.RenameEditsAt(_compilation, uri, line, ch, newName);
+        if (edits is null)
         {
             return null;
         }
 
-        // Build the WorkspaceEdit.changes map (uri -> TextEdit[]) from the per-file preview groups.
+        // Build the WorkspaceEdit.changes map (uri -> TextEdit[]) grouped per file.
         var changes = new Dictionary<string, object?>(StringComparer.Ordinal);
-        foreach (var file in preview.Files)
+        foreach (var group in edits.GroupBy(e => e.Occurrence.Uri, StringComparer.Ordinal))
         {
-            changes[file.Uri] = file.Occurrences
-                .Select(r => (object)new Dictionary<string, object?>
+            changes[group.Key] = group
+                .Select(e => (object)new Dictionary<string, object?>
                 {
-                    ["range"] = RangeOf(r),
-                    ["newText"] = preview.NewName,
+                    ["range"] = RangeOf(e.Occurrence),
+                    ["newText"] = e.NewText,
                 })
                 .ToArray();
         }

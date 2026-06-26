@@ -722,6 +722,39 @@ public class KoineLanguageServiceTests
         Svc.RenamePreviewAt(Doc(src), U, line: 1, character: 18, newName: "Money").ShouldBeNull();
     }
 
+    // ---- Aggregate-root <Root>Id identity co-rename (#550) ----------------
+
+    [Fact]
+    public void RenameEdits_corenames_an_aggregate_roots_convention_linked_id_type()
+    {
+        // The default Studio scaffold: aggregate Sales whose root entity Order is `identified by OrderId`.
+        var src =
+            "context Ordering {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        // Cursor a couple chars into the root entity's name on the `entity Order …` line (line index 2).
+        var entityLine = src.Split('\n')[2];
+        var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var edits = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
+
+        edits.ShouldNotBeNull();
+        // The root itself renames to the new name …
+        edits.ShouldContain(e => e.NewText == "PurchaseOrder");
+        // … and its convention-linked identity type OrderId co-renames to PurchaseOrderId.
+        edits.ShouldContain(e => e.NewText == "PurchaseOrderId");
+
+        // The Id co-rename is the additive part of RenameEditsAt: the lower-level RenameAt (which renames
+        // a single symbol uniformly) only touches the root, never the OrderId identity type.
+        var rootOnly = Svc.RenameAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
+        rootOnly.ShouldNotBeNull();
+        rootOnly.Count.ShouldBeLessThan(edits.Count);
+    }
+
     // ---- Linked editing ---------------------------------------------------
 
     [Fact]
