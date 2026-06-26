@@ -1,13 +1,71 @@
-/* --- left sidebar: Files / Explorer / Overview / Documentation ---
-   One column, ONE scroll bar. The rail itself is the scroll container; the four collapsible sections
-   size to their content and never scroll on their own (the file tree's internal scroll is neutralised
-   below too), so the whole sidebar moves under a single scroll bar. */
+/* --- left sidebar: the DDD "Domain" navigator (#453) ---
+   A labelled Domain·Files axis switch over one navigator host (the Domain construct tree or the
+   workspace Files tree), plus a slim documentation footer pinned to the bottom. One column, ONE scroll
+   bar: the rail is the scroll container; the navigator sizes to its content and the file tree's internal
+   scroll is neutralised below, so the whole sidebar moves under a single scroll bar. */
 #leftrail {
   display: flex;
   flex-direction: column;
   background: var(--koi-paper-2);
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+/* The axis switch: a labelled segmented control choosing Domain vs Files. Two equal-width segments; the
+   active one wears the app's accent-TINTED pill (accent text on a faint accent wash + accent border) —
+   not a solid accent fill, which fails WCAG AA on the mid-blue accent — matching the toolbar/docs pills. */
+#rail-axis-switch {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--koi-space-0-5);
+  margin: var(--koi-space-2) var(--koi-space-2) 0;
+  padding: var(--koi-space-0-5);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  background: var(--koi-paper);
+}
+
+.rail-axis {
+  flex: 1 1 0;
+  padding: var(--koi-space-1-25) var(--koi-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-xs);
+  background: transparent;
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-align: center;
+  cursor: pointer;
+  transition: background var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease,
+    border-color var(--koi-dur-fast) ease;
+
+  &:hover {
+    color: var(--koi-fg);
+  }
+  &[aria-selected='true'] {
+    background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+    border-color: var(--koi-accent);
+    color: var(--koi-accent);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+}
+
+/* The navigator host grows to fill the rail; the docs footer (margin-top:auto below) sinks to the bottom. */
+.rail-navigator-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The Domain axis pane: where the construct/context navigator mounts (ModelOutlinePanel for now). */
+.rail-pane {
+  padding: var(--koi-space-1) var(--koi-space-2) var(--koi-space-3);
 }
 
 .rail-sect {
@@ -98,46 +156,17 @@
   overflow: visible;
 }
 
-/* The "Overview" section: per-context construct tallies (renderOverviewCounts). */
-.koi-overview-ctx + .koi-overview-ctx {
-  margin-top: var(--koi-space-2-5);
-}
-.koi-overview-ctx-name {
-  margin: 0 0 var(--koi-space-1-5);
-  font-size: var(--koi-text-xs);
-  font-weight: 600;
-  color: var(--koi-fg);
-}
-.koi-overview-counts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--koi-space-1) var(--koi-space-1-5);
-}
-.koi-overview-count {
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--koi-space-0-75);
-  padding: var(--koi-space-0-5) var(--koi-space-1-5);
-  border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius-pill);
-  background: var(--koi-paper);
-  font-size: var(--koi-text-2xs);
-  color: var(--koi-muted);
-  transition: border-color var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease;
-
-  .koi-model-count-num {
-    font-weight: 600;
-    color: var(--koi-fg);
-  }
-  &:hover {
-    border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
-    color: var(--koi-fg);
-  }
+/* The documentation footer: shortcuts into the model's prose surfaces (ADR, Notes — Context Map and the
+   glossary moved into the Domain axis, #453). margin-top:auto sinks it to the bottom of the rail; a top
+   rule separates it from the navigator. These are navigation, so they wear the toolbar's stroked
+   line-icon idiom — not the Domain navigator's colour-coded construct shapes. */
+.rail-docs-foot {
+  flex: 0 0 auto;
+  margin-top: auto;
+  padding: var(--koi-space-2) var(--koi-space-2) var(--koi-space-3);
+  border-top: 1px solid var(--koi-line);
 }
 
-/* The "Documentation" section: shortcuts into the model's prose surfaces (Context Map, the glossary,
-   ADRs, notes). These are navigation, so they wear the toolbar's stroked line-icon idiom — not the
-   Explorer's colour-coded construct shapes — and read as one tidy list rather than orphaned buttons. */
 .koi-doclinks {
   list-style: none;
   margin: 0;

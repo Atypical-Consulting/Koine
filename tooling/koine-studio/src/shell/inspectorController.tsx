@@ -7,8 +7,7 @@
 //   • the BOTTOM strip (Problems / Events / Relationships / Context Map) with its lazy loaders,
 //     collapse toggle and resizer,
 //   • the per-view LAZY LOADERS and their stale-token / debounce lifecycle (the Generated preview,
-//     the diagrams, the always-visible left-rail Explorer + Overview model, the glossary, the ADR
-//     docs, and the bottom tables),
+//     the diagrams, the left-rail Domain navigator, the glossary, the ADR docs, and the bottom tables),
 //   • the bounded-context SCOPE switcher (#146) and the selection-driven Properties inspector +
 //     cross-highlight cluster (#142), and the joined model index it reads.
 //
@@ -67,7 +66,7 @@ import {
   type ContextScope,
 } from '@/model/activeContext';
 import type { SelectedElement } from '@/model/selection';
-import { renderOverviewCounts, type ModelOutlineHandlers } from '@/model/modelOutline';
+import { type ModelOutlineHandlers } from '@/model/modelOutline';
 import { buildInspectorElement, renderRules, type InspectorElement, type InspectorHandlers } from '@/model/inspector';
 import { buildModelIndex, lookupElement, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
@@ -301,10 +300,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   });
   el('view-preview').appendChild(copyBtn);
 
-  // Left-rail hosts (always visible, repainted together from the model): the Explorer construct
-  // tree and the Overview per-context counts.
-  const explorerBody = el('rail-explorer-body');
-  const overviewBody = el('rail-overview-body');
+  // Left-rail host: the Domain axis's construct/context navigator (#453). The ModelOutlinePanel mounts
+  // here for now; a later task swaps in the strategic/tactical renderers. (The former Overview counts
+  // surface was removed with the section stack.)
+  const domainPane = el('rail-domain-pane');
   // The Documentation center tab's three sub-views: Glossary (the ubiquitous language), Decisions (the
   // ADR list) and Notes — the latter two split from the former combined "Decisions & Notes" surface.
   const glossaryView = el('view-glossary');
@@ -921,17 +920,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     el('rview-rules').replaceChildren(renderRules(element));
   }
 
-  // Repaint the always-visible left rail: the Explorer construct tree + the Overview counts, both
-  // scoped to the active bounded context (#146). The inspector resolves any selection against the whole
-  // model, so only the navigator + counts are narrowed.
+  // Repaint the Domain axis's construct/context navigator, scoped to the active bounded context (#146).
+  // The inspector resolves any selection against the whole model, so only the navigator is narrowed.
   async function loadModel(): Promise<void> {
     // Capture the 'model' stale-token before the await; markLoaded only takes if it's still current
     // after, so an edit mid-fetch leaves the surface stale for the next show (the slice discipline).
     const token = appStore.getState().currentToken('model');
-    // The status/empty/error states write the explorer host imperatively via docMessage; the tree itself
+    // The status/empty/error states write the navigator host imperatively via docMessage; the tree itself
     // is a Preact panel painted via renderPanel, which drops the loading line first so the outline
     // replaces it rather than stacking beside it.
-    docMessage(explorerBody, 'Loading model…');
+    docMessage(domainPane, 'Loading model…');
     try {
       const index = await ensureModelIndex();
       // The model index just (re)built — re-pass it to the breadcrumb so the selected element's type icon
@@ -942,21 +940,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       const scopedGlossary = scopeGlossaryModel(index.glossary, activeContext.get());
       if (!scopedGlossary.entries.length) {
         docMessage(
-          explorerBody,
+          domainPane,
           index.glossary.entries.length
             ? 'No elements in this context — switch to “All contexts” to see the whole model.'
             : 'No elements yet — declare some types, or fix syntax errors to populate the model.',
         );
-        overviewBody.replaceChildren();
         renderSelectedInspector();
         appStore.getState().markLoaded('model', token);
         return;
       }
-      // Explorer = the construct tree as a Preact panel scoped from the store's activeContext slice, with
-      // its inline counts suppressed; the dedicated Overview section owns the tallies (renderOverviewCounts),
-      // so the two never double up. The panel owns the leaf `is-selected` cross-highlight on its own.
+      // The construct tree as a Preact panel scoped from the store's activeContext slice; the panel owns
+      // the leaf `is-selected` cross-highlight on its own.
       renderPanel(
-        explorerBody,
+        domainPane,
         <ModelOutlinePanel
           store={appStore}
           model={index.glossary}
@@ -964,12 +960,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
           index={index}
         />,
       );
-      overviewBody.replaceChildren(renderOverviewCounts(scopedGlossary));
       renderSelectedInspector();
       applySelectionHighlight();
       appStore.getState().markLoaded('model', token);
     } catch (e) {
-      docMessage(explorerBody, 'Model request failed: ' + String(e), 'error');
+      docMessage(domainPane, 'Model request failed: ' + String(e), 'error');
     }
   }
 
@@ -1250,10 +1245,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     t.addEventListener('click', () => selectDocsTab(t.dataset.docs as DocsView));
   }
 
-  // The left rail's "Documentation" section: four shortcuts into the model's prose surfaces. Context
-  // Map opens the bottom strip's map; the other three each open their own Documentation page (Glossary,
-  // Decisions, Notes). querySelectorAll keeps this resilient to fixtures that omit the rail, and
-  // selectBottomTab (declared below) is hoisted, so referencing it here is fine.
+  // The left rail's documentation footer: shortcuts into the model's prose surfaces. ADR + Notes each
+  // open their own Documentation page; the contextmap/glossary actions are retained (the footer no
+  // longer renders those buttons — they moved into the Domain axis, #453 — so they simply bind to
+  // nothing, and a later task can re-wire them from the strategic view). querySelectorAll keeps this
+  // resilient to fixtures that omit the rail, and selectBottomTab (declared below) is hoisted, so
+  // referencing it here is fine.
   const docLinkActions: Record<string, () => void> = {
     contextmap: () => focusContextMap(),
     glossary: () => focusDocs(),

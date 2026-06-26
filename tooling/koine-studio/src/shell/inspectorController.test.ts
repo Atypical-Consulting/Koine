@@ -13,6 +13,7 @@ import {
   type InspectorControllerDeps,
   type InspectorControllerLsp,
 } from '@/shell/inspectorController';
+import { leftRailMarkup } from '@/shell/leftRail';
 import { createAppStore } from '@/store/index';
 import * as maxgraphRenderer from '@/diagrams/diagrams-maxgraph';
 import type { ContextMapGraphHooks } from '@/diagrams/diagrams-maxgraph';
@@ -36,18 +37,7 @@ const APP_HTML = `
   <div id="app">
     <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
     <main id="split">
-      <aside id="leftrail" class="pane">
-        <div class="rail-sect-body" id="rail-explorer-body"></div>
-        <div class="rail-sect-body" id="rail-overview-body"></div>
-        <nav class="rail-sect-body" id="rail-docs-body" aria-label="Documentation">
-          <ul class="koi-doclinks">
-            <li><button type="button" class="koi-doclink" data-doclink="contextmap"><span class="koi-doclink-label">Context Map</span></button></li>
-            <li><button type="button" class="koi-doclink" data-doclink="glossary"><span class="koi-doclink-label">Ubiquitous Language</span></button></li>
-            <li><button type="button" class="koi-doclink" data-doclink="adr"><span class="koi-doclink-label">ADR</span></button></li>
-            <li><button type="button" class="koi-doclink" data-doclink="notes"><span class="koi-doclink-label">Notes</span></button></li>
-          </ul>
-        </nav>
-      </aside>
+      <aside id="leftrail" class="pane">${leftRailMarkup()}</aside>
       <section id="center" class="pane">
         <div id="center-tabs" role="tablist">
           <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Visual</button>
@@ -529,25 +519,11 @@ describe('createInspectorController — bottom strip lazy loading', () => {
     expect(deps.gotoSourceSpan).not.toHaveBeenCalled();
   });
 
-  test('the rail Context Map link leaves Documentation so the otherwise-hidden strip shows the map', async () => {
-    const lsp = makeLsp();
-    const ctl = createInspectorController(makeDeps(lsp));
-    ctl.init();
-
-    // Land on the Documentation center, where the bottom strip (the Context Map's home) is hidden.
-    ctl.selectDocsTab('adr');
-    expect(el('diagnostics').hidden).toBe(true);
-
-    // Regression (#docs-rail): the rail's Context Map link must switch away from Documentation AND open
-    // the Context Map tab — otherwise it sets the bottom tab on a strip that stays hidden and the click
-    // appears to do nothing.
-    document.querySelector<HTMLButtonElement>('.koi-doclink[data-doclink="contextmap"]')!.click();
-    await flush();
-
-    expect(el('center-docs').hidden).toBe(true); // left Documentation…
-    expect(el('diagnostics').hidden).toBe(false); // …so the strip is visible…
-    expect(el('panel-contextmap').hidden).toBe(false); // …showing the Context Map.
-  });
+  // NOTE: the rail's Context Map / Ubiquitous Language doclinks moved out of the docs footer into the
+  // Domain axis (#453); the footer now carries only ADR + Notes. The Context Map doorway (and its
+  // "leave Documentation, reveal the strip" regression, #docs-rail) is rebuilt in the strategic Domain
+  // view by a later task, which will re-add its own coverage. focusContextMap stays wired in the
+  // controller for that re-wire.
 });
 
 describe('createInspectorController — loading states clear on success', () => {
@@ -559,12 +535,12 @@ describe('createInspectorController — loading states clear on success', () => 
     const ctl = createInspectorController(makeDeps(lsp));
     ctl.init();
 
-    ctl.refreshActiveSurfaces(); // → loadModel paints the left-rail Explorer outline
+    ctl.refreshActiveSurfaces(); // → loadModel paints the left-rail Domain navigator outline
     await flush();
 
-    const explorer = el('rail-explorer-body');
-    expect(explorer.textContent).toContain('Money'); // the outline rendered
-    expect(explorer.textContent).not.toContain('Loading model'); // …without the loading line left behind
+    const domainPane = el('rail-domain-pane');
+    expect(domainPane.textContent).toContain('Money'); // the outline rendered
+    expect(domainPane.textContent).not.toContain('Loading model'); // …without the loading line left behind
   });
 
   test('the glossary replaces its "Loading glossary…" line on success', async () => {

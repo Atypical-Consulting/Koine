@@ -18,6 +18,7 @@ import {
 } from '@/shell/ideUtils';
 import { createEditorSession } from '@/shell/editorSession';
 import { createInspectorController } from '@/shell/inspectorController';
+import { leftRailMarkup } from '@/shell/leftRail';
 import { openInspectorSheet } from '@/shell/inspectorSheet';
 import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
@@ -466,6 +467,11 @@ export function init(): () => void {
     // Arm the idle auto-save debounce for both groups (a no-op unless Auto-save is on); B autosaves too.
     workspace.scheduleAutoSave();
   });
+
+  // The left rail's inner markup is owned by leftRail.ts (single source of truth, #453); index.html keeps
+  // <aside id="leftrail"> a thin shell. Inject it here — synchronously, before any rail el(...) lookup or
+  // the inspector controller below — so #filetree-body / #rail-domain-pane / the doclinks all resolve.
+  el<HTMLElement>('leftrail').innerHTML = leftRailMarkup();
 
   const treeBodyEl = el<HTMLElement>('filetree-body');
   const treeTitleEl = el<HTMLElement>('filetree-title');

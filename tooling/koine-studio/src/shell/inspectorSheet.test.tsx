@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent } from '@testing-library/preact';
 import { axe } from 'vitest-axe';
 import { createInspectorSheet, openInspectorSheet, type InspectorSheet } from '@/shell/inspectorSheet';
+import { leftRailMarkup } from '@/shell/leftRail';
 import {
   createInspectorController,
   type InspectorAssistant,
@@ -220,10 +221,7 @@ const APP_HTML = `
   <div id="app">
     <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
     <main id="split">
-      <aside id="leftrail" class="pane">
-        <div class="rail-sect-body" id="rail-explorer-body"></div>
-        <div class="rail-sect-body" id="rail-overview-body"></div>
-      </aside>
+      <aside id="leftrail" class="pane">${leftRailMarkup()}</aside>
       <section id="center" class="pane">
         <div id="center-tabs" role="tablist"></div>
         <div id="center-body">
