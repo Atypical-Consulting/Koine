@@ -240,7 +240,7 @@ class Order
 
     public function equals(self $other): bool
     {
-        return $other instanceof Order && $this->id === $other->id;
+        return $this->id === $other->id;
     }
 
     private function checkInvariants(): void

@@ -242,7 +242,7 @@ class Product
 
     public function equals(self $other): bool
     {
-        return $other instanceof Product && $this->id === $other->id;
+        return $this->id === $other->id;
     }
 }
 
