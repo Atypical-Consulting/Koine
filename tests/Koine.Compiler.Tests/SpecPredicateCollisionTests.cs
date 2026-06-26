@@ -342,4 +342,50 @@ public class SpecPredicateCollisionTests
         diags.Count(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate).ShouldBe(0);
         diags.ShouldContain(d => d.Code == DiagnosticCodes.DuplicateSpec);
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Issue #539 — collisions that fold into *different* strict-key groups. The conservative strict
+    // fold collapses underscores *before* stripping a leading `Is` word, so `IsIs_active` and
+    // `Is_active` land in different strict groups (`isactive` vs `active`) and the single-strict-key
+    // grouping never compared them — yet both emit the *same* TypeScript predicate `isIs_active` (TS
+    // keeps underscores, then strips the leading `Is` word). Detection is now per emitted-target
+    // keyspace, so this TypeScript collision is caught. PHP's own fold *is* the strict key, so for this
+    // pair PHP emits distinct methods (`isIsActive` / `isActive`) — confirmed by emitting the pair — so
+    // a PHP-only build sees only an advisory cross-target warning, never a false hard error.
+    // ---------------------------------------------------------------------------------------------
+
+    private const string CrossStrictGroupTsPair = """
+        context Acct {
+          value Account { balance: Int }
+          spec IsIs_active on Account = balance > 0
+          spec Is_active   on Account = balance > 1
+        }
+        """;
+
+    [Fact]
+    public void Cross_strict_group_TypeScript_collision_is_caught()
+    {
+        // `IsIs_active` and `Is_active` fold to *different* strict keys (`isactive` vs `active`), so the
+        // historical single-strict-key grouping never compared them — yet TypeScript emits `isIs_active`
+        // for BOTH (a duplicate function → TS compile error). Per-target detection catches it: a hard
+        // error whenever TypeScript is enabled (explicitly, and via the all-targets default).
+        HasError(Diagnose(CrossStrictGroupTsPair, EmitTargetSet.TypeScript)).ShouldBeTrue();
+        HasError(Diagnose(CrossStrictGroupTsPair, EmitTargetSet.All)).ShouldBeTrue();
+
+        // The no-target default is the conservative all-targets path, so it errors too.
+        HasError(Diagnose(CrossStrictGroupTsPair)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Cross_strict_group_pair_is_only_a_warning_for_a_php_only_build()
+    {
+        // PHP's predicate fold *is* the strict key, so for this pair PHP emits distinct methods
+        // (`isIsActive` / `isActive`) — it does NOT duplicate. A PHP-only build must therefore NOT be
+        // hard-blocked; the TypeScript-only collision survives as an advisory warning (issue #495),
+        // never a false error — pinning that the per-target keyspace does not over-report on a target
+        // that genuinely emits distinct predicates.
+        IReadOnlyList<Diagnostic> diags = Diagnose(CrossStrictGroupTsPair, EmitTargetSet.Php);
+        HasError(diags).ShouldBeFalse();
+        HasWarning(diags).ShouldBeTrue();
+    }
 }
