@@ -105,6 +105,7 @@ import { type MobileZone } from '@/store/slices/uiChrome';
 import { isNarrowViewport } from '@/shared/breakpoint';
 import { buildOverflowItems, toggleOverflowMenu } from '@/shell/toolbarOverflow';
 import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
+import { CompilingIndicator } from '@/shell/CompilingIndicator';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
 import { createWorkspaceController, type WorkspaceController } from '@/shell/workspaceController';
 import { createSearchPanel } from '@/shell/searchController';
@@ -342,6 +343,11 @@ export function init(): () => void {
   // summarising every file's diagnostics, hidden while the workspace is clean. Subscribes to the
   // diagnostics slice, so the LSP publish path keeps it current with no extra wiring.
   render(<WorkspaceProblemsBadge store={appStore} />, el('sb-problems-host'));
+
+  // Transient "compiling…" indicator (#516): surfaces the existing compile-in-flight signal (#469) while
+  // the compiler is busy (diagnose / emit-preview / run-scenario), debounced so a fast keystroke-diagnose
+  // doesn't flash it. Subscribes to compileActivity's onCompileActivityChange seam — no store wiring.
+  render(<CompilingIndicator />, el('sb-compiling-host'));
 
   // The top-bar "scope path" breadcrumb (the bounded-context selector + the selected element) is owned by
   // the inspector controller — it holds the contexts list + model index the breadcrumb needs, and routes
