@@ -230,12 +230,18 @@ export function formatValidate(buckets: WFileDiagnostics[]): string {
 // so the desktop host normalizes the payload back to that exact string here, keeping ONE validation
 // contract rather than teaching the parser two formats.
 
-/** One MCP `DiagnosticInfo` (Koine.Mcp/Models.cs): a STRING severity and an ALREADY-1-based line/column. */
+/** One MCP `DiagnosticInfo` (Koine.Mcp/Models.cs): a STRING severity and an ALREADY-1-based line/column.
+ *  Only severity/message/line/column are read here; the rest of the payload's fields are modelled as
+ *  optional so a full DiagnosticInfo passes the type checker without being needed. */
 export interface McpDiagnostic {
   severity: string;
   message: string;
   line: number;
   column: number;
+  code?: string;
+  file?: string | null;
+  endLine?: number;
+  endColumn?: number;
 }
 
 /** The MCP `koine_validate` result payload (Koine.Mcp `ValidationResult`). */
