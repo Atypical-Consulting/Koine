@@ -1827,6 +1827,10 @@ export function init(): () => void {
       getWorkspaceFiles: () => Object.fromEntries([...workspace.buffers.values()].map((b) => [b.relPath, b.text])),
       // Host executor for the staged list/read/write edit tools (browser WASM / desktop MCP).
       runEditTool: platform.runEditTool ? (name, argsJson, session) => platform.runEditTool!(name, argsJson, session) : undefined,
+      // Once-per-turn whole-staged-workspace validation (issue #474): the loop calls this a single time
+      // at end of turn (browser WASM DiagnoseWorkspace / desktop MCP koine_validate) instead of after
+      // each write, and the panel surfaces the diagnostics for pre-apply review.
+      validateStaged: platform.validateStagedWorkspace ? (session) => platform.validateStagedWorkspace!(session) : undefined,
       // Commit an accepted multi-file change set through the controller (new files under the folder root).
       // applyFileEdit returns null (not throw) on a failed write/create — collect those relPaths so the
       // panel reports a partial apply instead of a false "Applied ✓".

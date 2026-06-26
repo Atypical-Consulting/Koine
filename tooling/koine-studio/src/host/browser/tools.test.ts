@@ -9,7 +9,7 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock('@/host/browser/wasm', () => ({ loadWasmApi: () => Promise.resolve(api) }));
 
-import { runEditTool, runWasmTool } from '@/host/browser/tools';
+import { runEditTool, runWasmTool, validateStagedWorkspace } from '@/host/browser/tools';
 import { createEditSession } from '@/ai/editSession';
 
 describe('runWasmTool', () => {
@@ -74,21 +74,36 @@ describe('runEditTool', () => {
     expect(await runEditTool('koine_read_file', JSON.stringify({ relPath: 'a.koi' }), session)).toContain('context A2 {}');
   });
 
-  test('koine_write_file stages a body and validates the WHOLE staged workspace', async () => {
-    api.DiagnoseWorkspace.mockReturnValue(JSON.stringify([{ uri: 'file:///a.koi', diagnostics: [] }]));
+  test('koine_write_file is STAGE-ONLY — it stages a body without validating (issue #474)', async () => {
+    api.DiagnoseWorkspace.mockClear(); // the shared spy accumulates across tests — isolate this count
     const session = createEditSession({ 'a.koi': 'context A {}', 'b.koi': 'context B {}' });
 
     const out = await runEditTool('koine_write_file', JSON.stringify({ relPath: 'a.koi', contents: 'context A2 {}' }), session);
 
+    // No per-write compile — DiagnoseWorkspace is NOT touched, and the result is ONLY the staged
+    // confirmation (the whole-workspace validation now runs once per turn via validateStagedWorkspace).
+    expect(api.DiagnoseWorkspace).not.toHaveBeenCalled();
+    expect(out).toBe('staged changes to a.koi (not yet written to disk).');
+    expect(out).not.toContain('ok:');
+  });
+
+  test('validateStagedWorkspace validates the WHOLE staged workspace once (turn-scoped, issue #474)', async () => {
+    api.DiagnoseWorkspace.mockClear(); // the shared spy accumulates across tests — isolate this count
+    api.DiagnoseWorkspace.mockReturnValue(JSON.stringify([{ uri: 'file:///a.koi', diagnostics: [] }]));
+    const session = createEditSession({ 'a.koi': 'context A {}', 'b.koi': 'context B {}' });
+
+    // Stage a write (stage-only), then run the once-per-turn validation explicitly.
+    await runEditTool('koine_write_file', JSON.stringify({ relPath: 'a.koi', contents: 'context A2 {}' }), session);
+    const out = await validateStagedWorkspace(session);
+
     // The validate call carried the FULL staged workspace: every relPath the session knows, with the
     // staged body for the written file (a.koi) and the initial body for the untouched one (b.koi).
-    const sentFiles = JSON.parse(api.DiagnoseWorkspace.mock.calls[api.DiagnoseWorkspace.mock.calls.length - 1][0]);
+    expect(api.DiagnoseWorkspace).toHaveBeenCalledTimes(1);
+    const sentFiles = JSON.parse(api.DiagnoseWorkspace.mock.calls[0][0]);
     expect(sentFiles).toEqual([
       { uri: 'file:///a.koi', text: 'context A2 {}' },
       { uri: 'file:///b.koi', text: 'context B {}' },
     ]);
-    // The result carries the staged confirmation AND the validation summary.
-    expect(out).toContain('staged changes to a.koi');
     expect(out).toContain('ok: true');
   });
 
