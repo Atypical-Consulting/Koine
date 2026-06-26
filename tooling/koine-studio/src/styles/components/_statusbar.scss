@@ -47,6 +47,41 @@
   color: var(--koi-hl-number);
 }
 
+/* The compiling-indicator host is transparent to layout (display:contents) so it adds no status-bar
+   gap while idle and the panel renders a hidden span — only the visible indicator becomes a flex item. */
+#sb-compiling-host {
+  display: contents;
+}
+
+/* Transient "compiling…" indicator (#516): a muted, pulsing affordance shown while a compile is in
+   flight (debounced reveal, immediate hide), mirroring the connecting-pill's pulse so "busy" reads
+   consistently across the shell. The `.sb-item` rule sets display:inline-flex, which would defeat the
+   UA `[hidden]` styling, so honour the hidden attribute explicitly when idle. */
+.koi-compiling-indicator {
+  color: var(--koi-muted);
+  font-style: italic;
+}
+
+.koi-compiling-indicator[hidden] {
+  display: none;
+}
+
+.koi-compiling-indicator::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: var(--koi-radius-pill);
+  background: currentColor;
+  animation: koi-pulse 1.3s ease-in-out infinite;
+}
+
+/* Respect reduced-motion: keep the dot, drop the pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .koi-compiling-indicator::before {
+    animation: none;
+  }
+}
+
 /* Toolbar connection-status pill (top-right of the toolbar). */
 #status {
   display: inline-flex;
