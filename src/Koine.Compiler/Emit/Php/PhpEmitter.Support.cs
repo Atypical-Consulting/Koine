@@ -504,6 +504,105 @@ public sealed partial class PhpEmitter
     private static string EscapeDoc(string line) =>
         line.Replace("*/", "* /");
 
+    /// <summary>
+    /// Writes a property's PHPDoc. When <paramref name="varType"/> is a phpstan value-type refinement
+    /// (a collection/generic <c>list&lt;T&gt;</c> / <c>array&lt;K,V&gt;</c> / <c>Range&lt;T&gt;</c> from
+    /// <see cref="PhpTypeMapper.DocType"/>), it is emitted as a <c>@var</c> tag — folded together with
+    /// the member's own <paramref name="doc"/> into a single block, since only the docblock immediately
+    /// preceding the property binds under phpstan. With no refinement this is exactly
+    /// <see cref="WriteDoc"/>, so a scalar/class property's output is unchanged.
+    /// </summary>
+    private static void WritePropertyDoc(StringBuilder sb, string? doc, string? varType, string indent)
+    {
+        if (varType is null)
+        {
+            WriteDoc(sb, doc, indent);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(doc))
+        {
+            sb.Append(indent).Append("/** @var ").Append(varType).Append(" */\n");
+            return;
+        }
+
+        sb.Append(indent).Append("/**\n");
+        foreach (var line in doc.Split('\n'))
+        {
+            sb.Append(indent).Append(" * ").Append(EscapeDoc(line)).Append('\n');
+        }
+
+        sb.Append(indent).Append(" * @var ").Append(varType).Append('\n');
+        sb.Append(indent).Append(" */\n");
+    }
+
+    /// <summary>The empty parameter list passed to <see cref="WriteMethodDoc"/> for a member that only
+    /// needs its return type refined (a derived getter, a list-returning finder).</summary>
+    private static readonly IReadOnlyList<(string VarName, TypeRef Type)> NoDocParams =
+        Array.Empty<(string, TypeRef)>();
+
+    /// <summary>
+    /// Writes a method/constructor PHPDoc that refines collection/generic parameters and/or the return
+    /// type with phpstan value-types (<c>@param list&lt;T&gt; $x</c> / <c>@return list&lt;T&gt;</c>),
+    /// folding the method's own <paramref name="doc"/> in. Each parameter is passed as its
+    /// already-rendered variable name (no leading <c>$</c>) paired with its declared type, so the tag's
+    /// variable matches the emitted signature exactly. When nothing needs refining this falls back to
+    /// <see cref="WriteDoc"/> — leaving a scalar/class-only signature's output unchanged.
+    /// </summary>
+    private static void WriteMethodDoc(
+        StringBuilder sb,
+        string indent,
+        PhpTypeMapper typeMapper,
+        IReadOnlyList<(string VarName, TypeRef Type)> parameters,
+        TypeRef? returnType,
+        string? doc)
+    {
+        var tags = new List<string>();
+        foreach (var (varName, type) in parameters)
+        {
+            if (typeMapper.DocType(type) is { } d)
+            {
+                tags.Add("@param " + d + " $" + varName);
+            }
+        }
+
+        if (returnType is not null && typeMapper.DocType(returnType) is { } rd)
+        {
+            tags.Add("@return " + rd);
+        }
+
+        if (tags.Count == 0)
+        {
+            WriteDoc(sb, doc, indent);
+            return;
+        }
+
+        // A lone tag with no human doc fits the project's single-line `/** … */` docblock style.
+        if (string.IsNullOrEmpty(doc) && tags.Count == 1)
+        {
+            sb.Append(indent).Append("/** ").Append(tags[0]).Append(" */\n");
+            return;
+        }
+
+        sb.Append(indent).Append("/**\n");
+        if (!string.IsNullOrEmpty(doc))
+        {
+            foreach (var line in doc.Split('\n'))
+            {
+                sb.Append(indent).Append(" * ").Append(EscapeDoc(line)).Append('\n');
+            }
+
+            sb.Append(indent).Append(" *\n");
+        }
+
+        foreach (var tag in tags)
+        {
+            sb.Append(indent).Append(" * ").Append(tag).Append('\n');
+        }
+
+        sb.Append(indent).Append(" */\n");
+    }
+
     /// <summary>A PHP double-quoted string literal for an invariant rule message.</summary>
     private static string RuleLiteral(string rule) =>
         "\"" + rule.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";

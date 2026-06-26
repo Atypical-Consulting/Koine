@@ -84,7 +84,7 @@ public sealed partial class PhpEmitter
 
         foreach (Member m in fields)
         {
-            WriteDoc(sb, m.Doc, Indent);
+            WritePropertyDoc(sb, m.Doc, typeMapper.DocType(m.Type), Indent);
             var propName = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
             var typeName = typeMapper.Map(m.Type);
             sb.Append(Indent).Append("public ").Append(typeName).Append(" $").Append(propName).Append(";\n");
@@ -99,7 +99,7 @@ public sealed partial class PhpEmitter
         foreach (Member m in derived)
         {
             sb.Append('\n');
-            WriteDoc(sb, m.Doc, Indent);
+            WriteMethodDoc(sb, Indent, typeMapper, NoDocParams, m.Type, m.Doc);
             var methodName = PhpNaming.MethodName(m.Name);
             var returnType = typeMapper.Map(m.Type);
             sb.Append(Indent).Append("public function ").Append(methodName).Append("(): ").Append(returnType).Append('\n');
@@ -159,6 +159,13 @@ public sealed partial class PhpEmitter
         PhpExpressionTranslator translator,
         PhpTypeMapper typeMapper)
     {
+        // PHPDoc refines any collection-typed constructor parameter (e.g. `@param list<OrderLine> $lines`)
+        // so phpstan --level max sees the element type the bare `array` hint erases.
+        var docParams = fields
+            .Select(m => (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name)), m.Type))
+            .ToList();
+        WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null);
+
         sb.Append(Indent).Append("public function __construct(\n");
 
         // The identity parameter comes first.

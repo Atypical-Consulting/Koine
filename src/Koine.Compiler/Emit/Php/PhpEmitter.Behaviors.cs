@@ -50,18 +50,26 @@ public sealed partial class PhpEmitter
     private static void WriteDomainEventsBuffer(StringBuilder sb)
     {
         sb.Append('\n');
-        sb.Append(Indent).Append("/** @var array<object> */\n");
+        sb.Append(Indent).Append("/** @var list<object> */\n");
         sb.Append(Indent).Append("private array $domainEvents = [];\n");
 
         sb.Append('\n');
-        sb.Append(Indent).Append("/** Returns a snapshot of recorded domain events (read-only). */\n");
+        sb.Append(Indent).Append("/**\n");
+        sb.Append(Indent).Append(" * Returns a snapshot of recorded domain events (read-only).\n");
+        sb.Append(Indent).Append(" *\n");
+        sb.Append(Indent).Append(" * @return list<object>\n");
+        sb.Append(Indent).Append(" */\n");
         sb.Append(Indent).Append("public function domainEvents(): array\n");
         sb.Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append("return $this->domainEvents;\n");
         sb.Append(Indent).Append("}\n");
 
         sb.Append('\n');
-        sb.Append(Indent).Append("/** Returns all recorded domain events and clears the buffer. */\n");
+        sb.Append(Indent).Append("/**\n");
+        sb.Append(Indent).Append(" * Returns all recorded domain events and clears the buffer.\n");
+        sb.Append(Indent).Append(" *\n");
+        sb.Append(Indent).Append(" * @return list<object>\n");
+        sb.Append(Indent).Append(" */\n");
         sb.Append(Indent).Append("public function releaseDomainEvents(): array\n");
         sb.Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append("$events = $this->domainEvents;\n");
@@ -108,7 +116,10 @@ public sealed partial class PhpEmitter
         var returnType = cmd.ReturnType is { } rt ? typeMapper.Map(rt) : "void";
 
         sb.Append('\n');
-        WriteDoc(sb, cmd.Doc, Indent);
+        var cmdDocParams = cmd.Parameters
+            .Select(p => (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(p.Name)), p.Type))
+            .ToList();
+        WriteMethodDoc(sb, Indent, typeMapper, cmdDocParams, cmd.ReturnType, cmd.Doc);
         sb.Append(Indent).Append("public function ").Append(methodName).Append('(');
 
         var first = true;
@@ -219,7 +230,10 @@ public sealed partial class PhpEmitter
         var methodName = PhpNaming.EscapeIdentifier(PhpNaming.MethodName(factory.Name));
 
         sb.Append('\n');
-        WriteDoc(sb, factory.Doc, Indent);
+        var factoryDocParams = factory.Parameters
+            .Select(p => (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(p.Name)), p.Type))
+            .ToList();
+        WriteMethodDoc(sb, Indent, typeMapper, factoryDocParams, null, factory.Doc);
         sb.Append(Indent).Append("public static function ").Append(methodName).Append('(');
 
         var first = true;

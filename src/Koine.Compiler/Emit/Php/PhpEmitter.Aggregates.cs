@@ -102,6 +102,13 @@ public sealed partial class PhpEmitter
                 typeMapper.Map(p.Type) + " $" + PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(p.Name)));
             var paramList = string.Join(", ", paramParts);
 
+            // PHPDoc the list-shaped return (`@return list<Root>`) so the bare `array` hint carries its
+            // element type; any collection finder parameter is refined too.
+            var finderDocParams = finder.Parameters
+                .Select(p => (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(p.Name)), p.Type))
+                .ToList();
+            WriteMethodDoc(sb, Indent, typeMapper, finderDocParams, finder.ResultType, null);
+
             sb.Append(Indent).Append("public function ").Append(method)
               .Append("(").Append(paramList).Append("): ").Append(ret).Append(";\n");
         }

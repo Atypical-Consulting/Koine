@@ -212,14 +212,17 @@ use Koine\Sales\Events\OrderOpened;
 use Koine\Sales\Events\OrderPlaced;
 use Koine\Sales\ValueObjects\CustomerId;
 use Koine\Sales\ValueObjects\OrderId;
+use Koine\Sales\ValueObjects\OrderLine;
 
 class Order
 {
     public OrderId $id;
     public CustomerId $customer;
+    /** @var list<OrderLine> */
     public array $lines;
     public OrderStatus $status;
 
+    /** @param list<OrderLine> $lines */
     public function __construct(
         OrderId $id,
         CustomerId $customer,
@@ -247,16 +250,24 @@ class Order
         }
     }
 
-    /** @var array<object> */
+    /** @var list<object> */
     private array $domainEvents = [];
 
-    /** Returns a snapshot of recorded domain events (read-only). */
+    /**
+     * Returns a snapshot of recorded domain events (read-only).
+     *
+     * @return list<object>
+     */
     public function domainEvents(): array
     {
         return $this->domainEvents;
     }
 
-    /** Returns all recorded domain events and clears the buffer. */
+    /**
+     * Returns all recorded domain events and clears the buffer.
+     *
+     * @return list<object>
+     */
     public function releaseDomainEvents(): array
     {
         $events = $this->domainEvents;
@@ -280,6 +291,7 @@ class Order
         $this->domainEvents[] = new OrderPlaced($this->id, count($this->lines));
     }
 
+    /** @param list<OrderLine> $lines */
     public static function forCustomer(CustomerId $customer, array $lines): self
     {
         $id = OrderId::generate();
@@ -573,6 +585,7 @@ interface OrderRepository
 
     public function remove(Order $aggregate): void;
 
+    /** @return list<Order> */
     public function byCustomer(CustomerId $customer): array;
 
     public function mostRecent(CustomerId $customer): ?Order;

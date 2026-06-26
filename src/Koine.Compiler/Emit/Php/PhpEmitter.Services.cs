@@ -91,7 +91,10 @@ public sealed partial class PhpEmitter
             }
 
             first = false;
-            WriteDoc(sb, op.Doc, Indent);
+            var opDocParams = op.Parameters
+                .Select(p => (PhpNaming.EscapeIdentifier(PhpNaming.MethodName(p.Name)), p.Type))
+                .ToList();
+            WriteMethodDoc(sb, Indent, typeMapper, opDocParams, op.ReturnType, op.Doc);
 
             var method = PhpNaming.MethodName(op.Name);
             var ret = typeMapper.Map(op.ReturnType);
@@ -166,7 +169,10 @@ public sealed partial class PhpEmitter
             }
 
             first = false;
-            WriteDoc(sb, uc.Doc, Indent);
+            var ucDocParams = uc.Parameters
+                .Select(p => (PhpNaming.EscapeIdentifier(PhpNaming.MethodName(p.Name)), p.Type))
+                .ToList();
+            WriteMethodDoc(sb, Indent, typeMapper, ucDocParams, uc.ReturnType, uc.Doc);
 
             var method = PhpNaming.MethodName(uc.Name);
             var ret = uc.ReturnType is null ? "void" : typeMapper.Map(uc.ReturnType);

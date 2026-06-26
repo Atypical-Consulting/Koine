@@ -247,16 +247,24 @@ class Invoice
         }
     }
 
-    /** @var array<object> */
+    /** @var list<object> */
     private array $domainEvents = [];
 
-    /** Returns a snapshot of recorded domain events (read-only). */
+    /**
+     * Returns a snapshot of recorded domain events (read-only).
+     *
+     * @return list<object>
+     */
     public function domainEvents(): array
     {
         return $this->domainEvents;
     }
 
-    /** Returns all recorded domain events and clears the buffer. */
+    /**
+     * Returns all recorded domain events and clears the buffer.
+     *
+     * @return list<object>
+     */
     public function releaseDomainEvents(): array
     {
         $events = $this->domainEvents;
@@ -424,6 +432,7 @@ interface InvoiceRepository
 
     public function remove(Invoice $aggregate): void;
 
+    /** @return list<Invoice> */
     public function byCustomer(string $customerId): array;
 
     public function latest(string $customerId): ?Invoice;
