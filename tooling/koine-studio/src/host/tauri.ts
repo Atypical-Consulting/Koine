@@ -12,7 +12,8 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc, TerminalTransport } from '@/host/types';
 import { buildLogLArgs, parseLogL, type ChangeEntry } from '@/host/gitHistory';
 import { saveMetaFor } from '@/host/saveMeta';
-import { normalizeCompileTarget } from '@/ai/assistantTools';
+import { formatListFiles, formatReadFile, formatWriteFile, normalizeCompileTarget } from '@/ai/assistantTools';
+import type { EditSession } from '@/ai/editSession';
 import { mcpCall } from '@/mcp/mcp';
 
 /** LSP transport over Tauri IPC. Mirrors the wiring previously inlined in lsp.ts. */
@@ -175,6 +176,41 @@ export class TauriPlatform implements Platform {
           : { files };
     try {
       return await mcpCall(url, name, mcpArgs);
+    } catch (e) {
+      return `Error: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  // The host-local edit tools dispatch against the per-turn staging session. list/read are pure session
+  // reads; a write stages a full-file body (NO disk write) then validates the whole staged workspace via
+  // the `koine_validate` MCP tool (the sidecar's compiler), mirroring the browser host's WASM validate.
+  async runEditTool(name: string, argsJson: string, session: EditSession): Promise<string> {
+    let args: { relPath?: unknown; contents?: unknown };
+    try {
+      args = JSON.parse(argsJson || '{}');
+    } catch {
+      return 'Error: the tool arguments were not valid JSON.';
+    }
+    try {
+      if (name === 'koine_list_files') return formatListFiles(session.list());
+      if (name === 'koine_read_file') {
+        const relPath = typeof args.relPath === 'string' ? args.relPath : '';
+        return formatReadFile(relPath, session.read(relPath));
+      }
+      if (name === 'koine_write_file') {
+        const relPath = typeof args.relPath === 'string' ? args.relPath : '';
+        const contents = typeof args.contents === 'string' ? args.contents : '';
+        session.stage(relPath, contents);
+        const isNew = session.staged().find((e) => e.relPath === relPath)?.isNew ?? false;
+        const url = await this.mcpEndpoint();
+        if (!url) {
+          return `${formatWriteFile(relPath, isNew)}\n(could not validate: the Koine MCP server is not available)`;
+        }
+        const files = session.list().map((p) => ({ path: p, source: session.read(p) ?? '' }));
+        const diagnostics = await mcpCall(url, 'koine_validate', { files });
+        return `${formatWriteFile(relPath, isNew)}\n${diagnostics}`;
+      }
+      return `Error: unknown tool ${name}.`;
     } catch (e) {
       return `Error: ${e instanceof Error ? e.message : String(e)}`;
     }

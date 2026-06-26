@@ -13,6 +13,7 @@
 // desktop, a registry id on the browser. The UI persists tokens (e.g. recent folders) and passes
 // them back to the platform — it never interprets them.
 
+import type { EditSession } from '@/ai/editSession';
 import type { ChangeEntry } from '@/host/gitHistory';
 
 /** A `.koi` file discovered under an opened folder. `path` is an opaque read/write token. */
@@ -135,6 +136,14 @@ export interface Platform {
    * can recover.
    */
   runCompilerTool?(name: string, argsJson: string): Promise<string>;
+
+  /**
+   * Run a host-local edit tool (koine_list_files/koine_read_file/koine_write_file) against the per-turn
+   * staging `session`. list/read are pure session reads; write stages a body (NO disk write) and
+   * validates the whole staged workspace (WASM DiagnoseWorkspace on browser, the MCP sidecar on
+   * desktop). Returns the model-facing text; never throws.
+   */
+  runEditTool?(name: string, argsJson: string, session: EditSession): Promise<string>;
 
   /**
    * The llama.cpp GBNF grammar for constrained `.koi` decoding (issue #257), used to constrain a
