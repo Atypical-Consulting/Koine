@@ -203,6 +203,93 @@ public sealed class KoineCompilation
     }
 
     /// <summary>
+    /// Reconciles <paramref name="previous"/> to <paramref name="files"/> and returns the snapshot a
+    /// cold <see cref="Create(IReadOnlyList{SourceFile})"/> of <paramref name="files"/> would produce —
+    /// but reusing <paramref name="previous"/>'s already-parsed units wherever a file's content is
+    /// byte-identical, re-parsing only changed/new files and dropping removed ones. When
+    /// <paramref name="previous"/> is <c>null</c> this is a plain cold build.
+    ///
+    /// <para>This is the pure, content-keyed engine the browser interop (issue #334) calls on every
+    /// stateless <c>[JSExport]</c> request: the interop holds the <em>previous</em> snapshot and feeds
+    /// it back in here, so an unchanged file keeps its parsed <see cref="ParsedUnit"/> by reference and
+    /// only the edited file re-parses. Keeping the <em>retention</em> (the mutable held field) at the
+    /// interop seam — and only this pure transform in the compiler core — preserves the core's freedom
+    /// from session state.</para>
+    ///
+    /// <para>The result is provably identical to a cold build of the same inputs: it is content-keyed
+    /// (<see cref="WithDocument"/> re-parses on any text difference) and is rebuilt cold whenever the
+    /// reconciled document order would diverge from a cold build's first-seen order (a mid-list insert
+    /// or a reorder), so <see cref="Model"/>, <see cref="SyntaxDiagnostics"/> and
+    /// <see cref="Fingerprint"/> all match <see cref="Create(IReadOnlyList{SourceFile})"/> exactly.</para>
+    /// </summary>
+    public static KoineCompilation Reconcile(KoineCompilation? previous, IReadOnlyList<SourceFile> files)
+    {
+        if (previous is null)
+        {
+            return Create(files);
+        }
+
+        // Reuse previous's parser throughout (WithDocument/WithoutDocument carry it forward) so the
+        // reconciled snapshot reuses exactly the units previous already parsed — and a test's
+        // re-parse-counting wrapper keeps counting across the reconcile.
+        var comp = previous;
+
+        // 1. Drop documents that are no longer open.
+        var incoming = new HashSet<string>(files.Count, StringComparer.Ordinal);
+        foreach (var f in files)
+        {
+            incoming.Add(f.Path);
+        }
+
+        foreach (var uri in previous._order)
+        {
+            if (!incoming.Contains(uri))
+            {
+                comp = comp.WithoutDocument(uri);
+            }
+        }
+
+        // 2. Add new / update changed documents (an unchanged file is a no-op returning `this`).
+        foreach (var f in files)
+        {
+            comp = comp.WithDocument(f.Path, f.Source);
+        }
+
+        // 3. The merged model lists contexts in first-seen uri order, so the reconciled order must
+        //    equal a cold build's. WithDocument appends new uris and keeps existing positions, which
+        //    diverges from cold only on a mid-list insert or a reorder — rebuild cold (with previous's
+        //    parser) in that rare case so the output is byte-identical to the stateless path.
+        return comp.HasFirstSeenOrder(files) ? comp : Create(files, previous._parser);
+    }
+
+    /// <summary>
+    /// True when this snapshot's document order already equals the first-seen-deduped uri order of
+    /// <paramref name="files"/> — i.e. a cold <see cref="Create(IReadOnlyList{SourceFile})"/> of
+    /// <paramref name="files"/> would list its documents in the same order this snapshot has.
+    /// </summary>
+    private bool HasFirstSeenOrder(IReadOnlyList<SourceFile> files)
+    {
+        var i = 0;
+        var seen = new HashSet<string>(files.Count, StringComparer.Ordinal);
+        foreach (var f in files)
+        {
+            if (!seen.Add(f.Path))
+            {
+                continue; // duplicate uri — a cold build keeps only its first-seen position
+            }
+
+            if (i >= _order.Length || !string.Equals(_order[i], f.Path, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            i++;
+        }
+
+        return i == _order.Length;
+    }
+
+    /// <summary>
     /// The merged <see cref="KoineModel"/> for this snapshot.
     /// Always non-null — error-tolerant parsing yields a partial model even on syntax errors.
     /// Computed lazily and memoised.
