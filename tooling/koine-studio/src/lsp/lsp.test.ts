@@ -11,7 +11,7 @@ import type { LspTransport } from '@/host/types';
 
 type Sent = { jsonrpc: string; id?: number; method: string; params: any };
 
-function harness() {
+function harness(trace?: 'off' | 'messages' | 'verbose') {
   const sent: Sent[] = [];
   const transport: LspTransport = {
     start: () => Promise.resolve(),
@@ -24,7 +24,7 @@ function harness() {
     onRestart: () => {},
     stop: () => Promise.resolve(),
   };
-  return { lsp: new KoineLsp(transport), sent };
+  return { lsp: new KoineLsp(transport, trace), sent };
 }
 
 const byMethod = (sent: Sent[], method: string) => sent.filter((m) => m.method === method);
@@ -244,6 +244,83 @@ describe('KoineLsp capability queries', () => {
   });
 });
 
+// Trace-logging coverage (#264/#354): the effective `lspTrace` setting gates how much LSP request/
+// response traffic KoineLsp prints to the console — `off` is silent, `messages` logs each wire
+// message's direction + method, `verbose` additionally logs the (size-guarded) payload, and `setTrace`
+// switches the level on the running client. We spy on console.debug rather than a real devtools console.
+describe('KoineLsp trace logging', () => {
+  test('at off (the default), nothing is logged', () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const { lsp } = harness();
+    lsp.openDoc(URI, 'hello'); // sends a didOpen notification
+    expect(debug).not.toHaveBeenCalled();
+  });
+
+  test('at messages, logs direction + method once per wire message, without the payload', () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const { lsp } = harness();
+    lsp.setTrace('messages');
+    lsp.openDoc(URI, 'hello');
+    expect(debug).toHaveBeenCalledTimes(1);
+    const [line, ...payload] = debug.mock.calls[0];
+    expect(line).toContain('textDocument/didOpen');
+    expect(line).toContain('→'); // outgoing
+    expect(payload).toHaveLength(0); // method name only — no params at the messages level
+  });
+
+  test('at verbose, additionally logs the payload', () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const { lsp } = harness();
+    lsp.setTrace('verbose');
+    lsp.openDoc(URI, 'hello');
+    expect(debug).toHaveBeenCalledTimes(1);
+    const call = debug.mock.calls[0];
+    expect(call[0]).toContain('textDocument/didOpen');
+    expect(call.slice(1).map(String).join(' ')).toContain('hello'); // the didOpen text param
+  });
+
+  test('verbose truncates a huge payload instead of logging it whole', () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const { lsp } = harness();
+    lsp.setTrace('verbose');
+    lsp.openDoc(URI, 'x'.repeat(50_000));
+    const rendered = debug.mock.calls[0].slice(1).map(String).join(' ');
+    expect(rendered.length).toBeLessThan(5_000); // size-guarded, not the full 50k
+    expect(rendered).toContain('…'); // truncation marker
+  });
+
+  test('setTrace switches the level live', () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const { lsp } = harness();
+    lsp.openDoc(URI, 'a'); // off → silent
+    expect(debug).toHaveBeenCalledTimes(0);
+    lsp.setTrace('messages');
+    lsp.openDoc(URI, 'b'); // now logged
+    expect(debug).toHaveBeenCalledTimes(1);
+    lsp.setTrace('off');
+    lsp.openDoc(URI, 'c'); // silent again
+    expect(debug).toHaveBeenCalledTimes(1);
+  });
+
+  test('logs incoming responses, not just outgoing requests', async () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const { lsp } = responder(() => null);
+    lsp.setTrace('messages');
+    await lsp.prepareCallHierarchy(0, 0);
+    const lines = debug.mock.calls.map((c) => String(c[0]));
+    expect(lines.some((l) => l.includes('→'))).toBe(true); // the request
+    expect(lines.some((l) => l.includes('←'))).toBe(true); // the response
+  });
+
+  test('an explicit trace level can be supplied at construction', () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const { lsp } = harness('messages');
+    lsp.openDoc(URI, 'hello');
+    expect(debug).toHaveBeenCalledTimes(1);
+  });
+});
+
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });

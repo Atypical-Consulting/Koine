@@ -58,6 +58,28 @@ interface JsonRpcMessage {
 
 const REQUEST_TIMEOUT_MS = 15000;
 
+/**
+ * LSP logging verbosity (issues #264/#354), mirroring the `lspTrace` setting: `off` logs nothing,
+ * `messages` logs each wire message's direction + method, `verbose` additionally logs the
+ * (size-guarded) params/result/error.
+ */
+export type LspTraceLevel = 'off' | 'messages' | 'verbose';
+
+// Cap a verbose-trace payload so a large didOpen / semanticTokens body can't flood the devtools console.
+const TRACE_PAYLOAD_MAX = 2000;
+
+/** Render a trace payload as a single size-guarded string (truncated past {@link TRACE_PAYLOAD_MAX}). */
+function traceFormat(payload: unknown): string {
+  let s: string | undefined;
+  try {
+    s = JSON.stringify(payload);
+  } catch {
+    return '[unserializable]';
+  }
+  if (s === undefined) return '';
+  return s.length > TRACE_PAYLOAD_MAX ? `${s.slice(0, TRACE_PAYLOAD_MAX)}… (${s.length} bytes)` : s;
+}
+
 interface OpenDoc {
   text: string;
   version: number;
@@ -77,11 +99,23 @@ export class KoineLsp {
   private onRestart?: () => void;
   private activeUri = '';
 
-  constructor(private readonly transport: LspTransport) {}
+  constructor(
+    private readonly transport: LspTransport,
+    private trace: LspTraceLevel = 'off',
+  ) {}
 
   /** The uri every request method currently targets. */
   get active(): string {
     return this.activeUri;
+  }
+
+  /**
+   * Set the LSP logging verbosity live (issues #264/#354). Driven by the effective `lspTrace` setting,
+   * so a global change or a per-workspace override takes effect immediately on the running client
+   * without a reconnect. See {@link LspTraceLevel} for the level semantics.
+   */
+  setTrace(level: LspTraceLevel): void {
+    this.trace = level;
   }
 
   onPublishDiagnostics(cb: (uri: string, diags: LspDiagnostic[]) => void): void {
@@ -159,7 +193,23 @@ export class KoineLsp {
     }
   }
 
+  /** Console-log one wire message at the current trace level (a no-op at `off`). */
+  private traceLog(direction: '→' | '←', msg: JsonRpcMessage): void {
+    if (this.trace === 'off') return;
+    const kind = msg.method ? (msg.id != null ? 'request' : 'notification') : 'response';
+    const label = msg.method ?? `#${msg.id ?? '?'}`;
+    if (this.trace === 'messages') {
+      console.debug(`[lsp] ${direction} ${kind} ${label}`);
+      return;
+    }
+    // verbose: the request's params, or the response's result/error, size-guarded.
+    const payload = msg.params ?? msg.result ?? msg.error;
+    if (payload === undefined) console.debug(`[lsp] ${direction} ${kind} ${label}`);
+    else console.debug(`[lsp] ${direction} ${kind} ${label}`, traceFormat(payload));
+  }
+
   private handle(msg: JsonRpcMessage): void {
+    this.traceLog('←', msg);
     if (msg.id != null && typeof msg.id === 'number' && this.pending.has(msg.id)) {
       const entry = this.pending.get(msg.id)!;
       this.pending.delete(msg.id);
@@ -175,6 +225,7 @@ export class KoineLsp {
   }
 
   private send(obj: object): Promise<void> {
+    this.traceLog('→', obj as JsonRpcMessage);
     return this.transport.send(JSON.stringify(obj));
   }
 
