@@ -108,6 +108,9 @@ const SETTINGS_KEY = 'koine.studio.settings';
 const RECENT_KEY = 'koine.studio.recentFolders';
 const SCRATCH_KEY = 'koine.studio.scratch';
 const WORKSPACE_CENTER_KEY = 'koine.studio.workspaceCenter';
+// The most-recently opened workspace token (#535), so a reload can restore it instead of silently
+// reverting to the empty default. Only OPFS-internal tokens are auto-restored at boot (see ide.ts).
+const LAST_WORKSPACE_KEY = 'koine.studio.lastWorkspace';
 // Editor keybinding overrides (#266): a small Partial<Record<BindingId, string>> of user remaps.
 const KEYBINDINGS_KEY = 'koine.studio.keybindings';
 // Per-workspace active context scope (#146): the folder's storage key is appended (see loadActiveContext).
@@ -513,6 +516,33 @@ export function loadWorkspaceCenter(): string | null {
 /** Persist the active center-pane id (best-effort). */
 export function saveWorkspaceCenter(id: string): void {
   writeRaw(WORKSPACE_CENTER_KEY, id);
+}
+
+// --- last opened workspace (#535) --------------------------------------------
+// A single pointer to the most-recently opened workspace token, so a cold boot can re-open it instead
+// of silently reverting to the empty default workspace (the data-loss bug). Only OPFS-internal tokens
+// ('(default)' / 'example-*') are actually auto-restored at boot — a picked-folder handle needs a
+// permission gesture boot can't provide, so it stays a manual Recents click (the gate lives in ide.ts).
+// This layer just round-trips the raw token, exactly like loadWorkspaceCenter above.
+
+/** The persisted last-opened workspace token, or null when none is stored (or storage is unavailable). */
+export function getLastWorkspace(): string | null {
+  return readRaw(LAST_WORKSPACE_KEY);
+}
+
+/** Persist the last-opened workspace token (best-effort). An empty token is ignored. */
+export function setLastWorkspace(token: string): void {
+  if (typeof token !== 'string' || token.length === 0) return;
+  writeRaw(LAST_WORKSPACE_KEY, token);
+}
+
+/** Forget the last-opened workspace pointer (best-effort). */
+export function clearLastWorkspace(): void {
+  try {
+    localStorage.removeItem(LAST_WORKSPACE_KEY);
+  } catch {
+    // storage unavailable — nothing to clear
+  }
 }
 
 // --- diagram canvas zoom (#145) ----------------------------------------------

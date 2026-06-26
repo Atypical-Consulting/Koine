@@ -539,6 +539,10 @@ beforeEach(() => {
   document.body.innerHTML = '';
   fakePlatform.current = null as unknown as Platform;
   window.location.hash = '';
+  // localStorage is a file-global in-memory shim (test-setup.ts), so a default/example boot persists a
+  // `lastWorkspace` pointer that would otherwise leak into the next test's boot ladder (#535). Drop it so
+  // every test boots as a fresh user unless it explicitly seeds the pointer.
+  localStorage.removeItem('koine.studio.lastWorkspace');
   // Clear the legacy-scratch seam's call history + any queued *Once overrides so each test starts
   // from the delegating default (re-established by the vi.mock factory on the module reset below).
   peekLegacyScratch.mockReset();
@@ -1073,5 +1077,99 @@ describe('ide init() — effective lspTrace drives the LSP (#354)', () => {
     } finally {
       localStorage.clear();
     }
+  });
+});
+
+// #535: a cold boot with no start-intent restores the LAST opened OPFS workspace (the bug was that an
+// opened example silently reverted to the empty default on reload). Only OPFS-internal tokens
+// ('(default)' / 'example-*') are auto-restored — a picked-folder handle needs a permission gesture
+// boot can't provide, so it stays a manual Recents click.
+describe('ide init() — last-workspace restore on reload (#535)', () => {
+  const LAST_WS_KEY = 'koine.studio.lastWorkspace';
+  // localStorage is a file-global in-memory shim (test-setup.ts) that the suite's beforeEach does NOT
+  // clear, so drop the pointer after each test here to avoid leaking it into later boots.
+  afterEach(() => localStorage.removeItem(LAST_WS_KEY));
+
+  /** Override listKoiFiles to record which folder tokens boot asked the host to read, returning the
+   *  current fake FS for every token (so a seeded example resolves like its persisted OPFS dir would). */
+  function captureOpened(p: FakePlatform, opened: string[]): void {
+    (p as unknown as { listKoiFiles: (token: string) => Promise<KoiFile[]> }).listKoiFiles = vi.fn(
+      async (folder: string) => {
+        opened.push(folder);
+        const out: KoiFile[] = [];
+        for (const relPath of p.files.keys()) {
+          if (!relPath.toLowerCase().endsWith('.koi')) continue;
+          out.push({ path: `${ROOT}/${relPath}`, name: relPath.split('/').pop()!, relPath });
+        }
+        out.sort((a, b) => a.relPath.localeCompare(b.relPath));
+        return out;
+      },
+    );
+  }
+
+  test('restores the last OPFS example workspace instead of the default seed', async () => {
+    localStorage.setItem(LAST_WS_KEY, 'example-saas');
+    const p = installPlatform();
+    // The example's persisted OPFS files survive a reload, so re-opening the token resolves.
+    p.files.set('sub.koi', 'context Sub { value Plan { raw: String } }\n');
+    const opened: string[] = [];
+    captureOpened(p, opened);
+
+    await boot({ platform: p });
+
+    // Boot re-opened the example token and NEVER seeded the default workspace.
+    expect(opened).toContain('example-saas');
+    expect(p.defaultWorkspaceSeed).toBeNull();
+    expect(editorDoc()).toContain('context Sub');
+  });
+
+  test('falls back to the default seed when the last workspace no longer resolves', async () => {
+    localStorage.setItem(LAST_WS_KEY, 'example-gone');
+    const p = installPlatform();
+    const realListKoiFiles = p.listKoiFiles.bind(p);
+    (p as unknown as { listKoiFiles: (token: string) => Promise<KoiFile[]> }).listKoiFiles = vi.fn(
+      async (folder: string) => {
+        // The persisted example dir was evicted / IndexedDB cleared: re-opening it throws.
+        if (folder === 'example-gone') throw new Error('this folder is no longer available — open it again');
+        return realListKoiFiles();
+      },
+    );
+
+    await boot({ platform: p });
+
+    // The restore attempt failed → boot opened + seeded the default workspace rather than stranding the user.
+    expect(p.defaultWorkspaceSeed).not.toBeNull();
+    expect(editorDoc()).toContain('context Billing');
+  });
+
+  test('does NOT auto-restore a picked-folder token at boot (it needs a permission gesture)', async () => {
+    localStorage.setItem(LAST_WS_KEY, '/Users/me/picked-folder');
+    const p = installPlatform();
+    const opened: string[] = [];
+    captureOpened(p, opened);
+
+    await boot({ platform: p });
+
+    // A picked token is not OPFS-internal, so boot ignored it and opened the default workspace.
+    expect(opened).not.toContain('/Users/me/picked-folder');
+    expect(p.defaultWorkspaceSeed).not.toBeNull();
+    expect(editorDoc()).toContain('context Billing');
+  });
+
+  test('a stored (default) pointer opens the default flow without a doomed openFolderPath or error pill', async () => {
+    // The '(default)' handle is registered lazily (never in IndexedDB), so re-opening it via
+    // openFolderPath at cold boot would always fail and leave a red "could not read folder" status pill
+    // on the most common returning-user boot. Boot must route '(default)' straight to the default flow.
+    localStorage.setItem(LAST_WS_KEY, '(default)');
+    const p = installPlatform();
+    const opened: string[] = [];
+    captureOpened(p, opened);
+
+    await boot({ platform: p });
+
+    expect(p.defaultWorkspaceSeed).not.toBeNull();
+    expect(editorDoc()).toContain('context Billing');
+    expect(opened).not.toContain('(default)'); // never attempted a doomed openFolderPath('(default)')
+    expect(document.getElementById('status')!.dataset.kind).not.toBe('error');
   });
 });

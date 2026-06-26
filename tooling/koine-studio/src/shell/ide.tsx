@@ -37,6 +37,8 @@ import {
   removeRecentFolder,
   saveActiveContext,
   saveWorkspaceCenter,
+  setLastWorkspace,
+  getLastWorkspace,
   workspaceKeyOf,
   type Settings,
 } from '@/settings/persistence';
@@ -164,6 +166,19 @@ const BLANK = `context NewModel {
 
 }
 `;
+
+// The host's reserved default-workspace token (mirrors host/browser/fs.ts DEFAULT_WS_TOKEN). Parentheses
+// can't appear in a real picked-folder name, so it never collides. Used as the lastWorkspace pointer
+// after "New" / a default-workspace open (#535).
+const DEFAULT_WS_TOKEN = '(default)';
+
+// Which workspace tokens the cold-boot ladder is allowed to silently re-open (#535). OPFS-backed dirs —
+// the default workspace and every materialized `example-*` dir — re-acquire from IndexedDB with NO
+// permission prompt, so boot can restore them. A *picked* folder handle needs a `requestPermission`
+// re-grant that requires a user gesture boot can't supply, so it must stay a manual Recents click.
+function isOpfsInternalToken(token: string): boolean {
+  return token === DEFAULT_WS_TOKEN || token.startsWith('example-');
+}
 
 // Starter shapes the empty-canvas doorways seed (the EMPTY_STATE_PICK_EVENT contract). Each is a strict
 // subset of a validated template (templates/starters/{ordering,contextmap}) so it always compiles green;
@@ -1127,6 +1142,9 @@ export function init(): () => void {
     // The active buffer was deleted and the workspace is now empty: reset to a fresh blank model.
     onWorkspaceEmptied: () => void newModel(),
     pushRecentFolder,
+    // Remember the opened workspace so a reload restores it instead of the empty default (#535). Gated
+    // (in the controller) on the same `recent` flag as pushRecentFolder, so transient opens don't set it.
+    rememberLastWorkspace: setLastWorkspace,
     setFolderTitle: (name) => {
       treeTitleEl.textContent = name;
     },
@@ -1237,6 +1255,10 @@ export function init(): () => void {
       output.setContent('// Koine Studio could not open a workspace in this browser.', 'plain');
       return;
     }
+    // The default workspace is now the open one, so point lastWorkspace at it (#535): a later reload
+    // returns here rather than reopening a stale example the user has since left via "New". '(default)'
+    // is OPFS-internal, so the boot ladder may auto-restore it.
+    setLastWorkspace(DEFAULT_WS_TOKEN);
     // Token confirmed — the workspace is open. Clear the legacy scratch key now so the migration is
     // non-destructive: content was never lost even if OPFS was unavailable on a prior load.
     clearLegacyScratch();
@@ -1367,6 +1389,10 @@ export function init(): () => void {
     workspace.reset();
     // openFolderPath then activates model.koi (= BLANK) and renders the tree.
     await workspace.openFolderPath(token, { recent: false });
+    // The user deliberately went back to a blank default, so repoint lastWorkspace at the default
+    // (#535): without this, a reload would reopen the example they just left behind. `token` is the
+    // host's reserved '(default)' token.
+    setLastWorkspace(token);
     welcome.hide();
   }
 
@@ -1411,7 +1437,11 @@ export function init(): () => void {
       setStatus('could not open template', 'error');
       return;
     }
-    await workspace.openFolderPath(token, { recent: false });
+    // recent:true — record the example in Recents so it shows on the Start screen and is one click to
+    // re-open, AND (via the controller's rememberLastWorkspace) mark it the last workspace so a reload
+    // restores it rather than silently reverting to the empty default (#535). The example token is an
+    // OPFS-internal `example-<id>`, which the cold-boot ladder is allowed to auto-restore.
+    await workspace.openFolderPath(token, { recent: true });
   }
 
   // Import a multi-file workspace carried in a share link. Materializes a real workspace and opens
@@ -2246,10 +2276,31 @@ export function init(): () => void {
       } else {
         // A start action chosen on the Home route (#368) is queued as a one-shot intent and performed
         // here, once, instead of opening the default workspace. A plain editor boot (cold `#/editor`
-        // deep link, or a returning user) has no intent and falls back to the default workspace.
+        // deep link, or a returning user) has no intent: restore the workspace it was last on (#535) —
+        // an opened example otherwise reverted to the empty default on reload (silent data loss).
+        //
+        // Only an `example-*` dir is re-opened through openFolderPath here: it persists a handle in
+        // IndexedDB that re-acquires with NO permission prompt. A *picked* folder is not OPFS-internal
+        // (needs a user gesture) → never auto-restored, by design. The default workspace IS OPFS-internal
+        // but its '(default)' handle is registered lazily (never put in IndexedDB), so openFolderPath
+        // can't re-open it at cold boot — it flows through openDefaultWorkspaceFlow below instead, which
+        // is its proper path (seeds the model, migrates legacy scratch, shows the memory-only banner).
+        // On any restore failure (example dir evicted / IndexedDB cleared) we also fall through to the
+        // default, so the user is never stranded on a blank editor.
         const intent = takeStartIntent();
-        if (intent) await runStartIntent(intent);
-        else await openDefaultWorkspaceFlow(legacyScratch ?? SEED);
+        if (intent) {
+          await runStartIntent(intent);
+        } else {
+          const last = getLastWorkspace();
+          const restoredExample =
+            !!last && last !== DEFAULT_WS_TOKEN && isOpfsInternalToken(last)
+              ? (await workspace.openFolderPath(last, { recent: false })).ok
+              : false;
+          // Legacy-scratch migration is deliberately NOT done on the example-restore path: the scratch
+          // content is only ever preserved by being seeded into the default workspace, so clearing it
+          // here (without seeding) would lose it. It stays untouched until a default-workspace open.
+          if (!restoredExample) await openDefaultWorkspaceFlow(legacyScratch ?? SEED);
+        }
       }
     })
     .catch((e) => {
