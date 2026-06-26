@@ -93,7 +93,7 @@ import { createAssistantPanel, type AssistantPanel, type AssistantContext } from
 import { createScenarioPanel, type ScenarioPanel } from '@/scenarios/scenarioPanel';
 import { createTerminalPanel, type TerminalPanel } from '@/shell/terminal/terminalPanel';
 import { createReviewStore } from '@/review/reviewStore';
-import { createReviewPanel, REVIEW_AUTHOR_FALLBACK, type ReviewPanel } from '@/review/ReviewPanel';
+import { createReviewPanel, resolveReviewAuthor, type ReviewPanel } from '@/review/ReviewPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from '@/export/share';
 import { handleBeforeUnload } from '@/shell/dirty';
 import { render } from 'preact';
@@ -772,10 +772,10 @@ export function init(): () => void {
     navigateToDefinition(location);
   }
 
-  // The author attributed to a review comment opened from Studio. No Settings display-name field exists
-  // yet (#259 Phase 1) → the shared fallback; a Phase-2 follow-up can feed a real name from Settings here.
+  // The author attributed to a review comment opened from Studio: the configured Settings "Display name"
+  // (#479), resolved through resolveReviewAuthor so a blank/unset name falls back to the shared 'You'.
   function reviewAuthorName(): string {
-    return REVIEW_AUTHOR_FALLBACK;
+    return resolveReviewAuthor(loadSettings().displayName);
   }
 
   // Open a review thread on the editor's current selection (#259). editorSession already pinned `span.file`
@@ -1817,6 +1817,7 @@ export function init(): () => void {
       store: reviewStore,
       onNavigate: (file, span) =>
         void gotoSourceSpan({ file, line: span.line, column: span.column, endLine: span.endLine, endColumn: span.endColumn }),
+      author: () => reviewAuthorName(),
     });
   }
 
