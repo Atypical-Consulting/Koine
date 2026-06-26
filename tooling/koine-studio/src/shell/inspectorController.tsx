@@ -151,6 +151,12 @@ export interface InspectorControllerDeps {
   saveActiveContext(workspaceKey: string, scope: string): void;
   loadActiveContext(workspaceKey: string): string | null;
 
+  /**
+   * Persist every dirty editor buffer (#109's Save-all), passed to the Source Control panel's
+   * save-all-before-commit prompt (#470). ide.ts wires this to `workspace.saveAllDirty`.
+   */
+  saveAllDirty(): Promise<void>;
+
   // --- write-path callbacks ide.ts owns (the controller triggers, never owns, these) ---
   /** Write the status pill (errors route here from the loaders that surface their own failures). */
   setStatus(text: string, kind: 'connecting' | 'green' | 'error'): void;
@@ -750,13 +756,26 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const sourceControlRightView = el('rview-source-control');
   let sourceControlLoaded = false;
   let sourceControlRefresh = 0;
+  // Paint the panel with the live commit-guard inputs (#470): the current unsaved-buffer count and a
+  // Save-all action, both read fresh at paint time. Splitting this out lets a dirty-count change re-paint
+  // the panel WITHOUT bumping the refresh nonce (just the prop update — no git re-fetch), while
+  // loadSourceControl bumps the nonce for a genuine re-fetch.
+  function renderSourceControl(): void {
+    render(
+      <SourceControlPanel
+        git={platform}
+        folderToken={deps.folderRootToken()}
+        refreshNonce={sourceControlRefresh}
+        dirtyCount={appStore.getState().dirtyCount()}
+        onSaveAll={() => deps.saveAllDirty()}
+      />,
+      sourceControlRightView,
+    );
+  }
   function loadSourceControl(): void {
     if (sourceControlLoaded) sourceControlRefresh += 1; // a re-open re-fetches; first mount loads on its own
     sourceControlLoaded = true;
-    render(
-      <SourceControlPanel git={platform} folderToken={deps.folderRootToken()} refreshNonce={sourceControlRefresh} />,
-      sourceControlRightView,
-    );
+    renderSourceControl();
   }
   // #470: re-fetch git status when a save lands while the SC tab is open — reuses the nonce bump so the
   // in-place refresh preserves the commit-message draft. A no-op when the panel isn't mounted or isn't
@@ -766,6 +785,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (appStore.getState().right !== 'source-control') return;
     loadSourceControl();
   }
+  // #470: keep the panel's `dirtyCount` prop live so the commit guard sees buffers dirtied AFTER it last
+  // mounted. A dirty-count change re-paints the panel in place (no nonce bump → no git re-fetch), only
+  // while the SC tab is the active right view; closed/unmounted → nothing to repaint.
+  let lastDirtyCount = appStore.getState().dirtyCount();
+  appStore.subscribe((s) => {
+    const dc = s.dirtyCount();
+    if (dc === lastDirtyCount) return;
+    lastDirtyCount = dc;
+    if (sourceControlLoaded && s.right === 'source-control') renderSourceControl();
+  });
   const docsFail = (verb: string) => (e: unknown) => deps.setStatus(`Could not ${verb}: ${String(e)}`, 'error');
 
   // One handlers object the two pages share: each create resets only its OWN page's loaded flag and

@@ -224,6 +224,7 @@ function makeDeps(lsp: Lsp, over: Partial<InspectorControllerDeps> = {}): Inspec
     store: createAppStore(),
     activeUri: () => 'file:///work/model.koi',
     folderRootToken: () => '',
+    saveAllDirty: vi.fn(async () => {}),
     initialTarget: 'csharp',
     saveWorkspaceCenter: vi.fn(),
     loadWorkspaceCenter: vi.fn(() => null),

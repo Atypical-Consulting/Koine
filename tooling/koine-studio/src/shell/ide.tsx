@@ -617,6 +617,9 @@ export function init(): () => void {
     store: appStore,
     activeUri: () => workspace.activeUri(),
     folderRootToken: () => workspace.folderRootToken(),
+    // #470: the Source Control panel's save-all-before-commit prompt persists every dirty buffer through
+    // the shell's existing Save-all (#109). A thunk because `workspace` is constructed after the controller.
+    saveAllDirty: () => workspace.saveAllDirty(),
     initialTarget: settings.previewTarget,
     saveWorkspaceCenter,
     loadWorkspaceCenter,
