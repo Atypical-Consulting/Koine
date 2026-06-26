@@ -1,0 +1,80 @@
+name: Wasm AOT smoke
+
+# Scheduled smoke test of the AOT-compiled browser-wasm bundle (issue #471).
+#
+# The per-push CI gate (ci.yml, "Smoke-test the published wasm bundle") drives the whole
+# [JSExport] surface, but against the DEFAULT (interpreter) publish — kept fast for the PR loop.
+# The DEPLOYED bundle is AOT-compiled (-p:KoineWasmAot=true, ~24-32 s slower; set by the
+# deploy-docs.yml deploy job). PublishTrimmed/TrimMode=full are identical across both modes, so the
+# trim/reflection-rooting breakage the smoke test guards is mode-independent and already caught by the
+# interpreter gate; the AOT bundle's BOOT is covered by the Studio browser smoke (koine-studio.yml).
+# The residual gap is an AOT-codegen-only regression on a non-boot reflection path — a method the AOT
+# compiler drops/mis-compiles but the interpreter keeps. This run closes it OFF the PR path, so the
+# AOT publish cost is irrelevant. The smoke test itself is UNCHANGED (it imports whatever AppBundle is
+# published — interpreter or AOT); only the publish flag differs from ci.yml's step.
+
+on:
+  # Nightly — a low-probability, AOT-only regression surfaces within a day. Retune the cadence freely.
+  schedule:
+    - cron: '17 4 * * *'
+  # Run on demand from the Actions UI or `gh workflow run wasm-aot-smoke.yml`.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  aot-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Mirror ci.yml's wasm toolchain so the scheduled job and the per-push job can't drift.
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          # All projects target net10.0; pin the 10.0.x channel and allow preview
+          # builds in case the GA SDK is not yet on the runner image.
+          dotnet-version: '10.0.x'
+          dotnet-quality: preview
+
+      # The smoke test runs under Node against the published AppBundle.
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      # The wasm workloads (emscripten + browser-wasm runtime pack) are slow to
+      # download; cache the SDK workload folders keyed on the SDK version.
+      - name: Cache wasm workloads
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.dotnet/sdk-manifests
+            ~/.dotnet/packs
+            ~/.dotnet/metadata
+            ~/.dotnet/sdk-advertising
+          key: ${{ runner.os }}-wasm-workloads-${{ hashFiles('Directory.Build.props') }}
+          restore-keys: ${{ runner.os }}-wasm-workloads-
+
+      - name: Install wasm workloads
+        run: dotnet workload install wasm-tools wasm-experimental
+
+      # No central package management / lock files, so cache the global NuGet
+      # package folder keyed on the project files that pin versions.
+      - name: Cache NuGet
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      # AOT-publish the bundle the docs site actually deploys, then drive the WHOLE [JSExport]
+      # surface against it under Node. -p:KoineWasmAot=true is the only flag that differs from ci.yml's
+      # interpreter publish (the csproj already gates WasmStripILAfterAOT on it). A red exit fails the
+      # job; the same run prints the pizzeria compile benchmark's `elapsed=` line for the log.
+      - name: AOT-publish + smoke-test the wasm bundle
+        run: |
+          dotnet publish src/Koine.Wasm -c Release -p:KoineWasmAot=true
+          node src/Koine.Wasm/smoke-test.mjs

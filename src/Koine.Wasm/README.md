@@ -33,6 +33,29 @@ node src/Koine.Wasm/smoke-test.mjs            # full-surface checks + pizzeria c
 A non-zero exit means a check (or the benchmark threshold) failed. CI runs exactly this on every push
 (`.github/workflows/ci.yml`, the "Smoke-test the published wasm bundle" step).
 
+### Scheduled AOT-bundle smoke run
+
+The per-push CI gate publishes the **default (interpreter)** bundle, but the deployed Playground/Studio
+ships the **AOT** bundle (`-p:KoineWasmAot=true`, set by `deploy-docs.yml`). `PublishTrimmed`/
+`TrimMode=full` are identical in both modes, so the trim/reflection breakage the smoke test guards is
+mode-independent and already caught by the per-push gate; the AOT bundle's *boot* is covered by the
+Studio browser smoke. The one residual gap is an **AOT-codegen-only regression on a non-boot path** — a
+method the AOT compiler drops or mis-compiles but the interpreter keeps.
+[`.github/workflows/wasm-aot-smoke.yml`](../../.github/workflows/wasm-aot-smoke.yml) closes it: a
+**scheduled** (nightly `cron` + `workflow_dispatch`) job that runs the *same, unchanged* smoke test
+against an AOT publish. It lives off the PR path so the ~24–32 s AOT publish cost never taxes the
+per-push loop, and a red run signals an AOT-specific regression the interpreter gate can't see.
+
+Run it on demand — from the Actions UI, or:
+
+```bash
+gh workflow run wasm-aot-smoke.yml            # trigger the scheduled job manually
+
+# …or reproduce it locally (needs the wasm workloads):
+dotnet publish src/Koine.Wasm -c Release -p:KoineWasmAot=true   # AOT publish
+node src/Koine.Wasm/smoke-test.mjs                              # same full-surface checks + benchmark
+```
+
 ## Pizzeria compile benchmark
 
 The same run compiles the 6-context [`templates/pizzeria`](../../templates/pizzeria) model in wasm — the
