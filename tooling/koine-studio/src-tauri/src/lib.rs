@@ -1834,20 +1834,40 @@ mod tests {
     // --- PTY shell resolution (pure) ----------------------------------------
 
     #[test]
-    fn resolve_shell_command_honours_an_explicit_shell() {
-        // An explicit shell path is used verbatim as the program, with no extra args — the
-        // terminal launches exactly what the caller (or `$SHELL`) named.
-        let (program, args) = resolve_shell_command(Some("/bin/zsh"));
-        assert_eq!(program, "/bin/zsh");
-        assert!(args.is_empty(), "an explicit shell takes no synthetic args");
+    fn resolve_shell_command_prefers_an_explicit_shell_and_logs_in_on_unix() {
+        // `$SHELL` (the first arg) wins over the passwd-recovered shell. On Unix the interactive
+        // shell is spawned as a *login* shell (`-l`) so a Finder/Dock launch — whose stripped GUI
+        // env never sourced `~/.zprofile` — still gets a real `PATH` (Homebrew/user dirs).
+        let (program, args) = resolve_shell_command(Some("/bin/zsh"), Some("/bin/bash"));
+        assert_eq!(program, "/bin/zsh", "an explicit $SHELL is honoured verbatim");
+        #[cfg(unix)]
+        assert!(
+            args.iter().any(|a| a == "-l"),
+            "the Unix terminal must be a login shell so the user's profile runs"
+        );
+        #[cfg(windows)]
+        assert!(args.is_empty(), "the Windows spawn path is unchanged — no login flag");
     }
 
     #[test]
-    fn resolve_shell_command_falls_back_to_a_platform_default() {
-        // With no shell named, a non-empty platform default must be chosen ($SHELL/`/bin/sh`
-        // on Unix, `cmd` on Windows) so `pty_start` always has something to spawn.
-        let (program, _args) = resolve_shell_command(None);
-        assert!(!program.is_empty(), "a platform default shell must be chosen");
+    #[cfg(unix)]
+    fn resolve_shell_command_recovers_the_passwd_shell_when_shell_is_unset() {
+        // The GUI-launch case: no `$SHELL`, so fall through to the user's shell recovered from
+        // `getpwuid` (passed as the second arg) rather than defaulting straight to `/bin/sh` —
+        // still as a login shell.
+        let (program, args) = resolve_shell_command(None, Some("/opt/homebrew/bin/fish"));
+        assert_eq!(program, "/opt/homebrew/bin/fish", "the passwd shell is the next preference");
+        assert!(args.iter().any(|a| a == "-l"), "the recovered shell is still a login shell");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn resolve_shell_command_falls_back_to_bin_sh_as_a_last_resort() {
+        // Neither `$SHELL` nor a passwd shell available: `/bin/sh` keeps `pty_start` able to spawn
+        // *something*, still logged-in.
+        let (program, args) = resolve_shell_command(None, None);
+        assert_eq!(program, "/bin/sh", "/bin/sh is the final fallback");
+        assert!(args.iter().any(|a| a == "-l"));
     }
 
     // --- PTY chunk decoding (pure) ------------------------------------------
