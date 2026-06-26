@@ -32,7 +32,7 @@ import { createModal } from '@/shared/overlay';
 import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from '@/mcp/mcp';
 import { EMIT_TARGETS } from '@/shared/emitTargets';
 import { KEYBINDINGS, DEFAULT_BINDINGS, type BindingId } from '@/editor/keybindings';
-import { formatChord } from '@/shared/platform';
+import { chordFromEvent, prettyChord } from '@/shared/platform';
 
 export interface PrefsCallbacks {
   /** Fired after every committed change with the merged, persisted Settings. */
@@ -117,40 +117,8 @@ const ICON = {
     '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.8"/><path d="M8 7.3v3.4"/><circle cx="8" cy="4.9" r="0.9" fill="currentColor" stroke="none"/></svg>',
 } as const;
 
-// Normalize a keydown into a CodeMirror key string ('Mod-s', 'Shift-F12', 'F2', 'Mod-.', 'Mod-d'), or
-// null when the event is a bare modifier (wait for a real key). Callers treat Escape as cancel
-// separately. The modifier prefix order (Mod → Shift → Alt) and portable 'Mod' (ctrl/meta) match the
-// style of the defaults in keybindings.ts, so a recorded chord round-trips through resolveKeybindings().
-export function chordFromEvent(e: KeyboardEvent): string | null {
-  const k = e.key;
-  if (k === 'Control' || k === 'Shift' || k === 'Alt' || k === 'Meta') return null; // bare modifier — keep waiting
-  let prefix = '';
-  if (e.ctrlKey || e.metaKey) prefix += 'Mod-'; // portable primary modifier (⌘ on mac, Ctrl elsewhere)
-  if (e.shiftKey) prefix += 'Shift-';
-  if (e.altKey) prefix += 'Alt-';
-  // A single printable character is lowercased ('d', '.'); a named key keeps its name ('F12', 'ArrowUp').
-  const base = k.length === 1 ? k.toLowerCase() : k;
-  return prefix + base;
-}
-
-// Render a stored CodeMirror key ('Mod-s') as a platform display string ('⌘+S' / 'Ctrl+S'). Strips the
-// known modifier prefixes off the FRONT (in chordFromEvent's emit order) rather than splitting on '-',
-// so a chord whose base key is itself '-' (e.g. 'Mod--', Ctrl+minus) renders as 'Ctrl+-' instead of a
-// garbled 'Ctrl++'. The remaining base is uppercased when it's a single char, then formatChord does the
-// platform substitution. '' (a deliberate "unbound" override) reads as 'Unbound'.
-function prettyChord(cmKey: string): string {
-  if (cmKey === '') return 'Unbound';
-  let rest = cmKey;
-  const mods: string[] = [];
-  for (const [prefix, segment] of [['Mod-', 'mod'], ['Shift-', 'Shift'], ['Alt-', 'Alt']] as const) {
-    if (rest.startsWith(prefix)) {
-      mods.push(segment);
-      rest = rest.slice(prefix.length);
-    }
-  }
-  const base = rest.length === 1 ? rest.toUpperCase() : rest;
-  return formatChord([...mods, base].join('+'));
-}
+// chordFromEvent (keydown → CodeMirror key) and prettyChord (CodeMirror key → display string) live in
+// shared/platform.ts beside formatChord — they're platform-string helpers, not Settings-dialog logic.
 
 /**
  * Build the Settings dialog and return an imperative handle. The DOM is created once; each open()
