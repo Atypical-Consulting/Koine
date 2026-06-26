@@ -872,8 +872,9 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
         return null;
       }
       existing.dirty = false; // set AFTER setDoc's onChange so the buffer ends clean
-      lsp.didSave();
+      if (existing.uri === activeUriValue) lsp.didSave(); // didSave() targets the ACTIVE doc — only valid then
       deps.refreshDirtyIndicator();
+      renderTree(); // setDoc's onChange repainted the explorer dirty dot; repaint it clean now
       return existing.uri;
     }
     const owningRoot = roots[0];

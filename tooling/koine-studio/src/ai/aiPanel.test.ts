@@ -465,7 +465,9 @@ describe('multi-file change set (agentic edits)', () => {
       return 'Stationed two edits.';
     });
 
-    const onApplyChangeSet = vi.fn(async (_files: { relPath: string; body: string; isNew: boolean }[]) => {});
+    const onApplyChangeSet = vi.fn(
+      async (_files: { relPath: string; body: string; isNew: boolean }[]) => ({ failed: [] as string[] }),
+    );
     const container = document.createElement('div');
     createAssistantPanel(
       opts(container, {
@@ -518,12 +520,46 @@ describe('multi-file change set (agentic edits)', () => {
         getUseTools: () => true,
         getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
-        onApplyChangeSet: vi.fn(async () => {}),
+        onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
       }),
     );
     fire(container);
 
     await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
     expect(container.querySelector('.koi-changeset')).toBeNull();
+  });
+
+  test('a partial-apply failure is surfaced (no false "Applied ✓"), and a successful apply locks the review', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      req.editSession?.stage('events.koi', 'integration event OrderPlaced {}');
+      req.onText('Two edits.');
+      return 'Two edits.';
+    });
+    // First apply fails to write events.koi; the panel must report it and NOT show a terminal "Applied ✓".
+    const onApplyChangeSet = vi.fn(async (_files: { relPath: string; body: string; isNew: boolean }[]) => ({
+      failed: ['events.koi'] as string[],
+    }));
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        runEditTool: vi.fn(async () => 'ok'),
+        onApplyChangeSet,
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset-apply')).not.toBeNull());
+    const applyBtn = container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    applyBtn.click();
+    await vi.waitFor(() =>
+      expect(container.querySelector('.koi-changeset-status')?.textContent).toContain('events.koi'),
+    );
+    // Discard is still present (the change set isn't terminal) and Apply re-opened for a retry.
+    expect(container.querySelector('.koi-changeset-discard')).not.toBeNull();
+    expect(applyBtn.textContent).not.toContain('✓');
+    expect(applyBtn.disabled).toBe(false);
   });
 });

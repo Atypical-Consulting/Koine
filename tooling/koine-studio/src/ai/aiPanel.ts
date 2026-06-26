@@ -101,9 +101,11 @@ export interface AssistantPanelOptions {
   runEditTool?: (name: string, argsJson: string, session: EditSession) => Promise<string>;
   /**
    * Commit an accepted multi-file change set: write each accepted file through the workspace
-   * controller (new files under the folder root), then re-validate. Resolves when writes complete.
+   * controller (new files under the folder root), then re-validate. Resolves with the relPaths whose
+   * write FAILED (empty when all succeeded) so the panel can report a partial apply instead of a
+   * false "Applied ✓".
    */
-  onApplyChangeSet?: (files: StagedEdit[]) => Promise<void>;
+  onApplyChangeSet?: (files: StagedEdit[]) => Promise<{ failed: string[] }>;
 }
 
 export interface AssistantPanel {
@@ -166,6 +168,21 @@ export function buildSystem(ctx: AssistantContext): string {
   }
   return parts.join('\n');
 }
+
+/**
+ * Appended to the system prompt only in workspace mode (when the multi-file edit tools are advertised
+ * this turn). Without it the primer's "output the COMPLETE model in a single ```koine block" instruction
+ * dominates and the model never calls the write tools, so the change-set review silently never appears.
+ */
+const WORKSPACE_EDIT_GUIDE = [
+  'You are editing a multi-file Koine workspace. When a change spans more than the current file (for',
+  'example an integration event touching a publisher context, a subscriber context, and the context',
+  'map), do NOT answer with a single ```koine block. Instead use the workspace edit tools: call',
+  '`koine_list_files` to see the `.koi` files, `koine_read_file` to read the ones you will change, then',
+  '`koine_write_file` once per file to STAGE its complete new contents. Staged edits are shown to the',
+  'user as a per-file diff to review and apply — nothing is written to disk until they accept. Only',
+  '`.koi` files can be written.',
+].join(' ');
 
 /**
  * Build the "Explain this construct" prompt: an EXPLANATORY (never generative) ask aimed at a domain
@@ -273,7 +290,7 @@ function renderChangeSet(
   bubble: HTMLElement,
   staged: StagedEdit[],
   before: Record<string, string>,
-  handlers: { onApply: (accepted: StagedEdit[]) => void | Promise<void>; onDiscard: () => void },
+  handlers: { onApply: (accepted: StagedEdit[]) => Promise<{ failed: string[] }>; onDiscard: () => void },
 ): void {
   const panel = document.createElement('div');
   panel.className = 'koi-changeset';
@@ -283,6 +300,9 @@ function renderChangeSet(
 
   // The set of still-accepted edits (all on by default); the Apply label + the committed list read from it.
   const accepted = new Set<StagedEdit>(staged);
+  // The accept checkboxes, so a successful apply can disable them all (a toggle afterwards must not
+  // re-enable Apply and let the same change set be written to disk a second time).
+  const checkboxes: HTMLInputElement[] = [];
 
   const applyBtn = document.createElement('button');
   applyBtn.type = 'button';
@@ -292,6 +312,12 @@ function renderChangeSet(
   discardBtn.type = 'button';
   discardBtn.className = 'koi-changeset-discard';
   discardBtn.textContent = 'Discard';
+
+  // A polite live region so a screen reader announces the apply outcome (WCAG 2.1 AA 4.1.3).
+  const status = document.createElement('div');
+  status.className = 'koi-changeset-status';
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
 
   function refreshApply(): void {
     const n = accepted.size;
@@ -313,6 +339,7 @@ function renderChangeSet(
       else accepted.delete(file);
       refreshApply();
     });
+    checkboxes.push(check);
     row.appendChild(check);
 
     const badge = document.createElement('span');
@@ -335,9 +362,24 @@ function renderChangeSet(
 
   applyBtn.addEventListener('click', () => {
     const list = staged.filter((f) => accepted.has(f));
-    applyBtn.disabled = true; // prevent a double-apply while the writes are in flight
-    void Promise.resolve(handlers.onApply(list)).then(() => {
+    if (!list.length) return;
+    applyBtn.disabled = true; // guard the in-flight window
+    void Promise.resolve(handlers.onApply(list)).then((result) => {
+      if (result.failed.length) {
+        // Partial/total failure: report exactly which files didn't write and re-open Apply so the user
+        // can retry the still-checked set, rather than a false "Applied ✓".
+        const wrote = list.length - result.failed.length;
+        status.textContent =
+          `${wrote ? `Applied ${wrote} file${wrote === 1 ? '' : 's'}; ` : ''}` +
+          `couldn't write ${result.failed.length}: ${result.failed.join(', ')}. Re-apply to retry.`;
+        refreshApply();
+        return;
+      }
+      // Success: lock the review (disable the checkboxes so a later toggle can't trigger a second write)
+      // and mark Apply terminal.
+      for (const cb of checkboxes) cb.disabled = true;
       applyBtn.textContent = `Applied ${list.length} file${list.length === 1 ? '' : 's'} ✓`;
+      status.textContent = `Applied ${list.length} file${list.length === 1 ? '' : 's'}.`;
       discardBtn.remove();
     });
   });
@@ -347,7 +389,7 @@ function renderChangeSet(
   });
 
   refreshApply();
-  panel.append(applyBtn, discardBtn);
+  panel.append(applyBtn, discardBtn, status);
   bubble.appendChild(panel);
 }
 
@@ -752,10 +794,12 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       }
       const mechanism = chooseMechanism(constrainOn, provider, baseUrl, !!gbnf);
 
-      // Build the per-turn multi-file staging session ONLY in workspace mode: tools are on AND the host
-      // supplies the edit executor AND there are workspace files to edit across. The model's writes land
-      // in `editSession`; after the turn resolves, `editSession.staged()` holds the proposed full files.
-      const wsFiles = opts.getUseTools() && opts.runEditTool && opts.getWorkspaceFiles ? opts.getWorkspaceFiles() : null;
+      // Build the per-turn multi-file staging session ONLY for a GENERATIVE workspace turn: offerApply
+      // (an Explain turn must never stage/apply edits) AND tools are on AND the host supplies the edit
+      // executor AND there are workspace files to edit across. The model's writes land in `editSession`;
+      // after the turn resolves, `editSession.staged()` holds the proposed full files.
+      const wsFiles =
+        offerApply && opts.getUseTools() && opts.runEditTool && opts.getWorkspaceFiles ? opts.getWorkspaceFiles() : null;
       const editSession = wsFiles && Object.keys(wsFiles).length > 0 ? createEditSession(wsFiles) : null;
 
       full = await runAssistant({
@@ -763,7 +807,9 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         baseUrl,
         apiKey,
         model: opts.getModel(),
-        system: buildSystem(ctx),
+        // In workspace mode, steer the model toward the multi-file edit tools (otherwise the primer's
+        // "output one ```koine block" instruction wins and the change-set path never fires).
+        system: editSession ? `${buildSystem(ctx)}\n\n${WORKSPACE_EDIT_GUIDE}` : buildSystem(ctx),
         messages,
         signal: aborter.signal,
         // Attach the grammar only on the grammar-constrained path; a no-op for providers that ignore it.
@@ -786,9 +832,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         // the user accepts before any disk write (the single-file Apply gate is for non-staged replies).
         replyBubble.innerHTML = `<div class="koi-md">${renderMarkdown(full)}</div>`;
         renderChangeSet(replyBubble, editSession.staged(), wsFiles ?? {}, {
-          onApply: async (accepted) => {
-            await opts.onApplyChangeSet?.(accepted);
-          },
+          onApply: async (accepted) => (await opts.onApplyChangeSet?.(accepted)) ?? { failed: [] },
           onDiscard: () => {},
         });
       } else {

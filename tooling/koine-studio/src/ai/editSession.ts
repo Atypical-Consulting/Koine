@@ -24,6 +24,8 @@ export interface EditSession {
   read(relPath: string): string | null;
   /** Stage a full-file body for `relPath`. Staging the same relPath again replaces the body. */
   stage(relPath: string, body: string): void;
+  /** Whether `relPath` is a brand-new file (not among the session's initial workspace files). */
+  isNew(relPath: string): boolean;
   /** One entry per relPath staged this session, in stage order, each flagged new vs modified. */
   staged(): StagedEdit[];
   /** Empty the staging area: `staged()` → `[]` and `read()` falls back to `initial` again. */
@@ -36,6 +38,9 @@ export interface EditSession {
  * first so a Windows-style path is checked the same way. Throws an `Error` describing the rejection.
  */
 export function assertSafeRelPath(relPath: string): void {
+  if (!relPath.trim()) {
+    throw new Error('Unsafe relPath (empty path).');
+  }
   const normalized = relPath.replace(/\\/g, '/');
   if (normalized.startsWith('/')) {
     throw new Error(`Unsafe relPath (absolute path): ${relPath}`);
@@ -79,7 +84,16 @@ export function createEditSession(initial: Record<string, string>): EditSession 
 
     stage(relPath: string, body: string): void {
       assertSafeRelPath(relPath);
+      // The assistant edits the workspace's `.koi` model, not arbitrary project files — reject any other
+      // extension so a write tool can't create/overwrite a README, lockfile, etc. inside the folder.
+      if (!relPath.toLowerCase().endsWith('.koi')) {
+        throw new Error(`Unsafe relPath (only .koi files can be edited): ${relPath}`);
+      }
       stagedMap.set(relPath, body);
+    },
+
+    isNew(relPath: string): boolean {
+      return !initialSet.has(relPath);
     },
 
     staged(): StagedEdit[] {

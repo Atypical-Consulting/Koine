@@ -76,4 +76,24 @@ describe('createEditSession', () => {
     expect(session.read('billing.koi')).toBeNull(); // staged-only file is gone
     expect(session.list()).toEqual(['order.koi']);
   });
+
+  test('stage() rejects an empty/blank relPath', () => {
+    const session = createEditSession({ 'order.koi': 'context Order {}' });
+    expect(() => session.stage('', 'x')).toThrow();
+    expect(() => session.stage('   ', 'x')).toThrow();
+  });
+
+  test('stage() rejects a non-.koi relPath (the assistant edits the .koi model, not project files)', () => {
+    const session = createEditSession({ 'order.koi': 'context Order {}' });
+    expect(() => session.stage('README.md', '# hi')).toThrow();
+    expect(() => session.stage('package.json', '{}')).toThrow();
+    expect(() => session.stage('nested/notes.txt', 'x')).toThrow();
+    expect(() => session.stage('nested/billing.koi', 'context Billing {}')).not.toThrow();
+  });
+
+  test('isNew() reflects absence from the initial workspace', () => {
+    const session = createEditSession({ 'order.koi': 'context Order {}' });
+    expect(session.isNew('order.koi')).toBe(false); // an existing file
+    expect(session.isNew('billing.koi')).toBe(true); // not in the initial snapshot
+  });
 });

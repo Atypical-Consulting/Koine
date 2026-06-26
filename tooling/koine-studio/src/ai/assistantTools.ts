@@ -7,6 +7,7 @@
 // MCP server exposes, but executed by the IDE itself. `reference`/`examples` are intentionally NOT
 // here: their content is already injected into the system prompt (KOINE_PRIMER + live source).
 import type { ChatCompletionFunctionTool } from 'openai/resources/chat/completions';
+import type { EditSession } from '@/ai/editSession';
 import { EMIT_TARGETS, isEmitTarget } from '@/shared/emitTargets';
 
 export type CompileTarget = string;
@@ -253,6 +254,49 @@ export function formatReadFile(relPath: string, contents: string | null): string
 /** Render a koine_write_file confirmation: the file was STAGED (not written to disk yet). */
 export function formatWriteFile(relPath: string, isNew: boolean): string {
   return `staged ${isNew ? 'new file' : 'changes to'} ${relPath} (not yet written to disk).`;
+}
+
+/**
+ * Host-independent dispatch for the staged edit tools (`koine_list_files` / `koine_read_file` /
+ * `koine_write_file`) against a per-turn {@link EditSession}: parse the args, run a pure list/read, or
+ * stage a write and report it. The whole-staged-workspace validation differs by host (WASM
+ * `DiagnoseWorkspace` in the browser, the MCP sidecar on desktop), so the caller passes
+ * `validateStaged`, invoked only after a write to append the diagnostics summary. Never throws — bad
+ * JSON, an unsafe/non-`.koi` relPath (the session's `stage` guard throws), or an unknown tool all
+ * resolve to an error string the model can read and recover from.
+ */
+export async function runEditToolStaging(
+  name: string,
+  argsJson: string,
+  session: EditSession,
+  validateStaged: () => Promise<string>,
+): Promise<string> {
+  let args: { relPath?: unknown; contents?: unknown };
+  try {
+    args = JSON.parse(argsJson || '{}');
+  } catch {
+    return 'Error: the tool arguments were not valid JSON.';
+  }
+  try {
+    switch (name) {
+      case 'koine_list_files':
+        return formatListFiles(session.list());
+      case 'koine_read_file': {
+        const relPath = typeof args.relPath === 'string' ? args.relPath : '';
+        return formatReadFile(relPath, session.read(relPath));
+      }
+      case 'koine_write_file': {
+        const relPath = typeof args.relPath === 'string' ? args.relPath : '';
+        const contents = typeof args.contents === 'string' ? args.contents : '';
+        session.stage(relPath, contents);
+        return `${formatWriteFile(relPath, session.isNew(relPath))}\n${await validateStaged()}`;
+      }
+      default:
+        return `Error: unknown tool ${name}.`;
+    }
+  } catch (e) {
+    return `Error: ${e instanceof Error ? e.message : String(e)}`;
+  }
 }
 
 /** A short, single-line status for the inline tool-call line in the transcript. */

@@ -1651,8 +1651,14 @@ export function init(): () => void {
       // Host executor for the staged list/read/write edit tools (browser WASM / desktop MCP).
       runEditTool: platform.runEditTool ? (name, argsJson, session) => platform.runEditTool!(name, argsJson, session) : undefined,
       // Commit an accepted multi-file change set through the controller (new files under the folder root).
+      // applyFileEdit returns null (not throw) on a failed write/create — collect those relPaths so the
+      // panel reports a partial apply instead of a false "Applied ✓".
       onApplyChangeSet: async (files) => {
-        for (const f of files) await workspace.applyFileEdit(f.relPath, f.body);
+        const failed: string[] = [];
+        for (const f of files) {
+          if ((await workspace.applyFileEdit(f.relPath, f.body)) === null) failed.push(f.relPath);
+        }
+        return { failed };
       },
     });
     return assistant;
