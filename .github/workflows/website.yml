@@ -1,0 +1,59 @@
+name: Website
+
+# Gate pull requests on the website's Node-env vitest unit suite (~70 tests across
+# website/src/**/*.test.ts). The .NET solution is gated by ci.yml and the Koine Studio
+# package by koine-studio.yml; this is the equivalent PR gate for the docs-site /
+# Playground TypeScript — so a logic regression in the boot-watchdog/fallback wiring,
+# the supersede/abort path, or the service-worker registration fails a PR check instead
+# of merging green and surfacing only post-merge (issue #587, the gap noticed in #510).
+#
+# Node-only and fast (the suite is ~300ms; the worker is mocked): no wasm workloads, no
+# AOT bundle, no Chromium. The real-browser boot smoke (npm run test:browser) stays the
+# separate post-merge gate in deploy-docs.yml.
+#
+# Path-gated to website/** and src/** (the Playground bundles the compiler to wasm, so a
+# compiler change can affect website behaviour), plus this workflow file itself, so
+# unrelated PRs don't pay for it.
+
+on:
+  pull_request:
+    paths:
+      - 'website/**'
+      - 'src/**'
+      - '.github/workflows/website.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel superseded PR runs; never cancel a manual dispatch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  website-tests:
+    name: website-tests
+    runs-on: ubuntu-latest
+    # Backstop so a hung install can't run to the 6-hour default; the suite finishes in
+    # well under a minute warm (npm ci + a ~300ms vitest run).
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          # Astro 7 / Starlight require Node >= 22.12 (matches deploy-docs.yml).
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./website
+        run: npm ci
+
+      - name: Run website unit tests (vitest, Node env)
+        working-directory: ./website
+        run: npm test

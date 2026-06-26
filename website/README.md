@@ -35,6 +35,21 @@ ways so it can't silently regress again:
   ship to GitHub Pages. (The Playground's vitest unit tests mock the worker, so they cannot catch a
   boot hang on their own — this browser gate is what does.)
 
+### CI: PR gate vs. post-merge boot smoke
+
+The two layers run at different points in the lifecycle:
+
+- **`npm test`** (the Node-env vitest suite — `src/**/*.test.ts`, worker mocked) gates **pull
+  requests** via [`.github/workflows/website.yml`](../.github/workflows/website.yml). A TypeScript
+  unit-test regression in the Playground (the boot-watchdog/fallback wiring, the supersede/abort
+  path, the service-worker registration, or the `worker-handler` source guard) now fails a PR check
+  instead of merging green. The job is Node-only and fast — no wasm workloads, no Chromium —
+  path-gated to `website/**` + `src/**`. (Mirrors how `koine-studio.yml` gates the studio package;
+  see #587, the gap noticed while implementing #510.)
+- **`npm run test:browser`** (the headless-Chromium boot smoke above) stays the separate
+  **post-merge** real-boot gate in `deploy-docs.yml`, exercising only the happy boot path against the
+  built site. The unit suite covers the timeout/fallback/cancellation branches it cannot (#492 / #510).
+
 ## 🚀 Project Structure
 
 Inside of your Astro + Starlight project, you'll see the following folders and files:

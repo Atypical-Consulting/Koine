@@ -88,15 +88,17 @@ internal sealed class PhpTypeMapper
         string? inner = type.Name switch
         {
             ModelIndex.ListTypeName or ModelIndex.SetTypeName when type.Element is not null
-                => $"list<{Map(type.Element)}>",
+                => $"list<{InnerDocType(type.Element)}>",
             // `Map<K, V>` → `array<K, V>`. A non-scalar key (a value object / entity) renders e.g.
             // `array<Sku, int>`; phpstan --level max accepts this (it does not enforce the
             // int|string array-key constraint inside a generic PHPDoc — empirically [OK] on
-            // PHPStan 2.x), so no key-type guard is needed for level-max parity (#583).
+            // PHPStan 2.x), so no key-type guard is needed for level-max parity (#583). The
+            // key and value both thread through `InnerDocType`, so a nested collection in either
+            // position is typed fully rather than as a bare `array`.
             ModelIndex.MapTypeName when type.Element is not null && type.Value is not null
-                => $"array<{Map(type.Element)}, {Map(type.Value)}>",
+                => $"array<{InnerDocType(type.Element)}, {InnerDocType(type.Value)}>",
             ModelIndex.RangeTypeName when type.Element is not null
-                => $"Range<{Map(type.Element)}>",
+                => $"Range<{InnerDocType(type.Element)}>",
             _ => null,
         };
 
@@ -107,6 +109,21 @@ internal sealed class PhpTypeMapper
 
         return type.IsOptional ? inner + "|null" : inner;
     }
+
+    /// <summary>
+    /// The phpstan PHPDoc type for a collection's inner type argument (a <c>List</c>/<c>Set</c>
+    /// element, a <c>Map</c> key/value, or a <c>Range</c> argument). When that argument is itself a
+    /// collection or generic, this recurses through <see cref="DocType"/> so it renders fully —
+    /// <c>list&lt;T&gt;</c> / <c>array&lt;K,V&gt;</c> / <c>Range&lt;T&gt;</c> — instead of the bare
+    /// <c>array</c> native hint that <c>phpstan --level max</c> rejects as untyped
+    /// (<c>missingType.iterableValue</c>). For a non-collection argument (scalar, value object,
+    /// entity, enum) <see cref="DocType"/> is <c>null</c> and it falls back to the native hint
+    /// (<see cref="Map"/>), which already fully specifies the type. This closes the nested-collection
+    /// gap one level deeper than #583 — e.g. <c>Map&lt;String, List&lt;OrderLine&gt;&gt;</c> →
+    /// <c>array&lt;string, list&lt;OrderLine&gt;&gt;</c>, <c>List&lt;List&lt;Int&gt;&gt;</c> →
+    /// <c>list&lt;list&lt;int&gt;&gt;</c> (#588).
+    /// </summary>
+    private string InnerDocType(TypeRef type) => DocType(type) ?? Map(type);
 
     /// <summary>True when the member's type is a Koine <c>List&lt;T&gt;</c>.</summary>
     public static bool IsList(TypeRef type) => type.Name == ModelIndex.ListTypeName;
