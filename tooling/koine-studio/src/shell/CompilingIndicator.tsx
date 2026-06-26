@@ -9,8 +9,13 @@ import { isCompileInFlight, onCompileActivityChange } from '@/host/browser/compi
 //
 // The reveal is DEBOUNCED (~150 ms): a fast keystroke-diagnose finishes inside the window and never
 // flashes the indicator on and off, matching the playground's perceived behavior. The hide is immediate.
-// The element is an `aria-live="polite"` region kept in the DOM so a screen reader announces "compiling…"
-// when it appears (and the absence of text when it clears), without stealing focus. On teardown the
+//
+// Accessibility mirrors the project-wizard announcer (src/export/generateProjectWizard.ts): the VISUAL
+// pulsing pill is shown/hidden freely (and `aria-hidden`, so it isn't double-read), while announcements
+// ride a SEPARATE, always-present visually-hidden `aria-live="polite"` region whose text alone toggles.
+// Toggling a node's `hidden`/`display` in the same update that inserts its text is unreliable for screen
+// readers — the live region must already be in the accessibility tree when its text changes — so the
+// announcer stays mounted and only its text content flips between "" and "compiling…". On teardown the
 // subscription is released and the pending timer cleared, so there's no leak and no setState after unmount.
 
 const DEFAULT_DEBOUNCE_MS = 150;
@@ -54,14 +59,22 @@ export function CompilingIndicator(props: { debounceMs?: number } = {}) {
   }, [debounceMs]);
 
   return (
-    <span
-      class="sb-item koi-compiling-indicator"
-      data-role="compiling"
-      aria-live="polite"
-      aria-atomic="true"
-      hidden={!visible}
-    >
-      {visible ? 'compiling…' : ''}
-    </span>
+    <>
+      {/* The visual pulsing pill, shown only while busy. `aria-hidden` so the persistent live region
+          below is the single announcement source (no double read). */}
+      <span
+        class="sb-item koi-compiling-indicator"
+        data-role="compiling"
+        aria-hidden="true"
+        hidden={!visible}
+      >
+        {visible ? 'compiling…' : ''}
+      </span>
+      {/* The always-present visually-hidden polite announcer; only its text toggles, so a screen reader
+          reliably announces "compiling…" when it appears and falls silent when it clears. */}
+      <span class="koi-sr-only" data-role="compiling-status" aria-live="polite" aria-atomic="true">
+        {visible ? 'compiling…' : ''}
+      </span>
+    </>
   );
 }

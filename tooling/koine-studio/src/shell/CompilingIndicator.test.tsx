@@ -9,7 +9,9 @@ import { CompilingIndicator } from '@/shell/CompilingIndicator';
 import { isCompileInFlight, markCompileEnd, markCompileStart } from '@/host/browser/compileActivity';
 
 const DEBOUNCE_MS = 150;
+// The visual pulsing pill (shown/hidden), and the separate always-present polite live region.
 const indicator = (c: Element) => c.querySelector('[data-role="compiling"]') as HTMLElement | null;
+const liveRegion = (c: Element) => c.querySelector('[data-role="compiling-status"]') as HTMLElement | null;
 const isShown = (el: HTMLElement | null) => el != null && !el.hasAttribute('hidden');
 
 describe('CompilingIndicator (#516)', () => {
@@ -26,9 +28,15 @@ describe('CompilingIndicator (#516)', () => {
   it('is hidden initially (idle, nothing compiling)', () => {
     const { container } = render(<CompilingIndicator />);
     const el = indicator(container);
-    expect(el).not.toBeNull(); // the live region is in the DOM so it can announce later…
+    expect(el).not.toBeNull(); // the visual pill exists…
     expect(isShown(el)).toBe(false); // …but it shows nothing while idle
     expect(el!.textContent).toBe('');
+
+    // The announcer is always present in the a11y tree (so it can announce later), but silent while idle.
+    const live = liveRegion(container);
+    expect(live).not.toBeNull();
+    expect(live!.getAttribute('aria-live')).toBe('polite');
+    expect(live!.textContent).toBe('');
   });
 
   it('reveals "compiling…" only after the debounce elapses while still busy', () => {
@@ -50,7 +58,8 @@ describe('CompilingIndicator (#516)', () => {
     const el = indicator(container);
     expect(isShown(el)).toBe(true);
     expect(el!.textContent).toContain('compiling');
-    expect(el!.getAttribute('aria-live')).toBe('polite');
+    // The persistent polite announcer now carries the text, so a screen reader announces it.
+    expect(liveRegion(container)!.textContent).toContain('compiling');
   });
 
   it('shows nothing when busy ends before the debounce fires (fast keystroke-diagnose)', () => {
