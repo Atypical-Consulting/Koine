@@ -664,8 +664,10 @@ internal sealed class RefactorService
         // (2) Insert the verbatim declaration into the target body, re-indented to the inner indentation.
         // `Reindent` already prefixes line 0 with `innerIndent`, so feed it the declaration with its own
         // leading indentation trimmed and trailing newline(s) dropped; it lands on its own line before
-        // the closing brace (the trailing "\n" pushes the brace back onto a fresh line).
-        var reindented = Reindent(declText.TrimEnd('\n', '\r').TrimStart(), declIndentWidth, innerIndent);
+        // the closing brace (the trailing "\n" pushes the brace back onto a fresh line). The slice here is
+        // a single declaration (keyword on line 0, then its body), so opt into nesting a column-0 body.
+        var reindented = Reindent(
+            declText.TrimEnd('\n', '\r').TrimStart(), declIndentWidth, innerIndent, nestColumnZeroBody: true);
         var (insertLine, insertCol) = LineColumnOf(insertOffset);
         SourceSpan insertAt = PointSpan(insertLine, insertCol, insertOffset);
         var insert = new CodeFixEdit(insertAt, reindented + "\n");
@@ -780,13 +782,16 @@ internal sealed class RefactorService
     /// first line carries no original indentation (the slice starts at field/comment content), so it
     /// is simply prefixed; subsequent lines have up to <paramref name="oldIndentWidth"/> leading
     /// whitespace characters (spaces <b>or</b> tabs) stripped before the new indent is applied —
-    /// preserving deeper relative indentation. Two robustness cases: a tab-indented source has its
-    /// leading tabs stripped (rather than the new space-indent being stacked on a leftover tab), and a
-    /// column-0 declaration (<paramref name="oldIndentWidth"/> == 0, nothing to strip) gets its
-    /// otherwise-flat body nested one level under the keyword so the moved/extracted block still reads
-    /// as a nested body.
+    /// preserving deeper relative indentation. A tab-indented source has its leading tabs stripped
+    /// (rather than the new space-indent being stacked on a leftover tab). When
+    /// <paramref name="nestColumnZeroBody"/> is set — only the move path, whose slice is a SINGLE
+    /// declaration (keyword on line 0, then its body) — a column-0 declaration
+    /// (<paramref name="oldIndentWidth"/> == 0, nothing to strip) gets its otherwise-flat body nested
+    /// one level under the keyword so the moved block still reads as nested. Extract/inline slices
+    /// (runs of sibling fields, or several whole declarations) leave it off so siblings keep equal
+    /// indentation.
     /// </summary>
-    private static string Reindent(string slice, int oldIndentWidth, string newIndent)
+    private static string Reindent(string slice, int oldIndentWidth, string newIndent, bool nestColumnZeroBody = false)
     {
         var lines = slice.Replace("\r\n", "\n").Split('\n');
         var sb = new StringBuilder();
@@ -811,8 +816,10 @@ internal sealed class RefactorService
 
                 // A column-0 declaration strips nothing, so a body line with no indentation of its own
                 // would land at the keyword's level. Nest it one level deeper; a lone closing brace
-                // stays at the keyword level.
-                nestFlatBody = oldIndentWidth == 0
+                // stays at the keyword level. Only for the single-declaration move slice — sibling-field
+                // extract slices leave this off so siblings keep equal indentation.
+                nestFlatBody = nestColumnZeroBody
+                    && oldIndentWidth == 0
                     && line.Length > 0
                     && line[0] != ' ' && line[0] != '\t'
                     && line.TrimEnd() != "}";
