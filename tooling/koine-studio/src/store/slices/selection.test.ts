@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { createSelectionSlice, type SelectionSlice } from '@/store/slices/selection';
+import { reanchorSelectionAfterRename } from '@/model/selection';
 
 const make = () => createStore<SelectionSlice>((set, get) => createSelectionSlice(set, get));
 
@@ -49,5 +50,24 @@ describe('selection slice', () => {
     s.getState().setSelection({ qualifiedName: 'Ordering.Order', context: 'Ordering' });
     expect(a).toHaveBeenCalledOnce();
     expect(b).toHaveBeenCalledOnce();
+  });
+
+  // #537: the Properties-panel rename path must re-anchor the selection to the renamed element's new
+  // qualified name. This exercises the exact transformation `renameElement` applies — read selection →
+  // re-anchor → write it back — proving the store ends up on the NEW name (it used to keep the old one,
+  // which the inspector + breadcrumb then failed to resolve).
+  test('rename re-anchors the store selection to the new qualified name', () => {
+    const s = make();
+    s.getState().setSelection({ qualifiedName: 'NewModel.NewAggregateRoot', context: 'NewModel' });
+
+    const current = s.getState().selection;
+    const reanchored = reanchorSelectionAfterRename(
+      current,
+      { qualifiedName: 'NewModel.NewAggregateRoot', context: 'NewModel', name: 'NewAggregateRoot' },
+      'Order',
+    );
+    if (reanchored !== current) s.getState().setSelection(reanchored);
+
+    expect(s.getState().selection).toEqual({ qualifiedName: 'NewModel.Order', context: 'NewModel' });
   });
 });
