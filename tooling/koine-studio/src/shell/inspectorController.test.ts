@@ -278,6 +278,20 @@ describe('createInspectorController — center switching', () => {
     expect(el('center-tab-visual').getAttribute('aria-selected')).toBe('true');
   });
 
+  test('the bottom panel is visible in every center view (#451)', () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init(); // boots Visual
+
+    expect(el('diagnostics').hidden).toBe(false); // Visual
+    ctl.selectCenter('technical');
+    expect(el('diagnostics').hidden).toBe(false); // Code
+    ctl.selectDocsTab('glossary'); // forces center = docs
+    expect(el('diagnostics').hidden).toBe(false); // Documentation
+    ctl.selectCenter('assistant');
+    expect(el('diagnostics').hidden).toBe(false); // Assistant
+  });
+
   test('selectCenter("technical") surfaces the technical center + editor sub-view and marks the Code tab', () => {
     const ctl = createInspectorController(makeDeps(makeLsp()));
     ctl.init();
@@ -531,23 +545,21 @@ describe('createInspectorController — bottom strip lazy loading', () => {
     expect(deps.gotoSourceSpan).not.toHaveBeenCalled();
   });
 
-  test('the rail Context Map link leaves Documentation so the otherwise-hidden strip shows the map', async () => {
+  test('the rail Context Map link opens the map in the now-global strip without leaving the view (#451)', async () => {
     const lsp = makeLsp();
     const ctl = createInspectorController(makeDeps(lsp));
     ctl.init();
 
-    // Land on the Documentation center, where the bottom strip (the Context Map's home) is hidden.
+    // Land on Documentation — the bottom strip is now visible here (it's global).
     ctl.selectDocsTab('adr');
-    expect(el('diagnostics').hidden).toBe(true);
+    expect(el('diagnostics').hidden).toBe(false);
 
-    // Regression (#docs-rail): the rail's Context Map link must switch away from Documentation AND open
-    // the Context Map tab — otherwise it sets the bottom tab on a strip that stays hidden and the click
-    // appears to do nothing.
+    // The rail's Context Map link just opens the Context Map bottom tab, in place.
     document.querySelector<HTMLButtonElement>('.koi-doclink[data-doclink="contextmap"]')!.click();
     await flush();
 
-    expect(el('center-docs').hidden).toBe(true); // left Documentation…
-    expect(el('diagnostics').hidden).toBe(false); // …so the strip is visible…
+    expect(el('center-docs').hidden).toBe(false); // still on Documentation…
+    expect(el('diagnostics').hidden).toBe(false); // …strip visible…
     expect(el('panel-contextmap').hidden).toBe(false); // …showing the Context Map.
   });
 });
