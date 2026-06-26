@@ -755,6 +755,75 @@ public class KoineLanguageServiceTests
         rootOnly.Count.ShouldBeLessThan(edits.Count);
     }
 
+    [Fact]
+    public void RenameEdits_does_not_corename_a_non_conventional_identity()
+    {
+        // The root's identity is the primitive Guid, not <Root>Id — so there is nothing to co-rename and,
+        // crucially, the primitive must not be rewritten.
+        var src =
+            "context Ordering {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by Guid {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var entityLine = src.Split('\n')[2];
+        var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var edits = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
+
+        edits.ShouldNotBeNull();
+        edits.ShouldContain(e => e.NewText == "PurchaseOrder");
+        // No fabricated <New>Id edit, and the Guid primitive is left alone.
+        edits.ShouldNotContain(e => e.NewText == "PurchaseOrderId");
+        edits.ShouldNotContain(e => e.NewText == "Guid");
+    }
+
+    [Fact]
+    public void RenameEdits_does_not_corename_when_the_new_id_name_collides()
+    {
+        // PurchaseOrderId already names a type, so co-renaming OrderId -> PurchaseOrderId would collide.
+        // The root still renames; the Id is left as-is (Approach 2 fallback, surfaced by Studio).
+        var src =
+            "context Ordering {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "  value PurchaseOrderId { code: String }\n" +
+            "}\n";
+        var entityLine = src.Split('\n')[2];
+        var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var edits = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
+
+        edits.ShouldNotBeNull();
+        edits.ShouldContain(e => e.NewText == "PurchaseOrder");
+        edits.ShouldNotContain(e => e.NewText == "PurchaseOrderId"); // collision → Id left unchanged
+    }
+
+    [Fact]
+    public void RenameEdits_does_not_corename_when_renaming_a_value_object_named_like_an_id()
+    {
+        // Renaming a standalone value object that merely happens to be named OrderId must not trigger the
+        // aggregate-root co-rename path — it isn't a root, so it renames as the ordinary symbol it is.
+        var src =
+            "context Ordering {\n" +
+            "  value OrderId { code: String }\n" +
+            "  value Line { ref: OrderId }\n" +
+            "}\n";
+        var voLine = src.Split('\n')[1];
+        var col = voLine.IndexOf("OrderId", StringComparison.Ordinal) + 2;
+
+        var edits = Svc.RenameEditsAt(Doc(src), U, line: 1, character: col, newName: "RefId");
+
+        edits.ShouldNotBeNull();
+        // Every edit is the ordinary rename to RefId — no spurious suffixed co-rename text.
+        edits.ShouldAllBe(e => e.NewText == "RefId");
+    }
+
     // ---- Linked editing ---------------------------------------------------
 
     [Fact]

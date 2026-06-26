@@ -87,7 +87,7 @@ import { badgeCounts, createDiagCountGate } from '@/diagnostics/diagCountGate';
 import { severityErrorOrWarning } from '@/lsp/severity';
 import { reanchorSelectionAfterRename, type SelectedElement } from '@/model/selection';
 import { resolveInspectableQn } from '@/model/modelIndex';
-import { type InspectorElement } from '@/model/inspector';
+import { renameStatusMessage, type InspectorElement } from '@/model/inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
 import { createScenarioPanel, type ScenarioPanel } from '@/scenarios/scenarioPanel';
 import { createTerminalPanel, type TerminalPanel } from '@/shell/terminal/terminalPanel';
@@ -720,7 +720,9 @@ export function init(): () => void {
       const current = appStore.getState().selection;
       const reanchored = reanchorSelectionAfterRename(current, element, newName);
       if (reanchored !== current) selection.set(reanchored);
-      setStatus(`Renamed ${element.name} → ${newName}`, 'green');
+      // Surface the co-rename of an aggregate root's convention-linked <Root>Id identity (#550), or flag
+      // it when the link was ambiguous / the new Id name collided and the id was left behind.
+      setStatus(renameStatusMessage(element, newName, edit), 'green');
     } catch (e) {
       setStatus('Rename failed: ' + String(e), 'error');
     }

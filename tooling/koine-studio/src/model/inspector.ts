@@ -11,6 +11,7 @@
 // members), so the element fields are optional and the panel renders those compartments only when a
 // future minimal emitter change populates them — the layout is forward-compatible.
 import type { DiagramNode, GlossaryEntry, ModelMember, Range, SourceSpan } from '@/lsp/lsp';
+import type { WorkspaceEdit } from '@/lsp/protocol';
 import type { ChangeEntry } from '@/host/gitHistory';
 import { railHint, renderRailEmpty } from '@/model/railEmpty';
 
@@ -130,6 +131,37 @@ export function buildInspectorElement(
     // change-history lookup then falls back to the active file + name range).
     sourceSpan: node?.sourceSpan ?? null,
   };
+}
+
+/**
+ * The status-line message shown after renaming `element` to `newName`.
+ *
+ * For an aggregate root whose identity follows the `<Root>Id` convention, the rename refactor also
+ * co-renames that identity type (`OrderId` → `PurchaseOrderId`) in the same edit (#550). When it could
+ * NOT — an ambiguous link or a name collision left the id behind — this flags that the id type was left
+ * unchanged, so the user isn't silently left with a mismatched `OrderId` on a `PurchaseOrder`. For every
+ * other element (or when the co-rename did happen) it's just the plain "Renamed X → Y".
+ */
+export function renameStatusMessage(
+  element: Pick<InspectorElement, 'name' | 'properties' | 'stereotype'>,
+  newName: string,
+  edit: WorkspaceEdit,
+): string {
+  const base = `Renamed ${element.name} → ${newName}`;
+  // Only aggregate roots carry a convention-linked identity type worth co-renaming.
+  if (element.stereotype !== 'aggregate root') {
+    return base;
+  }
+
+  const oldId = `${element.name}Id`;
+  const hasConventionId = element.properties.some((p) => p.text === `id: ${oldId}`);
+  if (!hasConventionId) {
+    return base;
+  }
+
+  const newId = `${newName}Id`;
+  const coRenamed = Object.values(edit.changes).some((edits) => edits.some((e) => e.newText === newId));
+  return coRenamed ? base : `${base}; id type ${oldId} left unchanged`;
 }
 
 /**
