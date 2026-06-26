@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { renderStrategic } from '@/model/domainNavigator';
-import type { GlossaryEntry, GlossaryModel, Range } from '@/lsp/lsp';
+import { mountDomainNavigator, renderStrategic } from '@/model/domainNavigator';
+import { createAppStore } from '@/store/index';
+import type { ContextMapResult, GlossaryEntry, GlossaryModel, Range } from '@/lsp/lsp';
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -47,5 +48,70 @@ describe('renderStrategic', () => {
     expect(el.textContent).toContain('4');
     (el.querySelector('[data-ctx="Ordering"]') as HTMLButtonElement).click();
     expect(onOpenContext).toHaveBeenCalledWith('Ordering');
+  });
+});
+
+// A fresh app store — the single source of truth for the navigator's altitude + scope.
+const makeTestStore = () => createAppStore();
+
+// A minimal LSP stub: the two endpoints the strategic level reads (glossaryModel + contextMap), plus
+// model() for parity with the controller's seam. Each resolves async, so the navigator's first fetch
+// is genuinely asynchronous — the test flushes a microtask round after mount/clicks (the realistic path).
+function fakeLsp() {
+  return {
+    glossaryModel: vi.fn(async (): Promise<GlossaryModel> => fakeGlossary(['Ordering', 'Billing'])),
+    contextMap: vi.fn(async (): Promise<ContextMapResult> => ({ contexts: ['Ordering', 'Billing'], relations: [] })),
+    model: vi.fn(async () => ({ kind: 'model', qualifiedName: '', title: '', members: [], children: [] })),
+  };
+}
+
+/** Let the navigator's microtask-chained fetch settle so its synchronous render runs. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 6; i++) await Promise.resolve();
+}
+
+describe('mountDomainNavigator', () => {
+  it('drills into a context and the breadcrumb zooms back out', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+    mountDomainNavigator(host, store, fakeLsp());
+    await flush(); // the initial strategic fetch resolves and paints the context rows
+
+    (host.querySelector('[data-ctx="Ordering"]') as HTMLButtonElement).click();
+    expect(store.getState().navAltitude).toBe('tactical');
+    expect(store.getState().activeContext).toBe('Ordering');
+    await flush();
+
+    // The tactical view carries a breadcrumb that zooms back out to the strategic context list.
+    (host.querySelector('.koi-breadcrumb-back') as HTMLButtonElement).click();
+    expect(store.getState().navAltitude).toBe('strategic');
+  });
+
+  it('delegates the Context Map / Ubiquitous Language doorways to the caller', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const onOpenContextMap = vi.fn();
+    const onOpenGlossary = vi.fn();
+    mountDomainNavigator(host, makeTestStore(), fakeLsp(), { onOpenContextMap, onOpenGlossary });
+    await flush();
+
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+    (host.querySelector('[data-door="glossary"]') as HTMLButtonElement).click();
+    expect(onOpenContextMap).toHaveBeenCalledTimes(1);
+    expect(onOpenGlossary).toHaveBeenCalledTimes(1);
+  });
+
+  it('unmount drops the store subscription so later changes stop re-rendering', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+    const handle = mountDomainNavigator(host, store, fakeLsp());
+    await flush();
+    handle.unmount();
+    // After unmount a scope/altitude change must not resurrect a tactical view in the detached host.
+    store.getState().setActiveContext('Ordering');
+    store.getState().setNavAltitude('tactical');
+    expect(host.querySelector('.koi-breadcrumb-back')).toBeNull();
   });
 });

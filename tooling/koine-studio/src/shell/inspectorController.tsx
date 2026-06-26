@@ -62,16 +62,15 @@ import {
   isAllContexts,
   listContexts,
   scopeDocsFiles,
-  scopeGlossaryModel,
   type ContextScope,
 } from '@/model/activeContext';
 import type { SelectedElement } from '@/model/selection';
 import { type ModelOutlineHandlers } from '@/model/modelOutline';
+import { mountDomainNavigator, type DomainNavigatorHandle } from '@/model/domainNavigator';
 import { buildInspectorElement, renderRules, type InspectorElement, type InspectorHandlers } from '@/model/inspector';
 import { buildModelIndex, lookupElement, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
 import { ContextBreadcrumb } from '@/model/ContextBreadcrumb';
-import { ModelOutlinePanel } from '@/model/ModelOutlinePanel';
 import { EventsPanel } from '@/model/EventsPanel';
 import { RelationshipsPanel } from '@/model/RelationshipsPanel';
 import { GlossaryPanel } from '@/model/GlossaryPanel';
@@ -300,10 +299,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   });
   el('view-preview').appendChild(copyBtn);
 
-  // Left-rail host: the Domain axis's construct/context navigator (#453). The ModelOutlinePanel mounts
-  // here for now; a later task swaps in the strategic/tactical renderers. (The former Overview counts
-  // surface was removed with the section stack.)
+  // Left-rail host: the Domain axis's strategic/tactical navigator (#453). mountDomainNavigator owns this
+  // node — it self-fetches its strategic data and reads the store for altitude + scope — so loadModel
+  // mounts it once and thereafter just reloads it. (The former Overview counts surface was removed with
+  // the section stack.)
   const domainPane = el('rail-domain-pane');
+  // The mounted Domain navigator (#453), created lazily on the first loadModel and reused thereafter — so
+  // a model reload re-fetches its strategic data rather than re-mounting (which would drop its store
+  // subscription + breadcrumb state). Disposed on tear-down to drop that subscription.
+  let domainNavigator: DomainNavigatorHandle | null = null;
   // The Documentation center tab's three sub-views: Glossary (the ubiquitous language), Decisions (the
   // ADR list) and Notes — the latter two split from the former combined "Decisions & Notes" surface.
   const glossaryView = el('view-glossary');
@@ -378,6 +382,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     docs: 'glossary',
     bottom: 'problems',
     right: 'props',
+    // The Domain navigator starts at the strategic altitude (#453) for a fresh workspace session — reset
+    // here for the same reason the tabs above are: the injected store is, in production, the app-wide
+    // singleton reused across reopens, so a prior session left on tactical mustn't leak into a fresh boot.
+    navAltitude: 'strategic',
   });
   // The docViews slice (#193) is the single source of truth for which lazily-loaded, model-derived
   // surfaces — the Generated preview, the left-rail model, the diagram, the glossary, and the bottom
@@ -792,10 +800,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     set: (element) => appStore.getState().setSelection(element),
   };
 
+  // The Domain navigator's wiring (#453), passed to mountDomainNavigator: its strategic doorways route to
+  // focusContextMap() / focusDocs() (focusContextMap also leaves the Documentation center first so the
+  // bottom strip is visible — the plain selectBottomTab would set a hidden tab), and its onSelect/goto
+  // drive the inspector + jump-to-source for the tactical leaves (wired through renderTactical in Task 4).
   const modelOutlineHandlers: ModelOutlineHandlers = {
     onSelect: (entry) => selection.set({ qualifiedName: entry.qualifiedName, context: entry.context }),
     goto: (line, col) => editor.goto(line, col),
-    onOpenContextMap: () => selectBottomTab('contextmap'),
+    onOpenContextMap: () => focusContextMap(),
     onOpenGlossary: () => focusDocs(),
   };
   const inspectorHandlers: InspectorHandlers = {
@@ -920,51 +932,37 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     el('rview-rules').replaceChildren(renderRules(element));
   }
 
-  // Repaint the Domain axis's construct/context navigator, scoped to the active bounded context (#146).
-  // The inspector resolves any selection against the whole model, so only the navigator is narrowed.
+  // Repaint the Domain axis's strategic/tactical navigator (#453) and the model-index-derived chrome
+  // (breadcrumb, palette, inspector). The navigator OWNS #rail-domain-pane: it self-fetches its strategic
+  // data and reads the store for altitude + scope, so loadModel mounts it once and thereafter just reloads
+  // it. The inspector resolves any selection against the whole model, so it tracks the model index here.
   async function loadModel(): Promise<void> {
     // Capture the 'model' stale-token before the await; markLoaded only takes if it's still current
     // after, so an edit mid-fetch leaves the surface stale for the next show (the slice discipline).
     const token = appStore.getState().currentToken('model');
-    // The status/empty/error states write the navigator host imperatively via docMessage; the tree itself
-    // is a Preact panel painted via renderPanel, which drops the loading line first so the outline
-    // replaces it rather than stacking beside it.
-    docMessage(domainPane, 'Loading model…');
+    // Mount the navigator once (it paints a loading placeholder + its own empty state, and surfaces a
+    // fetch failure in the pane itself); a reload re-fetches its strategic data. Kicking this off before
+    // the await runs its fetch in parallel with the model index build, so the rail paints promptly. Its
+    // Context Map / Ubiquitous Language doorways route to the same focuses the docs footer used.
+    if (!domainNavigator) {
+      domainNavigator = mountDomainNavigator(domainPane, appStore, lsp, modelOutlineHandlers);
+    } else {
+      domainNavigator.reload();
+    }
     try {
-      const index = await ensureModelIndex();
+      await ensureModelIndex();
       // The model index just (re)built — re-pass it to the breadcrumb so the selected element's type icon
       // resolves (the panel tracks selection itself, but reads the construct off the index prop). The
       // palette likewise reads the index to gate its aggregate-scoped buttons (#254), so re-pass it too.
       renderBreadcrumb();
       renderCanvasPalette();
-      const scopedGlossary = scopeGlossaryModel(index.glossary, activeContext.get());
-      if (!scopedGlossary.entries.length) {
-        docMessage(
-          domainPane,
-          index.glossary.entries.length
-            ? 'No elements in this context — switch to “All contexts” to see the whole model.'
-            : 'No elements yet — declare some types, or fix syntax errors to populate the model.',
-        );
-        renderSelectedInspector();
-        appStore.getState().markLoaded('model', token);
-        return;
-      }
-      // The construct tree as a Preact panel scoped from the store's activeContext slice; the panel owns
-      // the leaf `is-selected` cross-highlight on its own.
-      renderPanel(
-        domainPane,
-        <ModelOutlinePanel
-          store={appStore}
-          model={index.glossary}
-          handlers={modelOutlineHandlers}
-          index={index}
-        />,
-      );
       renderSelectedInspector();
       applySelectionHighlight();
       appStore.getState().markLoaded('model', token);
     } catch (e) {
-      docMessage(domainPane, 'Model request failed: ' + String(e), 'error');
+      // The navigator owns #rail-domain-pane and surfaces its own fetch failure there; a failing model
+      // index (the inspector/breadcrumb source) is reported on the status pill instead.
+      deps.setStatus('Model request failed: ' + String(e), 'error');
     }
   }
 
@@ -1774,6 +1772,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     clearTimeout(copyResetTimer);
     clearTimeout(editDebounce);
     clearTimeout(bottomPanelDebounce);
+    // Drop the Domain navigator's store subscription so a deferred store change can't repaint a torn-down
+    // host (the same hazard the debounce clears, for the navigator's #453 subscription).
+    domainNavigator?.unmount();
     if (inspectorSheet) {
       window.removeEventListener('resize', onViewportResize);
       inspectorSheet.destroy();

@@ -64,4 +64,24 @@ describe('activeContext slice', () => {
     s.getState().setContexts(['Sales', 'Billing']); // a real change notifies
     expect(fn).toHaveBeenCalledTimes(1);
   });
+
+  test('navAltitude defaults to strategic and setNavAltitude flips it', () => {
+    const s = make();
+    expect(s.getState().navAltitude).toBe('strategic');
+    s.getState().setNavAltitude('tactical');
+    expect(s.getState().navAltitude).toBe('tactical');
+    s.getState().setNavAltitude('strategic');
+    expect(s.getState().navAltitude).toBe('strategic');
+  });
+
+  test('setNavAltitude with the same altitude does not notify (no churn)', () => {
+    const s = make();
+    const fn = vi.fn();
+    s.subscribe((state) => fn(state.navAltitude));
+    s.getState().setNavAltitude('strategic'); // already strategic = no-op
+    expect(fn).not.toHaveBeenCalled();
+    s.getState().setNavAltitude('tactical'); // a real change notifies
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(fn).toHaveBeenNthCalledWith(1, 'tactical');
+  });
 });

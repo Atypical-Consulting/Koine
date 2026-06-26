@@ -530,17 +530,21 @@ describe('createInspectorController — loading states clear on success', () => 
   // Regression: docMessage writes a raw <p>Loading…</p> the Preact reconciler can't see, so a
   // bare render(<Panel/>, host) used to APPEND the panel beside the loading line — both showed at
   // once. Every Preact-panel host must replace its loading line, not stack on top of it.
-  test('loadModel replaces the "Loading model…" line — it does not stack beside the outline', async () => {
+  test('loadModel paints the strategic Domain navigator — its loading placeholder is replaced', async () => {
     const lsp = makeLsp();
     const ctl = createInspectorController(makeDeps(lsp));
     ctl.init();
 
-    ctl.refreshActiveSurfaces(); // → loadModel paints the left-rail Domain navigator outline
+    ctl.refreshActiveSurfaces(); // → loadModel mounts the Domain navigator, which self-fetches + paints
     await flush();
 
+    // The Domain pane now shows the STRATEGIC context list (a row per bounded context, #453), not the old
+    // per-construct outline — so the glossaryFixture's 'Billing' context appears…
     const domainPane = el('rail-domain-pane');
-    expect(domainPane.textContent).toContain('Money'); // the outline rendered
-    expect(domainPane.textContent).not.toContain('Loading model'); // …without the loading line left behind
+    expect(domainPane.querySelector('[data-ctx="Billing"]')).not.toBeNull();
+    expect(domainPane.textContent).toContain('Billing');
+    // …and neither the navigator's loading placeholder nor any stale loading line is left behind.
+    expect(domainPane.textContent).not.toContain('Loading');
   });
 
   test('the glossary replaces its "Loading glossary…" line on success', async () => {
