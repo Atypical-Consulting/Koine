@@ -353,3 +353,65 @@
     display: none;
   }
 }
+
+/* --- mobile overflow "More" (⋮) menu (#528) --------------------------------------------------------
+   The floating menu opened by #btn-toolbar-overflow, mirroring the domain navigator's leaf `⋯` menu
+   (shared popover-surface chrome). Mounted on document.body, right-aligned under the kebab. */
+.koi-overflow-menu {
+  @include a.popover-surface;
+  z-index: var(--koi-z-popover);
+  min-width: 184px;
+}
+
+.koi-overflow-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
+  color: var(--koi-fg);
+  cursor: pointer;
+  padding: var(--koi-space-1-5) var(--koi-space-2-5);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-base);
+}
+
+.koi-overflow-menu-item:hover,
+.koi-overflow-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--koi-accent) 40%, var(--koi-line));
+  outline: none;
+}
+
+/* --- phone width: collapse the secondary actions into the overflow menu (#528) ----------------------
+   At ≤ $bp-narrow (where the mobile bottom zone-bar already turns on) the toolbar can't fit its full
+   action set, so the secondary actions hide and the single ⋮ kebab collects them. The high-frequency
+   primary actions (New / Open / Undo / Redo / Generate) stay inline. overflow-x:auto is a safety net so
+   the bar is never SILENTLY clipped on the very narrowest phones. */
+@media (max-width: a.$bp-narrow) {
+  #toolbar {
+    overflow-x: auto;
+
+    /* Keep the accent hairline INSIDE the (now-scrollable) box so overflow-x:auto — which makes the
+       paired overflow-y compute to `auto` — can't clip a `bottom: -1px` underline. */
+    &::after {
+      bottom: 0;
+    }
+  }
+
+  #btn-save-project,
+  #btn-check,
+  #install-affordance,
+  #palette-hint,
+  #btn-theme,
+  #btn-prefs {
+    display: none;
+  }
+
+  /* Reveal the kebab. The id selector outranks `.icon-btn[hidden] { display: none }`, so it shows even
+     while the [hidden] attribute remains (the attribute is the desktop default). */
+  #btn-toolbar-overflow {
+    display: inline-flex;
+  }
+}
