@@ -13,11 +13,17 @@ import type { MenuItem } from '@/editor/actions';
 // be exercised here (it needs a real browser with layout). Everything else — the menu/input behaviour,
 // keyboard nav, dismissal triggers, and the single-active-widget invariant — runs for real.
 
-// A fresh detached EditorView per test, mounted in the document so scrollDOM/focus behave.
+// A fresh detached EditorView per test, mounted in the document so scrollDOM/focus behave. Each view is
+// tracked so afterEach can destroy() it — an undestroyed EditorView keeps a window resize listener whose
+// DOMObserver.onResize queues a deferred measure that, surviving into happy-dom teardown, throws an
+// uncaught `this.win.requestAnimationFrame is not a function` and crashes the studio job (#493).
+const liveViews: EditorView[] = [];
 function makeView(doc = 'hello\nworld'): EditorView {
   const parent = document.createElement('div');
   document.body.appendChild(parent);
-  return new EditorView({ parent, state: EditorState.create({ doc }) });
+  const view = new EditorView({ parent, state: EditorState.create({ doc }) });
+  liveViews.push(view);
+  return view;
 }
 
 // Convenience accessors for the single active widget on the body.
@@ -36,6 +42,15 @@ function keydown(target: EventTarget, key: string): KeyboardEvent {
 afterEach(() => {
   // Always leave the body clean even if a test left a widget open.
   dismissFloating();
+  // Destroy every EditorView the test mounted so no deferred CodeMirror measure survives into happy-dom
+  // teardown (#493). destroy() removes the DOMObserver's resize listener and clears its pending timer.
+  while (liveViews.length) {
+    try {
+      liveViews.pop()!.destroy();
+    } catch {
+      /* already destroyed */
+    }
+  }
   vi.useRealTimers();
 });
 
