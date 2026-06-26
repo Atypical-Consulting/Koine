@@ -400,10 +400,12 @@ function renderChangeSet(
     panel.remove();
   });
 
-  // End-of-turn whole-staged-workspace validation diagnostics (issue #474): surface them only when the
-  // single end-of-turn validation actually found errors (`ok: false …`), so a write that broke the
-  // model is reviewable/discardable pre-apply. A clean `ok: true …` (or no validation) shows nothing.
-  if (diagnostics && diagnostics.startsWith('ok: false')) {
+  // End-of-turn whole-staged-workspace validation diagnostics (issue #474): surface them whenever the
+  // single end-of-turn validation reported anything other than a CLEAN compile (`ok: true …`) — that
+  // covers errors, warnings, and a "could not validate" note (e.g. the desktop MCP sidecar briefly
+  // unreachable) — so a write that broke the model, or a validation that didn't actually run, is
+  // reviewable/discardable BEFORE apply. A clean compile (or no validation at all) shows nothing.
+  if (diagnostics && !diagnostics.startsWith('ok: true')) {
     const diag = document.createElement('pre');
     diag.className = 'koi-changeset-diagnostics';
     diag.textContent = diagnostics;

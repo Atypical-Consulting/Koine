@@ -246,10 +246,22 @@ async function runToolLoop(req: AssistantRequest, adapter: ToolLoopAdapter): Pro
   // change-set panel rather than polluting the model's prose answer.
   // Await the compile FIRST, then surface — keep the two separate so the validation still runs when no
   // panel callback is wired (an `onStagedValidation?.(await validateStaged())` would short-circuit the
-  // argument, skipping the compile, whenever the callback is absent).
+  // argument, skipping the compile, whenever the callback is absent). A validation FAILURE must NOT
+  // sink the turn: the old per-write call was caught inside runEditToolStaging, so recover here too —
+  // surface the failure as a diagnostics note and still return the model's answer, so the change set
+  // (with its staged files) stays reviewable instead of being rolled back over a transient compile
+  // hiccup (e.g. the desktop MCP sidecar briefly unreachable).
   if (session && req.validateStaged && session.staged().length > 0) {
-    const diagnostics = await req.validateStaged();
-    req.onStagedValidation?.(diagnostics);
+    try {
+      // Bind the result to a local BEFORE the optional callback: `onStagedValidation?.(await …)` would
+      // short-circuit the argument and skip the compile entirely whenever no callback is wired.
+      const diagnostics = await req.validateStaged();
+      req.onStagedValidation?.(diagnostics);
+    } catch (e) {
+      req.onStagedValidation?.(
+        `ok: false — could not validate the staged workspace: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   }
   return finalText;
 }

@@ -652,6 +652,34 @@ describe('multi-file change set (agentic edits)', () => {
     expect(container.querySelector('.koi-changeset-diagnostics')).toBeNull();
   });
 
+  test('a "could not validate" note (validation did not run) is surfaced in the change set', async () => {
+    // When the end-of-turn validation could not run (e.g. desktop MCP sidecar unreachable), the panel
+    // must show the note so the user knows the staged set was NOT validated before applying.
+    const NOTE = 'ok: false — could not validate the staged workspace: MCP koine_validate failed: HTTP 503';
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders {}');
+      req.onStagedValidation?.(NOTE);
+      req.onText('Staged one edit.');
+      return 'Staged one edit.';
+    });
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        runEditTool: vi.fn(async () => 'ok'),
+        validateStaged: vi.fn(async () => NOTE),
+        onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    const diag = container.querySelector('.koi-changeset-diagnostics');
+    expect(diag).not.toBeNull();
+    expect(diag?.textContent).toContain('could not validate');
+  });
+
   test('a non-staged generative turn still shows single-file Apply (no change set)', async () => {
     // An ordinary generative reply (a fenced koine block, nothing staged) → the legacy single-file gate.
     vi.mocked(runAssistant).mockImplementation(async (req: any) => {

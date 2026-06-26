@@ -503,4 +503,30 @@ describe('end-of-turn staged-workspace validation (issue #474)', () => {
     // The model's prose answer is returned untouched — diagnostics ride the callback, not the text.
     expect(out).toBe('All good ✓');
   });
+
+  test('a FAILED end-of-turn validation does not sink the turn — it surfaces a note and still returns', async () => {
+    // A transient validation failure (e.g. the desktop MCP sidecar briefly unreachable) must not roll
+    // back the whole turn: the model's answer is returned and the failure rides onStagedValidation so
+    // the change set stays reviewable (regression guard — the old per-write call was caught too).
+    const session = createEditSession({});
+    const queue = [
+      streamFrom(callRound('koine_write_file', '{"relPath":"a.koi","contents":"context A {}"}')),
+      streamFrom(TEXT),
+    ];
+    h.createImpl = () => Promise.resolve(queue.shift());
+    const validateStaged = vi.fn(() => Promise.reject(new Error('MCP koine_validate failed: HTTP 503')));
+    const surfaced: string[] = [];
+    const out = await runAssistant(
+      baseReq({
+        editSession: session,
+        runEditTool: stagingEditTool,
+        validateStaged,
+        onStagedValidation: (d) => surfaced.push(d),
+      }),
+    );
+    expect(out).toBe('All good ✓'); // turn NOT lost
+    expect(surfaced).toHaveLength(1);
+    expect(surfaced[0]).toContain('could not validate');
+    expect(surfaced[0]).toContain('HTTP 503');
+  });
 });
