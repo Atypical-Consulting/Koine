@@ -121,6 +121,41 @@ describe('renderTactical — cross-axis leaf actions', () => {
   });
 });
 
+// The leaf ⋯ menu's dismissal contract — pinned so the shared-engine migration (#547) is provably
+// behavior-preserving: Escape / outside-pointerdown close it and return focus to the `⋯` trigger.
+describe('renderTactical — leaf ⋯ menu dismissal', () => {
+  const ctxWithLeaf = (): ModelNode => ctxNode('Ordering', [value('Currency')]);
+
+  function openMore(el: HTMLElement): HTMLButtonElement {
+    const more = el.querySelector('.koi-tactical-more') as HTMLButtonElement;
+    more.click();
+    return more;
+  }
+
+  it('Escape dismisses the ⋯ menu and returns focus to the trigger', () => {
+    const el = renderTactical(ctxWithLeaf(), noopTacticalHandlers());
+    document.body.appendChild(el);
+    const more = openMore(el);
+    expect(document.querySelector('.koi-tactical-menu')).toBeTruthy();
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(document.querySelector('.koi-tactical-menu')).toBeNull();
+    expect(document.activeElement).toBe(more);
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('an outside pointerdown dismisses the ⋯ menu', () => {
+    const el = renderTactical(ctxWithLeaf(), noopTacticalHandlers());
+    document.body.appendChild(el);
+    openMore(el);
+    expect(document.querySelector('.koi-tactical-menu')).toBeTruthy();
+
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    expect(document.querySelector('.koi-tactical-menu')).toBeNull();
+  });
+});
+
 // A fresh app store — the single source of truth for the navigator's altitude + scope.
 const makeTestStore = () => createAppStore();
 

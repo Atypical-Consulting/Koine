@@ -12,6 +12,31 @@
   box-shadow: var(--koi-shadow);
 }
 
+// A row in a floating menu — the look shared by the toolbar overflow, the domain-navigator leaf `⋯`
+// menu and the explorer context menu (#547). Full-width, left-aligned, transparent until hover/focus,
+// when it lifts to an accent wash + ring. Pair with `popover-surface` (the menu's chrome) and
+// `$menu-min-width` (its floor). Verbatim from the original `*-menu-item` rules these three shared.
+@mixin menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
+  color: var(--koi-fg);
+  cursor: pointer;
+  padding: var(--koi-space-1-5) var(--koi-space-2-5);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-base);
+
+  &:hover,
+  &:focus-visible {
+    background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+    border-color: color-mix(in srgb, var(--koi-accent) 40%, var(--koi-line));
+    outline: none;
+  }
+}
+
 // Canonical content padding for a side-rail / center tab panel. The Properties inspector
 // (`.koi-inspector`), the Rules/Notes tabs and the center doc surfaces (`.doc-view`) all share it,
 // so their content — and their empty states (`.koi-rview-empty`) — align to the same margin. Single

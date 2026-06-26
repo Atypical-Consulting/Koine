@@ -1,6 +1,11 @@
 // Build-time-only SCSS values. NEVER put --koi-* runtime tokens here — those live in themes/.
 $bp-narrow: 640px; // mirrors the @media (max-width: 640px) breakpoint in the source
 
+// One floor width for every floating-menu surface — the toolbar overflow, the domain-navigator leaf
+// `⋯` menu and the explorer context menu (#547). They had drifted to 168px and 184px; this is the
+// single source so they can never disagree again.
+$menu-min-width: 168px;
+
 // Destination-language brand hues — values are the runtime tokens; drives the identity-dot @each loop.
 $languages: (
   csharp: var(--lang-csharp),

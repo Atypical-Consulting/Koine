@@ -9,6 +9,7 @@
 
 import { isTauri } from '@/host';
 import { announce as defaultAnnounce } from './liveRegion';
+import { connectRevealAnnouncer } from './revealAnnouncer';
 
 /** What assistive tech hears when the update affordance slides into the toolbar (#522). */
 export const UPDATE_ANNOUNCEMENT = 'A new version is available — reload to update';
@@ -130,48 +131,38 @@ export interface UpdateAffordanceDom {
 export function connectUpdateAffordance(controller: UpdateController, dom: UpdateAffordanceDom): () => void {
   const reload = dom.reload ?? ((): void => window.location.reload());
   const announce = dom.announce ?? defaultAnnounce;
-  const isPerceivable = dom.isPerceivable ?? ((): boolean => true);
 
-  // Announce on the hidden→visible edge (a new version landing), never on dismiss or repeat
-  // notifications. The shared live region is body-level (#522), so it can announce while the control is
-  // still inside a route-hidden `#app`. The perceivability gate (#573) closes that gap: when the reveal
-  // edge fires before the control is perceivable, defer the announcement and flush it via the same
-  // `announce(...)` once the toolbar becomes perceivable — never dropping it. Seed `wasVisible` from the
-  // current DOM state (the markup ships `hidden`) so the reveal fires once.
-  let wasVisible = !dom.root.hidden;
-  let pending = false; // a reveal that fired while not perceivable, awaiting a perceivable edge to flush
-  const sync = (): void => {
-    const visible = controller.canReload();
-    dom.root.hidden = !visible;
-    if (visible && !wasVisible) {
-      if (isPerceivable()) announce(UPDATE_ANNOUNCEMENT);
-      else pending = true; // not perceivable yet → defer until it is
-    } else if (!visible) {
-      pending = false; // hidden/dismissed before it could flush → drop the deferred announcement
-    }
-    wasVisible = visible;
-  };
-  const flushPending = (): void => {
-    // Flush a deferred reveal once the control is both perceivable and still visible — exactly once.
-    if (pending && isPerceivable() && controller.canReload()) {
-      pending = false;
-      announce(UPDATE_ANNOUNCEMENT);
-    }
+  // Capture the markup's initial hidden state (it ships `hidden`) before the first sync toggles it, so
+  // the shared announcer can detect a reveal on the initial `sync()`.
+  const initiallyVisible = !dom.root.hidden;
+  const syncVisibility = (): void => {
+    dom.root.hidden = !controller.canReload();
   };
   const onReload = (): void => reload();
   const onDismiss = (): void => controller.dismiss();
 
   dom.reloadButton.addEventListener('click', onReload);
   dom.dismissButton.addEventListener('click', onDismiss);
-  const unsub = controller.subscribe(sync);
-  const unsubPerceivable = dom.subscribePerceivable?.(flushPending);
-  sync(); // reflect the initial (hidden) state immediately
+  const unsub = controller.subscribe(syncVisibility);
+  syncVisibility(); // reflect the initial (hidden) visibility immediately
+  // Delegate the reveal-announce + #573 defer/flush state machine to the shared helper (#580); this
+  // controller keeps owning the `dom.root.hidden` toggle above, the announce side lives once in
+  // connectRevealAnnouncer. The body-level live region (#522) announces on the hidden→visible edge.
+  const disposeAnnouncer = connectRevealAnnouncer({
+    isVisible: (): boolean => controller.canReload(),
+    subscribe: controller.subscribe,
+    announce,
+    message: UPDATE_ANNOUNCEMENT,
+    initiallyVisible,
+    isPerceivable: dom.isPerceivable,
+    subscribePerceivable: dom.subscribePerceivable,
+  });
 
   return () => {
     dom.reloadButton.removeEventListener('click', onReload);
     dom.dismissButton.removeEventListener('click', onDismiss);
     unsub();
-    unsubPerceivable?.();
+    disposeAnnouncer();
   };
 }
 
