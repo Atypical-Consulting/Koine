@@ -1,5 +1,6 @@
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
+using Koine.Compiler.Services;
 
 namespace Koine.Compiler.CodeFixes.Providers;
 
@@ -78,21 +79,11 @@ public sealed class AddOptionalMarkerCodeFixProvider : ICodeFixProvider
         {
             foreach (TypeDecl type in ctx.AllTypeDecls())
             {
-                foreach (Member member in MembersOf(type))
+                foreach (Member member in type.MembersOf())
                 {
                     yield return member;
                 }
             }
         }
     }
-
-    /// <summary>The field members of <paramref name="type"/>, or empty for a kind that carries none.</summary>
-    private static IReadOnlyList<Member> MembersOf(TypeDecl type) => type switch
-    {
-        ValueObjectDecl v => v.Members,
-        EntityDecl e => e.Members,
-        EventDecl ev => ev.Members,
-        IntegrationEventDecl ie => ie.Members,
-        _ => [],
-    };
 }
