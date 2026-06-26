@@ -26,6 +26,13 @@ response as a `Promise`. Cancellation is supported in two modes, both now **wire
   a **Stop** button in the playground toolbar. Awaiting `whenReady()` across a respawn now rejects rather
   than hangs (the outgoing generation's ready-promise is settled on respawn).
 
+The same `compileActivity.ts` in-flight signal also drives a transient **"compiling…"** indicator in the
+Studio **status bar** (#516): the `CompilingIndicator` panel subscribes to a small `onCompileActivityChange`
+notify seam on that module and reveals an `aria-live="polite"` "compiling…" affordance while a compile is
+running — debounced (~150 ms) so a fast keystroke-diagnose doesn't flash it, hidden immediately when the
+compiler settles. This matches the docs-site playground's toolbar busy state, so a slow diagnose/emit no
+longer reads as an idle editor.
+
 `WasmEnableThreads` stays **`false`** in `src/Koine.Wasm/Koine.Wasm.csproj`. The worker uses
 plain structured-clone `postMessage`, so **no `SharedArrayBuffer` and no COOP/COEP
 cross-origin-isolation headers are required**.

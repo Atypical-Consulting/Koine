@@ -304,6 +304,9 @@
              the <WorkspaceProblemsBadge> Preact panel renders its sb-item span in here. -->
         <span id="sb-problems-host"></span>
         <span class="sb-spacer"></span>
+        <!-- Transient "compiling…" indicator (#516): the <CompilingIndicator> Preact panel renders its
+             aria-live sb-item span in here while a compile is in flight (debounced), hidden when idle. -->
+        <span id="sb-compiling-host"></span>
         <span class="sb-item" id="sb-connection">Connecting…</span>
         <span class="sb-item" id="sb-version"></span>
       </footer>
