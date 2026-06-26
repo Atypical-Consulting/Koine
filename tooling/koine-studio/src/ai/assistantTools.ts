@@ -222,6 +222,76 @@ export function formatValidate(buckets: WFileDiagnostics[]): string {
   return `ok: false — ${errors} error(s), ${warnings} warning(s):\n${all.map(diagLine).join('\n')}`;
 }
 
+// --- desktop (MCP) koine_validate normalization (issue #445) -----------------
+// The browser host runs koine_validate in-WASM and formats it with formatValidate (above). The Tauri
+// DESKTOP host instead proxies koine_validate to the `koine mcp --http` sidecar, which returns the MCP
+// ValidateTool JSON payload ({ ok, errorCount, warningCount, diagnostics[] }, see src/Koine.Mcp/Models.cs)
+// — a DIFFERENT shape. The apply-gate's parseValidationOutcome only understands the browser `ok:` string,
+// so the desktop host normalizes the payload back to that exact string here, keeping ONE validation
+// contract rather than teaching the parser two formats.
+
+/** One MCP `DiagnosticInfo` (Koine.Mcp/Models.cs): a STRING severity and an ALREADY-1-based line/column. */
+export interface McpDiagnostic {
+  severity: string;
+  message: string;
+  line: number;
+  column: number;
+}
+
+/** The MCP `koine_validate` result payload (Koine.Mcp `ValidationResult`). */
+export interface McpValidationResult {
+  ok: boolean;
+  errorCount: number;
+  warningCount: number;
+  diagnostics: McpDiagnostic[];
+}
+
+/** One MCP diagnostic as a `- [severity] line:col message` line. Unlike {@link diagLine}, the severity
+ *  is already a string and the line/column are already 1-based, so neither is remapped. */
+function mcpDiagLine(d: McpDiagnostic): string {
+  return `- [${d.severity}] ${d.line}:${d.column} ${d.message}`;
+}
+
+/**
+ * Map an MCP {@link McpValidationResult} to the EXACT browser {@link formatValidate} string, so a single
+ * {@link parseValidationOutcome} reads either host's koine_validate result. Byte-for-byte with the
+ * browser: no diagnostics ⇒ `ok: true — no diagnostics. The model compiles.`; otherwise the
+ * `ok: false — E error(s), W warning(s):` header followed by one diagnostic line each (a warnings-only
+ * payload reports 0 errors, so the apply-gate still treats it as applicable).
+ */
+export function formatMcpValidate(payload: McpValidationResult): string {
+  const all = payload.diagnostics ?? [];
+  if (!all.length) return 'ok: true — no diagnostics. The model compiles.';
+  const errors = payload.errorCount ?? 0;
+  const warnings = payload.warningCount ?? 0;
+  return `ok: false — ${errors} error(s), ${warnings} warning(s):\n${all.map(mcpDiagLine).join('\n')}`;
+}
+
+/**
+ * Normalize a RAW desktop koine_validate result string (the MCP ValidateTool JSON the sidecar returns)
+ * into the browser `ok:` contract. Fails CLOSED: non-JSON text (e.g. an `Error: …` string) or a JSON
+ * value of an unexpected shape is returned unchanged — which parseValidationOutcome reads as
+ * not-parsing, surfacing a single failed validate (never an infinite repair loop; repairToValid is
+ * bounded). Only the desktop host needs this; the browser host already emits the `ok:` string.
+ */
+export function normalizeMcpValidate(raw: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return raw; // not JSON → fail closed
+  }
+  if (
+    parsed !== null &&
+    typeof parsed === 'object' &&
+    typeof (parsed as McpValidationResult).errorCount === 'number' &&
+    Array.isArray((parsed as McpValidationResult).diagnostics)
+  ) {
+    return formatMcpValidate(parsed as McpValidationResult);
+  }
+  return raw; // unexpected shape → fail closed
+}
+
 /** Summarize an EmitPreview result for the model: the emitted files, or the error/diagnostics. */
 export function formatCompile(res: WEmitPreviewResult): string {
   if (res.error) return `compile failed: ${res.error}`;

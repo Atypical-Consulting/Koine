@@ -9,6 +9,8 @@ import {
   toOpenAiTool,
   toAnthropicTool,
   formatValidate,
+  formatMcpValidate,
+  normalizeMcpValidate,
   formatCompile,
   formatListFiles,
   formatReadFile,
@@ -207,6 +209,59 @@ describe('formatValidate', () => {
     expect(out).toContain('1 warning');
     expect(out).toContain('3:5'); // 0-based 2:4 -> 1-based 3:5
     expect(out).toContain('unknown type Mony');
+  });
+});
+
+describe('formatMcpValidate', () => {
+  test('a clean MCP payload maps byte-for-byte to the browser ok:true string', () => {
+    // The desktop koine_validate (MCP ValidateTool) payload must normalize to EXACTLY what the browser
+    // formatValidate emits, so a single parseValidationOutcome reads either host (issue #445).
+    const out = formatMcpValidate({ ok: true, errorCount: 0, warningCount: 0, diagnostics: [] });
+    expect(out).toBe(formatValidate([{ uri: 'file:///model.koi', diagnostics: [] }]));
+    expect(out).toBe('ok: true — no diagnostics. The model compiles.');
+  });
+
+  test('an error payload maps to the ok:false header with already-1-based line:col lines', () => {
+    const out = formatMcpValidate({
+      ok: false,
+      errorCount: 1,
+      warningCount: 1,
+      // MCP DiagnosticInfo: string severity, 1-based line/column (NOT remapped, unlike the browser path).
+      diagnostics: [
+        { severity: 'error', code: 'KOI0201', message: 'unknown type Mony', line: 3, column: 5, endLine: 3, endColumn: 9, file: 'model.koi' },
+        { severity: 'warning', code: 'KOI0500', message: 'unused value', line: 6, column: 1, endLine: 6, endColumn: 4, file: 'model.koi' },
+      ],
+    });
+    expect(out).toBe(
+      'ok: false — 1 error(s), 1 warning(s):\n- [error] 3:5 unknown type Mony\n- [warning] 6:1 unused value',
+    );
+  });
+
+  test('a warnings-only payload keeps an ok:false header but reports 0 errors (so it stays applicable)', () => {
+    const out = formatMcpValidate({
+      ok: true,
+      errorCount: 0,
+      warningCount: 1,
+      diagnostics: [{ severity: 'warning', code: 'KOI0500', message: 'unused value', line: 6, column: 1, endLine: 6, endColumn: 4, file: 'model.koi' }],
+    });
+    expect(out).toBe('ok: false — 0 error(s), 1 warning(s):\n- [warning] 6:1 unused value');
+  });
+});
+
+describe('normalizeMcpValidate', () => {
+  test('parses the raw MCP JSON into the browser ok: string', () => {
+    const raw = JSON.stringify({ ok: true, errorCount: 0, warningCount: 0, diagnostics: [] });
+    expect(normalizeMcpValidate(raw)).toBe('ok: true — no diagnostics. The model compiles.');
+  });
+
+  test('fails closed on non-JSON text (returns it unchanged → not-parsing)', () => {
+    const err = 'Error: the Koine MCP server is not available.';
+    expect(normalizeMcpValidate(err)).toBe(err);
+  });
+
+  test('fails closed on a JSON value of an unexpected shape', () => {
+    expect(normalizeMcpValidate('{"unexpected":true}')).toBe('{"unexpected":true}');
+    expect(normalizeMcpValidate('42')).toBe('42');
   });
 });
 
