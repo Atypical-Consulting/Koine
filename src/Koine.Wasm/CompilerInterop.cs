@@ -121,22 +121,13 @@ public static partial class CompilerInterop
     /// <summary>
     /// The compiler version from <see cref="AssemblyInformationalVersionAttribute"/> (set from
     /// <c>Directory.Build.props</c>'s <c>&lt;Version&gt;</c>), trimming any SDK-appended
-    /// <c>+&lt;commit&gt;</c> build-metadata suffix — the same logic as <c>Koine.Cli.Program.GetVersion()</c>,
-    /// so the wasm bundle and <c>koine --version</c> stay in lock-step. Falls back to the four-part assembly
-    /// version (then <c>0.0.0</c>) only if the attribute is absent.
+    /// <c>+&lt;commit&gt;</c> build-metadata suffix. Delegates to the shared
+    /// <see cref="VersionInfo.Display"/> — the same logic as <c>Koine.Cli.Program.GetVersion()</c>,
+    /// so the wasm bundle and <c>koine --version</c> stay in lock-step. Falls back to the four-part
+    /// assembly version (then <c>0.0.0</c>) only if the attribute is absent.
     /// </summary>
     private static string CompilerVersion()
-    {
-        var asm = typeof(CompilerInterop).Assembly;
-        var info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        if (string.IsNullOrEmpty(info))
-        {
-            return asm.GetName().Version?.ToString() ?? "0.0.0";
-        }
-
-        var plus = info.IndexOf('+');
-        return plus < 0 ? info : info[..plus];
-    }
+        => VersionInfo.Display(typeof(CompilerInterop).Assembly);
 
     /// <summary>
     /// The names of every <c>[JSExport]</c> this module ships — the staleness signal Koine Studio builds
