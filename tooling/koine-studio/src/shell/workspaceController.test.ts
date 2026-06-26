@@ -379,6 +379,35 @@ describe('createWorkspaceController — opening a folder', () => {
   });
 });
 
+describe('createWorkspaceController — rememberLastWorkspace (#535)', () => {
+  test('a successful openFolderPath remembers the opened token as the last workspace', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    const trace: string[] = [];
+    const rememberLastWorkspace = vi.fn();
+    const ws = createWorkspaceController(
+      makeDeps(platform, makeLsp(trace), makeEditor(trace), { rememberLastWorkspace }),
+    );
+
+    await ws.openFolderPath(ROOT); // default opts → recent (the toolbar / recent-row / example path)
+
+    expect(rememberLastWorkspace).toHaveBeenCalledWith(ROOT);
+  });
+
+  test('a transient openWorkspaceWith1File does NOT remember the workspace', async () => {
+    const platform = new FakePlatform();
+    const trace: string[] = [];
+    const rememberLastWorkspace = vi.fn();
+    const ws = createWorkspaceController(
+      makeDeps(platform, makeLsp(trace), makeEditor(trace), { rememberLastWorkspace }),
+    );
+
+    await ws.openWorkspaceWith1File('context Shared {}\n');
+
+    expect(rememberLastWorkspace).not.toHaveBeenCalled();
+  });
+});
+
 describe('createWorkspaceController — reset', () => {
   test('closes every open doc, clears buffers + the diagnostics cache, and does NOT re-open', async () => {
     const platform = new FakePlatform();

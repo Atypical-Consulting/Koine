@@ -37,6 +37,7 @@ import {
   removeRecentFolder,
   saveActiveContext,
   saveWorkspaceCenter,
+  setLastWorkspace,
   workspaceKeyOf,
   type Settings,
 } from '@/settings/persistence';
@@ -1127,6 +1128,9 @@ export function init(): () => void {
     // The active buffer was deleted and the workspace is now empty: reset to a fresh blank model.
     onWorkspaceEmptied: () => void newModel(),
     pushRecentFolder,
+    // Remember the opened workspace so a reload restores it instead of the empty default (#535). Gated
+    // (in the controller) on the same `recent` flag as pushRecentFolder, so transient opens don't set it.
+    rememberLastWorkspace: setLastWorkspace,
     setFolderTitle: (name) => {
       treeTitleEl.textContent = name;
     },
@@ -1411,7 +1415,11 @@ export function init(): () => void {
       setStatus('could not open template', 'error');
       return;
     }
-    await workspace.openFolderPath(token, { recent: false });
+    // recent:true — record the example in Recents so it shows on the Start screen and is one click to
+    // re-open, AND (via the controller's rememberLastWorkspace) mark it the last workspace so a reload
+    // restores it rather than silently reverting to the empty default (#535). The example token is an
+    // OPFS-internal `example-<id>`, which the cold-boot ladder is allowed to auto-restore.
+    await workspace.openFolderPath(token, { recent: true });
   }
 
   // Import a multi-file workspace carried in a share link. Materializes a real workspace and opens

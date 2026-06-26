@@ -104,6 +104,12 @@ export interface WorkspaceControllerDeps {
 
   /** Persist a recently-opened folder (ide.ts's pushRecentFolder); skipped for transient workspaces. */
   pushRecentFolder?(folder: string): void;
+  /**
+   * Persist the last-opened workspace so a cold boot can restore it (ide.ts's setLastWorkspace, #535).
+   * Skipped for transient opens (shared-link imports / the default-workspace flow), exactly like
+   * {@link pushRecentFolder} — both are gated on the same `recent` flag.
+   */
+  rememberLastWorkspace?(folder: string): void;
   /** Folder display name written into the tree title (ide.ts's #filetree-title). */
   setFolderTitle?(name: string): void;
   /** Reveal the file-tree chrome after a folder opens (ide.ts's showFileTreeChrome). */
@@ -554,7 +560,13 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     deps.hideWelcome?.(); // dismiss the start screen only now that the open has succeeded
     deps.setFolderTitle?.(platform.folderName(folder));
     deps.showFileTreeChrome?.();
-    if (opts.recent ?? true) deps.pushRecentFolder?.(folder);
+    if (opts.recent ?? true) {
+      deps.pushRecentFolder?.(folder);
+      // Remember this as the last-opened workspace so a reload restores it (#535). Gated on the same
+      // `recent` flag as pushRecentFolder, so transient opens (shared-link import via
+      // openWorkspaceWith1File, the default-workspace flow) don't overwrite the pointer.
+      deps.rememberLastWorkspace?.(folder);
+    }
     // ide.ts restores this workspace's bounded-context scope BEFORE the first scoped render and
     // refreshes the doc surfaces. The bus value drives the render paths, so the initial ensureLoaded
     // is already scoped even before the dropdown finishes repainting.

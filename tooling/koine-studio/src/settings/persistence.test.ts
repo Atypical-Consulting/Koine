@@ -15,6 +15,9 @@ import {
   clearLegacyScratch,
   loadWorkspaceCenter,
   saveWorkspaceCenter,
+  getLastWorkspace,
+  setLastWorkspace,
+  clearLastWorkspace,
   loadDiagramZoom,
   saveDiagramZoom,
   loadDiagramPositions,
@@ -361,6 +364,32 @@ describe('workspace center-pane persistence', () => {
     expect(loadWorkspaceCenter()).toBe('docs');
     saveWorkspaceCenter('technical'); // a later save overwrites the prior one
     expect(loadWorkspaceCenter()).toBe('technical');
+  });
+});
+
+describe('last-opened workspace pointer (#535)', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('round-trips a token through set/get', () => {
+    setLastWorkspace('example-saas-subscription');
+    expect(getLastWorkspace()).toBe('example-saas-subscription');
+    setLastWorkspace('(default)'); // a later save overwrites the prior one
+    expect(getLastWorkspace()).toBe('(default)');
+  });
+
+  test('clearLastWorkspace makes a stored token null', () => {
+    setLastWorkspace('example-saas-subscription');
+    clearLastWorkspace();
+    expect(getLastWorkspace()).toBeNull();
+  });
+
+  test('returns null when no token has been stored', () => {
+    expect(getLastWorkspace()).toBeNull();
+  });
+
+  test('ignores an empty token (never persists "")', () => {
+    setLastWorkspace('');
+    expect(getLastWorkspace()).toBeNull();
   });
 });
 
