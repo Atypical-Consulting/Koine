@@ -16,6 +16,10 @@ namespace Koine.Compiler.Tests.Conformance;
 /// </summary>
 public class PhpSnapshotTests
 {
+    private const string NoInterpreterNotice =
+        "No usable PHP interpreter (php) available; php -l syntax check not run. " +
+        "Install PHP (or set KOINE_PHP) — CI runs this for real.";
+
     /// <summary>The Phase-1 domain fixture, emitted to PHP. Shared by Tasks 5+ (one growing snapshot).</summary>
     internal const string Fixture = """
         context Sales {
@@ -99,21 +103,19 @@ public class PhpSnapshotTests
 
     /// <summary>The emitted PHP for the fixture must match its reviewed snapshot.</summary>
     [Fact]
-    public Task Php_fixture_emits_expected_php()
+    public async Task Php_fixture_emits_expected_php()
     {
         var result = new KoineCompiler().Compile(Fixture, new PhpEmitter());
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
-        // Always-on syntax gate: runs php -l when a PHP interpreter is available, and asserts on it.
-        // Stays INCONCLUSIVE (no assertion) when no interpreter is present locally.
-        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
-        if (syntax.ToolchainAvailable)
-        {
-            syntax.Ok.ShouldBeTrue(string.Join("\n", syntax.Errors));
-        }
-
-        return Verify(TestSupport.Render(result.Files))
+        // The snapshot is the always-on guarantee — it runs regardless of the PHP toolchain.
+        await Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
+
+        // The php -l syntax gate skips (or hard-fails under KOINE_REQUIRE_CONFORMANCE) when php is absent.
+        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue(string.Join("\n", syntax.Errors));
     }
 
     /// <summary>
@@ -145,20 +147,19 @@ public class PhpSnapshotTests
     /// with identity <c>equals()</c>, constructor invariants, and a derived getter.
     /// </summary>
     [Fact]
-    public Task Php_entity_emits_expected_php()
+    public async Task Php_entity_emits_expected_php()
     {
         var result = new KoineCompiler().Compile(EntityFixture, new PhpEmitter());
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
-        // Always-on syntax gate: asserts php -l succeeds when available; INCONCLUSIVE otherwise.
-        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
-        if (syntax.ToolchainAvailable)
-        {
-            syntax.Ok.ShouldBeTrue(string.Join("\n", syntax.Errors));
-        }
-
-        return Verify(TestSupport.Render(result.Files))
+        // The snapshot is the always-on guarantee — it runs regardless of the PHP toolchain.
+        await Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
+
+        // The php -l syntax gate skips (or hard-fails under KOINE_REQUIRE_CONFORMANCE) when php is absent.
+        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue(string.Join("\n", syntax.Errors));
     }
 
     // -----------------------------------------------------------------------
@@ -224,19 +225,18 @@ public class PhpSnapshotTests
     /// and repository interface — exercising Task 8's full per-type dispatch in PHP.
     /// </summary>
     [Fact]
-    public Task Php_end_to_end_emits_expected_php()
+    public async Task Php_end_to_end_emits_expected_php()
     {
         var result = new KoineCompiler().Compile(EndToEndFixture, new PhpEmitter());
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
-        // Always-on syntax gate: asserts php -l succeeds when available; INCONCLUSIVE otherwise.
-        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
-        if (syntax.ToolchainAvailable)
-        {
-            syntax.Ok.ShouldBeTrue(string.Join("\n", syntax.Errors));
-        }
-
-        return Verify(TestSupport.Render(result.Files))
+        // The snapshot is the always-on guarantee — it runs regardless of the PHP toolchain.
+        await Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
+
+        // The php -l syntax gate skips (or hard-fails under KOINE_REQUIRE_CONFORMANCE) when php is absent.
+        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue(string.Join("\n", syntax.Errors));
     }
 }
