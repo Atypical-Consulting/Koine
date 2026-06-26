@@ -856,6 +856,21 @@ describe('bare grammar-constrained candidate recovery at legacy entry points (#5
     ]);
   }
 
+  // Drive a generative send via the first quick action (offerApply defaults true).
+  function fire(container: HTMLElement): void {
+    container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
+  }
+
+  // Mock `runAssistant` to stream `body`, then have the user hit Stop before it finishes — the
+  // stop-mid-stream sequence whose partial is committed and routed through `maybeOfferApply`.
+  function streamThenStop(container: HTMLElement, body: string): void {
+    vi.mocked(runAssistant).mockImplementation(async (req: { onText: (t: string) => void }) => {
+      req.onText(body);
+      container.querySelector<HTMLButtonElement>('.koi-assistant-stop')!.click(); // user Stops
+      throw new DOMException('aborted', 'AbortError'); // the fetch rejects on abort
+    });
+  }
+
   test('replay of a BARE valid grammar-constrained .koi (no fence) offers Apply', async () => {
     seedBareTurn();
     const container = document.createElement('div');
@@ -903,5 +918,20 @@ describe('bare grammar-constrained candidate recovery at legacy entry points (#5
     await settle();
     // The prose is gated like any candidate and rejected — Apply withheld (no spurious offer).
     expect(container.querySelector('.koi-assistant-apply')).toBeNull();
+  });
+
+  // --- stop-mid-stream (the abort partial-commit path) ---------------------------------------
+  // A Stop mid-generation commits the partial reply and offers Apply on it via the SAME
+  // `maybeOfferApply` sink. When the streamed partial is a complete BARE grammar-constrained program
+  // (no fence), the candidate must be recovered there too, so a valid model stays applicable after Stop.
+  test('stop mid-stream with a complete BARE valid .koi (no fence) offers Apply', async () => {
+    const container = document.createElement('div');
+    createAssistantPanel(opts(container, { runCompilerTool: () => Promise.resolve(CLEAN) }));
+    // A fully-streamed bare grammar-constrained program, then a Stop on the in-flight request.
+    streamThenStop(container, BARE_MODEL);
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-stopped')).not.toBeNull());
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
   });
 });
