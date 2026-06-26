@@ -235,6 +235,7 @@ function makeDeps(lsp: Lsp, over: Partial<InspectorControllerDeps> = {}): Inspec
     onExportDiagram: vi.fn(),
     onCopyDiagramMermaid: vi.fn(),
     gotoSourceSpan: vi.fn(),
+    revealInFiles: vi.fn(),
     ensureAssistant: vi.fn(() => makeAssistant()),
     initEdgeResizer: vi.fn(),
     ...over,
@@ -524,6 +525,31 @@ describe('createInspectorController — bottom strip lazy loading', () => {
   // "leave Documentation, reveal the strip" regression, #docs-rail) is rebuilt in the strategic Domain
   // view by a later task, which will re-add its own coverage. focusContextMap stays wired in the
   // controller for that re-wire.
+});
+
+describe('createInspectorController — rail axis switch (#453)', () => {
+  test('the Files axis button surfaces #rail-files and hides the Domain pane; Domain switches back', () => {
+    localStorage.removeItem('koine.studio.railAxis');
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+
+    const domainPane = el('rail-domain-pane');
+    const filesPane = el('rail-files');
+    // Domain is the default axis.
+    expect(domainPane.hidden).toBe(false);
+    expect(filesPane.hidden).toBe(true);
+
+    // Clicking the Files axis tab shows the file tree and hides the Domain navigator.
+    (document.querySelector('#rail-axis-switch [data-axis="files"]') as HTMLButtonElement).click();
+    expect(domainPane.hidden).toBe(true);
+    expect(filesPane.hidden).toBe(false);
+    expect(document.querySelector('#rail-axis-switch [data-axis="files"]')!.getAttribute('aria-selected')).toBe('true');
+
+    // setAxis('domain') (ide.ts's ⌘B path) hands the rail back to the Domain navigator.
+    ctl.setAxis('domain');
+    expect(domainPane.hidden).toBe(false);
+    expect(filesPane.hidden).toBe(true);
+  });
 });
 
 describe('createInspectorController — loading states clear on success', () => {

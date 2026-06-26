@@ -372,6 +372,7 @@ function makeDeps(lsp: Lsp): InspectorControllerDeps {
     onExportDiagram: vi.fn(),
     onCopyDiagramMermaid: vi.fn(),
     gotoSourceSpan: vi.fn(),
+    revealInFiles: vi.fn(),
     ensureAssistant: vi.fn(() => makeAssistant()),
     initEdgeResizer: vi.fn(),
   };

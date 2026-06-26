@@ -142,14 +142,23 @@ export interface DomainNavigatorLsp {
 }
 
 /** Wiring for the tactical level — what a leaf (an owned construct or a context-level peer) does when
- * activated. Kept deliberately minimal: Task 5 (#453) wires the real select → goto + Reveal-in-Files and
- * may widen this. The leaves already carry their `data-construct` / `data-name`, so a click resolves to a
- * model element without re-rendering the tree. */
+ * activated, plus the cross-axis links (#453, Task 5). The leaves carry their `data-construct` /
+ * `data-name` and `qualifiedName`, so a click resolves to a model element without re-rendering the tree.
+ * Supplied by the rail controller, which owns the inspector / editor / Files-axis seams. */
 export interface TacticalHandlers {
   /** Select a tactical node — drives the inspector + cross-highlight. */
   onSelect(node: ModelNode): void;
-  /** Reveal/jump to a node's declaration (Task 5 resolves the node → source position + Files reveal). */
+  /** Jump to a node's declaration (the controller resolves the node → 1-based source position). */
   goto(node: ModelNode): void;
+  /** Reveal the node's bounded context in the Files axis (the leaf calls {@link setAxis} first). */
+  reveal(node: ModelNode): void;
+  /** Switch the rail's active navigator axis (the DDD Domain view vs the workspace Files tree). */
+  setAxis(axis: 'domain' | 'files'): void;
+}
+
+/** A harmless no-op handler set, so a bare {@link mountDomainNavigator} (the unit test) does nothing. */
+function noopTacticalHandlers(): TacticalHandlers {
+  return { onSelect: () => {}, goto: () => {}, reveal: () => {}, setAxis: () => {} };
 }
 
 /**
@@ -180,6 +189,7 @@ export function mountDomainNavigator(
   store: StoreApi<AppState>,
   lsp: DomainNavigatorLsp,
   handlers: DomainNavigatorHandlers = {},
+  tacticalHandlers: TacticalHandlers = noopTacticalHandlers(),
 ): DomainNavigatorHandle {
   // The navigator data is fetched once and cached; store-driven changes (altitude / scope / filter)
   // re-render synchronously from the cache, and reload() re-fetches after an edit. `null` = not yet
@@ -187,14 +197,6 @@ export function mountDomainNavigator(
   // `tree` is the structured model graph the TACTICAL view walks (best-effort: `null` if it failed).
   let cache: { model: GlossaryModel; relLinks: number; tree: ModelNode | null } | null = null;
   let fetchSeq = 0;
-
-  // The tactical-leaf seam (Task 5 wires the real select → goto + Reveal-in-Files). A structural no-op
-  // for now — the leaves carry their data-construct / data-name so Task 5 can resolve a click without
-  // re-rendering the tree.
-  const tacticalHandlers: TacticalHandlers = {
-    onSelect: () => {},
-    goto: () => {},
-  };
 
   const strategicHandlers: StrategicHandlers = {
     // Drilling in is one gesture across two store fields: narrow the scope AND descend to tactical. The
@@ -325,23 +327,123 @@ function constructGlyph(slug: string): HTMLElement {
   return icon;
 }
 
-/** One tactical leaf — an owned construct (under an aggregate) or a context-level peer. Carries
- * `data-construct` (its glyph slug) + `data-name` (its title) so Task 5 can resolve a click to the model
- * element and cross-highlight it. Icon first, then the name text, so `leaf.textContent === node.title`. */
+/** One tactical leaf — an owned construct (under an aggregate) or a context-level peer. The row IS the
+ * `treeitem`; inside it the activation button (`.koi-tactical-leaf`, carrying `data-construct` + `data-name`
+ * so a click resolves to the model element + cross-highlights) selects-and-jumps, and a trailing `⋯`
+ * overflow opens the cross-axis menu ("Reveal in Files", #453). Icon first, then the name text, so
+ * `leaf.textContent === node.title`. */
 function tacticalLeaf(node: ModelNode, h: TacticalHandlers): HTMLElement {
   const { slug } = constructForKind(node.kind);
+  const row = document.createElement('div');
+  row.className = 'koi-tactical-leaf-row';
+  row.setAttribute('role', 'treeitem');
+
   const leaf = document.createElement('button');
   leaf.type = 'button';
   leaf.className = 'koi-tactical-leaf';
   leaf.dataset.construct = slug;
   leaf.dataset.name = node.title;
-  leaf.setAttribute('role', 'treeitem');
   leaf.append(constructGlyph(slug), node.title);
   leaf.addEventListener('click', () => {
     h.onSelect(node);
     h.goto(node);
   });
-  return leaf;
+
+  row.append(leaf, leafOverflowButton(node, h));
+  return row;
+}
+
+/** The per-leaf `⋯` overflow: a real, keyboard-activatable button that opens a small menu of cross-axis
+ * actions for the node. Today the menu holds a single item — "Reveal in Files" — which switches the rail
+ * to the Files axis ({@link TacticalHandlers.setAxis}) and reveals the node's `.koi` ({@link
+ * TacticalHandlers.reveal}). Full keyboard tree-nav is Task 6; this stays accessible (aria-haspopup +
+ * an arrow/Escape-navigable menu) without pre-building it. */
+function leafOverflowButton(node: ModelNode, h: TacticalHandlers): HTMLElement {
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'koi-tactical-more';
+  more.textContent = '⋯';
+  more.setAttribute('aria-label', `Actions for ${node.title}`);
+  more.setAttribute('aria-haspopup', 'menu');
+  more.setAttribute('aria-expanded', 'false');
+  more.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    openLeafMenu(more, node, h);
+  });
+  return more;
+}
+
+// The single floating leaf menu (mounted to document.body and reused), mirroring the explorer's context
+// menu: positioned at the trigger, dismissed on outside-click / Escape / action, with focus returned to
+// the trigger. Module-scoped so opening one closes any other.
+let leafMenuEl: HTMLElement | null = null;
+let leafMenuTrigger: HTMLElement | null = null;
+
+function closeLeafMenu(): void {
+  if (!leafMenuEl) return;
+  leafMenuEl.remove();
+  leafMenuEl = null;
+  document.removeEventListener('pointerdown', onLeafMenuPointerDown, true);
+  document.removeEventListener('keydown', onLeafMenuKeydown, true);
+  const trigger = leafMenuTrigger;
+  leafMenuTrigger = null;
+  if (trigger) {
+    trigger.setAttribute('aria-expanded', 'false');
+    if (trigger.isConnected) trigger.focus();
+  }
+}
+
+function onLeafMenuPointerDown(ev: PointerEvent): void {
+  if (leafMenuEl && !leafMenuEl.contains(ev.target as Node)) closeLeafMenu();
+}
+
+function onLeafMenuKeydown(ev: KeyboardEvent): void {
+  if (!leafMenuEl) return;
+  const items = Array.from(leafMenuEl.querySelectorAll<HTMLElement>('.koi-tactical-menu-item'));
+  const i = items.indexOf(document.activeElement as HTMLElement);
+  if (ev.key === 'Escape' || ev.key === 'Tab') {
+    ev.preventDefault();
+    closeLeafMenu();
+  } else if (ev.key === 'ArrowDown') {
+    ev.preventDefault();
+    items[Math.min(items.length - 1, i + 1)]?.focus();
+  } else if (ev.key === 'ArrowUp') {
+    ev.preventDefault();
+    items[Math.max(0, i - 1)]?.focus();
+  }
+}
+
+function openLeafMenu(trigger: HTMLElement, node: ModelNode, h: TacticalHandlers): void {
+  closeLeafMenu();
+  const menu = document.createElement('ul');
+  menu.className = 'koi-tactical-menu';
+  menu.setAttribute('role', 'menu');
+  const rect = trigger.getBoundingClientRect();
+  menu.style.left = `${rect.left}px`;
+  menu.style.top = `${rect.bottom}px`;
+
+  const li = document.createElement('li');
+  li.setAttribute('role', 'none');
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.className = 'koi-tactical-menu-item';
+  item.setAttribute('role', 'menuitem');
+  item.textContent = 'Reveal in Files';
+  item.addEventListener('click', () => {
+    closeLeafMenu();
+    h.setAxis('files');
+    h.reveal(node);
+  });
+  li.appendChild(item);
+  menu.appendChild(li);
+
+  leafMenuTrigger = trigger;
+  trigger.setAttribute('aria-expanded', 'true');
+  document.body.appendChild(menu);
+  leafMenuEl = menu;
+  item.focus();
+  document.addEventListener('pointerdown', onLeafMenuPointerDown, true);
+  document.addEventListener('keydown', onLeafMenuKeydown, true);
 }
 
 /** One aggregate node: a head row (the `⬡` aggregate glyph + name, carrying the aggregate's qualified

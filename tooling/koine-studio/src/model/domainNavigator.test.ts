@@ -68,7 +68,12 @@ function ctxNode(name: string, children: ModelNode[]): ModelNode {
   );
   return { kind: 'context', qualifiedName: name, title: name, members: [], children: stamped };
 }
-const noopTacticalHandlers = (): TacticalHandlers => ({ onSelect: () => {}, goto: () => {} });
+const noopTacticalHandlers = (): TacticalHandlers => ({
+  onSelect: () => {},
+  goto: () => {},
+  reveal: () => {},
+  setAxis: () => {},
+});
 
 describe('renderTactical', () => {
   it('nests owned constructs under their aggregate; context-level types are peers', () => {
@@ -81,6 +86,38 @@ describe('renderTactical', () => {
     expect(agg.querySelector('[data-construct="value"][data-name="Money"]')).toBeTruthy();
     expect(agg.querySelector('[data-construct="event"][data-name="OrderPlaced"]')).toBeTruthy();
     expect(el.querySelector('.koi-ctx-peers [data-name="Currency"]')).toBeTruthy();
+  });
+});
+
+// --- cross-axis leaf actions: select → goto + the "Reveal in Files" overflow (Task 5, #453) --------
+describe('renderTactical — cross-axis leaf actions', () => {
+  const ctxWithLeaf = (): ModelNode => ctxNode('Ordering', [value('Currency')]);
+
+  // Open the leaf's ⋯ overflow menu and choose "Reveal in Files". The menu mounts to document.body
+  // (mirroring the explorer's floating context menu), so the item is queried globally.
+  function revealInFiles(el: HTMLElement): void {
+    (el.querySelector('.koi-tactical-more') as HTMLButtonElement).click();
+    const item = Array.from(document.querySelectorAll<HTMLButtonElement>('.koi-tactical-menu-item')).find(
+      (b) => b.textContent === 'Reveal in Files',
+    )!;
+    item.click();
+  }
+
+  it('selecting a leaf jumps + selects; Reveal in Files switches axis and reveals the file', () => {
+    const onSelect = vi.fn();
+    const goto = vi.fn();
+    const reveal = vi.fn();
+    const setAxis = vi.fn();
+    const el = renderTactical(ctxWithLeaf(), { onSelect, goto, reveal, setAxis });
+    document.body.appendChild(el); // the ⋯ menu mounts to document.body; afterEach clears it
+
+    (el.querySelector('.koi-tactical-leaf') as HTMLButtonElement).click();
+    expect(onSelect).toHaveBeenCalled();
+    expect(goto).toHaveBeenCalled();
+
+    revealInFiles(el); // open ⋯ menu → Reveal in Files
+    expect(setAxis).toHaveBeenCalledWith('files');
+    expect(reveal).toHaveBeenCalled();
   });
 });
 

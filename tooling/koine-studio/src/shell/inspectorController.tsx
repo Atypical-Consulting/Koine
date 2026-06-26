@@ -66,9 +66,9 @@ import {
 } from '@/model/activeContext';
 import type { SelectedElement } from '@/model/selection';
 import { type ModelOutlineHandlers } from '@/model/modelOutline';
-import { mountDomainNavigator, type DomainNavigatorHandle } from '@/model/domainNavigator';
+import { mountDomainNavigator, type DomainNavigatorHandle, type TacticalHandlers } from '@/model/domainNavigator';
 import { buildInspectorElement, renderRules, type InspectorElement, type InspectorHandlers } from '@/model/inspector';
-import { buildModelIndex, lookupElement, type ModelIndex } from '@/model/modelIndex';
+import { buildModelIndex, lookupElement, resolveInspectableQn, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
 import { ContextBreadcrumb } from '@/model/ContextBreadcrumb';
 import { EventsPanel } from '@/model/EventsPanel';
@@ -176,6 +176,12 @@ export interface InspectorControllerDeps {
   onCopyDiagramMermaid(): void;
   /** Jump to a RAW 1-based source span (opens the owning file if needed) — the bottom tables' row click. */
   gotoSourceSpan(span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>): void;
+  /**
+   * Reveal a bounded context's `.koi` in the Files axis (the tactical "Reveal in Files" target, #453).
+   * ide.ts owns the explorer instance, so it forwards to `explorer.revealByContext`; the tactical leaf
+   * has already switched the rail to the Files axis (setAxis) before this fires.
+   */
+  revealInFiles(context: string): void;
 
   /** The assistant panel, created lazily by ide.ts the first time its tab is shown. */
   ensureAssistant(): InspectorAssistant;
@@ -225,6 +231,12 @@ export interface InspectorController {
 
   // View selection (palette commands + toolbar/tab clicks route here).
   selectCenter(view: CenterView): void;
+  /**
+   * Switch the left rail's active navigator axis (#453): show the Domain pane (the strategic/tactical DDD
+   * navigator) or the Files pane (the workspace `.koi` tree), hiding the other, and persist the choice.
+   * ide.ts's ⌘B drives this so the file tree and the Domain view never both claim the rail.
+   */
+  setAxis(axis: 'domain' | 'files'): void;
   selectTech(view: TechView): void;
   selectDocsTab(view: DocsView): void;
   selectBottomTab(tab: BottomTab): void;
@@ -810,6 +822,74 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     onOpenContextMap: () => focusContextMap(),
     onOpenGlossary: () => focusDocs(),
   };
+
+  // --- rail axis switch: Domain vs Files (#453) ------------------------------
+  // The left rail shows ONE of two top-level navigators: the Domain pane (#rail-domain-pane — the
+  // strategic/tactical DDD navigator) or the Files pane (#rail-files — the workspace `.koi` tree). The
+  // axis is persisted so a reload restores the last-used navigator; Domain is the default. ide.ts's ⌘B
+  // and the tactical "Reveal in Files" affordance both drive setAxis (the file tree and the Domain view
+  // never both claim the rail). The segmented control's two buttons live in #rail-axis-switch.
+  const RAIL_AXIS_KEY = 'koine.studio.railAxis';
+  type RailAxis = 'domain' | 'files';
+  const filesPane = document.getElementById('rail-files');
+  const axisButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('#rail-axis-switch [data-axis]'));
+
+  // Paint the active axis: surface its pane, hide the other, and reflect the segmented control. Showing
+  // Files also force-expands its section (its own collapse is ide.ts's #rail-sect chrome) so a reveal
+  // always lands on a visible row.
+  function applyAxis(axis: RailAxis): void {
+    domainPane.hidden = axis !== 'domain';
+    if (filesPane) {
+      filesPane.hidden = axis !== 'files';
+      if (axis === 'files') {
+        filesPane.dataset.open = 'true';
+        filesPane.querySelector('.rail-sect-head')?.setAttribute('aria-expanded', 'true');
+      }
+    }
+    for (const b of axisButtons) b.setAttribute('aria-selected', String(b.dataset.axis === axis));
+  }
+
+  function setAxis(axis: RailAxis): void {
+    applyAxis(axis);
+    try {
+      localStorage.setItem(RAIL_AXIS_KEY, axis);
+    } catch {
+      // no persistence available — the in-session choice still applies
+    }
+  }
+
+  for (const b of axisButtons) {
+    b.addEventListener('click', () => setAxis((b.dataset.axis as RailAxis) ?? 'domain'));
+  }
+
+  // The Domain navigator's TACTICAL leaf wiring (#453): a leaf click selects-and-jumps; its ⋯ overflow's
+  // "Reveal in Files" switches the rail to the Files axis then reveals the node's `.koi`. Selection +
+  // jump-to-source reuse the same seams the Model outline / diagram use, so the surfaces stay consistent.
+  const tacticalHandlers: TacticalHandlers = {
+    // Select the node — derive its bounded context from the qualified-name prefix (the model graph
+    // carries no separate context field), falling back to the active scope when the name is unqualified.
+    onSelect: (node) => selection.set({ qualifiedName: node.qualifiedName, context: nodeContext(node) }),
+    // Resolve the node to the nearest inspectable element and jump to its declaration (the editor's
+    // 1-based goto contract; the glossary nameRange is 0-based, hence the +1). Unresolvable → no-op.
+    goto: (node) => {
+      if (!modelIndex) return;
+      const qn = resolveInspectableQn(modelIndex, node.qualifiedName);
+      const entry = qn ? lookupElement(modelIndex, qn)?.element.entry : undefined;
+      if (!entry) return;
+      modelOutlineHandlers.goto(entry.nameRange.start.line + 1, entry.nameRange.start.character + 1);
+    },
+    reveal: (node) => deps.revealInFiles(nodeContext(node)),
+    setAxis: (axis) => setAxis(axis),
+  };
+
+  // A model node's bounded context: the segment before the first dot of its qualified name (the model
+  // graph names a context child `Context.X`), or the active scope when the name is unqualified.
+  function nodeContext(node: ModelNode): string {
+    const dot = node.qualifiedName.indexOf('.');
+    if (dot > 0) return node.qualifiedName.slice(0, dot);
+    const scope = activeContext.get();
+    return isAllContexts(scope) ? '' : scope;
+  }
   const inspectorHandlers: InspectorHandlers = {
     onGoto: (range) => editor.gotoRange(range.start, range.end),
     onRename: (element, newName) => deps.onRenameElement(element, newName),
@@ -945,7 +1025,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // the await runs its fetch in parallel with the model index build, so the rail paints promptly. Its
     // Context Map / Ubiquitous Language doorways route to the same focuses the docs footer used.
     if (!domainNavigator) {
-      domainNavigator = mountDomainNavigator(domainPane, appStore, lsp, modelOutlineHandlers);
+      domainNavigator = mountDomainNavigator(domainPane, appStore, lsp, modelOutlineHandlers, tacticalHandlers);
     } else {
       domainNavigator.reload();
     }
@@ -1758,6 +1838,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function init(): void {
     applyCenterChrome();
     setTarget(currentTarget);
+    // Restore the persisted rail axis (Domain default), painting the matching navigator pane (#453).
+    let storedAxis: RailAxis = 'domain';
+    try {
+      if (localStorage.getItem(RAIL_AXIS_KEY) === 'files') storedAxis = 'files';
+    } catch {
+      // no persistence available — fall back to the Domain default
+    }
+    applyAxis(storedAxis);
     // Mount the top-bar scope path once at boot (hidden until refreshContextList finds a context). It
     // tracks scope/selection via the store thereafter; setContextOptions + loadModel re-render it when
     // the contexts list or model index changes.
@@ -1785,6 +1873,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     selection,
     activeContext,
     selectCenter,
+    setAxis,
     selectTech,
     selectDocsTab,
     selectBottomTab,

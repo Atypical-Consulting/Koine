@@ -59,6 +59,13 @@ export interface Explorer {
    * per-group item list whose top-level New File/Folder + drag-to-root target that group's root.
    */
   renderRoots(groups: ExplorerRootGroup[]): void;
+  /**
+   * Reveal the `.koi` file backing a bounded context (the cross-axis "Reveal in Files" target, #453):
+   * expand its ancestor folders, scroll its row into view and highlight it. Best-effort — a context with
+   * no resolvable `.koi` (matched case-insensitively by file stem) is a silent no-op. ADDITIVE: it never
+   * mutates the workspace, so a missing match can't regress any file op.
+   */
+  revealByContext(context: string): void;
 }
 
 /** One context-menu action, shown in the right-click / "…" / empty-space menu. */
@@ -1226,7 +1233,50 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     }
   }
 
-  return { el: root, render, renderRoots };
+  // --- reveal by context ("Reveal in Files", #453) ----------------------------
+
+  // Find the file backing a bounded context by matching its STEM (the basename minus the `.koi`
+  // extension) case-insensitively — the convention that one `.koi` file is one bounded context. Returns
+  // the file token + its ancestor directory tokens (to expand on the way), or null when none matches. The
+  // explorer is token-opaque, so the lookup walks the structural FsEntry tree rather than parsing paths.
+  function findFileForContext(context: string): { token: string; ancestors: string[] } | null {
+    const target = context.trim().toLowerCase();
+    if (!target) return null;
+    let hit: { token: string; ancestors: string[] } | null = null;
+    const walk = (e: FsEntry, ancestors: string[]): void => {
+      if (hit) return;
+      if (e.kind === 'file') {
+        const lower = e.name.toLowerCase();
+        const stem = lower.endsWith('.koi') ? lower.slice(0, -'.koi'.length) : lower;
+        if (stem === target) hit = { token: e.token, ancestors };
+        return;
+      }
+      const childAncestors = [...ancestors, e.token];
+      for (const c of e.children ?? []) walk(c, childAncestors);
+    };
+    for (const g of lastGroups) for (const e of g.entries) walk(e, []);
+    return hit;
+  }
+
+  function revealByContext(context: string): void {
+    const found = findFileForContext(context);
+    if (!found) return; // best-effort: no matching .koi → silent no-op
+    // Expand every ancestor folder (even ones the user collapsed) so the target row is visible, then
+    // rebuild the tree once with those folders open.
+    for (const t of found.ancestors) collapsed.delete(t);
+    renderRoots(lastGroups);
+    // Highlight the freshly-rebuilt row (the prior tree was torn down, so query by token) and bring it
+    // into view. Clear any earlier reveal mark first so only one row reads as revealed at a time.
+    for (const r of tree.querySelectorAll('.explorer-row.is-revealed')) r.classList.remove('is-revealed');
+    const row = tree.querySelector<HTMLElement>(
+      `li[role="treeitem"][data-token="${cssEscape(found.token)}"] > .explorer-row`,
+    );
+    if (!row) return;
+    row.classList.add('is-revealed');
+    row.scrollIntoView?.({ block: 'nearest' });
+  }
+
+  return { el: root, render, renderRoots, revealByContext };
 }
 
 /** The folder name shown in a group header: the root token's last non-empty path segment. */

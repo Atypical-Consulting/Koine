@@ -287,6 +287,69 @@
   }
 }
 
+/* A tactical leaf's row IS the treeitem: the activation button flexes to fill, and a trailing "⋯"
+   overflow opens the cross-axis menu (#453), revealing on hover/focus like the Explorer's "⋯". */
+.koi-tactical-leaf-row {
+  display: flex;
+  align-items: center;
+}
+
+.koi-tactical-leaf-row .koi-tactical-leaf {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.koi-tactical-more {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--koi-muted);
+  cursor: pointer;
+  font-size: var(--koi-text-base);
+  line-height: 1;
+  padding: 0 var(--koi-space-1);
+  border-radius: var(--koi-radius-xs);
+  opacity: 0;
+}
+
+.koi-tactical-leaf-row:hover .koi-tactical-more,
+.koi-tactical-leaf-row:focus-within .koi-tactical-more,
+.koi-tactical-more:focus-visible {
+  opacity: 1;
+}
+
+.koi-tactical-more:hover {
+  color: var(--koi-fg);
+}
+
+/* The leaf overflow menu (floating, mounted to body) — shares the explorer menu's surface + item look. */
+.koi-tactical-menu {
+  @include a.popover-surface;
+  z-index: var(--koi-z-popover);
+  min-width: 168px;
+}
+
+.koi-tactical-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
+  color: var(--koi-fg);
+  cursor: pointer;
+  padding: var(--koi-space-1-5) var(--koi-space-2-5);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-base);
+}
+
+.koi-tactical-menu-item:hover,
+.koi-tactical-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--koi-accent) 40%, var(--koi-line));
+  outline: none;
+}
+
 /* The aggregate head reads as the boundary owner — a touch heavier than its owned leaves. */
 .koi-agg-head {
   font-weight: 600;
