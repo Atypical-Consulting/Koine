@@ -7,6 +7,7 @@
 // ide.test.ts's APP_HTML so a drift throws via el()) and a spied `lsp` content stub. happy-dom renders
 // the real panel DOM; fake timers cover the 350ms edit/bottom debounce.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { waitFor } from '@testing-library/preact';
 import {
   createInspectorController,
   type InspectorAssistant,
@@ -763,6 +764,49 @@ describe('createInspectorController — bounded-context scope', () => {
     ctl.invalidateDocViews();
     await ctl.getCachedDomainIndex();
     expect(lsp.contextMap.mock.calls.length).toBeGreaterThan(callsAfterBuild);
+  });
+});
+
+describe('createInspectorController — Source Control live refresh-on-save (#470)', () => {
+  // A git-capable platform: canUseGit true + the git surface as spies, so the mounted SourceControlPanel
+  // actually fetches (gitStatus) and we can assert a re-fetch. The panel's fetch runs in its own
+  // useEffect (a rAF/macrotask under happy-dom), so assertions poll via waitFor rather than a microtask flush.
+  function gitPlatform() {
+    const gitStatus = vi.fn(async () => ({ branch: 'main', files: [] }));
+    const platform = fakePlatform({
+      canUseGit: true,
+      gitStatus,
+      gitDiff: vi.fn(async () => ''),
+      gitStage: vi.fn(async () => {}),
+      gitUnstage: vi.fn(async () => {}),
+      gitCommit: vi.fn(async () => {}),
+      gitBranches: vi.fn(async () => ['main']),
+      gitCheckout: vi.fn(async () => {}),
+      gitLog: vi.fn(async () => []),
+    });
+    return { platform, gitStatus };
+  }
+
+  test('refreshSourceControl() re-fetches git status while the SC tab is open, and is a no-op otherwise', async () => {
+    const { platform, gitStatus } = gitPlatform();
+    const ctl = createInspectorController(makeDeps(makeLsp(), { platform }));
+    ctl.init();
+
+    // Open the Source Control right view (the rtab click → selectRightView → loadSourceControl → mount).
+    el('rtab-source-control').click();
+    await waitFor(() => expect(gitStatus.mock.calls.length).toBeGreaterThanOrEqual(1));
+    const afterOpen = gitStatus.mock.calls.length;
+
+    // A save fires refreshSourceControl(): the tab is open, so it re-fetches git status in place.
+    ctl.refreshSourceControl();
+    await waitFor(() => expect(gitStatus.mock.calls.length).toBeGreaterThan(afterOpen));
+
+    // Switch to another right view: refreshSourceControl() is now a no-op (the tab isn't the active view).
+    el('rtab-props').click();
+    const beforeNoop = gitStatus.mock.calls.length;
+    ctl.refreshSourceControl();
+    await new Promise((r) => setTimeout(r, 60)); // give any (erroneous) re-fetch time to fire
+    expect(gitStatus.mock.calls.length).toBe(beforeNoop);
   });
 });
 

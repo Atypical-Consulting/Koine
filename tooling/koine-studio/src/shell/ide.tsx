@@ -1216,6 +1216,9 @@ export function init(): () => void {
     controller.onDocEdited();
     history.noteEdit({ immediate: true });
   });
+  // A save wrote buffer(s) to disk: the on-disk git status just changed, so live-refresh the Source
+  // Control panel when its tab is open (#470). A no-op otherwise — the next SC open re-fetches anyway.
+  workspace.onSaved(() => controller.refreshSourceControl());
 
   // Boot/empty-state: open the host's persistent default workspace. The clearLegacyScratch + the
   // OPFS-error output line are ide-specific, so they wrap workspace.openDefaultWorkspaceFlow here.

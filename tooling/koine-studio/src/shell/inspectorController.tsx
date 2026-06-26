@@ -264,6 +264,14 @@ export interface InspectorController {
    * separate from invalidateDocViews().
    */
   invalidateDocsPanel(): void;
+  /**
+   * Live refresh-on-save (#470): re-fetch git status in the Source Control panel when it's the active
+   * right view (reusing the `sourceControlRefresh` nonce, so the commit-message draft survives the
+   * in-place refresh). A no-op when the SC tab isn't open or the panel hasn't mounted. ide.ts calls
+   * this from the editor's save-completion path so a save while the tab is open repaints the changed
+   * files without a manual Refresh.
+   */
+  refreshSourceControl(): void;
   /** A theme flip: the Mermaid palette changed, so mark the diagram stale + re-render it if it's showing. */
   onThemeChanged(): void;
   refreshActiveSurfaces(): void;
@@ -749,6 +757,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       <SourceControlPanel git={platform} folderToken={deps.folderRootToken()} refreshNonce={sourceControlRefresh} />,
       sourceControlRightView,
     );
+  }
+  // #470: re-fetch git status when a save lands while the SC tab is open — reuses the nonce bump so the
+  // in-place refresh preserves the commit-message draft. A no-op when the panel isn't mounted or isn't
+  // the active right view (the next open re-fetches anyway).
+  function refreshSourceControl(): void {
+    if (!sourceControlLoaded) return;
+    if (appStore.getState().right !== 'source-control') return;
+    loadSourceControl();
   }
   const docsFail = (verb: string) => (e: unknown) => deps.setStatus(`Could not ${verb}: ${String(e)}`, 'error');
 
@@ -1928,6 +1944,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     onDocEdited,
     invalidateDocViews,
     invalidateDocsPanel,
+    refreshSourceControl,
     onThemeChanged,
     refreshActiveSurfaces,
     refreshContextList,

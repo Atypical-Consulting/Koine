@@ -233,6 +233,13 @@ export interface WorkspaceController {
   onBuffersChanged(cb: () => void): void;
   /** Fired after the explorer entry tree is re-read (a folder open or any structural file op). */
   onEntriesRefreshed(cb: () => void): void;
+  /**
+   * Fired after a save writes buffer(s) to disk (single-file save, Save-all, or the assistant's
+   * multi-file apply) — i.e. whenever a buffer's dirty flag was cleared by a successful `writeTextFile`.
+   * ide.ts wires this to the Source Control panel's live refresh-on-save (#470): the on-disk git status
+   * just changed, so re-fetch it when the SC tab is open.
+   */
+  onSaved(cb: () => void): void;
 }
 
 export function createWorkspaceController(deps: WorkspaceControllerDeps): WorkspaceController {
@@ -252,6 +259,8 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   let activeChanged: ((uri: string) => void) | null = null;
   let buffersChanged: (() => void) | null = null;
   let entriesRefreshed: (() => void) | null = null;
+  // Fired after a successful disk write clears a buffer's dirty flag (#470 — SC live refresh-on-save).
+  let onSavedCb: (() => void) | null = null;
 
   // --- token <-> path helpers (unchanged from ide.ts) -----------------------
 
@@ -875,6 +884,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       if (existing.uri === activeUriValue) lsp.didSave(); // didSave() targets the ACTIVE doc — only valid then
       deps.refreshDirtyIndicator();
       renderTree(); // setDoc's onChange repainted the explorer dirty dot; repaint it clean now
+      onSavedCb?.(); // #470: this buffer hit disk — refresh the SC panel if its tab is open
       return existing.uri;
     }
     const owningRoot = roots[0];
@@ -942,6 +952,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
         buf.dirty = false;
         lsp.didSave();
         renderTree();
+        onSavedCb?.(); // #470: the on-disk git status changed — refresh the SC panel if its tab is open
       } catch (e) {
         deps.setStatus('save failed', 'error');
         console.error('writeTextFile failed:', e);
@@ -993,6 +1004,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
         lsp.didSave();
         renderTree();
       }
+      if (saved > 0) onSavedCb?.(); // #470: refresh the SC panel — at least one buffer hit disk
       if (failures > 0) {
         deps.setStatus(`Save failed for ${failures} file${failures === 1 ? '' : 's'}`, 'error');
       } else {
@@ -1083,6 +1095,9 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     },
     onEntriesRefreshed(cb) {
       entriesRefreshed = cb;
+    },
+    onSaved(cb) {
+      onSavedCb = cb;
     },
   };
 }
