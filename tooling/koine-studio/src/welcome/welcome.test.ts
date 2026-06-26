@@ -473,6 +473,24 @@ describe('mountHome — Resume editing control', () => {
   });
 });
 
+describe('mountHome — embedded chrome suppression', () => {
+  test('embedded Home renders neither the duplicate brand nor the stray ✕', () => {
+    const el = document.createElement('div');
+    mountHome(el, makeCallbacks(), SAMPLE);
+    // The top-bar brand is the single logo on Home; the card must not duplicate it.
+    expect(el.querySelector('.koi-welcome-brand')).toBeNull();
+    // No overlay to dismiss on the routed Home — the close ✕ (console and gallery) is gone entirely.
+    expect(el.querySelector('.koi-welcome-close')).toBeNull();
+  });
+
+  test('the legacy overlay (createWelcome) keeps its brand and ✕', () => {
+    createWelcome(makeCallbacks(), SAMPLE);
+    const root = document.body.querySelector<HTMLElement>('.koi-welcome')!;
+    expect(root.querySelector('.koi-welcome-brand')).not.toBeNull();
+    expect(root.querySelector('.koi-welcome-close')).not.toBeNull();
+  });
+});
+
 describe('Home hero snippet', () => {
   test('collapses the spacing before the invariant message to a single space', () => {
     const el = document.createElement('div');
