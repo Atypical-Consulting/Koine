@@ -206,23 +206,57 @@ fn parse_mcp_endpoint(line: &str) -> Option<String> {
 // --- terminal shell resolution ----------------------------------------------
 
 /// Decide which shell program (and args) the integrated terminal should spawn. Pure so the policy is
-/// unit-tested without opening a PTY: a caller-supplied `os_shell` (e.g. the user's `$SHELL`) is used
-/// verbatim; with `None` we fall back to a platform default — `$SHELL` (then `/bin/sh`) on Unix, and
-/// `cmd` on Windows. We launch the bare interactive shell with no synthetic args, so the program
-/// is returned alongside an (currently always empty) arg vector that keeps the call site uniform and
-/// leaves room for future per-shell flags.
-fn resolve_shell_command(os_shell: Option<&str>) -> (String, Vec<String>) {
-    if let Some(shell) = os_shell {
-        return (shell.to_string(), Vec::new());
-    }
-    // No shell named: pick a sensible platform default. `cfg!(windows)` is a const so the unused
-    // branch is dead-code-eliminated rather than a warning.
+/// unit-tested without opening a PTY: both the user's `$SHELL` and the password-database shell
+/// (recovered from `getpwuid` by the caller) are passed in.
+///
+/// On **Unix** the program is chosen `$SHELL` → `passwd_shell` → `/bin/sh`, and it is spawned as a
+/// **login** shell (`-l`). This is the fix for a bundled `.app` launched from Finder/Dock: macOS hands
+/// GUI processes a stripped `launchd` environment with no `$SHELL` and a `PATH` that lacks Homebrew
+/// (`/opt/homebrew/bin`, `/usr/local/bin`). Recovering the user's real shell from the password database
+/// and running it as a login shell makes it source `~/.zprofile`/`~/.bash_profile`, so `PATH` is
+/// populated and `git`/`dotnet` resolve — matching how VS Code/iTerm behave.
+///
+/// On **Windows** the path is unchanged: an explicit `$SHELL` (rare) is used verbatim, else `cmd`, and
+/// no login flag is added. (Empty strings are treated as "unset" so a stray `SHELL=` doesn't win.)
+fn resolve_shell_command(os_shell: Option<&str>, passwd_shell: Option<&str>) -> (String, Vec<String>) {
+    // Treat a blank entry as "unset" so a stray `SHELL=` doesn't win over the recovered shell.
+    let os_shell = os_shell.filter(|s| !s.is_empty());
+    let passwd_shell = passwd_shell.filter(|s| !s.is_empty());
+
+    // `cfg!(windows)` is a const, so the dead branch is eliminated rather than warned on.
     if cfg!(windows) {
-        ("cmd".to_string(), Vec::new())
-    } else {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-        (shell, Vec::new())
+        let program = os_shell.unwrap_or("cmd").to_string();
+        return (program, Vec::new());
     }
+
+    // Unix: prefer `$SHELL`, then the passwd-recovered shell (the GUI-launch case), then `/bin/sh`.
+    let program = os_shell.or(passwd_shell).unwrap_or("/bin/sh").to_string();
+    // `-l` makes it a login shell so the user's profile runs and `PATH` is populated.
+    (program, vec!["-l".to_string()])
+}
+
+/// Recover the user's login shell from the password database (`getpwuid(getuid())->pw_shell`). Used
+/// when the GUI-stripped launch environment has no `$SHELL`. Returns `None` on any lookup failure, a
+/// blank entry, or a non-UTF-8 path, so the caller falls through to its own `/bin/sh` default. Non-Unix
+/// targets have no password database, so this is always `None` there.
+///
+/// Uses `nix::unistd::User::from_uid`, which wraps the reentrant `getpwuid_r` — thread-safe and free of
+/// the static-buffer data race that raw `getpwuid` carries, with no `unsafe`.
+#[cfg(unix)]
+fn passwd_login_shell() -> Option<String> {
+    use nix::unistd::{Uid, User};
+    let user = User::from_uid(Uid::current()).ok().flatten()?;
+    let shell = user.shell.into_os_string().into_string().ok()?;
+    if shell.is_empty() {
+        None
+    } else {
+        Some(shell)
+    }
+}
+
+#[cfg(not(unix))]
+fn passwd_login_shell() -> Option<String> {
+    None
 }
 
 // --- sidecar spawning + supervision -----------------------------------------
@@ -1137,9 +1171,13 @@ fn pty_start(
         })
         .map_err(|e| format!("failed to open pty: {e}"))?;
 
-    // Resolve the shell from `$SHELL` (Unix) — `resolve_shell_command` falls back to a platform
-    // default when it is unset (and on Windows, where `$SHELL` is absent, that yields `cmd`).
-    let (program, args) = resolve_shell_command(std::env::var("SHELL").ok().as_deref());
+    // Resolve the shell: `$SHELL` first, then — for a Finder/Dock launch whose stripped GUI env has
+    // no `$SHELL` — the user's shell recovered from the password database, then `/bin/sh`. On Unix the
+    // chosen shell is spawned as a login shell so `PATH` (Homebrew/user dirs) is populated; on Windows
+    // this yields `cmd` with no extra args.
+    let passwd_shell = passwd_login_shell();
+    let (program, args) =
+        resolve_shell_command(std::env::var("SHELL").ok().as_deref(), passwd_shell.as_deref());
     let mut cmd = CommandBuilder::new(program);
     cmd.args(args);
     if let Some(dir) = cwd {
@@ -1834,20 +1872,51 @@ mod tests {
     // --- PTY shell resolution (pure) ----------------------------------------
 
     #[test]
-    fn resolve_shell_command_honours_an_explicit_shell() {
-        // An explicit shell path is used verbatim as the program, with no extra args — the
-        // terminal launches exactly what the caller (or `$SHELL`) named.
-        let (program, args) = resolve_shell_command(Some("/bin/zsh"));
-        assert_eq!(program, "/bin/zsh");
-        assert!(args.is_empty(), "an explicit shell takes no synthetic args");
+    fn resolve_shell_command_prefers_an_explicit_shell_and_logs_in_on_unix() {
+        // `$SHELL` (the first arg) wins over the passwd-recovered shell. On Unix the interactive
+        // shell is spawned as a *login* shell (`-l`) so a Finder/Dock launch — whose stripped GUI
+        // env never sourced `~/.zprofile` — still gets a real `PATH` (Homebrew/user dirs).
+        let (program, args) = resolve_shell_command(Some("/bin/zsh"), Some("/bin/bash"));
+        assert_eq!(program, "/bin/zsh", "an explicit $SHELL is honoured verbatim");
+        #[cfg(unix)]
+        assert!(
+            args.iter().any(|a| a == "-l"),
+            "the Unix terminal must be a login shell so the user's profile runs"
+        );
+        #[cfg(windows)]
+        assert!(args.is_empty(), "the Windows spawn path is unchanged — no login flag");
     }
 
     #[test]
-    fn resolve_shell_command_falls_back_to_a_platform_default() {
-        // With no shell named, a non-empty platform default must be chosen ($SHELL/`/bin/sh`
-        // on Unix, `cmd` on Windows) so `pty_start` always has something to spawn.
-        let (program, _args) = resolve_shell_command(None);
-        assert!(!program.is_empty(), "a platform default shell must be chosen");
+    #[cfg(unix)]
+    fn resolve_shell_command_recovers_the_passwd_shell_when_shell_is_unset() {
+        // The GUI-launch case: no `$SHELL`, so fall through to the user's shell recovered from
+        // `getpwuid` (passed as the second arg) rather than defaulting straight to `/bin/sh` —
+        // still as a login shell.
+        let (program, args) = resolve_shell_command(None, Some("/opt/homebrew/bin/fish"));
+        assert_eq!(program, "/opt/homebrew/bin/fish", "the passwd shell is the next preference");
+        assert!(args.iter().any(|a| a == "-l"), "the recovered shell is still a login shell");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn resolve_shell_command_falls_back_to_bin_sh_as_a_last_resort() {
+        // Neither `$SHELL` nor a passwd shell available: `/bin/sh` keeps `pty_start` able to spawn
+        // *something*, still logged-in.
+        let (program, args) = resolve_shell_command(None, None);
+        assert_eq!(program, "/bin/sh", "/bin/sh is the final fallback");
+        assert!(args.iter().any(|a| a == "-l"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn resolve_shell_command_defaults_to_cmd_on_windows() {
+        // The Windows spawn path is unchanged: with nothing named, `cmd` is the default and no login
+        // flag is added. (Guards the `os_shell.unwrap_or("cmd")` branch, which the Unix-gated tests
+        // above never exercise.)
+        let (program, args) = resolve_shell_command(None, None);
+        assert_eq!(program, "cmd", "Windows defaults to cmd when no shell is named");
+        assert!(args.is_empty(), "the Windows spawn path adds no login flag");
     }
 
     // --- PTY chunk decoding (pure) ------------------------------------------
