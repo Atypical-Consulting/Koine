@@ -10,6 +10,7 @@
 
 import { localStorageFlag, type StorageLike } from './localStorageFlag';
 import { announce as defaultAnnounce } from './liveRegion';
+import { connectRevealAnnouncer } from './revealAnnouncer';
 
 /** localStorage key recording that the user dismissed the in-app install affordance (non-nagging). */
 export const INSTALL_DISMISSED_KEY = 'koine.studio.installDismissed';
@@ -160,34 +161,12 @@ export function connectInstallAffordance(
 ): () => void {
   const target = dom.target ?? window;
   const announce = dom.announce ?? defaultAnnounce;
-  const isPerceivable = dom.isPerceivable ?? ((): boolean => true);
 
-  // Announce on the hidden→visible edge, so assistive tech hears about the affordance once when it
-  // appears — not on every controller notification, nor when it's hidden/dismissed. The shared live
-  // region is body-level (#522), so it can announce while the control is still inside a route-hidden
-  // `#app`. The perceivability gate (#573) closes that gap: when the reveal edge fires before the
-  // control is perceivable, defer the announcement and flush it via the same `announce(...)` once the
-  // toolbar becomes perceivable — never dropping it. Seed `wasVisible` from the current DOM state (the
-  // markup ships `hidden`) so a reveal during the initial `sync()` still fires.
-  let wasVisible = !dom.root.hidden;
-  let pending = false; // a reveal that fired while not perceivable, awaiting a perceivable edge to flush
-  const sync = (): void => {
-    const visible = controller.canInstall();
-    dom.root.hidden = !visible;
-    if (visible && !wasVisible) {
-      if (isPerceivable()) announce(INSTALL_ANNOUNCEMENT);
-      else pending = true; // not perceivable yet → defer until it is
-    } else if (!visible) {
-      pending = false; // hidden/dismissed before it could flush → drop the deferred announcement
-    }
-    wasVisible = visible;
-  };
-  const flushPending = (): void => {
-    // Flush a deferred reveal once the control is both perceivable and still visible — exactly once.
-    if (pending && isPerceivable() && controller.canInstall()) {
-      pending = false;
-      announce(INSTALL_ANNOUNCEMENT);
-    }
+  // Capture the markup's initial hidden state (it ships `hidden`) before the first sync toggles it, so
+  // the shared announcer can detect a reveal on the initial `sync()`.
+  const initiallyVisible = !dom.root.hidden;
+  const syncVisibility = (): void => {
+    dom.root.hidden = !controller.canInstall();
   };
   const onBip = (e: Event): void => controller.onBeforeInstallPrompt(e as BeforeInstallPromptEvent);
   const onInstalled = (): void => controller.onAppInstalled();
@@ -198,9 +177,20 @@ export function connectInstallAffordance(
   target.addEventListener('appinstalled', onInstalled);
   dom.installButton.addEventListener('click', onInstallClick);
   dom.dismissButton.addEventListener('click', onDismissClick);
-  const unsub = controller.subscribe(sync);
-  const unsubPerceivable = dom.subscribePerceivable?.(flushPending);
-  sync(); // reflect the initial state immediately
+  const unsub = controller.subscribe(syncVisibility);
+  syncVisibility(); // reflect the initial visibility immediately
+  // Delegate the reveal-announce + #573 defer/flush state machine to the shared helper (#580); this
+  // controller keeps owning the `dom.root.hidden` toggle above, the announce side lives once in
+  // connectRevealAnnouncer. The body-level live region (#522) announces on the hidden→visible edge.
+  const disposeAnnouncer = connectRevealAnnouncer({
+    isVisible: (): boolean => controller.canInstall(),
+    subscribe: controller.subscribe,
+    announce,
+    message: INSTALL_ANNOUNCEMENT,
+    initiallyVisible,
+    isPerceivable: dom.isPerceivable,
+    subscribePerceivable: dom.subscribePerceivable,
+  });
 
   return () => {
     target.removeEventListener('beforeinstallprompt', onBip);
@@ -208,6 +198,6 @@ export function connectInstallAffordance(
     dom.installButton.removeEventListener('click', onInstallClick);
     dom.dismissButton.removeEventListener('click', onDismissClick);
     unsub();
-    unsubPerceivable?.();
+    disposeAnnouncer();
   };
 }
