@@ -212,14 +212,17 @@ use Koine\Sales\Events\OrderOpened;
 use Koine\Sales\Events\OrderPlaced;
 use Koine\Sales\ValueObjects\CustomerId;
 use Koine\Sales\ValueObjects\OrderId;
+use Koine\Sales\ValueObjects\OrderLine;
 
 class Order
 {
     public OrderId $id;
     public CustomerId $customer;
+    /** @var list<OrderLine> */
     public array $lines;
     public OrderStatus $status;
 
+    /** @param list<OrderLine> $lines */
     public function __construct(
         OrderId $id,
         CustomerId $customer,
@@ -237,7 +240,7 @@ class Order
 
     public function equals(self $other): bool
     {
-        return $other instanceof Order && $this->id === $other->id;
+        return $this->id === $other->id;
     }
 
     private function checkInvariants(): void
@@ -247,16 +250,24 @@ class Order
         }
     }
 
-    /** @var array<object> */
+    /** @var list<object> */
     private array $domainEvents = [];
 
-    /** Returns a snapshot of recorded domain events (read-only). */
+    /**
+     * Returns a snapshot of recorded domain events (read-only).
+     *
+     * @return list<object>
+     */
     public function domainEvents(): array
     {
         return $this->domainEvents;
     }
 
-    /** Returns all recorded domain events and clears the buffer. */
+    /**
+     * Returns all recorded domain events and clears the buffer.
+     *
+     * @return list<object>
+     */
     public function releaseDomainEvents(): array
     {
         $events = $this->domainEvents;
@@ -280,6 +291,7 @@ class Order
         $this->domainEvents[] = new OrderPlaced($this->id, count($this->lines));
     }
 
+    /** @param list<OrderLine> $lines */
     public static function forCustomer(CustomerId $customer, array $lines): self
     {
         $id = OrderId::generate();
@@ -355,23 +367,21 @@ enum Currency: int
         return self::tryFrom($value);
     }
 
-    /** Dispatch to the handler for this member; throws if unhandled. */
+    /** Dispatch to the handler for this member (exhaustive over all cases). */
     public function match_(\Closure $eur, \Closure $usd): mixed
     {
         return match($this) {
             self::EUR => ($eur)(),
             self::USD => ($usd)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("Currency", "unhandled Currency {$this->name}"),
         };
     }
 
-    /** Dispatch to the side-effecting handler for this member; throws if unhandled. */
+    /** Dispatch to the side-effecting handler for this member (exhaustive over all cases). */
     public function switch_(\Closure $eur, \Closure $usd): void
     {
         match($this) {
             self::EUR => ($eur)(),
             self::USD => ($usd)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("Currency", "unhandled Currency {$this->name}"),
         };
     }
 }
@@ -423,23 +433,21 @@ enum MassUnit: int
         return self::tryFrom($value);
     }
 
-    /** Dispatch to the handler for this member; throws if unhandled. */
+    /** Dispatch to the handler for this member (exhaustive over all cases). */
     public function match_(\Closure $gram, \Closure $kilogram): mixed
     {
         return match($this) {
             self::GRAM => ($gram)(),
             self::KILOGRAM => ($kilogram)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("MassUnit", "unhandled MassUnit {$this->name}"),
         };
     }
 
-    /** Dispatch to the side-effecting handler for this member; throws if unhandled. */
+    /** Dispatch to the side-effecting handler for this member (exhaustive over all cases). */
     public function switch_(\Closure $gram, \Closure $kilogram): void
     {
         match($this) {
             self::GRAM => ($gram)(),
             self::KILOGRAM => ($kilogram)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("MassUnit", "unhandled MassUnit {$this->name}"),
         };
     }
 }
@@ -492,25 +500,23 @@ enum OrderStatus: int
         return self::tryFrom($value);
     }
 
-    /** Dispatch to the handler for this member; throws if unhandled. */
+    /** Dispatch to the handler for this member (exhaustive over all cases). */
     public function match_(\Closure $draft, \Closure $placed, \Closure $cancelled): mixed
     {
         return match($this) {
             self::DRAFT => ($draft)(),
             self::PLACED => ($placed)(),
             self::CANCELLED => ($cancelled)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("OrderStatus", "unhandled OrderStatus {$this->name}"),
         };
     }
 
-    /** Dispatch to the side-effecting handler for this member; throws if unhandled. */
+    /** Dispatch to the side-effecting handler for this member (exhaustive over all cases). */
     public function switch_(\Closure $draft, \Closure $placed, \Closure $cancelled): void
     {
         match($this) {
             self::DRAFT => ($draft)(),
             self::PLACED => ($placed)(),
             self::CANCELLED => ($cancelled)(),
-            default => throw new \Koine\Runtime\DomainInvariantViolationException("OrderStatus", "unhandled OrderStatus {$this->name}"),
         };
     }
 }
@@ -573,6 +579,7 @@ interface OrderRepository
 
     public function remove(Order $aggregate): void;
 
+    /** @return list<Order> */
     public function byCustomer(CustomerId $customer): array;
 
     public function mostRecent(CustomerId $customer): ?Order;
@@ -715,6 +722,7 @@ use Koine\Runtime\Range;
 /** A bookable window over time (exercises Range<Instant>). */
 final class SalePeriod
 {
+    /** @param Range<\DateTimeImmutable> $window */
     public function __construct(
         public readonly Range $window
     ) {

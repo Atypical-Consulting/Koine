@@ -1,5 +1,6 @@
 using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.Php;
+using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests.Conformance;
 
@@ -106,6 +107,32 @@ public class PhpConformanceTests
         var runtimeOnly = new[] { new EmittedFile(PhpRuntime.FileName, PhpRuntime.Source) };
 
         var r = TestSupport.TypeCheckPhp(runtimeOnly);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Full-model parity gate (issue #496): a complete emitted PHP model — entities, aggregates,
+    /// enums, repositories, value objects, plus the always-present <c>KoineRuntime.php</c> — must pass
+    /// <c>phpstan analyse --level max</c> with zero findings, the same strict-type bar the TypeScript
+    /// (<c>tsc --strict</c>) and Python (<c>mypy --strict</c>) outputs already hold.
+    /// <para>
+    /// Where <see cref="Emitted_runtime_typechecks_at_phpstan_level_max"/> guards only the emitted
+    /// runtime, this guards the per-model emitter. Before this issue it reported the per-model findings:
+    /// untyped iterable <c>array</c> shapes (entity/aggregate/repository), the always-true entity
+    /// <c>instanceof</c> guard, enum mixed-<c>$this->name</c> / always-true match arms, and the
+    /// ungenericised <c>Range</c>. Skipped (not failed) only when no <c>phpstan</c> is present locally;
+    /// CI installs the toolchain and runs it for real.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Emitted_model_typechecks_at_phpstan_level_max()
+    {
+        var result = new KoineCompiler().Compile(PhpSnapshotTests.Fixture, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
         TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
