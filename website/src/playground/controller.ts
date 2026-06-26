@@ -3,7 +3,8 @@
 // switching (C#/TS/Python/PHP/Rust/glossary/Docs/AsyncAPI/OpenAPI) with syntax-highlighted output, a grouped file tree, copy +
 // download-as-zip, a mobile editor/output toggle, and the "Open in Studio" handoff.
 import { createKoineEditor, createOutputView, type KoineEditor, type OutputView, type OutputLang } from './editor';
-import { capabilities, compile, preloadCompiler, type CompileResult, type Target } from './koine';
+import { capabilities, compile, preloadCompiler, terminateAndRespawn, type CompileResult, type Target } from './koine';
+import { createSuperseder } from './supersede';
 import { registerPlaygroundServiceWorker } from './sw-register';
 import { DEFAULT_SAMPLE } from './samples';
 import { makeZip, downloadBlob } from './zip';
@@ -42,6 +43,7 @@ export function mountPlayground(root: HTMLElement): void {
   const filePick = $<HTMLSelectElement>('.koi-filepick');
   const copyBtn = $<HTMLButtonElement>('.koi-copy');
   const downloadBtn = $<HTMLButtonElement>('.koi-download');
+  const stopBtn = $<HTMLButtonElement>('.koi-stop');
   const studioLink = $<HTMLAnchorElement>('.koi-studio');
   const targetBtns = Array.from(root.querySelectorAll<HTMLButtonElement>('.koi-targets button'));
   const mobileBtns = Array.from(root.querySelectorAll<HTMLButtonElement>('.koi-mobile-tabs button'));
@@ -52,10 +54,22 @@ export function mountPlayground(root: HTMLElement): void {
   let editor: KoineEditor;
   const output: OutputView = createOutputView(viewHost);
 
+  // Per-operation superseders (#353): a newer edit aborts the prior in-flight call's signal — the
+  // worker client then drops that call's pending id — so a stale compile/lint never lands. One each so
+  // the two independent operations never cancel each other.
+  const compileSup = createSuperseder();
+  const lintSup = createSuperseder();
+
   const setStatus = (text: string, kind: 'idle' | 'busy' | 'ok' | 'err' = 'idle') => {
     statusEl.textContent = text;
     statusEl.dataset.kind = kind;
   };
+
+  // The Stop affordance is shown only while a compile is in flight (a runaway compile to abandon).
+  const setBusy = (busy: boolean) => {
+    if (stopBtn) stopBtn.hidden = !busy;
+  };
+  setBusy(false);
 
   const currentResult = () => cache.get(target);
   const currentFile = () => currentResult()?.files[activeFile] ?? currentResult()?.files[0];
@@ -146,17 +160,30 @@ export function mountPlayground(root: HTMLElement): void {
       return;
     }
     setStatus('compiling…', 'busy');
+    setBusy(true);
+    const signal = compileSup.next();
+    // Capture the target this compile is FOR: `target` is mutable (the tab buttons reassign it), so a
+    // tab switch mid-compile must not make us cache/paint this result under the wrong target.
+    const compiledTarget = target;
     const source = editor.getDoc();
     const started = performance.now();
     try {
-      const result = await compile(source, target);
-      cache.set(target, result);
+      const result = await compile(source, compiledTarget, { signal });
+      cache.set(compiledTarget, result);
+      // The user switched tabs while this was compiling: the result is valid for its target (now
+      // cached) but the view shows a different one — don't paint over it.
+      if (compiledTarget !== target) return;
       if (pickDefault) activeFile = defaultFileIndex(result);
       else if (result.files.length) activeFile = Math.min(activeFile, result.files.length - 1);
       paint(result, performance.now() - started);
     } catch (e) {
+      // Superseded by a newer edit (or stopped): drop quietly — a fresh compile owns the UI now.
+      if (signal.aborted) return;
       setStatus('compiler failed to load', 'err');
       output.setContent(String(e), 'plain');
+    } finally {
+      // Leave the busy/Stop state to the newer compile if this one was superseded.
+      if (!signal.aborted) setBusy(false);
     }
   }
 
@@ -172,11 +199,13 @@ export function mountPlayground(root: HTMLElement): void {
     doc: initialDoc,
     onChange: onDocChanged,
     lintSource: async (src) => {
+      const signal = lintSup.next();
       try {
-        const r = await compile(src, target);
+        const r = await compile(src, target, { signal });
         cache.set(target, r);
         return r.diagnostics;
       } catch {
+        // Superseded by a newer edit (or failed): no squiggles to publish for this stale source.
         return [];
       }
     },
@@ -206,6 +235,20 @@ export function mountPlayground(root: HTMLElement): void {
     };
     btn.setAttribute('aria-selected', String(btn.dataset.target === target));
     btn.classList.toggle('is-active', btn.dataset.target === target);
+  }
+
+  // --- Stop: abandon a runaway compile and re-boot a fresh worker (#353) ---
+  if (stopBtn) {
+    stopBtn.onclick = () => {
+      // Drop the in-flight compile/lint, then terminate the worker and boot a fresh generation.
+      // terminateAndRespawn() already re-points the singleton at the booting fresh worker, so no
+      // separate preload is needed — the next edit's compile awaits it.
+      compileSup.abort();
+      lintSup.abort();
+      terminateAndRespawn();
+      setBusy(false);
+      setStatus('stopped — edit to recompile', 'idle');
+    };
   }
 
   // --- copy current file ---
