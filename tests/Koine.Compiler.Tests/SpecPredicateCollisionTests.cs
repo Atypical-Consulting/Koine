@@ -36,14 +36,15 @@ public class SpecPredicateCollisionTests
     [Fact]
     public void Every_collider_after_the_first_is_flagged()
     {
-        // Three specs folding to the same key (`active`): the 2nd and 3rd are each flagged against the
-        // first-seen, so a triple collision yields two diagnostics — not just one for the first pair.
+        // Three *distinct* spec names folding to the same key (`freeorder`): the 2nd and 3rd are each
+        // flagged against the first-seen, so a triple collision yields two diagnostics — not just one for
+        // the first pair. (Distinct names, so none is a KOI1005 exact duplicate that #494 would suppress.)
         const string src = """
-            context Acct {
-              value Account { balance: Int }
-              spec IsActive on Account = balance > 0
-              spec Active   on Account = balance > 1
-              spec active   on Account = balance > 2
+            context Promotions {
+              value Order { discountedTotal: Int }
+              spec FreeOrder   on Order = discountedTotal == 0
+              spec free_order  on Order = discountedTotal == 1
+              spec IsFreeOrder on Order = discountedTotal == 2
             }
             """;
 
@@ -131,5 +132,79 @@ public class SpecPredicateCollisionTests
             """;
 
         Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate);
+    }
+
+    [Fact]
+    public void Exact_case_insensitive_same_target_duplicate_does_not_also_emit_KOI1007()
+    {
+        // Issue #494: `Active` + `active` on the same target is already an exact/case-insensitive
+        // duplicate that KOI1005 (`DuplicateSpec`) owns with the clearer message. KOI1007 folds case
+        // too, so it would double-report the very same span — suppress it here. KOI1005 still fires.
+        const string src = """
+            context Acct {
+              value Account { balance: Int }
+              spec Active on Account = balance > 0
+              spec active on Account = balance > 1
+            }
+            """;
+
+        IReadOnlyList<Diagnostic> diagnostics = Diagnose(src);
+        diagnostics.Count(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate).ShouldBe(0);
+        diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.DuplicateSpec);
+    }
+
+    [Fact]
+    public void Distinct_names_folding_to_same_predicate_on_same_target_still_emit_KOI1007()
+    {
+        // `IsActive` + `Active` are *distinct* names (not a KOI1005 duplicate) that nonetheless fold to
+        // the same predicate (`isActive`) — exactly what KOI1007 exists to catch, so it must still fire.
+        const string src = """
+            context Acct {
+              value Account { balance: Int }
+              spec IsActive on Account = balance > 0
+              spec Active   on Account = balance > 1
+            }
+            """;
+
+        Diagnose(src).Count(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate).ShouldBe(1);
+    }
+
+    [Fact]
+    public void Exact_duplicate_buried_mid_fold_chain_is_suppressed_order_independently()
+    {
+        // Issue #494: `IsActive`, `Active`, `active` all fold to `isActive`. `active` is an exact
+        // case-insensitive duplicate of `Active` — KOI1005 owns it regardless of where it sits in the
+        // chain — so KOI1007 must NOT also fire on it. Only `Active` (genuinely distinct from `IsActive`)
+        // gets KOI1007 → exactly one, not two. This pins order-independent suppression.
+        const string src = """
+            context Acct {
+              value Account { balance: Int }
+              spec IsActive on Account = balance > 0
+              spec Active   on Account = balance > 1
+              spec active   on Account = balance > 2
+            }
+            """;
+
+        IReadOnlyList<Diagnostic> diagnostics = Diagnose(src);
+        diagnostics.Count(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate).ShouldBe(1);
+        diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.DuplicateSpec);
+    }
+
+    [Fact]
+    public void Exact_duplicate_name_on_different_targets_in_one_context_still_emits_KOI1007()
+    {
+        // Same exact name on two *different* targets is NOT a KOI1005 duplicate (KOI1005 groups by
+        // target), yet both emit `isFreeOrder` into the one per-context predicate class — a real
+        // collision KOI1007 owns. The suppression is gated on same-target, so it must still fire here.
+        const string src = """
+            context Promotions {
+              value Order { discountedTotal: Int }
+              value Cart  { total: Int }
+              spec FreeOrder on Order = discountedTotal == 0
+              spec FreeOrder on Cart  = total == 0
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate);
     }
 }
