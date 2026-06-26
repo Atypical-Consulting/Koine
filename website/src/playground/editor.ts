@@ -313,6 +313,22 @@ const langExt = (lang: OutputLang): Extension => {
   return [];
 };
 
+/** Presentation-only map from an emit-target id to the output viewer's syntax-highlight mode. This is
+ *  the one thing the dynamic target list (koine.ts `listEmitTargets`) can't carry — the backend
+ *  doesn't know CodeMirror modes — so it lives here keyed by id, NOT as a second list of which targets
+ *  exist. Any id without an entry (a newly-shipped target, e.g. rust/docs/asyncapi) degrades to plain
+ *  text. */
+const HIGHLIGHT_MODE_BY_TARGET: Record<string, OutputLang> = {
+  csharp: 'csharp',
+  typescript: 'typescript',
+  python: 'python',
+};
+
+/** The output-viewer highlight mode for an emit-target id; unknown ids degrade to plain text (#438). */
+export function highlightModeForTarget(targetId: string): OutputLang {
+  return HIGHLIGHT_MODE_BY_TARGET[targetId] ?? 'plain';
+}
+
 export interface OutputView {
   setContent(text: string, lang: OutputLang): void;
   destroy(): void;

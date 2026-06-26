@@ -198,3 +198,61 @@ describe('playground koine.ts — worker proxy', () => {
     expect(resolved).toBe(true);
   });
 });
+
+describe('playground emit targets — sourced from ListEmitTargets (#438)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  /** Wire the mocked worker client so its `call()` is driven by `respond` (a fake `ListEmitTargets`). */
+  async function mockWorkerCall(respond: (method: string, args: unknown[]) => Promise<string>) {
+    const mockCall = vi.fn(respond);
+    const { createKoineWorkerClient } = await import('./workerClient');
+    (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
+      call: mockCall,
+      whenReady: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+    });
+    return mockCall;
+  }
+
+  it('listEmitTargets() returns exactly the targets the runtime reports — not a hardcoded union', async () => {
+    // Deliberately NOT the old hardcoded union (csharp/typescript/python/php/…): proves the selectable
+    // set is sourced from the export, so a newly-shipped target (e.g. rust) surfaces with no website edit.
+    const reported = [
+      { id: 'csharp', displayName: 'C#', fileExtension: '.cs' },
+      { id: 'rust', displayName: 'Rust', fileExtension: '.rs' },
+    ];
+    const mockCall = await mockWorkerCall(() => Promise.resolve(JSON.stringify({ targets: reported })));
+
+    const { listEmitTargets } = await import('./koine');
+    const result = await listEmitTargets();
+
+    expect(mockCall).toHaveBeenCalledWith('ListEmitTargets', [], undefined);
+    expect(result.map((t) => t.id)).toEqual(['csharp', 'rust']);
+  });
+
+  it('listEmitTargets() forwards the AbortSignal opts to the worker call (#338/#353)', async () => {
+    const mockCall = await mockWorkerCall(() => Promise.resolve(JSON.stringify({ targets: [{ id: 'csharp', displayName: 'C#', fileExtension: '.cs' }] })));
+    const { listEmitTargets } = await import('./koine');
+    const ac = new AbortController();
+    await listEmitTargets({ signal: ac.signal });
+    expect(mockCall).toHaveBeenCalledWith('ListEmitTargets', [], { signal: ac.signal });
+  });
+
+  it('listEmitTargets() degrades gracefully to the built-in set when the export is missing/throws', async () => {
+    await mockWorkerCall(() => Promise.reject(new Error('Koine WASM export "ListEmitTargets" is not a function')));
+    const { listEmitTargets, BUILTIN_EMIT_TARGETS } = await import('./koine');
+    const result = await listEmitTargets();
+    expect(result.map((t) => t.id)).toEqual(BUILTIN_EMIT_TARGETS.map((t) => t.id));
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  it('listEmitTargets() degrades gracefully when the runtime reports an empty list', async () => {
+    await mockWorkerCall(() => Promise.resolve(JSON.stringify({ targets: [] })));
+    const { listEmitTargets, BUILTIN_EMIT_TARGETS } = await import('./koine');
+    const result = await listEmitTargets();
+    expect(result.map((t) => t.id)).toEqual(BUILTIN_EMIT_TARGETS.map((t) => t.id));
+  });
+});
