@@ -90,21 +90,21 @@ jobs:
         run: |
           set -euo pipefail
           if cargo --version 2>/dev/null; then
-            echo "Reusing the preinstalled Rust stable toolchain."
+            echo "Reusing the stable cargo already on PATH."
           else
             for attempt in 1 2 3; do
               if rustup toolchain install stable --profile minimal && rustup default stable; then
                 break
               fi
               if [ "$attempt" -eq 3 ]; then
-                echo "::error::Could not provision the Rust stable toolchain after ${attempt} attempts." >&2
+                echo "::error::Could not provision the Rust stable toolchain after ${attempt} attempts."
                 exit 1
               fi
               echo "rustup install failed (attempt ${attempt}); retrying in $((attempt * 10))s…" >&2
               sleep "$((attempt * 10))"
             done
           fi
-          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+          echo "${CARGO_HOME:-${HOME}/.cargo}/bin" >> "${GITHUB_PATH}"
           cargo --version
 
       # Koine.Wasm targets the browser-wasm RID and is part of the solution, so the
