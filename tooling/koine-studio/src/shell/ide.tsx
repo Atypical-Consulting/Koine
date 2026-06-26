@@ -446,16 +446,18 @@ export function init(): () => void {
     onDiagnostics: (uri, diags) => {
       if (diagCountGate.changed(uri, diags)) workspace.renderTree();
     },
-    // Review threads (#259): the editors paint marks from the store's list(), opening a comment routes
-    // through addReviewComment (fills the uri + author), and each edit re-anchors the pinned spans.
+    // Review threads (#259): the editors paint marks from the store's list() (editorSession file-scopes it
+    // per group), opening a comment routes through addReviewComment, and each edit re-anchors only the
+    // edited file's pinned spans (editorSession supplies the file).
     getReviewThreads: () => reviewStore.list(),
     onAddComment: (span) => addReviewComment(span),
-    onDocChange: (change, doc) => reviewStore.remap(change, doc),
+    onDocChange: (change, doc, file) => reviewStore.remap(file, change, doc),
   });
   const editor = editorSession.editor;
   const setStatus = editorSession.setStatus;
-  // Repaint the editors' review marks on every store change (add/reply/resolve/delete/remap/load).
-  reviewStore.subscribe(() => editorSession.refreshReviewDecorations());
+  // Repaint the editors' review marks on every store change (add/reply/resolve/delete/remap/load). Keep the
+  // unsubscribe so init()'s teardown releases it (the editorSession is destroyed there).
+  const unsubReviewStore = reviewStore.subscribe(() => editorSession.refreshReviewDecorations());
 
   // The buffer/dirty/tree half of the editor's onChange (the editor↔LSP sync runs inside
   // editorSession; the buffer text+dirty update lives in workspace.syncBuffer). The callback carries
@@ -733,13 +735,13 @@ export function init(): () => void {
     return REVIEW_AUTHOR_FALLBACK;
   }
 
-  // Open a review thread on the editor's current selection (#259). The editor hands a SourceSpan with
-  // `file: null` (it doesn't know the active uri); we fill it with the active file and prompt for the
-  // comment text. The window.prompt is a deliberate Phase-1 MVP affordance — a richer inline composer is
-  // a fine Phase-2 follow-up. An empty/cancelled prompt bails; otherwise we add the thread, reveal the
-  // Review tab, and repaint the editor marks.
+  // Open a review thread on the editor's current selection (#259). editorSession already pinned `span.file`
+  // to the INVOKING group's uri (so a split view comments on the right file, not just group A's active
+  // one); we just prompt for the comment text. The window.prompt is a deliberate Phase-1 MVP affordance —
+  // a richer inline composer is a fine Phase-2 follow-up. An empty/cancelled prompt bails; otherwise we add
+  // the thread, reveal the Review tab, and repaint the editor marks.
   function addReviewComment(span: SourceSpan): void {
-    const file = workspace.activeUri();
+    const file = span.file ?? workspace.activeUri();
     if (!file) return;
     const text = window.prompt('Add a review comment:')?.trim();
     if (!text) return;
@@ -2238,6 +2240,7 @@ export function init(): () => void {
     window.removeEventListener('resize', onDiagramViewportResize);
     terminal?.dispose(); // stop the brokered shell + dispose xterm (#256)
     review?.dispose(); // unmount the Review panel + release its store subscription (#259)
+    unsubReviewStore(); // release the editor-repaint subscription (the editorSession is destroyed above)
     workspace.setAutoSave(false);
     unsubRouteIntent();
   };

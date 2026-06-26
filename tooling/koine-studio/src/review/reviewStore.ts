@@ -60,11 +60,12 @@ export interface ReviewStore {
   /** Delete a thread (no-op when the id is unknown). */
   remove(id: string): void;
   /**
-   * Re-anchor every thread's span through a CodeMirror {@link ChangeSet} after the document was
-   * edited, so a comment keeps pointing at the text it was filed against (and orphans when that text
-   * was deleted). Persists + notifies only when something actually moved. See {@link remapSpans}.
+   * Re-anchor the threads pinned to `file` through a CodeMirror {@link ChangeSet} after that file's
+   * document was edited, so a comment keeps pointing at the text it was filed against (and orphans when
+   * that text was deleted). Threads in OTHER files are left untouched — `change`/`doc` describe one
+   * buffer only. Persists + notifies only when something actually moved. See {@link remapSpans}.
    */
-  remap(change: ChangeSet, doc: Text): void;
+  remap(file: string, change: ChangeSet, doc: Text): void;
   /** Register a callback fired after every mutation; returns a function that unsubscribes it. */
   subscribe(cb: () => void): () => void;
 }
@@ -165,22 +166,28 @@ function sameSpan(a: SourceSpan, b: SourceSpan): boolean {
  * were filed against. A PURE function: it never mutates its arguments and always returns a new array of
  * new threads/spans.
  *
- * Each span's start offset is mapped with `assoc = 1` and its end with `assoc = -1`, both in
- * {@link MapMode.TrackDel} mode. `TrackDel` yields `null` (older CodeMirror docs say `-1`) when a
- * deletion straddled that position — and a span whose endpoints survive but collapse to zero width has
- * had every character deleted. Either signal means "the whole span is gone": the thread is KEPT but
- * orphaned (re-anchored to where the text used to be, via a plain — never-`null` — `mapPos`, with a
+ * `file` scopes the remap: `change`/`doc` belong to exactly one editor buffer, so only threads pinned to
+ * that `file` are re-anchored — every other file's thread is returned untouched. Without this guard an
+ * edit in one file would map unrelated files' offsets through the wrong ChangeSet and recompute their
+ * line/column against the wrong document, silently corrupting (and orphaning) them.
+ *
+ * For an in-`file` thread, each span's start offset is mapped with `assoc = 1` and its end with
+ * `assoc = -1`, both in {@link MapMode.TrackDel} mode. `TrackDel` yields `null` (older CodeMirror docs say
+ * `-1`) when a deletion straddled that position — and a span whose endpoints survive but collapse to zero
+ * width has had every character deleted. Either signal means "the whole span is gone": the thread is KEPT
+ * but orphaned (re-anchored to where the text used to be, via a plain — never-`null` — `mapPos`, with a
  * zero-width span). Only an `'open'` thread flips to `'orphaned'`; `'resolved'`/`'orphaned'` status is
  * preserved (a surviving orphaned thread is re-anchored, never resurrected to open). For a surviving
  * span the new line/column (and end-exclusive endLine/endColumn) are recomputed from the NEW `doc`.
  */
-export function remapSpans(threads: ReviewThread[], change: ChangeSet, doc: Text): ReviewThread[] {
+export function remapSpans(threads: ReviewThread[], change: ChangeSet, doc: Text, file: string): ReviewThread[] {
   const clamp = (offset: number): number => Math.max(0, Math.min(offset, doc.length));
   const lineColOf = (offset: number): { line: number; column: number } => {
     const line = doc.lineAt(offset);
     return { line: line.number, column: offset - line.from + 1 }; // 1-based column
   };
   return threads.map((thread) => {
+    if (thread.file !== file) return thread; // a different buffer's change can't move this thread
     const start = change.mapPos(thread.span.offset, 1, MapMode.TrackDel);
     const end = change.mapPos(thread.span.offset + thread.span.length, -1, MapMode.TrackDel);
     const deleted =
@@ -277,6 +284,9 @@ export function createReviewStore(platform: Platform, folderToken: () => string 
 
   return {
     async load() {
+      // Drop any token cached for a previously-opened folder: load() runs on every folder open, and the
+      // cache must be re-discovered under the CURRENT root or persistence would read/write the old folder.
+      fileToken = null;
       const root = folderToken();
       if (!root) return; // scratch mode: nothing on disk to hydrate from
       const t = await locate(root);
@@ -323,10 +333,10 @@ export function createReviewStore(platform: Platform, folderToken: () => string 
       threads = next;
       mutated();
     },
-    remap(change, doc) {
-      const next = remapSpans(threads, change, doc); // index-aligned: same count, same order/ids
+    remap(file, change, doc) {
+      const next = remapSpans(threads, change, doc, file); // index-aligned: same count, same order/ids
       const changed = next.some((t, i) => t.status !== threads[i].status || !sameSpan(t.span, threads[i].span));
-      if (!changed) return; // nothing moved: avoid a needless write + render
+      if (!changed) return; // nothing moved (or no threads in `file`): avoid a needless write + render
       threads = next;
       mutated();
     },

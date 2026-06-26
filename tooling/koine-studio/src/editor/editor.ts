@@ -3,7 +3,7 @@
 // viewer for the generated C#/TypeScript output. Adapted from the website playground;
 // the key difference is that diagnostics are PUSH-based (publishDiagnostics → setDiagnostics)
 // rather than pull-based (linter()).
-import { EditorState, Compartment, StateEffect, type ChangeSet, type Extension, type Text } from '@codemirror/state';
+import { EditorState, Compartment, StateEffect, Annotation, type ChangeSet, type Extension, type Text } from '@codemirror/state';
 import {
   Decoration,
   type DecorationSet,
@@ -724,6 +724,13 @@ const reviewTheme = EditorView.baseTheme({
 
 // --- editable editor --------------------------------------------------------
 
+// Marks a transaction as a PROGRAMMATIC whole-document swap (setDoc — e.g. switching the open file or
+// applying a generated model), as opposed to an incremental user edit. `onDocChange` (review-span
+// remapping) skips these: a full-buffer replace maps every pinned offset to "deleted", which would
+// orphan and persist away every review thread on a mere file switch. `onChange` still fires (the LSP
+// re-syncs the new buffer). Incremental edits (typing, paste, LSP format/rename) carry no annotation.
+const programmaticDocSwap = Annotation.define<boolean>();
+
 /** Go-to-definition provider; resolves a 0-based position to a Location (or array/null). */
 export type DefinitionFn = (line: number, character: number) => Promise<Location | Location[] | null>;
 
@@ -1247,7 +1254,10 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
           if (u.docChanged && opts.onChange) opts.onChange(u.state.doc.toString());
           // Hand the structured change to onDocChange (review-span remapping needs the ChangeSet, not
           // just the new text). The review-decoration field also recomputes on docChanged on its own.
-          if (u.docChanged && opts.onDocChange) opts.onDocChange(u.changes, u.state.doc);
+          // Skip a programmatic whole-buffer swap (setDoc on a file switch): remapping a full-replace
+          // would orphan every pinned span. Only incremental edits re-anchor review threads.
+          const isDocSwap = u.transactions.some((tr) => tr.annotation(programmaticDocSwap));
+          if (u.docChanged && !isDocSwap && opts.onDocChange) opts.onDocChange(u.changes, u.state.doc);
           // Keyboard occlusion: on a narrow viewport, keep the caret above the soft keyboard whenever a
           // focused edit or selection move could have pushed it under the keyboard. Gated on the cached
           // narrow flag (not a per-keystroke innerWidth read) so desktop scroll behavior is byte-for-byte
@@ -1273,7 +1283,10 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     view,
     getDoc: () => view.state.doc.toString(),
     setDoc(doc: string) {
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: doc } });
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: doc },
+        annotations: programmaticDocSwap.of(true), // not a user edit — don't remap/orphan review spans
+      });
     },
     goto(line: number, col: number) {
       const ln = Math.min(Math.max(line, 1), view.state.doc.lines);

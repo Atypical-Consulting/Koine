@@ -223,7 +223,7 @@ describe('reviewStore — remapSpans (pure re-anchoring)', () => {
     const after = Text.of(['XYhello', 'world']); // "XYhello\nworld", length 13
     const input = thread(worldSpan());
 
-    const out = remapSpans([input], change, after);
+    const out = remapSpans([input], change, after, 'model.koi');
 
     expect(out).not.toBe(input as unknown); // a fresh array
     expect(out[0]).not.toBe(input); // a fresh thread (purity)
@@ -244,7 +244,7 @@ describe('reviewStore — remapSpans (pure re-anchoring)', () => {
     // grow: insert 3 chars at offset 8 (inside "world")
     const grow = ChangeSet.of({ from: 8, to: 8, insert: '!!!' }, before.length);
     const grownDoc = Text.of(['hello', 'wo!!!rld']);
-    const grown = remapSpans([thread(worldSpan())], grow, grownDoc);
+    const grown = remapSpans([thread(worldSpan())], grow, grownDoc, 'model.koi');
     expect(grown[0].span.offset).toBe(6); // start unchanged
     expect(grown[0].span.length).toBe(8); // 5 + 3 inserted
     expect(grown[0].status).toBe('open');
@@ -252,7 +252,7 @@ describe('reviewStore — remapSpans (pure re-anchoring)', () => {
     // shrink: delete the 2 chars at [7,9) (inside "world")
     const shrink = ChangeSet.of({ from: 7, to: 9, insert: '' }, before.length);
     const shrunkDoc = Text.of(['hello', 'wrld']);
-    const shrunk = remapSpans([thread(worldSpan())], shrink, shrunkDoc);
+    const shrunk = remapSpans([thread(worldSpan())], shrink, shrunkDoc, 'model.koi');
     expect(shrunk[0].span.offset).toBe(6); // start unchanged
     expect(shrunk[0].span.length).toBe(3); // 5 - 2 deleted
     expect(shrunk[0].status).toBe('open');
@@ -262,7 +262,7 @@ describe('reviewStore — remapSpans (pure re-anchoring)', () => {
     const before = Text.of(['hello', 'world']);
     const change = ChangeSet.of({ from: 6, to: 11, insert: '' }, before.length); // delete "world"
     const after = Text.of(['hello', '']); // "hello\n", length 6
-    const out = remapSpans([thread(worldSpan())], change, after);
+    const out = remapSpans([thread(worldSpan())], change, after, 'model.koi');
 
     expect(out).toHaveLength(1); // kept, not dropped
     expect(out[0].status).toBe('orphaned');
@@ -278,14 +278,31 @@ describe('reviewStore — remapSpans (pure re-anchoring)', () => {
     // a RESOLVED thread whose span is deleted keeps 'resolved' (only open flips to orphaned)
     const del = ChangeSet.of({ from: 6, to: 11, insert: '' }, before.length);
     const after = Text.of(['hello', '']);
-    expect(remapSpans([thread(worldSpan(), 'resolved')], del, after)[0].status).toBe('resolved');
+    expect(remapSpans([thread(worldSpan(), 'resolved')], del, after, 'model.koi')[0].status).toBe('resolved');
 
     // an ORPHANED thread that SURVIVES an edit stays orphaned, with its position re-anchored
     const ins = ChangeSet.of({ from: 0, to: 0, insert: 'XY' }, before.length);
     const grownDoc = Text.of(['XYhello', 'world']);
-    const survived = remapSpans([thread(worldSpan(), 'orphaned')], ins, grownDoc);
+    const survived = remapSpans([thread(worldSpan(), 'orphaned')], ins, grownDoc, 'model.koi');
     expect(survived[0].status).toBe('orphaned');
     expect(survived[0].span.offset).toBe(8);
+  });
+
+  it('leaves threads in OTHER files untouched (the change belongs to one buffer only)', () => {
+    const before = Text.of(['hello', 'world']);
+    // a big delete in model.koi that WOULD orphan a thread anchored there…
+    const change = ChangeSet.of({ from: 0, to: before.length, insert: '' }, before.length);
+    const after = Text.of(['']);
+    // …but the thread lives in other.koi, so remapping for 'model.koi' must return it byte-identical.
+    const other = thread(worldSpan());
+    other.file = 'other.koi';
+    other.span = { ...other.span, file: 'other.koi' };
+
+    const out = remapSpans([other], change, after, 'model.koi');
+
+    expect(out[0]).toBe(other); // same reference: not re-anchored, not orphaned, not copied
+    expect(out[0].status).toBe('open');
+    expect(out[0].span.offset).toBe(6);
   });
 });
 
@@ -307,7 +324,7 @@ describe('reviewStore — remap (store wiring)', () => {
     const before = Text.of(['hello', 'world']);
     const change = ChangeSet.of({ from: 0, to: 0, insert: 'XY' }, before.length);
     const after = Text.of(['XYhello', 'world']);
-    store.remap(change, after);
+    store.remap('model.koi', change, after);
 
     const shifted = store.list().find((x) => x.id === t.id)!;
     expect(shifted.span.offset).toBe(8);
@@ -323,7 +340,7 @@ describe('reviewStore — remap (store wiring)', () => {
 
     // an identity change moves nothing: no extra notify (and no needless write)
     const identity = ChangeSet.of([], after.length);
-    store.remap(identity, after);
+    store.remap('model.koi', identity, after);
     expect(cb).toHaveBeenCalledTimes(1);
   });
 });
