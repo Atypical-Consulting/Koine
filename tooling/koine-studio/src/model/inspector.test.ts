@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   buildInspectorElement,
+  renameStatusMessage,
   renderInspector,
   renderRules,
   renderChangeHistory,
@@ -9,6 +10,7 @@ import {
 } from '@/model/inspector';
 import type { ChangeEntry } from '@/host/gitHistory';
 import type { DiagramNode, GlossaryEntry, ModelMember, Range } from '@/lsp/lsp';
+import type { TextEdit, WorkspaceEdit } from '@/lsp/protocol';
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -423,5 +425,35 @@ describe('renderChangeHistory', () => {
     const el = renderChangeHistory(entries)!;
     const shas = Array.from(el.querySelectorAll('.koi-inspector-history-item')).map((n) => (n as HTMLElement).dataset.sha);
     expect(shas).toEqual(['a1b2c3d', 'e4f5g6h']);
+  });
+});
+
+describe('renameStatusMessage (#550)', () => {
+  const edit = (...newTexts: string[]): WorkspaceEdit => ({
+    changes: {
+      'file:///t.koi': newTexts.map<TextEdit>((newText) => ({ range, newText })),
+    },
+  });
+
+  test('plain message when the convention-linked id WAS co-renamed', () => {
+    // fullElement is the aggregate root Order with an `id: OrderId` property.
+    const msg = renameStatusMessage(fullElement, 'PurchaseOrder', edit('PurchaseOrder', 'PurchaseOrderId'));
+    expect(msg).toBe('Renamed Order → PurchaseOrder');
+  });
+
+  test('flags the left-behind id when the root renamed but its <Root>Id did not', () => {
+    // A collision / ambiguous link left OrderId behind: the edit renames only the root.
+    const msg = renameStatusMessage(fullElement, 'PurchaseOrder', edit('PurchaseOrder'));
+    expect(msg).toBe('Renamed Order → PurchaseOrder; id type OrderId left unchanged');
+  });
+
+  test('plain message for a non-root element even without a co-rename', () => {
+    const entity: InspectorElement = { ...fullElement, stereotype: 'entity', properties: [{ text: 'id: OrderId', computed: false }] };
+    expect(renameStatusMessage(entity, 'Purchase', edit('Purchase'))).toBe('Renamed Order → Purchase');
+  });
+
+  test('plain message for a root whose identity is non-conventional', () => {
+    const root: InspectorElement = { ...fullElement, properties: [{ text: 'id: Guid', computed: false }] };
+    expect(renameStatusMessage(root, 'PurchaseOrder', edit('PurchaseOrder'))).toBe('Renamed Order → PurchaseOrder');
   });
 });

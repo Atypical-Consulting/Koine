@@ -26,6 +26,15 @@ public sealed record RenamePreview(string NewName, IReadOnlyList<RenameFileChang
 public sealed record RenameFileChanges(string Uri, IReadOnlyList<Reference> Occurrences);
 
 /// <summary>
+/// A single rename edit: the <paramref name="Occurrence"/> to rewrite and the <paramref name="NewText"/>
+/// to write there. Unlike a bare rename (every occurrence of one symbol takes the SAME new name), this
+/// pairs each occurrence with its own replacement, so one rename can rewrite different tokens to different
+/// texts — e.g. renaming an aggregate root <c>Order</c>→<c>PurchaseOrder</c> while co-renaming its
+/// convention-linked identity type <c>OrderId</c>→<c>PurchaseOrderId</c> in the same edit (#550).
+/// </summary>
+public sealed record RenameEdit(Reference Occurrence, string NewText);
+
+/// <summary>
 /// A workspace-wide declaration index built from a <c>uri → source</c> map. Each
 /// document is parsed once; resolution is local-file-first, then a unique match
 /// across the other files (ambiguity yields no result). Editor-agnostic — no LSP.
@@ -419,6 +428,15 @@ public sealed class WorkspaceIndex
     /// </summary>
     public bool IsRenameableName(string activeUri, string name) =>
         _byUri.Values.Any(sema => StrongSpan(sema, name) is not null);
+
+    /// <summary>
+    /// True when <paramref name="name"/> already names a type, spec, or ID value object anywhere in the
+    /// workspace — the type-namespace collision check that gates a convention-linked <c>&lt;Root&gt;Id</c>
+    /// co-rename (#550): if the proposed <c>&lt;NewRoot&gt;Id</c> would clash with an existing declaration,
+    /// the Id is left as-is rather than colliding. Mirrors the type-namespace branch of <see cref="WouldCollide"/>.
+    /// </summary>
+    internal bool DeclaresTypeLike(string name) =>
+        _byUri.Values.Any(sema => sema.GetSymbol(name) is TypeSymbol or SpecSymbol or IdValueObjectSymbol);
 
     /// <summary>Validates a proposed rename target against the lexer's <c>Identifier</c> rule (<c>[a-zA-Z_]\w*</c>).</summary>
     public static bool IsValidIdentifier(string name) =>
