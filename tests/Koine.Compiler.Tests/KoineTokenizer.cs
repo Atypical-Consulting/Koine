@@ -1,3 +1,6 @@
+using Antlr4.Runtime;
+using Koine.Compiler.Grammar;
+
 namespace Koine.Compiler.Tests;
 
 /// <summary>The lexical kind of a <see cref="KoineToken"/> the <see cref="GbnfMatcher"/> matches against.</summary>
@@ -27,240 +30,70 @@ internal enum TokenKind
 internal readonly record struct KoineToken(TokenKind Kind, string Text);
 
 /// <summary>
-/// A faithful, test-only mini-lexer for <c>.koi</c> that mirrors <c>KoineLexer.g4</c> closely enough
-/// to feed <see cref="GbnfMatcher"/>: it does maximal-munch keyword/operator recognition, drops
-/// whitespace and comments (which ride hidden channels in the real lexer), reads a <c>matches /.../</c>
-/// regex as a single token (the lexer's REGEX_MODE), and classifies the multi-word, hyphenated
-/// context-map role keywords as single tokens.
-///
-/// <para>It returns <c>null</c> when it meets a character no Koine token can start with (e.g. a stray
-/// <c>;</c> or <c>$</c> injected into a garbage variant) — which the matcher treats as "not in the
-/// language", exactly as the real lexer would reject it.</para>
+/// Tokenises <c>.koi</c> source for <see cref="GbnfMatcher"/> through the <b>real, generated
+/// <see cref="KoineLexer"/></b> — the exact lexer the compiler runs — rather than a hand-maintained
+/// parallel keyword/role/operator list. That parallel copy was a third place the keyword set lived
+/// (lexer grammar, <c>GbnfExporter</c> rule table, this tokenizer), free to drift from the lexer and let
+/// the GBNF tests pass against a tokenisation the compiler would never produce. Adapting the generated
+/// lexer keeps the harness in lock-step with the language for free: the <c>matches /.../</c> regex mode,
+/// trivia dropping, and the multi-word hyphenated context-map role tokens all come from the lexer, not a
+/// re-listing.
 /// </summary>
 internal static class KoineTokenizer
 {
-    /// <summary>The reserved words the lexer tokenises as keywords (so they never lex as identifiers),
-    /// mirroring the keyword rules in <c>KoineLexer.g4</c>. <c>true</c>/<c>false</c> are included here:
-    /// they are matched by the GBNF <c>bool</c> rule's quoted literals by text.</summary>
-    private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
-    {
-        "context", "value", "quantity", "entity", "aggregate", "enum", "identified", "by", "root",
-        "invariant", "command", "requires", "result", "event", "emit", "states", "create", "spec",
-        "on", "service", "operation", "policy", "as", "natural", "sequence", "guid", "versioned",
-        "repository", "operations", "find", "usecase", "readmodel", "from", "query", "import",
-        "module", "version", "contextmap", "partnership", "conformist", "acl", "integration",
-        "publishes", "subscribes", "when", "if", "then", "else", "let", "in", "matches",
-        "true", "false",
-    };
-
-    /// <summary>The hyphenated context-map role keywords — single tokens whose hyphen is part of the
-    /// spelling (the only place a hyphen is legal in the language). Longest first so the maximal-munch
-    /// match is unambiguous.</summary>
-    private static readonly string[] HyphenRoles =
-    {
-        "anti-corruption-layer", "published-language", "customer-supplier", "shared-kernel", "open-host",
-    };
-
-    /// <summary>Multi- and single-character operators/punctuation, longest first for maximal munch.</summary>
-    private static readonly string[] Operators =
-    {
-        "<->", "->", "=>", "??", "==", "!=", "<=", ">=", "&&", "||",
-        "{", "}", "(", ")", ",", ":", ".", "?", "@", "=", "<", ">", "+", "-", "*", "/", "!",
-    };
-
-    /// <summary>Tokenises <paramref name="src"/>, or returns <c>null</c> on an unlexable character.</summary>
+    /// <summary>
+    /// Lexes <paramref name="src"/> with <see cref="KoineLexer"/> and projects the parser-visible
+    /// (default-channel) tokens onto the matcher's <see cref="KoineToken"/> shape. Whitespace, comments,
+    /// and doc comments ride hidden channels in <c>KoineLexer.g4</c>, so they are dropped here exactly as
+    /// the compiler's parser drops them (it reads only the default channel).
+    ///
+    /// <para>Returns <c>null</c> when the lexer reports a token-recognition error — a character no Koine
+    /// token can start with (e.g. a stray <c>;</c> injected into a garbage variant). ANTLR otherwise
+    /// silently skips the offending char and lexes on, so without this the matcher would accept input the
+    /// compiler's lexer rejects.</para>
+    /// </summary>
     public static List<KoineToken>? Tokenize(string src)
     {
+        var lexer = new KoineLexer(new AntlrInputStream(src));
+        lexer.RemoveErrorListeners();
+        var errorSink = new ErrorSink();
+        lexer.AddErrorListener(errorSink);
+
         var tokens = new List<KoineToken>();
-        int i = 0;
-        int n = src.Length;
-        while (i < n)
+        foreach (IToken token in lexer.GetAllTokens())
         {
-            char c = src[i];
-
-            if (c is ' ' or '\t' or '\r' or '\n')
+            // The parser (and so the matcher) reads only the default channel; EOF is not a real token.
+            if (token.Channel != TokenConstants.DefaultChannel || token.Type == TokenConstants.EOF)
             {
-                i++;
                 continue;
             }
 
-            // Comments ride hidden channels in the real lexer: skip them entirely.
-            if (c == '/' && i + 1 < n && src[i + 1] == '/')
-            {
-                while (i < n && src[i] != '\n')
-                {
-                    i++;
-                }
-
-                continue;
-            }
-
-            if (c == '/' && i + 1 < n && src[i + 1] == '*')
-            {
-                i += 2;
-                while (i + 1 < n && !(src[i] == '*' && src[i + 1] == '/'))
-                {
-                    i++;
-                }
-
-                i = Math.Min(i + 2, n);
-                continue;
-            }
-
-            if (c == '"')
-            {
-                int j = i + 1;
-                while (j < n && src[j] != '"')
-                {
-                    j += src[j] == '\\' ? 2 : 1;
-                }
-
-                j = Math.Min(j + 1, n); // include the closing quote
-                tokens.Add(new KoineToken(TokenKind.String, src[i..j]));
-                i = j;
-                continue;
-            }
-
-            if (char.IsDigit(c))
-            {
-                int j = i;
-                while (j < n && char.IsDigit(src[j]))
-                {
-                    j++;
-                }
-
-                if (j < n && src[j] == '.' && j + 1 < n && char.IsDigit(src[j + 1]))
-                {
-                    j++;
-                    while (j < n && char.IsDigit(src[j]))
-                    {
-                        j++;
-                    }
-
-                    tokens.Add(new KoineToken(TokenKind.Decimal, src[i..j]));
-                }
-                else
-                {
-                    tokens.Add(new KoineToken(TokenKind.Int, src[i..j]));
-                }
-
-                i = j;
-                continue;
-            }
-
-            if (char.IsLetter(c) || c == '_')
-            {
-                // A hyphenated context-map role wins as a single token (maximal munch over the
-                // Identifier + '-' + Identifier split that would otherwise apply).
-                string? role = MatchHyphenRole(src, i);
-                if (role is not null)
-                {
-                    tokens.Add(new KoineToken(TokenKind.Exact, role));
-                    i += role.Length;
-                    continue;
-                }
-
-                int j = i;
-                while (j < n && (char.IsLetterOrDigit(src[j]) || src[j] == '_'))
-                {
-                    j++;
-                }
-
-                string word = src[i..j];
-                i = j;
-                if (Keywords.Contains(word))
-                {
-                    tokens.Add(new KoineToken(TokenKind.Exact, word));
-                    if (word == "matches" && !TryReadRegex(src, ref i, tokens))
-                    {
-                        // `matches` not followed by a regex: malformed; bail out.
-                        return null;
-                    }
-                }
-                else
-                {
-                    tokens.Add(new KoineToken(TokenKind.Identifier, word));
-                }
-
-                continue;
-            }
-
-            string? op = MatchOperator(src, i);
-            if (op is not null)
-            {
-                tokens.Add(new KoineToken(TokenKind.Exact, op));
-                i += op.Length;
-                continue;
-            }
-
-            // A character no Koine token can start with — not in the language.
-            return null;
+            tokens.Add(new KoineToken(KindOf(token.Type), token.Text));
         }
 
-        return tokens;
+        return errorSink.HadError ? null : tokens;
     }
 
-    /// <summary>After a <c>matches</c> keyword, reads the following <c>/.../</c> regex as one token
-    /// (the lexer's REGEX_MODE). Returns false if no regex literal follows.</summary>
-    private static bool TryReadRegex(string src, ref int i, List<KoineToken> tokens)
+    /// <summary>Projects a generated <see cref="KoineLexer"/> token type onto the lexical
+    /// <see cref="TokenKind"/> the GBNF recogniser distinguishes: the five literal/identifier terminals
+    /// map to their kind; every other default-channel token (keyword, hyphenated role, operator,
+    /// punctuation, and <c>true</c>/<c>false</c>) is exact-text-matched by a quoted GBNF literal.</summary>
+    private static TokenKind KindOf(int tokenType) => tokenType switch
     {
-        int n = src.Length;
-        while (i < n && (src[i] is ' ' or '\t' or '\r' or '\n'))
-        {
-            i++;
-        }
+        KoineLexer.Identifier => TokenKind.Identifier,
+        KoineLexer.IntLiteral => TokenKind.Int,
+        KoineLexer.DecimalLiteral => TokenKind.Decimal,
+        KoineLexer.StringLiteral => TokenKind.String,
+        KoineLexer.Regex => TokenKind.Regex,
+        _ => TokenKind.Exact,
+    };
 
-        if (i >= n || src[i] != '/')
-        {
-            return false;
-        }
-
-        int j = i + 1;
-        while (j < n && src[j] != '/' && src[j] != '\n')
-        {
-            j += src[j] == '\\' ? 2 : 1;
-        }
-
-        if (j >= n || src[j] != '/')
-        {
-            return false;
-        }
-
-        j++; // include the closing slash
-        tokens.Add(new KoineToken(TokenKind.Regex, src[i..j]));
-        i = j;
-        return true;
-    }
-
-    private static string? MatchHyphenRole(string src, int i)
+    /// <summary>Records whether the lexer raised any token-recognition error during a tokenise pass.</summary>
+    private sealed class ErrorSink : IAntlrErrorListener<int>
     {
-        foreach (string role in HyphenRoles)
-        {
-            if (i + role.Length <= src.Length &&
-                string.CompareOrdinal(src, i, role, 0, role.Length) == 0)
-            {
-                int end = i + role.Length;
-                bool boundary = end >= src.Length || !(char.IsLetterOrDigit(src[end]) || src[end] == '_' || src[end] == '-');
-                if (boundary)
-                {
-                    return role;
-                }
-            }
-        }
+        public bool HadError { get; private set; }
 
-        return null;
-    }
-
-    private static string? MatchOperator(string src, int i)
-    {
-        foreach (string op in Operators)
-        {
-            if (i + op.Length <= src.Length && string.CompareOrdinal(src, i, op, 0, op.Length) == 0)
-            {
-                return op;
-            }
-        }
-
-        return null;
+        public void SyntaxError(TextWriter output, IRecognizer recognizer, int offendingSymbol,
+            int line, int charPositionInLine, string msg, RecognitionException e) => HadError = true;
     }
 }
