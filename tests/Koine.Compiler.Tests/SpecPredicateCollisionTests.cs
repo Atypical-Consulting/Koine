@@ -132,4 +132,57 @@ public class SpecPredicateCollisionTests
 
         Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate);
     }
+
+    [Fact]
+    public void Exact_case_insensitive_same_target_duplicate_does_not_also_emit_KOI1007()
+    {
+        // Issue #494: `Active` + `active` on the same target is already an exact/case-insensitive
+        // duplicate that KOI1005 (`DuplicateSpec`) owns with the clearer message. KOI1007 folds case
+        // too, so it would double-report the very same span — suppress it here. KOI1005 still fires.
+        const string src = """
+            context Acct {
+              value Account { balance: Int }
+              spec Active on Account = balance > 0
+              spec active on Account = balance > 1
+            }
+            """;
+
+        IReadOnlyList<Diagnostic> diagnostics = Diagnose(src);
+        diagnostics.Count(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate).ShouldBe(0);
+        diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.DuplicateSpec);
+    }
+
+    [Fact]
+    public void Distinct_names_folding_to_same_predicate_on_same_target_still_emit_KOI1007()
+    {
+        // `IsActive` + `Active` are *distinct* names (not a KOI1005 duplicate) that nonetheless fold to
+        // the same predicate (`isActive`) — exactly what KOI1007 exists to catch, so it must still fire.
+        const string src = """
+            context Acct {
+              value Account { balance: Int }
+              spec IsActive on Account = balance > 0
+              spec Active   on Account = balance > 1
+            }
+            """;
+
+        Diagnose(src).Count(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate).ShouldBe(1);
+    }
+
+    [Fact]
+    public void Exact_duplicate_name_on_different_targets_in_one_context_still_emits_KOI1007()
+    {
+        // Same exact name on two *different* targets is NOT a KOI1005 duplicate (KOI1005 groups by
+        // target), yet both emit `isFreeOrder` into the one per-context predicate class — a real
+        // collision KOI1007 owns. The suppression is gated on same-target, so it must still fire here.
+        const string src = """
+            context Promotions {
+              value Order { discountedTotal: Int }
+              value Cart  { total: Int }
+              spec FreeOrder on Order = discountedTotal == 0
+              spec FreeOrder on Cart  = total == 0
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate);
+    }
 }

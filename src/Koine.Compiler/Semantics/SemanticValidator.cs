@@ -360,9 +360,21 @@ public sealed class SemanticValidator
 
                 if (seen.TryGetValue(key, out SpecDecl? first))
                 {
-                    diagnostics.Add(Diagnostic.FromSpan(DiagnosticCodes.DuplicateSpecPredicate,
-                        $"spec '{spec.Name}' emits the same predicate ('is{subject}') as spec '{first.Name}'",
-                        spec.Span));
+                    // Issue #494: an exact/case-insensitive same-target duplicate is already reported by
+                    // KOI1005 (DuplicateSpec, in ValidateSpecs) with the clearer "duplicates another spec
+                    // or a member" message — KOI1007 here would only double-report the same span. Suppress
+                    // it for that pair (same TargetType, names equal under OrdinalIgnoreCase — the exact
+                    // condition KOI1005 fires on). Genuinely distinct names that merely fold to the same
+                    // predicate (IsActive+Active), or an exact name on different targets, still fire.
+                    var koi1005AlreadyCovers =
+                        string.Equals(first.TargetType, spec.TargetType, StringComparison.Ordinal)
+                        && string.Equals(first.Name, spec.Name, StringComparison.OrdinalIgnoreCase);
+                    if (!koi1005AlreadyCovers)
+                    {
+                        diagnostics.Add(Diagnostic.FromSpan(DiagnosticCodes.DuplicateSpecPredicate,
+                            $"spec '{spec.Name}' emits the same predicate ('is{subject}') as spec '{first.Name}'",
+                            spec.Span));
+                    }
                 }
                 else
                 {
