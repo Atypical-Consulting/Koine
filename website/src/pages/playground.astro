@@ -8,8 +8,9 @@
 // Imports only the lightweight samples data + the shared encoder — never the CodeMirror controller.
 import { SAMPLES } from '../playground/samples';
 import { encodeCode } from '../playground/encode';
+import { basePath } from '../lib/base';
 
-const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const base = basePath();
 const studio = `${base}/studio/`;
 const exampleModels = Object.fromEntries(SAMPLES.map((s) => [s.id, encodeCode(s.code)]));
 ---
