@@ -3,6 +3,7 @@ import {
   chooseMechanism,
   isGrammarCapable,
   parseValidationOutcome,
+  repairBudgetFor,
   repairToValid,
   type RepairDeps,
 } from '@/ai/grammarConstraint';
@@ -54,6 +55,28 @@ describe('chooseMechanism()', () => {
     // Anthropic is never capable; OpenAI proper ignores a grammar field — both repair.
     expect(chooseMechanism(true, 'anthropic', 'https://api.anthropic.com', true)).toBe('repair');
     expect(chooseMechanism(true, 'openai', 'https://api.openai.com/v1', true)).toBe('repair');
+  });
+});
+
+describe('repairBudgetFor()', () => {
+  // The repair-round budget is what makes the gbnf path self-heal (#446): 'gbnf' now gets the SAME
+  // budget as 'repair', so a grammar a backend silently ignored (Ollama) falls into parse-and-repair
+  // instead of stopping after the single validate — the gbnf path is never strictly worse than repair.
+  test("'off' never repairs", () => {
+    expect(repairBudgetFor('off', 3)).toBe(0);
+  });
+
+  test("'repair' gets the full round budget", () => {
+    expect(repairBudgetFor('repair', 3)).toBe(3);
+  });
+
+  test("'gbnf' ALSO gets the full budget — a failed validate degrades to parse-and-repair", () => {
+    expect(repairBudgetFor('gbnf', 3)).toBe(3);
+  });
+
+  test('floors and clamps the round count (never negative, integral)', () => {
+    expect(repairBudgetFor('repair', -1)).toBe(0);
+    expect(repairBudgetFor('gbnf', 2.9)).toBe(2);
   });
 });
 

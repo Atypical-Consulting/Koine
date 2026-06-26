@@ -59,6 +59,22 @@ export function chooseMechanism(
 }
 
 /**
+ * How many parse-and-repair rounds a turn may spend, given its mechanism and the configured cap.
+ *
+ * The `'gbnf'` path gets the SAME budget as `'repair'` (issue #446). A grammar-capable backend usually
+ * makes the first candidate valid by construction, so {@link repairToValid} returns on round 0 and no
+ * repair happens. But if the backend silently IGNORED the grammar (Ollama's OpenAI-compatible endpoint
+ * constrains via its own `format` field and drops a top-level `grammar`), the unconstrained output can
+ * fail to parse — and rather than disabling Apply right there (strictly *worse* than parse-and-repair,
+ * since the user loses the repair loop they'd otherwise get), the gbnf path degrades into the same
+ * bounded repair loop. `'off'` never repairs.
+ */
+export function repairBudgetFor(mechanism: ConstraintMechanism, maxRounds: number): number {
+  if (mechanism === 'off') return 0;
+  return Math.max(0, Math.floor(maxRounds));
+}
+
+/**
  * Adapt the `koine_validate` tool's formatted result string into a {@link ValidationOutcome}. The tool
  * (see `formatValidate` in assistantTools.ts) returns `ok: true — no diagnostics. …` when the model is
  * clean, or `ok: false — N error(s), M warning(s):\n- [error] L:C …` otherwise. The whole string is

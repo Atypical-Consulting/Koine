@@ -389,6 +389,53 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     expect(container.querySelector<HTMLButtonElement>('.koi-assistant-apply')!.disabled).toBe(false);
   });
 
+  test('gbnf path: a failed validate degrades to parse-and-repair instead of stopping (#446)', async () => {
+    // A loopback backend that advertises grammar but silently IGNORES it (Ollama's OpenAI-compat
+    // endpoint) emits an unconstrained, invalid model. The single validate fails — and instead of
+    // disabling Apply right there (strictly worse than parse-and-repair), the gbnf path must fall into
+    // the SAME bounded repair loop the repair mechanism uses.
+    mockReply();
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getGrammar: () => Promise.resolve('root ::= "x"'),
+        runCompilerTool: () => Promise.resolve(DIRTY), // grammar ignored → output never parses
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-invalid')).not.toBeNull());
+    // We did NOT stop after the single validate: the initial turn + one regenerate per repair round ran.
+    expect(vi.mocked(runAssistant).mock.calls.length).toBe(1 + MAX_REPAIR_ROUNDS);
+    // The live "repair k/N" counter ticked to the cap …
+    expect(container.querySelector('.koi-assistant-repair-counter')?.textContent).toBe(
+      `repair ${MAX_REPAIR_ROUNDS}/${MAX_REPAIR_ROUNDS}`,
+    );
+    // … and the chip stops claiming a constraint that didn't hold — it degraded to parse-and-repair.
+    expect(container.querySelector('.koi-assistant-chip')?.textContent).toBe('parse-and-repair');
+    expect(container.querySelector('.koi-assistant-apply')).toBeNull();
+  });
+
+  test('gbnf path: an ignored grammar that repairs to valid enables Apply (degrade, then heal) (#446)', async () => {
+    // Same ignored-grammar backend, but the first repair round produces a parseable model: Apply must
+    // end up enabled (the gbnf path is never worse than parse-and-repair).
+    mockReply();
+    let n = 0;
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getGrammar: () => Promise.resolve('root ::= "x"'),
+        runCompilerTool: () => Promise.resolve(n++ === 0 ? DIRTY : CLEAN),
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
+    expect(container.querySelector<HTMLButtonElement>('.koi-assistant-apply')!.disabled).toBe(false);
+    expect(container.querySelector('.koi-assistant-repair-counter')?.textContent).toBe(`repair 1/${MAX_REPAIR_ROUNDS}`);
+    expect(container.querySelector('.koi-assistant-chip')?.textContent).toBe('parse-and-repair');
+  });
+
   test('repair path (Anthropic): never valid → "repair k/N" counter, notice, Apply stays disabled', async () => {
     mockReply();
     const container = document.createElement('div');

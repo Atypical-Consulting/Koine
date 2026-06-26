@@ -10,6 +10,7 @@ import {
   chooseMechanism,
   isGrammarCapable,
   parseValidationOutcome,
+  repairBudgetFor,
   repairToValid,
   type ConstraintMechanism,
 } from '@/ai/grammarConstraint';
@@ -707,14 +708,16 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     }
   }
 
-  // A small status chip on an assistant turn ("grammar-constrained" / "parse-and-repair").
-  function addChip(bubble: HTMLElement, label: string): void {
+  // A small status chip on an assistant turn ("grammar-constrained" / "parse-and-repair"). Returns the
+  // element so the caller can relabel it if the mechanism degrades mid-turn (gbnf → repair, #446).
+  function addChip(bubble: HTMLElement, label: string): HTMLElement {
     const chip = document.createElement('span');
     chip.className = 'koi-assistant-chip';
     // Status indicator, not decoration: expose the mechanism to assistive tech (WCAG 2.1 AA 4.1.3).
     chip.setAttribute('role', 'status');
     chip.textContent = label;
     bubble.appendChild(chip);
+    return chip;
   }
 
   // The validate seam for the apply-gate: adapt the host's `koine_validate` tool (in-WASM in the
@@ -731,8 +734,11 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
    * generative turn that produced a `.koi` candidate — a mechanism chip and a gated "Apply" button.
    *
    *  • `off`    → exactly the legacy behavior: offer Apply unconditionally.
-   *  • `gbnf`   → the output is valid by construction; we still validate ONCE (a "grammar-constrained"
-   *               chip), enabling Apply only if it parses.
+   *  • `gbnf`   → the output is meant to be valid by construction; we validate, and the "grammar-constrained"
+   *               chip stays only while that holds. If the backend silently ignored the grammar so the
+   *               candidate fails to parse, the path SELF-HEALS into the same bounded repair loop as
+   *               `repair` (issue #446) — relabelling the chip to "parse-and-repair" — so it's never
+   *               strictly worse than parse-and-repair.
    *  • `repair` → bounded parse-and-repair against the real Koine parser, a live "repair k/N" counter
    *               and a "parse-and-repair" chip; Apply is enabled only when a candidate finally parses,
    *               else a "couldn't produce valid Koine" notice is shown and Apply stays disabled.
@@ -764,20 +770,21 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       return;
     }
 
-    addChip(bubble, mechanism === 'gbnf' ? 'grammar-constrained' : 'parse-and-repair');
+    const chip = addChip(bubble, mechanism === 'gbnf' ? 'grammar-constrained' : 'parse-and-repair');
 
-    // The grammar-constrained candidate is valid by construction → validate once, never repair. The
-    // repair path re-prompts the model up to MAX_REPAIR_ROUNDS times, showing a live "repair k/N" line.
-    const maxRounds = mechanism === 'gbnf' ? 0 : MAX_REPAIR_ROUNDS;
-    let counter: HTMLElement | null = null;
-    if (mechanism === 'repair') {
-      counter = document.createElement('div');
-      counter.className = 'koi-assistant-repair-counter';
-      // A live region so a screen reader announces each "repair k/N" tick (WCAG 2.1 AA 4.1.3).
-      counter.setAttribute('role', 'status');
-      counter.setAttribute('aria-live', 'polite');
-      bubble.appendChild(counter);
-    }
+    // Both 'gbnf' and 'repair' now self-heal (issue #446): validate once and, on failure, fall into the
+    // SAME bounded repair loop — so the gbnf path is never strictly worse than parse-and-repair. A
+    // grammar that was honored makes the first candidate valid (rounds:0 → no repair, chip unchanged); a
+    // grammar the backend silently ignored (Ollama) fails that validate and degrades into the repair
+    // loop. The round budget lives in `repairBudgetFor` so the policy is in one place.
+    const maxRounds = repairBudgetFor(mechanism, MAX_REPAIR_ROUNDS);
+    // A live "repair k/N" counter, ticked only when a repair round actually runs (so it stays empty on
+    // the gbnf happy path and a first-try-valid repair). A live region announces each tick (WCAG 4.1.3).
+    const counter = document.createElement('div');
+    counter.className = 'koi-assistant-repair-counter';
+    counter.setAttribute('role', 'status');
+    counter.setAttribute('aria-live', 'polite');
+    bubble.appendChild(counter);
 
     let round = 0;
     let result: { source: string; ok: boolean; rounds: number };
@@ -788,7 +795,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
           validate,
           regenerate: async (previous, diagnostics) => {
             round++;
-            if (counter) counter.textContent = `repair ${round}/${maxRounds}`;
+            counter.textContent = `repair ${round}/${maxRounds}`;
             const repaired = await runAssistant({
               provider: opts.getProvider(),
               baseUrl: opts.getBaseUrl(),
@@ -810,6 +817,10 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       result = { source: candidate, ok: false, rounds: round };
     }
 
+    // A gbnf turn that had to repair means the grammar wasn't actually honored — relabel the chip so it
+    // stops claiming a constraint that didn't hold (Task 2's probe makes this case rare to begin with).
+    if (mechanism === 'gbnf' && result.rounds > 0) chip.textContent = 'parse-and-repair';
+
     if (result.ok) {
       attachApplyButton(bubble, result.source);
     } else {
@@ -817,10 +828,8 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       notice.className = 'koi-assistant-invalid';
       // The failure + disabled-Apply state is conveyed only by this text, so announce it (WCAG 2.1 AA 4.1.3).
       notice.setAttribute('role', 'alert');
-      notice.textContent =
-        mechanism === 'repair'
-          ? `Couldn't produce valid Koine after ${maxRounds} repair attempt${maxRounds === 1 ? '' : 's'} — Apply is disabled.`
-          : "The generated model didn't parse — Apply is disabled.";
+      // Both paths spend repair rounds now, so the message reflects the attempts that were made.
+      notice.textContent = `Couldn't produce valid Koine after ${maxRounds} repair attempt${maxRounds === 1 ? '' : 's'} — Apply is disabled.`;
       bubble.appendChild(notice);
     }
   }
