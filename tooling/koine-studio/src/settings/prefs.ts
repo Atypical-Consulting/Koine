@@ -504,11 +504,28 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   const accent = accentPicker((name) => commit({ accent: name }));
   const reduceMotion = toggle('Reduce motion', (on) => commit({ reduceMotion: on }));
 
+  // The name attributed to review comments authored from Studio (#479). Committed trimmed; a blank value
+  // is stored as-is and resolves to the 'You' fallback at comment-creation time (resolveReviewAuthor).
+  const displayNameInput = document.createElement('input');
+  displayNameInput.type = 'text';
+  displayNameInput.className = 'koi-text';
+  displayNameInput.spellcheck = false;
+  displayNameInput.autocomplete = 'off';
+  displayNameInput.placeholder = 'You';
+  displayNameInput.addEventListener('change', () => {
+    commit({ displayName: displayNameInput.value.trim() });
+  });
+
   const appearancePanel = panel(
     'appearance',
     row('Theme', 'Light or dark surfaces across the whole studio.', themeSeg.el),
     row('Accent', 'The highlight colour for selections, focus, and actions.', accent.el),
     row('Reduce motion', 'Collapse animations and transitions.', reduceMotion.el),
+    row(
+      'Display name',
+      'The name your review comments are attributed to. Leave blank to show as “You”.',
+      displayNameInput,
+    ),
   );
 
   // --- Editor ---------------------------------------------------------------
@@ -1406,6 +1423,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     themeSeg.set(s.theme);
     accent.set(s.accent);
     reduceMotion.set(s.reduceMotion);
+    displayNameInput.value = s.displayName;
     fontInput.value = String(s.fontSize);
     lineHeightInput.value = String(s.lineHeight);
     autoSave.set(s.autoSave);

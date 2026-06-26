@@ -599,3 +599,44 @@ describe('Settings → Assistant: Compiler-tools / grammar mutual exclusion (#44
     expect(loadSettings().aiConstrainGrammar).toBe(true);
   });
 });
+
+describe('Settings → Display name (#479)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+  });
+
+  const displayNameInput = () =>
+    document.querySelector<HTMLInputElement>('#koi-set-display-name')!;
+
+  it('renders a Display name text input in the Appearance panel, bound to settings.displayName', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, displayName: 'Ada Lovelace' });
+    openPrefs();
+    const input = displayNameInput();
+    expect(input).not.toBeNull();
+    expect(input.type).toBe('text');
+    // It lives in the Appearance panel and is populated from the stored display name on open.
+    expect(input.closest('#koi-settings-panel-appearance')).not.toBeNull();
+    expect(input.value).toBe('Ada Lovelace');
+  });
+
+  it('editing the field commits displayName via patchSettings and reports it through onChange', () => {
+    const onChange = vi.fn();
+    openPrefs({ onChange });
+    const input = displayNameInput();
+    input.value = 'Grace Hopper';
+    input.dispatchEvent(new Event('change'));
+    expect(loadSettings().displayName).toBe('Grace Hopper');
+    expect(onChange).toHaveBeenCalled();
+    const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0];
+    expect(last.displayName).toBe('Grace Hopper');
+  });
+
+  it('trims surrounding whitespace when committing the display name', () => {
+    openPrefs();
+    const input = displayNameInput();
+    input.value = '   Alan Turing   ';
+    input.dispatchEvent(new Event('change'));
+    expect(loadSettings().displayName).toBe('Alan Turing');
+  });
+});

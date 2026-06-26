@@ -76,6 +76,8 @@ export interface Settings {
   mcpClient: McpClientId;
   /** The language the emitted-code ("Generated") preview renders. */
   previewTarget: PreviewTarget;
+  /** Name attributed to review comments authored from Studio (#479); blank → the 'You' fallback. */
+  displayName: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -100,6 +102,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mcpEnabled: false,
   mcpClient: 'lm-studio',
   previewTarget: 'csharp',
+  displayName: '',
 };
 
 // --- storage keys ------------------------------------------------------------
@@ -309,6 +312,7 @@ export function loadSettings(): Settings {
       mcpEnabled: typeof parsed.mcpEnabled === 'boolean' ? parsed.mcpEnabled : DEFAULT_SETTINGS.mcpEnabled,
       mcpClient: coerceMcpClient(parsed.mcpClient),
       previewTarget: coercePreviewTarget(parsed.previewTarget),
+      displayName: typeof parsed.displayName === 'string' ? parsed.displayName : DEFAULT_SETTINGS.displayName,
     };
   } catch {
     return { ...DEFAULT_SETTINGS, aiApiKey: secretCache };
