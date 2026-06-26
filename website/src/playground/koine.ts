@@ -80,6 +80,30 @@ export function preloadCompiler(): void {
   void loadApi();
 }
 
+/**
+ * Hard-cancel a runaway compile (the playground "Stop" affordance, #353): terminate the worker and
+ * boot a fresh generation. The SAME client object is reused (its worker is swapped) — no second client
+ * is created. The singleton is re-pointed at the fresh generation so the next `compile`/`diagnose`
+ * awaits it; callers should re-`preloadCompiler()` to warm the new worker. No-op if the runtime was
+ * never booted. Additive — existing call sites are unchanged.
+ */
+export function terminateAndRespawn(): void {
+  const prev = clientPromise;
+  if (!prev) return; // never booted — nothing in flight to terminate
+  clientPromise = (async () => {
+    const client = await prev; // the existing (booted) client object
+    client.terminateAndRespawn(); // kill the runaway worker; spawn a fresh generation
+    await client.whenReady(); // wait for the fresh generation to signal ready
+    return client;
+  })();
+  // Don't leave a rejected boot cached: if the fresh generation fails to boot, clear so a later
+  // preloadCompiler()/compile() retries from scratch (mirrors the studio wasm.ts cache discipline).
+  const attempt = clientPromise;
+  attempt.catch(() => {
+    if (clientPromise === attempt) clientPromise = null;
+  });
+}
+
 /** True once the runtime has finished booting (use to gate UI spinners). */
 export async function whenReady(): Promise<void> {
   await loadApi();

@@ -45,3 +45,11 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSData"] }
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "NSImage"] }
 
+# Unix only: recover the user's login shell from the password database when the GUI-stripped launch
+# environment (Finder/Dock) leaves `$SHELL` unset — see `passwd_login_shell` in lib.rs. `nix` is
+# already in the tree (pulled in by `portable-pty`, the PTY crate this file uses); we just opt into its
+# `user` feature for `unistd::User::from_uid`, which wraps the reentrant `getpwuid_r` so the lookup is
+# thread-safe and needs no `unsafe`.
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.28", features = ["user"] }
+
