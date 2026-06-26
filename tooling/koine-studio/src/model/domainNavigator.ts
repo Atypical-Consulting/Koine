@@ -11,6 +11,7 @@
 import type { ContextMapResult, GlossaryModel, ModelNode } from '@/lsp/lsp';
 import { constructForKind, constructIcon, countsByContext, type ModelOutlineHandlers } from '@/model/modelOutline';
 import { filterGlossaryModel, isAllContexts } from '@/model/activeContext';
+import { createFloatingMenu } from '@/shared/floatingMenu';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 
@@ -539,83 +540,39 @@ function leafOverflowButton(node: ModelNode, h: TacticalHandlers): HTMLElement {
   return more;
 }
 
-// The single floating leaf menu (mounted to document.body and reused), mirroring the explorer's context
-// menu: positioned at the trigger, dismissed on outside-click / Escape / action, with focus returned to
-// the trigger. Module-scoped so opening one closes any other.
-let leafMenuEl: HTMLElement | null = null;
-let leafMenuTrigger: HTMLElement | null = null;
+// The single floating leaf menu (mounted to document.body and reused), built on the shared
+// `createFloatingMenu` engine (#547): positioned under the `⋯` trigger, dismissed on outside-click /
+// Escape / Tab / action, with focus returned to the trigger. Module-scoped so opening one closes any
+// other. `refocusTriggerOnActivate` stays at the engine default (false) because "Reveal in Files" hides
+// the Domain pane — the `⋯` trigger included — and the Files reveal owns focus next; refocusing the
+// now-hidden trigger would strand focus on `<body>`.
+const leafMenu = createFloatingMenu({
+  menuClass: 'koi-tactical-menu',
+  itemClass: 'koi-tactical-menu-item',
+});
 
-/** Tear down the floating leaf menu and its global listeners. Idempotent — a no-op when nothing is open,
- *  so it's safe to call on every re-render / unmount. `refocus` returns focus to the `⋯` trigger (the
- *  normal dismiss); the "Reveal in Files" action passes `false` because it immediately hides the Domain
- *  pane (the trigger included), which would strand focus on `<body>` — the Files reveal owns focus then. */
+/** Tear down the floating leaf menu. Idempotent — a no-op when nothing is open, so it's safe to call on
+ *  every re-render / unmount. `refocus` returns focus to the `⋯` trigger (the normal dismiss); callers
+ *  about to tear the trigger down pass `false`. */
 function closeLeafMenu(refocus = true): void {
-  if (!leafMenuEl) return;
-  leafMenuEl.remove();
-  leafMenuEl = null;
-  document.removeEventListener('pointerdown', onLeafMenuPointerDown, true);
-  document.removeEventListener('keydown', onLeafMenuKeydown, true);
-  const trigger = leafMenuTrigger;
-  leafMenuTrigger = null;
-  if (trigger) {
-    trigger.setAttribute('aria-expanded', 'false');
-    if (refocus && trigger.isConnected) trigger.focus();
-  }
-}
-
-function onLeafMenuPointerDown(ev: PointerEvent): void {
-  if (leafMenuEl && !leafMenuEl.contains(ev.target as Node)) closeLeafMenu();
-}
-
-function onLeafMenuKeydown(ev: KeyboardEvent): void {
-  if (!leafMenuEl) return;
-  const items = Array.from(leafMenuEl.querySelectorAll<HTMLElement>('.koi-tactical-menu-item'));
-  const i = items.indexOf(document.activeElement as HTMLElement);
-  if (ev.key === 'Escape' || ev.key === 'Tab') {
-    ev.preventDefault();
-    closeLeafMenu();
-  } else if (ev.key === 'ArrowDown') {
-    ev.preventDefault();
-    items[Math.min(items.length - 1, i + 1)]?.focus();
-  } else if (ev.key === 'ArrowUp') {
-    ev.preventDefault();
-    items[Math.max(0, i - 1)]?.focus();
-  }
+  leafMenu.close(refocus);
 }
 
 function openLeafMenu(trigger: HTMLElement, node: ModelNode, h: TacticalHandlers): void {
-  closeLeafMenu();
-  const menu = document.createElement('ul');
-  menu.className = 'koi-tactical-menu';
-  menu.setAttribute('role', 'menu');
-  const rect = trigger.getBoundingClientRect();
-  menu.style.left = `${rect.left}px`;
-  menu.style.top = `${rect.bottom}px`;
-
-  const li = document.createElement('li');
-  li.setAttribute('role', 'none');
-  const item = document.createElement('button');
-  item.type = 'button';
-  item.className = 'koi-tactical-menu-item';
-  item.setAttribute('role', 'menuitem');
-  item.textContent = 'Reveal in Files';
-  item.addEventListener('click', () => {
-    // Don't refocus the `⋯` trigger: setAxis('files') hides the Domain pane (the trigger with it), so a
-    // refocus would land on a hidden node and drop focus to <body>. Let the Files reveal own focus.
-    closeLeafMenu(false);
-    h.setAxis('files');
-    h.reveal(node);
+  leafMenu.open({
+    trigger,
+    align: 'left',
+    items: [
+      {
+        id: 'reveal-in-files',
+        label: 'Reveal in Files',
+        run: () => {
+          h.setAxis('files');
+          h.reveal(node);
+        },
+      },
+    ],
   });
-  li.appendChild(item);
-  menu.appendChild(li);
-
-  leafMenuTrigger = trigger;
-  trigger.setAttribute('aria-expanded', 'true');
-  document.body.appendChild(menu);
-  leafMenuEl = menu;
-  item.focus();
-  document.addEventListener('pointerdown', onLeafMenuPointerDown, true);
-  document.addEventListener('keydown', onLeafMenuKeydown, true);
 }
 
 /** One aggregate node: a head row (the `⬡` aggregate glyph + name, carrying the aggregate's qualified
