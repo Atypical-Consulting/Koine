@@ -75,9 +75,37 @@ jobs:
         run: python -m pip install mypy==1.13.0
 
       # Rust: the Rust conformance suite runs `cargo check` over an emitted crate.
-      # ResolveCargo() finds `cargo` on PATH (KOINE_CARGO overrides).
+      # ResolveCargo() finds `cargo` on PATH (KOINE_CARGO overrides). The ubuntu-latest image ships
+      # rustup with a default stable toolchain preinstalled, so provision through rustup directly
+      # rather than dtolnay/rust-toolchain@stable: that action unconditionally fetches the latest
+      # stable channel over the network, and a transient blip there (or a PATH-propagation race into
+      # the next step) occasionally leaves no usable `cargo` for the Test step, reddening an unrelated
+      # build (issue #524). Reuse the preinstalled toolchain when it already works, and only hit the
+      # network — with a bounded retry/backoff — when `cargo` is genuinely absent, so a single blip
+      # self-heals. A persistent failure still reddens here (and at the preflight below), never
+      # silently: #240's "missing toolchain in CI = hard failure" guarantee is preserved, just
+      # surfaced earlier and more clearly. The dependency-free `cargo check` fixtures are
+      # version-robust, so any stable cargo suffices.
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        run: |
+          set -euo pipefail
+          if cargo --version 2>/dev/null; then
+            echo "Reusing the preinstalled Rust stable toolchain."
+          else
+            for attempt in 1 2 3; do
+              if rustup toolchain install stable --profile minimal && rustup default stable; then
+                break
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "::error::Could not provision the Rust stable toolchain after ${attempt} attempts." >&2
+                exit 1
+              fi
+              echo "rustup install failed (attempt ${attempt}); retrying in $((attempt * 10))s…" >&2
+              sleep "$((attempt * 10))"
+            done
+          fi
+          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+          cargo --version
 
       # Koine.Wasm targets the browser-wasm RID and is part of the solution, so the
       # `dotnet build`/`dotnet test` over Koine.slnx below need the WebAssembly SDK.
@@ -108,6 +136,22 @@ jobs:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
           restore-keys: ${{ runner.os }}-nuget-
+
+      # Fail-fast conformance-toolchain preflight (issue #524). The Test step below runs with
+      # KOINE_REQUIRE_CONFORMANCE=1, which turns a toolchain that has dropped off the runner into a
+      # hard FAILURE buried ~80s deep in the test log (issue #240). Assert every conformance tool
+      # resolves on PATH here instead, so a provisioning miss reddens at this clearly-named step —
+      # naming the absent tool — and is diagnosed in seconds rather than mined from a test log. This
+      # strengthens, never weakens, the #240 gate: a genuinely missing toolchain still fails CI, just
+      # earlier and more legibly.
+      - name: Verify conformance toolchains
+        run: |
+          set -e
+          cargo --version
+          tsc --version
+          php --version
+          phpstan --version
+          mypy --version
 
       - name: Build
         run: dotnet build -c Release
