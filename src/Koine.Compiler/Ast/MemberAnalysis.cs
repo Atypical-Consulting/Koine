@@ -84,21 +84,32 @@ public static class MemberAnalysis
         TypeShapeEquals(value, target) || (value.Name == "Int" && target.Name == "Decimal");
 
     /// <summary>The factory parameters whose declared type IS the entity's identity type
-    /// (a simple, non-optional ref to <see cref="EntityDecl.IdentityName"/>). These are the
-    /// caller-supplied identity candidates for an explicit-id create factory (#324).</summary>
+    /// (a simple, non-optional ref to <see cref="EntityDecl.IdentityName"/>). On a non-generatable
+    /// (non-Guid) identity these are the caller-supplied identity candidates for an explicit-id
+    /// create factory (#324); on a Guid identity a factory mints its own id, so such a parameter is
+    /// an ordinary identity reference (e.g. <c>reply(parent: CommentId, …)</c>), NOT the new id.</summary>
     public static IReadOnlyList<Param> IdentityParameters(EntityDecl entity, FactoryDecl factory) =>
         factory.Parameters.Where(p => IsIdentityTypeRef(p.Type, entity.IdentityName)).ToList();
 
     /// <summary>True iff the factory supplies its own identity via exactly one identity-typed
-    /// parameter — so it needs no client-side generator (#324). Drives the relaxed KOI0808 and
-    /// every emitter's generate-vs-use-parameter branch.</summary>
+    /// parameter instead of minting it (#324). Only a non-generatable (non-Guid) identity can —
+    /// a Guid factory always auto-generates, so an identity-typed parameter there is an ordinary
+    /// reference, never the new id. Drives the relaxed KOI0808 and every emitter's
+    /// generate-vs-use-parameter branch.</summary>
     public static bool FactoryProvidesExplicitId(EntityDecl entity, FactoryDecl factory) =>
-        IdentityParameters(entity, factory).Count == 1;
+        entity.IdStrategy != IdentityStrategy.Guid && IdentityParameters(entity, factory).Count == 1;
 
-    /// <summary>The single explicit identity parameter when the factory provides exactly one,
-    /// else null. The emitters bind the synthetic <c>id</c> to this parameter.</summary>
+    /// <summary>The single explicit identity parameter the factory supplies its identity through,
+    /// or null. Always null for a Guid entity (it mints its id; an identity-typed parameter there is
+    /// an ordinary reference) and when the factory provides zero or more than one (#324). The
+    /// emitters bind the synthetic <c>id</c> to this parameter.</summary>
     public static Param? ExplicitIdParameter(EntityDecl entity, FactoryDecl factory)
     {
+        if (entity.IdStrategy == IdentityStrategy.Guid)
+        {
+            return null;
+        }
+
         IReadOnlyList<Param> ids = IdentityParameters(entity, factory);
         return ids.Count == 1 ? ids[0] : null;
     }

@@ -128,6 +128,46 @@ public class R8ExplicitIdFactoryTests
         bookType.GetProperty("Id")!.GetValue(instance).ShouldBe(expected);
     }
 
+    [Fact]
+    public void CSharp_guid_factory_with_self_typed_reference_param_still_mints_distinct_ids()
+    {
+        // Regression (#324 review): explicit-id binding is by TYPE but applies ONLY to non-Guid keys.
+        // A Guid factory whose parameter happens to be its OWN identity type is an ordinary reference
+        // (reply-to-parent), NOT the new id — it must still mint a fresh `CommentId.New()`, or every
+        // reply would silently inherit its parent's identity. Proven by executing the factory twice and
+        // asserting the two aggregates get DISTINCT ids.
+        const string src = """
+            context Forum {
+              entity Comment identified by CommentId {
+                body: String
+                create reply(parent: CommentId, body: String) { body -> body }
+              }
+            }
+            """;
+        Diagnose(src).ShouldBeEmpty();
+
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var comment = result.Files.Single(f => f.RelativePath.EndsWith("Entities/Comment.cs", StringComparison.Ordinal)).Contents;
+
+        // The id is minted, not aliased from the `parent` reference.
+        comment.ShouldContain("var id = CommentId.New();");
+        comment.ShouldNotContain("var id = parent;");
+
+        var (asm, errors) = TestSupport.Compile(result.Files);
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+
+        var commentType = asm!.GetType("Forum.Comment")!;
+        var commentIdType = asm.GetType("Forum.CommentId")!;
+        var reply = commentType.GetMethod("Reply")!;
+        var parent = commentIdType.GetMethod("New")!.Invoke(null, null);
+
+        var a = commentType.GetProperty("Id")!.GetValue(reply.Invoke(null, new[] { parent, (object)"first" }));
+        var b = commentType.GetProperty("Id")!.GetValue(reply.Invoke(null, new[] { parent, (object)"second" }));
+        a.ShouldNotBe(b);          // two replies → two distinct minted ids
+        a.ShouldNotBe(parent);     // and neither inherits the `parent` reference's id
+    }
+
     // ---- Rust: real compile (cargo) ----------------------------------------
 
     [Fact]

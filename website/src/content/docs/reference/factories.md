@@ -158,19 +158,24 @@ exists, you can be sure every `Order` in the system was born through a path that
 
 ### 12.3.5 Diagnostics and restrictions
 
-- **`id` is reserved — unless it *is* the identity.** A factory parameter named `id` is allowed when its
-  type **is the entity's identity type** (`create register(id: BookId, …)`): it then supplies the explicit
-  identity and binds to the synthetic `id` local. A parameter named `id` whose type is *not* the identity
-  type is still rejected — it would collide with that synthetic `id`. (Binding is by parameter *type*, not
-  the literal name, so the explicit-id parameter may be named anything: `id`, `bookId`, `no`, …)
+- **`id` is reserved — unless it *is* a non-Guid identity.** A factory parameter named `id` is allowed
+  only when its type **is the entity's identity type** *and* that identity is non-Guid
+  (`create register(id: BookId, …)` on a `natural`/`sequence` key): it then supplies the explicit identity
+  and binds to the synthetic `id` local. On a Guid identity the factory still mints `var id = <Id>.New();`,
+  so any parameter named `id` — even of the identity type — collides with that local and is rejected; and a
+  parameter named `id` whose type is *not* the identity type is rejected everywhere. (Binding is by
+  parameter *type*, not the literal name, so the explicit-id parameter may be named anything: `id`,
+  `bookId`, `no`, …)
 - **The identity must be generatable — or passed in explicitly.** A factory auto-generates the new
   aggregate's identity, but only the default Guid-backed id has a meaningful generator (`IdType.New()` /
   `IdType::generate()`). A `create` factory on an entity whose identity is `as natural(String)`,
   `as natural(Int)`, or `as sequence` is therefore allowed **only when it accepts the identity as an
   explicit parameter of the identity type** (`create register(id: BookId, …)`) — no generator is emitted,
-  the parameter is threaded as the id. `KOI0808` now fires only when such a factory provides **no**
-  identity-typed parameter (the key would have to be minted client-side, which it cannot be). Declaring
-  **more than one** identity-typed parameter is ambiguous and is its own error (`KOI0809`).
+  the parameter is threaded as the id. `KOI0808` fires only when such a non-Guid factory provides **no**
+  identity-typed parameter (the key would have to be minted client-side, which it cannot be), and declaring
+  **more than one** is ambiguous and is its own error (`KOI0809`). A **Guid** factory always mints, so it is
+  unaffected by both rules: a parameter of its own identity type is an ordinary reference (e.g.
+  `reply(parent: CommentId, …)`), never the new id.
 - **The factory name emits a `public static` method**, so it must not collide with a field, a property,
   a command name, or a synthesized member like `getHashCode`. Two factories with the same name is a
   duplicate-factory error.
