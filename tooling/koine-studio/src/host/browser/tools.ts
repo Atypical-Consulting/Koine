@@ -56,11 +56,20 @@ function workspaceEnvelope(session: EditSession): string {
 /**
  * Execute a host-local edit tool (koine_list_files/koine_read_file/koine_write_file) against the
  * per-turn staging `session`. The list/read/write dispatch is host-independent
- * ({@link runEditToolStaging}); the browser host supplies the whole-staged-workspace validation by
- * running the resident WASM compiler's `DiagnoseWorkspace` over the staged set after a write.
+ * ({@link runEditToolStaging}); writes are stage-only — the whole-staged-workspace validation now runs
+ * once per agentic turn via {@link validateStagedWorkspace}, not after each write (issue #474).
  */
 export function runEditTool(name: string, argsJson: string, session: EditSession): Promise<string> {
-  return runEditToolStaging(name, argsJson, session, async () =>
-    formatValidate(JSON.parse(await (await loadWasmApi()).DiagnoseWorkspace(workspaceEnvelope(session)))),
-  );
+  return runEditToolStaging(name, argsJson, session);
+}
+
+/**
+ * Validate the WHOLE staged workspace by running the resident WASM compiler's `DiagnoseWorkspace` over
+ * the staged set, formatted as the `ok:` diagnostics string. Called ONCE at end of an agentic turn
+ * (issue #474) rather than after every staged write, so a multi-file refactor pays a single
+ * whole-model compile (O(N)) instead of one per write (≈O(M×N)). The `workspaceEnvelope` payload is
+ * unchanged from the former per-write closure.
+ */
+export async function validateStagedWorkspace(session: EditSession): Promise<string> {
+  return formatValidate(JSON.parse(await (await loadWasmApi()).DiagnoseWorkspace(workspaceEnvelope(session))));
 }

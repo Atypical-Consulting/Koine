@@ -335,17 +335,18 @@ export function formatWriteFile(relPath: string, isNew: boolean): string {
 /**
  * Host-independent dispatch for the staged edit tools (`koine_list_files` / `koine_read_file` /
  * `koine_write_file`) against a per-turn {@link EditSession}: parse the args, run a pure list/read, or
- * stage a write and report it. The whole-staged-workspace validation differs by host (WASM
- * `DiagnoseWorkspace` in the browser, the MCP sidecar on desktop), so the caller passes
- * `validateStaged`, invoked only after a write to append the diagnostics summary. Never throws — bad
- * JSON, an unsafe/non-`.koi` relPath (the session's `stage` guard throws), or an unknown tool all
- * resolve to an error string the model can read and recover from.
+ * stage a write and report it. A `koine_write_file` is **stage-only** — it returns just the
+ * {@link formatWriteFile} confirmation and does NOT validate, so staging M files over an N-file
+ * workspace no longer pays M whole-workspace re-compiles (≈O(M×N)). The whole-staged-workspace
+ * validation now runs ONCE per agentic turn, after the loop terminates (see `runToolLoop` in `ai.ts`,
+ * issue #474), where the host's turn-scoped validator compiles the final staged set a single time
+ * (O(N)). Never throws — bad JSON, an unsafe/non-`.koi` relPath (the session's `stage` guard throws),
+ * or an unknown tool all resolve to an error string the model can read and recover from.
  */
 export async function runEditToolStaging(
   name: string,
   argsJson: string,
   session: EditSession,
-  validateStaged: () => Promise<string>,
 ): Promise<string> {
   let args: { relPath?: unknown; contents?: unknown };
   try {
@@ -365,7 +366,8 @@ export async function runEditToolStaging(
         const relPath = typeof args.relPath === 'string' ? args.relPath : '';
         const contents = typeof args.contents === 'string' ? args.contents : '';
         session.stage(relPath, contents);
-        return `${formatWriteFile(relPath, session.isNew(relPath))}\n${await validateStaged()}`;
+        // Stage-only: the staged set is validated once at end of turn, not after every write.
+        return formatWriteFile(relPath, session.isNew(relPath));
       }
       default:
         return `Error: unknown tool ${name}.`;
