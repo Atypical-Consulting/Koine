@@ -63,7 +63,11 @@
   min-height: 0;
 }
 
-/* The Domain axis pane: where the construct/context navigator mounts (ModelOutlinePanel for now). */
+/* The Domain axis pane (`#rail-domain-pane`): where the construct/context navigator mounts. Like
+   `#rail-files` it is toggled via the `hidden` attribute by the axis switch (applyAxis), but it carries
+   NO `display` rule — so the UA `[hidden] { display: none }` hides it for free. If a `display` is ever
+   added here, it must also restore `#rail-domain-pane[hidden] { display: none }` (see #rail-files, #485),
+   or the Domain navigator will leak into the Files axis the same way the Files pane leaked into Domain. */
 .rail-pane {
   padding: var(--koi-space-1) var(--koi-space-2) var(--koi-space-3);
 }
