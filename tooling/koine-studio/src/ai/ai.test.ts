@@ -411,3 +411,96 @@ describe('agentic edit tools (multi-file workspace mode)', () => {
     expect(tools.every((t) => !!t.input_schema && t.parameters === undefined)).toBe(true);
   });
 });
+
+describe('end-of-turn staged-workspace validation (issue #474)', () => {
+  // A stub edit executor that stages writes into the real session (so staged().length tracks the model's
+  // writes); list/read return canned text. Mirrors the workspace-mode stub above.
+  const stagingEditTool = (name: string, argsJson: string, s: EditSession) => {
+    if (name === 'koine_write_file') {
+      const { relPath, contents } = JSON.parse(argsJson) as { relPath: string; contents: string };
+      s.stage(relPath, contents);
+      return Promise.resolve(`staged ${relPath} (not yet written to disk).`);
+    }
+    return Promise.resolve('ok');
+  };
+
+  test('validates the whole staged workspace EXACTLY ONCE after a turn that stages M=3 files (not 3×)', async () => {
+    const session = createEditSession({ 'a.koi': 'context A {}', 'b.koi': 'context B {}' });
+    // Three separate write rounds, then the final text — the model staged 3 files across the turn.
+    const queue = [
+      streamFrom(callRound('koine_write_file', '{"relPath":"a.koi","contents":"context A { /* v2 */ }"}')),
+      streamFrom(callRound('koine_write_file', '{"relPath":"b.koi","contents":"context B { /* v2 */ }"}')),
+      streamFrom(callRound('koine_write_file', '{"relPath":"c.koi","contents":"context C {}"}')),
+      streamFrom(TEXT),
+    ];
+    h.createImpl = () => Promise.resolve(queue.shift());
+
+    const validateStaged = vi.fn(() => Promise.resolve('ok: true — no diagnostics. The model compiles.'));
+    const out = await runAssistant(
+      baseReq({ editSession: session, runEditTool: stagingEditTool, validateStaged }),
+    );
+
+    // Three writes were staged, yet the whole-workspace compile ran a SINGLE time at end of turn.
+    expect(session.staged().map((e) => e.relPath)).toEqual(['a.koi', 'b.koi', 'c.koi']);
+    expect(validateStaged).toHaveBeenCalledTimes(1);
+    expect(out).toBe('All good ✓');
+  });
+
+  test('also validates once on the round-cap exit path when files were staged mid-turn', async () => {
+    const session = createEditSession({ 'a.koi': 'context A {}' });
+    // The model never stops requesting writes → the loop runs tools on rounds 0..MAX-1 (the final round
+    // drops tools so the model must answer), staging one fresh file each. A turn that hit the cap
+    // mid-edit must still validate its staged set exactly once.
+    let n = 0;
+    h.createImpl = () =>
+      Promise.resolve(streamFrom(callRound('koine_write_file', `{"relPath":"f${n++}.koi","contents":"context F {}"}`)));
+    const validateStaged = vi.fn(() => Promise.resolve('ok: true — no diagnostics. The model compiles.'));
+    await runAssistant(baseReq({ editSession: session, runEditTool: stagingEditTool, validateStaged }));
+    // MAX_TOOL_ROUNDS files were staged (one per tool-executing round), and the whole-workspace compile
+    // still ran exactly once at the cap.
+    expect(session.staged().length).toBe(MAX_TOOL_ROUNDS);
+    expect(validateStaged).toHaveBeenCalledTimes(1);
+  });
+
+  test('a turn with NO writes (only koine_validate) never invokes the staged-workspace validation', async () => {
+    const session = createEditSession({ 'a.koi': 'context A {}' });
+    const queue = [streamFrom(callRound('koine_validate', '{"source":"context A {}"}')), streamFrom(TEXT)];
+    h.createImpl = () => Promise.resolve(queue.shift());
+    const validateStaged = vi.fn(() => Promise.resolve('ok'));
+    await runAssistant(
+      baseReq({
+        editSession: session,
+        runEditTool: stagingEditTool,
+        runCompilerTool: () => Promise.resolve('ok: true — no diagnostics. The model compiles.'),
+        validateStaged,
+      }),
+    );
+    // Nothing staged ⇒ no end-of-turn compile (chat / compiler-only turns pay nothing).
+    expect(session.staged()).toEqual([]);
+    expect(validateStaged).not.toHaveBeenCalled();
+  });
+
+  test('surfaces the end-of-turn diagnostics via onStagedValidation (so the panel/model still see them)', async () => {
+    const session = createEditSession({});
+    const queue = [
+      streamFrom(callRound('koine_write_file', '{"relPath":"a.koi","contents":"context A {"}')),
+      streamFrom(TEXT),
+    ];
+    h.createImpl = () => Promise.resolve(queue.shift());
+    const DIAG = 'ok: false — 1 error(s), 0 warning(s):\n- [error] 1:11 unexpected end of input';
+    const validateStaged = vi.fn(() => Promise.resolve(DIAG));
+    const surfaced: string[] = [];
+    const out = await runAssistant(
+      baseReq({
+        editSession: session,
+        runEditTool: stagingEditTool,
+        validateStaged,
+        onStagedValidation: (d) => surfaced.push(d),
+      }),
+    );
+    expect(validateStaged).toHaveBeenCalledTimes(1);
+    expect(surfaced).toEqual([DIAG]);
+    // The model's prose answer is returned untouched — diagnostics ride the callback, not the text.
+    expect(out).toBe('All good ✓');
+  });
+});

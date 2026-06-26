@@ -110,6 +110,21 @@ export interface AssistantRequest {
    * per-turn {@link editSession}. Supplied by the host alongside {@link runCompilerTool}.
    */
   runEditTool?: (name: string, argsJson: string, session: EditSession) => Promise<string>;
+  /**
+   * Validate the WHOLE staged workspace ONCE, at the end of the agentic turn (host-supplied: the
+   * browser runs WASM `DiagnoseWorkspace`, the desktop the MCP `koine_validate` sidecar, both over the
+   * staged set). The loop calls it exactly once after the turn terminates, and only when the model
+   * staged at least one write — replacing the former per-`koine_write_file` validation so a turn that
+   * stages M files over an N-file workspace pays ONE whole-model compile (O(N)) instead of M (≈O(M×N),
+   * issue #474). Absent ⇒ no end-of-turn validation (e.g. single-doc chats with no staging session).
+   */
+  validateStaged?: () => Promise<string>;
+  /**
+   * Notified once with the {@link validateStaged} diagnostics string when the turn staged edits, so the
+   * change-set panel can surface them ("staged, N error(s)") for pre-apply review and the user/model
+   * still see a write that broke the model. Fires only when {@link validateStaged} actually ran.
+   */
+  onStagedValidation?: (diagnostics: string) => void;
   /** Notified each time the model invokes a tool, for transcript visibility (name + short status). */
   onToolCall?: (name: string, summary: string) => void;
 }
@@ -189,6 +204,7 @@ async function runToolLoop(req: AssistantRequest, adapter: ToolLoopAdapter): Pro
               ? compilerExec(name, argsJson)
               : Promise.resolve(`Error: no executor available for tool ${name}.`)
       : undefined;
+  let finalText = '';
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     // Offer tools until the last allowed round, where we drop them so the model must answer in text —
     // a hard stop against a model that would otherwise keep requesting tools forever.
@@ -197,13 +213,15 @@ async function runToolLoop(req: AssistantRequest, adapter: ToolLoopAdapter): Pro
     // A refusal resolves normally (HTTP 200) with no usable text — surface it as an error so the UI
     // shows a message instead of a blank reply. Test this round's own (trimmed) text: a refusal can
     // land on a later round after a tool preamble, and an earlier round's text must not mask it.
+    // (The turn is rolled back on this throw, so the staged set is discarded — no validation needed.)
     if (r.refused && !r.text.trim()) {
       throw new Error('The model declined to respond to this request.');
     }
 
-    // No tool request (or no executor / final round) → this round's text IS the answer.
+    // No tool request (or no executor / final round) → this round's text IS the answer; stop looping.
     if (!r.wantsTools || !exec || round === MAX_TOOL_ROUNDS) {
-      return r.text;
+      finalText = r.text;
+      break;
     }
 
     const results: { id: string; content: string }[] = [];
@@ -220,7 +238,20 @@ async function runToolLoop(req: AssistantRequest, adapter: ToolLoopAdapter): Pro
     }
     adapter.recordToolRound(r, results);
   }
-  return '';
+
+  // End-of-turn validation (issue #474): validate the WHOLE staged workspace ONCE, here, instead of
+  // after every koine_write_file — every normal exit (final text answer or the MAX_TOOL_ROUNDS cap)
+  // funnels through this single point. Only when the model actually staged a write this turn (so
+  // chat-only / compiler-only turns pay nothing); the diagnostics ride onStagedValidation to the
+  // change-set panel rather than polluting the model's prose answer.
+  // Await the compile FIRST, then surface — keep the two separate so the validation still runs when no
+  // panel callback is wired (an `onStagedValidation?.(await validateStaged())` would short-circuit the
+  // argument, skipping the compile, whenever the callback is absent).
+  if (session && req.validateStaged && session.staged().length > 0) {
+    const diagnostics = await req.validateStaged();
+    req.onStagedValidation?.(diagnostics);
+  }
+  return finalText;
 }
 
 /**
