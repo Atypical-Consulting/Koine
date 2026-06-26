@@ -76,6 +76,31 @@ const capsOk =
   caps.targets.length > 0 &&
   caps.targets.every((t) => t.id && t.displayName && t.fileExtension);
 
+// 7. Warm/incremental cache (issue #334): the LSP-shaped exports retain a content-hash-keyed
+// KoineCompilation across calls and reconcile it to each incoming snapshot (re-parsing only the
+// edited file). It is pure content-keyed memoization, so it must NEVER change a result — re-diagnosing
+// the ORIGINAL snapshot after an intervening edit must return byte-identical JSON. This drives the
+// static-field warm path (CompilerInterop._warm) in the real single-threaded wasm runtime, which the
+// managed unit tests (over KoineCompilation.Reconcile) can't reach.
+const wsV1 = JSON.stringify([
+  { uri: 'file:///catalog.koi', text: 'context Catalog { value Sku { code: String } }' },
+  { uri: 'file:///payments.koi', text: 'context Payments { value Amount { cents: Int } }' },
+]);
+const wsV2 = JSON.stringify([
+  { uri: 'file:///catalog.koi', text: 'context Catalog { value Sku { code: String } }' },
+  { uri: 'file:///payments.koi', text: 'context Payments { value Amount { cents: Int currency: String } }' },
+]);
+const warmFirst = api.DiagnoseWorkspace(wsV1); // builds the warm snapshot cold
+api.DiagnoseWorkspace(wsV2); // reconcile: re-parses only payments.koi
+const warmAgain = api.DiagnoseWorkspace(wsV1); // reconcile back to the original inputs
+const warmBuckets = JSON.parse(warmFirst);
+const warmOk =
+  warmFirst === warmAgain && // warmth never changes the result for identical inputs
+  Array.isArray(warmBuckets) &&
+  warmBuckets.length === 2 &&
+  warmBuckets.every((f) => Array.isArray(f.diagnostics) && f.diagnostics.length === 0);
+console.log('warm cache: stable across edit =', warmFirst === warmAgain, '| clean =', warmOk);
+
 // Assert the happy path.
 const ok =
   diags.length === 0 &&
@@ -86,10 +111,11 @@ const ok =
   Array.isArray(semtok.data) &&
   semtok.data.length > 0 &&
   semtok.data.length % 5 === 0 &&
-  capsOk;
+  capsOk &&
+  warmOk;
 console.log(ok ? '\nSMOKE TEST PASSED' : '\nSMOKE TEST FAILED');
 
-// 7. Optional benchmark: time compiling the pizzeria template and report bundle size (issue #327).
+// 8. Optional benchmark: time compiling the pizzeria template and report bundle size (issue #327).
 let benchOk = true;
 if (BENCH) {
   benchOk = runBenchmark();
