@@ -140,7 +140,15 @@ async function main() {
     if (rel === '' || rel.endsWith('/')) rel += 'index.html';
     let file = normalize(join(distDir, rel));
     if (!file.startsWith(distDir) || !existsSync(file) || !statSync(file).isFile()) {
-      file = join(distDir, 'index.html'); // SPA fallback
+      // Fall back to index.html only for ROUTE requests (no file extension). A missing ASSET — e.g. a
+      // 404'd `koine-wasm/_framework/*` chunk or a renamed bundle — must return a real 404, NOT an
+      // index.html body, so the boot tap counts zero `_framework` responses and `classifyBootOutcome`
+      // reports a precise "failed to load/parse" instead of mislabelling an HTML 200 as a fetched asset.
+      if (extname(rel)) {
+        res.writeHead(404).end('not found');
+        return;
+      }
+      file = join(distDir, 'index.html'); // SPA fallback for routes
     }
     res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream' });
     res.end(readFileSync(file));
