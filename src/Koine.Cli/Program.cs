@@ -1,5 +1,6 @@
 using System.Reflection;
 using Koine.Cli.Commands;
+using Koine.Compiler.Services;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -94,20 +95,12 @@ internal static class Program
     /// The display version, read from <see cref="AssemblyInformationalVersionAttribute"/>
     /// (set from <c>Version</c> in Directory.Build.props) rather than the four-part
     /// <c>AssemblyVersion</c>, which defaults to <c>1.0.0.0</c>. The SDK may append a
-    /// <c>+&lt;commit&gt;</c> build-metadata suffix, which we trim off.
+    /// <c>+&lt;commit&gt;</c> build-metadata suffix, which we trim off. Delegates to the shared
+    /// <see cref="VersionInfo.Display"/> so <c>koine --version</c> and the wasm
+    /// <c>Capabilities().version</c> stay in lock-step.
     /// </summary>
     internal static string GetVersion()
-    {
-        var info = Assembly.GetExecutingAssembly()
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        if (string.IsNullOrEmpty(info))
-        {
-            return Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
-        }
-
-        var plus = info.IndexOf('+');
-        return plus < 0 ? info : info[..plus];
-    }
+        => VersionInfo.Display(Assembly.GetExecutingAssembly());
 
     // ---- init scaffold (R17.3) ---------------------------------------------
 
