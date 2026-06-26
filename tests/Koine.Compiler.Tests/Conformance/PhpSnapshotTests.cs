@@ -245,12 +245,17 @@ public class PhpSnapshotTests
 
     // -----------------------------------------------------------------------
     // #583: phpstan --level max coverage for the constructs #496's fixtures
-    // did NOT reach — event payloads, CQRS read-models/queries, and a Map with
-    // a non-scalar key. Each carries a collection (`List`/`Set`/`Map`) or a
-    // generic (`Range<T>`), so today the emitter produces a bare
-    // `array`/`Range` PHPDoc that `phpstan --level max` rejects
-    // (`missingType.iterableValue` / `missingType.generics`), and a
-    // non-scalar `Map` key renders an invalid `array<ValueObject, …>` key type.
+    // did NOT reach — event payloads and CQRS read-models/queries. Each carries
+    // a collection (`List`/`Set`/`Map`) or a generic (`Range<T>`), so before
+    // #583 the emitter produced a bare `array`/`Range` PHPDoc that
+    // `phpstan --level max` rejects (`missingType.iterableValue` /
+    // `missingType.generics`) — including the query-handler interface, whose
+    // `extends QueryHandler` was unbound (`missingType.generics`) because #496
+    // shipped no `query` fixture to exercise it. The fixture also carries an
+    // event `Map<Sku, Int>` with a non-scalar (value-object) key: that renders
+    // `array<Sku, int>`, which phpstan --level max accepts (it does not enforce
+    // the int|string array-key constraint inside a generic PHPDoc), so no
+    // key-type guard is needed for level-max parity.
     //
     // NOTE — enum associated-data collections are intentionally NOT covered:
     // the semantic validator (KOI0909) restricts an enum associated-data field

@@ -89,6 +89,10 @@ internal sealed class PhpTypeMapper
         {
             ModelIndex.ListTypeName or ModelIndex.SetTypeName when type.Element is not null
                 => $"list<{Map(type.Element)}>",
+            // `Map<K, V>` → `array<K, V>`. A non-scalar key (a value object / entity) renders e.g.
+            // `array<Sku, int>`; phpstan --level max accepts this (it does not enforce the
+            // int|string array-key constraint inside a generic PHPDoc — empirically [OK] on
+            // PHPStan 2.x), so no key-type guard is needed for level-max parity (#583).
             ModelIndex.MapTypeName when type.Element is not null && type.Value is not null
                 => $"array<{Map(type.Element)}, {Map(type.Value)}>",
             ModelIndex.RangeTypeName when type.Element is not null
