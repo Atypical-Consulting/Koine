@@ -54,11 +54,20 @@ body.resizing #diag-resizer {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   background: transparent;
   border: none;
   color: inherit;
   padding: 0;
   cursor: pointer;
+  /* Comfortable ~44×44px touch target (WCAG 2.5.5) around the small 11px chevron — the
+     panel's everywhere-handle is now reachable on mobile views (#458/#476). The negative
+     margin shrinks the button's *margin box* back to the glyph's 11px footprint, so the
+     enlarged hit area grows only the clickable/tappable region: #diag-header keeps its
+     height and the tablist stays put. Coupled to .diag-chevron's 11px size below. */
+  min-width: 44px;
+  min-height: 44px;
+  margin: calc((11px - 44px) / 2);
 }
 .diag-collapse:hover {
   color: var(--koi-fg);
