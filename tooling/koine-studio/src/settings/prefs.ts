@@ -198,8 +198,9 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     thumb.className = 'koi-switch-thumb';
     btn.appendChild(thumb);
     const set = (on: boolean) => btn.setAttribute('aria-checked', String(on));
-    // Grey out + block interaction (e.g. a mutually-exclusive sibling is on). A disabled <button>
-    // dispatches no click, so onChange can't fire while disabled; mirror it to aria-disabled for AT.
+    // Grey out + block interaction (e.g. a mutually-exclusive sibling is on). The native `disabled`
+    // attribute is what actually blocks the click (a disabled <button> dispatches no click event, so
+    // onChange can't fire); aria-disabled is set alongside it as an explicit, redundant signal.
     const setDisabled = (disabled: boolean) => {
       btn.disabled = disabled;
       btn.setAttribute('aria-disabled', String(disabled));

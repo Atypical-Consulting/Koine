@@ -800,7 +800,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       // the tools entirely rather than advertise tools the GBNF would silently render uncallable. When
       // the grammar isn't effective ('off'/'repair' — non-capable backend, no GBNF, or an explanatory
       // turn) the tools run exactly as before. The settings UI also makes the two mutually exclusive
-      // (prefer.ts), so this is the belt-and-braces guard for any stale/legacy both-on state.
+      // (prefs.ts), so this is the belt-and-braces guard for any stale/legacy both-on state.
       const toolsEffective = opts.getUseTools() && mechanism !== 'gbnf';
 
       // Build the per-turn multi-file staging session ONLY for a GENERATIVE workspace turn: offerApply

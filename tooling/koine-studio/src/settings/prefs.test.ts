@@ -575,6 +575,19 @@ describe('Settings → Assistant: Compiler-tools / grammar mutual exclusion (#44
     expect(loadSettings().aiConstrainGrammar).toBe(false);
   });
 
+  it('clicking the disabled (greyed) toggle is a no-op — the both-on state can never be set', () => {
+    saveSettings({ ...DEFAULT_SETTINGS }); // grammar on → tools toggle disabled
+    openPrefs();
+    expect(toolsToggle().disabled).toBe(true);
+    // A real user click on a native-disabled <button> dispatches no click event; emulate that contract
+    // by firing click() and asserting nothing changed (the native `disabled` is the actual safety net).
+    toolsToggle().click();
+    expect(toolsToggle().getAttribute('aria-checked')).toBe('false');
+    expect(grammarToggle().getAttribute('aria-checked')).toBe('true');
+    expect(loadSettings().aiAgenticTools).toBe(false);
+    expect(loadSettings().aiConstrainGrammar).toBe(true);
+  });
+
   it('loading a legacy both-on state normalizes to grammar-on / tools-off (and persists it)', () => {
     saveSettings({ ...DEFAULT_SETTINGS, aiAgenticTools: true, aiConstrainGrammar: true });
     openPrefs();
