@@ -23,6 +23,7 @@ vi.mock('@/host/browser/wasm', () => ({
 }));
 
 import { WasmLspTransport } from '@/host/browser/transport';
+import { isCompileInFlight } from '@/host/browser/compileActivity';
 
 const URI = 'file:///a.koi';
 
@@ -215,5 +216,67 @@ describe('WasmLspTransport — supersede stale diagnostics (#353)', () => {
     expect(published[0].diagnostics[0]?.code).toBe('NEW');
 
     api.DiagnoseWorkspace.mockReturnValue('[]'); // restore the default for any later tests
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Compile-in-flight activity for the Stop-command gate (#469)
+// ---------------------------------------------------------------------------
+
+describe('WasmLspTransport — compile-in-flight activity (#469)', () => {
+  afterEach(() => {
+    wasmState.workerClient = null;
+    // Each test settles every diagnose it starts, so the transport balances start/end back to idle.
+    expect(isCompileInFlight()).toBe(false);
+  });
+
+  test('isCompileInFlight() is true while a worker DiagnoseWorkspace is outstanding, false once it resolves', async () => {
+    const calls: RecordedCall[] = [];
+    wasmState.workerClient = makeFakeWorkerClient(calls);
+
+    const transport = new WasmLspTransport();
+    transport.onMessage(() => {});
+    await transport.start();
+
+    expect(isCompileInFlight()).toBe(false);
+
+    // didOpen triggers a diagnose (call #0) that stays pending until we settle it.
+    const open = transport.send(
+      JSON.stringify({ method: 'textDocument/didOpen', params: { textDocument: { uri: URI, text: 'a' } } }),
+    );
+    expect(calls).toHaveLength(1);
+    expect(isCompileInFlight()).toBe(true); // compile in flight
+
+    calls[0].resolve('[]');
+    await open;
+    expect(isCompileInFlight()).toBe(false); // settled → idle
+  });
+
+  test('the in-flight count returns to idle when a diagnose settles via the supersede/abort path', async () => {
+    const calls: RecordedCall[] = [];
+    wasmState.workerClient = makeFakeWorkerClient(calls);
+
+    const transport = new WasmLspTransport();
+    transport.onMessage(() => {});
+    await transport.start();
+
+    // First diagnose in flight (call #0).
+    const c1 = transport.send(
+      JSON.stringify({ method: 'textDocument/didOpen', params: { textDocument: { uri: URI, text: 'a' } } }),
+    );
+    expect(isCompileInFlight()).toBe(true);
+
+    // A newer edit supersedes it: the prior call's signal aborts (rejecting it) and call #1 issues.
+    const c2 = transport.send(
+      JSON.stringify({ method: 'textDocument/didChange', params: { textDocument: { uri: URI }, contentChanges: [{ text: 'aa' }] } }),
+    );
+    expect(calls).toHaveLength(2);
+    expect(calls[0].signal?.aborted).toBe(true);
+    expect(isCompileInFlight()).toBe(true); // call #1 keeps it in flight while #0 unwinds via abort
+
+    // Settle the latest; the aborted #0 (finally) and resolved #1 (finally) both decrement → idle.
+    calls[1].resolve('[]');
+    await Promise.all([c1, c2]);
+    expect(isCompileInFlight()).toBe(false);
   });
 });

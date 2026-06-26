@@ -6,6 +6,7 @@
 import type { LspTransport } from '@/host/types';
 import { loadWasmApi, getWasmWorkerClient, mapWorkerCallError, type KoineWasmApi } from '@/host/browser/wasm';
 import { CancelledError } from '@/host/browser/workerClient';
+import { markCompileEnd, markCompileStart } from '@/host/browser/compileActivity';
 
 interface JsonRpc {
   id?: number | string | null;
@@ -70,37 +71,45 @@ export class WasmLspTransport implements LspTransport {
     const mySeq = ++this.diagnoseSeq;
 
     const filesJson = this.filesJson();
-    let raw: string;
+    // Bracket the compile/diagnose call so the Stop-command gate (#469) reflects an actual in-flight
+    // compile. markCompileEnd() runs in `finally` so a clean resolve, a supersede-abort, a Stop's
+    // CancelledError, and a real error all decrement — the gate never sticks visible after a compile.
+    markCompileStart();
     try {
-      // Route through the worker client when present so the AbortSignal actually cancels the in-flight
-      // call (#338's `{ signal }` seam). The main-thread fallback (no worker client) has no cancellation,
-      // so use the proxy and rely on the sequence-guard below to drop a stale resolution.
-      const client = getWasmWorkerClient();
-      raw = client
-        ? await client.call('DiagnoseWorkspace', [filesJson], { signal: controller.signal })
-        : await api.DiagnoseWorkspace(filesJson);
-    } catch (err) {
-      // Drop silently — there is nothing to publish — when this diagnose was cancelled: either
-      // superseded by a newer edit (its own signal aborted) or hard-cancelled by the Stop affordance
-      // (terminateAndRespawn rejects every in-flight call with CancelledError). Any other failure is a
-      // real error: surface it, re-mapped to the actionable stale-bundle message when applicable.
-      if (controller.signal.aborted || err instanceof CancelledError) return [];
-      throw mapWorkerCallError(err);
+      let raw: string;
+      try {
+        // Route through the worker client when present so the AbortSignal actually cancels the in-flight
+        // call (#338's `{ signal }` seam). The main-thread fallback (no worker client) has no cancellation,
+        // so use the proxy and rely on the sequence-guard below to drop a stale resolution.
+        const client = getWasmWorkerClient();
+        raw = client
+          ? await client.call('DiagnoseWorkspace', [filesJson], { signal: controller.signal })
+          : await api.DiagnoseWorkspace(filesJson);
+      } catch (err) {
+        // Drop silently — there is nothing to publish — when this diagnose was cancelled: either
+        // superseded by a newer edit (its own signal aborted) or hard-cancelled by the Stop affordance
+        // (terminateAndRespawn rejects every in-flight call with CancelledError). Any other failure is a
+        // real error: surface it, re-mapped to the actionable stale-bundle message when applicable.
+        if (controller.signal.aborted || err instanceof CancelledError) return [];
+        throw mapWorkerCallError(err);
+      }
+
+      // Main-thread fallback has no real cancellation; guard against a stale resolution landing late and
+      // overwriting newer diagnostics.
+      if (mySeq !== this.diagnoseSeq) return [];
+
+      const buckets = JSON.parse(raw) as {
+        uri: string;
+        diagnostics: unknown[];
+      }[];
+      return buckets.map((b) => ({
+        jsonrpc: '2.0',
+        method: 'textDocument/publishDiagnostics',
+        params: { uri: b.uri, diagnostics: b.diagnostics },
+      }));
+    } finally {
+      markCompileEnd();
     }
-
-    // Main-thread fallback has no real cancellation; guard against a stale resolution landing late and
-    // overwriting newer diagnostics.
-    if (mySeq !== this.diagnoseSeq) return [];
-
-    const buckets = JSON.parse(raw) as {
-      uri: string;
-      diagnostics: unknown[];
-    }[];
-    return buckets.map((b) => ({
-      jsonrpc: '2.0',
-      method: 'textDocument/publishDiagnostics',
-      params: { uri: b.uri, diagnostics: b.diagnostics },
-    }));
   }
 
   private async handle(msg: JsonRpc): Promise<object[]> {
