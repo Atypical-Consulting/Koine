@@ -94,6 +94,7 @@ import { createScenarioPanel, type ScenarioPanel } from '@/scenarios/scenarioPan
 import { createTerminalPanel, type TerminalPanel } from '@/shell/terminal/terminalPanel';
 import { createReviewStore } from '@/review/reviewStore';
 import { createReviewPanel, resolveReviewAuthor, type ReviewPanel } from '@/review/ReviewPanel';
+import { createCommentComposer, type CommentComposer } from '@/review/CommentComposer';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from '@/export/share';
 import { handleBeforeUnload } from '@/shell/dirty';
 import { render } from 'preact';
@@ -778,19 +779,76 @@ export function init(): () => void {
     return resolveReviewAuthor(loadSettings().displayName);
   }
 
+  // The currently-open comment composer (#479), if any — only one at a time. Dismissing it (Add, Cancel,
+  // Escape, or opening another) tears down its host element via the closure captured at mount.
+  let commentComposerClose: (() => void) | null = null;
+
+  // Anchor the composer's host near the editor's live text selection (CodeMirror keeps a real DOM
+  // selection), clamped on-screen; fall back to a fixed spot near the top when there is no usable rect
+  // (e.g. opened from the command palette). Mirrors the editor action-widget placement (actions.ts).
+  function placeComposerNearSelection(host: HTMLElement): void {
+    const WIDTH = 320;
+    let left = window.innerWidth / 2 - WIDTH / 2;
+    let top = 120;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      if (rect && (rect.width || rect.height || rect.top || rect.left)) {
+        left = rect.left;
+        top = rect.bottom + 6;
+      }
+    }
+    host.style.position = 'fixed';
+    host.style.left = Math.max(8, Math.min(left, window.innerWidth - WIDTH - 8)) + 'px';
+    host.style.top = Math.min(top, window.innerHeight - 180) + 'px';
+  }
+
   // Open a review thread on the editor's current selection (#259). editorSession already pinned `span.file`
   // to the INVOKING group's uri (so a split view comments on the right file, not just group A's active
-  // one); we just prompt for the comment text. The window.prompt is a deliberate Phase-1 MVP affordance —
-  // a richer inline composer is a fine Phase-2 follow-up. An empty/cancelled prompt bails; otherwise we add
-  // the thread, reveal the Review tab, and repaint the editor marks.
+  // one). Instead of the Phase-1 window.prompt, mount a compact, non-blocking inline composer (#479) near
+  // the selection: it is multi-line, theme-matched, and Escape-cancellable, and keeps the reviewed code
+  // visible. Submitting empty/whitespace or cancelling adds no thread; on submit we add the thread,
+  // reveal the Review tab, and repaint the editor marks.
   function addReviewComment(span: SourceSpan): void {
     const file = span.file ?? workspace.activeUri();
     if (!file) return;
-    const text = window.prompt('Add a review comment:')?.trim();
-    if (!text) return;
-    reviewStore.add(file, { ...span, file }, text, reviewAuthorName());
-    controller.selectBottomTab('review');
-    editorSession.refreshReviewDecorations();
+    commentComposerClose?.(); // only one composer open at a time
+
+    const host = document.createElement('div');
+    host.className = 'koi-comment-composer-host';
+    document.body.appendChild(host);
+    placeComposerNearSelection(host);
+
+    let composer: CommentComposer | null = null;
+    // Attached on the next frame so the click/keystroke that opened the composer doesn't dismiss it.
+    let onDocMouseDown: ((e: MouseEvent) => void) | null = null;
+    const armId = window.setTimeout(() => {
+      onDocMouseDown = (e: MouseEvent): void => {
+        if (!host.contains(e.target as Node)) close();
+      };
+      document.addEventListener('mousedown', onDocMouseDown, true);
+    }, 0);
+
+    const close = (): void => {
+      window.clearTimeout(armId);
+      if (onDocMouseDown) document.removeEventListener('mousedown', onDocMouseDown, true);
+      composer?.dispose();
+      composer = null;
+      host.remove();
+      if (commentComposerClose === close) commentComposerClose = null;
+    };
+    commentComposerClose = close;
+
+    composer = createCommentComposer({
+      parent: host,
+      onSubmit: (text) => {
+        close();
+        reviewStore.add(file, { ...span, file }, text, reviewAuthorName());
+        controller.selectBottomTab('review');
+        editorSession.refreshReviewDecorations();
+      },
+      onCancel: close,
+    });
   }
 
   // Jump-to-source from a diagram node: the SVG renderer draws each navigable node as a `<g>` that
