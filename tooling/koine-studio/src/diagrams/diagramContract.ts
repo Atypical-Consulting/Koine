@@ -58,6 +58,18 @@ export interface DiagramNodeEditDetail {
 export const DIAGRAM_RELAYOUT_EVENT = 'koi-diagram-relayout';
 
 /**
+ * Global event the IDE raises (on `document`, mirroring {@link DIAGRAM_ANNOTATION_CREATE_EVENT}) to ask
+ * the LIVE canvas to re-fit and re-lay-out its minimap (#529). The canvas is built once and shown/hidden
+ * via CSS (`#split[data-mobile-zone]`), so when a hidden zone — the mobile **Diagram** tab — is revealed
+ * the surface gains real dimensions but nothing re-runs `fit()`: content stays at its raw (negative/large)
+ * coordinates in the top-left and the Outline minimap, built against a zero-size host, shows as an
+ * oversized empty box. `ide.tsx` dispatches this after the zone's CSS reveal (next animation frame) so the
+ * canvas re-frames its content and rebuilds the Outline. View-only — it re-fits scale/center and refreshes
+ * the minimap; it never reloads the layout or rebuilds nodes, so manual positions/pan are preserved.
+ */
+export const DIAGRAM_REFIT_EVENT = 'koi-diagram-refit';
+
+/**
  * Bubbling event the canvas dispatches when the user drags from one node to another to draw a
  * relationship (authoring). `ide.ts` turns it into an `addField` structured edit — a field on the source
  * whose type is the target — so the new composition round-trips into `.koi` (and re-draws as an edge).
