@@ -19,6 +19,9 @@ vi.mock('./workerClient', () => {
 describe('playground koine.ts — worker proxy', () => {
   beforeEach(() => {
     vi.resetModules();
+    // Clear the hoisted createKoineWorkerClient mock's call history (resetModules only resets the
+    // koine.ts singleton, not the mock) so per-test call-count assertions start from zero.
+    vi.clearAllMocks();
   });
 
   it('diagnose() round-trips through the mocked worker client and JSON.parses the result', async () => {
@@ -104,6 +107,65 @@ describe('playground koine.ts — worker proxy', () => {
     // Resolve the slow ready to let the dangling promise settle (avoid unhandled rejection)
     resolveWhenReady();
     await slowReady;
+  });
+
+  it('diagnose()/compile() forward the AbortSignal opts to the worker client call (#338/#353)', async () => {
+    const mockCall = vi.fn<(method: string, args: unknown[], opts?: unknown) => Promise<string>>();
+    mockCall.mockResolvedValue('[]');
+
+    const { createKoineWorkerClient } = await import('./workerClient');
+    (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
+      call: mockCall,
+      whenReady: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      terminateAndRespawn: vi.fn(),
+      dispose: vi.fn(),
+    });
+
+    const { diagnose, compile } = await import('./koine');
+    const ac = new AbortController();
+    await diagnose('value Foo = { }', { signal: ac.signal });
+    await compile('value Foo = { }', 'csharp', { signal: ac.signal });
+
+    expect(mockCall).toHaveBeenCalledWith('Diagnose', ['value Foo = { }'], { signal: ac.signal });
+    expect(mockCall).toHaveBeenCalledWith('Compile', ['value Foo = { }', 'csharp'], { signal: ac.signal });
+  });
+
+  it('terminateAndRespawn() restarts the booted worker and re-awaits the fresh generation (Stop path)', async () => {
+    const mockTerminate = vi.fn();
+    const mockWhenReady = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+    const { createKoineWorkerClient } = await import('./workerClient');
+    (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
+      call: vi.fn<(method: string, args: unknown[]) => Promise<string>>().mockResolvedValue('{}'),
+      whenReady: mockWhenReady,
+      terminateAndRespawn: mockTerminate,
+      dispose: vi.fn(),
+    });
+
+    const { preloadCompiler, whenReady, terminateAndRespawn } = await import('./koine');
+    preloadCompiler(); // boot the singleton
+    await whenReady();
+
+    terminateAndRespawn(); // Stop pressed
+    await whenReady(); // the singleton now awaits the fresh generation
+
+    expect(mockTerminate).toHaveBeenCalledTimes(1);
+    // The SAME client object is reused (its worker is swapped) — no second client is created (no leak).
+    expect(createKoineWorkerClient).toHaveBeenCalledTimes(1);
+  });
+
+  it('terminateAndRespawn() is a no-op when the runtime was never booted', async () => {
+    const { createKoineWorkerClient } = await import('./workerClient');
+    (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
+      call: vi.fn(),
+      whenReady: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      terminateAndRespawn: vi.fn(),
+      dispose: vi.fn(),
+    });
+
+    const { terminateAndRespawn } = await import('./koine');
+    expect(() => terminateAndRespawn()).not.toThrow();
+    expect(createKoineWorkerClient).not.toHaveBeenCalled(); // nothing booted → nothing to terminate
   });
 
   it('whenReady() resolves once the worker client whenReady() resolves', async () => {

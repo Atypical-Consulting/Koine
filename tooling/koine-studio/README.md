@@ -12,11 +12,18 @@ folder, unsaved buffers included.
 The WASM compiler (`src/Koine.Wasm`) runs inside a **dedicated Web Worker** (`src/host/browser/koine.worker.ts`)
 in both browser hosts — Koine Studio and the docs-site playground. A main-thread id-correlated
 client (`workerClient.ts`) routes calls to the worker over `postMessage` and resolves each
-response as a `Promise`. Cancellation is supported in two modes:
+response as a `Promise`. Cancellation is supported in two modes, both now **wired into the editors**
+([#353](https://github.com/Atypical-Consulting/Koine/issues/353)):
 
 - **Supersede** — a stale in-flight call is dropped when a newer one arrives (debounced diagnostics).
+  Studio's `transport.ts` aborts the prior `DiagnoseWorkspace` on every keystroke; the playground's
+  `controller.ts` does the same per-edit for `compile`/`diagnose`. A superseded call's late reply never
+  overwrites newer state.
 - **Terminate-and-respawn** — a runaway compile is abandoned by terminating the worker and booting a
-  fresh one.
+  fresh one. Exposed as the **"Stop compilation"** command palette entry in Studio (shown only on the
+  worker boot path — see `stopCompile.ts`) and a **Stop** button in the playground toolbar. Awaiting
+  `whenReady()` across a respawn now rejects rather than hangs (the outgoing generation's ready-promise
+  is settled on respawn).
 
 `WasmEnableThreads` stays **`false`** in `src/Koine.Wasm/Koine.Wasm.csproj`. The worker uses
 plain structured-clone `postMessage`, so **no `SharedArrayBuffer` and no COOP/COEP

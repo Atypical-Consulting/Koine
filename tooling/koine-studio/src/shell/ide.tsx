@@ -46,6 +46,7 @@ import { createCommandPalette, type Command } from '@/shared/palette';
 import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
 import { loadLayout, saveLayout, type LayoutState } from '@/shell/layoutStore';
 import { devCommands } from '@/shell/devCommands';
+import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
 import { createPreferences } from '@/settings/prefs';
 import { applyAppearance } from '@/settings/appearance';
 import { initEdgeResizer, initGroupResizer } from '@/shell/resize';
@@ -2072,6 +2073,18 @@ export function init(): () => void {
       { id: 'view-assistant', title: 'Show Assistant', group: 'Workspace', run: () => controller.selectCenter('assistant') },
       { id: 'assistant-explain', title: 'Explain this construct', group: 'Workspace', run: () => { controller.selectCenter('assistant'); ensureAssistant().explainSelection(); } },
     ];
+
+    // Stop a runaway compile: terminate the WASM worker and boot a fresh one (#353). Offered only when a
+    // cancellable worker exists (the worker boot path) — in the main-thread fallback there is nothing to
+    // terminate. getCommands() re-runs on every palette open, so this reflects the live boot state.
+    if (canStopCompile()) {
+      cmds.push({
+        id: 'stop-compile',
+        title: 'Stop compilation (restart compiler)',
+        group: 'Workspace',
+        run: () => stopRunawayCompile(),
+      });
+    }
 
     // Surface every open file as a "Go to File" entry so the palette doubles as a
     // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open.

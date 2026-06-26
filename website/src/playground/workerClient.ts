@@ -116,6 +116,11 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
     });
     readyResolve = resolve;
     readyReject = reject;
+    // A respawn (terminateAndRespawn) rejects the OUTGOING generation's readyPromise. After the initial
+    // boot, no one is awaiting whenReady(), so that rejection would surface as an unhandled rejection.
+    // Attach a no-op catch so an unawaited rejection is swallowed; an external `await client.whenReady()`
+    // still observes resolve/reject because whenReady() returns this same `readyPromise`.
+    readyPromise.catch(() => {});
 
     const timer = setTimeout(() => {
       reject(new Error(`Koine worker timed out after ${BOOT_TIMEOUT_MS / 1000}s`));
@@ -202,6 +207,11 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
     terminateAndRespawn(): void {
       clearTimeout(bootTimer);
       rejectAll(new CancelledError('Koine worker call cancelled — worker restarted'));
+      // Settle the OUTGOING generation's ready-promise so a caller awaiting whenReady() across a respawn
+      // (e.g. a Stop pressed during boot) rejects instead of hanging forever. Must happen BEFORE
+      // startWorkerGeneration() reassigns readyReject to the new generation. A no-op if the generation
+      // already signalled ready (the common post-boot case — rejecting a settled promise does nothing).
+      readyReject(new CancelledError('Koine worker restarted'));
       if (currentWorker) {
         currentWorker.onmessage = null;
         currentWorker.terminate();
