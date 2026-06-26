@@ -330,3 +330,4 @@ Koine.Compiler.Services.KoineLanguageService.Subtypes(Koine.Compiler.Services.Ko
 Koine.Compiler.Ast.ModelIndex.SubscriptionEventNameIsAmbiguous(string! subscriberContext, string! eventShortName) -> bool
 Koine.Compiler.Emit.Grammar.GbnfExporter
 static Koine.Compiler.Emit.Grammar.GbnfExporter.Export() -> string!
+static Koine.Compiler.Services.KoineCompilation.Reconcile(Koine.Compiler.Services.KoineCompilation? previous, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files) -> Koine.Compiler.Services.KoineCompilation!
