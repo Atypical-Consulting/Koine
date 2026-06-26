@@ -114,6 +114,25 @@ public sealed class KoineFormatter
         var last = endCharacter == 0 && endLine > startLine ? endLine - 1 : endLine;
         last = Math.Min(last, orig.Length - 1);
 
+        // A blank-line run the formatter COLLAPSES is a deletion: the common-prefix line-diff keeps the
+        // surviving blank at the run's start and attributes the redundant ones to the changed region, so
+        // `changedStart` can sit AFTER blank lines the user selected — and a selection of just those blanks
+        // would then intersect nothing and return null (#390). When the changed region begins by deleting
+        // an empty line (a blank collapse), pull its start — and its formatted counterpart, in lockstep —
+        // back over the equal empty lines the selection reaches, so the selected redundant blanks fall
+        // inside the edit. The lockstep is sound because every line below `prefix` matched on both sides,
+        // so the net replacement text is unchanged; only the edit's start moves back onto the selection.
+        // The `Length == 0` guard limits this to truly-empty lines: a whitespace-only blank never matches
+        // the formatter's trimmed blank, so the common prefix never swallows it and this case can't arise.
+        if (changedStart < changedEnd && od[changedStart].Length == 0)
+        {
+            while (changedStart > first && od[changedStart - 1].Length == 0)
+            {
+                changedStart--;
+                fmtStart--;
+            }
+        }
+
         // Intersect the changed region with the selection ([first, last] inclusive → [first, last+1) exclusive).
         var lo = Math.Max(changedStart, first);
         var hi = Math.Min(changedEnd, last + 1);
