@@ -735,6 +735,34 @@ describe('explorer', () => {
     expect(ex.el.querySelector('li[data-kind="dir"]')!.getAttribute('aria-expanded')).toBe('false');
   });
 
+  // --- reveal by context (cross-axis "Reveal in Files", #453) ----------------
+
+  it('revealByContext expands the ancestor folder and highlights the matching .koi file', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    dirRow(ex).click(); // collapse orders/ so the target is hidden
+    expect(ex.el.querySelector('li[data-kind="dir"]')!.getAttribute('aria-expanded')).toBe('false');
+
+    // The 'Order' bounded context lives in orders/order.koi — reveal it by context name (case-insensitive
+    // stem match): the ancestor folder re-expands and the file row is marked revealed.
+    ex.revealByContext('Order');
+    expect(ex.el.querySelector('li[data-kind="dir"]')!.getAttribute('aria-expanded')).toBe('true');
+    expect(fileRow(ex, 'order.koi').classList.contains('is-revealed')).toBe(true);
+  });
+
+  it('revealByContext is a no-op for a context with no matching .koi file', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    expect(() => ex.revealByContext('Nonexistent')).not.toThrow();
+    expect(ex.el.querySelector('.explorer-row.is-revealed')).toBeNull();
+  });
+
   // --- multi-root groups (Task 3) -------------------------------------------
 
   // A second workspace root, structurally like sampleTree() but under a different folder token.

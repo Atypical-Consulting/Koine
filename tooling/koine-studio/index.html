@@ -102,72 +102,13 @@
       </header>
 
       <main id="split">
-        <!-- One left sidebar, one scroll bar: Files (the workspace tree), Explorer (the DDD
-             construct/context tree, renderModelOutline), Overview (per-context counts,
-             renderOverviewCounts) and Documentation (shortcuts into the model's prose surfaces). The
-             sections are collapsible and the whole rail is the single scroll container — section bodies
-             don't scroll on their own. -->
-        <aside id="leftrail" class="pane" aria-label="Workspace">
-          <section class="rail-sect" id="rail-files" data-open="true">
-            <div class="rail-sect-head-row">
-              <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="filetree-body">Files</button>
-              <span id="filetree-title" class="rail-sect-meta">Scratch</span>
-            </div>
-            <div class="rail-sect-body" id="filetree-body"></div>
-          </section>
-          <section class="rail-sect" id="rail-explorer" data-open="true">
-            <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-explorer-body">Explorer</button>
-            <div class="rail-sect-body" id="rail-explorer-body"></div>
-          </section>
-          <section class="rail-sect" id="rail-overview" data-open="true">
-            <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-overview-body">Overview</button>
-            <div class="rail-sect-body" id="rail-overview-body"></div>
-          </section>
-          <!-- Documentation: four shortcuts into the model's prose surfaces. These are navigation, so
-               they wear the toolbar's stroked line-icon idiom (not the Explorer's colour-coded construct
-               shapes). Wired in inspectorController via [data-doclink]. -->
-          <section class="rail-sect" id="rail-docs" data-open="true">
-            <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-docs-body">Documentation</button>
-            <nav class="rail-sect-body" id="rail-docs-body" aria-label="Documentation">
-              <ul class="koi-doclinks">
-                <li>
-                  <button type="button" class="koi-doclink" data-doclink="contextmap" title="How the bounded contexts relate">
-                    <svg class="tb-ico koi-doclink-ico" viewBox="0 0 16 16" aria-hidden="true">
-                      <circle cx="4" cy="4.5" r="1.7" /><circle cx="12" cy="5.5" r="1.7" /><circle cx="7" cy="12" r="1.7" />
-                      <path d="M5.6 5 10.4 5.4M4.7 6.1 6.3 10.6M11.2 7 8 10.7" />
-                    </svg>
-                    <span class="koi-doclink-label">Context Map</span>
-                  </button>
-                </li>
-                <li>
-                  <button type="button" class="koi-doclink" data-doclink="glossary" title="The shared vocabulary of the domain">
-                    <svg class="tb-ico koi-doclink-ico" viewBox="0 0 16 16" aria-hidden="true">
-                      <path d="M8 4.6C6.7 3.7 4.8 3.5 2.8 4V12c2-.5 3.9-.3 5.2.6 1.3-.9 3.2-1.1 5.2-.6V4c-2-.5-3.9-.3-5.2.6Z" />
-                      <path d="M8 4.6V12.6" />
-                    </svg>
-                    <span class="koi-doclink-label">Ubiquitous Language</span>
-                  </button>
-                </li>
-                <li>
-                  <button type="button" class="koi-doclink" data-doclink="adr" title="Architecture Decision Records">
-                    <svg class="tb-ico koi-doclink-ico" viewBox="0 0 16 16" aria-hidden="true">
-                      <path d="M4 2.5h4.6L12 5.9V13.5H4Z" /><path d="M8.4 2.5v3.2h3.2" /><path d="M5.8 9.6 7.2 11 10 7.9" />
-                    </svg>
-                    <span class="koi-doclink-label">ADR</span>
-                  </button>
-                </li>
-                <li>
-                  <button type="button" class="koi-doclink" data-doclink="notes" title="Free-form notes on the model">
-                    <svg class="tb-ico koi-doclink-ico" viewBox="0 0 16 16" aria-hidden="true">
-                      <path d="M10.4 3.1 12.9 5.6 6.1 12.4 3 13 3.6 9.9Z" /><path d="M9.2 4.3 11.7 6.8" />
-                    </svg>
-                    <span class="koi-doclink-label">Notes</span>
-                  </button>
-                </li>
-              </ul>
-            </nav>
-          </section>
-        </aside>
+        <!-- One left sidebar, one scroll bar: a DDD "Domain" navigator with a labelled Domain·Files axis
+             switch over one navigator host (the Domain construct tree or the workspace file tree), plus a
+             slim documentation footer. The rail is the single scroll container. Its inner markup is the
+             single source of truth in src/shell/leftRail.ts (leftRailMarkup) and is injected here by
+             ide.tsx's boot BEFORE any el(...) lookup — keep this <aside> a thin shell so the two can't
+             drift. -->
+        <aside id="leftrail" class="pane" aria-label="Workspace"><!-- injected at boot: leftRailMarkup() --></aside>
         <div class="koi-resizer" id="leftrail-resizer" aria-hidden="true"></div>
 
         <!-- Center: Visual (the diagram) / Code (the editor plus the generated code, the compatibility

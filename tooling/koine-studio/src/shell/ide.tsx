@@ -18,6 +18,7 @@ import {
 } from '@/shell/ideUtils';
 import { createEditorSession } from '@/shell/editorSession';
 import { createInspectorController } from '@/shell/inspectorController';
+import { leftRailMarkup } from '@/shell/leftRail';
 import { openInspectorSheet } from '@/shell/inspectorSheet';
 import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
@@ -489,6 +490,11 @@ export function init(): () => void {
     workspace.scheduleAutoSave();
   });
 
+  // The left rail's inner markup is owned by leftRail.ts (single source of truth, #453); index.html keeps
+  // <aside id="leftrail"> a thin shell. Inject it here — synchronously, before any rail el(...) lookup or
+  // the inspector controller below — so #filetree-body / #rail-domain-pane / the doclinks all resolve.
+  el<HTMLElement>('leftrail').innerHTML = leftRailMarkup();
+
   const treeBodyEl = el<HTMLElement>('filetree-body');
   const treeTitleEl = el<HTMLElement>('filetree-title');
   const filesSect = el<HTMLElement>('rail-files');
@@ -501,24 +507,18 @@ export function init(): () => void {
     sect.querySelector('.rail-sect-head')?.setAttribute('aria-expanded', String(open));
   }
 
-  // The Files section of the single left sidebar is collapsible; the section header (and ⌘B) toggle
-  // it, and the choice is persisted. (The file tree no longer has its own column — it's one section
-  // of the unified rail.)
-  const FILETREE_VIS_KEY = 'koine.studio.filetree';
-  function applyFileTreeVisibility(visible: boolean): void {
-    setRailSectionOpen(filesSect, visible);
-  }
+  // Since #453 the rail's AXIS (Domain vs Files) is the single source of truth for the file tree's
+  // visibility — `controller.setAxis` owns + persists it (RAIL_AXIS_KEY) and `applyAxis` toggles the
+  // Files pane. So opening a folder/workspace surfaces the Files axis (matching the "Reveal in Files"
+  // path), rather than poking `dataset.open` on a pane the default Domain axis keeps hidden.
   function showFileTreeChrome(): void {
-    applyFileTreeVisibility((localStorage.getItem(FILETREE_VIS_KEY) ?? '1') !== '0');
+    controller.setAxis('files');
   }
   function toggleFileTree(): void {
-    const visible = filesSect.dataset.open === 'false'; // currently collapsed → expand
-    applyFileTreeVisibility(visible);
-    try {
-      localStorage.setItem(FILETREE_VIS_KEY, visible ? '1' : '0');
-    } catch {
-      // ignore — no persistence available
-    }
+    // ⌘B shows/hides "the file tree", which since #453 lives on the rail's Files axis — so this toggles
+    // the Domain↔Files axis (the controller owns + persists the axis, and re-expands the Files section
+    // when it surfaces). When the Files pane is hidden the Domain view holds the rail, so ⌘B reveals it.
+    controller.setAxis(filesSect.hidden ? 'files' : 'domain');
   }
 
   // The workspace file explorer. It deals in opaque fs tokens; ide.ts maps token ↔ file:// uri
@@ -633,6 +633,9 @@ export function init(): () => void {
     onExportDiagram: (format) => void exportActiveDiagram(format),
     onCopyDiagramMermaid: () => void copyActiveDiagramMermaid(),
     gotoSourceSpan: (span) => void gotoSourceSpan(span),
+    // Cross-axis "Reveal in Files" (#453): the tactical leaf already switched the rail to the Files axis
+    // (setAxis) before this fires, so we just point the explorer at the context's `.koi`.
+    revealInFiles: (context) => explorer.revealByContext(context),
     ensureAssistant: () => ensureAssistant(),
     ensureScenarios: () => ensureScenarios(),
     ensureTerminal: () => ensureTerminal(),
