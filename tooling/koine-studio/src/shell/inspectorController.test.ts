@@ -734,6 +734,54 @@ describe('createInspectorController — Properties inspector tracks the selectio
   });
 });
 
+describe('createInspectorController — selecting an element focuses the Properties tab (#533)', () => {
+  // Regression: when the right rail is on a non-Properties tab (Source Control / Rules / Notes), a new
+  // element selection used to leave the rail on that tab — the user had to click Properties to see the
+  // element they just selected. Selecting now auto-activates the Properties tab (desktop mirror of the
+  // existing mobile inspector-sheet raise on the same selection path).
+  test('a new selection while on Source Control activates the Properties right tab', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    // Put the right rail on a non-Properties tab, exactly as a user clicking Source Control would.
+    el('rtab-source-control').click();
+    expect(deps.store.getState().right).toBe('source-control');
+    expect(el('rtab-source-control').getAttribute('aria-selected')).toBe('true');
+    expect(el('rtab-props').getAttribute('aria-selected')).toBe('false');
+
+    // Selecting an element (canvas / Domain navigator) must bring the user back to Properties.
+    ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
+
+    expect(deps.store.getState().right).toBe('props');
+    expect(el('rtab-props').getAttribute('aria-selected')).toBe('true');
+    expect(el('rtab-source-control').getAttribute('aria-selected')).toBe('false');
+  });
+
+  test('clearing the selection leaves the current right tab untouched (no auto-switch on deselect)', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    // Select something (which focuses Properties), then deliberately switch back to Source Control.
+    ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
+    el('rtab-source-control').click();
+    expect(deps.store.getState().right).toBe('source-control');
+
+    // A deselect must NOT yank the user onto the (now-empty) Properties pane.
+    ctl.selection.set(null);
+
+    expect(deps.store.getState().right).toBe('source-control');
+    expect(el('rtab-source-control').getAttribute('aria-selected')).toBe('true');
+  });
+});
+
 describe('createInspectorController — bounded-context scope', () => {
   test('refreshContextList populates the scope-path selector and reveals it', async () => {
     const lsp = makeLsp();
