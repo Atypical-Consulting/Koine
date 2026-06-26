@@ -2054,6 +2054,7 @@ export function init(): () => void {
       { id: 'view-scenarios', title: 'Show Scenario Runner', group: 'Workspace', run: () => controller.selectTech('scenarios') },
       { id: 'view-assistant', title: 'Show Assistant', group: 'Workspace', run: () => controller.selectCenter('assistant') },
       { id: 'assistant-explain', title: 'Explain this construct', group: 'Workspace', run: () => { controller.selectCenter('assistant'); ensureAssistant().explainSelection(); } },
+      { id: 'add-comment', title: 'Add review comment', group: 'Review', run: () => editor.addCommentAtSelection() },
     ];
 
     // Surface every open file as a "Go to File" entry so the palette doubles as a
