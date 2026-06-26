@@ -1193,12 +1193,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     selectDocsTab('glossary');
   }
 
-  // The Context Map lives in the bottom strip, which applyCenterChrome HIDES while Documentation is the
-  // active center. So the rail's Context Map link must first leave Documentation for a center that shows
-  // the strip (Visual — the map's natural home) before opening its Context Map tab; otherwise the click
-  // would set the bottom tab on a strip that stays hidden, and nothing would appear.
+  // The Context Map lives in the bottom strip, which is now visible in every center view, so opening it
+  // is just a bottom-tab switch from wherever the user is — selectBottomTab expands the strip if it's
+  // collapsed. (It used to leave Documentation first, because the strip was hidden there.)
   function focusContextMap(): void {
-    if (activeCenter() === 'docs') selectCenter('visual');
     selectBottomTab('contextmap');
   }
 
