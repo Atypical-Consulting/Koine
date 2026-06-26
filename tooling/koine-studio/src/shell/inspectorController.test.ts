@@ -106,6 +106,7 @@ const APP_HTML = `
           <div id="panel-relationships" class="diag-panel" role="tabpanel" hidden></div>
           <div id="panel-contextmap" class="diag-panel doc-view" role="tabpanel" hidden></div>
           <div id="panel-terminal" class="diag-panel diag-panel-terminal" role="tabpanel" hidden></div>
+          <div id="panel-review" class="diag-panel" role="tabpanel" hidden></div>
         </footer>
       </section>
       <aside id="right" class="pane">
