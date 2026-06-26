@@ -96,6 +96,80 @@ function doorwayRow(opts: {
   return row;
 }
 
+// --- keyboard model: the WAI-ARIA tree pattern (roving tabindex) (#453, Task 6) ---------------------
+// Both levels are `role="tree"`s of `role="treeitem"` rows, navigated with Arrow/Home/End and a SINGLE
+// tab stop (roving tabindex), mirroring the Files explorer's `visibleItems`/`focusItem`/`onRowKeydown`.
+// The navigator's trees never collapse a branch (aggregates render expanded; the filter removes
+// non-matching rows from the DOM), so every rendered treeitem is visible and DOM order IS visual order.
+
+/** The visible treeitems of a `role="tree"`, in DOM (visual) order. */
+function treeItems(tree: HTMLElement): HTMLElement[] {
+  return Array.from(tree.querySelectorAll<HTMLElement>('[role="treeitem"]'));
+}
+
+/** Seed/refresh the roving tabindex: every inner control leaves the tab order and exactly one treeitem
+ * (the active one, else the first) becomes the lone tab stop — so the whole tree is ONE Tab landing. */
+function setRovingItem(tree: HTMLElement, active: HTMLElement | null): void {
+  // Inner controls (the leaf activator, the ⋯ overflow, the aggregate head) leave the sequential tab
+  // order; mouse clicks still work, and keyboard activation is forwarded from the focused treeitem.
+  for (const btn of tree.querySelectorAll<HTMLElement>('button')) btn.tabIndex = -1;
+  const items = treeItems(tree);
+  const tabbable = active && items.includes(active) ? active : (items[0] ?? null);
+  for (const item of items) item.tabIndex = item === tabbable ? 0 : -1;
+}
+
+/** Move roving focus to `item` — a single tabbable treeitem at a time, then `.focus()` it. */
+function focusTreeItem(tree: HTMLElement, item: HTMLElement): void {
+  setRovingItem(tree, item);
+  item.focus();
+}
+
+/** Wire the WAI-ARIA tree keyboard model onto a `role="tree"` root: roving tabindex (one tab stop) plus
+ * ArrowDown/Up across the visible treeitems, Home/End to the first/last, and Enter/Space to activate the
+ * focused row (a treeitem that is itself a `<button>` activates natively; a wrapper row forwards to its
+ * primary control). The listener is delegated on the root, so a keydown bubbling from any focused row —
+ * or dispatched on the root itself — is handled in one place. */
+function wireTreeNav(tree: HTMLElement): void {
+  setRovingItem(tree, null); // seed the first treeitem as the single tab stop
+  tree.addEventListener('keydown', (ev) => {
+    const items = treeItems(tree);
+    if (!items.length) return;
+    const focused = document.activeElement as HTMLElement | null;
+    const current =
+      (ev.target as HTMLElement | null)?.closest<HTMLElement>('[role="treeitem"]') ??
+      focused?.closest<HTMLElement>('[role="treeitem"]') ??
+      null;
+    const idx = current ? items.indexOf(current) : -1;
+    switch (ev.key) {
+      case 'ArrowDown':
+        ev.preventDefault();
+        focusTreeItem(tree, items[Math.min(items.length - 1, idx + 1)] ?? items[0]);
+        break;
+      case 'ArrowUp':
+        ev.preventDefault();
+        focusTreeItem(tree, items[Math.max(0, idx - 1)] ?? items[0]);
+        break;
+      case 'Home':
+        ev.preventDefault();
+        focusTreeItem(tree, items[0]);
+        break;
+      case 'End':
+        ev.preventDefault();
+        focusTreeItem(tree, items[items.length - 1]);
+        break;
+      case 'Enter':
+      case ' ':
+        // A `<button>` treeitem activates natively; a wrapper row (the tactical rows) forwards to the
+        // primary control inside it.
+        if (current && current.tagName !== 'BUTTON') {
+          ev.preventDefault();
+          current.querySelector<HTMLElement>('button')?.click();
+        }
+        break;
+    }
+  });
+}
+
 /**
  * Build the strategic-level Domain navigator: one `◈` row per bounded context (with its total-construct
  * count badge), then the `⤳ Context Map` and `▤ Ubiquitous Language` doorway rows. `relLinks` is the
@@ -121,6 +195,7 @@ export function renderStrategic(model: GlossaryModel, relLinks: number, h: Strat
   );
   root.appendChild(doors);
 
+  wireTreeNav(root); // roving tabindex + Arrow/Home/End across the context + doorway rows
   return root;
 }
 
@@ -210,30 +285,70 @@ export function mountDomainNavigator(
     onOpenGlossary: () => handlers.onOpenGlossary?.(),
   };
 
+  // Persistent navigator chrome: a type-to-filter input plus the body the levels paint into. The input
+  // drives the SHARED `outlineFilter` slice (the same one the Explorer outline reads, so the two never
+  // disagree), and it lives OUTSIDE the re-rendered body — like the explorer's head — so typing into it
+  // never tears down + refocuses the field, and the query survives an altitude change. Only `body` is
+  // replaceChildren'd; the input persists across every re-render.
+  const filterInput = document.createElement('input');
+  filterInput.type = 'search';
+  filterInput.className = 'koi-domain-filter';
+  filterInput.placeholder = 'Filter domain…';
+  filterInput.setAttribute('aria-label', 'Filter the domain by name');
+  filterInput.spellcheck = false;
+  filterInput.value = store.getState().outlineFilter;
+  filterInput.addEventListener('input', () => store.getState().setOutlineFilter(filterInput.value));
+
+  const body = document.createElement('div');
+  body.className = 'koi-domain-body';
+  host.replaceChildren(filterInput, body);
+
+  // The altitude the last render painted, so a drill / climb (and ONLY that — not a filter keystroke or
+  // the first content paint) plays the reduced-motion-guarded zoom entrance on the freshly-mounted level.
+  let paintedAltitude = store.getState().navAltitude;
+
+  // Swap the body to a freshly-built level, tagging it `koi-domain-enter` (the zoom entrance) only when
+  // the ALTITUDE changed — so a drill / climb animates but a filter keystroke doesn't flicker. The
+  // animation is CSS, gated behind `prefers-reduced-motion: no-preference` in `_leftrail.scss`.
+  function paint(level: HTMLElement, altitude: typeof paintedAltitude): void {
+    if (altitude !== paintedAltitude) level.classList.add('koi-domain-enter');
+    paintedAltitude = altitude;
+    body.replaceChildren(level);
+  }
+
   function render(): void {
     const s = store.getState();
+    if (filterInput.value !== s.outlineFilter) filterInput.value = s.outlineFilter;
+
     // Tactical only when a real context is in scope; the unscoped sentinel falls back to strategic.
     if (s.navAltitude === 'tactical' && !isAllContexts(s.activeContext)) {
-      // Resolve the scoped context's node from the cached model graph; a missing node (not yet fetched,
-      // or absent) yields an empty tactical body under the breadcrumb rather than a crash.
-      const ctxNode = findContextNode(cache?.tree, s.activeContext);
-      host.replaceChildren(renderTacticalView(s.activeContext, store, ctxNode, tacticalHandlers));
+      // Resolve the scoped context's node from the cached model graph, then narrow it by the per-level
+      // filter; a missing node (not yet fetched, or absent) yields an empty tactical body rather than a
+      // crash.
+      const ctxNode = filterContextNode(findContextNode(cache?.tree, s.activeContext), s.outlineFilter);
+      filterInput.hidden = false;
+      paint(renderTacticalView(s.activeContext, store, ctxNode, tacticalHandlers), 'tactical');
       return;
     }
     if (!cache) {
-      host.replaceChildren(message('koi-domain-loading', 'Loading domain…'));
+      filterInput.hidden = true;
+      body.replaceChildren(message('koi-domain-loading', 'Loading domain…'));
+      paintedAltitude = s.navAltitude;
       return;
     }
     if (!cache.model.entries.length) {
-      host.replaceChildren(
+      filterInput.hidden = true;
+      body.replaceChildren(
         message('koi-domain-empty', 'No elements yet — declare some types, or fix syntax errors to populate the model.'),
       );
+      paintedAltitude = s.navAltitude;
       return;
     }
     // The type-to-filter box narrows the strategic context list (a context drops out once none of its
     // constructs match) — the same filter the Explorer outline uses, so the two never disagree.
     const model = filterGlossaryModel(cache.model, s.outlineFilter);
-    host.replaceChildren(renderStrategic(model, cache.relLinks, strategicHandlers));
+    filterInput.hidden = false;
+    paint(renderStrategic(model, cache.relLinks, strategicHandlers), 'strategic');
   }
 
   async function doFetch(): Promise<void> {
@@ -314,6 +429,28 @@ function findContextNode(root: ModelNode | null | undefined, context: string): M
     root?.children.find((c) => c.kind === 'context' && (c.title === context || c.qualifiedName === context)) ??
     null
   );
+}
+
+/** Narrow a context node to the constructs whose name matches a free-text query (case-insensitive
+ * substring) — the TACTICAL counterpart of {@link filterGlossaryModel}. An aggregate survives when it
+ * matches OR owns a surviving construct (keeping all of its children when the aggregate name itself is
+ * the hit); a context-level peer survives on its own match. A blank query is the identity. */
+function filterContextNode(ctx: ModelNode | null, query: string): ModelNode | null {
+  if (!ctx) return ctx;
+  const q = query.trim().toLowerCase();
+  if (!q) return ctx;
+  const matches = (n: ModelNode): boolean => n.title.toLowerCase().includes(q);
+  const children: ModelNode[] = [];
+  for (const child of ctx.children) {
+    if (child.kind === 'aggregate') {
+      const selfMatch = matches(child);
+      const keptKids = selfMatch ? child.children : child.children.filter(matches);
+      if (selfMatch || keptKids.length) children.push({ ...child, children: keptKids });
+    } else if (matches(child)) {
+      children.push(child);
+    }
+  }
+  return { ...ctx, children };
 }
 
 /** A small shape-coded construct glyph, keyed by the slug the shared grammar ({@link constructForKind})
@@ -515,6 +652,8 @@ export function renderTactical(ctxNode: ModelNode | null | undefined, h: Tactica
     note.textContent = 'No aggregates or types here yet.';
     body.appendChild(note);
   }
+
+  wireTreeNav(body); // roving tabindex + Arrow/Home/End across the aggregate + leaf rows
   return body;
 }
 

@@ -244,6 +244,174 @@
   background: var(--koi-ddd-factory); /* a rounded square — it builds aggregates */
 }
 
+/* --- Domain navigator: the STRATEGIC level + shared chrome (#453) ------------------------------
+   The rail's outside-in entry point: a type-to-filter box over the bounded-context list, each context a
+   `role="treeitem"` row with a `◈` glyph + a total-construct count, then the Context Map / Ubiquitous
+   Language doorways. Rows are keyboard-navigated (Task 6), so each carries a clearly-visible focus ring. */
+
+/* The per-level type-to-filter box — the navigator's own copy of the Explorer outline's filter idiom,
+   wired to the SAME `outlineFilter` slice. It sits above the active level (strategic OR tactical) and
+   persists across re-renders, so typing never tears down and refocuses the field. */
+.koi-domain-filter {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin-bottom: var(--koi-space-1-5);
+  padding: var(--koi-space-1-25) var(--koi-space-2);
+  background: var(--koi-paper);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+
+  &::placeholder {
+    color: var(--koi-muted);
+  }
+  /* Visible keyboard focus (WCAG 2.4.7), matching the Explorer filter + the context <select>. */
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+    border-color: var(--koi-accent);
+  }
+}
+
+.koi-domain-strategic,
+.koi-domain-doors {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* The doorways are divided from the context list by a hairline so the two read as distinct groups. */
+.koi-domain-doors {
+  margin-top: var(--koi-space-1-5);
+  padding-top: var(--koi-space-1-5);
+  border-top: 1px solid var(--koi-line);
+}
+
+/* A context row / a doorway row: the whole row IS the button (and the treeitem). They share one look so
+   the strategic level reads as one list; the doorway label stays a touch quieter (navigation, not a
+   domain element). */
+.koi-ctx-row,
+.koi-domain-door {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-1-5);
+  width: 100%;
+  box-sizing: border-box;
+  /* WCAG 2.5.8 target size — a comfortable click/pointer target, like the tactical rows. */
+  min-height: 28px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--koi-fg);
+  padding: var(--koi-space-1) var(--koi-space-1-5);
+  border-radius: var(--koi-radius-xs);
+  cursor: pointer;
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-base-plus);
+
+  &:hover {
+    background: var(--koi-surface);
+  }
+  /* Roving-tabindex focus lands on the row itself — keep the ring clearly visible (WCAG 2.4.7). */
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: -2px;
+  }
+}
+
+/* The `◈` context diamond / `⤳`·`▤` doorway glyphs — decorative (aria-hidden); the accent colour ties
+   them to the inspector's accent bar so the rail's navigators share one signature. */
+.koi-domain-glyph {
+  flex: 0 0 auto;
+  width: 1rem;
+  color: var(--koi-accent);
+  font-size: var(--koi-text-base);
+  line-height: 1;
+  text-align: center;
+}
+
+.koi-ctx-name,
+.koi-domain-door-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.koi-ctx-name {
+  font-weight: 500;
+}
+.koi-domain-door-label {
+  color: var(--koi-ink-soft);
+}
+
+/* The trailing count pill (a context's total constructs / the context-map relation count) — the proven
+   Explorer count-chip look (fg number on a faint fg wash) so contrast holds AA. */
+.koi-ctx-count,
+.koi-domain-door-count {
+  flex: 0 0 auto;
+  min-width: 1.5rem;
+  padding: 0.05rem var(--koi-space-1);
+  border-radius: var(--koi-radius-pill);
+  background: color-mix(in srgb, var(--koi-fg) 9%, transparent);
+  color: var(--koi-fg);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  font-weight: 600;
+  text-align: center;
+}
+
+/* --- Domain navigator: the TACTICAL breadcrumb (#453) ---
+   The "‹ Context" row that climbs from a context's tactical body back to the strategic list. A quiet nav
+   button that warms to the accent on hover/focus, kept clearly focusable for keyboard users. */
+.koi-breadcrumb-back {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: var(--koi-space-1-5);
+  padding: var(--koi-space-1) var(--koi-space-1-5);
+  background: transparent;
+  border: none;
+  border-radius: var(--koi-radius-xs);
+  color: var(--koi-muted);
+  cursor: pointer;
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-align: left;
+
+  &:hover {
+    background: var(--koi-surface);
+    color: var(--koi-accent);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: -2px;
+  }
+}
+
+.koi-breadcrumb-back-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The breadcrumb's `‹` chevron stays muted, warming to the accent with the row. */
+.koi-breadcrumb-back .koi-domain-glyph {
+  color: var(--koi-muted);
+}
+.koi-breadcrumb-back:hover .koi-domain-glyph,
+.koi-breadcrumb-back:focus-visible .koi-domain-glyph {
+  color: var(--koi-accent);
+}
+
 /* --- Domain navigator: the TACTICAL tree (#453) ------------------------------------------------
    The aggregate-centric drill-down shown under the breadcrumb once a context is in scope: each aggregate
    owns a bracketed spine of its constructs; declarations that live at the context level (not inside an
@@ -255,6 +423,16 @@
 
 .koi-agg {
   margin-bottom: var(--koi-space-2);
+}
+
+/* Roving-tabindex focus lands on the aggregate treeitem (the container); ring just its HEAD row, not the
+   whole nested block, so the focus indicator reads as "this aggregate row" (WCAG 2.4.7). */
+.koi-agg:focus-visible {
+  outline: none;
+}
+.koi-agg:focus-visible > .koi-agg-head {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: -2px;
 }
 
 .koi-agg-head,
@@ -292,6 +470,13 @@
 .koi-tactical-leaf-row {
   display: flex;
   align-items: center;
+}
+
+/* Roving-tabindex focus lands on the leaf row (the treeitem); ring the whole single-line row. */
+.koi-tactical-leaf-row:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: -2px;
+  border-radius: var(--koi-radius-xs);
 }
 
 .koi-tactical-leaf-row .koi-tactical-leaf {

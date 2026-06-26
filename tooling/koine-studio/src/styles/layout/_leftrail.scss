@@ -242,3 +242,26 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* --- Domain navigator: the drill / zoom transition (#453) ---
+   Changing altitude (strategic ⇄ tactical) swaps the navigator body to a freshly-built level; the
+   controller tags that level `.koi-domain-enter` so it plays a brief zoom-in entrance — a spatial cue
+   that you moved between DDD altitudes. Only an altitude change is tagged, never a filter keystroke, so
+   typing doesn't flicker. The animation is GATED behind `prefers-reduced-motion: no-preference`: a user
+   who asked for reduced motion gets an instant, motion-free swap (WCAG 2.3.3). */
+@media (prefers-reduced-motion: no-preference) {
+  .koi-domain-enter {
+    animation: koi-domain-drill var(--koi-dur-fast) ease both;
+  }
+}
+
+@keyframes koi-domain-drill {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
