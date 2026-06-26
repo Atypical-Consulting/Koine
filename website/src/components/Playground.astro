@@ -22,6 +22,7 @@
       <button data-mobile="output" type="button">Output</button>
     </div>
     <span class="koi-status" data-kind="busy">loading compiler...</span>
+    <button class="koi-stop" type="button" title="Stop a runaway compile and restart the compiler" hidden>Stop</button>
     <span class="koi-version" title="Compiler version"></span>
     <div class="koi-bar-right">
       <button class="koi-copy" type="button" title="Copy the current file">Copy</button>
@@ -180,6 +181,30 @@
     50% {
       opacity: 1;
     }
+  }
+
+  /* Stop affordance — shown only while a compile is in flight (#353). Filled danger button: #fff on
+     #c0392b is ~5.5:1, meeting WCAG 2.1 AA (>=4.5:1) for normal-size text in both light and dark themes
+     (the background is theme-independent). An outline red-on-surface variant fell below AA on the dark
+     theme, so the control is filled. */
+  .koi-stop {
+    appearance: none;
+    font: 600 0.76rem/1 var(--koi-font-mono);
+    padding: 0.32rem 0.6rem;
+    border-radius: var(--koi-radius-sm);
+    border: 1px solid #c0392b;
+    background: #c0392b;
+    color: #fff;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .koi-stop:hover {
+    background: #a93226;
+    border-color: #a93226;
+  }
+  .koi-stop[hidden] {
+    display: none;
   }
 
   .koi-bar-right {

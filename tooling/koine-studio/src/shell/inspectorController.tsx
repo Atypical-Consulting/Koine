@@ -71,6 +71,7 @@ import { renderOverviewCounts, type ModelOutlineHandlers } from '@/model/modelOu
 import { buildInspectorElement, renderRules, type InspectorElement, type InspectorHandlers } from '@/model/inspector';
 import { buildModelIndex, lookupElement, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
+import { SourceControlPanel } from '@/model/SourceControlPanel';
 import { ContextBreadcrumb } from '@/model/ContextBreadcrumb';
 import { ModelOutlinePanel } from '@/model/ModelOutlinePanel';
 import { EventsPanel } from '@/model/EventsPanel';
@@ -708,6 +709,24 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   let notesMount: HTMLElement | null = null;
   let adrLoaded = false;
   let notesLoaded = false;
+
+  // --- Source Control (git) right-rail panel (#272) -------------------------
+  // Folder-derived like the docs pages: lazily mounted on the first Source-Control tab open, re-fetched
+  // on every re-open (a `refreshNonce` bump — Preact reuses the mounted instance, so the commit-message
+  // draft survives the in-place refresh), and re-mounted against the new folder on a workspace switch.
+  // The panel self-gates on `platform.canUseGit` and catches a non-repo `gitStatus` reject, so the
+  // controller can mount it unconditionally and let it paint the right empty state.
+  const sourceControlRightView = el('rview-source-control');
+  let sourceControlLoaded = false;
+  let sourceControlRefresh = 0;
+  function loadSourceControl(): void {
+    if (sourceControlLoaded) sourceControlRefresh += 1; // a re-open re-fetches; first mount loads on its own
+    sourceControlLoaded = true;
+    render(
+      <SourceControlPanel git={platform} folderToken={deps.folderRootToken()} refreshNonce={sourceControlRefresh} />,
+      sourceControlRightView,
+    );
+  }
   const docsFail = (verb: string) => (e: unknown) => deps.setStatus(`Could not ${verb}: ${String(e)}`, 'error');
 
   // One handlers object the two pages share: each create resets only its OWN page's loaded flag and
@@ -1042,6 +1061,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function invalidateDocsPanel(): void {
     adrLoaded = false;
     notesLoaded = false;
+    // Source Control is folder-derived too — drop its loaded gate so the next open re-mounts it against
+    // the new folder, and re-mount immediately when it's the open right-rail view (its `gitStatus` is for
+    // the new workspace's repository). This runs on a folder open / root-set change; a `.koi` save's
+    // refresh is covered by the refresh-on-reopen (selectRightView) plus the panel's own Refresh button.
+    sourceControlLoaded = false;
+    if (appStore.getState().right === 'source-control') loadSourceControl();
   }
 
   // Diagrams are rendered with a theme-matched Mermaid palette; re-render on a theme flip. Mark the
@@ -1274,11 +1299,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     props: inspectorHost,
     rules: el('rview-rules'),
     notes: el('rview-notes'),
+    'source-control': sourceControlRightView,
   };
   function selectRightView(view: RightView): void {
     appStore.getState().setRight(view);
     for (const t of rightTabs) t.setAttribute('aria-selected', String(t.dataset.rview === view));
     for (const [key, node] of Object.entries(rightViews)) node.hidden = key !== view;
+    // Source Control is lazily mounted + folder-derived (#272): paint it on first open and re-fetch git
+    // status on every re-open (so a save / external `git` since the last view is reflected — the panel
+    // itself owns the in-place refresh). The canUseGit gate + the non-repo empty state live in the panel.
+    if (view === 'source-control') loadSourceControl();
   }
   for (const t of rightTabs) {
     t.addEventListener('click', () => selectRightView(t.dataset.rview as RightView));
