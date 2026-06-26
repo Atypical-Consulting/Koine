@@ -321,6 +321,33 @@ public class R17GbnfExportTests
             .ShouldBeFalse("an unbalanced/truncated program must be rejected");
     }
 
+    /// <summary>
+    /// The recogniser interprets the GBNF by recursive descent, and the exported grammar is recursive
+    /// (<c>primary ::= … | "(" ws expression ws ")"</c>), so input nested arbitrarily deep would recurse
+    /// once per nesting level. Without a bound that is an unrecoverable
+    /// <see cref="StackOverflowException"/> — it aborts the whole test host instead of rejecting the
+    /// input. A test recogniser must reject pathological input cleanly, so <see cref="GbnfMatcher"/> caps
+    /// its recursion depth and returns <em>no-match</em> once the bound is exceeded.
+    /// </summary>
+    [Fact]
+    public void Exported_grammar_rejects_pathologically_deep_input_instead_of_overflowing()
+    {
+        string gbnf = GbnfExporter.Export();
+
+        // A member default value whose expression is tens of thousands of nested parentheses: every
+        // token is valid, so the matcher reaches the recursive `primary` paren rule and would recurse
+        // once per level. Far past anything a real `templates/**` model nests.
+        const int depth = 50_000;
+        string deeplyNested =
+            "context C { value V { x: Int = " +
+            new string('(', depth) + "1" + new string(')', depth) +
+            " } }";
+
+        // Must terminate with a clean reject (the depth guard fired), never a StackOverflow crash.
+        GbnfMatcher.Accepts(gbnf, deeplyNested)
+            .ShouldBeFalse("input nested past the matcher's depth bound must be rejected, not overflow the stack");
+    }
+
     private static IEnumerable<string> RuleReferences(string body)
     {
         var stripped = new StringBuilder();

@@ -43,12 +43,24 @@ internal static class GbnfMatcher
         }
 
         var run = new Run(grammar, tokens);
-        return run.Match(new Ref("root"), 0).Contains(tokens.Count);
+        return run.Match(new Ref("root"), 0, 0).Contains(tokens.Count);
     }
 
     /// <summary>One recognition pass over a fixed token list, carrying the per-pass memo table.</summary>
     private sealed class Run
     {
+        /// <summary>
+        /// Caps the recogniser's recursion depth. The exported GBNF is recursive
+        /// (<c>primary ::= … | "(" ws expression ws ")"</c>), so input nested N levels deep recurses N
+        /// times; without a bound, pathological input overflows the stack and aborts the whole test host
+        /// instead of being rejected. The deepest a real <c>templates/**</c> model drives the matcher is
+        /// 99 levels (pizzeria/ordering.koi), while the recogniser empirically overflows the test
+        /// thread's ~1 MB stack near depth ~2000. 500 sits between the two — ~5× over the deepest real
+        /// template, ~4× below the overflow point — so legitimate models always pass and anything past
+        /// the bound is rejected as no-match rather than crashing.
+        /// </summary>
+        private const int MaxDepth = 500;
+
         private readonly GbnfGrammar _grammar;
         private readonly IReadOnlyList<KoineToken> _tokens;
         private readonly Dictionary<(string, int), HashSet<int>> _memo = new();
@@ -61,8 +73,14 @@ internal static class GbnfMatcher
         }
 
         /// <summary>The set of token indices at which <paramref name="node"/> can finish from <paramref name="pos"/>.</summary>
-        public HashSet<int> Match(Node node, int pos)
+        public HashSet<int> Match(Node node, int pos, int depth)
         {
+            if (depth > MaxDepth)
+            {
+                // Past the depth bound: reject cleanly (no-match) rather than recursing into a stack overflow.
+                return new HashSet<int>();
+            }
+
             switch (node)
             {
                 case Lit lit:
@@ -71,7 +89,7 @@ internal static class GbnfMatcher
                         : new HashSet<int>();
 
                 case Ref r:
-                    return MatchRef(r.Name, pos);
+                    return MatchRef(r.Name, pos, depth);
 
                 case Seq seq:
                     {
@@ -81,7 +99,7 @@ internal static class GbnfMatcher
                             var next = new HashSet<int>();
                             foreach (int p in cur)
                             {
-                                next.UnionWith(Match(item, p));
+                                next.UnionWith(Match(item, p, depth + 1));
                             }
 
                             cur = next;
@@ -99,7 +117,7 @@ internal static class GbnfMatcher
                         var res = new HashSet<int>();
                         foreach (Node item in alt.Items)
                         {
-                            res.UnionWith(Match(item, pos));
+                            res.UnionWith(Match(item, pos, depth + 1));
                         }
 
                         return res;
@@ -108,15 +126,15 @@ internal static class GbnfMatcher
                 case Opt opt:
                     {
                         var res = new HashSet<int> { pos };
-                        res.UnionWith(Match(opt.Item, pos));
+                        res.UnionWith(Match(opt.Item, pos, depth + 1));
                         return res;
                     }
 
                 case Star star:
-                    return Closure(star.Item, new HashSet<int> { pos });
+                    return Closure(star.Item, new HashSet<int> { pos }, depth);
 
                 case Plus plus:
-                    return Closure(plus.Item, Match(plus.Item, pos));
+                    return Closure(plus.Item, Match(plus.Item, pos, depth + 1), depth);
 
                 default:
                     throw new InvalidOperationException($"unknown node {node.GetType().Name}");
@@ -124,14 +142,14 @@ internal static class GbnfMatcher
         }
 
         /// <summary>Reflexive-transitive reachable end positions from <paramref name="seed"/> by repeating <paramref name="item"/>.</summary>
-        private HashSet<int> Closure(Node item, HashSet<int> seed)
+        private HashSet<int> Closure(Node item, HashSet<int> seed, int depth)
         {
             var reach = new HashSet<int>(seed);
             var work = new Stack<int>(seed);
             while (work.Count > 0)
             {
                 int p = work.Pop();
-                foreach (int q in Match(item, p))
+                foreach (int q in Match(item, p, depth + 1))
                 {
                     if (reach.Add(q))
                     {
@@ -143,7 +161,7 @@ internal static class GbnfMatcher
             return reach;
         }
 
-        private HashSet<int> MatchRef(string name, int pos)
+        private HashSet<int> MatchRef(string name, int pos, int depth)
         {
             // The six lexer-terminal rules are matched by token kind, not by expanding their
             // char-class bodies; `ws` matches the empty sequence at any position.
@@ -175,7 +193,7 @@ internal static class GbnfMatcher
                 return new HashSet<int>();
             }
 
-            HashSet<int> result = Match(_grammar.Rule(name), pos);
+            HashSet<int> result = Match(_grammar.Rule(name), pos, depth + 1);
             _inProgress.Remove(key);
             _memo[key] = result;
             return result;
