@@ -871,4 +871,51 @@ describe('explorer', () => {
 
     expect(cb.onNewFile).toHaveBeenCalledWith('/home/me/billing', 'extra.koi');
   });
+
+  it("toolbar New File on the primary root mounts the inline-create row INSIDE that root's group (multi-root)", () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.renderRoots([
+      { root: '/home/me/sales', entries: sampleTree() },
+      { root: '/home/me/billing', entries: secondTree() },
+    ]);
+
+    // The toolbar "New file" button targets the PRIMARY (first) root.
+    ex.el.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click();
+
+    const createRow = ex.el.querySelector<HTMLElement>('.explorer-create');
+    expect(createRow).not.toBeNull();
+    const createLi = createRow!.closest('li.explorer-create-li')!;
+
+    // The transient row must live inside the PRIMARY group's items list — not detached above it as a
+    // direct child of <ul.explorer-tree> (the multi-root mis-mount this fixes).
+    const primaryItems = ex.el.querySelector<HTMLElement>(
+      '.explorer-group[data-root="/home/me/sales"] > .explorer-group-items',
+    );
+    expect(primaryItems).not.toBeNull();
+    expect(createLi.parentElement).toBe(primaryItems);
+
+    const tree = ex.el.querySelector('ul[role="tree"]')!;
+    expect(Array.from(tree.children)).not.toContain(createLi);
+
+    // The created file still lands under the primary root token.
+    commitCreate(ex, 'catalog.koi');
+    expect(cb.onNewFile).toHaveBeenCalledWith('/home/me/sales', 'catalog.koi');
+  });
+
+  it('toolbar New File in single-root mode mounts the create row directly in the tree (no group)', () => {
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.renderRoots([{ root: 'ROOT', entries: sampleTree() }]);
+
+    ex.el.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click();
+
+    // Single-root render is headerless (no group wrapper), so the create row stays a direct tree child.
+    expect(ex.el.querySelector('.explorer-group')).toBeNull();
+    const createLi = ex.el.querySelector<HTMLElement>('.explorer-create')!.closest('li.explorer-create-li')!;
+    const tree = ex.el.querySelector('ul[role="tree"]')!;
+    expect(createLi.parentElement).toBe(tree);
+  });
 });
