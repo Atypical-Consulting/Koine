@@ -114,11 +114,13 @@ const APP_HTML = `
           <button type="button" class="rtab" id="rtab-props" role="tab" data-rview="props" aria-selected="true">Properties</button>
           <button type="button" class="rtab" id="rtab-rules" role="tab" data-rview="rules" aria-selected="false">Rules</button>
           <button type="button" class="rtab" id="rtab-notes" role="tab" data-rview="notes" aria-selected="false">Notes</button>
+          <button type="button" class="rtab" id="rtab-source-control" role="tab" data-rview="source-control" aria-selected="false">Source Control</button>
         </div>
         <div id="right-body">
           <div id="inspector-host" class="rview" role="tabpanel"></div>
           <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden></div>
           <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden></div>
+          <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
         </div>
       </aside>
     </main>

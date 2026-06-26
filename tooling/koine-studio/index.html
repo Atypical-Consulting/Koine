@@ -274,6 +274,7 @@
             <button type="button" class="rtab" id="rtab-props" role="tab" data-rview="props" aria-selected="true">Properties</button>
             <button type="button" class="rtab" id="rtab-rules" role="tab" data-rview="rules" aria-selected="false">Rules</button>
             <button type="button" class="rtab" id="rtab-notes" role="tab" data-rview="notes" aria-selected="false">Notes</button>
+            <button type="button" class="rtab" id="rtab-source-control" role="tab" data-rview="source-control" aria-selected="false">Source Control</button>
           </div>
           <div id="right-body">
             <div id="inspector-host" class="rview" role="tabpanel"></div>
@@ -293,6 +294,15 @@
                   keep model-wide notes in <strong>Documentation → Notes</strong>. Per-element notes are
                   planned for a future update.
                 </p>
+              </div>
+            </div>
+            <!-- The Source Control panel (#272) is painted by inspectorController on the first tab open
+                 (SourceControlPanel mounts the git surface). The static content below is a pre-hydration
+                 fallback, replaced once the controller hydrates. -->
+            <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden>
+              <div class="koi-rview-empty">
+                <h3 class="koi-rview-empty-title">Source control</h3>
+                <p class="muted">Loading source control…</p>
               </div>
             </div>
           </div>

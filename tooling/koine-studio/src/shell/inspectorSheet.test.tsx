@@ -273,6 +273,7 @@ const APP_HTML = `
           <div id="inspector-host" class="rview" role="tabpanel"></div>
           <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden></div>
           <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden></div>
+          <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
         </div>
       </aside>
     </main>

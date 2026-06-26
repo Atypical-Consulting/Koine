@@ -85,6 +85,45 @@ export interface TerminalTransport {
   stop(): Promise<void>;
 }
 
+/**
+ * One path reported by `git status`, modeled per (file, area): a file changed in BOTH the index and
+ * the working tree appears TWICE — once with `staged: true` (its staged change) and once with
+ * `staged: false` (its unstaged change). The Source Control panel (issue #272) can therefore group
+ * entries into "Staged Changes" / "Changes" by the flag alone, with no further parsing.
+ */
+export interface GitFile {
+  /** Path relative to the workspace folder, forward-slashed (same scheme as {@link KoiFile.relPath}). */
+  relPath: string;
+  /** True when the entry sits in the index (the staged area); false for a worktree/untracked change. */
+  staged: boolean;
+  /** The kind of change git reports for this (file, area). `untracked` only ever appears unstaged. */
+  status: 'modified' | 'added' | 'deleted' | 'renamed' | 'copied' | 'untracked' | 'conflicted';
+}
+
+/** A snapshot of `git status` for a workspace folder: the current branch plus its changed paths. */
+export interface GitStatus {
+  /** The current branch name, or a detached-HEAD marker (e.g. `(detached)` or a short SHA). */
+  branch: string;
+  /** Every changed path — staged entries, unstaged entries, and untracked files (see {@link GitFile}). */
+  files: GitFile[];
+}
+
+/**
+ * One commit in `git log` — the SAME field shape as {@link ChangeEntry} from `gitHistory.ts`, so the
+ * commit-history UI can render either source uniformly. {@link Platform.gitLog} returns these newest
+ * first.
+ */
+export interface GitLogEntry {
+  /** The full commit SHA. */
+  sha: string;
+  /** The author name. */
+  author: string;
+  /** The author date as a strict ISO-8601 string; the renderer formats it for display. */
+  date: string;
+  /** The commit subject line. */
+  message: string;
+}
+
 /** The host environment the studio runs in, and its capabilities. */
 export interface Platform {
   readonly kind: 'tauri' | 'browser';
@@ -224,6 +263,80 @@ export interface Platform {
    * missing, the file untracked), so the caller simply hides the section. Newest commit first.
    */
   gitLogForRange(path: string, startLine: number, endLine: number): Promise<ChangeEntry[] | null>;
+
+  // --- source control (git) --------------------------------------------------
+  // A capability-gated surface for the Source Control panel (issue #272), shaped like the terminal one:
+  // `canUseGit` gates the whole block, and every method takes the workspace `folderToken` (the same
+  // opaque folder token the file ops use) as its first argument. Only the desktop host can run a real
+  // `git`; the browser tab has none, so it reports `canUseGit = false` and every method below rejects.
+  // **Callers MUST check `canUseGit` before calling any `git*` method.** Unlike {@link gitLogForRange}
+  // (always present, returns `null` when history is unavailable), these methods return their data type
+  // directly and the browser stub REJECTS — asynchronously, never a synchronous throw, never a console
+  // message — so a missed guard surfaces as a handled rejection rather than fake "clean" data. Every
+  // `relPath`/`relPaths` is forward-slashed and relative to `folderToken`.
+
+  /**
+   * Whether this host can run git for the Source Control panel. True on the Tauri desktop (it shells
+   * out to a real `git`); false in the browser, which has no git — there the panel renders a graceful
+   * "desktop only" placeholder. Gates every `git*` method below: callers guard on this flag first.
+   */
+  readonly canUseGit: boolean;
+
+  /**
+   * The `git status` of the workspace `folderToken`: the current branch and its changed paths — staged,
+   * unstaged, and untracked (see {@link GitFile}/{@link GitStatus}). Desktop only; the browser stub
+   * rejects. Callers must check {@link canUseGit} first.
+   */
+  gitStatus(folderToken: string): Promise<GitStatus>;
+
+  /**
+   * The unified diff for one path under the workspace folder: the STAGED diff (index vs HEAD) when
+   * `staged` is true, otherwise the WORKTREE diff (working tree vs index). Resolves the patch text, or
+   * the empty string when there is no diff. Desktop only; the browser stub rejects. Callers must check
+   * {@link canUseGit} first.
+   */
+  gitDiff(folderToken: string, relPath: string, staged: boolean): Promise<string>;
+
+  /**
+   * Stage (`git add`) the given paths under the workspace folder, moving each worktree/untracked change
+   * into the index. Desktop only; the browser stub rejects. Callers must check {@link canUseGit} first.
+   */
+  gitStage(folderToken: string, relPaths: string[]): Promise<void>;
+
+  /**
+   * Unstage (`git restore --staged`) the given paths under the workspace folder, moving each change back
+   * out of the index into the working tree. Desktop only; the browser stub rejects. Callers must check
+   * {@link canUseGit} first.
+   */
+  gitUnstage(folderToken: string, relPaths: string[]): Promise<void>;
+
+  /**
+   * Commit the currently-staged changes of the workspace folder with `message` (`git commit -m`).
+   * Resolves once the commit is recorded; rejects when nothing is staged or git fails. Desktop only;
+   * the browser stub rejects. Callers must check {@link canUseGit} first.
+   */
+  gitCommit(folderToken: string, message: string): Promise<void>;
+
+  /**
+   * The local branch names of the workspace folder. The currently checked-out branch is reported by
+   * {@link gitStatus} (its `branch` field), so the picker can mark it without a second shape. Desktop
+   * only; the browser stub rejects. Callers must check {@link canUseGit} first.
+   */
+  gitBranches(folderToken: string): Promise<string[]>;
+
+  /**
+   * Check out an existing local branch of the workspace folder (`git checkout <branch>`). Resolves once
+   * switched; rejects on an unknown branch or a checkout git refuses (e.g. conflicting local changes).
+   * Desktop only; the browser stub rejects. Callers must check {@link canUseGit} first.
+   */
+  gitCheckout(folderToken: string, branch: string): Promise<void>;
+
+  /**
+   * The commit history of the workspace folder, newest first — the whole repo's log, or only the commits
+   * touching `relPath` when it is given. Returns {@link GitLogEntry}s (the {@link ChangeEntry} field
+   * shape). Desktop only; the browser stub rejects. Callers must check {@link canUseGit} first.
+   */
+  gitLog(folderToken: string, relPath?: string): Promise<GitLogEntry[]>;
 
   /** Read a file's UTF-8 text by its token. */
   readTextFile(path: string): Promise<string>;

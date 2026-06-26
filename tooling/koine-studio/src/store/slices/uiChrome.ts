@@ -4,7 +4,7 @@ export type CenterView = 'visual' | 'technical' | 'docs' | 'assistant';
 export type TechView = 'editor' | 'preview' | 'check' | 'scenarios';
 export type DocsView = 'glossary' | 'adr' | 'notes';
 export type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap' | 'terminal' | 'review';
-export type RightView = 'props' | 'rules' | 'notes';
+export type RightView = 'props' | 'rules' | 'notes' | 'source-control';
 
 /** The four zones the narrow-viewport (mobile) shell shows one at a time, switched by the bottom
  *  MobileZoneBar. Code → #center + selectCenter('technical'); Diagram → #center + selectCenter('visual');
