@@ -922,6 +922,62 @@ describe('multi-file change set (agentic edits)', () => {
     )!;
     expect(eventsRow.querySelector('.koi-changeset-drift')).not.toBeNull();
   });
+
+  // #473 (Task 3): both guards active on the same panel/turn driver. A new send supersedes the prior
+  // panel (across-turn staleness) AND the still-live panel skips a file edited since SEND (within-turn
+  // staleness) — the two guards cover disjoint windows and coexist.
+  test('both guards together: a new send supersedes the first panel; the second skips a drifted file', async () => {
+    let ws: Record<string, string> = { 'a.koi': 'context A {}', 'b.koi': 'context B {}' };
+    let turn = 0;
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      turn++;
+      if (turn === 1) {
+        req.editSession?.stage('a.koi', 'context A { /* t1 */ }');
+      } else {
+        req.editSession?.stage('a.koi', 'context A { /* t2 */ }');
+        req.editSession?.stage('b.koi', 'context B { /* t2 */ }');
+      }
+      req.onText('staged');
+      return 'staged';
+    });
+    const onApplyChangeSet = vi.fn(
+      async (_files: { relPath: string; body: string; isNew: boolean }[]) => ({ failed: [] as string[] }),
+    );
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ws,
+        runEditTool: vi.fn(async () => 'ok'),
+        onApplyChangeSet,
+      }),
+    );
+
+    // Turn 1 stages a change set.
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelectorAll('.koi-changeset').length).toBe(1));
+    const firstPanel = container.querySelector('.koi-changeset')!;
+    const firstApply = firstPanel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+
+    // Guard A (across-turn): a second send supersedes turn 1's panel.
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelectorAll('.koi-changeset').length).toBe(2));
+    expect(firstApply.disabled).toBe(true);
+    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+
+    // Guard B (within-turn): a concurrent edit drifts a.koi before turn 2's panel is applied.
+    ws = { ...ws, 'a.koi': 'context A { /* user edit */ }' };
+    const secondPanel = container.querySelectorAll('.koi-changeset')[1];
+    const secondApply = secondPanel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    secondApply.click();
+    await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+
+    // The drifted a.koi was skipped; only the clean b.koi was written.
+    const written = onApplyChangeSet.mock.calls[0][0].map((f) => f.relPath);
+    expect(written).toEqual(['b.koi']);
+    const aRow = [...secondPanel.querySelectorAll('.koi-changeset-file')].find((r) => r.textContent?.includes('a.koi'))!;
+    expect(aRow.querySelector('.koi-changeset-drift')).not.toBeNull();
+  });
 });
 
 // --- apply-gate re-validation at the legacy entry points (#444) -------------------------------
