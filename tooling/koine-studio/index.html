@@ -81,6 +81,21 @@
         <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
 
         <div class="toolbar-right">
+          <!-- Service-worker update affordance (#443). Hidden until koine-studio-sw.js detects a newly
+               deployed build, then revealed by connectUpdateAffordance (src/shell/serviceWorkerUpdate.ts):
+               a non-blocking "reload to update" so an installed PWA never gets stuck on a stale offline
+               cache. Reuses the install affordance's classes (focusable buttons, AA contrast); the "×"
+               hides it for the session. -->
+          <div id="sw-update" class="install-affordance" hidden>
+            <button type="button" id="btn-sw-reload" class="install-btn" aria-label="Reload to update Koine Studio" title="A new version is available — reload to update">
+              <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.4V5h-2.6" /></svg>
+              <span class="install-btn-label">Update</span>
+            </button>
+            <button type="button" id="btn-sw-dismiss" class="install-dismiss icon-btn" aria-label="Dismiss update notice" title="Dismiss">
+              <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" /></svg>
+            </button>
+            <span class="tb-divider" aria-hidden="true"></span>
+          </div>
           <!-- Dismissible, event-gated PWA install affordance (#442). Hidden until the browser fires
                beforeinstallprompt (Chromium only; never on iOS/Safari or when already installed), then
                revealed by connectInstallAffordance (src/shell/pwaInstall.ts). The "×" persists a

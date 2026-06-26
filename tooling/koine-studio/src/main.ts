@@ -14,6 +14,11 @@ import { hasPersistedWorkspace, markWorkspaceOpened } from '@/shell/workspaceFla
 import { setStartIntent, type StartIntent } from '@/shell/bootIntent';
 import { readModelFromHash } from '@/export/share';
 import { connectInstallAffordance, createInstallController } from '@/shell/pwaInstall';
+import {
+  connectUpdateAffordance,
+  createUpdateController,
+  registerStudioServiceWorker,
+} from '@/shell/serviceWorkerUpdate';
 
 // Home actions: each queues what the editor should do on its next boot (the start-intent), remembers a
 // workspace was opened (so the next cold load returns to the editor), then navigates to the editor —
@@ -67,6 +72,26 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
           dismissButton: installDismiss as HTMLButtonElement,
         })
       : null;
+
+  // Service-worker offline support + update flow (#443): register koine-studio-sw.js (guarded for
+  // browsers without the API; skipped under the Tauri desktop shell), then reveal a dismissible
+  // "reload to update" affordance when a new build is deployed so an installed PWA never gets stuck on
+  // a stale offline cache. Wired here at boot for the same reason as the install affordance: the
+  // toolbar nodes live inside #app (present but hidden until the editor route) and resolve now, and
+  // registration shouldn't wait on the lazy editor init().
+  const swUpdateRoot = document.getElementById('sw-update');
+  const swReloadButton = document.getElementById('btn-sw-reload');
+  const swDismissButton = document.getElementById('btn-sw-dismiss');
+  const updateController = createUpdateController();
+  const disposeSwUpdate =
+    swUpdateRoot && swReloadButton && swDismissButton
+      ? connectUpdateAffordance(updateController, {
+          root: swUpdateRoot,
+          reloadButton: swReloadButton as HTMLButtonElement,
+          dismissButton: swDismissButton as HTMLButtonElement,
+        })
+      : null;
+  registerStudioServiceWorker({ onUpdateReady: () => updateController.markUpdateReady() });
 
   // A shared playground link (`#model=…`) always opens the editor; otherwise the hash and the
   // synchronous "a workspace was open" flag decide. Resolved before any paint.
@@ -139,6 +164,7 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
     ideDispose?.();
     home?.destroy();
     disposeInstall?.();
+    disposeSwUpdate?.();
   };
 }
 
