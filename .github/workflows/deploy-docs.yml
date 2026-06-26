@@ -73,20 +73,50 @@ jobs:
       - name: Install wasm workloads
         run: dotnet workload install wasm-tools wasm-experimental
 
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          # Astro 7 / Starlight require Node >= 22.12.
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
       # NOTE: no explicit wasm-publish step here on purpose. The Astro build below runs the website
       # `prebuild` chain (npm run build → prebuild → scripts/build-wasm.mjs), which publishes the AOT
       # bundle into website/public/koine-wasm/; build-studio.mjs then drives the studio's prebuild:web
       # → its own build-wasm.mjs, which REUSES that bundle via the `bundleIsFresh` guard (issue #342).
       # Net: the AOT bundle is published exactly once per deploy. Don't re-add an explicit publish
       # step — the guard would just skip it.
+      #
+      # (This step replaced `withastro/action@v6` so the boot smoke-test below can run BETWEEN the
+      # build and the Pages artifact upload — the action does build+upload in one shot, leaving no
+      # seam to gate on. The explicit npm ci + build + upload-pages-artifact chain is equivalent.)
       - name: Build site
-        # withastro/action installs deps (auto-detects the package manager), runs the build,
-        # and uploads the Pages artifact from website/dist.
-        uses: withastro/action@v6
+        working-directory: ./website
+        run: |
+          npm ci
+          npm run build
+
+      # The compiler worker must actually boot in a real browser before we publish. The website's
+      # vitest suite MOCKS the worker, so without this gate a worker-boot regression ships green — which
+      # is exactly how #492 reached production ("Koine worker timed out after 30s": the #357/#358
+      # channel-clobber un-ported to the website copy). This closes the "no browser-boot smoke test
+      # gates the deploy" gap — the website equivalent of Studio's #358 smoke gate (koine-studio.yml).
+      # Only Chromium is needed; --with-deps installs its Linux system libs.
+      - name: Install Playwright Chromium (boot smoke-test)
+        working-directory: ./website
+        run: npx playwright install --with-deps chromium
+
+      - name: Boot smoke-test — the real Playground compiler boots in a browser (#492)
+        working-directory: ./website
+        run: npm run test:browser
+
+      # Upload the Pages artifact from website/dist ONLY after the smoke test passes, so a worker that
+      # can't boot can never be published. (The deploy job below consumes this `github-pages` artifact.)
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          path: ./website
-          # Astro 6 / Starlight require Node >= 22.12 (the action defaults to 20).
-          node-version: 22
+          path: ./website/dist
 
   deploy:
     needs: build
