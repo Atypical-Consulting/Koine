@@ -90,11 +90,14 @@
               <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.6v6.8M5.2 6.8 8 9.6l2.8-2.8M3.4 12.6h9.2" /></svg>
               <span class="install-btn-label">Install</span>
             </button>
-            <button type="button" id="btn-install-dismiss" class="install-dismiss" aria-label="Dismiss install prompt" title="Dismiss">
+            <button type="button" id="btn-install-dismiss" class="install-dismiss icon-btn" aria-label="Dismiss install prompt" title="Dismiss">
               <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" /></svg>
             </button>
+            <!-- Trailing divider lives INSIDE the affordance so it hides together with it; otherwise it
+                 would orphan as a leading divider for the majority of users (Safari/iOS, already
+                 installed, or dismissed), where the affordance is `display:none`. -->
+            <span class="tb-divider" aria-hidden="true"></span>
           </div>
-          <span class="tb-divider" aria-hidden="true"></span>
           <button type="button" id="palette-hint" class="palette-hint" title="Command palette (⌘K)" aria-label="Open command palette"><span aria-hidden="true">⌘K</span></button>
           <span class="tb-divider" aria-hidden="true"></span>
           <button type="button" id="btn-theme" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">

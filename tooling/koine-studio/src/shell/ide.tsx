@@ -19,7 +19,6 @@ import {
 import { createEditorSession } from '@/shell/editorSession';
 import { createInspectorController } from '@/shell/inspectorController';
 import { leftRailMarkup } from '@/shell/leftRail';
-import { connectInstallAffordance, createInstallController } from '@/shell/pwaInstall';
 import { openInspectorSheet } from '@/shell/inspectorSheet';
 import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
@@ -2078,17 +2077,6 @@ export function init(): () => void {
   if (!platform.canSaveProjects) saveProjectBtn.hidden = true;
   el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
   el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => prefs.open());
-
-  // PWA install affordance (#442): a dismissible, event-gated in-app Install button. The controller
-  // captures the browser's beforeinstallprompt (preventing the native mini-infobar) and stashes it;
-  // connectInstallAffordance toggles the toolbar affordance from canInstall() and routes the
-  // Install/dismiss clicks. A no-op where the event never fires (Safari/iOS, already installed, or a
-  // prior dismissal persisted in localStorage) — the affordance simply stays hidden.
-  connectInstallAffordance(createInstallController(), {
-    root: el('install-affordance'),
-    installButton: el<HTMLButtonElement>('btn-install'),
-    dismissButton: el<HTMLButtonElement>('btn-install-dismiss'),
-  });
 
   // Format the active document via the LSP and apply the edits (shared by the palette command
   // and format-on-save). Degrades silently if the request fails.

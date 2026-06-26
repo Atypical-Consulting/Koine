@@ -99,9 +99,16 @@ export function createInstallController(opts: { storage?: InstallStorage } = {})
     // Single-use: drop the stash BEFORE awaiting so it can never be prompted twice.
     deferred = null;
     notify();
-    await event.prompt();
-    const { outcome } = await event.userChoice;
-    return outcome;
+    try {
+      await event.prompt();
+      const { outcome } = await event.userChoice;
+      return outcome;
+    } catch {
+      // prompt()/userChoice can reject (NotAllowedError / InvalidStateError if the browser declines or
+      // the install criteria changed mid-flight). Swallow it: the stash is already cleared and the
+      // affordance hidden, so report "unavailable" rather than leaking an unhandled rejection.
+      return 'unavailable';
+    }
   }
 
   function dismiss(): void {

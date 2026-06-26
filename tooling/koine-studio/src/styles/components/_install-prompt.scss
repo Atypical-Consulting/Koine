@@ -1,13 +1,17 @@
 // Dismissible in-app PWA install affordance (#442). Lives in the toolbar's right zone; revealed only
 // when the browser fires `beforeinstallprompt` (connectInstallAffordance toggles the container's
-// `hidden`). Two controls: a primary "Install" pill and a compact "×" dismiss. Both meet the mobile
-// a11y bar from #422 — a >=44x44 CSS px tap target (via an invisible centred hit area so the visible
-// chrome stays toolbar-compact), WCAG 2.1 AA contrast in light + dark, and a visible focus ring.
+// `hidden`). Two controls: a primary "Install" pill and a compact "×" dismiss (the dismiss reuses the
+// toolbar's shared `.icon-btn`). Both meet the mobile a11y bar from #422 — a >=44x44 CSS px tap target
+// (via an invisible centred hit area so the visible chrome stays toolbar-compact), WCAG 2.1 AA contrast
+// in light + dark, and a visible focus ring.
 
 .install-affordance {
   display: flex;
   align-items: center;
-  gap: var(--koi-space-0-5, 0.2rem);
+  // Wide enough that the dismiss button's 44px tap overlay (≈7px wider than its 30px box on each side)
+  // cannot reach back over the Install button's edge — otherwise the later-painted dismiss overlay would
+  // capture clicks aimed at Install (a single-shot, persisted action). See the `::after` floor below.
+  gap: var(--koi-space-2);
 
   // connectInstallAffordance toggles this; the flex display above would otherwise outrank the UA
   // `[hidden]` rule and keep it visible.
@@ -17,16 +21,11 @@
 }
 
 // Shared tap-target floor: an invisible, centred overlay guaranteeing a >=44x44px hit area without
-// growing the visible button (so the toolbar height never jumps when the affordance appears).
+// growing the visible button (so the toolbar height never jumps when the affordance appears). Applies to
+// the Install pill and the dismiss (which otherwise inherits its chrome from `.icon-btn`).
 .install-btn,
 .install-dismiss {
   position: relative;
-  cursor: pointer;
-  font-family: var(--koi-font-body);
-  transition:
-    background var(--koi-dur-fast, 0.12s) ease,
-    color var(--koi-dur-fast, 0.12s) ease,
-    border-color var(--koi-dur-fast, 0.12s) ease;
 
   &::after {
     content: '';
@@ -44,21 +43,32 @@
   }
 }
 
-// The primary "Install" pill: accent text on an accent-tinted surface — reads as the install verb while
-// staying lighter than the toolbar's Generate primary. The accent token is theme-tuned for AA contrast.
+// The primary "Install" pill: an accent-bordered, accent-tinted surface with an accent icon — reads as
+// the install verb while staying lighter than the toolbar's Generate primary. The LABEL uses --koi-fg
+// (not the accent) so it clears WCAG 2.1 AA (4.5:1) on the light tint, where accent-coloured text would
+// only reach ~3.2:1; the accent glyph is a graphical object (≥3:1), which it meets.
 .install-btn {
   display: inline-flex;
   align-items: center;
-  gap: var(--koi-space-1, 0.35rem);
+  gap: var(--koi-space-1);
   height: 30px;
-  padding: 0 var(--koi-space-2, 0.6rem);
-  color: var(--koi-accent);
+  padding: 0 var(--koi-space-2);
+  color: var(--koi-fg);
   background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--koi-accent) 45%, transparent);
-  border-radius: var(--koi-radius-sm, 6px);
-  font-size: var(--koi-text-sm, 0.85rem);
+  border-radius: var(--koi-radius-sm);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm);
   font-weight: 600;
   line-height: 1;
+  cursor: pointer;
+  transition:
+    background var(--koi-dur-fast) ease,
+    border-color var(--koi-dur-fast) ease;
+
+  .tb-ico {
+    color: var(--koi-accent);
+  }
 
   &:hover {
     background: color-mix(in srgb, var(--koi-accent) 22%, transparent);
@@ -68,23 +78,4 @@
 
 .install-btn-label {
   white-space: nowrap;
-}
-
-// The "×" dismiss: a compact square ghost, muted until hover — quiet so it never competes with Install.
-.install-dismiss {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  color: var(--koi-muted);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--koi-radius-sm, 6px);
-
-  &:hover {
-    color: var(--koi-fg);
-    background: var(--koi-surface);
-    border-color: var(--koi-line);
-  }
 }

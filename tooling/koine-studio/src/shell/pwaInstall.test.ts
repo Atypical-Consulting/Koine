@@ -73,6 +73,19 @@ describe('createInstallController', () => {
     expect(await c.promptInstall()).toBe('unavailable');
   });
 
+  it('promptInstall() swallows a rejecting prompt() and reports "unavailable" (no unhandled rejection)', async () => {
+    const c = createInstallController({ storage: memStorage() });
+    const rejecting = {
+      preventDefault() {},
+      prompt: () => Promise.reject(new Error('NotAllowedError')),
+      userChoice: Promise.resolve({ outcome: 'accepted', platform: 'web' }),
+    } as unknown as BeforeInstallPromptEvent;
+    c.onBeforeInstallPrompt(rejecting);
+
+    await expect(c.promptInstall()).resolves.toBe('unavailable');
+    expect(c.canInstall()).toBe(false); // single-use stash still cleared
+  });
+
   it('dismiss() persists the flag and keeps canInstall() false thereafter', () => {
     const storage = memStorage();
     const c = createInstallController({ storage });
