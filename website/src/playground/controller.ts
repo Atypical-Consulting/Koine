@@ -9,6 +9,7 @@ import { registerPlaygroundServiceWorker } from './sw-register';
 import { DEFAULT_SAMPLE } from './samples';
 import { makeZip, downloadBlob } from './zip';
 import { encodeCode } from './encode';
+import { basePath } from '../lib/base';
 
 const TARGET_LANG: Record<Target, OutputLang> = {
   csharp: 'csharp',
@@ -282,7 +283,7 @@ export function mountPlayground(root: HTMLElement): void {
   // tab-in before Enter) so it reflects the latest doc no matter how it changed — without
   // re-encoding the whole document on every keystroke.
   if (studioLink) {
-    const base = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '');
+    const base = basePath();
     const update = () => {
       studioLink.href = `${base}/studio/#model=${encodeCode(editor.getDoc())}`;
     };
