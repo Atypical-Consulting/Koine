@@ -779,7 +779,12 @@ internal sealed class RefactorService
     /// Re-indents a verbatim source slice so each line sits at <paramref name="newIndent"/>. The
     /// first line carries no original indentation (the slice starts at field/comment content), so it
     /// is simply prefixed; subsequent lines have up to <paramref name="oldIndentWidth"/> leading
-    /// spaces stripped before the new indent is applied — preserving deeper relative indentation.
+    /// whitespace characters (spaces <b>or</b> tabs) stripped before the new indent is applied —
+    /// preserving deeper relative indentation. Two robustness cases: a tab-indented source has its
+    /// leading tabs stripped (rather than the new space-indent being stacked on a leftover tab), and a
+    /// column-0 declaration (<paramref name="oldIndentWidth"/> == 0, nothing to strip) gets its
+    /// otherwise-flat body nested one level under the keyword so the moved/extracted block still reads
+    /// as a nested body.
     /// </summary>
     private static string Reindent(string slice, int oldIndentWidth, string newIndent)
     {
@@ -793,19 +798,29 @@ internal sealed class RefactorService
             }
 
             var line = lines[i];
+            var nestFlatBody = false;
             if (i > 0)
             {
                 var strip = 0;
-                while (strip < oldIndentWidth && strip < line.Length && line[strip] == ' ')
+                while (strip < oldIndentWidth && strip < line.Length && (line[strip] == ' ' || line[strip] == '\t'))
                 {
                     strip++;
                 }
 
                 line = line[strip..];
+
+                // A column-0 declaration strips nothing, so a body line with no indentation of its own
+                // would land at the keyword's level. Nest it one level deeper; a lone closing brace
+                // stays at the keyword level.
+                nestFlatBody = oldIndentWidth == 0
+                    && line.Length > 0
+                    && line[0] != ' ' && line[0] != '\t'
+                    && line.TrimEnd() != "}";
             }
 
             // Keep a blank line blank (don't emit trailing indentation whitespace).
-            sb.Append(line.Length == 0 ? string.Empty : newIndent + line);
+            var prefix = nestFlatBody ? newIndent + "  " : newIndent;
+            sb.Append(line.Length == 0 ? string.Empty : prefix + line);
         }
 
         return sb.ToString();
