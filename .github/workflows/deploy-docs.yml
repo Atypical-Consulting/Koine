@@ -114,7 +114,7 @@ jobs:
       # Upload the Pages artifact from website/dist ONLY after the smoke test passes, so a worker that
       # can't boot can never be published. (The deploy job below consumes this `github-pages` artifact.)
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: ./website/dist
 
