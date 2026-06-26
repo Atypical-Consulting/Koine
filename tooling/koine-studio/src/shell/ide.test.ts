@@ -12,6 +12,7 @@ import { act } from '@testing-library/preact';
 import { EditorView } from '@codemirror/view';
 import type { FsEntry, GitLogEntry, GitStatus, KoiFile, LspTransport, Platform } from '@/host/types';
 import { buildShareUrl, buildWorkspaceShareUrl } from '@/export/share';
+import { loadSettings, saveSettings } from '@/settings/persistence';
 
 // The studio reads `__APP_VERSION__` (a vite build-time define) once at boot for the status bar.
 // vitest does not define it, so stub it as a global before any init() runs — test scaffolding only,
@@ -1063,6 +1064,37 @@ describe('ide init() — mobile Props zone reflects selected state (#221)', () =
       expect(split.dataset.mobileZone).not.toBe('props');
     } finally {
       Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: origWidth });
+    }
+  });
+});
+
+// #354 — the effective lspTrace setting is pushed to the live LSP client. PR #349 made lspTrace one of
+// the per-workspace-scopable fields but left it inert; this wires applyEffectiveScoped → lsp.setTrace so
+// a global (or per-workspace) trace change drives LSP logging verbosity live, exactly like the other
+// three scoped fields. We spy on KoineLsp.prototype.setTrace — dynamic-imported AFTER beforeEach's
+// vi.resetModules() so the spy lands on the same class the fresh ide module will construct.
+describe('ide init() — effective lspTrace drives the LSP (#354)', () => {
+  test('boot pushes the effective (verbose) lspTrace to lsp.setTrace', async () => {
+    saveSettings({ ...loadSettings(), lspTrace: 'verbose' });
+    const { KoineLsp } = await import('@/lsp/lsp');
+    const setTrace = vi.spyOn(KoineLsp.prototype, 'setTrace');
+    try {
+      await boot();
+      expect(setTrace).toHaveBeenCalledWith('verbose');
+    } finally {
+      localStorage.clear();
+    }
+  });
+
+  test('boot applies the default off level when lspTrace is unset', async () => {
+    saveSettings({ ...loadSettings(), lspTrace: 'off' });
+    const { KoineLsp } = await import('@/lsp/lsp');
+    const setTrace = vi.spyOn(KoineLsp.prototype, 'setTrace');
+    try {
+      await boot();
+      expect(setTrace).toHaveBeenCalledWith('off');
+    } finally {
+      localStorage.clear();
     }
   });
 });
