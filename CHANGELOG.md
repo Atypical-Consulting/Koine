@@ -22,6 +22,15 @@ may include breaking changes.
   never ship silently again.
 
 ### Added
+- **Playground — graceful boot degradation (watchdog + main-thread fallback).** The marketing-site
+  Playground now survives a worker boot that goes wrong for any reason (a future runtime regression, an
+  exotic browser, a corrupted cached bundle), not just the #492 channel-clobber. The wasm worker carries
+  a **boot watchdog**: if `dotnet.create()` neither resolves nor rejects within ~20s it posts an explicit
+  `boot-failure`, so the host fails fast with a named diagnostic instead of silently waiting out its 30s
+  timer. And the host now has a **guarded main-thread fallback** — when the worker never reaches `ready`,
+  the compiler boots on the UI thread instead so the Playground still works (a large compile may briefly
+  freeze the page) rather than bricking. The worker stays the fast path; the fallback fires only as the
+  safety net, mirroring Koine Studio's shipped #357/#358 resilience (issue #510).
 - **Koine Studio — Source Control (git) panel.** A new right-rail **Source Control** view brings git into
   the IDE for `.koi` models kept under version control (issue #272): the current branch with a switcher,
   changed files grouped into **Staged** / **Changes** / **Untracked** with per-row stage/unstage and an

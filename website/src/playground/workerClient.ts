@@ -51,6 +51,24 @@ export interface CallOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * A compiler surface booted on the MAIN THREAD, used as the graceful-degradation fallback (#510).
+ * Dispatches `call(method, args)` directly — no worker hop. Mirrors the worker's RPC shape so the
+ * client can route calls to it transparently once the worker boot has failed.
+ */
+export type FallbackCall = (method: string, args: unknown[]) => Promise<string>;
+
+/** Options for `createWorkerClient` / `createKoineWorkerClient`. Additive — existing callers omit entirely. */
+export interface WorkerClientOptions {
+  /**
+   * Boot the compiler on the main thread when the worker never reaches `ready` (it hangs past the
+   * boot timeout, or posts a `boot-failure`). Resolves to a {@link FallbackCall} the client routes all
+   * subsequent `call()`s to. The worker fast-path stays FIRST; this fires only as the safety net, so
+   * the common case keeps the UI thread free. When omitted, a failed boot rejects `whenReady()` as before.
+   */
+  fallbackBoot?: () => Promise<FallbackCall>;
+}
+
 /** The public surface of an id-correlated worker client. */
 export interface WorkerClient {
   /** Call a named method on the remote runtime, passing positional args. Resolves/rejects with the reply. */
@@ -83,16 +101,30 @@ export class CancelledError extends Error {
   }
 }
 
+/** The error an aborted call rejects with — the signal's own reason if it carries one, else a generic AbortError. */
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error('AbortError: The operation was aborted.');
+}
+
 /**
  * Create a `WorkerClient` backed by a worker produced by `workerFactory`. The client installs a
  * single `onmessage` handler that demultiplexes replies by `id` and routes `ready`/`boot-failure`
  * signals to the ready promise.
  *
  * @param workerFactory - Called once at construction and again on each `terminateAndRespawn()`.
+ * @param options - Additive; `options.fallbackBoot` enables the main-thread fallback (#510).
  */
-export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClient {
+export function createWorkerClient(
+  workerFactory: () => WorkerLike,
+  options: WorkerClientOptions = {},
+): WorkerClient {
   let nextId = 1;
   const pending = new Map<number, PendingCall>();
+
+  // Set once the main-thread fallback has booted (#510): all subsequent calls route here instead of
+  // to the dead worker. Reset at the start of each generation so a `terminateAndRespawn()` re-attempts
+  // the worker fast-path.
+  let fallbackCall: FallbackCall | null = null;
 
   // Per-generation ready state. Each respawn resets these.
   let readyResolve!: () => void;
@@ -107,6 +139,12 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
     const myGeneration = ++generation;
     const worker = workerFactory();
     currentWorker = worker;
+    // A fresh generation always re-attempts the worker fast-path: clear any fallback a previous
+    // generation installed so calls don't keep routing to a stale main-thread surface (#510).
+    fallbackCall = null;
+    // The first boot outcome (ready / fallback / reject) wins — guards against the host timeout and a
+    // late worker signal both firing for the same generation.
+    let bootSettled = false;
 
     let resolve!: () => void;
     let reject!: (err: Error) => void;
@@ -122,9 +160,40 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
     // still observes resolve/reject because whenReady() returns this same `readyPromise`.
     readyPromise.catch(() => {});
 
-    const timer = setTimeout(() => {
-      reject(new Error(`Koine worker timed out after ${BOOT_TIMEOUT_MS / 1000}s`));
-    }, BOOT_TIMEOUT_MS);
+    // The worker never reached `ready` (it hung past the boot budget, or posted `boot-failure`). With a
+    // `fallbackBoot`, boot the compiler on the main thread and route subsequent calls there so the
+    // Playground still works (#510); otherwise reject as before. First outcome wins (idempotent).
+    const handleBootFailure = (err: Error): void => {
+      if (myGeneration !== generation || bootSettled) return;
+      bootSettled = true;
+      clearTimeout(bootTimer);
+      if (!options.fallbackBoot) {
+        reject(err);
+        return;
+      }
+      console.warn(
+        `Koine playground: worker compiler boot failed (${err.message}); falling back to the main thread.`,
+      );
+      // The worker is dead weight now — detach + terminate it so its hung runtime is freed.
+      worker.onmessage = null;
+      worker.terminate();
+      options.fallbackBoot().then(
+        (call) => {
+          if (myGeneration !== generation) return;
+          fallbackCall = call;
+          resolve();
+        },
+        (fallbackErr: unknown) => {
+          if (myGeneration !== generation) return;
+          reject(fallbackErr instanceof Error ? fallbackErr : new Error(String(fallbackErr)));
+        },
+      );
+    };
+
+    const timer = setTimeout(
+      () => handleBootFailure(new Error(`Koine worker timed out after ${BOOT_TIMEOUT_MS / 1000}s`)),
+      BOOT_TIMEOUT_MS,
+    );
     if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
       (timer as NodeJS.Timeout).unref();
     }
@@ -137,11 +206,15 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
 
       if (data && typeof data === 'object' && 'type' in data) {
         const signal = data as WorkerSignal;
-        clearTimeout(bootTimer);
         if (signal.type === 'ready') {
+          if (bootSettled) return;
+          bootSettled = true;
+          clearTimeout(bootTimer);
           readyResolve();
         } else if (signal.type === 'boot-failure') {
-          readyReject(new Error(signal.error));
+          // Route through the watchdog/fallback handler so a boot-failure degrades to the main thread
+          // when a `fallbackBoot` is supplied, instead of rejecting outright (#510).
+          handleBootFailure(new Error(signal.error));
         }
         return;
       }
@@ -176,20 +249,44 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
 
   return {
     call(method: string, args: unknown[], opts?: CallOptions): Promise<string> {
+      const signal = opts?.signal;
+
+      // Main-thread fallback mode (#510): the worker boot failed, so dispatch directly to the
+      // main-thread compiler — no worker hop. Honour an abort so a superseded call still drops its
+      // (now-stale) result, mirroring the worker path; the synchronous main-thread compile itself
+      // can't be interrupted, but its result is discarded once the signal fires.
+      if (fallbackCall) {
+        if (signal?.aborted) return Promise.reject(abortReason(signal));
+        const result = fallbackCall(method, args);
+        if (!signal) return result;
+        return new Promise<string>((resolve, reject) => {
+          const onAbort = () => reject(abortReason(signal));
+          signal.addEventListener('abort', onAbort, { once: true });
+          const settle = () => signal.removeEventListener('abort', onAbort);
+          result.then(
+            (value) => {
+              settle();
+              resolve(value);
+            },
+            (err: unknown) => {
+              settle();
+              reject(err instanceof Error ? err : new Error(String(err)));
+            },
+          );
+        });
+      }
+
       return new Promise<string>((resolve, reject) => {
         const id = nextId++;
         pending.set(id, { resolve, reject });
         const req: WorkerRequest = { id, method, args };
         currentWorker.postMessage(req);
 
-        const signal = opts?.signal;
         if (signal) {
           if (signal.aborted) {
-            rejectPending(id, signal.reason instanceof Error ? signal.reason : new Error('AbortError: The operation was aborted.'));
+            rejectPending(id, abortReason(signal));
           } else {
-            const onAbort = () => {
-              rejectPending(id, signal.reason instanceof Error ? signal.reason : new Error('AbortError: The operation was aborted.'));
-            };
+            const onAbort = () => rejectPending(id, abortReason(signal));
             signal.addEventListener('abort', onAbort, { once: true });
           }
         }
@@ -229,13 +326,16 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
 /**
  * Create a production `WorkerClient` backed by a real module worker at `./koine.worker.ts`.
  * This is the entry point for application code; the injectable form is `createWorkerClient`.
+ *
+ * @param options - Additive; pass `{ fallbackBoot }` to enable a main-thread fallback when the worker
+ *   never boots (#510). Existing no-arg callers are unaffected.
  */
-export function createKoineWorkerClient(): WorkerClient {
+export function createKoineWorkerClient(options: WorkerClientOptions = {}): WorkerClient {
   return createWorkerClient(() => {
     const worker = new Worker(new URL('./koine.worker.ts', import.meta.url), { type: 'module' });
     // A real Worker satisfies WorkerLike at runtime (postMessage / onmessage receiving `{data}` /
     // terminate); the cast bridges the DOM lib's over-specified `MessageEvent`-typed `onmessage`, which
     // structural variance otherwise rejects against our minimal `{ data: unknown }` shape.
     return worker as unknown as WorkerLike;
-  });
+  }, options);
 }
