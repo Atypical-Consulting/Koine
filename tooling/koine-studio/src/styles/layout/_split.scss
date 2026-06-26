@@ -30,6 +30,22 @@
   grid-column: 5;
 }
 
+/* Pin every #split child to a single grid row (#527). Column order alone is fragile: the
+   data-siderail-side='left' configuration assigns the panes descending grid-column values in DOM
+   order (Workspace=5 … Properties=1), and under sparse `grid-auto-flow: row` with no `grid-row` the
+   auto-placement cursor cannot backtrack to an earlier column — each later pane is bumped to a new
+   implicit row, staircasing the shell down an anti-diagonal. A definite row for every item removes the
+   implicit rows entirely, so any column order (ascending or descending) places side-by-side on row 1.
+   The mobile @media block (which pins the three zones to grid-column: 1) is unaffected — it leaves
+   grid-row: 1 in place. Only the editor-internal stack (#editor-pane in _center.scss) ever rows. */
+#leftrail,
+#leftrail-resizer,
+#center,
+#split-resizer,
+#right {
+  grid-row: 1;
+}
+
 .pane {
   min-width: 0;
   min-height: 0;
