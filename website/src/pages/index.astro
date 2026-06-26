@@ -3,8 +3,9 @@ import BlueprintLayout from '../layouts/BlueprintLayout.astro';
 import Playground from '../components/Playground.astro';
 import { sampleById } from '../playground/samples';
 import { encodeCode } from '../playground/encode';
+import { basePath } from '../lib/base';
 
-const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const base = basePath();
 
 const ordering = sampleById('ordering');
 const orderingStudioHref = ordering

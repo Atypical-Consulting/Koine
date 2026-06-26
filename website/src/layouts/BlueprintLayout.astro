@@ -6,6 +6,7 @@ import '@fontsource-variable/archivo';
 import '@fontsource-variable/hanken-grotesk';
 import '@fontsource-variable/jetbrains-mono';
 import '../styles/tokens.css';
+import { basePath } from '../lib/base';
 
 interface Props {
   title: string;
@@ -14,7 +15,7 @@ interface Props {
   fullbleed?: boolean;
 }
 const { title, description = '', fullbleed = false } = Astro.props;
-const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const base = basePath();
 
 // Starlight emits canonical/OpenGraph/Twitter tags for the docs pages automatically, but
 // these custom (non-Starlight) pages don't get them — build the same set by hand so the
