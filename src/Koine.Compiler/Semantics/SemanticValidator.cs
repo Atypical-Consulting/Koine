@@ -347,6 +347,16 @@ public sealed class SemanticValidator
                 ctx.Specs.Concat(ctx.Types.OfType<AggregateDecl>().SelectMany(a => a.Specs));
 
             var seen = new Dictionary<string, SpecDecl>(StringComparer.Ordinal);
+
+            // Issue #494: KOI1005 (DuplicateSpec, in ValidateSpecs) already reports — with the clearer
+            // "duplicates another spec or a member" message — every spec whose name exactly/case-
+            // insensitively duplicates an *earlier* spec on the same target. KOI1007's fold is a strict
+            // superset of that, so it would double-report the very same span. Mirror KOI1005's detection
+            // here (specs grouped by TargetType under Ordinal; names compared under OrdinalIgnoreCase)
+            // and stay silent on exactly the spans it owns — order-independently, so a duplicate buried
+            // mid-chain (e.g. IsActive, Active, active) is suppressed too. Genuinely distinct names that
+            // merely fold together (IsActive+Active), or an exact name on a *different* target, still fire.
+            var namesByTarget = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
             foreach (SpecDecl spec in specs)
             {
                 // The PascalCase subject (with a leading `Is` word stripped) drives both the collision
@@ -358,18 +368,18 @@ public sealed class SemanticValidator
                     continue; // a name with no alphanumeric content emits no usable predicate
                 }
 
+                if (!namesByTarget.TryGetValue(spec.TargetType, out HashSet<string>? targetNames))
+                {
+                    namesByTarget[spec.TargetType] = targetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                }
+
+                // True when this spec exactly/case-insensitively duplicates an earlier same-target spec —
+                // precisely the case KOI1005 owns, so KOI1007 must stay silent for it.
+                var koi1005AlreadyReports = !targetNames.Add(spec.Name);
+
                 if (seen.TryGetValue(key, out SpecDecl? first))
                 {
-                    // Issue #494: an exact/case-insensitive same-target duplicate is already reported by
-                    // KOI1005 (DuplicateSpec, in ValidateSpecs) with the clearer "duplicates another spec
-                    // or a member" message — KOI1007 here would only double-report the same span. Suppress
-                    // it for that pair (same TargetType, names equal under OrdinalIgnoreCase — the exact
-                    // condition KOI1005 fires on). Genuinely distinct names that merely fold to the same
-                    // predicate (IsActive+Active), or an exact name on different targets, still fire.
-                    var koi1005AlreadyCovers =
-                        string.Equals(first.TargetType, spec.TargetType, StringComparison.Ordinal)
-                        && string.Equals(first.Name, spec.Name, StringComparison.OrdinalIgnoreCase);
-                    if (!koi1005AlreadyCovers)
+                    if (!koi1005AlreadyReports)
                     {
                         diagnostics.Add(Diagnostic.FromSpan(DiagnosticCodes.DuplicateSpecPredicate,
                             $"spec '{spec.Name}' emits the same predicate ('is{subject}') as spec '{first.Name}'",
