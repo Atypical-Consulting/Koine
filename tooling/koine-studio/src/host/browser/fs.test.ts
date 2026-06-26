@@ -585,14 +585,19 @@ describe('saveProjectToRoot / workspace root', () => {
 // through structured clone (prototype methods don't survive — verified empirically), so a re-acquired
 // plain mock would not be walkable. We therefore back the OPFS handle with a `Map` subclass: a Map
 // round-trips structured clone into a real Map whose `.values()` still iterates its children, so the
-// re-acquired handle walks exactly like a restored OPFS handle. And — like a real OPFS handle, unlike a
-// picked folder — the restored Map carries NO queryPermission/requestPermission, so resolveFolder
-// re-acquires it silently. That asymmetry is the whole premise of #535: boot may auto-restore `example-*`
-// but never a picked folder.
+// re-acquired handle exposes the one surface fs.ts's walk drives (`values()`) for the flat tree this test
+// seeds. (The model is single-level: structured clone reconstructs a bare Map and drops a CloneDir's own
+// `kind`/`name`, so a *nested* subdir wouldn't survive — a real OPFS handle keeps those at every depth.
+// This test seeds one flat `.koi`, matching the #544 example, so depth never comes into play.) And — like
+// a real OPFS handle, unlike a picked folder — the restored Map carries NO queryPermission/
+// requestPermission, so resolveFolder re-acquires it silently. That asymmetry is the whole premise of
+// #535: boot may auto-restore `example-*` but never a picked folder.
 describe('materializeWorkspace persisted-example IndexedDB reload round-trip (#544)', () => {
-  // Spy proving the re-acquire path never prompts. It lives on the LIVE handle's prototype; structured
-  // clone drops it (a restored OPFS handle exposes no permission API), so a green re-acquire that leaves
-  // this uncalled is the silent-restore guarantee.
+  // A permission API on the LIVE handle (as a picked-folder handle would have). Structured clone drops it,
+  // so the re-acquired OPFS handle exposes none and resolveFolder's prompt branch is unreachable. The
+  // not-called assertion therefore documents/guards that the re-acquire stays on the permission-free path
+  // (it can't catch a regression that re-adds a prompt — the restored handle has no method to call — but
+  // it pins the OPFS-vs-picked asymmetry the #535 design rests on).
   const requestPermissionSpy = vi.fn(async (_opts?: { mode: string }) => 'granted' as PermissionState);
 
   /** A file handle seeded into the OPFS tree (materialize only exercises createWritable; walk reads name). */
@@ -618,7 +623,8 @@ describe('materializeWorkspace persisted-example IndexedDB reload round-trip (#5
 
   // A directory handle that survives fake-indexeddb's structured clone with a working values(): children
   // live as Map entries, so the clone (a plain Map) still iterates them via Map.prototype.values — the
-  // same surface fs.ts's walk drives. Models a [Serializable] OPFS handle restored from IndexedDB.
+  // surface fs.ts's walk drives. Models a [Serializable] OPFS handle restored from IndexedDB, single-level
+  // (see the suite comment): the clone keeps the Map entries but drops this CloneDir's own kind/name.
   class CloneDir extends Map<string, CloneFile | CloneDir> {
     readonly kind = 'directory' as const;
     constructor(public name: string) {
@@ -696,7 +702,8 @@ describe('materializeWorkspace persisted-example IndexedDB reload round-trip (#5
     const files2 = await listKoiFiles(token as string);
     expect(files2.map((f) => f.relPath)).toContain('subscription.koi');
 
-    // The OPFS silent-restore invariant: re-acquiring the example prompted for nothing.
+    // OPFS silent-restore: the re-acquired handle carries no permission API, so resolveFolder never
+    // reached its prompt branch (see the requestPermissionSpy note above for what this does/doesn't guard).
     expect(requestPermissionSpy).not.toHaveBeenCalled();
   });
 });
