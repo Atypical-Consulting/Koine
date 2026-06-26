@@ -230,6 +230,15 @@
   opacity: 0.6;
   cursor: default;
 }
+// Per-row drift warning (issue #473): the file moved on between SEND and Apply, so it was skipped.
+// Sits on its own grid line under the diff; the error colour plus the explicit text carry the meaning.
+.koi-changeset-drift {
+  grid-column: 1 / -1;
+  margin-top: var(--koi-space-0-5);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  color: var(--koi-error);
+}
 .koi-changeset-status {
   margin-top: var(--koi-space-1);
   font-size: var(--koi-text-xs);

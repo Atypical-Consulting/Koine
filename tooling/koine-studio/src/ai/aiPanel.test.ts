@@ -805,6 +805,123 @@ describe('multi-file change set (agentic edits)', () => {
     expect(firstApply.textContent).toContain('✓');
     expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).not.toMatch(/superseded/i);
   });
+
+  // #473 (Task 2): a file edited between SEND and Apply (the staged body was computed against the OLD
+  // text) must not be silently clobbered — detect the drift against a LIVE read, warn, and skip it,
+  // while clean files still apply.
+  test('drift: a file changed between send and apply is warned + skipped; clean files still apply', async () => {
+    // The live workspace read; reassigned (not mutated) to simulate a concurrent edit after SEND.
+    let ws: Record<string, string> = { 'orders.koi': 'context Orders {}', 'events.koi': 'context Events {}' };
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* a */ }');
+      req.editSession?.stage('events.koi', 'context Events { /* b */ }');
+      req.onText('Two edits.');
+      return 'Two edits.';
+    });
+    const onApplyChangeSet = vi.fn(
+      async (_files: { relPath: string; body: string; isNew: boolean }[]) => ({ failed: [] as string[] }),
+    );
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ws, // a LIVE read — currentText reflects concurrent edits at apply time
+        runEditTool: vi.fn(async () => 'ok'),
+        onApplyChangeSet,
+      }),
+    );
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+
+    // Concurrent edit: the Domain Developer keeps typing in orders.koi while the turn ran — its live
+    // text now differs from the snapshot the change set was staged against. events.koi is untouched.
+    ws = { ...ws, 'orders.koi': 'context Orders { /* user typed this */ }' };
+
+    const applyBtn = container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    applyBtn.click();
+    await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+
+    // Only the clean file (events.koi) was written; the drifted one (orders.koi) was skipped.
+    const written = onApplyChangeSet.mock.calls[0][0].map((f) => f.relPath);
+    expect(written).toEqual(['events.koi']);
+
+    // The drifted row carries a "changed since this was proposed" warning.
+    const ordersRow = [...container.querySelectorAll('.koi-changeset-file')].find((r) =>
+      r.textContent?.includes('orders.koi'),
+    )!;
+    expect(ordersRow.querySelector('.koi-changeset-drift')?.textContent).toMatch(/changed since/i);
+    // …and the status live region announces the skip.
+    expect(container.querySelector('.koi-changeset-status')?.textContent).toMatch(/changed since|skipped/i);
+  });
+
+  test('drift: every accepted file changed ⇒ nothing is written and Apply stays usable for a fresh review', async () => {
+    let ws: Record<string, string> = { 'orders.koi': 'context Orders {}' };
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* staged */ }');
+      req.onText('One edit.');
+      return 'One edit.';
+    });
+    const onApplyChangeSet = vi.fn(async () => ({ failed: [] as string[] }));
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ws,
+        runEditTool: vi.fn(async () => 'ok'),
+        onApplyChangeSet,
+      }),
+    );
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+
+    // The only accepted file drifts.
+    ws = { 'orders.koi': 'context Orders { /* user edit */ }' };
+    const applyBtn = container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    applyBtn.click();
+    await vi.waitFor(() =>
+      expect(container.querySelector('.koi-changeset-status')?.textContent).toMatch(/changed since|nothing/i),
+    );
+
+    // Nothing was written, Apply is NOT stranded disabled, and the panel is still open (Discard present).
+    expect(onApplyChangeSet).not.toHaveBeenCalled();
+    expect(applyBtn.disabled).toBe(false);
+    expect(applyBtn.textContent).not.toContain('✓');
+    expect(container.querySelector('.koi-changeset-discard')).not.toBeNull();
+  });
+
+  test('drift edge: a new file whose path now EXISTS is treated as drift (not clobbered)', async () => {
+    let ws: Record<string, string> = { 'orders.koi': 'context Orders {}' };
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('events.koi', 'integration event OrderPlaced {}'); // NEW (absent at send)
+      req.onText('New file.');
+      return 'New file.';
+    });
+    const onApplyChangeSet = vi.fn(async () => ({ failed: [] as string[] }));
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ws,
+        runEditTool: vi.fn(async () => 'ok'),
+        onApplyChangeSet,
+      }),
+    );
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+
+    // A file appeared at events.koi since SEND (created by the user / another action) → presence = drift.
+    ws = { ...ws, 'events.koi': 'context Events {}' };
+    const applyBtn = container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    applyBtn.click();
+    await vi.waitFor(() =>
+      expect(container.querySelector('.koi-changeset-status')?.textContent).toMatch(/changed since|nothing/i),
+    );
+    expect(onApplyChangeSet).not.toHaveBeenCalled();
+    const eventsRow = [...container.querySelectorAll('.koi-changeset-file')].find((r) =>
+      r.textContent?.includes('events.koi'),
+    )!;
+    expect(eventsRow.querySelector('.koi-changeset-drift')).not.toBeNull();
+  });
 });
 
 // --- apply-gate re-validation at the legacy entry points (#444) -------------------------------

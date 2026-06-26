@@ -318,7 +318,16 @@ function renderChangeSet(
   bubble: HTMLElement,
   staged: StagedEdit[],
   before: Record<string, string>,
-  handlers: { onApply: (accepted: StagedEdit[]) => Promise<{ failed: string[] }>; onDiscard: () => void },
+  handlers: {
+    onApply: (accepted: StagedEdit[]) => Promise<{ failed: string[] }>;
+    onDiscard: () => void;
+    /**
+     * A LIVE read of the workspace text for `relPath`, taken at APPLY time (issue #473). Compared to
+     * the send-time `before` to detect drift — a file the user edited while the turn ran — so a stale
+     * staged body can't silently clobber newer work. `undefined` ⇒ the file isn't currently readable.
+     */
+    currentText: (relPath: string) => string | undefined;
+  },
   diagnostics?: string | null,
 ): ChangeSetHandle {
   const panel = document.createElement('div');
@@ -332,6 +341,8 @@ function renderChangeSet(
   // The accept checkboxes, so a successful apply can disable them all (a toggle afterwards must not
   // re-enable Apply and let the same change set be written to disk a second time).
   const checkboxes: HTMLInputElement[] = [];
+  // Each staged file's row, so a drift warning can be attached to the right one at apply time (#473).
+  const rowByFile = new Map<StagedEdit, HTMLElement>();
   // Whether this set has been fully applied — once true, invalidation is a no-op so a later turn can't
   // overwrite the terminal "Applied ✓" with a "superseded" notice (issue #473).
   let applied = false;
@@ -389,21 +400,75 @@ function renderChangeSet(
     diff.textContent = lineDiff(before[file.relPath] ?? '', file.body);
     row.appendChild(diff);
 
+    rowByFile.set(file, row);
     panel.appendChild(row);
+  }
+
+  // Drift check (#473): has `file`'s LIVE text moved away from the send-time `before` it was staged
+  // against? A drifted file must be skipped so a stale full-file body can't clobber newer work.
+  function isDrifted(file: StagedEdit): boolean {
+    const cur = handlers.currentText(file.relPath);
+    const base = before[file.relPath];
+    if (cur === undefined) {
+      // The file isn't currently readable (closed/removed): safe only if there was nothing to overwrite
+      // (base empty or absent); otherwise we can't confirm the target is still the reviewed text → warn.
+      return !(base === undefined || base === '');
+    }
+    // A brand-new file whose path now EXISTS (cur defined): don't clobber a file created since SEND.
+    if (file.isNew) return true;
+    // An existing modification: drift iff the live text differs from the reviewed `before`.
+    return cur !== (base ?? '');
+  }
+
+  // Attach a persistent "changed since proposed" warning to a drifted file's row (idempotent).
+  function markDrift(file: StagedEdit): void {
+    const row = rowByFile.get(file);
+    if (!row || row.querySelector('.koi-changeset-drift')) return;
+    const warn = document.createElement('span');
+    warn.className = 'koi-changeset-drift';
+    warn.textContent = 'Changed since this was proposed — skipped to protect your edits.';
+    row.appendChild(warn);
   }
 
   applyBtn.addEventListener('click', () => {
     const list = staged.filter((f) => accepted.has(f));
     if (!list.length) return;
+
+    // Partition the accepted files against a LIVE read taken NOW (#473): a file the user edited while
+    // the turn ran (drift) is warned + skipped; only the clean subset is written. The send-time `before`
+    // still backs the REVIEWED diff above — drift is judged against the current text at apply time.
+    const drifted = list.filter(isDrifted);
+    const clean = list.filter((f) => !drifted.includes(f));
+    for (const f of drifted) markDrift(f);
+
+    if (!clean.length) {
+      // Everything selected drifted: write nothing, keep the panel open with the warnings, and leave
+      // Apply usable for a fresh review (don't strand it in the in-flight disabled state).
+      status.textContent =
+        `${drifted.length} file${drifted.length === 1 ? '' : 's'} changed since ` +
+        `${drifted.length === 1 ? 'it was' : 'they were'} proposed; nothing was applied. ` +
+        `Send again for a fresh proposal.`;
+      refreshApply();
+      return;
+    }
+
+    const skipped = drifted.length
+      ? ` Skipped ${drifted.length} that changed since ${drifted.length === 1 ? 'it was' : 'they were'} proposed.`
+      : '';
+    // Announce the skip synchronously (drift detection is synchronous) so the warning is visible the
+    // instant Apply is clicked; the async result below refines it to the final "Applied N" message.
+    if (drifted.length) status.textContent = `Applying ${clean.length} clean file${clean.length === 1 ? '' : 's'}.${skipped}`;
+
     applyBtn.disabled = true; // guard the in-flight window
-    void Promise.resolve(handlers.onApply(list)).then((result) => {
+    void Promise.resolve(handlers.onApply(clean)).then((result) => {
       if (result.failed.length) {
         // Partial/total failure: report exactly which files didn't write and re-open Apply so the user
         // can retry the still-checked set, rather than a false "Applied ✓".
-        const wrote = list.length - result.failed.length;
+        const wrote = clean.length - result.failed.length;
         status.textContent =
           `${wrote ? `Applied ${wrote} file${wrote === 1 ? '' : 's'}; ` : ''}` +
-          `couldn't write ${result.failed.length}: ${result.failed.join(', ')}. Re-apply to retry.`;
+          `couldn't write ${result.failed.length}: ${result.failed.join(', ')}. Re-apply to retry.` +
+          skipped;
         refreshApply();
         return;
       }
@@ -411,8 +476,8 @@ function renderChangeSet(
       // and mark Apply terminal.
       applied = true;
       for (const cb of checkboxes) cb.disabled = true;
-      applyBtn.textContent = `Applied ${list.length} file${list.length === 1 ? '' : 's'} ✓`;
-      status.textContent = `Applied ${list.length} file${list.length === 1 ? '' : 's'}.`;
+      applyBtn.textContent = `Applied ${clean.length} file${clean.length === 1 ? '' : 's'} ✓`;
+      status.textContent = `Applied ${clean.length} file${clean.length === 1 ? '' : 's'}.` + skipped;
       discardBtn.remove();
     });
   });
@@ -976,6 +1041,10 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
             onDiscard: () => {
               if (activeChangeSet === handle) activeChangeSet = null;
             },
+            // A LIVE re-read at apply time (#473): the reviewed diff stays anchored on the send-time
+            // `wsFiles`, but drift is judged against the CURRENT workspace text, so a concurrent edit
+            // since SEND is detected and that file is skipped rather than clobbered.
+            currentText: (relPath) => opts.getWorkspaceFiles?.()?.[relPath],
           },
           stagedDiagnostics,
         );
