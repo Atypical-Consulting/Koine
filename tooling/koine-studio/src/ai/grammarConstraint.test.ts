@@ -105,11 +105,22 @@ describe('probeGrammarCapability()', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
-  test('caches NEGATIVE verdicts too — a broken endpoint is not re-probed every turn', async () => {
+  test('caches a DEFINITIVE negative (endpoint answered, reply ≠ sentinel) — not re-probed', async () => {
     const run = vi.fn().mockResolvedValue('nope');
     expect(await probeGrammarCapability('openai', 'http://localhost:1234/v1', run)).toBe(false);
     expect(await probeGrammarCapability('openai', 'http://localhost:1234/v1', run)).toBe(false);
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  test('does NOT cache a probe ERROR — a transiently-down/aborted endpoint re-probes next turn', async () => {
+    // First probe errors (endpoint down) → false but uncached; second probe succeeds → capable.
+    const run = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+      .mockResolvedValueOnce(GRAMMAR_PROBE_SENTINEL);
+    expect(await probeGrammarCapability('openai', 'http://localhost:1234/v1', run)).toBe(false);
+    expect(await probeGrammarCapability('openai', 'http://localhost:1234/v1', run)).toBe(true);
+    expect(run).toHaveBeenCalledTimes(2);
   });
 
   test('cache is keyed per endpoint — a different host/port re-probes', async () => {
