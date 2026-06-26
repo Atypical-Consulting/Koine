@@ -197,6 +197,12 @@
   background: var(--koi-on-accent);
 }
 
+/* Greyed when a mutually-exclusive sibling owns the choice (#447: Compiler tools vs grammar). */
+.koi-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
 /* segmented radio group (Theme) */
 .koi-segmented {
   display: inline-flex;

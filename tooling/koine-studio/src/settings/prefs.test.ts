@@ -528,3 +528,74 @@ describe('keyboard settings', () => {
     expect(onKeybindingsChanged).not.toHaveBeenCalled();
   });
 });
+
+// #447: the two Assistant toggles — "Compiler tools" (the agentic loop) and "Constrain AI output to
+// the Koine grammar" — are mutually exclusive: a GBNF that only accepts `.koi` cannot also emit the
+// tool-call JSON the agentic loop needs, so with both on the grammar silently disables the tools.
+// They must exclude each other in the UI (grammar wins), and a legacy persisted both-on state must
+// normalize to grammar-on/tools-off on open.
+describe('Settings → Assistant: Compiler-tools / grammar mutual exclusion (#447)', () => {
+  const toolsToggle = () => document.querySelector<HTMLButtonElement>('.koi-switch[aria-label="Compiler tools"]')!;
+  const grammarToggle = () =>
+    document.querySelector<HTMLButtonElement>('.koi-switch[aria-label="Constrain AI output to the Koine grammar"]')!;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+  });
+
+  it('default (grammar on): the Compiler-tools toggle is disabled so it can never be on alongside', () => {
+    saveSettings({ ...DEFAULT_SETTINGS }); // aiConstrainGrammar: true, aiAgenticTools: false
+    openPrefs();
+    expect(grammarToggle().getAttribute('aria-checked')).toBe('true');
+    expect(toolsToggle().getAttribute('aria-checked')).toBe('false');
+    expect(toolsToggle().disabled).toBe(true);
+  });
+
+  it('enabling grammar disables (and clears) the Compiler-tools toggle', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, aiAgenticTools: false, aiConstrainGrammar: false });
+    openPrefs();
+    expect(toolsToggle().disabled).toBe(false);
+    grammarToggle().click(); // grammar on
+    expect(grammarToggle().getAttribute('aria-checked')).toBe('true');
+    expect(toolsToggle().disabled).toBe(true);
+    expect(toolsToggle().getAttribute('aria-checked')).toBe('false');
+    expect(loadSettings().aiConstrainGrammar).toBe(true);
+    expect(loadSettings().aiAgenticTools).toBe(false);
+  });
+
+  it('enabling Compiler-tools disables (and clears) the grammar toggle', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, aiAgenticTools: false, aiConstrainGrammar: false });
+    openPrefs();
+    toolsToggle().click(); // tools on
+    expect(toolsToggle().getAttribute('aria-checked')).toBe('true');
+    expect(grammarToggle().disabled).toBe(true);
+    expect(grammarToggle().getAttribute('aria-checked')).toBe('false');
+    expect(loadSettings().aiAgenticTools).toBe(true);
+    expect(loadSettings().aiConstrainGrammar).toBe(false);
+  });
+
+  it('clicking the disabled (greyed) toggle is a no-op — the both-on state can never be set', () => {
+    saveSettings({ ...DEFAULT_SETTINGS }); // grammar on → tools toggle disabled
+    openPrefs();
+    expect(toolsToggle().disabled).toBe(true);
+    // A real user click on a native-disabled <button> dispatches no click event; emulate that contract
+    // by firing click() and asserting nothing changed (the native `disabled` is the actual safety net).
+    toolsToggle().click();
+    expect(toolsToggle().getAttribute('aria-checked')).toBe('false');
+    expect(grammarToggle().getAttribute('aria-checked')).toBe('true');
+    expect(loadSettings().aiAgenticTools).toBe(false);
+    expect(loadSettings().aiConstrainGrammar).toBe(true);
+  });
+
+  it('loading a legacy both-on state normalizes to grammar-on / tools-off (and persists it)', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, aiAgenticTools: true, aiConstrainGrammar: true });
+    openPrefs();
+    expect(grammarToggle().getAttribute('aria-checked')).toBe('true');
+    expect(toolsToggle().getAttribute('aria-checked')).toBe('false');
+    expect(toolsToggle().disabled).toBe(true);
+    // The correction is persisted, not just reflected in the DOM.
+    expect(loadSettings().aiAgenticTools).toBe(false);
+    expect(loadSettings().aiConstrainGrammar).toBe(true);
+  });
+});
