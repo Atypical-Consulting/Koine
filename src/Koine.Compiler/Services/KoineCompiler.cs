@@ -69,6 +69,22 @@ public sealed class KoineCompiler
     private SemanticValidator CreateValidator() => new(_externalAnalyzers);
 
     /// <summary>
+    /// Maps the emitter actually being run to the <see cref="EmitTargetSet"/> the validator should
+    /// reason about (issue #495). A build commits to ONE target, so a target-aware check can relax a
+    /// collision that target won't hit. Only the spec-predicate-emitting targets are distinguished;
+    /// any other (or unknown) target falls back to <see cref="EmitTargetSet.All"/> — the conservative,
+    /// pre-#495 strict behaviour. The no-emitter paths (<see cref="Diagnose(string, string)"/>,
+    /// <see cref="DiagnoseWorkspace(IReadOnlyList{SourceFile})"/>) never call this and stay strict.
+    /// </summary>
+    private static EmitTargetSet TargetsFor(IEmitter emitter) => emitter.TargetName switch
+    {
+        "csharp" => EmitTargetSet.CSharp,
+        "typescript" => EmitTargetSet.TypeScript,
+        "php" => EmitTargetSet.Php,
+        _ => EmitTargetSet.All,
+    };
+
+    /// <summary>
     /// Lexes, parses, and builds the model for a single source. Returns syntax diagnostics only.
     /// Parsing is error-tolerant (R-resilience): even when the source has a syntax error, a
     /// <em>partial</em> model is built from ANTLR's recovered tree (so the valid declarations are
@@ -185,8 +201,9 @@ public sealed class KoineCompiler
         }
 
         // Reuse the snapshot's single shared SemanticModel — build resolution once, reuse for
-        // both validation and emission.
-        var semantic = CreateValidator().Validate(comp.SemanticModel);
+        // both validation and emission. Tell the validator which target this compile is for (issue
+        // #495), so a target-aware check (KOI1007) can relax a collision the chosen target won't hit.
+        var semantic = CreateValidator().Validate(comp.SemanticModel, TargetsFor(emitter));
         var diagnostics = Filter(Combine(comp.SyntaxDiagnostics, semantic), filterOptions, files);
 
         // Success is computed from the *filtered* diagnostics (a config-promoted/warnings-as-errors
