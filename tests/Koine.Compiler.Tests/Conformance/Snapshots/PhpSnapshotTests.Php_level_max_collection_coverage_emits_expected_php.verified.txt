@@ -319,11 +319,18 @@ declare(strict_types=1);
 namespace Koine\Catalog\Events;
 
 use Koine\Catalog\ValueObjects\OrderId;
+use Koine\Catalog\ValueObjects\OrderLine;
+use Koine\Catalog\ValueObjects\Sku;
 use Koine\Runtime\Range;
 
 /** Raised when an order is placed — its payload carries a collection, a range, and a map. */
 final class OrderPlaced
 {
+    /**
+     * @param list<OrderLine> $lines
+     * @param Range<\DateTimeImmutable> $window
+     * @param array<Sku, int> $tallies
+     */
     public function __construct(
         public readonly OrderId $orderId,
         public readonly array $lines,

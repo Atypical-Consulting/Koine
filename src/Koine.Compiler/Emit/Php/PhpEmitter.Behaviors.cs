@@ -508,6 +508,14 @@ public sealed partial class PhpEmitter
         sb.Append("final class ").Append(name).Append('\n');
         sb.Append("{\n");
 
+        // PHPDoc refines a promoted property whose native hint loses type info: a bare collection
+        // `array` (List/Set/Map) or a generic `Range<T>`. On a promoted constructor parameter the
+        // `@param` types both the parameter and the property for phpstan --level max.
+        var docParams = fields
+            .Select(m => (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name)), m.Type))
+            .ToList();
+        WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null);
+
         // Constructor-promoted readonly properties for all stored fields.
         sb.Append(Indent).Append("public function __construct(\n");
 
