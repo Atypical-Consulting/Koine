@@ -1,4 +1,6 @@
 using Koine.Compiler.Emit;
+using Koine.Compiler.Emit.Php;
+using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests.Conformance;
 
@@ -81,6 +83,26 @@ public class PhpConformanceTests
         TestSupport.PhpCheck.Skipped.ToolchainAvailable.ShouldBeFalse();
         TestSupport.PhpCheck.Skipped.Ok.ShouldBeFalse();
         TestSupport.PhpCheck.Skipped.Errors.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Parity gate with the TypeScript (<c>tsc --strict</c>) and Python (<c>mypy --strict</c>)
+    /// outputs: a full emitted PHP model — including the always-present <c>KoineRuntime.php</c> and
+    /// its bc-math <c>Decimal</c> helpers — must pass <c>phpstan analyse --level max</c> with zero
+    /// findings. Before the runtime typed its bc-math operands as <c>numeric-string</c> this reported
+    /// the four <c>bcadd</c>/<c>bcsub</c> findings (issue #478). Skipped (not failed) only when no
+    /// <c>phpstan</c> is present locally; CI installs the toolchain and runs it for real.
+    /// </summary>
+    [Fact]
+    public void Emitted_model_with_runtime_typechecks_at_phpstan_level_max()
+    {
+        var result = new KoineCompiler().Compile(PhpSnapshotTests.Fixture, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
     /// <summary>
