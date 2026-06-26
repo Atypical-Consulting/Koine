@@ -57,8 +57,9 @@ export function connectRevealAnnouncer(opts: RevealAnnouncerOptions): () => void
   // region is body-level (#522), so it can announce while the control is still inside a route-hidden
   // `#app`. The perceivability gate (#573) closes that gap: when the reveal edge fires before the
   // control is perceivable, defer the announcement and flush it via the same `announce(...)` once the
-  // toolbar becomes perceivable — never dropping it. Seed `wasVisible` from the initial DOM state (the
-  // markup ships `hidden`) so a reveal during the initial `sync()` still fires.
+  // toolbar becomes perceivable — never dropping it. Seed `wasVisible` from `initiallyVisible` (the
+  // caller passes `!dom.root.hidden`, captured before its DOM toggle) so a reveal during the initial
+  // `sync()` still fires; this helper stays DOM-agnostic and never reads `dom.root.hidden` itself.
   let wasVisible = opts.initiallyVisible ?? isVisible();
   let pending = false; // a reveal that fired while not perceivable, awaiting a perceivable edge to flush
   const sync = (): void => {
