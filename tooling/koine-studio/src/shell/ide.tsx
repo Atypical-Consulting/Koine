@@ -2135,9 +2135,10 @@ export function init(): () => void {
       { id: 'view-review', title: 'Show Review', group: 'Workspace', run: () => controller.selectBottomTab('review') },
     ];
 
-    // Stop a runaway compile: terminate the WASM worker and boot a fresh one (#353). Offered only when a
-    // cancellable worker exists (the worker boot path) — in the main-thread fallback there is nothing to
-    // terminate. getCommands() re-runs on every palette open, so this reflects the live boot state.
+    // Stop a runaway compile: terminate the WASM worker and boot a fresh one (#353). Offered only while a
+    // compile is actually in flight on the worker boot path (#469) — in the main-thread fallback there is
+    // nothing to terminate, and an idle Stop would pointlessly restart the worker. getCommands() re-runs
+    // on every palette open, so the command appears and disappears with the live in-flight state.
     if (canStopCompile()) {
       cmds.push({
         id: 'stop-compile',
