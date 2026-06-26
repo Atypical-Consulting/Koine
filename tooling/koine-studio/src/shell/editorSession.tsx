@@ -22,6 +22,8 @@ import { diagnosticsInRange } from '@/shell/ideUtils';
 import { appStore } from '@/store/index';
 import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
 import { DiagnosticsStripPanel } from '@/diagnostics/DiagnosticsStripPanel';
+import type { ChangeSet, Text } from '@codemirror/state';
+import type { ReviewThread } from '@/review/reviewStore';
 import type {
   CallHierarchyIncomingCall,
   CallHierarchyItem,
@@ -35,6 +37,7 @@ import type {
   PrepareRenameResult,
   Range,
   SemanticTokens,
+  SourceSpan,
   WorkspaceEdit,
 } from '@/lsp/lsp';
 
@@ -114,6 +117,16 @@ export interface EditorSessionDeps {
    * active uri) repainted the editor + strip + status before this fires.
    */
   onDiagnostics(uri: string, diags: LspDiagnostic[]): void;
+
+  // --- review threads (#259) -------------------------------------------------
+  // All optional + passed straight through to BOTH editor groups, so a host that doesn't wire reviews
+  // (or a test) leaves them unset and the editor renders no review marks.
+  /** The review-thread provider (the store's `list()`); when given, the editors render review marks + a gutter. */
+  getReviewThreads?(): ReviewThread[];
+  /** Open a review thread from the editor's current selection (the Mod-Alt-m chord / palette command). */
+  onAddComment?(span: SourceSpan): void;
+  /** Re-anchor review spans through a document edit's CodeMirror {@link ChangeSet} (ide.ts → store.remap). */
+  onDocChange?(change: ChangeSet, doc: Text): void;
 }
 
 export interface EditorSession {
@@ -149,6 +162,12 @@ export interface EditorSession {
    * write group A's buffer (#265).
    */
   onChange(cb: (doc: string, uri: string) => void): void;
+
+  /**
+   * Repaint the review-thread decorations in every live editor group (A, and B when open) after the
+   * review store changed — ide.ts calls this from the store subscription + after add/load.
+   */
+  refreshReviewDecorations(): void;
 
   // The editor's LSP forwarders, exposed so callers (and tests) can reach the wall directly.
   hover(line: number, character: number): Promise<HoverResult | null>;
@@ -251,6 +270,11 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     onPrepareCallHierarchy: (line, character) => lsp.prepareCallHierarchy(line, character),
     onIncomingCalls: (item) => lsp.incomingCalls(item),
     onOutgoingCalls: (item) => lsp.outgoingCalls(item),
+    // Review threads (#259): the marks/gutter provider, the add-comment handler, and the span-remap
+    // hook all pass straight through from ide.ts (unset → no review marks).
+    getReviewThreads: deps.getReviewThreads,
+    onAddComment: deps.onAddComment,
+    onDocChange: deps.onDocChange,
     // Save (Cmd/Ctrl-S) is owned by ide.ts's window keydown handler: it formats AND writes the
     // active buffer to disk. We deliberately do NOT pass onFormat here so the editor's Mod-s keymap
     // stays inert and there's exactly one save path.
@@ -352,6 +376,10 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
         onPrepareCallHierarchy: (line, character) => lsp.prepareCallHierarchy(line, character),
         onIncomingCalls: (item) => lsp.incomingCalls(item),
         onOutgoingCalls: (item) => lsp.outgoingCalls(item),
+        // Review threads render in group B too, over the SAME store (#259).
+        getReviewThreads: deps.getReviewThreads,
+        onAddComment: deps.onAddComment,
+        onDocChange: deps.onDocChange,
       });
     } else {
       // groupBUri is already the new target (set above), and editor.setDoc dispatches a doc change that
@@ -520,6 +548,10 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     updateStatus,
     onChange(cb) {
       downstreamOnChange = cb;
+    },
+    refreshReviewDecorations() {
+      editor.refreshReviewDecorations();
+      groupB?.refreshReviewDecorations();
     },
     hover,
     completion,

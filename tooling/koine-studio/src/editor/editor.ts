@@ -3,7 +3,7 @@
 // viewer for the generated C#/TypeScript output. Adapted from the website playground;
 // the key difference is that diagnostics are PUSH-based (publishDiagnostics → setDiagnostics)
 // rather than pull-based (linter()).
-import { EditorState, Compartment, StateEffect, type Extension, type Text } from '@codemirror/state';
+import { EditorState, Compartment, StateEffect, type ChangeSet, type Extension, type Text } from '@codemirror/state';
 import {
   Decoration,
   type DecorationSet,
@@ -819,6 +819,12 @@ export interface KoineEditorOptions {
    * from the current selection — `file` is `null`; ide.ts's handler fills in the active uri.
    */
   onAddComment?: (span: SourceSpan) => void;
+  /**
+   * Fired on every document edit with the CodeMirror {@link ChangeSet} and the new {@link Text} (alongside
+   * the string `onChange`), so a review store can re-anchor its pinned spans through the change. Distinct
+   * from `onChange`, which only hands back the new full text — span remapping needs the structured change.
+   */
+  onDocChange?: (change: ChangeSet, doc: Text) => void;
 }
 
 export interface KoineEditor {
@@ -1239,6 +1245,9 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         EditorView.updateListener.of((u) => {
           // Fire onChange immediately; the LSP client debounces didChange.
           if (u.docChanged && opts.onChange) opts.onChange(u.state.doc.toString());
+          // Hand the structured change to onDocChange (review-span remapping needs the ChangeSet, not
+          // just the new text). The review-decoration field also recomputes on docChanged on its own.
+          if (u.docChanged && opts.onDocChange) opts.onDocChange(u.changes, u.state.doc);
           // Keyboard occlusion: on a narrow viewport, keep the caret above the soft keyboard whenever a
           // focused edit or selection move could have pushed it under the keyboard. Gated on the cached
           // narrow flag (not a per-keystroke innerWidth read) so desktop scroll behavior is byte-for-byte

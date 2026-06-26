@@ -99,7 +99,7 @@ const SYMBOL_KIND_NAMESPACE = 3;
 type CenterView = 'visual' | 'technical' | 'docs' | 'assistant';
 type TechView = 'editor' | 'preview' | 'check' | 'scenarios';
 type DocsView = 'glossary' | 'adr' | 'notes';
-type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap' | 'terminal';
+type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap' | 'terminal' | 'review';
 
 /**
  * The slice of {@link import('@/lsp/lsp').KoineLsp} the loaders call (content requests only). A
@@ -191,6 +191,9 @@ export interface InspectorControllerDeps {
    * the panel renders a placeholder instead.
    */
   ensureTerminal?(): { fit(): void };
+
+  /** The Review panel (#259), created lazily by ide.ts the first time its bottom-panel tab is shown. */
+  ensureReview?(): void;
 
   /** Bind a fixed-height resizer to a panel (ide.ts's resize.ts, injected to keep this DOM-infra-free). */
   initEdgeResizer(opts: {
@@ -357,6 +360,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const relationshipsPanel = el('panel-relationships');
   const contextMapView = el('panel-contextmap');
   const terminalPanel = el('panel-terminal');
+  const reviewPanel = el('panel-review');
 
   // --- center pane restore ---------------------------------------------------
   // Restore the persisted center pane, defaulting to Visual when absent/invalid.
@@ -1473,6 +1477,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     relationshipsPanel.hidden = tab !== 'relationships';
     contextMapView.hidden = tab !== 'contextmap';
     terminalPanel.hidden = tab !== 'terminal';
+    reviewPanel.hidden = tab !== 'review';
     diagCountEl.hidden = tab !== 'problems';
     if (diagEl.classList.contains('collapsed')) applyDiagCollapsed(false);
     ensureBottomLoaded(tab);
@@ -1526,6 +1531,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // assistant/scenarios panels); fit() reflows xterm now that the panel has layout. Desktop-only —
     // the browser host omits ensureTerminal and the panel shows its placeholder.
     if (tab === 'terminal') deps.ensureTerminal?.().fit();
+    // The Review panel is created lazily by ide.ts the first time its tab is shown (mirrors terminal).
+    if (tab === 'review') deps.ensureReview?.();
   }
 
   // --- the "Context Map" tab: the strategic context map, as an interactive GRAPH or the dense TABLE ----

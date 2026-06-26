@@ -87,6 +87,8 @@ import { type InspectorElement } from '@/model/inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
 import { createScenarioPanel, type ScenarioPanel } from '@/scenarios/scenarioPanel';
 import { createTerminalPanel, type TerminalPanel } from '@/shell/terminal/terminalPanel';
+import { createReviewStore } from '@/review/reviewStore';
+import { createReviewPanel, REVIEW_AUTHOR_FALLBACK, type ReviewPanel } from '@/review/ReviewPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from '@/export/share';
 import { handleBeforeUnload } from '@/shell/dirty';
 import { render } from 'preact';
@@ -411,6 +413,12 @@ export function init(): () => void {
   // push that leaves a file's counts unchanged would rebuild the explorer for an identical result.
   const diagCountGate = createDiagCountGate();
 
+  // The in-editor review threads (#259, Phase 1 collaboration): a Studio-only sidecar persisted to the
+  // opened folder's `.koine/reviews.json` (a no-op in-memory in no-folder mode). Created once for the
+  // IDE lifetime; `load()` runs on every folder open (onFolderOpened, below). The editors read its
+  // `list()` to paint marks, edits remap its spans, and the bottom-panel Review tab renders it.
+  const reviewStore = createReviewStore(platform, () => workspace.folderRootToken() || null);
+
   const editorSession = createEditorSession({
     parent: el('editor-pane'),
     // The second editor group (group B) mounts here when the user splits the editor; docFor reads a
@@ -438,9 +446,16 @@ export function init(): () => void {
     onDiagnostics: (uri, diags) => {
       if (diagCountGate.changed(uri, diags)) workspace.renderTree();
     },
+    // Review threads (#259): the editors paint marks from the store's list(), opening a comment routes
+    // through addReviewComment (fills the uri + author), and each edit re-anchors the pinned spans.
+    getReviewThreads: () => reviewStore.list(),
+    onAddComment: (span) => addReviewComment(span),
+    onDocChange: (change, doc) => reviewStore.remap(change, doc),
   });
   const editor = editorSession.editor;
   const setStatus = editorSession.setStatus;
+  // Repaint the editors' review marks on every store change (add/reply/resolve/delete/remap/load).
+  reviewStore.subscribe(() => editorSession.refreshReviewDecorations());
 
   // The buffer/dirty/tree half of the editor's onChange (the editor↔LSP sync runs inside
   // editorSession; the buffer text+dirty update lives in workspace.syncBuffer). The callback carries
@@ -614,6 +629,7 @@ export function init(): () => void {
     ensureAssistant: () => ensureAssistant(),
     ensureScenarios: () => ensureScenarios(),
     ensureTerminal: () => ensureTerminal(),
+    ensureReview: () => ensureReview(),
     initEdgeResizer,
   });
   // Thin shims over the app store (the single source of truth) for the two state reads ide.ts needs:
@@ -709,6 +725,27 @@ export function init(): () => void {
       },
     };
     navigateToDefinition(location);
+  }
+
+  // The author attributed to a review comment opened from Studio. No Settings display-name field exists
+  // yet (#259 Phase 1) → the shared fallback; a Phase-2 follow-up can feed a real name from Settings here.
+  function reviewAuthorName(): string {
+    return REVIEW_AUTHOR_FALLBACK;
+  }
+
+  // Open a review thread on the editor's current selection (#259). The editor hands a SourceSpan with
+  // `file: null` (it doesn't know the active uri); we fill it with the active file and prompt for the
+  // comment text. The window.prompt is a deliberate Phase-1 MVP affordance — a richer inline composer is
+  // a fine Phase-2 follow-up. An empty/cancelled prompt bails; otherwise we add the thread, reveal the
+  // Review tab, and repaint the editor marks.
+  function addReviewComment(span: SourceSpan): void {
+    const file = workspace.activeUri();
+    if (!file) return;
+    const text = window.prompt('Add a review comment:')?.trim();
+    if (!text) return;
+    reviewStore.add(file, { ...span, file }, text, reviewAuthorName());
+    controller.selectBottomTab('review');
+    editorSession.refreshReviewDecorations();
   }
 
   // Jump-to-source from a diagram node: the SVG renderer draws each navigable node as a `<g>` that
@@ -1071,6 +1108,9 @@ export function init(): () => void {
       // save reads through the live getFormatOnSave thunk, so it auto-picks up; lspTrace has no live
       // re-application site here — its override surfaces on next read.)
       applyEffectiveScoped(effectiveSettings(settings, wsKey()));
+      // Hydrate this folder's review threads from `.koine/reviews.json` (a no-op in no-folder mode),
+      // then repaint the editor marks. Fires on boot too — openDefaultWorkspaceFlow routes through here.
+      void reviewStore.load().then(() => editorSession.refreshReviewDecorations());
     },
     // The active buffer was deleted and the workspace is now empty: reset to a fresh blank model.
     onWorkspaceEmptied: () => void newModel(),
@@ -1679,6 +1719,20 @@ export function init(): () => void {
     return terminal;
   }
 
+  // The Review panel (#259), created lazily the first time its bottom-panel tab is shown (the
+  // terminal/scenarios pattern). It renders the review store grouped by file; clicking a thread jumps the
+  // editor to its span via the shared gotoSourceSpan.
+  let review: ReviewPanel | null = null;
+  function ensureReview(): void {
+    if (review) return;
+    review = createReviewPanel({
+      parent: el('panel-review'),
+      store: reviewStore,
+      onNavigate: (file, span) =>
+        void gotoSourceSpan({ file, line: span.line, column: span.column, endLine: span.endLine, endColumn: span.endColumn }),
+    });
+  }
+
   // Diagrams are rendered with a theme-matched Mermaid palette; re-render on a theme flip (covers
   // the toolbar toggle, the command palette, and Preferences — all route through setTheme). The
   // controller owns the diagram cache + center state, so it decides whether to re-render now.
@@ -2055,6 +2109,7 @@ export function init(): () => void {
       { id: 'view-assistant', title: 'Show Assistant', group: 'Workspace', run: () => controller.selectCenter('assistant') },
       { id: 'assistant-explain', title: 'Explain this construct', group: 'Workspace', run: () => { controller.selectCenter('assistant'); ensureAssistant().explainSelection(); } },
       { id: 'add-comment', title: 'Add review comment', group: 'Review', run: () => editor.addCommentAtSelection() },
+      { id: 'view-review', title: 'Show Review', group: 'Workspace', run: () => controller.selectBottomTab('review') },
     ];
 
     // Surface every open file as a "Go to File" entry so the palette doubles as a
@@ -2182,6 +2237,7 @@ export function init(): () => void {
     editorSession.destroy();
     window.removeEventListener('resize', onDiagramViewportResize);
     terminal?.dispose(); // stop the brokered shell + dispose xterm (#256)
+    review?.dispose(); // unmount the Review panel + release its store subscription (#259)
     workspace.setAutoSave(false);
     unsubRouteIntent();
   };
