@@ -734,10 +734,14 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     const provider = opts.getProvider();
     const baseUrl = opts.getBaseUrl();
     const apiKey = opts.getApiKey();
+    // Whether a *usable* key was configured for this turn: a whitespace-only stored value is truthy
+    // but unusable, so trim before deciding. Captured once so both the pre-flight guard and the
+    // catch-block auth-error copy agree on whether a key was actually present (#530).
+    const hasKey = !!apiKey.trim();
     // A key is required for Anthropic and for any remote OpenAI-compatible endpoint; local servers
     // (Ollama / LM Studio on localhost) need no auth, so a blank key is fine there.
     const needsKey = provider === 'anthropic' || !isLocalProviderUrl(baseUrl);
-    if (needsKey && !apiKey) {
+    if (needsKey && !hasKey) {
       const note = addBubble('assistant');
       note.classList.add('koi-msg-note');
       note.innerHTML = 'Add your API key in Settings to use the assistant. ';
@@ -906,7 +910,12 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
           const jsonMsg = raw.match(/"message"\s*:\s*"([^"]+)"/)?.[1];
           if (isAuth) {
             replyBubble.classList.add('koi-msg-note');
-            replyBubble.textContent = 'The provider rejected your API key. Check it in Settings → Assistant. ';
+            // "Rejected" only makes sense if a key was actually sent; a 401 with no usable key (a
+            // keyless local/remote endpoint that still demands auth) is a missing-key situation, not
+            // a bad one — so word it as "not configured" to match the pre-flight guard (#530).
+            replyBubble.textContent = hasKey
+              ? 'The provider rejected your API key. Check it in Settings → Assistant. '
+              : 'No API key configured — add one in Settings → Assistant. ';
             const open = document.createElement('button');
             open.type = 'button';
             open.className = 'koi-link-btn';
