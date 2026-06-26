@@ -156,6 +156,30 @@ describe('Editor autoSave + enableMinimap settings', () => {
   });
 });
 
+describe('Review-comment display name (#479)', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('defaults to an empty string (the review-author fallback applies)', () => {
+    expect(DEFAULT_SETTINGS.displayName).toBe('');
+    expect(loadSettings().displayName).toBe('');
+  });
+
+  test('round-trips a saved non-empty name', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, displayName: 'Ada Lovelace' });
+    expect(loadSettings().displayName).toBe('Ada Lovelace');
+  });
+
+  test('coerces a stored non-string displayName back to an empty string', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, displayName: 42 as never });
+    expect(loadSettings().displayName).toBe('');
+  });
+
+  test('falls back to an empty string when displayName is absent from the stored blob', () => {
+    localStorage.setItem('koine.studio.settings', JSON.stringify({ theme: 'light' }));
+    expect(loadSettings().displayName).toBe('');
+  });
+});
+
 describe('API key secret', () => {
   beforeEach(async () => {
     localStorage.clear();

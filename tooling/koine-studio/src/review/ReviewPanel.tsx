@@ -10,11 +10,21 @@ import type { ReviewStore, ReviewThread } from '@/review/reviewStore';
 import type { SourceSpan } from '@/lsp/lsp';
 
 /**
- * The author attributed to comments authored from Studio. There is no Settings display-name field yet
- * (#259 Phase 1), so it falls back to a friendly default; a Phase-2 follow-up can feed a real name in
- * here (and into ide.tsx's add-comment handler) from Settings. Exported so the two call sites agree.
+ * The author attributed to comments authored from Studio when no display name is configured. The
+ * Settings "Display name" field (#479) feeds a real name in here (and into ide.tsx's add-comment
+ * handler); until one is set, attribution falls back to this friendly default. Exported so the two
+ * call sites agree.
  */
 export const REVIEW_AUTHOR_FALLBACK = 'You';
+
+/**
+ * Resolve a configured display name into the author attributed to a review comment: a non-blank name is
+ * trimmed and used; a blank or whitespace-only name falls back to {@link REVIEW_AUTHOR_FALLBACK}, so
+ * attribution is unchanged until the user sets a name in Settings (#479).
+ */
+export function resolveReviewAuthor(name: string): string {
+  return name.trim() || REVIEW_AUTHOR_FALLBACK;
+}
 
 /** Human-readable label for each thread status (the panel never shows the raw enum). */
 const STATUS_LABEL: Record<ReviewThread['status'], string> = {
@@ -30,6 +40,12 @@ export interface ReviewPanelOptions {
   store: ReviewStore;
   /** Jump the editor to a thread's span (ide.tsx opens the file then moves the caret). */
   onNavigate: (file: string, span: SourceSpan) => void;
+  /**
+   * The author to attribute replies to — the configured Settings display name (#479). Optional and
+   * defensively resolved through {@link resolveReviewAuthor}, so a missing callback or a blank name
+   * falls back to {@link REVIEW_AUTHOR_FALLBACK}.
+   */
+  author?: () => string;
 }
 
 export interface ReviewPanel {
@@ -62,11 +78,13 @@ function ThreadCard({
   file,
   store,
   onNavigate,
+  author,
 }: {
   thread: ReviewThread;
   file: string;
   store: ReviewStore;
   onNavigate: (file: string, span: SourceSpan) => void;
+  author: () => string;
 }) {
   const label = basename(file);
   const isOpen = thread.status === 'open';
@@ -76,7 +94,7 @@ function ThreadCard({
     const input = form.querySelector<HTMLInputElement>('.koi-review-reply-input');
     const body = input?.value.trim() ?? '';
     if (!body) return; // empty reply: nothing to add
-    store.reply(thread.id, body, REVIEW_AUTHOR_FALLBACK);
+    store.reply(thread.id, body, author());
     if (input) input.value = '';
   };
   return (
@@ -124,7 +142,15 @@ function ThreadCard({
 }
 
 /** The panel body: subscribes to the store and re-renders the file-grouped thread list on every change. */
-function ReviewPanelView({ store, onNavigate }: { store: ReviewStore; onNavigate: (file: string, span: SourceSpan) => void }) {
+function ReviewPanelView({
+  store,
+  onNavigate,
+  author,
+}: {
+  store: ReviewStore;
+  onNavigate: (file: string, span: SourceSpan) => void;
+  author: () => string;
+}) {
   // The store can't be observed by Preact directly; bump a counter on every mutation to re-render. The
   // effect's cleanup is the store's unsubscribe, so an unmount (dispose) releases the subscription.
   const [, setTick] = useState(0);
@@ -146,7 +172,7 @@ function ReviewPanelView({ store, onNavigate }: { store: ReviewStore; onNavigate
             <p class="koi-review-file-name" title={g.file}>{basename(g.file)}</p>
             <ul class="koi-review-threads">
               {g.threads.map((t) => (
-                <ThreadCard key={t.id} thread={t} file={g.file} store={store} onNavigate={onNavigate} />
+                <ThreadCard key={t.id} thread={t} file={g.file} store={store} onNavigate={onNavigate} author={author} />
               ))}
             </ul>
           </li>
@@ -163,7 +189,10 @@ function ReviewPanelView({ store, onNavigate }: { store: ReviewStore; onNavigate
  * unmounts the tree (releasing the store subscription via the unmount effect cleanup).
  */
 export function createReviewPanel(opts: ReviewPanelOptions): ReviewPanel {
-  render(<ReviewPanelView store={opts.store} onNavigate={opts.onNavigate} />, opts.parent);
+  // Defensively resolve the configured author at reply time: a missing callback or a blank display
+  // name falls back to REVIEW_AUTHOR_FALLBACK, so attribution is unchanged until a name is set (#479).
+  const author = (): string => resolveReviewAuthor(opts.author?.() ?? '');
+  render(<ReviewPanelView store={opts.store} onNavigate={opts.onNavigate} author={author} />, opts.parent);
   return {
     dispose() {
       render(null, opts.parent);
