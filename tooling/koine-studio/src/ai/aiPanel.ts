@@ -10,6 +10,7 @@ import {
   chooseMechanism,
   isGrammarCapable,
   parseValidationOutcome,
+  probeGrammarCapability,
   repairBudgetFor,
   repairToValid,
   type ConstraintMechanism,
@@ -962,10 +963,33 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       const constrainOn = opts.getConstrainGrammar() && offerApply;
       let gbnf: string | null = null;
       if (constrainOn && opts.getGrammar && isGrammarCapable(provider, baseUrl)) {
-        try {
-          gbnf = await opts.getGrammar();
-        } catch {
-          gbnf = null;
+        // Don't TRUST the URL that a loopback OpenAI endpoint honours a GBNF grammar (issue #446):
+        // Ollama's OpenAI-compatible endpoint looks identical but ignores a top-level `grammar` (it
+        // constrains via its own `format`), which would light a LYING "grammar-constrained" chip and skip
+        // the repair loop. Probe the endpoint's ACTUAL behaviour (cached per endpoint) with a tiny
+        // sentinel-only grammar, and only attach the real GBNF when the probe confirms the grammar took.
+        // A not-capable / errored probe leaves `gbnf` null → `chooseMechanism` returns 'repair' → the
+        // honest parse-and-repair path (and Task 1's gbnf self-heal is the belt-and-braces backstop).
+        const honoursGrammar = await probeGrammarCapability(provider, baseUrl, (grammar) =>
+          runAssistant({
+            provider,
+            baseUrl,
+            apiKey,
+            model: opts.getModel(),
+            system: 'Probe.',
+            messages: [{ role: 'user', content: 'ping' }],
+            grammar,
+            signal: aborter?.signal,
+            // Stream nothing into the transcript and don't commit it — the probe is invisible plumbing.
+            onText: () => {},
+          }),
+        );
+        if (honoursGrammar) {
+          try {
+            gbnf = await opts.getGrammar();
+          } catch {
+            gbnf = null;
+          }
         }
       }
       const mechanism = chooseMechanism(constrainOn, provider, baseUrl, !!gbnf);

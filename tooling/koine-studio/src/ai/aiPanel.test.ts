@@ -11,6 +11,7 @@ import {
   type DomainIndex,
 } from '@/ai/aiPanel';
 import { runAssistant } from '@/ai/ai';
+import { GRAMMAR_PROBE_GBNF, GRAMMAR_PROBE_SENTINEL, resetGrammarCapabilityCache } from '@/ai/grammarConstraint';
 import { saveChat } from '@/settings/persistence';
 
 // Stream a fenced ```koine block as the reply so a generative turn would normally offer "Apply"; the
@@ -312,21 +313,49 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     // Reset the shared runAssistant mock's call log AND implementation so `mock.calls[0]` is this
     // test's own first call (earlier describe blocks leave calls accumulated on the shared spy).
     vi.mocked(runAssistant).mockReset();
+    // The grammar-capability verdict is cached per endpoint (module-level, #446) — clear it so each test
+    // re-probes from scratch rather than inheriting a sibling test's verdict for the same baseUrl.
+    resetGrammarCapabilityCache();
   });
   afterEach(() => {
     localStorage.clear();
     vi.mocked(runAssistant).mockReset();
+    resetGrammarCapabilityCache();
   });
 
   const CLEAN = 'ok: true — no diagnostics. The model compiles.';
   const DIRTY = 'ok: false — 1 error(s), 0 warning(s):\n- [error] 1:1 boom';
 
   // The default mocked runAssistant streams a fenced koine block (a generative turn that offers Apply).
+  // It also plays a grammar-HONOURING local backend: a probe request (one carrying the sentinel-only
+  // GBNF, #446) gets the sentinel back, so `probeGrammarCapability` deems the endpoint capable and the
+  // gbnf path is taken. The not-capable case uses `mockReplyIgnoresGrammar` below instead.
   function mockReply(body = 'Here is your model:\n```koine\ncontext X {}\n```'): void {
-    vi.mocked(runAssistant).mockImplementation(async (req: { onText: (t: string) => void }) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: { onText: (t: string) => void; grammar?: string }) => {
+      if (req.grammar === GRAMMAR_PROBE_GBNF) return GRAMMAR_PROBE_SENTINEL; // probe → honoured
       req.onText(body);
       return body;
     });
+  }
+
+  // A local backend that IGNORES a top-level grammar (Ollama's OpenAI-compat endpoint): the probe gets
+  // an unconstrained reply, never the sentinel, so the endpoint is judged not-capable (#446).
+  function mockReplyIgnoresGrammar(body = 'Here is your model:\n```koine\ncontext X {}\n```'): void {
+    vi.mocked(runAssistant).mockImplementation(async (req: { onText: (t: string) => void; grammar?: string }) => {
+      if (req.grammar === GRAMMAR_PROBE_GBNF) return 'I will gladly help! Here is some unconstrained prose.';
+      req.onText(body);
+      return body;
+    });
+  }
+
+  // The runAssistant request objects for actual generation/repair — i.e. NOT the capability probe (#446).
+  // The probe adds one runAssistant call per capable-endpoint turn; filtering it out keeps the count
+  // assertions about the generation + repair loop, independent of the probe.
+  function genCalls(): { grammar?: string }[] {
+    return vi
+      .mocked(runAssistant)
+      .mock.calls.map((c) => c[0] as { grammar?: string })
+      .filter((a) => a.grammar !== GRAMMAR_PROBE_GBNF);
   }
 
   function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
@@ -364,8 +393,10 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     fire(container);
 
     await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
-    // The GBNF rode along on the request body.
-    expect(vi.mocked(runAssistant).mock.calls[0][0].grammar).toBe('root ::= "x"');
+    // The endpoint was probed first with the sentinel-only grammar (#446) …
+    expect(vi.mocked(runAssistant).mock.calls[0][0].grammar).toBe(GRAMMAR_PROBE_GBNF);
+    // … then, the probe having confirmed the grammar is honoured, the REAL GBNF rode along on generation.
+    expect(genCalls()[0].grammar).toBe('root ::= "x"');
     // The "grammar-constrained" chip is shown and Apply is enabled (valid by construction).
     expect(container.querySelector('.koi-assistant-chip')?.textContent).toBe('grammar-constrained');
     expect(container.querySelector<HTMLButtonElement>('.koi-assistant-apply')!.disabled).toBe(false);
@@ -389,24 +420,25 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     expect(container.querySelector<HTMLButtonElement>('.koi-assistant-apply')!.disabled).toBe(false);
   });
 
-  test('gbnf path: a failed validate degrades to parse-and-repair instead of stopping (#446)', async () => {
-    // A loopback backend that advertises grammar but silently IGNORES it (Ollama's OpenAI-compat
-    // endpoint) emits an unconstrained, invalid model. The single validate fails — and instead of
-    // disabling Apply right there (strictly worse than parse-and-repair), the gbnf path must fall into
+  test('gbnf path: a constrained candidate that still fails validate degrades to parse-and-repair (#446)', async () => {
+    // The probe confirmed the grammar is honoured, so the gbnf path is taken — but a GBNF only constrains
+    // tokens, not full semantic validity, so the generated model can still fail `koine_validate`. Instead
+    // of disabling Apply right there (strictly worse than parse-and-repair), the gbnf path must fall into
     // the SAME bounded repair loop the repair mechanism uses.
     mockReply();
     const container = document.createElement('div');
     createAssistantPanel(
       opts(container, {
         getGrammar: () => Promise.resolve('root ::= "x"'),
-        runCompilerTool: () => Promise.resolve(DIRTY), // grammar ignored → output never parses
+        runCompilerTool: () => Promise.resolve(DIRTY), // constrained output still doesn't fully parse
       }),
     );
     fire(container);
 
     await vi.waitFor(() => expect(container.querySelector('.koi-assistant-invalid')).not.toBeNull());
-    // We did NOT stop after the single validate: the initial turn + one regenerate per repair round ran.
-    expect(vi.mocked(runAssistant).mock.calls.length).toBe(1 + MAX_REPAIR_ROUNDS);
+    // We did NOT stop after the single validate: the initial turn + one regenerate per repair round ran
+    // (the capability probe is filtered out by `genCalls`).
+    expect(genCalls().length).toBe(1 + MAX_REPAIR_ROUNDS);
     // The live "repair k/N" counter ticked to the cap …
     expect(container.querySelector('.koi-assistant-repair-counter')?.textContent).toBe(
       `repair ${MAX_REPAIR_ROUNDS}/${MAX_REPAIR_ROUNDS}`,
@@ -416,9 +448,9 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     expect(container.querySelector('.koi-assistant-apply')).toBeNull();
   });
 
-  test('gbnf path: an ignored grammar that repairs to valid enables Apply (degrade, then heal) (#446)', async () => {
-    // Same ignored-grammar backend, but the first repair round produces a parseable model: Apply must
-    // end up enabled (the gbnf path is never worse than parse-and-repair).
+  test('gbnf path: a constrained candidate that repairs to valid enables Apply (degrade, then heal) (#446)', async () => {
+    // Same gbnf path, but the first repair round produces a parseable model: Apply must end up enabled
+    // (the gbnf path is never worse than parse-and-repair).
     mockReply();
     let n = 0;
     const container = document.createElement('div');
@@ -433,6 +465,27 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
     expect(container.querySelector<HTMLButtonElement>('.koi-assistant-apply')!.disabled).toBe(false);
     expect(container.querySelector('.koi-assistant-repair-counter')?.textContent).toBe(`repair 1/${MAX_REPAIR_ROUNDS}`);
+    expect(container.querySelector('.koi-assistant-chip')?.textContent).toBe('parse-and-repair');
+  });
+
+  test('probe: a loopback endpoint that IGNORES the grammar (Ollama) is judged not-capable — no chip lie (#446)', async () => {
+    // The endpoint advertises as a grammar-capable local OpenAI server, but the probe reply doesn't honour
+    // the sentinel grammar (Ollama uses its own `format`). So no GBNF is attached, the mechanism falls to
+    // parse-and-repair, and the chip never claims "grammar-constrained".
+    mockReplyIgnoresGrammar();
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getGrammar: () => Promise.resolve('root ::= "x"'),
+        runCompilerTool: () => Promise.resolve(CLEAN),
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
+    // No GBNF rode along on the generation request — the probe withheld it.
+    expect(genCalls().every((c) => c.grammar === undefined)).toBe(true);
+    // The chip tells the truth: parse-and-repair, NOT a "grammar-constrained" badge over an ignored grammar.
     expect(container.querySelector('.koi-assistant-chip')?.textContent).toBe('parse-and-repair');
   });
 
@@ -525,8 +578,9 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     );
     fire(container);
 
-    await vi.waitFor(() => expect(vi.mocked(runAssistant)).toHaveBeenCalled());
-    const req = vi.mocked(runAssistant).mock.calls[0][0];
+    // Wait for the GENERATION call (after the capability probe, #446), then inspect it.
+    await vi.waitFor(() => expect(genCalls().length).toBeGreaterThan(0));
+    const req = genCalls()[0] as { grammar?: string; runCompilerTool?: unknown };
     expect(req.grammar).toBe('root ::= "x"'); // grammar rode along
     expect(req.runCompilerTool).toBeUndefined(); // tools withheld — the GBNF can't call them
   });
