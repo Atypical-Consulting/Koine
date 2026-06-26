@@ -209,6 +209,30 @@ check('DiagnoseWorkspace', () => {
   expectTrue(r.length > 0, 'a one-file workspace should produce one per-file bucket');
   expectObject(r[0], 'uri', 'diagnostics');
   expectArray(r[0].diagnostics);
+
+  // Warm/incremental cache (issue #334): the LSP-shaped exports retain a content-hash-keyed
+  // KoineCompilation across calls and reconcile it to each incoming snapshot (re-parsing only the
+  // edited file). Pure content-keyed memoization must NEVER change a result — re-diagnosing the
+  // ORIGINAL snapshot after an intervening edit must return byte-identical JSON. This drives the
+  // static warm path (CompilerInterop._warm) in the single-threaded wasm runtime the managed unit
+  // tests (over KoineCompilation.Reconcile) can't reach.
+  const wsV1 = JSON.stringify([
+    { uri: 'file:///catalog.koi', text: 'context Catalog { value Sku { code: String } }' },
+    { uri: 'file:///payments.koi', text: 'context Payments { value Amount { cents: Int } }' },
+  ]);
+  const wsV2 = JSON.stringify([
+    { uri: 'file:///catalog.koi', text: 'context Catalog { value Sku { code: String } }' },
+    { uri: 'file:///payments.koi', text: 'context Payments { value Amount { cents: Int currency: String } }' },
+  ]);
+  const warmFirst = api.DiagnoseWorkspace(wsV1); // builds the warm snapshot cold
+  api.DiagnoseWorkspace(wsV2); // reconcile: re-parses only payments.koi
+  const warmAgain = api.DiagnoseWorkspace(wsV1); // reconcile back to the original inputs
+  expectTrue(warmFirst === warmAgain, 'warm cache must return byte-identical JSON for identical inputs across an intervening edit (#334)');
+  const warm = expectArray(parse(warmFirst));
+  expectTrue(
+    warm.length === 2 && warm.every((f) => Array.isArray(f.diagnostics) && f.diagnostics.length === 0),
+    'the clean two-file workspace should diagnose to two empty buckets',
+  );
 });
 
 check('EmitPreview', () => {

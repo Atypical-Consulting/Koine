@@ -356,7 +356,10 @@ export function init(): () => void {
     storeInspectorHost.hidden = !storeInspectorHost.hidden;
   }
 
-  const lsp = new KoineLsp(platform.createLspTransport());
+  // Seed the LSP trace verbosity from the user-level setting (no workspace is open yet at construction,
+  // so the effective value equals the user value — mirroring `lineWrap: settings.wordWrap` below). Any
+  // per-workspace override is then pushed live via applyEffectiveScoped once a folder opens (#264/#354).
+  const lsp = new KoineLsp(platform.createLspTransport(), settings.lspTrace);
 
   // --- workspace model ------------------------------------------------------
   // The buffers / activeUri / folderRootToken / entriesCache state and the whole open/save/dirty/
@@ -377,13 +380,14 @@ export function init(): () => void {
   }
 
   // Apply the workspace-scoped fields that need a LIVE push (word-wrap on both surfaces, the preview
-  // target relabel) from an already-resolved effective Settings. Shared by the prefs onChange, a folder
-  // open, and a root-set change so the three call sites can never drift. (format-on-save reads through
-  // the live getFormatOnSave thunk; lspTrace has no live consumer — see #264.)
+  // target relabel, the LSP trace verbosity) from an already-resolved effective Settings. Shared by the
+  // prefs onChange, a folder open, and a root-set change so the three call sites can never drift.
+  // (format-on-save reads through the live getFormatOnSave thunk, so it needs no push here.)
   function applyEffectiveScoped(eff: Settings): void {
     editor.setLineWrap(eff.wordWrap);
     output.setLineWrap(eff.wordWrap);
     controller.onPreviewTargetChanged(eff.previewTarget);
+    lsp.setTrace(eff.lspTrace);
   }
 
   // Adding or removing a workspace root changes the workspace identity: folderRootToken() may now point
@@ -1067,9 +1071,8 @@ export function init(): () => void {
       void controller.refreshContextList();
       controller.refreshActiveSurfaces();
       // Switching folders changes wsKey(), so re-apply the now-effective workspace-scoped behaviors:
-      // this folder's overrides for word-wrap and preview target take effect immediately. (format-on-
-      // save reads through the live getFormatOnSave thunk, so it auto-picks up; lspTrace has no live
-      // re-application site here — its override surfaces on next read.)
+      // this folder's overrides for word-wrap, preview target, and LSP trace take effect immediately.
+      // (format-on-save reads through the live getFormatOnSave thunk, so it auto-picks up.)
       applyEffectiveScoped(effectiveSettings(settings, wsKey()));
     },
     // The active buffer was deleted and the workspace is now empty: reset to a fresh blank model.
