@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 
 // Routing coverage for the browser WasmLspTransport: each JSON-RPC `method` must dispatch to the right
 // [JSExport] on the WASM api with the right argument shape, and reply with the parsed result. The WASM
@@ -14,7 +14,13 @@ const api = vi.hoisted(() => ({
   IncomingCalls: vi.fn<(f: string, item: string) => string>(),
   OutgoingCalls: vi.fn<(f: string, item: string) => string>(),
 }));
-vi.mock('@/host/browser/wasm', () => ({ loadWasmApi: () => Promise.resolve(api) }));
+// The transport reads getWasmWorkerClient() to route DiagnoseWorkspace through the cancellable worker
+// client (#353). Default null → the main-thread path (api proxy). Supersede tests set a fake client.
+const wasmState = vi.hoisted(() => ({ workerClient: null as unknown }));
+vi.mock('@/host/browser/wasm', () => ({
+  loadWasmApi: () => Promise.resolve(api),
+  getWasmWorkerClient: () => wasmState.workerClient,
+}));
 
 import { WasmLspTransport } from '@/host/browser/transport';
 
@@ -85,5 +91,129 @@ describe('WasmLspTransport routing — inlay hints & call hierarchy', () => {
     const result = await roundtrip('callHierarchy/incomingCalls', {});
     expect(last(api.IncomingCalls.mock.calls)[1]).toBe('{}');
     expect(result).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Supersede stale keystroke-driven diagnostics (#353)
+// ---------------------------------------------------------------------------
+
+/** A controllable in-flight DiagnoseWorkspace call recorded by the fake worker client. */
+interface RecordedCall {
+  method: string;
+  args: unknown[];
+  signal: AbortSignal | undefined;
+  resolve: (value: string) => void;
+  reject: (err: Error) => void;
+}
+
+/**
+ * A fake WorkerClient whose `call()` records each invocation and returns a promise the test settles
+ * by hand. An aborted signal rejects the call — mirroring the real worker client's AbortSignal
+ * integration (it drops the pending id on abort).
+ */
+function makeFakeWorkerClient(calls: RecordedCall[]) {
+  return {
+    call(method: string, args: unknown[], opts?: { signal?: AbortSignal }): Promise<string> {
+      return new Promise<string>((resolve, reject) => {
+        const entry: RecordedCall = { method, args, signal: opts?.signal, resolve, reject };
+        calls.push(entry);
+        opts?.signal?.addEventListener(
+          'abort',
+          () => reject(new Error('AbortError: The operation was aborted.')),
+          { once: true },
+        );
+      });
+    },
+    whenReady: () => Promise.resolve(),
+    cancel: vi.fn(),
+    terminateAndRespawn: vi.fn(),
+    dispose: vi.fn(),
+  };
+}
+
+describe('WasmLspTransport — supersede stale diagnostics (#353)', () => {
+  afterEach(() => {
+    wasmState.workerClient = null;
+  });
+
+  test('a newer didChange aborts the in-flight diagnose; only the latest diagnostics publish', async () => {
+    const calls: RecordedCall[] = [];
+    wasmState.workerClient = makeFakeWorkerClient(calls);
+
+    const transport = new WasmLspTransport();
+    const published: { uri: string; diagnostics: { code?: string }[] }[] = [];
+    transport.onMessage((json) => {
+      const m = JSON.parse(json);
+      if (m.method === 'textDocument/publishDiagnostics') published.push(m.params);
+    });
+    await transport.start();
+
+    // didOpen triggers a first diagnose (call #0). Resolve it so didOpen settles; it carries no
+    // diagnostics, so it publishes nothing.
+    const open = transport.send(
+      JSON.stringify({ method: 'textDocument/didOpen', params: { textDocument: { uri: URI, text: 'a' } } }),
+    );
+    expect(calls).toHaveLength(1);
+    calls[0].resolve('[]');
+    await open;
+
+    // Fire two didChange-driven diagnoses back-to-back WITHOUT awaiting the first — both are in flight.
+    const c1 = transport.send(
+      JSON.stringify({ method: 'textDocument/didChange', params: { textDocument: { uri: URI }, contentChanges: [{ text: 'aa' }] } }),
+    );
+    expect(calls).toHaveLength(2); // call #1 (stale) is now pending
+    const c2 = transport.send(
+      JSON.stringify({ method: 'textDocument/didChange', params: { textDocument: { uri: URI }, contentChanges: [{ text: 'aaa' }] } }),
+    );
+    expect(calls).toHaveLength(3); // call #2 (latest) issued
+
+    // The newer request must have aborted the prior in-flight call's signal (dropping its worker id).
+    expect(calls[1].signal?.aborted).toBe(true);
+    expect(calls[2].signal?.aborted).toBe(false);
+
+    // Settle the latest call with diagnostics-B. (Call #1 already rejected via its aborted signal.)
+    calls[2].resolve(JSON.stringify([{ uri: URI, diagnostics: [{ code: 'B' }] }]));
+    await Promise.all([c1, c2]);
+
+    // Only the latest diagnostics reached the client; the superseded call published nothing.
+    expect(published).toHaveLength(1);
+    expect(published[0].uri).toBe(URI);
+    expect(published[0].diagnostics[0]?.code).toBe('B');
+  });
+
+  test('without a worker client (main-thread fallback), a stale resolution never overwrites a newer one', async () => {
+    // No worker client → the transport uses the api proxy and the sequence-guard drops stale results.
+    const deferreds: { resolve: (v: string) => void }[] = [];
+    api.DiagnoseWorkspace.mockImplementation(
+      () => new Promise<string>((resolve) => deferreds.push({ resolve })) as unknown as string,
+    );
+
+    const transport = new WasmLspTransport();
+    const published: { uri: string; diagnostics: { code?: string }[] }[] = [];
+    transport.onMessage((json) => {
+      const m = JSON.parse(json);
+      if (m.method === 'textDocument/publishDiagnostics') published.push(m.params);
+    });
+    await transport.start();
+
+    // Two diagnose-triggering edits in flight (didOpen #0, then didChange #1).
+    const c1 = transport.send(
+      JSON.stringify({ method: 'textDocument/didOpen', params: { textDocument: { uri: URI, text: 'a' } } }),
+    );
+    const c2 = transport.send(
+      JSON.stringify({ method: 'textDocument/didChange', params: { textDocument: { uri: URI }, contentChanges: [{ text: 'aa' }] } }),
+    );
+    expect(deferreds).toHaveLength(2);
+
+    // Resolve the NEWER one first (it wins), then the stale one — which must be dropped by the guard.
+    deferreds[1].resolve(JSON.stringify([{ uri: URI, diagnostics: [{ code: 'NEW' }] }]));
+    deferreds[0].resolve(JSON.stringify([{ uri: URI, diagnostics: [{ code: 'STALE' }] }]));
+    await Promise.all([c1, c2]);
+
+    expect(published).toHaveLength(1);
+    expect(published[0].diagnostics[0]?.code).toBe('NEW');
+
+    api.DiagnoseWorkspace.mockReturnValue('[]'); // restore the default for any later tests
   });
 });
