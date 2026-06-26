@@ -1,9 +1,10 @@
 // Browser platform backend: the compiler runs in-process via Koine.Wasm (WasmLspTransport) and
 // files go through the File System Access API (fs.ts). Used when the studio is served as a plain
 // web page rather than hosted in the Tauri desktop shell.
+import type { EditSession } from '@/ai/editSession';
 import type { FsEntry, GitLogEntry, GitStatus, KoiFile, LspTransport, Platform, SourceDoc } from '@/host/types';
 import { WasmLspTransport } from '@/host/browser/transport';
-import { runWasmTool } from '@/host/browser/tools';
+import { runEditTool as runEditToolImpl, runWasmTool } from '@/host/browser/tools';
 import { loadWasmApi } from '@/host/browser/wasm';
 import * as fs from '@/host/browser/fs';
 import { saveMetaFor } from '@/host/saveMeta';
@@ -42,6 +43,11 @@ export class BrowserPlatform implements Platform {
   // The Assistant's koine tools run in-process against the resident Koine.Wasm compiler.
   runCompilerTool(name: string, argsJson: string): Promise<string> {
     return runWasmTool(name, argsJson);
+  }
+
+  // The host-local edit tools dispatch against the per-turn staging session (in-process WASM validate).
+  runEditTool(name: string, argsJson: string, session: EditSession): Promise<string> {
+    return runEditToolImpl(name, argsJson, session);
   }
 
   // The GBNF grammar for grammar-constrained decoding (#257) comes straight from the resident

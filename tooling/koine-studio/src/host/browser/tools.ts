@@ -2,7 +2,8 @@
 // call to the already-resident Koine.Wasm runtime and format the result for the model. This is the
 // browser half of Platform.runCompilerTool — the desktop half proxies to the `koine mcp --http`
 // sidecar instead (src/host/tauri.ts). The tool DEFINITIONS + pure formatters live in assistantTools.
-import { formatCompile, formatValidate, normalizeCompileTarget } from '@/ai/assistantTools';
+import { formatCompile, formatValidate, normalizeCompileTarget, runEditToolStaging } from '@/ai/assistantTools';
+import type { EditSession } from '@/ai/editSession';
 import { loadWasmApi } from '@/host/browser/wasm';
 
 /** The single synthetic file URI the one-file tool `source` is wrapped into for the workspace APIs. */
@@ -42,4 +43,24 @@ export async function runWasmTool(name: string, argsJson: string): Promise<strin
     default:
       return `Error: unknown tool ${name}.`;
   }
+}
+
+/** The `[{uri,text}]` envelope for the WHOLE staged workspace (every relPath the session knows,
+ *  reading through to staged-or-initial bodies). relPaths map to `file:///<relPath>` uris. */
+function workspaceEnvelope(session: EditSession): string {
+  return JSON.stringify(
+    session.list().map((relPath) => ({ uri: `file:///${relPath}`, text: session.read(relPath) ?? '' })),
+  );
+}
+
+/**
+ * Execute a host-local edit tool (koine_list_files/koine_read_file/koine_write_file) against the
+ * per-turn staging `session`. The list/read/write dispatch is host-independent
+ * ({@link runEditToolStaging}); the browser host supplies the whole-staged-workspace validation by
+ * running the resident WASM compiler's `DiagnoseWorkspace` over the staged set after a write.
+ */
+export function runEditTool(name: string, argsJson: string, session: EditSession): Promise<string> {
+  return runEditToolStaging(name, argsJson, session, async () =>
+    formatValidate(JSON.parse(await (await loadWasmApi()).DiagnoseWorkspace(workspaceEnvelope(session)))),
+  );
 }

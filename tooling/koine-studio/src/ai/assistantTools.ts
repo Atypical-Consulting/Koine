@@ -7,6 +7,7 @@
 // MCP server exposes, but executed by the IDE itself. `reference`/`examples` are intentionally NOT
 // here: their content is already injected into the system prompt (KOINE_PRIMER + live source).
 import type { ChatCompletionFunctionTool } from 'openai/resources/chat/completions';
+import type { EditSession } from '@/ai/editSession';
 import { EMIT_TARGETS, isEmitTarget } from '@/shared/emitTargets';
 
 export type CompileTarget = string;
@@ -27,14 +28,25 @@ export function normalizeCompileTarget(target: unknown): CompileTarget {
   return isEmitTarget(target) ? (target as CompileTarget) : 'csharp';
 }
 
-/** The tool names advertised to the model — identical to the MCP server's, so a future desktop
- *  MCP-backed executor can dispatch by the same name. */
-export const KOINE_TOOL_NAMES = ['koine_validate', 'koine_compile', 'koine_format'] as const;
+/** The compiler tools — executed against the WASM api / MCP sidecar. Identical to the MCP server's. */
+export const KOINE_COMPILER_TOOL_NAMES = ['koine_validate', 'koine_compile', 'koine_format'] as const;
+/** The host-local edit tools — dispatched against the Studio host's in-memory edit-session staging
+ *  area (editSession.ts), NOT the MCP server, so they are tracked separately. */
+export const KOINE_EDIT_TOOL_NAMES = ['koine_list_files', 'koine_read_file', 'koine_write_file'] as const;
+/** Every tool name the assistant advertises. */
+export const KOINE_TOOL_NAMES = [...KOINE_COMPILER_TOOL_NAMES, ...KOINE_EDIT_TOOL_NAMES] as const;
 export type KoineToolName = (typeof KOINE_TOOL_NAMES)[number];
+export type KoineEditToolName = (typeof KOINE_EDIT_TOOL_NAMES)[number];
 
 const SOURCE_PROP = {
   type: 'string',
   description: 'The complete Koine (.koi) model source.',
+} as const;
+
+const REL_PATH_PROP = {
+  type: 'string',
+  description:
+    'Workspace-relative path of a .koi file (e.g. "ordering/orders.koi"). Must stay inside the workspace — no absolute or ".." paths.',
 } as const;
 
 /** A provider-neutral tool definition. `inputSchema` is a JSON Schema object; the adapters below
@@ -91,6 +103,41 @@ export function koineToolDefs(): NeutralTool[] {
       additionalProperties: false,
       properties: { source: SOURCE_PROP },
       required: ['source'],
+    },
+  },
+  {
+    name: 'koine_list_files',
+    description:
+      'List the workspace .koi files the assistant may read or edit, by their workspace-relative paths.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {},
+    },
+  },
+  {
+    name: 'koine_read_file',
+    description: 'Read the current contents of one workspace .koi file by its workspace-relative path.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { relPath: REL_PATH_PROP },
+      required: ['relPath'],
+    },
+  },
+  {
+    name: 'koine_write_file',
+    description:
+      'Stage new full-file contents for one workspace .koi file (creating it if new). The write is ' +
+      'STAGED for the user to review and apply — it does NOT touch disk. Call once per file you want to change.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        relPath: REL_PATH_PROP,
+        contents: { type: 'string', description: 'The complete new file contents.' },
+      },
+      required: ['relPath', 'contents'],
     },
   },
   ];
@@ -188,6 +235,68 @@ export function formatCompile(res: WEmitPreviewResult): string {
     `compiled to ${res.target} — ${files.length} file(s):\n\n` +
     files.map((f) => `// ${f.path}\n${f.contents}`).join('\n\n')
   );
+}
+
+// --- edit-tool result formatters (host-staged, see editSession.ts) -----------
+
+/** Render a koine_list_files result: the workspace-relative .koi paths the model may touch. */
+export function formatListFiles(relPaths: string[]): string {
+  if (!relPaths.length) return 'no .koi files in the workspace.';
+  return `${relPaths.length} file(s):\n${relPaths.map((p) => `- ${p}`).join('\n')}`;
+}
+
+/** Render a koine_read_file result: the file body, or a not-found line when contents is null. */
+export function formatReadFile(relPath: string, contents: string | null): string {
+  if (contents === null) return `not found: ${relPath}`;
+  return `${relPath}:\n${contents}`;
+}
+
+/** Render a koine_write_file confirmation: the file was STAGED (not written to disk yet). */
+export function formatWriteFile(relPath: string, isNew: boolean): string {
+  return `staged ${isNew ? 'new file' : 'changes to'} ${relPath} (not yet written to disk).`;
+}
+
+/**
+ * Host-independent dispatch for the staged edit tools (`koine_list_files` / `koine_read_file` /
+ * `koine_write_file`) against a per-turn {@link EditSession}: parse the args, run a pure list/read, or
+ * stage a write and report it. The whole-staged-workspace validation differs by host (WASM
+ * `DiagnoseWorkspace` in the browser, the MCP sidecar on desktop), so the caller passes
+ * `validateStaged`, invoked only after a write to append the diagnostics summary. Never throws — bad
+ * JSON, an unsafe/non-`.koi` relPath (the session's `stage` guard throws), or an unknown tool all
+ * resolve to an error string the model can read and recover from.
+ */
+export async function runEditToolStaging(
+  name: string,
+  argsJson: string,
+  session: EditSession,
+  validateStaged: () => Promise<string>,
+): Promise<string> {
+  let args: { relPath?: unknown; contents?: unknown };
+  try {
+    args = JSON.parse(argsJson || '{}');
+  } catch {
+    return 'Error: the tool arguments were not valid JSON.';
+  }
+  try {
+    switch (name) {
+      case 'koine_list_files':
+        return formatListFiles(session.list());
+      case 'koine_read_file': {
+        const relPath = typeof args.relPath === 'string' ? args.relPath : '';
+        return formatReadFile(relPath, session.read(relPath));
+      }
+      case 'koine_write_file': {
+        const relPath = typeof args.relPath === 'string' ? args.relPath : '';
+        const contents = typeof args.contents === 'string' ? args.contents : '';
+        session.stage(relPath, contents);
+        return `${formatWriteFile(relPath, session.isNew(relPath))}\n${await validateStaged()}`;
+      }
+      default:
+        return `Error: unknown tool ${name}.`;
+    }
+  } catch (e) {
+    return `Error: ${e instanceof Error ? e.message : String(e)}`;
+  }
 }
 
 /** A short, single-line status for the inline tool-call line in the transcript. */

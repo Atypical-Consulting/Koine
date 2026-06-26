@@ -3,23 +3,38 @@ import {
   koineTools,
   koineToolDefs,
   KOINE_TOOL_NAMES,
+  KOINE_COMPILER_TOOL_NAMES,
+  KOINE_EDIT_TOOL_NAMES,
   compileTargets,
   toOpenAiTool,
   toAnthropicTool,
   formatValidate,
   formatCompile,
+  formatListFiles,
+  formatReadFile,
+  formatWriteFile,
   summarizeForChip,
 } from '@/ai/assistantTools';
 
+const ALL_SIX = [
+  'koine_compile',
+  'koine_format',
+  'koine_list_files',
+  'koine_read_file',
+  'koine_validate',
+  'koine_write_file',
+];
+const isCompilerTool = (name: string) => (KOINE_COMPILER_TOOL_NAMES as readonly string[]).includes(name);
+
 describe('koineTools() definitions', () => {
-  test('advertises exactly validate/compile/format as OpenAI function tools', () => {
+  test('advertises all six compiler+edit tools as OpenAI function tools', () => {
     const names = koineTools().map((t) => t.function.name).sort();
-    expect(names).toEqual(['koine_compile', 'koine_format', 'koine_validate']);
+    expect(names).toEqual(ALL_SIX);
     expect([...KOINE_TOOL_NAMES].sort()).toEqual(names);
   });
 
-  test('every tool requires a source string and has a non-empty description', () => {
-    for (const t of koineTools()) {
+  test('every COMPILER tool requires a source string and has a non-empty description', () => {
+    for (const t of koineTools().filter((t) => isCompilerTool(t.function.name))) {
       expect(t.type).toBe('function');
       expect(t.function.description && t.function.description.length).toBeGreaterThan(0);
       const params = t.function.parameters as { required?: string[]; properties: Record<string, unknown> };
@@ -39,10 +54,10 @@ describe('koineTools() definitions', () => {
 });
 
 describe('neutral tool defs + adapters', () => {
-  test('koineToolDefs() has exactly validate/compile/format, each source-required', () => {
+  test('koineToolDefs() advertises all six tools; the compiler tools are source-required', () => {
     const names = koineToolDefs().map((d) => d.name).sort();
-    expect(names).toEqual(['koine_compile', 'koine_format', 'koine_validate']);
-    for (const def of koineToolDefs()) {
+    expect(names).toEqual(ALL_SIX);
+    for (const def of koineToolDefs().filter((d) => isCompilerTool(d.name))) {
       expect(def.description.length).toBeGreaterThan(0);
       const schema = def.inputSchema as { required?: string[]; properties: Record<string, unknown> };
       expect(typeof def.inputSchema).toBe('object');
@@ -66,6 +81,107 @@ describe('neutral tool defs + adapters', () => {
     const tool = toAnthropicTool(def);
     expect(tool).toEqual({ name: def.name, description: def.description, input_schema: def.inputSchema });
     expect(tool.input_schema).toBe(def.inputSchema); // referential, no schema rewrite
+  });
+});
+
+describe('edit tool defs (list/read/write)', () => {
+  const byName = (name: string) => koineToolDefs().find((d) => d.name === name)!;
+
+  test('koineToolDefs() includes the three edit tools with additionalProperties:false', () => {
+    for (const name of KOINE_EDIT_TOOL_NAMES) {
+      const def = byName(name);
+      expect(def).toBeTruthy();
+      expect(def.description.length).toBeGreaterThan(0);
+      const schema = def.inputSchema as { additionalProperties?: boolean };
+      expect(schema.additionalProperties).toBe(false);
+    }
+  });
+
+  test('koine_list_files takes no args (no required, empty properties)', () => {
+    const schema = byName('koine_list_files').inputSchema as {
+      required?: string[];
+      properties: Record<string, unknown>;
+    };
+    expect(schema.required).toBeUndefined();
+    expect(schema.properties).toEqual({});
+  });
+
+  test('koine_read_file requires relPath', () => {
+    const schema = byName('koine_read_file').inputSchema as {
+      required?: string[];
+      properties: Record<string, unknown>;
+    };
+    expect(schema.required).toEqual(['relPath']);
+    expect(schema.properties.relPath).toBeTruthy();
+  });
+
+  test('koine_write_file requires relPath and contents', () => {
+    const schema = byName('koine_write_file').inputSchema as {
+      required?: string[];
+      properties: Record<string, unknown>;
+    };
+    expect(schema.required).toEqual(['relPath', 'contents']);
+    expect(schema.properties.relPath).toBeTruthy();
+    expect(schema.properties.contents).toBeTruthy();
+  });
+
+  test('koineTools() advertises the edit tools to OpenAI too', () => {
+    const names = koineTools().map((t) => t.function.name);
+    for (const name of KOINE_EDIT_TOOL_NAMES) expect(names).toContain(name);
+  });
+
+  test('edit defs round-trip through both provider adapters, sharing the schema reference', () => {
+    for (const name of KOINE_EDIT_TOOL_NAMES) {
+      const def = byName(name);
+      // OpenAI: schema lands in function.parameters
+      expect(toOpenAiTool(def).function.parameters).toBe(def.inputSchema);
+      // Anthropic: schema lands in input_schema, by reference
+      const anth = toAnthropicTool(def);
+      expect(anth.input_schema).toBe(def.inputSchema);
+    }
+  });
+});
+
+describe('formatListFiles', () => {
+  test('says there are no files when empty', () => {
+    expect(formatListFiles([]).toLowerCase()).toContain('no .koi files');
+  });
+
+  test('lists each workspace-relative path with a count when non-empty', () => {
+    const out = formatListFiles(['a.koi', 'b/c.koi']);
+    expect(out).toContain('2 file');
+    expect(out).toContain('a.koi');
+    expect(out).toContain('b/c.koi');
+  });
+});
+
+describe('formatReadFile', () => {
+  test('renders a not-found line when contents is null', () => {
+    const out = formatReadFile('x.koi', null);
+    expect(out.toLowerCase()).toContain('not found');
+    expect(out).toContain('x.koi');
+  });
+
+  test('includes the file body when present', () => {
+    const out = formatReadFile('x.koi', 'context X {}');
+    expect(out).toContain('x.koi');
+    expect(out).toContain('context X {}');
+  });
+});
+
+describe('formatWriteFile', () => {
+  test('reads as a NEW staged file that is not yet on disk', () => {
+    const out = formatWriteFile('x.koi', true);
+    expect(out.toLowerCase()).toContain('new');
+    expect(out).toContain('x.koi');
+    expect(out.toLowerCase()).toContain('not yet written to disk');
+  });
+
+  test('reads as staged changes to an existing file, not yet on disk', () => {
+    const out = formatWriteFile('x.koi', false);
+    expect(out.toLowerCase()).toContain('staged');
+    expect(out).toContain('x.koi');
+    expect(out.toLowerCase()).toContain('not yet written to disk');
   });
 });
 

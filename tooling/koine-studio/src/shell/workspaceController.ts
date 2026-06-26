@@ -219,6 +219,12 @@ export interface WorkspaceController {
   // --- workspace edits ---
   /** Apply a rename/code-action WorkspaceEdit across open buffers (active via editor, others patched). */
   applyWorkspaceEdit(edit: WorkspaceEdit): void;
+  /**
+   * Write a full-file body to `relPath`: update + persist an existing open buffer, or CREATE a new
+   * file under the primary root and open it. Syncs the open buffer + LSP and clears its dirty flag.
+   * Used by the assistant's multi-file apply. Returns the file uri, or null on failure.
+   */
+  applyFileEdit(relPath: string, body: string): Promise<string | null>;
 
   // --- seams (ide.ts wires editorSession/controller through these to avoid a circular import) ---
   /** Register the active-file-changed callback (ide.ts: showDiagnostics + invalidateDocViews + follow). */
@@ -849,6 +855,40 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     buffersChanged?.();
   }
 
+  // Write one full-file body to `relPath` for the assistant's multi-file apply. An EXISTING open buffer
+  // (matched by relPath) is updated in place — reflected in the editor when it's the active one (so the
+  // change shows + fires onChange), synced to the LSP, persisted, and left CLEAN. A relPath with no open
+  // buffer is CREATED under the primary root and opened. Returns the file uri, or null on failure.
+  async function applyFileEdit(relPath: string, body: string): Promise<string | null> {
+    const existing = [...buffers.values()].find((b) => b.relPath === relPath);
+    if (existing) {
+      if (existing.uri === activeUriValue) editor.setDoc(body); // reflect in the open editor (fires onChange → dirty)
+      existing.text = body;
+      lsp.changeDoc(existing.uri, body);
+      try {
+        await platform.writeTextFile(existing.path, body);
+      } catch (e) {
+        console.error('applyFileEdit write failed:', e);
+        return null;
+      }
+      existing.dirty = false; // set AFTER setDoc's onChange so the buffer ends clean
+      if (existing.uri === activeUriValue) lsp.didSave(); // didSave() targets the ACTIVE doc — only valid then
+      deps.refreshDirtyIndicator();
+      renderTree(); // setDoc's onChange repainted the explorer dirty dot; repaint it clean now
+      return existing.uri;
+    }
+    const owningRoot = roots[0];
+    if (!owningRoot) return null;
+    try {
+      const token = await platform.createFile(owningRoot, relPath, body); // new file under the folder root
+      await refreshEntries();
+      return await ensureBuffer(token);
+    } catch (e) {
+      console.error('applyFileEdit create failed:', e);
+      return null;
+    }
+  }
+
   // --- buffer / dirty sync --------------------------------------------------
 
   // The buffer/dirty half of the editor's onChange. ide.ts keeps welcome.hide + controller.onDocEdited
@@ -1034,6 +1074,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     refreshEntries,
     renderTree,
     applyWorkspaceEdit,
+    applyFileEdit,
     onActiveChanged(cb) {
       activeChanged = cb;
     },
