@@ -22,6 +22,7 @@
       <button data-mobile="output" type="button">Output</button>
     </div>
     <span class="koi-status" data-kind="busy">loading compiler...</span>
+    <button class="koi-stop" type="button" title="Stop a runaway compile and restart the compiler" hidden>Stop</button>
     <span class="koi-version" title="Compiler version"></span>
     <div class="koi-bar-right">
       <button class="koi-copy" type="button" title="Copy the current file">Copy</button>
@@ -180,6 +181,27 @@
     50% {
       opacity: 1;
     }
+  }
+
+  /* Stop affordance — shown only while a compile is in flight (#353). */
+  .koi-stop {
+    appearance: none;
+    font: 600 0.76rem/1 var(--koi-font-mono);
+    padding: 0.32rem 0.6rem;
+    border-radius: var(--koi-radius-sm);
+    border: 1px solid #d14b3c;
+    background: var(--koi-surface);
+    color: #d14b3c;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.12s, color 0.12s;
+  }
+  .koi-stop:hover {
+    background: #d14b3c;
+    color: var(--koi-on-accent, #fff);
+  }
+  .koi-stop[hidden] {
+    display: none;
   }
 
   .koi-bar-right {
