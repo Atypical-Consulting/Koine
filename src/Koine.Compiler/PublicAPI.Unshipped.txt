@@ -296,6 +296,14 @@ Koine.Compiler.Services.RenameFileChanges.Occurrences.get -> System.Collections.
 Koine.Compiler.Services.RenameFileChanges.Occurrences.init -> void
 Koine.Compiler.Services.KoineLanguageService.RenamePreviewAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character, string! newName) -> Koine.Compiler.Services.RenamePreview?
 Koine.Compiler.Services.KoineLanguageService.RenamePreviewAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character, string! newName) -> Koine.Compiler.Services.RenamePreview?
+Koine.Compiler.Services.RenameEdit
+Koine.Compiler.Services.RenameEdit.RenameEdit(Koine.Compiler.Services.Reference! Occurrence, string! NewText) -> void
+Koine.Compiler.Services.RenameEdit.Occurrence.get -> Koine.Compiler.Services.Reference!
+Koine.Compiler.Services.RenameEdit.Occurrence.init -> void
+Koine.Compiler.Services.RenameEdit.NewText.get -> string!
+Koine.Compiler.Services.RenameEdit.NewText.init -> void
+Koine.Compiler.Services.KoineLanguageService.RenameEditsAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character, string! newName) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameEdit!>?
+Koine.Compiler.Services.KoineLanguageService.RenameEditsAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character, string! newName) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameEdit!>?
 Koine.Compiler.Services.KoineLanguageService.LinkedEditingRangeAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>?
 Koine.Compiler.Services.KoineLanguageService.LinkedEditingRangeAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>?
 Koine.Compiler.Formatting.FormatRangeEdit

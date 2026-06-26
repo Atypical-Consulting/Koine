@@ -1044,24 +1044,28 @@ public static partial class CompilerInterop
     /// <summary>
     /// Workspace edit that renames the name under the cursor to <paramref name="newName"/> across the
     /// merged workspace: <c>{ changes: { uri: TextEdit[] } }</c>, or the JSON literal <c>null</c> when
-    /// no rename applies (cursor not on a renameable name, invalid identifier, or unchanged).
+    /// no rename applies (cursor not on a renameable name, invalid identifier, or unchanged). When the
+    /// renamed symbol is an aggregate root entity with a convention-linked <c>&lt;Root&gt;Id</c> identity,
+    /// the edit also co-renames that identity type to <c>&lt;newName&gt;Id</c> (#550).
     /// </summary>
     [JSExport]
     public static string Rename(string filesJson, string activeUri, int line, int character, string newName)
     {
         try
         {
-            var refs = LanguageService.RenameAt(GetWarmCompilation(DeserializeFiles(filesJson)), activeUri, line, character, newName);
-            if (refs is null)
+            var edits = LanguageService.RenameEditsAt(GetWarmCompilation(DeserializeFiles(filesJson)), activeUri, line, character, newName);
+            if (edits is null)
             {
                 return "null";
             }
 
-            var changes = refs
-                .GroupBy(r => r.Uri, StringComparer.Ordinal)
+            // Each occurrence carries its OWN newText: the root takes newName, while a co-renamed
+            // aggregate-root identity type takes <newName>Id (#550).
+            var changes = edits
+                .GroupBy(e => e.Occurrence.Uri, StringComparer.Ordinal)
                 .ToDictionary(
                     g => g.Key,
-                    g => g.Select(r => new WTextEdit(RangeOf(r), newName)).ToArray(),
+                    g => g.Select(e => new WTextEdit(RangeOf(e.Occurrence), e.NewText)).ToArray(),
                     StringComparer.Ordinal);
             return JsonSerializer.Serialize(new WWorkspaceEdit(changes), LangJson.Default.WWorkspaceEdit);
         }
