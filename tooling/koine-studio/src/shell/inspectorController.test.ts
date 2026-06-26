@@ -276,6 +276,20 @@ describe('createInspectorController — center switching', () => {
     expect(el('center-tab-visual').getAttribute('aria-selected')).toBe('true');
   });
 
+  test('the bottom panel is visible in every center view (#451)', () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init(); // boots Visual
+
+    expect(el('diagnostics').hidden).toBe(false); // Visual
+    ctl.selectCenter('technical');
+    expect(el('diagnostics').hidden).toBe(false); // Code
+    ctl.selectDocsTab('glossary'); // forces center = docs
+    expect(el('diagnostics').hidden).toBe(false); // Documentation
+    ctl.selectCenter('assistant');
+    expect(el('diagnostics').hidden).toBe(false); // Assistant
+  });
+
   test('selectCenter("technical") surfaces the technical center + editor sub-view and marks the Code tab', () => {
     const ctl = createInspectorController(makeDeps(makeLsp()));
     ctl.init();

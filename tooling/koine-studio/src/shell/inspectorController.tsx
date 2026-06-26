@@ -1110,9 +1110,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // reachable in one click from any view, not a Code sub-tab. Its host (#view-assistant) is the
     // center-host itself, so it's shown/hidden purely by the active center.
     assistantView.hidden = center !== 'assistant';
-    // The bottom strip (Problems/Events/Relationships/Context Map) sits under the canvas/editor — it
-    // serves Visual and Code, but not Documentation or the full-height Assistant conversation.
-    diagEl.hidden = center === 'docs' || center === 'assistant';
+    // The bottom strip (Problems/Events/Relationships/Context Map/Terminal) is GLOBAL: it serves every
+    // center view and is hidden only by its own collapse toggle (#diag-collapse), never by the active
+    // view. (Previously hidden on Documentation + Assistant for full-height reading/chat; the collapse
+    // control reclaims that height on demand instead.)
+    diagEl.hidden = false;
     for (const t of centerTabs) t.setAttribute('aria-selected', String(t.dataset.center === center));
     const techVisible = center === 'technical';
     editorPaneEl.hidden = !(techVisible && tech === 'editor');

@@ -234,8 +234,8 @@
             </section>
             <!-- The AI copilot — a top-level center pane (peer of Visual / Code / Documentation), so it's
                  one click from any view. The AssistantPanel is mounted into this host lazily on first show
-                 (ide.tsx); the bottom diagnostics strip is hidden here, as on Documentation, so the
-                 conversation gets the center's full height. -->
+                 (ide.tsx); the bottom diagnostics strip stays visible here (it's global), collapse it from
+                 its chevron to give the conversation the center's full height. -->
             <section id="view-assistant" class="center-host" role="tabpanel" aria-label="Assistant" hidden></section>
           </div>
 
