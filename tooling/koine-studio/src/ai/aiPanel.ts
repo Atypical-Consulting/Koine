@@ -547,12 +547,21 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
   }
 
   // Append an "Apply to editor" affordance when the assistant produced a model — re-validating the
-  // extracted `.koi` first so the two LEGACY entry points (transcript replay, stop-mid-stream) can't
-  // apply a model that never passed the live apply-gate (#444). Both reach here without the live
-  // path's validation, so we re-run the SAME adapter via {@link shouldOfferApply} before offering.
+  // candidate first so the two LEGACY entry points (transcript replay, stop-mid-stream) can't apply a
+  // model that never passed the live apply-gate (#444). Both reach here without the live path's
+  // validation, so we re-run the SAME adapter via {@link shouldOfferApply} before offering.
+  //
+  // Candidate recovery mirrors the live path (#561): a genuinely grammar-constrained reply is a BARE
+  // `.koi` program with NO ```koine fence (the GBNF root can't emit one), so `extractKoine` returns
+  // null for it. When there's no fence AND the constraint toggle is on, fall back to the trimmed body
+  // as the candidate — only on the constrained path, since the bare-program shape only arises there, so
+  // this preserves the legacy "off ⇒ fenced-only" behavior. The candidate still clears `shouldOfferApply`
+  // either way, so a valid bare model is offered Apply, prose that doesn't parse is rejected, and the
+  // #444 bypass stays closed (no Apply without validation).
   async function maybeOfferApply(bubble: HTMLElement, markdown: string): Promise<void> {
-    const koine = extractKoine(markdown);
-    if (koine && (await shouldOfferApply(koine))) attachApplyButton(bubble, koine);
+    const candidate =
+      extractKoine(markdown) ?? (opts.getConstrainGrammar() ? markdown.trim() || null : null);
+    if (candidate && (await shouldOfferApply(candidate))) attachApplyButton(bubble, candidate);
   }
 
   // Should a model-bearing LEGACY turn (transcript replay / stop-mid-stream partial) offer Apply?
