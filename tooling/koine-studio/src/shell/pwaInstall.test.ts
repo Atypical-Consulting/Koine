@@ -251,4 +251,24 @@ describe('connectInstallAffordance', () => {
     dispatchBip(dom.target);
     expect(dom.root.hidden).toBe(true); // no longer listening, so it never armed
   });
+
+  it('announces once via the shared live region on the hidden→visible reveal (and not on dismiss)', () => {
+    const dom = makeDom();
+    const announce = vi.fn();
+    const controller = createInstallController({ storage: memStorage() });
+    const dispose = connectInstallAffordance(controller, { ...dom, announce });
+
+    expect(announce).not.toHaveBeenCalled(); // nothing to announce while hidden
+
+    dispatchBip(dom.target); // hidden → visible
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith('Koine Studio can be installed');
+
+    // Dismissing is silent, and a re-fired event stays hidden (persisted dismissal) → no re-announce.
+    dom.dismissButton.click();
+    dispatchBip(dom.target);
+    expect(announce).toHaveBeenCalledTimes(1);
+
+    dispose();
+  });
 });
