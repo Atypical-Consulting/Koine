@@ -138,6 +138,11 @@
   background: var(--koi-paper-2);
   padding: var(--koi-space-2);
 }
+// A superseded change set (a newer turn retired it, issue #473) is dimmed so it reads as inert; the
+// disabled Apply/checkboxes and the status notice carry the meaning, so this is not color-alone.
+.koi-changeset-superseded {
+  opacity: 0.55;
+}
 .koi-changeset-file {
   display: grid;
   grid-template-columns: auto auto 1fr;

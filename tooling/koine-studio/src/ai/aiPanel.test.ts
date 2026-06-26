@@ -735,6 +735,76 @@ describe('multi-file change set (agentic edits)', () => {
     expect(applyBtn.textContent).not.toContain('✓');
     expect(applyBtn.disabled).toBe(false);
   });
+
+  // #473 (Task 1): a stale change-set panel from a prior turn must not stay clickable after a NEW send —
+  // a late Apply on it would write stale full-file bodies wholesale over everything done since.
+  test('a new send supersedes the prior un-applied change set (Apply + checkboxes disabled, superseded notice)', async () => {
+    // Each turn stages a one-file change set.
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      req.onText('Edit.');
+      return 'Edit.';
+    });
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        runEditTool: vi.fn(async () => 'ok'),
+        onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
+      }),
+    );
+
+    // First turn stages a change set; capture its (still-live) Apply button + accept checkboxes.
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    const firstPanel = container.querySelector('.koi-changeset')!;
+    const firstApply = firstPanel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    const firstChecks = firstPanel.querySelectorAll<HTMLInputElement>('.koi-changeset-accept');
+    expect(firstApply.disabled).toBe(false);
+    expect([...firstChecks].some((c) => c.disabled)).toBe(false);
+
+    // A second send begins → the prior panel is retired: Apply + every accept checkbox disabled and a
+    // "superseded" notice in its status live region, so a late click can't clobber newer work.
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelectorAll('.koi-changeset').length).toBe(2));
+
+    expect(firstApply.disabled).toBe(true);
+    expect([...firstChecks].every((c) => c.disabled)).toBe(true);
+    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+  });
+
+  // Idempotency: invalidation must never overwrite an ALREADY-applied panel's terminal "Applied ✓".
+  test('superseding an already-applied change set is a no-op (keeps "Applied ✓", no "superseded")', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      req.onText('Edit.');
+      return 'Edit.';
+    });
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        runEditTool: vi.fn(async () => 'ok'),
+        onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
+      }),
+    );
+
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    const firstPanel = container.querySelector('.koi-changeset')!;
+    const firstApply = firstPanel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    // Apply the first change set to terminal "Applied ✓".
+    firstApply.click();
+    await vi.waitFor(() => expect(firstApply.textContent).toContain('✓'));
+
+    // A later send must NOT overwrite the applied panel's terminal status with a "superseded" notice.
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelectorAll('.koi-changeset').length).toBe(2));
+    expect(firstApply.textContent).toContain('✓');
+    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).not.toMatch(/superseded/i);
+  });
 });
 
 // --- apply-gate re-validation at the legacy entry points (#444) -------------------------------

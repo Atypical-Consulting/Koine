@@ -287,6 +287,20 @@ function lineDiff(oldText: string, newText: string): string {
 }
 
 /**
+ * A handle to a rendered agentic change set, so the panel can retire it when it goes stale (issue #473):
+ * a new turn supersedes a prior un-applied proposal whose `before` was computed against an older
+ * workspace snapshot.
+ */
+interface ChangeSetHandle {
+  /**
+   * Disable Apply + every accept checkbox and announce `reason` in the status live region, so an
+   * obsolete panel can no longer be applied. A no-op once the set has already been applied (must not
+   * overwrite the terminal "Applied ✓").
+   */
+  invalidate(reason: string): void;
+}
+
+/**
  * Render a reviewable, per-file change set for an AGENTIC turn that STAGED multi-file edits: one row
  * per staged file (an accept checkbox, a new/modified badge, the relPath, and an inline line-diff of
  * the file's before-text vs the staged body), plus an "Apply N files" button (whose label/disabled
@@ -296,6 +310,9 @@ function lineDiff(oldText: string, newText: string): string {
  * `diagnostics` is the once-per-turn whole-staged-workspace validation summary (issue #474): when it
  * reports errors (`ok: false …`), they're shown alongside the file rows so a write that broke the model
  * is visible BEFORE the user applies; a clean (`ok: true …`) or absent result renders no extra noise.
+ *
+ * Returns a {@link ChangeSetHandle} the caller keeps as the panel's active change set, so a later turn
+ * can supersede this one (issue #473).
  */
 function renderChangeSet(
   bubble: HTMLElement,
@@ -303,7 +320,7 @@ function renderChangeSet(
   before: Record<string, string>,
   handlers: { onApply: (accepted: StagedEdit[]) => Promise<{ failed: string[] }>; onDiscard: () => void },
   diagnostics?: string | null,
-): void {
+): ChangeSetHandle {
   const panel = document.createElement('div');
   panel.className = 'koi-changeset';
   // A labelled group so assistive tech announces the scope of the review (WCAG 2.1 AA 1.3.1 / 4.1.2).
@@ -315,6 +332,9 @@ function renderChangeSet(
   // The accept checkboxes, so a successful apply can disable them all (a toggle afterwards must not
   // re-enable Apply and let the same change set be written to disk a second time).
   const checkboxes: HTMLInputElement[] = [];
+  // Whether this set has been fully applied — once true, invalidation is a no-op so a later turn can't
+  // overwrite the terminal "Applied ✓" with a "superseded" notice (issue #473).
+  let applied = false;
 
   const applyBtn = document.createElement('button');
   applyBtn.type = 'button';
@@ -389,6 +409,7 @@ function renderChangeSet(
       }
       // Success: lock the review (disable the checkboxes so a later toggle can't trigger a second write)
       // and mark Apply terminal.
+      applied = true;
       for (const cb of checkboxes) cb.disabled = true;
       applyBtn.textContent = `Applied ${list.length} file${list.length === 1 ? '' : 's'} ✓`;
       status.textContent = `Applied ${list.length} file${list.length === 1 ? '' : 's'}.`;
@@ -416,6 +437,19 @@ function renderChangeSet(
   refreshApply();
   panel.append(applyBtn, discardBtn, status);
   bubble.appendChild(panel);
+
+  return {
+    invalidate(reason: string): void {
+      // Once applied, the panel is terminal ("Applied ✓") — never overwrite that with a stale notice.
+      if (applied) return;
+      panel.classList.add('koi-changeset-superseded');
+      applyBtn.disabled = true;
+      for (const cb of checkboxes) cb.disabled = true;
+      // Announce in the polite live region so assistive tech learns the proposal can no longer be
+      // applied (WCAG 2.1 AA 4.1.3); the message carries the `reason` (e.g. "superseded").
+      status.textContent = `This change set was ${reason} by a newer turn and can no longer be applied.`;
+    },
+  };
 }
 
 export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPanel {
@@ -424,6 +458,9 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
   let messages: ChatMessage[] = loadChat(opts.getWorkspaceKey());
   let loadedKey = opts.getWorkspaceKey();
   let aborter: AbortController | null = null;
+  // The most recently rendered, still-un-applied agentic change set (issue #473). A new send supersedes
+  // it (its `before` was computed against an older workspace snapshot); cleared once it applies/discards.
+  let activeChangeSet: ChangeSetHandle | null = null;
 
   opts.container.classList.add('koi-assistant');
   opts.container.innerHTML = '';
@@ -788,6 +825,12 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       return;
     }
 
+    // #473: a new turn supersedes any still-un-applied change set from a prior turn — its staged bodies
+    // were computed against an older workspace snapshot, so retire it (disable Apply + accept checkboxes,
+    // announce "superseded") rather than let a late click clobber everything done since.
+    activeChangeSet?.invalidate('superseded');
+    activeChangeSet = null;
+
     input.value = '';
     const userBubble = addBubble('user');
     userBubble.textContent = prompt;
@@ -916,16 +959,27 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         // The model staged a multi-file change: render the body, then a reviewable per-file change set
         // the user accepts before any disk write (the single-file Apply gate is for non-staged replies).
         replyBubble.innerHTML = `<div class="koi-md">${renderMarkdown(full)}</div>`;
-        renderChangeSet(
+        // Keep a handle to this turn's change set so the NEXT send can supersede it (#473). The
+        // onApply/onDiscard wrappers clear the ref once this set reaches a terminal state, so a later
+        // send doesn't try to invalidate an already-applied or discarded panel.
+        let handle: ChangeSetHandle | undefined;
+        handle = renderChangeSet(
           replyBubble,
           editSession.staged(),
           wsFiles ?? {},
           {
-            onApply: async (accepted) => (await opts.onApplyChangeSet?.(accepted)) ?? { failed: [] },
-            onDiscard: () => {},
+            onApply: async (accepted) => {
+              const result = (await opts.onApplyChangeSet?.(accepted)) ?? { failed: [] };
+              if (result.failed.length === 0 && activeChangeSet === handle) activeChangeSet = null;
+              return result;
+            },
+            onDiscard: () => {
+              if (activeChangeSet === handle) activeChangeSet = null;
+            },
           },
           stagedDiagnostics,
         );
+        activeChangeSet = handle;
       } else {
         // The apply-gate lives here: a constrained turn validates (and, on the repair path, re-prompts)
         // before "Apply to editor" is enabled, so unparseable text can never be applied (#257).
