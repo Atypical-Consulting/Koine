@@ -99,6 +99,7 @@ import { HistoryControls } from '@/shell/HistoryControls';
 import { MobileZoneBar } from '@/shell/MobileZoneBar';
 import { type MobileZone } from '@/store/slices/uiChrome';
 import { isNarrowViewport } from '@/shared/breakpoint';
+import { buildOverflowItems, toggleOverflowMenu } from '@/shell/toolbarOverflow';
 import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
 import { createWorkspaceController, type WorkspaceController } from '@/shell/workspaceController';
@@ -2083,6 +2084,22 @@ export function init(): () => void {
   if (!platform.canSaveProjects) saveProjectBtn.hidden = true;
   el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
   el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => prefs.open());
+
+  // Mobile overflow "More" (⋮) menu (#528): at ≤ $bp-narrow the toolbar hides its secondary actions
+  // (Save/Check/Install/⌘K/theme/Settings) and reveals this kebab, which collects them into a floating
+  // menu. Items reuse the command-palette handlers (getCommands) so they never drift; Install is gated
+  // on its affordance being revealed (#442) and reuses the #btn-install handler.
+  const overflowBtn = el<HTMLButtonElement>('btn-toolbar-overflow');
+  overflowBtn.addEventListener('click', () =>
+    toggleOverflowMenu(overflowBtn, () =>
+      buildOverflowItems({
+        commands: getCommands(),
+        openPalette: () => palette.open(),
+        installAvailable: !el<HTMLElement>('install-affordance').hidden,
+        install: () => el<HTMLButtonElement>('btn-install').click(),
+      }),
+    ),
+  );
 
   // Format the active document via the LSP and apply the edits (shared by the palette command
   // and format-on-save). Degrades silently if the request fails.
