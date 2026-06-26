@@ -103,14 +103,18 @@ class Range
  */
 class Decimal
 {
+    /** @var numeric-string The validated decimal string; numeric by construction. */
     private string $value;
 
     public function __construct(string|int $value, private readonly int $scale = 10)
     {
-        if (!is_numeric((string)$value)) {
+        $normalized = (string)$value;
+        if (!is_numeric($normalized)) {
             throw new InvalidArgumentException("Invalid Decimal value: {$value}");
         }
-        $this->value = (string)$value;
+        // is_numeric() above narrows $normalized to numeric-string, which the bc-math
+        // helpers (bcadd/bcsub/bcmul/bcdiv/bccomp) require under phpstan --level max.
+        $this->value = $normalized;
     }
 
     public function getValue(): string

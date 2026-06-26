@@ -129,14 +129,18 @@ internal static class PhpRuntime
         " */\n" +
         "class Decimal\n" +
         "{\n" +
+        "    /** @var numeric-string The validated decimal string; numeric by construction. */\n" +
         "    private string $value;\n" +
         "\n" +
         "    public function __construct(string|int $value, private readonly int $scale = 10)\n" +
         "    {\n" +
-        "        if (!is_numeric((string)$value)) {\n" +
+        "        $normalized = (string)$value;\n" +
+        "        if (!is_numeric($normalized)) {\n" +
         "            throw new InvalidArgumentException(\"Invalid Decimal value: {$value}\");\n" +
         "        }\n" +
-        "        $this->value = (string)$value;\n" +
+        "        // is_numeric() above narrows $normalized to numeric-string, which the bc-math\n" +
+        "        // helpers (bcadd/bcsub/bcmul/bcdiv/bccomp) require under phpstan --level max.\n" +
+        "        $this->value = $normalized;\n" +
         "    }\n" +
         "\n" +
         "    public function getValue(): string\n" +
