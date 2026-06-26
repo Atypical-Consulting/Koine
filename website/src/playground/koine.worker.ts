@@ -16,8 +16,17 @@
 //   Broadcast ← { type: 'ready' }
 //              | { type: 'boot-failure'; error: string }
 
-import type { WorkerRequest, WorkerResponse, WorkerSignal } from './workerClient';
+import type { WorkerRequest, WorkerResponse } from './workerClient';
+import { broadcastBootSignal } from './bootWatchdog';
 import { basePath } from '../lib/base';
+
+/**
+ * Watchdog budget for the in-worker boot (#510). If `dotnet.create()` neither resolves nor rejects
+ * within this window, the watchdog posts an explicit `boot-failure` so the host fails fast — and falls
+ * back to a main-thread boot — instead of waiting out its own 30 s timer with no diagnostic. Kept under
+ * the host's `BOOT_TIMEOUT_MS = 30_000` so the named watchdog failure wins the race on a silent hang.
+ */
+const BOOT_WATCHDOG_MS = 20_000;
 
 /** Base-aware URL of the published dotnet.js loader (respects Astro's base, e.g. `/Koine/`). */
 function dotnetEntryUrl(): string {
@@ -85,14 +94,16 @@ async function handleMessage(ev: MessageEvent<WorkerRequest>): Promise<void> {
 // handler only once boot has resolved leaves that channel untouched during boot. The host sends RPC
 // only after it receives `ready`, so installing the handler just before `ready` loses no messages.
 // (Mirrors tooling/koine-studio/src/host/browser/koine.worker.ts.)
+//
+// The watchdog (broadcastBootSignal, #510) drives that contract: it runs `onReady` — which installs
+// the `addEventListener('message', …)` loop — BEFORE posting `ready`, posts `boot-failure` if the boot
+// rejects, and converts a silent `dotnet.create()` hang into a named `boot-failure` after the budget.
 // ---------------------------------------------------------------------------
 
-bootRuntime()
-  .then(() => {
-    self.addEventListener('message', (ev: MessageEvent) => void handleMessage(ev as MessageEvent<WorkerRequest>));
-    self.postMessage({ type: 'ready' } satisfies WorkerSignal);
-  })
-  .catch((err: unknown) => {
-    const message = err instanceof Error ? err.message : String(err);
-    self.postMessage({ type: 'boot-failure', error: message } satisfies WorkerSignal);
-  });
+broadcastBootSignal(
+  bootRuntime(),
+  (signal) => self.postMessage(signal),
+  BOOT_WATCHDOG_MS,
+  () =>
+    self.addEventListener('message', (ev: MessageEvent) => void handleMessage(ev as MessageEvent<WorkerRequest>)),
+);
