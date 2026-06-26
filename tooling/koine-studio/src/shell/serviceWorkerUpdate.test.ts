@@ -174,6 +174,136 @@ describe('serviceWorkerUpdate — connectUpdateAffordance', () => {
   });
 });
 
+describe('serviceWorkerUpdate — connectUpdateAffordance perceivability gate (#573)', () => {
+  function dom() {
+    const root = document.createElement('div');
+    root.hidden = true;
+    const reloadButton = document.createElement('button');
+    const dismissButton = document.createElement('button');
+    root.append(reloadButton, dismissButton);
+    document.body.append(root);
+    return { root, reloadButton, dismissButton };
+  }
+  // An injectable perceivability signal: a predicate + a subscription whose callbacks fire on demand.
+  function makePerceivable(initial: boolean) {
+    let perceivable = initial;
+    const cbs = new Set<() => void>();
+    return {
+      isPerceivable: () => perceivable,
+      subscribePerceivable: (cb: () => void) => {
+        cbs.add(cb);
+        return () => void cbs.delete(cb);
+      },
+      set(value: boolean) {
+        perceivable = value;
+        for (const cb of cbs) cb();
+      },
+    };
+  }
+
+  it('defers the announcement when revealed while not perceivable, then flushes once it becomes perceivable', () => {
+    const controller = createUpdateController();
+    const d = dom();
+    const announce = vi.fn();
+    const p = makePerceivable(false);
+    const dispose = connectUpdateAffordance(controller, {
+      ...d,
+      announce,
+      reload: vi.fn(),
+      isPerceivable: p.isPerceivable,
+      subscribePerceivable: p.subscribePerceivable,
+    });
+
+    controller.markUpdateReady(); // revealed, but #app is route-hidden → defer
+    expect(d.root.hidden).toBe(false);
+    expect(announce).not.toHaveBeenCalled();
+
+    p.set(true); // editor route shown → flush exactly once
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith('A new version is available — reload to update');
+
+    // Further perceivability toggles never re-announce — one announcement per reveal.
+    p.set(false);
+    p.set(true);
+    expect(announce).toHaveBeenCalledTimes(1);
+
+    dispose();
+  });
+
+  it('announces immediately when revealed while already perceivable (no defer)', () => {
+    const controller = createUpdateController();
+    const d = dom();
+    const announce = vi.fn();
+    const p = makePerceivable(true);
+    const dispose = connectUpdateAffordance(controller, {
+      ...d,
+      announce,
+      reload: vi.fn(),
+      isPerceivable: p.isPerceivable,
+      subscribePerceivable: p.subscribePerceivable,
+    });
+
+    controller.markUpdateReady();
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith('A new version is available — reload to update');
+
+    dispose();
+  });
+
+  it('drops a deferred announcement when dismissed before it became perceivable', () => {
+    const controller = createUpdateController();
+    const d = dom();
+    const announce = vi.fn();
+    const p = makePerceivable(false);
+    const dispose = connectUpdateAffordance(controller, {
+      ...d,
+      announce,
+      reload: vi.fn(),
+      isPerceivable: p.isPerceivable,
+      subscribePerceivable: p.subscribePerceivable,
+    });
+
+    controller.markUpdateReady(); // deferred
+    d.dismissButton.click(); // dismissed while still route-hidden
+    p.set(true); // becoming perceivable must NOT resurrect the dropped announcement
+    expect(announce).not.toHaveBeenCalled();
+
+    dispose();
+  });
+
+  it('announces immediately by default when no perceivability gate is injected', () => {
+    const controller = createUpdateController();
+    const d = dom();
+    const announce = vi.fn();
+    const dispose = connectUpdateAffordance(controller, { ...d, announce, reload: vi.fn() });
+
+    controller.markUpdateReady();
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith('A new version is available — reload to update');
+
+    dispose();
+  });
+
+  it('dispose unsubscribes the perceivability subscription', () => {
+    const controller = createUpdateController();
+    const d = dom();
+    const announce = vi.fn();
+    const unsub = vi.fn();
+    const subscribePerceivable = vi.fn(() => unsub);
+    const dispose = connectUpdateAffordance(controller, {
+      ...d,
+      announce,
+      reload: vi.fn(),
+      isPerceivable: () => false,
+      subscribePerceivable,
+    });
+
+    expect(subscribePerceivable).toHaveBeenCalledTimes(1);
+    dispose();
+    expect(unsub).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('serviceWorkerUpdate — scheduleCompilerPrecache', () => {
   it('is a no-op when the Service Worker API is unavailable (no throw)', () => {
     expect(() => scheduleCompilerPrecache({ navigatorRef: {} as Navigator })).not.toThrow();
