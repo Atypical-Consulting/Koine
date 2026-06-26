@@ -171,6 +171,9 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
   return () => {
     unsub();
     window.removeEventListener('hashchange', onHash);
+    // Clear the route flag so a teardown leaves no stale body[data-route] behind to mis-style a later
+    // mount in the same document (symmetry with apply() setting it; #490).
+    delete document.body.dataset.route;
     ideDispose?.();
     home?.destroy();
     disposeInstall?.();
