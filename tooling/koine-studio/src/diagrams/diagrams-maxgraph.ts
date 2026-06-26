@@ -1165,6 +1165,13 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   // kept so `refit()` can rebuild it once the host is measurable.
   if (!outline && outlineDiv.childElementCount === 0) outlineDiv.remove();
 
+  // True only when the host has a real, measurable box — false while it sits in a hidden (display:none)
+  // zone. Mirrors fit()'s "no-op until measurable" discipline.
+  const isMeasurable = (): boolean => {
+    const r = host.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+
   // Re-fit + re-lay-out the minimap once the surface is measurable again (#529). The canvas is built once
   // and shown/hidden via CSS, so when a hidden zone (the mobile Diagram tab) is revealed nothing re-frames
   // the content or re-measures the Outline. `refit()` re-frames the VIEW (scale/center) and rebuilds the
@@ -1172,6 +1179,11 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   // positions and pan are preserved.
   const refit = (): void => {
     fit();
+    // Rebuild the minimap ONLY when the host is measurable. The refit event is broadcast on `document`, so
+    // it can also reach a still-hidden sibling canvas (the read-only context-map / event-flow chrome);
+    // rebuilding the Outline against that zero-size host would just recreate the oversized empty box. A
+    // hidden sibling re-fits itself when IT is revealed (its own ResizeObserver / the next dispatch).
+    if (!isMeasurable()) return;
     // The Outline reads laid-out geometry at construction; rebuild it so a minimap built against a
     // zero-size host (the oversized empty box) is replaced by a correct thumbnail. If it was removed
     // because it could never construct, re-append a host so it has somewhere to live.
@@ -1184,11 +1196,11 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   // Outline read no geometry. Watch the host and refit ONCE when it transitions 0 → measurable, covering
   // every reveal path (mobile zone switch, split toggle, orientation) — not just the mobile-zone event.
   // Guarded to a genuine 0→non-zero transition so it never thrashes on a live user resize/pan/zoom.
-  let wasMeasurable = host.clientWidth > 0 && host.clientHeight > 0;
+  let wasMeasurable = isMeasurable();
   let ro: { disconnect(): void } | null = null;
   if (typeof ResizeObserver !== 'undefined') {
     const observer = new ResizeObserver(() => {
-      const measurable = host.clientWidth > 0 && host.clientHeight > 0;
+      const measurable = isMeasurable();
       if (measurable && !wasMeasurable) {
         wasMeasurable = true;
         refit();
