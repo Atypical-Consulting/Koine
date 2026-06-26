@@ -83,6 +83,44 @@ public static class MemberAnalysis
     public static bool IsAssignable(TypeRef value, TypeRef target) =>
         TypeShapeEquals(value, target) || (value.Name == "Int" && target.Name == "Decimal");
 
+    /// <summary>The factory parameters whose declared type IS the entity's identity type
+    /// (a simple, non-optional ref to <see cref="EntityDecl.IdentityName"/>). On a non-generatable
+    /// (non-Guid) identity these are the caller-supplied identity candidates for an explicit-id
+    /// create factory (#324); on a Guid identity a factory mints its own id, so such a parameter is
+    /// an ordinary identity reference (e.g. <c>reply(parent: CommentId, …)</c>), NOT the new id.</summary>
+    public static IReadOnlyList<Param> IdentityParameters(EntityDecl entity, FactoryDecl factory) =>
+        factory.Parameters.Where(p => IsIdentityTypeRef(p.Type, entity.IdentityName)).ToList();
+
+    /// <summary>True iff the factory supplies its own identity via exactly one identity-typed
+    /// parameter instead of minting it (#324). Only a non-generatable (non-Guid) identity can —
+    /// a Guid factory always auto-generates, so an identity-typed parameter there is an ordinary
+    /// reference, never the new id. Drives the relaxed KOI0808 and every emitter's
+    /// generate-vs-use-parameter branch.</summary>
+    public static bool FactoryProvidesExplicitId(EntityDecl entity, FactoryDecl factory) =>
+        entity.IdStrategy != IdentityStrategy.Guid && IdentityParameters(entity, factory).Count == 1;
+
+    /// <summary>The single explicit identity parameter the factory supplies its identity through,
+    /// or null. Always null for a Guid entity (it mints its id; an identity-typed parameter there is
+    /// an ordinary reference) and when the factory provides zero or more than one (#324). The
+    /// emitters bind the synthetic <c>id</c> to this parameter.</summary>
+    public static Param? ExplicitIdParameter(EntityDecl entity, FactoryDecl factory)
+    {
+        if (entity.IdStrategy == IdentityStrategy.Guid)
+        {
+            return null;
+        }
+
+        IReadOnlyList<Param> ids = IdentityParameters(entity, factory);
+        return ids.Count == 1 ? ids[0] : null;
+    }
+
+    /// <summary>True when <paramref name="type"/> is a simple, non-optional reference to the
+    /// identity type named <paramref name="identityName"/> (no generic element/value, not nullable)
+    /// — i.e. it denotes the entity's identity, so the parameter is an explicit-id candidate (#324).</summary>
+    internal static bool IsIdentityTypeRef(TypeRef type, string identityName) =>
+        string.Equals(type.Name, identityName, StringComparison.Ordinal)
+        && type.Element is null && type.Value is null && !type.IsOptional;
+
     /// <summary>Enumerates every FREE identifier name referenced inside an expression (in
     /// depth-first, left-to-right order, with duplicates). Lambda parameters and let-bound names
     /// are bound variables, so they are excluded from the body that introduces them.</summary>

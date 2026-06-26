@@ -305,7 +305,7 @@ leak into the target-agnostic model.
 | Construct | Emits |
 |-----------|-------|
 | `value X { … }` | `sealed record` with get-only properties, a validating constructor, value equality |
-| `entity X identified by XId { … }` | `sealed class` with **identity-only** equality + a generated `XId` value object (Guid by default; `as natural(String\|Int)` or `as sequence` selects the strategy). A `create` factory needs the **Guid** strategy — it mints the id (`XId.New()` / `XId::generate()`), which only a Guid identity provides meaningfully; a factory on a `natural`/`sequence` id is rejected (`KOI0808`). |
+| `entity X identified by XId { … }` | `sealed class` with **identity-only** equality + a generated `XId` value object (Guid by default; `as natural(String\|Int)` or `as sequence` selects the strategy). A `create` factory either mints the id (Guid: `XId.New()` / `XId::generate()`) or, for a `natural`/`sequence` key, takes it as an explicit identity-typed parameter (`create register(id: XId, …)`) — `KOI0808` only when a non-Guid factory provides neither. |
 | `aggregate A root R { … }` | nested types in the `<Context>` namespace; the root `R` implements `IAggregateRoot`, and an `I<R>Repository` contract is emitted for it |
 | `aggregate A root R versioned { … }` | the root additionally gains a get-only `Version` token; `ConcurrencyConflictException` is emitted into `Koine.Runtime` |
 | `repository { operations: … ; find name(p): List<R>\|R }` | tunes the root's repository — its mutating method set plus intention-revealing async finders |
@@ -513,7 +513,10 @@ emitters = ./build/Acme.GoEmitter.dll
   a native desktop app ([`tooling/koine-studio`](tooling/koine-studio)). Its built-in **AI copilot**
   makes the `.koi` it generates valid by construction: a grammar-capable local model is constrained to
   Koine's grammar (GBNF token masking), hosted APIs fall back to bounded parse-and-repair against the
-  real parser, and *Apply to editor* stays disabled until the model parses — see the
+  real parser, and *Apply to editor* stays disabled until the model parses. In a folder workspace it
+  can also **edit across files in one turn** — the assistant reads the workspace and *stages* full-file
+  changes (new files land under the folder root) that you review as a per-file diff and apply together;
+  nothing touches disk until you accept. See the
   [Assistant guide](https://atypical-consulting.github.io/Koine/guides/assistant-local-llm/).
 - **Editor support.** [`tooling/koine-textmate`](tooling/) is a TextMate grammar for `.koi` that works
   in **JetBrains Rider** and **VS Code**. For **live error squiggles, completion, hover docs, and

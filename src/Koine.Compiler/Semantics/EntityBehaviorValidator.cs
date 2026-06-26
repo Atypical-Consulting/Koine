@@ -207,19 +207,30 @@ internal static class EntityBehaviorValidator
                     $"factory '{factory.Name}' collides with a property or command of '{entity.Name}'", factory.Span));
             }
 
-            // A `create` factory auto-generates the new aggregate's identity, but only a Guid-backed id
-            // has a meaningful client-side generator. A `natural` key is caller-supplied and a `sequence`
-            // key is store-assigned, so neither does — and the emitters reflect that: C# emits `<Id>.New()`
-            // only for Guid (any non-Guid factory dangles an undefined `.New()` and the assembly won't
-            // compile), while Rust either dangles `<Id>::generate()` (natural(Int)/sequence) or mints a
-            // *random* v4 UUID for a key the user declared natural (natural(String)) — semantically wrong.
-            // Reject every non-Guid case here, before any emitter runs, with a source-located diagnostic
-            // (issue #317). One diagnostic per factory.
+            // A `create` factory on a Guid identity auto-generates the new aggregate's id (`<Id>.New()` /
+            // `<Id>::generate()`), the only key with a meaningful client-side generator. A `natural` key is
+            // caller-supplied and a `sequence` key is store-assigned, so neither can be minted — the opt-in
+            // (#324) is to take the identity as an explicit identity-typed parameter, and the emitters then
+            // bind `id` to it instead of dangling an undefined generator. So for a NON-Guid identity exactly
+            // one such parameter is required: zero leaves nothing to mint (KOI0808), more than one is
+            // ambiguous (KOI0809). A Guid identity always mints, so an identity-typed parameter there is an
+            // ordinary reference (e.g. `reply(parent: CommentId, …)`) and neither rule applies. One per
+            // factory, before any emitter runs (issue #317).
             if (entity.IdStrategy != IdentityStrategy.Guid)
             {
-                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.FactoryNeedsGeneratableIdentity,
-                    $"factory '{factory.Name}' on '{entity.Name}' auto-generates the identity, but '{entity.IdentityName}' is a {DescribeIdentity(entity)} key with no meaningful client-side generator; pass the identity explicitly or use a Guid identity",
-                    factory.Span));
+                var idParamCount = MemberAnalysis.IdentityParameters(entity, factory).Count;
+                if (idParamCount == 0)
+                {
+                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.FactoryNeedsGeneratableIdentity,
+                        $"factory '{factory.Name}' on '{entity.Name}' auto-generates the identity, but '{entity.IdentityName}' is a {DescribeIdentity(entity)} key with no meaningful client-side generator; pass the identity explicitly (a parameter of type '{entity.IdentityName}') or use a Guid identity",
+                        factory.Span));
+                }
+                else if (idParamCount > 1)
+                {
+                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.AmbiguousFactoryIdentity,
+                        $"factory '{factory.Name}' on '{entity.Name}' declares more than one parameter of the identity type '{entity.IdentityName}'; at most one may serve as the explicit identity",
+                        factory.Span));
+                }
             }
 
             // Scope: the factory's parameters plus the synthetic `id` (its identity).
@@ -237,12 +248,19 @@ internal static class EntityBehaviorValidator
                         $"duplicate parameter '{p.Name}' in factory '{factory.Name}'", p.Span));
                 }
 
-                // `id` is reserved for the auto-generated identity local; a parameter of
-                // that name would collide with it in the emitted method (CS0136).
-                if (string.Equals(p.Name, "id", StringComparison.OrdinalIgnoreCase))
+                // `id` is reserved for the synthetic identity local; a parameter of that name
+                // would collide with it in the emitted method (CS0136). The one exception (#324):
+                // on a NON-Guid identity an identity-typed `id` parameter IS the explicit identity and
+                // binds to that synthetic local (no generator is emitted, so no collision) — allow it.
+                // On a Guid identity the factory still mints `var id = <Id>.New();`, so an `id`
+                // parameter would collide; and a param named `id` whose type is not the identity type
+                // stays rejected everywhere.
+                var isExplicitIdParameter = entity.IdStrategy != IdentityStrategy.Guid
+                    && MemberAnalysis.IsIdentityTypeRef(p.Type, entity.IdentityName);
+                if (string.Equals(p.Name, "id", StringComparison.OrdinalIgnoreCase) && !isExplicitIdParameter)
                 {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReservedFactoryParameter,
-                        $"factory parameter '{p.Name}' is reserved; the identity is generated automatically", p.Span));
+                        $"factory parameter '{p.Name}' is reserved; the identity is generated automatically unless declared as an explicit parameter of type '{entity.IdentityName}' on a non-Guid identity", p.Span));
                 }
             }
 

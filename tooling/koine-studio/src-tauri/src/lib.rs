@@ -206,23 +206,57 @@ fn parse_mcp_endpoint(line: &str) -> Option<String> {
 // --- terminal shell resolution ----------------------------------------------
 
 /// Decide which shell program (and args) the integrated terminal should spawn. Pure so the policy is
-/// unit-tested without opening a PTY: a caller-supplied `os_shell` (e.g. the user's `$SHELL`) is used
-/// verbatim; with `None` we fall back to a platform default — `$SHELL` (then `/bin/sh`) on Unix, and
-/// `cmd` on Windows. We launch the bare interactive shell with no synthetic args, so the program
-/// is returned alongside an (currently always empty) arg vector that keeps the call site uniform and
-/// leaves room for future per-shell flags.
-fn resolve_shell_command(os_shell: Option<&str>) -> (String, Vec<String>) {
-    if let Some(shell) = os_shell {
-        return (shell.to_string(), Vec::new());
-    }
-    // No shell named: pick a sensible platform default. `cfg!(windows)` is a const so the unused
-    // branch is dead-code-eliminated rather than a warning.
+/// unit-tested without opening a PTY: both the user's `$SHELL` and the password-database shell
+/// (recovered from `getpwuid` by the caller) are passed in.
+///
+/// On **Unix** the program is chosen `$SHELL` → `passwd_shell` → `/bin/sh`, and it is spawned as a
+/// **login** shell (`-l`). This is the fix for a bundled `.app` launched from Finder/Dock: macOS hands
+/// GUI processes a stripped `launchd` environment with no `$SHELL` and a `PATH` that lacks Homebrew
+/// (`/opt/homebrew/bin`, `/usr/local/bin`). Recovering the user's real shell from the password database
+/// and running it as a login shell makes it source `~/.zprofile`/`~/.bash_profile`, so `PATH` is
+/// populated and `git`/`dotnet` resolve — matching how VS Code/iTerm behave.
+///
+/// On **Windows** the path is unchanged: an explicit `$SHELL` (rare) is used verbatim, else `cmd`, and
+/// no login flag is added. (Empty strings are treated as "unset" so a stray `SHELL=` doesn't win.)
+fn resolve_shell_command(os_shell: Option<&str>, passwd_shell: Option<&str>) -> (String, Vec<String>) {
+    // Treat a blank entry as "unset" so a stray `SHELL=` doesn't win over the recovered shell.
+    let os_shell = os_shell.filter(|s| !s.is_empty());
+    let passwd_shell = passwd_shell.filter(|s| !s.is_empty());
+
+    // `cfg!(windows)` is a const, so the dead branch is eliminated rather than warned on.
     if cfg!(windows) {
-        ("cmd".to_string(), Vec::new())
-    } else {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-        (shell, Vec::new())
+        let program = os_shell.unwrap_or("cmd").to_string();
+        return (program, Vec::new());
     }
+
+    // Unix: prefer `$SHELL`, then the passwd-recovered shell (the GUI-launch case), then `/bin/sh`.
+    let program = os_shell.or(passwd_shell).unwrap_or("/bin/sh").to_string();
+    // `-l` makes it a login shell so the user's profile runs and `PATH` is populated.
+    (program, vec!["-l".to_string()])
+}
+
+/// Recover the user's login shell from the password database (`getpwuid(getuid())->pw_shell`). Used
+/// when the GUI-stripped launch environment has no `$SHELL`. Returns `None` on any lookup failure, a
+/// blank entry, or a non-UTF-8 path, so the caller falls through to its own `/bin/sh` default. Non-Unix
+/// targets have no password database, so this is always `None` there.
+///
+/// Uses `nix::unistd::User::from_uid`, which wraps the reentrant `getpwuid_r` — thread-safe and free of
+/// the static-buffer data race that raw `getpwuid` carries, with no `unsafe`.
+#[cfg(unix)]
+fn passwd_login_shell() -> Option<String> {
+    use nix::unistd::{Uid, User};
+    let user = User::from_uid(Uid::current()).ok().flatten()?;
+    let shell = user.shell.into_os_string().into_string().ok()?;
+    if shell.is_empty() {
+        None
+    } else {
+        Some(shell)
+    }
+}
+
+#[cfg(not(unix))]
+fn passwd_login_shell() -> Option<String> {
+    None
 }
 
 // --- sidecar spawning + supervision -----------------------------------------
@@ -523,6 +557,244 @@ fn git_log_for_range(dir: String, args: Vec<String>) -> Result<String, String> {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+// --- source control (git) ---------------------------------------------------
+//
+// The Source Control panel (issue #272) drives these from the Tauri `Platform`. Each is a thin,
+// per-invocation `git -C <dir> …` shell-out (no long-lived state), mirroring `git_log_for_range`'s
+// exec pattern: a spawn failure (git missing) becomes `Err("git-unavailable: …")`, and a non-zero
+// exit (dir not a work tree, bad ref, nothing to commit) returns the trimmed stderr. The structs
+// serialize to the exact camelCase the TS `Platform` git types expect.
+
+/// One path reported by `git status`, modeled per (file, area): a file changed in BOTH the index
+/// and the working tree is emitted TWICE — once `staged: true`, once `staged: false` — so the panel
+/// groups Staged Changes / Changes by the flag alone. `status` is one of the TS literals
+/// (`modified`/`added`/`deleted`/`renamed`/`copied`/`untracked`/`conflicted`).
+#[derive(serde::Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GitFile {
+    /// Path relative to the repo, forward-slashed (git already reports it that way).
+    rel_path: String,
+    /// True for an index (staged) entry; false for a worktree change or an untracked file.
+    staged: bool,
+    /// The kind of change for this (file, area).
+    status: String,
+}
+
+/// A snapshot of `git status` for a workspace folder: the current branch plus its changed paths.
+/// `branch` and `files` are already camelCase, so no field rename is needed.
+#[derive(serde::Serialize)]
+struct GitStatus {
+    /// The current branch name, or `(detached)` for a detached HEAD (git's own header value).
+    branch: String,
+    /// Every changed path — staged, unstaged, and untracked entries (see [`GitFile`]).
+    files: Vec<GitFile>,
+}
+
+/// One commit in `git log`, newest first. Fields are single words, already the camelCase the TS
+/// `GitLogEntry` expects.
+#[derive(serde::Serialize)]
+struct GitLogEntry {
+    /// The full 40-char commit SHA.
+    sha: String,
+    /// The author name.
+    author: String,
+    /// The author date as a strict ISO-8601 string (`%aI`).
+    date: String,
+    /// The commit subject line (`%s`).
+    message: String,
+}
+
+/// Run `git -C <dir> <args…>` and return its stdout, or an `Err` shaped like `git_log_for_range`:
+/// a spawn failure (git not installed) → `git-unavailable: …`; a non-zero exit → the trimmed
+/// stderr. The thin core every source-control command shares.
+fn run_git(dir: &str, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .map_err(|e| format!("git-unavailable: {e}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Map a porcelain-v2 status letter to the TS `GitFile.status` literal. Unknown/typechange (`T`)
+/// degrades to `modified` so the value always stays within the TS union.
+fn git_status_letter(c: char) -> String {
+    match c {
+        'A' => "added",
+        'D' => "deleted",
+        'R' => "renamed",
+        'C' => "copied",
+        _ => "modified", // 'M', 'T' (typechange) and any future letter
+    }
+    .to_string()
+}
+
+/// Expand a porcelain-v2 `<XY>` field for `path` into GitFiles: an index (staged) entry when X is
+/// not `.`, and a worktree (unstaged) entry when Y is not `.` — so a both-areas file yields two.
+fn push_xy_files(files: &mut Vec<GitFile>, xy: &str, path: &str) {
+    let mut chars = xy.chars();
+    let x = chars.next().unwrap_or('.');
+    let y = chars.next().unwrap_or('.');
+    if x != '.' {
+        files.push(GitFile {
+            rel_path: path.to_string(),
+            staged: true,
+            status: git_status_letter(x),
+        });
+    }
+    if y != '.' {
+        files.push(GitFile {
+            rel_path: path.to_string(),
+            staged: false,
+            status: git_status_letter(y),
+        });
+    }
+}
+
+/// `git status` for the open folder: the current branch plus every changed path. Parses
+/// `--porcelain=v2 -b` — the branch from the `# branch.head` header; `1 <XY> …` ordinary entries
+/// (staged when X≠`.`, unstaged when Y≠`.`, so a both-areas file appears twice); `2 …` renames/
+/// copies (new path before the tab); `? …` untracked; `u …` unmerged → `conflicted`. `Err` when
+/// `dir` is not a work tree.
+#[tauri::command]
+fn git_status(dir: String) -> Result<GitStatus, String> {
+    let out = run_git(&dir, &["status", "--porcelain=v2", "-b"])?;
+    let mut branch = String::new();
+    let mut files: Vec<GitFile> = Vec::new();
+
+    for line in out.lines() {
+        if let Some(rest) = line.strip_prefix("# branch.head ") {
+            branch = rest.trim().to_string();
+        } else if let Some(rest) = line.strip_prefix("? ") {
+            files.push(GitFile {
+                rel_path: rest.to_string(),
+                staged: false,
+                status: "untracked".to_string(),
+            });
+        } else if let Some(rest) = line.strip_prefix("1 ") {
+            // <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>  (8 fields; path may contain spaces).
+            let mut fields = rest.splitn(8, ' ');
+            let xy = fields.next().unwrap_or("..");
+            if let Some(path) = fields.nth(6) {
+                push_xy_files(&mut files, xy, path);
+            }
+        } else if let Some(rest) = line.strip_prefix("2 ") {
+            // <XY> <sub> <mH> <mI> <mW> <hH> <hI> <Xscore> <path>\t<origPath>  (9 fields).
+            let mut fields = rest.splitn(9, ' ');
+            let xy = fields.next().unwrap_or("..");
+            if let Some(path_and_orig) = fields.nth(7) {
+                // The new path precedes the tab; the original path follows it.
+                let path = path_and_orig.split('\t').next().unwrap_or(path_and_orig);
+                push_xy_files(&mut files, xy, path);
+            }
+        } else if let Some(rest) = line.strip_prefix("u ") {
+            // Unmerged: <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>  (10 fields).
+            let mut fields = rest.splitn(10, ' ');
+            if let Some(path) = fields.nth(9) {
+                files.push(GitFile {
+                    rel_path: path.to_string(),
+                    staged: false,
+                    status: "conflicted".to_string(),
+                });
+            }
+        }
+    }
+
+    Ok(GitStatus { branch, files })
+}
+
+/// The unified diff for one path: the worktree diff, or the staged (`--cached`) diff when `staged`.
+/// Returns git's stdout verbatim — empty when there is no change in the requested area.
+#[tauri::command]
+fn git_diff(dir: String, rel_path: String, staged: bool) -> Result<String, String> {
+    let mut args: Vec<&str> = vec!["diff"];
+    if staged {
+        args.push("--cached");
+    }
+    args.push("--");
+    args.push(&rel_path);
+    run_git(&dir, &args)
+}
+
+/// Stage paths (`git add -- <paths…>`): move worktree/untracked changes into the index.
+#[tauri::command]
+fn git_stage(dir: String, rel_paths: Vec<String>) -> Result<(), String> {
+    let mut args: Vec<&str> = vec!["add", "--"];
+    args.extend(rel_paths.iter().map(String::as_str));
+    run_git(&dir, &args).map(|_| ())
+}
+
+/// Unstage paths (`git reset -- <paths…>`): reset the index entries back to HEAD, leaving the
+/// worktree untouched — the inverse of [`git_stage`].
+#[tauri::command]
+fn git_unstage(dir: String, rel_paths: Vec<String>) -> Result<(), String> {
+    let mut args: Vec<&str> = vec!["reset", "--quiet", "--"];
+    args.extend(rel_paths.iter().map(String::as_str));
+    run_git(&dir, &args).map(|_| ())
+}
+
+/// Commit the staged area with `message` (`git commit -m`). `Err` (with git's stderr) when there is
+/// nothing staged or the identity is unset.
+#[tauri::command]
+fn git_commit(dir: String, message: String) -> Result<(), String> {
+    run_git(&dir, &["commit", "-m", &message]).map(|_| ())
+}
+
+/// The local branch names (`git branch --format=%(refname:short)`), one per entry.
+#[tauri::command]
+fn git_branches(dir: String) -> Result<Vec<String>, String> {
+    let out = run_git(&dir, &["branch", "--format=%(refname:short)"])?;
+    Ok(out
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
+/// Switch the working tree to `branch` (`git checkout`). `Err` (git's stderr) when the branch is
+/// unknown or the switch is blocked by local changes.
+#[tauri::command]
+fn git_checkout(dir: String, branch: String) -> Result<(), String> {
+    run_git(&dir, &["checkout", &branch]).map(|_| ())
+}
+
+/// `git log` newest first, optionally scoped to `rel_path`. Uses a US-delimited
+/// (`%H\x1f%an\x1f%aI\x1f%s`) one-record-per-line format so an author name or subject containing
+/// spaces/colons can't corrupt the split. Capped at the most recent `LOG_MAX_COUNT` commits: the
+/// Source Control panel renders only a short recent-commit list, so streaming a long history over IPC
+/// on every status refresh would be pure waste. `Err` on a non-repo dir or an unborn branch (no commits).
+#[tauri::command]
+fn git_log(dir: String, rel_path: Option<String>) -> Result<Vec<GitLogEntry>, String> {
+    /// Comfortably above what the panel shows, while bounding the IPC payload on a long-history repo.
+    const LOG_MAX_COUNT: &str = "--max-count=50";
+    let mut args: Vec<&str> = vec!["log", LOG_MAX_COUNT, "--pretty=format:%H%x1f%an%x1f%aI%x1f%s"];
+    if let Some(ref p) = rel_path {
+        args.push("--");
+        args.push(p.as_str());
+    }
+    let out = run_git(&dir, &args)?;
+
+    let mut entries: Vec<GitLogEntry> = Vec::new();
+    for line in out.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.split('\u{1f}');
+        entries.push(GitLogEntry {
+            sha: parts.next().unwrap_or("").to_string(),
+            author: parts.next().unwrap_or("").to_string(),
+            date: parts.next().unwrap_or("").to_string(),
+            message: parts.next().unwrap_or("").to_string(),
+        });
+    }
+    Ok(entries)
 }
 
 // --- workspace explorer tree + mutations ------------------------------------
@@ -1137,9 +1409,13 @@ fn pty_start(
         })
         .map_err(|e| format!("failed to open pty: {e}"))?;
 
-    // Resolve the shell from `$SHELL` (Unix) — `resolve_shell_command` falls back to a platform
-    // default when it is unset (and on Windows, where `$SHELL` is absent, that yields `cmd`).
-    let (program, args) = resolve_shell_command(std::env::var("SHELL").ok().as_deref());
+    // Resolve the shell: `$SHELL` first, then — for a Finder/Dock launch whose stripped GUI env has
+    // no `$SHELL` — the user's shell recovered from the password database, then `/bin/sh`. On Unix the
+    // chosen shell is spawned as a login shell so `PATH` (Homebrew/user dirs) is populated; on Windows
+    // this yields `cmd` with no extra args.
+    let passwd_shell = passwd_login_shell();
+    let (program, args) =
+        resolve_shell_command(std::env::var("SHELL").ok().as_deref(), passwd_shell.as_deref());
     let mut cmd = CommandBuilder::new(program);
     cmd.args(args);
     if let Some(dir) = cwd {
@@ -1287,7 +1563,15 @@ pub fn run() {
             create_folder,
             rename_entry,
             delete_entry,
-            move_entry
+            move_entry,
+            git_status,
+            git_diff,
+            git_stage,
+            git_unstage,
+            git_commit,
+            git_branches,
+            git_checkout,
+            git_log
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -1834,20 +2118,51 @@ mod tests {
     // --- PTY shell resolution (pure) ----------------------------------------
 
     #[test]
-    fn resolve_shell_command_honours_an_explicit_shell() {
-        // An explicit shell path is used verbatim as the program, with no extra args — the
-        // terminal launches exactly what the caller (or `$SHELL`) named.
-        let (program, args) = resolve_shell_command(Some("/bin/zsh"));
-        assert_eq!(program, "/bin/zsh");
-        assert!(args.is_empty(), "an explicit shell takes no synthetic args");
+    fn resolve_shell_command_prefers_an_explicit_shell_and_logs_in_on_unix() {
+        // `$SHELL` (the first arg) wins over the passwd-recovered shell. On Unix the interactive
+        // shell is spawned as a *login* shell (`-l`) so a Finder/Dock launch — whose stripped GUI
+        // env never sourced `~/.zprofile` — still gets a real `PATH` (Homebrew/user dirs).
+        let (program, args) = resolve_shell_command(Some("/bin/zsh"), Some("/bin/bash"));
+        assert_eq!(program, "/bin/zsh", "an explicit $SHELL is honoured verbatim");
+        #[cfg(unix)]
+        assert!(
+            args.iter().any(|a| a == "-l"),
+            "the Unix terminal must be a login shell so the user's profile runs"
+        );
+        #[cfg(windows)]
+        assert!(args.is_empty(), "the Windows spawn path is unchanged — no login flag");
     }
 
     #[test]
-    fn resolve_shell_command_falls_back_to_a_platform_default() {
-        // With no shell named, a non-empty platform default must be chosen ($SHELL/`/bin/sh`
-        // on Unix, `cmd` on Windows) so `pty_start` always has something to spawn.
-        let (program, _args) = resolve_shell_command(None);
-        assert!(!program.is_empty(), "a platform default shell must be chosen");
+    #[cfg(unix)]
+    fn resolve_shell_command_recovers_the_passwd_shell_when_shell_is_unset() {
+        // The GUI-launch case: no `$SHELL`, so fall through to the user's shell recovered from
+        // `getpwuid` (passed as the second arg) rather than defaulting straight to `/bin/sh` —
+        // still as a login shell.
+        let (program, args) = resolve_shell_command(None, Some("/opt/homebrew/bin/fish"));
+        assert_eq!(program, "/opt/homebrew/bin/fish", "the passwd shell is the next preference");
+        assert!(args.iter().any(|a| a == "-l"), "the recovered shell is still a login shell");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn resolve_shell_command_falls_back_to_bin_sh_as_a_last_resort() {
+        // Neither `$SHELL` nor a passwd shell available: `/bin/sh` keeps `pty_start` able to spawn
+        // *something*, still logged-in.
+        let (program, args) = resolve_shell_command(None, None);
+        assert_eq!(program, "/bin/sh", "/bin/sh is the final fallback");
+        assert!(args.iter().any(|a| a == "-l"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn resolve_shell_command_defaults_to_cmd_on_windows() {
+        // The Windows spawn path is unchanged: with nothing named, `cmd` is the default and no login
+        // flag is added. (Guards the `os_shell.unwrap_or("cmd")` branch, which the Unix-gated tests
+        // above never exercise.)
+        let (program, args) = resolve_shell_command(None, None);
+        assert_eq!(program, "cmd", "Windows defaults to cmd when no shell is named");
+        assert!(args.is_empty(), "the Windows spawn path adds no login flag");
     }
 
     // --- PTY chunk decoding (pure) ------------------------------------------
@@ -1890,5 +2205,247 @@ mod tests {
         assert_eq!(take_decodable(&mut carry).as_deref(), Some("\u{FFFD}"));
         assert_eq!(take_decodable(&mut carry).as_deref(), Some("x"));
         assert!(carry.is_empty());
+    }
+
+    // --- source control (git) -----------------------------------------------
+    //
+    // These exercise the real `git` binary against a throwaway repo built under the system temp
+    // dir (no `tempfile` crate — see CRITICAL constraints). `TempRepo` removes its directory on
+    // Drop so a panicking assertion still cleans up, and seeds a LOCAL identity + a pinned `main`
+    // branch so every assertion is deterministic regardless of the host's global git config.
+
+    /// A throwaway directory under `temp_dir()`, unique per (pid, counter), removed on Drop.
+    struct TempRepo {
+        dir: std::path::PathBuf,
+    }
+
+    impl TempRepo {
+        /// Create (and clean any stale leftover at) a unique empty directory.
+        fn new() -> Self {
+            static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let dir = std::env::temp_dir()
+                .join(format!("koine_git_test_{}_{}", std::process::id(), n));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            TempRepo { dir }
+        }
+
+        /// The directory as the `String` the git commands take.
+        fn path(&self) -> String {
+            self.dir.to_string_lossy().into_owned()
+        }
+
+        /// Run a raw `git -C <dir> <args...>`, asserting success (test setup, not under test).
+        fn git(&self, args: &[&str]) {
+            let out = Command::new("git")
+                .arg("-C")
+                .arg(&self.dir)
+                .args(args)
+                .output()
+                .expect("git should be installed");
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        /// Write `contents` to `rel` under the repo, creating any intermediate dirs.
+        fn write(&self, rel: &str, contents: &str) {
+            let p = self.dir.join(rel);
+            if let Some(parent) = p.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(p, contents).unwrap();
+        }
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// A repo with a pinned `main` branch and a local test identity, ready to commit.
+    fn init_repo() -> TempRepo {
+        let repo = TempRepo::new();
+        repo.git(&["init", "-b", "main"]);
+        repo.git(&["config", "user.email", "t@e.st"]);
+        repo.git(&["config", "user.name", "Tester"]);
+        // A host global config may force commit signing; disable it locally so commits succeed
+        // in the sandbox without a key.
+        repo.git(&["config", "commit.gpgsign", "false"]);
+        repo
+    }
+
+    /// True if `files` has exactly one entry with this (relPath, staged, status) triple.
+    fn has_file(files: &[GitFile], rel: &str, staged: bool, status: &str) -> bool {
+        files
+            .iter()
+            .filter(|f| f.rel_path == rel && f.staged == staged && f.status == status)
+            .count()
+            == 1
+    }
+
+    #[test]
+    fn git_status_reports_branch_staged_unstaged_and_untracked() {
+        let repo = init_repo();
+        repo.write("base.txt", "one\n");
+        repo.git(&["add", "base.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+
+        // An unstaged modification, a staged addition, and an untracked file.
+        repo.write("base.txt", "two\n");
+        repo.write("staged.txt", "x\n");
+        repo.git(&["add", "staged.txt"]);
+        repo.write("untracked.txt", "y\n");
+
+        let status = git_status(repo.path()).unwrap();
+
+        assert_eq!(status.branch, "main");
+        assert!(has_file(&status.files, "base.txt", false, "modified"), "{:?}", status.files);
+        assert!(has_file(&status.files, "staged.txt", true, "added"), "{:?}", status.files);
+        assert!(
+            has_file(&status.files, "untracked.txt", false, "untracked"),
+            "{:?}",
+            status.files
+        );
+    }
+
+    #[test]
+    fn git_status_reports_a_both_areas_file_twice() {
+        let repo = init_repo();
+        repo.write("b.txt", "1\n");
+        repo.git(&["add", "b.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+
+        // Stage a change, then change it again in the worktree → modified in BOTH areas.
+        repo.write("b.txt", "2\n");
+        repo.git(&["add", "b.txt"]);
+        repo.write("b.txt", "3\n");
+
+        let status = git_status(repo.path()).unwrap();
+
+        // The single porcelain `1 MM ... b.txt` row expands to two GitFiles so the panel can group
+        // them into Staged Changes / Changes by the flag alone.
+        assert!(has_file(&status.files, "b.txt", true, "modified"), "{:?}", status.files);
+        assert!(has_file(&status.files, "b.txt", false, "modified"), "{:?}", status.files);
+    }
+
+    #[test]
+    fn git_log_returns_commits_newest_first_and_scopes_to_a_path() {
+        let repo = init_repo();
+        repo.write("a.txt", "a1\n");
+        repo.git(&["add", "a.txt"]);
+        repo.git(&["commit", "-m", "first"]);
+        repo.write("b.txt", "b1\n");
+        repo.git(&["add", "b.txt"]);
+        repo.git(&["commit", "-m", "second"]);
+
+        let all = git_log(repo.path(), None).unwrap();
+        assert_eq!(all.len(), 2);
+        // Newest first.
+        assert_eq!(all[0].message, "second");
+        assert_eq!(all[1].message, "first");
+        assert_eq!(all[0].author, "Tester");
+        assert_eq!(all[0].sha.len(), 40);
+        assert!(all[0].date.starts_with("20"), "ISO date: {}", all[0].date);
+
+        // Scoped to a single path → only the commit that touched it.
+        let only_a = git_log(repo.path(), Some("a.txt".to_string())).unwrap();
+        assert_eq!(only_a.len(), 1);
+        assert_eq!(only_a[0].message, "first");
+    }
+
+    #[test]
+    fn git_commit_creates_a_commit_from_the_staged_area() {
+        let repo = init_repo();
+        repo.write("c.txt", "hello\n");
+        git_stage(repo.path(), vec!["c.txt".to_string()]).unwrap();
+
+        git_commit(repo.path(), "add c".to_string()).unwrap();
+
+        let log = git_log(repo.path(), None).unwrap();
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].message, "add c");
+        // Nothing left to commit afterwards.
+        assert!(git_status(repo.path()).unwrap().files.is_empty());
+    }
+
+    #[test]
+    fn git_stage_and_unstage_move_a_file_between_areas() {
+        let repo = init_repo();
+        repo.write("e.txt", "1\n");
+        repo.git(&["add", "e.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+
+        // Modify, then stage it → it shows as a staged modification.
+        repo.write("e.txt", "2\n");
+        git_stage(repo.path(), vec!["e.txt".to_string()]).unwrap();
+        let staged = git_status(repo.path()).unwrap();
+        assert!(has_file(&staged.files, "e.txt", true, "modified"), "{:?}", staged.files);
+        assert!(!has_file(&staged.files, "e.txt", false, "modified"));
+
+        // Unstage it → it moves back to the worktree (unstaged) area.
+        git_unstage(repo.path(), vec!["e.txt".to_string()]).unwrap();
+        let unstaged = git_status(repo.path()).unwrap();
+        assert!(has_file(&unstaged.files, "e.txt", false, "modified"), "{:?}", unstaged.files);
+        assert!(!has_file(&unstaged.files, "e.txt", true, "modified"));
+    }
+
+    #[test]
+    fn git_branches_lists_local_branches() {
+        let repo = init_repo();
+        repo.write("f.txt", "x\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+        repo.git(&["branch", "feature"]);
+
+        let branches = git_branches(repo.path()).unwrap();
+        assert!(branches.contains(&"main".to_string()), "{branches:?}");
+        assert!(branches.contains(&"feature".to_string()), "{branches:?}");
+    }
+
+    #[test]
+    fn git_checkout_switches_the_current_branch() {
+        let repo = init_repo();
+        repo.write("g.txt", "x\n");
+        repo.git(&["add", "g.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+        repo.git(&["branch", "feature"]);
+
+        git_checkout(repo.path(), "feature".to_string()).unwrap();
+        assert_eq!(git_status(repo.path()).unwrap().branch, "feature");
+    }
+
+    #[test]
+    fn git_diff_returns_a_unified_diff_for_a_modified_file() {
+        let repo = init_repo();
+        repo.write("h.txt", "line1\n");
+        repo.git(&["add", "h.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+        repo.write("h.txt", "line1\nline2\n");
+
+        // Worktree diff is non-empty and shows the added line.
+        let worktree = git_diff(repo.path(), "h.txt".to_string(), false).unwrap();
+        assert!(worktree.contains("@@"), "expected a hunk header: {worktree}");
+        assert!(worktree.contains("+line2"), "{worktree}");
+
+        // Once staged, the change shows under --cached and the worktree diff goes empty.
+        git_stage(repo.path(), vec!["h.txt".to_string()]).unwrap();
+        let cached = git_diff(repo.path(), "h.txt".to_string(), true).unwrap();
+        assert!(cached.contains("+line2"), "{cached}");
+        assert!(git_diff(repo.path(), "h.txt".to_string(), false).unwrap().is_empty());
+    }
+
+    #[test]
+    fn git_commands_error_on_a_non_git_dir() {
+        // A directory that was never `git init`-ed yields Err from every read command.
+        let plain = TempRepo::new();
+        assert!(git_status(plain.path()).is_err());
+        assert!(git_log(plain.path(), None).is_err());
+        assert!(git_branches(plain.path()).is_err());
+        assert!(git_diff(plain.path(), "anything.txt".to_string(), false).is_err());
     }
 }

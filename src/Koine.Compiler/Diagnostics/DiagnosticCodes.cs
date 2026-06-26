@@ -124,6 +124,7 @@ public static class DiagnosticCodes
     public const string UninitializedFactoryField = "KOI0806";
     public const string ReservedFactoryParameter = "KOI0807";
     public const string FactoryNeedsGeneratableIdentity = "KOI0808";
+    public const string AmbiguousFactoryIdentity = "KOI0809";
 
     // ---- Richer value objects (KOI0900–0999) ------------------------------
     public const string EnumMemberArity = "KOI0901";
@@ -310,7 +311,8 @@ public static class DiagnosticCodes
             [DuplicateInitialization] = D(DuplicateInitialization, "A factory initializes the same field more than once.", DiagnosticCategory.Factories, DiagnosticSeverity.Error),
             [UninitializedFactoryField] = D(UninitializedFactoryField, "A factory leaves a required field uninitialized with no default.", DiagnosticCategory.Factories, DiagnosticSeverity.Warning),
             [ReservedFactoryParameter] = D(ReservedFactoryParameter, "A factory parameter uses the reserved name 'id' (the auto-generated identity).", DiagnosticCategory.Factories, DiagnosticSeverity.Error),
-            [FactoryNeedsGeneratableIdentity] = D(FactoryNeedsGeneratableIdentity, "A `create` factory auto-generates the identity, but the entity's identity is a non-generatable (non-Guid) key.", DiagnosticCategory.Factories, DiagnosticSeverity.Error),
+            [FactoryNeedsGeneratableIdentity] = D(FactoryNeedsGeneratableIdentity, "A `create` factory auto-generates the identity, but the entity's identity is a non-generatable (non-Guid) key and the factory does not take it as an explicit parameter.", DiagnosticCategory.Factories, DiagnosticSeverity.Error),
+            [AmbiguousFactoryIdentity] = D(AmbiguousFactoryIdentity, "A `create` factory declares more than one parameter of the entity's identity type, so the explicit identity is ambiguous.", DiagnosticCategory.Factories, DiagnosticSeverity.Error),
 
             // ---- Richer value objects ----------------------------------------
             [EnumMemberArity] = D(EnumMemberArity, "An enum member's associated-value count does not match the enum's signature.", DiagnosticCategory.ValueObjects, DiagnosticSeverity.Error),

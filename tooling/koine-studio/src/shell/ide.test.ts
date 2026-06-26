@@ -10,8 +10,9 @@
 import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest';
 import { act } from '@testing-library/preact';
 import { EditorView } from '@codemirror/view';
-import type { FsEntry, KoiFile, LspTransport, Platform } from '@/host/types';
+import type { FsEntry, GitLogEntry, GitStatus, KoiFile, LspTransport, Platform } from '@/host/types';
 import { buildShareUrl, buildWorkspaceShareUrl } from '@/export/share';
+import { loadSettings, saveSettings } from '@/settings/persistence';
 
 // The studio reads `__APP_VERSION__` (a vite build-time define) once at boot for the status bar.
 // vitest does not define it, so stub it as a global before any init() runs — test scaffolding only,
@@ -113,6 +114,7 @@ class FakePlatform implements Platform {
   readonly canOpenFolders = true;
   readonly canSaveProjects = true;
   readonly canRunShell = false;
+  readonly canUseGit = false;
   persistsWorkspace = true;
   readonly transport = new FakeLspTransport();
 
@@ -189,6 +191,36 @@ class FakePlatform implements Platform {
   }
   gitLogForRange(): Promise<null> {
     return Promise.resolve(null);
+  }
+  // git is a desktop-only capability (#272); this browser-like fake reports canUseGit=false, so the
+  // source-control methods are never reached. They reject (rather than fake-resolve) so a test that
+  // forgot to guard fails loudly instead of passing against an unexercised path.
+  private gitUnavailable(): Promise<never> {
+    return Promise.reject(new Error('git is unavailable in this fake host'));
+  }
+  gitStatus(): Promise<GitStatus> {
+    return this.gitUnavailable();
+  }
+  gitDiff(): Promise<string> {
+    return this.gitUnavailable();
+  }
+  gitStage(): Promise<void> {
+    return this.gitUnavailable();
+  }
+  gitUnstage(): Promise<void> {
+    return this.gitUnavailable();
+  }
+  gitCommit(): Promise<void> {
+    return this.gitUnavailable();
+  }
+  gitBranches(): Promise<string[]> {
+    return this.gitUnavailable();
+  }
+  gitCheckout(): Promise<void> {
+    return this.gitUnavailable();
+  }
+  gitLog(): Promise<GitLogEntry[]> {
+    return this.gitUnavailable();
   }
   writeTextFile(path: string, contents: string): Promise<void> {
     this.files.set(this.relOf(path), contents);
@@ -311,13 +343,14 @@ const APP_HTML = `
           <footer id="diagnostics">
             <div class="koi-resizer koi-resizer-y" id="diag-resizer"></div>
             <div id="diag-header">
-              <button type="button" id="diag-collapse" class="diag-collapse" aria-expanded="true" aria-controls="diag-body panel-events panel-relationships panel-contextmap panel-terminal">collapse</button>
+              <button type="button" id="diag-collapse" class="diag-collapse" aria-expanded="true" aria-controls="diag-body panel-events panel-relationships panel-contextmap panel-terminal panel-review">collapse</button>
               <div class="diag-tabs" role="tablist">
                 <button type="button" class="diag-tab" id="tab-problems" role="tab" data-panel="problems" aria-selected="true" aria-controls="diag-body">Problems</button>
                 <button type="button" class="diag-tab" id="tab-events" role="tab" data-panel="events" aria-selected="false" aria-controls="panel-events">Events</button>
                 <button type="button" class="diag-tab" id="tab-relationships" role="tab" data-panel="relationships" aria-selected="false" aria-controls="panel-relationships">Relationships</button>
                 <button type="button" class="diag-tab" id="tab-contextmap" role="tab" data-panel="contextmap" aria-selected="false" aria-controls="panel-contextmap">Context Map</button>
                 <button type="button" class="diag-tab" id="tab-terminal" role="tab" data-panel="terminal" aria-selected="false" aria-controls="panel-terminal">Terminal</button>
+                <button type="button" class="diag-tab" id="tab-review" role="tab" data-panel="review" aria-selected="false" aria-controls="panel-review">Review</button>
               </div>
               <span id="diag-count" class="diag-count"></span>
             </div>
@@ -326,6 +359,7 @@ const APP_HTML = `
             <div id="panel-relationships" class="diag-panel" role="tabpanel" aria-labelledby="tab-relationships" hidden></div>
             <div id="panel-contextmap" class="diag-panel doc-view" role="tabpanel" aria-labelledby="tab-contextmap" hidden></div>
             <div id="panel-terminal" class="diag-panel diag-panel-terminal" role="tabpanel" aria-labelledby="tab-terminal" hidden></div>
+            <div id="panel-review" class="diag-panel" role="tabpanel" aria-labelledby="tab-review" hidden></div>
           </footer>
         </section>
         <div class="koi-resizer" id="split-resizer"></div>
@@ -334,11 +368,13 @@ const APP_HTML = `
             <button type="button" class="rtab" id="rtab-props" role="tab" data-rview="props" aria-selected="true">Properties</button>
             <button type="button" class="rtab" id="rtab-rules" role="tab" data-rview="rules" aria-selected="false">Rules</button>
             <button type="button" class="rtab" id="rtab-notes" role="tab" data-rview="notes" aria-selected="false">Notes</button>
+            <button type="button" class="rtab" id="rtab-source-control" role="tab" data-rview="source-control" aria-selected="false">Source Control</button>
           </div>
           <div id="right-body">
             <div id="inspector-host" class="rview" role="tabpanel"></div>
             <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden><p class="muted">Coming soon.</p></div>
             <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden><p class="muted">Coming soon.</p></div>
+            <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
           </div>
         </aside>
       </main>
@@ -1005,6 +1041,37 @@ describe('ide init() — mobile Props zone reflects selected state (#221)', () =
       expect(split.dataset.mobileZone).not.toBe('props');
     } finally {
       Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: origWidth });
+    }
+  });
+});
+
+// #354 — the effective lspTrace setting is pushed to the live LSP client. PR #349 made lspTrace one of
+// the per-workspace-scopable fields but left it inert; this wires applyEffectiveScoped → lsp.setTrace so
+// a global (or per-workspace) trace change drives LSP logging verbosity live, exactly like the other
+// three scoped fields. We spy on KoineLsp.prototype.setTrace — dynamic-imported AFTER beforeEach's
+// vi.resetModules() so the spy lands on the same class the fresh ide module will construct.
+describe('ide init() — effective lspTrace drives the LSP (#354)', () => {
+  test('boot pushes the effective (verbose) lspTrace to lsp.setTrace', async () => {
+    saveSettings({ ...loadSettings(), lspTrace: 'verbose' });
+    const { KoineLsp } = await import('@/lsp/lsp');
+    const setTrace = vi.spyOn(KoineLsp.prototype, 'setTrace');
+    try {
+      await boot();
+      expect(setTrace).toHaveBeenCalledWith('verbose');
+    } finally {
+      localStorage.clear();
+    }
+  });
+
+  test('boot applies the default off level when lspTrace is unset', async () => {
+    saveSettings({ ...loadSettings(), lspTrace: 'off' });
+    const { KoineLsp } = await import('@/lsp/lsp');
+    const setTrace = vi.spyOn(KoineLsp.prototype, 'setTrace');
+    try {
+      await boot();
+      expect(setTrace).toHaveBeenCalledWith('off');
+    } finally {
+      localStorage.clear();
     }
   });
 });

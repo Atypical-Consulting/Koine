@@ -9,10 +9,20 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { appDataDir, join } from '@tauri-apps/api/path';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc, TerminalTransport } from '@/host/types';
+import type {
+  FsEntry,
+  GitLogEntry,
+  GitStatus,
+  KoiFile,
+  LspTransport,
+  Platform,
+  SourceDoc,
+  TerminalTransport,
+} from '@/host/types';
 import { buildLogLArgs, parseLogL, type ChangeEntry } from '@/host/gitHistory';
 import { saveMetaFor } from '@/host/saveMeta';
-import { normalizeCompileTarget } from '@/ai/assistantTools';
+import { normalizeCompileTarget, runEditToolStaging } from '@/ai/assistantTools';
+import type { EditSession } from '@/ai/editSession';
 import { mcpCall } from '@/mcp/mcp';
 
 /** LSP transport over Tauri IPC. Mirrors the wiring previously inlined in lsp.ts. */
@@ -128,6 +138,11 @@ export class TauriPlatform implements Platform {
   readonly persistsWorkspace = true;
   // The desktop shell brokers a real PTY (see TauriTerminalTransport / the Rust pty_* commands).
   readonly canRunShell = true;
+  // The desktop shell shells out to a real `git` (see the Rust git_* commands), so the Source Control
+  // panel (issue #272) is available. A CONSTANT capability flag — "this host CAN do git" — not a
+  // per-folder probe: whether the *opened* folder is actually a work tree is decided at runtime, where
+  // gitStatus rejects for a non-repo and the panel shows its "not a git repository" empty state.
+  readonly canUseGit = true;
 
   createLspTransport(): LspTransport {
     return new TauriLspTransport();
@@ -178,6 +193,19 @@ export class TauriPlatform implements Platform {
     } catch (e) {
       return `Error: ${e instanceof Error ? e.message : String(e)}`;
     }
+  }
+
+  // The host-local edit tools dispatch against the per-turn staging session via the host-independent
+  // runEditToolStaging; the desktop host supplies the whole-staged-workspace validation by running the
+  // `koine_validate` MCP tool (the sidecar's compiler) over the staged set after a write, mirroring the
+  // browser host's in-WASM DiagnoseWorkspace.
+  runEditTool(name: string, argsJson: string, session: EditSession): Promise<string> {
+    return runEditToolStaging(name, argsJson, session, async () => {
+      const url = await this.mcpEndpoint();
+      if (!url) return '(could not validate: the Koine MCP server is not available)';
+      const files = session.list().map((p) => ({ path: p, source: session.read(p) ?? '' }));
+      return mcpCall(url, 'koine_validate', { files });
+    });
   }
 
   openExternal(url: string): void {
@@ -263,6 +291,53 @@ export class TauriPlatform implements Platform {
       if (/not a git repository|git-unavailable|not found|no such file|enoent/i.test(msg)) this.nonGitDirs.add(dir);
       return null;
     }
+  }
+
+  // --- source control (git) --------------------------------------------------
+  // Thin wrappers over the Rust git_* commands (src-tauri/src/lib.rs) for the Source Control panel
+  // (issue #272). Each takes the workspace `folderToken` as `dir`; Tauri maps these camelCase JS arg
+  // keys to the snake_case Rust params. The Rust structs already serialize to the TS types
+  // (GitStatus/GitLogEntry), so the results are returned as-is — no manual remapping. A non-work-tree
+  // folder (or any git failure) surfaces as a rejected promise the panel handles.
+
+  /** The `git status` of the workspace folder: current branch + every changed path (see {@link GitStatus}). */
+  gitStatus(folderToken: string): Promise<GitStatus> {
+    return invoke<GitStatus>('git_status', { dir: folderToken });
+  }
+
+  /** The unified diff for `relPath`: the staged diff (index vs HEAD) when `staged`, else the worktree diff. */
+  gitDiff(folderToken: string, relPath: string, staged: boolean): Promise<string> {
+    return invoke<string>('git_diff', { dir: folderToken, relPath, staged });
+  }
+
+  /** Stage (`git add`) the given paths, moving each worktree/untracked change into the index. */
+  gitStage(folderToken: string, relPaths: string[]): Promise<void> {
+    return invoke('git_stage', { dir: folderToken, relPaths }) as Promise<void>;
+  }
+
+  /** Unstage (`git restore --staged`) the given paths, moving each change back out of the index. */
+  gitUnstage(folderToken: string, relPaths: string[]): Promise<void> {
+    return invoke('git_unstage', { dir: folderToken, relPaths }) as Promise<void>;
+  }
+
+  /** Commit the currently-staged changes with `message` (`git commit -m`). */
+  gitCommit(folderToken: string, message: string): Promise<void> {
+    return invoke('git_commit', { dir: folderToken, message }) as Promise<void>;
+  }
+
+  /** The local branch names of the workspace folder (the current one is reported by {@link gitStatus}). */
+  gitBranches(folderToken: string): Promise<string[]> {
+    return invoke<string[]>('git_branches', { dir: folderToken });
+  }
+
+  /** Check out an existing local branch of the workspace folder (`git checkout <branch>`). */
+  gitCheckout(folderToken: string, branch: string): Promise<void> {
+    return invoke('git_checkout', { dir: folderToken, branch }) as Promise<void>;
+  }
+
+  /** The commit history newest-first — whole repo, or only commits touching `relPath` when given. */
+  gitLog(folderToken: string, relPath?: string): Promise<GitLogEntry[]> {
+    return invoke<GitLogEntry[]>('git_log', { dir: folderToken, relPath });
   }
 
   readTextFile(path: string): Promise<string> {

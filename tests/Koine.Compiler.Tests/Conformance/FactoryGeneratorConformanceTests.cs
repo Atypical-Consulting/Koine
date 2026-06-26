@@ -12,10 +12,13 @@ namespace Koine.Compiler.Tests.Conformance;
 /// <c>&lt;Id&gt;.New()</c> (C#) / <c>&lt;Id&gt;::generate()</c> (Rust), but only a Guid-backed id has a meaningful
 /// generator — C# emits <c>New()</c> for Guid only, and Rust emits a UUID <c>generate()</c> only for a
 /// String-backed id. The fix rejects a factory on any non-Guid key at the semantic layer, so the bad
-/// shape never reaches an emitter. This suite proves the invariant two ways: (1) across the real template
-/// corpus and a Guid-factory model, every emitted <c>generate()</c> / <c>New()</c> *call* has a matching
-/// *definition* — no dangling reference survives; and (2) the issue's exact repro model is rejected
-/// before emission with <c>KOI0808</c>.
+/// shape never reaches an emitter. This suite proves the invariant several ways: (1) across the real
+/// template corpus and a Guid-factory model, every emitted <c>generate()</c> / <c>New()</c> *call* has a
+/// matching *definition* — no dangling reference survives; (2) the issue's exact repro (a non-Guid factory
+/// with NO identity parameter) is still rejected before emission with <c>KOI0808</c>; and (3) the #324
+/// explicit-id path (the factory takes the identity as an identity-typed parameter) emits NO generator at
+/// all — not dangling, not present — for both a <c>natural(String)</c> and a <c>sequence</c> key, while the
+/// model still compiles.
 /// </summary>
 public class FactoryGeneratorConformanceTests
 {
@@ -43,7 +46,9 @@ public class FactoryGeneratorConformanceTests
         }
         """;
 
-    /// <summary>The exact repro from issue #317: a <c>create</c> factory on a <c>natural(String)</c> key.</summary>
+    /// <summary>The exact repro from issue #317: a <c>create</c> factory on a <c>natural(String)</c> key
+    /// with NO identity parameter — still rejected, because the factory would have to mint a non-generatable
+    /// key.</summary>
     private const string NaturalFactoryRepro = """
         context Catalog {
           entity Book identified by BookId as natural(String) {
@@ -57,6 +62,40 @@ public class FactoryGeneratorConformanceTests
           }
         }
         """;
+
+    /// <summary>#324, the explicit-id path on a <c>natural(String)</c> key: the factory takes the identity
+    /// as an identity-typed parameter (<c>id: BookId</c>), so nothing is minted — the parameter IS the id.</summary>
+    private const string NaturalExplicitIdModel = """
+        context Catalog {
+          value Isbn {
+            code: String
+            invariant code.trim.length > 0 "an ISBN cannot be blank"
+          }
+          entity Book identified by BookId as natural(String) {
+            isbn:  Isbn
+            title: String
+            create register(id: BookId, isbn: Isbn, title: String) {
+              isbn  -> isbn
+              title -> title
+            }
+          }
+        }
+        """;
+
+    /// <summary>#324, the explicit-id path on a <c>sequence</c> key: the store-assigned identity is passed
+    /// in as an identity-typed parameter (<c>id: InvoiceNo</c>), so again nothing is minted.</summary>
+    private const string SequenceExplicitIdModel = """
+        context Billing {
+          entity Invoice identified by InvoiceNo as sequence {
+            amount: Int
+            create raise(id: InvoiceNo, amount: Int) {
+              amount -> amount
+            }
+          }
+        }
+        """;
+
+    public static TheoryData<string> ExplicitIdModels() => new() { NaturalExplicitIdModel, SequenceExplicitIdModel };
 
     /// <summary>
     /// A Guid-identity factory emits a real <c>generate()</c>/<c>New()</c> definition AND a call to it;
@@ -118,6 +157,31 @@ public class FactoryGeneratorConformanceTests
     {
         var diags = new KoineCompiler().Diagnose(NaturalFactoryRepro);
         diags.ShouldContain(d => d.Code == DiagnosticCodes.FactoryNeedsGeneratableIdentity);
+    }
+
+    /// <summary>
+    /// #324: when the <c>create</c> factory takes the new aggregate's identity as an explicit
+    /// identity-typed parameter, the model now compiles (KOI0808 no longer fires) AND emits no client-side
+    /// generator at all — there is simply nothing to mint, the parameter IS the id. So the call sets are
+    /// not merely dangling-free, they are *empty*: no <c>&lt;Id&gt;::generate()</c> in the Rust crate and no
+    /// <c>var id = &lt;Id&gt;.New()</c> in the C# assembly. Proven for both a <c>natural(String)</c> key and a
+    /// <c>sequence</c> key, with both emitters.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ExplicitIdModels))]
+    public void Explicit_id_factory_emits_no_generator_and_still_compiles(string model)
+    {
+        var rust = new KoineCompiler().Compile(model, new RustEmitter());
+        rust.Success.ShouldBeTrue(string.Join("\n", rust.Diagnostics.Select(d => d.ToString())));
+        var rustCrate = Crate(rust.Files);
+        GenerateCalls(rustCrate).ShouldBeEmpty("the explicit-id factory must not emit any `::generate()` call");
+        DanglingRustGenerators(rustCrate).ShouldBeEmpty();
+
+        var cs = new KoineCompiler().Compile(model, new CSharpEmitter());
+        cs.Success.ShouldBeTrue(string.Join("\n", cs.Diagnostics.Select(d => d.ToString())));
+        var assembly = Crate(cs.Files);
+        NewCalls(assembly).ShouldBeEmpty("the explicit-id factory must not emit any `.New()` identity call");
+        DanglingCsharpNewCalls(assembly).ShouldBeEmpty();
     }
 
     /// <summary>

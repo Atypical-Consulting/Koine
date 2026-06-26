@@ -47,6 +47,7 @@ import { createCommandPalette, type Command } from '@/shared/palette';
 import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
 import { loadLayout, saveLayout, type LayoutState } from '@/shell/layoutStore';
 import { devCommands } from '@/shell/devCommands';
+import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
 import { createPreferences } from '@/settings/prefs';
 import { applyAppearance } from '@/settings/appearance';
 import { initEdgeResizer, initGroupResizer } from '@/shell/resize';
@@ -88,6 +89,8 @@ import { type InspectorElement } from '@/model/inspector';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
 import { createScenarioPanel, type ScenarioPanel } from '@/scenarios/scenarioPanel';
 import { createTerminalPanel, type TerminalPanel } from '@/shell/terminal/terminalPanel';
+import { createReviewStore } from '@/review/reviewStore';
+import { createReviewPanel, REVIEW_AUTHOR_FALLBACK, type ReviewPanel } from '@/review/ReviewPanel';
 import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from '@/export/share';
 import { handleBeforeUnload } from '@/shell/dirty';
 import { render } from 'preact';
@@ -357,7 +360,10 @@ export function init(): () => void {
     storeInspectorHost.hidden = !storeInspectorHost.hidden;
   }
 
-  const lsp = new KoineLsp(platform.createLspTransport());
+  // Seed the LSP trace verbosity from the user-level setting (no workspace is open yet at construction,
+  // so the effective value equals the user value — mirroring `lineWrap: settings.wordWrap` below). Any
+  // per-workspace override is then pushed live via applyEffectiveScoped once a folder opens (#264/#354).
+  const lsp = new KoineLsp(platform.createLspTransport(), settings.lspTrace);
 
   // --- workspace model ------------------------------------------------------
   // The buffers / activeUri / folderRootToken / entriesCache state and the whole open/save/dirty/
@@ -378,13 +384,14 @@ export function init(): () => void {
   }
 
   // Apply the workspace-scoped fields that need a LIVE push (word-wrap on both surfaces, the preview
-  // target relabel) from an already-resolved effective Settings. Shared by the prefs onChange, a folder
-  // open, and a root-set change so the three call sites can never drift. (format-on-save reads through
-  // the live getFormatOnSave thunk; lspTrace has no live consumer — see #264.)
+  // target relabel, the LSP trace verbosity) from an already-resolved effective Settings. Shared by the
+  // prefs onChange, a folder open, and a root-set change so the three call sites can never drift.
+  // (format-on-save reads through the live getFormatOnSave thunk, so it needs no push here.)
   function applyEffectiveScoped(eff: Settings): void {
     editor.setLineWrap(eff.wordWrap);
     output.setLineWrap(eff.wordWrap);
     controller.onPreviewTargetChanged(eff.previewTarget);
+    lsp.setTrace(eff.lspTrace);
   }
 
   // Adding or removing a workspace root changes the workspace identity: folderRootToken() may now point
@@ -411,6 +418,12 @@ export function init(): () => void {
   // keystroke, but the only diagnostics-driven tree output is each file's error/warning badge, so a
   // push that leaves a file's counts unchanged would rebuild the explorer for an identical result.
   const diagCountGate = createDiagCountGate();
+
+  // The in-editor review threads (#259, Phase 1 collaboration): a Studio-only sidecar persisted to the
+  // opened folder's `.koine/reviews.json` (a no-op in-memory in no-folder mode). Created once for the
+  // IDE lifetime; `load()` runs on every folder open (onFolderOpened, below). The editors read its
+  // `list()` to paint marks, edits remap its spans, and the bottom-panel Review tab renders it.
+  const reviewStore = createReviewStore(platform, () => workspace.folderRootToken() || null);
 
   const editorSession = createEditorSession({
     parent: el('editor-pane'),
@@ -439,9 +452,18 @@ export function init(): () => void {
     onDiagnostics: (uri, diags) => {
       if (diagCountGate.changed(uri, diags)) workspace.renderTree();
     },
+    // Review threads (#259): the editors paint marks from the store's list() (editorSession file-scopes it
+    // per group), opening a comment routes through addReviewComment, and each edit re-anchors only the
+    // edited file's pinned spans (editorSession supplies the file).
+    getReviewThreads: () => reviewStore.list(),
+    onAddComment: (span) => addReviewComment(span),
+    onDocChange: (change, doc, file) => reviewStore.remap(file, change, doc),
   });
   const editor = editorSession.editor;
   const setStatus = editorSession.setStatus;
+  // Repaint the editors' review marks on every store change (add/reply/resolve/delete/remap/load). Keep the
+  // unsubscribe so init()'s teardown releases it (the editorSession is destroyed there).
+  const unsubReviewStore = reviewStore.subscribe(() => editorSession.refreshReviewDecorations());
 
   // The buffer/dirty/tree half of the editor's onChange (the editor↔LSP sync runs inside
   // editorSession; the buffer text+dirty update lives in workspace.syncBuffer). The callback carries
@@ -617,6 +639,7 @@ export function init(): () => void {
     ensureAssistant: () => ensureAssistant(),
     ensureScenarios: () => ensureScenarios(),
     ensureTerminal: () => ensureTerminal(),
+    ensureReview: () => ensureReview(),
     initEdgeResizer,
   });
   // Thin shims over the app store (the single source of truth) for the two state reads ide.ts needs:
@@ -712,6 +735,27 @@ export function init(): () => void {
       },
     };
     navigateToDefinition(location);
+  }
+
+  // The author attributed to a review comment opened from Studio. No Settings display-name field exists
+  // yet (#259 Phase 1) → the shared fallback; a Phase-2 follow-up can feed a real name from Settings here.
+  function reviewAuthorName(): string {
+    return REVIEW_AUTHOR_FALLBACK;
+  }
+
+  // Open a review thread on the editor's current selection (#259). editorSession already pinned `span.file`
+  // to the INVOKING group's uri (so a split view comments on the right file, not just group A's active
+  // one); we just prompt for the comment text. The window.prompt is a deliberate Phase-1 MVP affordance —
+  // a richer inline composer is a fine Phase-2 follow-up. An empty/cancelled prompt bails; otherwise we add
+  // the thread, reveal the Review tab, and repaint the editor marks.
+  function addReviewComment(span: SourceSpan): void {
+    const file = span.file ?? workspace.activeUri();
+    if (!file) return;
+    const text = window.prompt('Add a review comment:')?.trim();
+    if (!text) return;
+    reviewStore.add(file, { ...span, file }, text, reviewAuthorName());
+    controller.selectBottomTab('review');
+    editorSession.refreshReviewDecorations();
   }
 
   // Jump-to-source from a diagram node: the SVG renderer draws each navigable node as a `<g>` that
@@ -1070,10 +1114,12 @@ export function init(): () => void {
       void controller.refreshContextList();
       controller.refreshActiveSurfaces();
       // Switching folders changes wsKey(), so re-apply the now-effective workspace-scoped behaviors:
-      // this folder's overrides for word-wrap and preview target take effect immediately. (format-on-
-      // save reads through the live getFormatOnSave thunk, so it auto-picks up; lspTrace has no live
-      // re-application site here — its override surfaces on next read.)
+      // this folder's overrides for word-wrap, preview target, and LSP trace take effect immediately.
+      // (format-on-save reads through the live getFormatOnSave thunk, so it auto-picks up.)
       applyEffectiveScoped(effectiveSettings(settings, wsKey()));
+      // Hydrate this folder's review threads from `.koine/reviews.json` (a no-op in no-folder mode),
+      // then repaint the editor marks. Fires on boot too — openDefaultWorkspaceFlow routes through here.
+      void reviewStore.load().then(() => editorSession.refreshReviewDecorations());
     },
     // The active buffer was deleted and the workspace is now empty: reset to a fresh blank model.
     onWorkspaceEmptied: () => void newModel(),
@@ -1649,6 +1695,20 @@ export function init(): () => void {
       // The GBNF comes from the host's resident compiler. Browser-host only — the desktop host omits
       // gbnfGrammar(), so the panel falls back to parse-and-repair there.
       getGrammar: platform.gbnfGrammar ? () => platform.gbnfGrammar!() : undefined,
+      // Workspace snapshot for multi-file agentic editing: relPath→current text of every open buffer.
+      getWorkspaceFiles: () => Object.fromEntries([...workspace.buffers.values()].map((b) => [b.relPath, b.text])),
+      // Host executor for the staged list/read/write edit tools (browser WASM / desktop MCP).
+      runEditTool: platform.runEditTool ? (name, argsJson, session) => platform.runEditTool!(name, argsJson, session) : undefined,
+      // Commit an accepted multi-file change set through the controller (new files under the folder root).
+      // applyFileEdit returns null (not throw) on a failed write/create — collect those relPaths so the
+      // panel reports a partial apply instead of a false "Applied ✓".
+      onApplyChangeSet: async (files) => {
+        const failed: string[] = [];
+        for (const f of files) {
+          if ((await workspace.applyFileEdit(f.relPath, f.body)) === null) failed.push(f.relPath);
+        }
+        return { failed };
+      },
     });
     return assistant;
   }
@@ -1680,6 +1740,20 @@ export function init(): () => void {
       cwd: () => workspace.folderRootToken() || null,
     });
     return terminal;
+  }
+
+  // The Review panel (#259), created lazily the first time its bottom-panel tab is shown (the
+  // terminal/scenarios pattern). It renders the review store grouped by file; clicking a thread jumps the
+  // editor to its span via the shared gotoSourceSpan.
+  let review: ReviewPanel | null = null;
+  function ensureReview(): void {
+    if (review) return;
+    review = createReviewPanel({
+      parent: el('panel-review'),
+      store: reviewStore,
+      onNavigate: (file, span) =>
+        void gotoSourceSpan({ file, line: span.line, column: span.column, endLine: span.endLine, endColumn: span.endColumn }),
+    });
   }
 
   // Diagrams are rendered with a theme-matched Mermaid palette; re-render on a theme flip (covers
@@ -2057,7 +2131,21 @@ export function init(): () => void {
       { id: 'view-scenarios', title: 'Show Scenario Runner', group: 'Workspace', run: () => controller.selectTech('scenarios') },
       { id: 'view-assistant', title: 'Show Assistant', group: 'Workspace', run: () => controller.selectCenter('assistant') },
       { id: 'assistant-explain', title: 'Explain this construct', group: 'Workspace', run: () => { controller.selectCenter('assistant'); ensureAssistant().explainSelection(); } },
+      { id: 'add-comment', title: 'Add review comment', group: 'Review', run: () => editor.addCommentAtSelection() },
+      { id: 'view-review', title: 'Show Review', group: 'Workspace', run: () => controller.selectBottomTab('review') },
     ];
+
+    // Stop a runaway compile: terminate the WASM worker and boot a fresh one (#353). Offered only when a
+    // cancellable worker exists (the worker boot path) — in the main-thread fallback there is nothing to
+    // terminate. getCommands() re-runs on every palette open, so this reflects the live boot state.
+    if (canStopCompile()) {
+      cmds.push({
+        id: 'stop-compile',
+        title: 'Stop compilation (restart compiler)',
+        group: 'Workspace',
+        run: () => stopRunawayCompile(),
+      });
+    }
 
     // Surface every open file as a "Go to File" entry so the palette doubles as a
     // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open.
@@ -2184,6 +2272,8 @@ export function init(): () => void {
     editorSession.destroy();
     window.removeEventListener('resize', onDiagramViewportResize);
     terminal?.dispose(); // stop the brokered shell + dispose xterm (#256)
+    review?.dispose(); // unmount the Review panel + release its store subscription (#259)
+    unsubReviewStore(); // release the editor-repaint subscription (the editorSession is destroyed above)
     workspace.setAutoSave(false);
     unsubRouteIntent();
   };

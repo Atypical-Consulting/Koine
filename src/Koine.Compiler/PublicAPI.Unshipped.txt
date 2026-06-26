@@ -269,6 +269,10 @@ const Koine.Compiler.Diagnostics.DiagnosticCodes.CommandParameterReferencesEntit
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DomainEventReferencesEntity = "KOI1604" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityFieldReferencesMessageType = "KOI1605" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.FactoryNeedsGeneratableIdentity = "KOI0808" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.AmbiguousFactoryIdentity = "KOI0809" -> string!
+static Koine.Compiler.Ast.MemberAnalysis.IdentityParameters(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>!
+static Koine.Compiler.Ast.MemberAnalysis.FactoryProvidesExplicitId(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory) -> bool
+static Koine.Compiler.Ast.MemberAnalysis.ExplicitIdParameter(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory) -> Koine.Compiler.Ast.Param?
 Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider
 Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider.AddOptionalMarkerCodeFixProvider() -> void
 Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider.FixableDiagnosticCodes.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
@@ -330,3 +334,4 @@ Koine.Compiler.Services.KoineLanguageService.Subtypes(Koine.Compiler.Services.Ko
 Koine.Compiler.Ast.ModelIndex.SubscriptionEventNameIsAmbiguous(string! subscriberContext, string! eventShortName) -> bool
 Koine.Compiler.Emit.Grammar.GbnfExporter
 static Koine.Compiler.Emit.Grammar.GbnfExporter.Export() -> string!
+static Koine.Compiler.Services.KoineCompilation.Reconcile(Koine.Compiler.Services.KoineCompilation? previous, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files) -> Koine.Compiler.Services.KoineCompilation!

@@ -3,7 +3,7 @@
 // viewer for the generated C#/TypeScript output. Adapted from the website playground;
 // the key difference is that diagnostics are PUSH-based (publishDiagnostics → setDiagnostics)
 // rather than pull-based (linter()).
-import { EditorState, Compartment, StateEffect, type Extension, type Text } from '@codemirror/state';
+import { EditorState, Compartment, StateEffect, Annotation, type ChangeSet, type Extension, type Text } from '@codemirror/state';
 import {
   Decoration,
   type DecorationSet,
@@ -65,6 +65,7 @@ import type {
   PrepareRenameResult,
   Range as LspRange,
   SemanticTokens,
+  SourceSpan,
   TextEdit,
   WorkspaceEdit,
 } from '@/lsp/lsp';
@@ -74,6 +75,10 @@ import { inlineCompletionExtension, type EditorInlineContext } from '@/editor/in
 import { requestInline } from '@/ai/inlineCompletionClient';
 import { loadSettings, resolveKeybindings } from '@/settings/persistence';
 import { buildExtraKeys, type BindingId } from '@/editor/keybindings';
+// Review-comment rendering (#259): the StateField+gutter that paint review threads over the buffer, plus
+// the helper that repaints them after a store change. A Studio-only view concern — never touches the model.
+import { reviewDecorationsExtension, dispatchReviewRefresh } from '@/review/reviewDecorations';
+import type { ReviewThread } from '@/review/reviewStore';
 // The markdown renderer lives in ./markdown (extracted so it can be unit-tested without a CodeMirror
 // view). Re-exported below so existing importers keep resolving it from `@/editor/editor`.
 import { renderMarkdown } from '@/editor/markdown';
@@ -692,7 +697,39 @@ export function semanticTokensExtension(provider: SemanticTokensFn, debounceMs =
   return [plugin, semanticTokenTheme];
 }
 
+// --- review-comment decorations ---------------------------------------------
+
+// Theme for the review-thread marks painted by reviewDecorationsExtension (#259): an OPEN thread gets a
+// wavy accent underline, a RESOLVED one is dimmed with a faint dotted underline, and the line gutter
+// shows a small speech-bubble glyph. Colours reuse the existing `--koi-*` palette so the marks read in
+// both themes; this lives with the editor's other `.cm-*` decoration themes (the review PANEL is styled
+// separately). The decorations are unit-tested without a view; only these cosmetics live here.
+const reviewTheme = EditorView.baseTheme({
+  '.cm-review-underline': {
+    textDecoration: 'underline wavy color-mix(in srgb, var(--koi-accent) 70%, transparent)',
+    textUnderlineOffset: '3px',
+  },
+  '.cm-review-resolved': {
+    opacity: '0.55',
+    textDecoration: 'underline dotted var(--koi-muted)',
+    textUnderlineOffset: '3px',
+  },
+  '.cm-review-gutter .cm-gutterElement': {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  '.cm-review-gutter-marker': { cursor: 'default', fontSize: '0.85em', lineHeight: '1' },
+});
+
 // --- editable editor --------------------------------------------------------
+
+// Marks a transaction as a PROGRAMMATIC whole-document swap (setDoc — e.g. switching the open file or
+// applying a generated model), as opposed to an incremental user edit. `onDocChange` (review-span
+// remapping) skips these: a full-buffer replace maps every pinned offset to "deleted", which would
+// orphan and persist away every review thread on a mere file switch. `onChange` still fires (the LSP
+// re-syncs the new buffer). Incremental edits (typing, paste, LSP format/rename) carry no annotation.
+const programmaticDocSwap = Annotation.define<boolean>();
 
 /** Go-to-definition provider; resolves a 0-based position to a Location (or array/null). */
 export type DefinitionFn = (line: number, character: number) => Promise<Location | Location[] | null>;
@@ -782,6 +819,19 @@ export interface KoineEditorOptions {
   onIncomingCalls?: IncomingCallsFn;
   /** Optional outgoing-calls provider (callees of the item under the cursor). */
   onOutgoingCalls?: OutgoingCallsFn;
+  /** Optional review-thread provider (the store's `list()`); when given, review marks + a gutter render. */
+  getReviewThreads?: () => ReviewThread[];
+  /**
+   * Invoked by {@link KoineEditor.addCommentAtSelection} (and the Mod-Alt-m chord) with a SourceSpan built
+   * from the current selection — `file` is `null`; ide.ts's handler fills in the active uri.
+   */
+  onAddComment?: (span: SourceSpan) => void;
+  /**
+   * Fired on every document edit with the CodeMirror {@link ChangeSet} and the new {@link Text} (alongside
+   * the string `onChange`), so a review store can re-anchor its pinned spans through the change. Distinct
+   * from `onChange`, which only hands back the new full text — span remapping needs the structured change.
+   */
+  onDocChange?: (change: ChangeSet, doc: Text) => void;
 }
 
 export interface KoineEditor {
@@ -801,6 +851,14 @@ export interface KoineEditor {
   setMinimap(on: boolean): void;
   /** Rebuild the editor keymap from the persisted keybinding overrides (reconfigures a compartment; no state loss). */
   reconfigureKeybindings(): void;
+  /**
+   * Open a review comment on the current selection: builds a SourceSpan from the main selection
+   * (`file: null` — ide.ts fills the uri) and hands it to `onAddComment`. No-op on an empty selection or
+   * when no `onAddComment` is wired.
+   */
+  addCommentAtSelection(): void;
+  /** Repaint the review-thread decorations after the store changed (dispatches the refresh effect). */
+  refreshReviewDecorations(): void;
   destroy(): void;
 }
 
@@ -842,6 +900,27 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
   function posToLsp(pos: number): { line: number; character: number } {
     const lineInfo = view.state.doc.lineAt(pos);
     return { line: lineInfo.number - 1, character: pos - lineInfo.from };
+  }
+
+  // Mod-Alt-m / "Add review comment": open a thread on the current selection (#259). Builds a raw,
+  // 1-based SourceSpan (end-exclusive endLine/endColumn — the same convention as remapSpans) with
+  // `file: null`; ide.ts's onAddComment handler fills in the active uri. No-op on an empty selection or
+  // when no handler is wired.
+  function addCommentAtSelection(): void {
+    const sel = view.state.selection.main;
+    if (sel.empty || !opts.onAddComment) return;
+    const startLine = view.state.doc.lineAt(sel.from);
+    const endLine = view.state.doc.lineAt(sel.to);
+    const span: SourceSpan = {
+      file: null,
+      line: startLine.number,
+      column: sel.from - startLine.from + 1,
+      endLine: endLine.number,
+      endColumn: sel.to - endLine.from + 1,
+      offset: sel.from,
+      length: sel.to - sel.from,
+    };
+    opts.onAddComment(span);
   }
 
   // F2 rename: prepareRename to find the editable identifier range, show the inline field
@@ -1042,6 +1121,20 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     },
   ]);
 
+  // Mod-Alt-m files a review comment on the current selection (#259). Collision-free against the editor's
+  // bound chords (Mod-D, Mod-Alt-↑/↓, Mod-., F2, Shift-F12, Mod-Alt-h, Mod-S, Mod-K, F12, Ctrl-Space). The
+  // binding is harmless without a handler — addCommentAtSelection no-ops when onAddComment is unset.
+  const addCommentKeys = keymap.of([
+    {
+      key: 'Mod-Alt-m',
+      preventDefault: true,
+      run: () => {
+        addCommentAtSelection();
+        return true;
+      },
+    },
+  ]);
+
   // Soft-wrap lives in its own compartment so Settings can flip it without rebuilding the editor.
   const lineWrap = new Compartment();
   // The minimap lives in its own compartment too (same pattern as lineWrap), so Settings can show/hide
@@ -1134,6 +1227,7 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         ...(opts.onInlayHints ? [inlayHintsExtension(opts.onInlayHints)] : []),
         keybindingCompartment.of(buildExtraKeys(resolveKeybindings(), keybindingHandlers)),
         callHierarchyKeys,
+        addCommentKeys,
         keymap.of([
           ...closeBracketsKeymap,
           ...completionKeymap,
@@ -1147,6 +1241,8 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         // LSP semantic-token highlighting (paints over the static grammar; falls back to it when the
         // server returns no tokens). After syntaxHighlighting so the mark decorations layer on top.
         ...(opts.onSemanticTokens ? [semanticTokensExtension(opts.onSemanticTokens)] : []),
+        // Review-comment marks + gutter (#259), wired only when a thread provider is supplied.
+        ...(opts.getReviewThreads ? [reviewDecorationsExtension(opts.getReviewThreads), reviewTheme] : []),
         lintGutter(),
         ...(opts.onHover ? [koineHoverTooltip(opts.onHover)] : []),
         sharedTheme,
@@ -1156,6 +1252,12 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         EditorView.updateListener.of((u) => {
           // Fire onChange immediately; the LSP client debounces didChange.
           if (u.docChanged && opts.onChange) opts.onChange(u.state.doc.toString());
+          // Hand the structured change to onDocChange (review-span remapping needs the ChangeSet, not
+          // just the new text). The review-decoration field also recomputes on docChanged on its own.
+          // Skip a programmatic whole-buffer swap (setDoc on a file switch): remapping a full-replace
+          // would orphan every pinned span. Only incremental edits re-anchor review threads.
+          const isDocSwap = u.transactions.some((tr) => tr.annotation(programmaticDocSwap));
+          if (u.docChanged && !isDocSwap && opts.onDocChange) opts.onDocChange(u.changes, u.state.doc);
           // Keyboard occlusion: on a narrow viewport, keep the caret above the soft keyboard whenever a
           // focused edit or selection move could have pushed it under the keyboard. Gated on the cached
           // narrow flag (not a per-keystroke innerWidth read) so desktop scroll behavior is byte-for-byte
@@ -1181,7 +1283,10 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     view,
     getDoc: () => view.state.doc.toString(),
     setDoc(doc: string) {
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: doc } });
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: doc },
+        annotations: programmaticDocSwap.of(true), // not a user edit — don't remap/orphan review spans
+      });
     },
     goto(line: number, col: number) {
       const ln = Math.min(Math.max(line, 1), view.state.doc.lines);
@@ -1208,6 +1313,10 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     },
     reconfigureKeybindings() {
       view.dispatch({ effects: keybindingCompartment.reconfigure(buildExtraKeys(resolveKeybindings(), keybindingHandlers)) });
+    },
+    addCommentAtSelection,
+    refreshReviewDecorations() {
+      dispatchReviewRefresh(view);
     },
     destroy() {
       viewDestroyed = true; // stop any queued caret-reveal frame from touching a torn-down view

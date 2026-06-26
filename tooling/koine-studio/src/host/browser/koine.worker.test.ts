@@ -304,4 +304,48 @@ describe('WorkerClient (workerClient.ts)', () => {
     newWorker.deliver({ id: req2.id, ok: true, result: 'real-reply' });
     await expect(p2).resolves.toBe('real-reply');
   });
+
+  // ---------------------------------------------------------------------------
+  // Cancellation: terminateAndRespawn ready-promise lifecycle (issue #353)
+  // ---------------------------------------------------------------------------
+
+  it('terminateAndRespawn() settles a pending whenReady() captured during boot (rejects, never hangs)', async () => {
+    const factory = makeWorkerFactory();
+    const client = createWorkerClient(factory);
+
+    // Capture the gen-0 ready promise BEFORE the worker signals `ready` — it is still pending.
+    const pendingReady = client.whenReady();
+
+    // Respawn while the first generation is still booting (e.g. a Stop pressed during boot).
+    client.terminateAndRespawn();
+
+    // The captured promise must REJECT with a cancellation error rather than hang forever.
+    await expect(pendingReady).rejects.toThrow(/cancel|restart/i);
+
+    // A fresh whenReady() must resolve once the new generation signals `ready`.
+    expect(factory.instances.length).toBe(2);
+    const newWorker = factory.instances[1];
+    const freshReady = client.whenReady();
+    newWorker.deliver({ type: 'ready' });
+    await expect(freshReady).resolves.toBeUndefined();
+  });
+
+  it('terminateAndRespawn() with no whenReady() awaiter does not raise an unhandled rejection', async () => {
+    const factory = makeWorkerFactory();
+    const client = createWorkerClient(factory);
+
+    // No caller is awaiting whenReady() (the common case after the initial boot). Respawning rejects
+    // the outgoing generation's ready-promise; the no-op `.catch` attached at creation must keep that
+    // rejection from surfacing as an unhandled rejection (which vitest would fail the run over).
+    client.terminateAndRespawn();
+
+    // Flush microtasks + a macrotask so any unhandled rejection would be reported by the runtime.
+    await new Promise((r) => setTimeout(r, 0));
+
+    // The new generation boots cleanly.
+    expect(factory.instances.length).toBe(2);
+    const newReady = client.whenReady();
+    factory.instances[1].deliver({ type: 'ready' });
+    await expect(newReady).resolves.toBeUndefined();
+  });
 });

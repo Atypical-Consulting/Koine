@@ -70,6 +70,7 @@ import { mountDomainNavigator, type DomainNavigatorHandle, type TacticalHandlers
 import { buildInspectorElement, renderRules, type InspectorElement, type InspectorHandlers } from '@/model/inspector';
 import { buildModelIndex, lookupElement, resolveInspectableQn, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
+import { SourceControlPanel } from '@/model/SourceControlPanel';
 import { ContextBreadcrumb } from '@/model/ContextBreadcrumb';
 import { EventsPanel } from '@/model/EventsPanel';
 import { RelationshipsPanel } from '@/model/RelationshipsPanel';
@@ -97,7 +98,7 @@ const SYMBOL_KIND_NAMESPACE = 3;
 type CenterView = 'visual' | 'technical' | 'docs' | 'assistant';
 type TechView = 'editor' | 'preview' | 'check' | 'scenarios';
 type DocsView = 'glossary' | 'adr' | 'notes';
-type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap' | 'terminal';
+type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap' | 'terminal' | 'review';
 
 /**
  * The slice of {@link import('@/lsp/lsp').KoineLsp} the loaders call (content requests only). A
@@ -195,6 +196,9 @@ export interface InspectorControllerDeps {
    * the panel renders a placeholder instead.
    */
   ensureTerminal?(): { fit(): void };
+
+  /** The Review panel (#259), created lazily by ide.ts the first time its bottom-panel tab is shown. */
+  ensureReview?(): void;
 
   /** Bind a fixed-height resizer to a panel (ide.ts's resize.ts, injected to keep this DOM-infra-free). */
   initEdgeResizer(opts: {
@@ -372,6 +376,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const relationshipsPanel = el('panel-relationships');
   const contextMapView = el('panel-contextmap');
   const terminalPanel = el('panel-terminal');
+  const reviewPanel = el('panel-review');
 
   // --- center pane restore ---------------------------------------------------
   // Restore the persisted center pane, defaulting to Visual when absent/invalid.
@@ -727,6 +732,24 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   let notesMount: HTMLElement | null = null;
   let adrLoaded = false;
   let notesLoaded = false;
+
+  // --- Source Control (git) right-rail panel (#272) -------------------------
+  // Folder-derived like the docs pages: lazily mounted on the first Source-Control tab open, re-fetched
+  // on every re-open (a `refreshNonce` bump — Preact reuses the mounted instance, so the commit-message
+  // draft survives the in-place refresh), and re-mounted against the new folder on a workspace switch.
+  // The panel self-gates on `platform.canUseGit` and catches a non-repo `gitStatus` reject, so the
+  // controller can mount it unconditionally and let it paint the right empty state.
+  const sourceControlRightView = el('rview-source-control');
+  let sourceControlLoaded = false;
+  let sourceControlRefresh = 0;
+  function loadSourceControl(): void {
+    if (sourceControlLoaded) sourceControlRefresh += 1; // a re-open re-fetches; first mount loads on its own
+    sourceControlLoaded = true;
+    render(
+      <SourceControlPanel git={platform} folderToken={deps.folderRootToken()} refreshNonce={sourceControlRefresh} />,
+      sourceControlRightView,
+    );
+  }
   const docsFail = (verb: string) => (e: unknown) => deps.setStatus(`Could not ${verb}: ${String(e)}`, 'error');
 
   // One handlers object the two pages share: each create resets only its OWN page's loaded flag and
@@ -813,9 +836,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   };
 
   // The Domain navigator's wiring (#453), passed to mountDomainNavigator: its strategic doorways route to
-  // focusContextMap() / focusDocs() (focusContextMap also leaves the Documentation center first so the
-  // bottom strip is visible — the plain selectBottomTab would set a hidden tab), and its onSelect/goto
-  // drive the inspector + jump-to-source for the tactical leaves (wired through renderTactical in Task 4).
+  // focusContextMap() / focusDocs() (the bottom strip is global since #451, so focusContextMap just opens
+  // the Context Map tab in place), and its onSelect/goto drive the inspector + jump-to-source for the
+  // tactical leaves (wired through renderTactical in Task 4).
   const modelOutlineHandlers: ModelOutlineHandlers = {
     onSelect: (entry) => selection.set({ qualifiedName: entry.qualifiedName, context: entry.context }),
     goto: (line, col) => editor.goto(line, col),
@@ -1121,6 +1144,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function invalidateDocsPanel(): void {
     adrLoaded = false;
     notesLoaded = false;
+    // Source Control is folder-derived too — drop its loaded gate so the next open re-mounts it against
+    // the new folder, and re-mount immediately when it's the open right-rail view (its `gitStatus` is for
+    // the new workspace's repository). This runs on a folder open / root-set change; a `.koi` save's
+    // refresh is covered by the refresh-on-reopen (selectRightView) plus the panel's own Refresh button.
+    sourceControlLoaded = false;
+    if (appStore.getState().right === 'source-control') loadSourceControl();
   }
 
   // Diagrams are rendered with a theme-matched Mermaid palette; re-render on a theme flip. Mark the
@@ -1189,9 +1218,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // reachable in one click from any view, not a Code sub-tab. Its host (#view-assistant) is the
     // center-host itself, so it's shown/hidden purely by the active center.
     assistantView.hidden = center !== 'assistant';
-    // The bottom strip (Problems/Events/Relationships/Context Map) sits under the canvas/editor — it
-    // serves Visual and Code, but not Documentation or the full-height Assistant conversation.
-    diagEl.hidden = center === 'docs' || center === 'assistant';
+    // The bottom strip (Problems/Events/Relationships/Context Map/Terminal) is GLOBAL: it serves every
+    // center view and is hidden only by its own collapse toggle (#diag-collapse), never by the active
+    // view. (Previously hidden on Documentation + Assistant for full-height reading/chat; the collapse
+    // control reclaims that height on demand instead.)
+    diagEl.hidden = false;
     for (const t of centerTabs) t.setAttribute('aria-selected', String(t.dataset.center === center));
     const techVisible = center === 'technical';
     editorPaneEl.hidden = !(techVisible && tech === 'editor');
@@ -1270,12 +1301,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     selectDocsTab('glossary');
   }
 
-  // The Context Map lives in the bottom strip, which applyCenterChrome HIDES while Documentation is the
-  // active center. So the rail's Context Map link must first leave Documentation for a center that shows
-  // the strip (Visual — the map's natural home) before opening its Context Map tab; otherwise the click
-  // would set the bottom tab on a strip that stays hidden, and nothing would appear.
+  // The Context Map lives in the bottom strip, which is now visible in every center view, so opening it
+  // is just a bottom-tab switch from wherever the user is — selectBottomTab expands the strip if it's
+  // collapsed. (It used to leave Documentation first, because the strip was hidden there.)
   function focusContextMap(): void {
-    if (activeCenter() === 'docs') selectCenter('visual');
     selectBottomTab('contextmap');
   }
 
@@ -1355,11 +1384,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     props: inspectorHost,
     rules: el('rview-rules'),
     notes: el('rview-notes'),
+    'source-control': sourceControlRightView,
   };
   function selectRightView(view: RightView): void {
     appStore.getState().setRight(view);
     for (const t of rightTabs) t.setAttribute('aria-selected', String(t.dataset.rview === view));
     for (const [key, node] of Object.entries(rightViews)) node.hidden = key !== view;
+    // Source Control is lazily mounted + folder-derived (#272): paint it on first open and re-fetch git
+    // status on every re-open (so a save / external `git` since the last view is reflected — the panel
+    // itself owns the in-place refresh). The canUseGit gate + the non-repo empty state live in the panel.
+    if (view === 'source-control') loadSourceControl();
   }
   for (const t of rightTabs) {
     t.addEventListener('click', () => selectRightView(t.dataset.rview as RightView));
@@ -1554,6 +1588,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     relationshipsPanel.hidden = tab !== 'relationships';
     contextMapView.hidden = tab !== 'contextmap';
     terminalPanel.hidden = tab !== 'terminal';
+    reviewPanel.hidden = tab !== 'review';
     diagCountEl.hidden = tab !== 'problems';
     if (diagEl.classList.contains('collapsed')) applyDiagCollapsed(false);
     ensureBottomLoaded(tab);
@@ -1607,6 +1642,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // assistant/scenarios panels); fit() reflows xterm now that the panel has layout. Desktop-only —
     // the browser host omits ensureTerminal and the panel shows its placeholder.
     if (tab === 'terminal') deps.ensureTerminal?.().fit();
+    // The Review panel is created lazily by ide.ts the first time its tab is shown (mirrors terminal).
+    if (tab === 'review') deps.ensureReview?.();
   }
 
   // --- the "Context Map" tab: the strategic context map, as an interactive GRAPH or the dense TABLE ----

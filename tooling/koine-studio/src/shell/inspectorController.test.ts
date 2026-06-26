@@ -97,6 +97,7 @@ const APP_HTML = `
           <div id="panel-relationships" class="diag-panel" role="tabpanel" hidden></div>
           <div id="panel-contextmap" class="diag-panel doc-view" role="tabpanel" hidden></div>
           <div id="panel-terminal" class="diag-panel diag-panel-terminal" role="tabpanel" hidden></div>
+          <div id="panel-review" class="diag-panel" role="tabpanel" hidden></div>
         </footer>
       </section>
       <aside id="right" class="pane">
@@ -104,11 +105,13 @@ const APP_HTML = `
           <button type="button" class="rtab" id="rtab-props" role="tab" data-rview="props" aria-selected="true">Properties</button>
           <button type="button" class="rtab" id="rtab-rules" role="tab" data-rview="rules" aria-selected="false">Rules</button>
           <button type="button" class="rtab" id="rtab-notes" role="tab" data-rview="notes" aria-selected="false">Notes</button>
+          <button type="button" class="rtab" id="rtab-source-control" role="tab" data-rview="source-control" aria-selected="false">Source Control</button>
         </div>
         <div id="right-body">
           <div id="inspector-host" class="rview" role="tabpanel"></div>
           <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden></div>
           <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden></div>
+          <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
         </div>
       </aside>
     </main>
@@ -266,6 +269,20 @@ describe('createInspectorController — center switching', () => {
     expect(el('center-technical').hidden).toBe(true);
     expect(el('center-docs').hidden).toBe(true);
     expect(el('center-tab-visual').getAttribute('aria-selected')).toBe('true');
+  });
+
+  test('the bottom panel is visible in every center view (#451)', () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init(); // boots Visual
+
+    expect(el('diagnostics').hidden).toBe(false); // Visual
+    ctl.selectCenter('technical');
+    expect(el('diagnostics').hidden).toBe(false); // Code
+    ctl.selectDocsTab('glossary'); // forces center = docs
+    expect(el('diagnostics').hidden).toBe(false); // Documentation
+    ctl.selectCenter('assistant');
+    expect(el('diagnostics').hidden).toBe(false); // Assistant
   });
 
   test('selectCenter("technical") surfaces the technical center + editor sub-view and marks the Code tab', () => {
@@ -522,10 +539,9 @@ describe('createInspectorController — bottom strip lazy loading', () => {
   });
 
   // NOTE: the rail's Context Map / Ubiquitous Language doclinks moved out of the docs footer into the
-  // Domain axis (#453); the footer now carries only ADR + Notes. The Context Map doorway (and its
-  // "leave Documentation, reveal the strip" regression, #docs-rail) is rebuilt in the strategic Domain
-  // view by a later task, which will re-add its own coverage. focusContextMap stays wired in the
-  // controller for that re-wire.
+  // Domain axis (#453); the footer now carries only ADR + Notes. The Context Map doorway is rebuilt in
+  // the strategic Domain view (below). Per #451 the bottom strip is global, so the doorway opens the
+  // Context Map in place without leaving the current center.
 });
 
 describe('createInspectorController — rail axis switch (#453)', () => {
@@ -554,27 +570,27 @@ describe('createInspectorController — rail axis switch (#453)', () => {
 });
 
 describe('createInspectorController — Domain navigator doorways + cross-axis glue (#453)', () => {
-  test('the strategic Context Map doorway runs focusContextMap — leaves Documentation and reveals the bottom strip', async () => {
+  test('the strategic Context Map doorway opens the Context Map in the now-global bottom strip, in place (#451/#453)', async () => {
     const ctl = createInspectorController(makeDeps(makeLsp()));
     ctl.init();
     ctl.refreshActiveSurfaces(); // mounts the Domain navigator, which self-fetches + paints the doorways
     await flush();
 
-    // Park on Documentation, which HIDES the bottom strip (where the Context Map lives).
-    ctl.selectCenter('docs');
+    // Land on Documentation — the bottom strip is global (#451), so it stays visible here.
+    ctl.selectDocsTab('adr');
     expect(el('center-docs').hidden).toBe(false);
-    expect(el('diagnostics').hidden).toBe(true);
+    expect(el('diagnostics').hidden).toBe(false);
 
     // Drive the REAL strategic Context Map doorway → modelOutlineHandlers.onOpenContextMap →
-    // focusContextMap(): it must leave Documentation for a center that shows the strip, then open the
-    // Context Map tab. A regression to a bare selectBottomTab('contextmap') would leave Docs up + the
-    // strip hidden, failing the assertions below.
+    // focusContextMap() → selectBottomTab('contextmap'): with the global strip (#451) it opens the
+    // Context Map tab IN PLACE, without leaving the current center. (Drives the #453 doorway, not the
+    // removed footer doclink.)
     const doorway = el('rail-domain-pane').querySelector<HTMLButtonElement>('[data-door="contextmap"]')!;
     doorway.click();
     await flush();
 
-    expect(el('center-docs').hidden).toBe(true); // left Documentation…
-    expect(el('diagnostics').hidden).toBe(false); // …so the bottom strip is visible…
+    expect(el('center-docs').hidden).toBe(false); // still on Documentation…
+    expect(el('diagnostics').hidden).toBe(false); // …strip visible…
     expect(el('panel-contextmap').hidden).toBe(false); // …showing the Context Map.
   });
 

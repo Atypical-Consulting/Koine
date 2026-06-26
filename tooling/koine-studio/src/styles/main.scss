@@ -47,12 +47,14 @@
 @use './components/about';
 @use './components/glossary';
 @use './components/docs';
+@use './components/source-control';
 @use './base/animations';
 @use './components/floating-menu';
 @use './components/diagrams-maxgraph';
 @use './components/canvas-empty';
 @use './components/ai-panel';
 @use './components/scenario';
+@use './components/review';
 @use './base/a11y';
 @use './components/wizard';
 @use './components/mobile-zone-bar';

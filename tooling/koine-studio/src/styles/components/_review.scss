@@ -1,0 +1,184 @@
+/* --- Review bottom-panel tab (issue #259) ---
+   A scannable, file-grouped list of in-editor review threads inside the shared `.diag-panel` box. Each
+   group heads with its file's short name; each thread shows a navigable status+location header, its
+   comment chain, the resolve/delete controls, and a reply field. Tokens mirror the diagnostics/table
+   panels so the strip reads as one control. */
+.koi-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-2);
+  font-family: var(--koi-font-body);
+  padding-top: var(--koi-space-2);
+}
+
+/* Empty state: the muted, italic treatment shared with the other panels' empty hints. */
+.koi-review-empty {
+  margin: 0;
+  padding: var(--koi-space-2) 7px;
+  color: var(--koi-muted);
+  font-style: italic;
+  line-height: 1.5;
+}
+
+/* The file groups + the threads within a group are plain stacked lists (no bullets/indent). */
+.koi-review-files,
+.koi-review-threads,
+.koi-review-comments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.koi-review-file {
+  margin-bottom: var(--koi-space-3);
+}
+
+/* Group heading: the muted/uppercase/tracked treatment the strip header uses. */
+.koi-review-file-name {
+  margin: 0 0 var(--koi-space-1);
+  color: var(--koi-muted);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
+
+.koi-review-threads {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-2);
+}
+
+.koi-review-thread {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-1-5);
+  padding: var(--koi-space-2);
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+}
+
+/* Thread header is a navigable button (jump to the span). It reads as a row: status pill + location. */
+.koi-review-thread-head {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--koi-fg);
+  font: inherit;
+}
+.koi-review-thread-head:hover .koi-review-loc {
+  color: var(--koi-accent);
+}
+.koi-review-thread-head:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 2px;
+}
+
+/* Status keyed by colour AND text (never colour alone): open = accent, resolved = string-green,
+   orphaned = muted. The dot precedes the label. */
+.koi-review-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+  flex: 0 0 auto;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--koi-muted);
+}
+.koi-review-status::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: var(--koi-radius-pill);
+  background: currentColor;
+}
+.koi-review-status[data-status='open'] {
+  color: var(--koi-accent);
+}
+.koi-review-status[data-status='resolved'] {
+  color: var(--koi-hl-string);
+}
+.koi-review-status[data-status='orphaned'] {
+  color: var(--koi-muted);
+}
+
+.koi-review-loc {
+  color: var(--koi-ink-soft);
+  font-family: var(--koi-font-mono);
+  font-size: 0.76rem;
+}
+
+.koi-review-comments {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-1);
+}
+.koi-review-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 0.8rem;
+}
+.koi-review-author {
+  color: var(--koi-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.koi-review-body {
+  color: var(--koi-fg);
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
+.koi-review-actions {
+  display: flex;
+  gap: var(--koi-space-2);
+}
+.koi-review-toggle,
+.koi-review-delete,
+.koi-review-reply-submit {
+  background: transparent;
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  color: var(--koi-ink-soft);
+  padding: var(--koi-space-0-5) var(--koi-space-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.76rem;
+}
+.koi-review-toggle:hover,
+.koi-review-delete:hover,
+.koi-review-reply-submit:hover {
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+}
+.koi-review-toggle:focus-visible,
+.koi-review-delete:focus-visible,
+.koi-review-reply-submit:focus-visible,
+.koi-review-reply-input:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+
+.koi-review-reply {
+  display: flex;
+  gap: var(--koi-space-1-5);
+}
+.koi-review-reply-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--koi-paper);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  color: var(--koi-fg);
+  padding: var(--koi-space-0-5) var(--koi-space-2);
+  font: inherit;
+  font-size: 0.8rem;
+}

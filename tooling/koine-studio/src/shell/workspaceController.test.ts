@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it, test, vi } from 'vitest';
 import { createWorkspaceController, type WorkspaceControllerDeps } from '@/shell/workspaceController';
 import { pathToFileUri } from '@/shell/ideUtils';
-import type { FsEntry, KoiFile, Platform, SourceDoc } from '@/host/types';
+import type { FsEntry, GitLogEntry, GitStatus, KoiFile, Platform, SourceDoc } from '@/host/types';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
 
 // --- in-memory Platform ------------------------------------------------------
@@ -46,6 +46,7 @@ class FakePlatform implements Platform {
   readonly canOpenFolders = true;
   readonly canSaveProjects = true;
   readonly canRunShell = false;
+  readonly canUseGit = false;
   readonly persistsWorkspace = true;
 
   /** Per-root store: rootToken -> (relPath -> UTF-8 contents). */
@@ -143,6 +144,35 @@ class FakePlatform implements Platform {
   }
   gitLogForRange(): Promise<null> {
     return Promise.resolve(null);
+  }
+  // git is a desktop-only capability (#272); this browser-like fake reports canUseGit=false, so the
+  // source-control methods are never reached. They reject so a test that forgot to guard fails loudly.
+  private gitUnavailable(): Promise<never> {
+    return Promise.reject(new Error('git is unavailable in this fake host'));
+  }
+  gitStatus(): Promise<GitStatus> {
+    return this.gitUnavailable();
+  }
+  gitDiff(): Promise<string> {
+    return this.gitUnavailable();
+  }
+  gitStage(): Promise<void> {
+    return this.gitUnavailable();
+  }
+  gitUnstage(): Promise<void> {
+    return this.gitUnavailable();
+  }
+  gitCommit(): Promise<void> {
+    return this.gitUnavailable();
+  }
+  gitBranches(): Promise<string[]> {
+    return this.gitUnavailable();
+  }
+  gitCheckout(): Promise<void> {
+    return this.gitUnavailable();
+  }
+  gitLog(): Promise<GitLogEntry[]> {
+    return this.gitUnavailable();
   }
   writeTextFile(path: string, contents: string): Promise<void> {
     const rel = this.relOf(path);

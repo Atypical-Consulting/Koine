@@ -262,6 +262,7 @@ const APP_HTML = `
           <div id="panel-relationships" class="diag-panel" role="tabpanel" hidden></div>
           <div id="panel-contextmap" class="diag-panel doc-view" role="tabpanel" hidden></div>
           <div id="panel-terminal" class="diag-panel diag-panel-terminal" role="tabpanel" hidden></div>
+          <div id="panel-review" class="diag-panel" role="tabpanel" hidden></div>
         </footer>
       </section>
       <aside id="right" class="pane">
@@ -270,6 +271,7 @@ const APP_HTML = `
           <div id="inspector-host" class="rview" role="tabpanel"></div>
           <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden></div>
           <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden></div>
+          <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
         </div>
       </aside>
     </main>

@@ -128,6 +128,97 @@
   font-family: var(--koi-font-body);
   font-size: var(--koi-text-xs);
 }
+/* Multi-file change set: a reviewable, per-file accept/apply panel for an agentic turn that staged
+   edits across the workspace. New vs modified files are badged distinctly; each row carries an
+   accept toggle and an inline line-diff, with one Apply/Discard pair for the whole set. */
+.koi-changeset {
+  margin-top: var(--koi-space-2);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  background: var(--koi-paper-2);
+  padding: var(--koi-space-2);
+}
+.koi-changeset-file {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: var(--koi-space-1-5);
+  margin-bottom: var(--koi-space-1-5);
+}
+.koi-changeset-accept {
+  cursor: pointer;
+}
+.koi-changeset-path {
+  font-family: var(--koi-font-mono, monospace);
+  font-size: var(--koi-text-xs);
+  color: var(--koi-fg);
+  word-break: break-word;
+}
+.koi-changeset-badge {
+  display: inline-block;
+  padding: var(--koi-space-0-5) var(--koi-space-1-5);
+  border-radius: var(--koi-radius-pill, 999px);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+// Text uses the high-contrast foreground (AA on the panel surface in both themes); the new/modified
+// distinction is carried by the tinted border/background AND the "new"/"modified" label, so it never
+// relies on color alone (WCAG 2.1 AA 1.4.1 / 1.4.3). `--koi-success` may be undefined → green fallback.
+.koi-changeset-badge-new {
+  border: 1px solid color-mix(in srgb, var(--koi-success, #2e9e58) 45%, var(--koi-line));
+  background: color-mix(in srgb, var(--koi-success, #2e9e58) 16%, transparent);
+  color: var(--koi-fg);
+}
+.koi-changeset-badge-modified {
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
+  background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+  color: var(--koi-fg);
+}
+.koi-changeset-diff {
+  grid-column: 1 / -1;
+  margin: var(--koi-space-0-5) 0 0;
+  max-height: 12rem;
+  overflow: auto;
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  background: var(--koi-surface);
+  padding: var(--koi-space-1-5);
+  font-family: var(--koi-font-mono, monospace);
+  font-size: var(--koi-text-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.koi-changeset-apply,
+.koi-changeset-discard {
+  margin-top: var(--koi-space-1-5);
+  margin-right: var(--koi-space-1-5);
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-1-25) var(--koi-space-2-5);
+  font-family: var(--koi-font-body);
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+.koi-changeset-apply:hover,
+.koi-changeset-discard:hover {
+  border-color: var(--koi-accent);
+}
+.koi-changeset-apply:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.koi-changeset-status {
+  margin-top: var(--koi-space-1);
+  font-size: var(--koi-text-xs);
+  color: var(--koi-muted);
+}
+.koi-changeset-status:empty {
+  display: none;
+}
 .koi-assistant-controls {
   flex: 0 0 auto;
   border-top: 1px solid var(--koi-line);

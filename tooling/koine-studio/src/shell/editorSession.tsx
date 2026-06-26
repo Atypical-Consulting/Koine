@@ -22,6 +22,8 @@ import { diagnosticsInRange } from '@/shell/ideUtils';
 import { appStore } from '@/store/index';
 import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
 import { DiagnosticsStripPanel } from '@/diagnostics/DiagnosticsStripPanel';
+import type { ChangeSet, Text } from '@codemirror/state';
+import type { ReviewThread } from '@/review/reviewStore';
 import type {
   CallHierarchyIncomingCall,
   CallHierarchyItem,
@@ -35,6 +37,7 @@ import type {
   PrepareRenameResult,
   Range,
   SemanticTokens,
+  SourceSpan,
   WorkspaceEdit,
 } from '@/lsp/lsp';
 
@@ -114,6 +117,18 @@ export interface EditorSessionDeps {
    * active uri) repainted the editor + strip + status before this fires.
    */
   onDiagnostics(uri: string, diags: LspDiagnostic[]): void;
+
+  // --- review threads (#259) -------------------------------------------------
+  // All optional; editorSession FILE-SCOPES each one per group before handing it to that group's editor,
+  // so group A and group B (which may show different files) each see only their own file's threads and
+  // only re-anchor / pin to their own file. A host that doesn't wire reviews (or a test) leaves them unset
+  // and the editor renders no review marks.
+  /** The review-thread provider (the store's `list()`) — the FULL multi-file list; editorSession narrows it per group. */
+  getReviewThreads?(): ReviewThread[];
+  /** Open a review thread on `span` (editorSession fills `span.file` with the invoking group's uri). */
+  onAddComment?(span: SourceSpan): void;
+  /** Re-anchor the threads in `file` through a document edit's CodeMirror {@link ChangeSet} (ide.ts → store.remap). */
+  onDocChange?(change: ChangeSet, doc: Text, file: string): void;
 }
 
 export interface EditorSession {
@@ -149,6 +164,12 @@ export interface EditorSession {
    * write group A's buffer (#265).
    */
   onChange(cb: (doc: string, uri: string) => void): void;
+
+  /**
+   * Repaint the review-thread decorations in every live editor group (A, and B when open) after the
+   * review store changed — ide.ts calls this from the store subscription + after add/load.
+   */
+  refreshReviewDecorations(): void;
 
   // The editor's LSP forwarders, exposed so callers (and tests) can reach the wall directly.
   hover(line: number, character: number): Promise<HoverResult | null>;
@@ -197,6 +218,24 @@ export interface EditorSession {
 
 export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   const { lsp } = deps;
+
+  // Review threads (#259) are file-scoped per editor group: `currentUri()` returns the uri the group is
+  // showing right now, so each group renders/edits ONLY its own file's threads. Without this a comment in
+  // file A would paint over file B and an edit in A would corrupt B's spans (both editors share one store).
+  function reviewOptionsFor(currentUri: () => string): {
+    getReviewThreads?: () => ReviewThread[];
+    onAddComment?: (span: SourceSpan) => void;
+    onDocChange?: (change: ChangeSet, doc: Text) => void;
+  } {
+    return {
+      // Only this group's file's threads, so the offsets line up with this editor's document.
+      getReviewThreads: deps.getReviewThreads ? () => deps.getReviewThreads!().filter((t) => t.file === currentUri()) : undefined,
+      // The editor builds the span with `file: null` (it doesn't know its uri); pin it to this group's file.
+      onAddComment: deps.onAddComment ? (span) => deps.onAddComment!({ ...span, file: currentUri() }) : undefined,
+      // Re-anchor only this group's file's threads through this buffer's change.
+      onDocChange: deps.onDocChange ? (change, doc) => deps.onDocChange!(change, doc, currentUri()) : undefined,
+    };
+  }
 
   // The per-uri diagnostics cache is the app store's `diagnostics` slice (issue #193). Holds the latest
   // pushed diagnostics for every file in the workspace so switching files can re-render the active one
@@ -251,6 +290,9 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     onPrepareCallHierarchy: (line, character) => lsp.prepareCallHierarchy(line, character),
     onIncomingCalls: (item) => lsp.incomingCalls(item),
     onOutgoingCalls: (item) => lsp.outgoingCalls(item),
+    // Review threads (#259): file-scoped to group A's active file (the marks/gutter provider, the
+    // add-comment handler, and the span-remap hook), so A never paints or remaps another file's threads.
+    ...reviewOptionsFor(() => deps.activeUri()),
     // Save (Cmd/Ctrl-S) is owned by ide.ts's window keydown handler: it formats AND writes the
     // active buffer to disk. We deliberately do NOT pass onFormat here so the editor's Mod-s keymap
     // stays inert and there's exactly one save path.
@@ -352,6 +394,9 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
         onPrepareCallHierarchy: (line, character) => lsp.prepareCallHierarchy(line, character),
         onIncomingCalls: (item) => lsp.incomingCalls(item),
         onOutgoingCalls: (item) => lsp.outgoingCalls(item),
+        // Review threads in group B too, over the SAME store but file-scoped to B's OWN uri (#259), so a
+        // split showing two different files keeps each pane's marks/edits to its own file.
+        ...reviewOptionsFor(() => groupBUri),
       });
     } else {
       // groupBUri is already the new target (set above), and editor.setDoc dispatches a doc change that
@@ -520,6 +565,10 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     updateStatus,
     onChange(cb) {
       downstreamOnChange = cb;
+    },
+    refreshReviewDecorations() {
+      editor.refreshReviewDecorations();
+      groupB?.refreshReviewDecorations();
     },
     hover,
     completion,

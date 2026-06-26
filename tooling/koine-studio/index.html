@@ -175,15 +175,15 @@
             </section>
             <!-- The AI copilot — a top-level center pane (peer of Visual / Code / Documentation), so it's
                  one click from any view. The AssistantPanel is mounted into this host lazily on first show
-                 (ide.tsx); the bottom diagnostics strip is hidden here, as on Documentation, so the
-                 conversation gets the center's full height. -->
+                 (ide.tsx); the bottom diagnostics strip stays visible here (it's global), collapse it from
+                 its chevron to give the conversation the center's full height. -->
             <section id="view-assistant" class="center-host" role="tabpanel" aria-label="Assistant" hidden></section>
           </div>
 
           <footer id="diagnostics" aria-label="Problems, events, relationships and the context map">
             <div class="koi-resizer koi-resizer-y" id="diag-resizer" aria-hidden="true"></div>
             <div id="diag-header">
-              <button type="button" id="diag-collapse" class="diag-collapse" aria-expanded="true" aria-controls="diag-body panel-events panel-relationships panel-contextmap panel-terminal" aria-label="Collapse panel">
+              <button type="button" id="diag-collapse" class="diag-collapse" aria-expanded="true" aria-controls="diag-body panel-events panel-relationships panel-contextmap panel-terminal panel-review" aria-label="Collapse panel">
                 <svg class="diag-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5 8 10 12 6.5" /></svg>
               </button>
               <div class="diag-tabs" role="tablist" aria-label="Bottom panel">
@@ -192,6 +192,7 @@
                 <button type="button" class="diag-tab" id="tab-relationships" role="tab" data-panel="relationships" aria-selected="false" aria-controls="panel-relationships">Relationships</button>
                 <button type="button" class="diag-tab" id="tab-contextmap" role="tab" data-panel="contextmap" aria-selected="false" aria-controls="panel-contextmap">Context Map</button>
                 <button type="button" class="diag-tab" id="tab-terminal" role="tab" data-panel="terminal" aria-selected="false" aria-controls="panel-terminal">Terminal</button>
+                <button type="button" class="diag-tab" id="tab-review" role="tab" data-panel="review" aria-selected="false" aria-controls="panel-review">Review</button>
               </div>
               <span id="diag-count" class="diag-count"></span>
             </div>
@@ -200,6 +201,7 @@
             <div id="panel-relationships" class="diag-panel" role="tabpanel" aria-labelledby="tab-relationships" hidden></div>
             <div id="panel-contextmap" class="diag-panel doc-view" role="tabpanel" aria-labelledby="tab-contextmap" hidden></div>
             <div id="panel-terminal" class="diag-panel diag-panel-terminal" role="tabpanel" aria-labelledby="tab-terminal" hidden></div>
+            <div id="panel-review" class="diag-panel" role="tabpanel" aria-labelledby="tab-review" hidden></div>
           </footer>
         </section>
         <div class="koi-resizer" id="split-resizer" aria-hidden="true"></div>
@@ -213,6 +215,7 @@
             <button type="button" class="rtab" id="rtab-props" role="tab" data-rview="props" aria-selected="true">Properties</button>
             <button type="button" class="rtab" id="rtab-rules" role="tab" data-rview="rules" aria-selected="false">Rules</button>
             <button type="button" class="rtab" id="rtab-notes" role="tab" data-rview="notes" aria-selected="false">Notes</button>
+            <button type="button" class="rtab" id="rtab-source-control" role="tab" data-rview="source-control" aria-selected="false">Source Control</button>
           </div>
           <div id="right-body">
             <div id="inspector-host" class="rview" role="tabpanel"></div>
@@ -232,6 +235,15 @@
                   keep model-wide notes in <strong>Documentation → Notes</strong>. Per-element notes are
                   planned for a future update.
                 </p>
+              </div>
+            </div>
+            <!-- The Source Control panel (#272) is painted by inspectorController on the first tab open
+                 (SourceControlPanel mounts the git surface). The static content below is a pre-hydration
+                 fallback, replaced once the controller hydrates. -->
+            <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden>
+              <div class="koi-rview-empty">
+                <h3 class="koi-rview-empty-title">Source control</h3>
+                <p class="muted">Loading source control…</p>
               </div>
             </div>
           </div>
