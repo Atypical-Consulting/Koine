@@ -1702,11 +1702,13 @@ public sealed partial class CSharpEmitter : IEmitter
 
     /// <summary>
     /// Emits a factory as a <c>public static</c> method on the aggregate root:
-    /// preconditions, an auto-generated identity, construction, then creation events.
-    /// Identity is always generated (<c>OrderId.New()</c>); constructor arguments are
-    /// drawn from <c>field &lt;- expr</c> initializations, falling back to the
-    /// constructor's own defaults (or <c>default!</c> for a required, uninitialized
-    /// field — already flagged by KOI0806).
+    /// preconditions, the new aggregate's identity, construction, then creation events.
+    /// Identity is auto-generated (<c>OrderId.New()</c>) by default; when the factory supplies it as an
+    /// explicit identity-typed parameter (#324, <see cref="MemberAnalysis.ExplicitIdParameter"/>) the
+    /// synthetic <c>id</c> binds to that parameter instead (no <c>New()</c> — the only generator a
+    /// non-Guid key has would be undefined). Constructor arguments are drawn from <c>field &lt;- expr</c>
+    /// initializations, falling back to the constructor's own defaults (or <c>default!</c> for a
+    /// required, uninitialized field — already flagged by KOI0806).
     /// </summary>
     private void WriteFactory(
         StringBuilder sb,
@@ -1745,10 +1747,22 @@ public sealed partial class CSharpEmitter : IEmitter
         var inits = factory.Body.OfType<Initialization>().ToList();
         var emits = factory.Body.OfType<EmitClause>().ToList();
 
-        // 1. Auto-generated identity. Declared first so it is in scope for the
-        //    preconditions and payloads (New() has no side effects). The aggregate is
-        //    still not constructed until step 3, satisfying "checked before construction".
-        sb.Append(Indent).Append(Indent).Append("var id = ").Append(entity.IdentityName).Append(".New();\n");
+        // 1. Identity, declared first so it is in scope for the preconditions and payloads (New()/the
+        //    parameter have no side effects); the aggregate is still not constructed until step 3,
+        //    satisfying "checked before construction". By default it is auto-generated
+        //    (<Id>.New()). When the factory supplies the identity as an explicit identity-typed
+        //    parameter (#324), bind the synthetic `id` to that parameter instead of minting: if the
+        //    parameter is literally named `id` it already provides the local (emit nothing); otherwise
+        //    alias it (`var id = bookId;`).
+        Param? explicitId = MemberAnalysis.ExplicitIdParameter(entity, factory);
+        if (explicitId is null)
+        {
+            sb.Append(Indent).Append(Indent).Append("var id = ").Append(entity.IdentityName).Append(".New();\n");
+        }
+        else if (CSharpNaming.ToCamelCase(explicitId.Name) is var idParam && idParam != "id")
+        {
+            sb.Append(Indent).Append(Indent).Append("var id = ").Append(idParam).Append(";\n");
+        }
 
         // 2. Preconditions — checked before any state is constructed.
         if (requires.Count > 0)

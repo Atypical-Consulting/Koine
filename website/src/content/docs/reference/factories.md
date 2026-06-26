@@ -15,11 +15,13 @@ the business action that brought it into being (`Order.Open(...)`, not `new Orde
 
 A factory is declared **inside an `entity` block** — after the entity's members, invariants, `states`,
 and `command` declarations. It belongs to the entity, not to `aggregate`: a factory is an entity member,
-never a direct child of `aggregate`. The host entity needs a **generatable identity** — a Guid-backed id
-(the default) — because the factory mints that identity for you with `IdType.New()` (C#) /
+never a direct child of `aggregate`. By default the host entity needs a **generatable identity** — a
+Guid-backed id (the default) — because the factory mints that identity for you with `IdType.New()` (C#) /
 `IdType::generate()` (Rust). A `natural(String)`, `natural(Int)`, or `sequence` key has no *meaningful*
 client-side generator (a natural key is caller-supplied; a sequence key is store-assigned), so a `create`
-factory on such an entity is rejected at compile time (see [§12.3.5](#1235-diagnostics-and-restrictions)).
+factory on such an entity is allowed only when it takes the identity as an **explicit identity-typed
+parameter** (e.g. `create register(id: BookId, …)`) — the parameter then supplies the id and nothing is
+minted; otherwise it is rejected at compile time (see [§12.3.5](#1235-diagnostics-and-restrictions)).
 
 Most factories sit on an aggregate **root** (as below), but a standalone, context-level entity may host
 one too. The one wrinkle is `emit`: a creation event can only be raised from a standalone entity or an
@@ -156,14 +158,24 @@ exists, you can be sure every `Order` in the system was born through a path that
 
 ### 12.3.5 Diagnostics and restrictions
 
-- **`id` is reserved.** A factory parameter named `id` is rejected — it collides with the synthetic
-  `var id = OrderId.New();`. Never name a create-param `id`.
-- **The identity must be generatable (Guid).** A factory auto-generates the new aggregate's identity,
-  but only the default Guid-backed id has a meaningful generator (`IdType.New()` / `IdType::generate()`).
-  A `create` factory on an entity whose identity is `as natural(String)`, `as natural(Int)`, or
-  `as sequence` is a hard error (`KOI0808`) — these keys are supplied by the caller or assigned by the
-  store, not minted client-side. Either give the entity a Guid identity or drop the factory and construct
-  with an explicit id. (Explicit-id factories for natural/sequence keys are a planned future enhancement.)
+- **`id` is reserved — unless it *is* a non-Guid identity.** A factory parameter named `id` is allowed
+  only when its type **is the entity's identity type** *and* that identity is non-Guid
+  (`create register(id: BookId, …)` on a `natural`/`sequence` key): it then supplies the explicit identity
+  and binds to the synthetic `id` local. On a Guid identity the factory still mints `var id = <Id>.New();`,
+  so any parameter named `id` — even of the identity type — collides with that local and is rejected; and a
+  parameter named `id` whose type is *not* the identity type is rejected everywhere. (Binding is by
+  parameter *type*, not the literal name, so the explicit-id parameter may be named anything: `id`,
+  `bookId`, `no`, …)
+- **The identity must be generatable — or passed in explicitly.** A factory auto-generates the new
+  aggregate's identity, but only the default Guid-backed id has a meaningful generator (`IdType.New()` /
+  `IdType::generate()`). A `create` factory on an entity whose identity is `as natural(String)`,
+  `as natural(Int)`, or `as sequence` is therefore allowed **only when it accepts the identity as an
+  explicit parameter of the identity type** (`create register(id: BookId, …)`) — no generator is emitted,
+  the parameter is threaded as the id. `KOI0808` fires only when such a non-Guid factory provides **no**
+  identity-typed parameter (the key would have to be minted client-side, which it cannot be), and declaring
+  **more than one** is ambiguous and is its own error (`KOI0809`). A **Guid** factory always mints, so it is
+  unaffected by both rules: a parameter of its own identity type is an ordinary reference (e.g.
+  `reply(parent: CommentId, …)`), never the new id.
 - **The factory name emits a `public static` method**, so it must not collide with a field, a property,
   a command name, or a synthesized member like `getHashCode`. Two factories with the same name is a
   duplicate-factory error.
@@ -206,11 +218,39 @@ public static Order Open(CustomerId customer, IReadOnlyList<OrderLine> lines)
 
 Notice three things:
 
-- **The identity is generated for you.** `var id = OrderId.New();` is always the first statement. The
-  caller never passes an id — and a factory parameter named `id` is a hard error (see [§12.3.5](#1235-diagnostics-and-restrictions)).
+- **The identity is generated for you — by default.** On the default Guid path, `var id = OrderId.New();`
+  is the first statement and the caller never passes an id. When the factory instead declares an
+  **explicit identity-typed parameter**, that parameter binds to `id` and no `New()` is emitted (see the
+  explicit-id example below, and [§12.3.5](#1235-diagnostics-and-restrictions)).
 - **Construction uses named arguments.** Each field is passed positionally-by-name, so the order of
   declaration in the factory does not have to match the constructor.
 - **Events are recorded after construction**, qualified on the freshly built `instance`.
+
+For a `natural(String)`, `natural(Int)`, or `sequence` key, the factory accepts the identity as an
+explicit parameter of the identity type — the parameter *is* the id, so no generator runs:
+
+```koine
+context Catalog {
+  entity Book identified by BookId as natural(String) {
+    isbn:  Isbn
+    title: String
+    create register(id: BookId, isbn: Isbn, title: String) {
+      isbn  -> isbn
+      title -> title
+    }
+  }
+}
+```
+
+emits — note there is no `BookId.New()`; the `id` parameter is threaded straight through:
+
+```csharp
+public static Book Register(BookId id, Isbn isbn, string title)
+{
+    var instance = new Book(id, isbn: isbn, title: title);
+    return instance;
+}
+```
 
 ### 12.4.1 Same-named parameter auto-bind
 

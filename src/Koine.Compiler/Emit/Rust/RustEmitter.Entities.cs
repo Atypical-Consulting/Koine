@@ -321,8 +321,11 @@ public sealed partial class RustEmitter
 
     /// <summary>
     /// Emits a factory as an associated <c>fn name(params…) -&gt; Result&lt;Self, DomainError&gt;</c> that
-    /// mints a fresh identity, checks the factory preconditions, constructs via the smart constructor
-    /// (which runs the entity invariants), and records creation events. Because Rust <em>moves</em> the
+    /// obtains the new aggregate's identity, checks the factory preconditions, constructs via the smart
+    /// constructor (which runs the entity invariants), and records creation events. The identity is
+    /// minted (a fresh v4 UUID) by default; when the factory supplies it as an explicit identity-typed
+    /// parameter (#324, <see cref="MemberAnalysis.ExplicitIdParameter"/>) the synthetic <c>id</c> binds
+    /// to that parameter instead of calling <c>::generate()</c>. Because Rust <em>moves</em> the
     /// parameters into the constructor, any <c>emit</c> payloads — which reference the same id/params —
     /// are built first (cloning the non-Copy ones) and assigned after construction.
     /// </summary>
@@ -346,8 +349,20 @@ public sealed partial class RustEmitter
         body.Append(Indent).Append("pub fn ").Append(method).Append('(').Append(paramList)
             .Append(") -> Result<Self, DomainError> {\n");
 
-        // 1. Mint identity (a fresh v4 UUID), in scope for the preconditions and event payloads.
-        body.Append(Indent).Append(Indent).Append("let id = ").Append(idType).Append("::generate();\n");
+        // 1. Identity, in scope for the preconditions and event payloads. By default mint a fresh v4
+        //    UUID. When the factory supplies it as an explicit identity-typed parameter (#324), bind
+        //    `id` to that parameter instead: if the parameter's field name is already `id` it provides
+        //    the local directly (emit nothing); otherwise alias it with `.clone()` (the id newtype
+        //    derives Clone) so the parameter stays usable for any later reference.
+        Param? explicitId = MemberAnalysis.ExplicitIdParameter(entity, factory);
+        if (explicitId is null)
+        {
+            body.Append(Indent).Append(Indent).Append("let id = ").Append(idType).Append("::generate();\n");
+        }
+        else if (RustNaming.Field(explicitId.Name) is var idParam && idParam != "id")
+        {
+            body.Append(Indent).Append(Indent).Append("let id = ").Append(idParam).Append(".clone();\n");
+        }
 
         // 2. Preconditions — checked before any state is constructed.
         foreach (RequiresClause req in factory.Body.OfType<RequiresClause>())
@@ -490,13 +505,16 @@ public sealed partial class RustEmitter
     }
 
     /// <summary>
-    /// True when an entity has a factory and a String-backed (Guid) identity — the case where the
-    /// factory mints ids via <c>&lt;Id&gt;::generate()</c> (a v4 UUID), which both the <c>generate()</c>
-    /// emission and the <c>uuid</c> Cargo dependency gate on. Keeping the two sites on one predicate
-    /// stops them drifting (a generator without its dependency would not compile).
+    /// True when an entity has a <em>minting</em> factory and a String-backed (Guid) identity — the case
+    /// where the factory mints ids via <c>&lt;Id&gt;::generate()</c> (a v4 UUID), which both the
+    /// <c>generate()</c> emission and the <c>uuid</c> Cargo dependency gate on. A factory that supplies
+    /// its identity as an explicit parameter (#324) does NOT mint, so it is excluded — otherwise an
+    /// explicit-id-only entity would dangle an unused <c>generate()</c> and pull in the <c>uuid</c> crate
+    /// for nothing. Keeping the two sites on one predicate stops them drifting (a generator without its
+    /// dependency would not compile).
     /// </summary>
     private static bool MintsUuidIdentity(EntityDecl entity) =>
-        entity.Factories.Count > 0 && IdBacking(entity).IsString;
+        entity.Factories.Any(f => !MemberAnalysis.FactoryProvidesExplicitId(entity, f)) && IdBacking(entity).IsString;
 
     /// <summary>The Rust backing type of an entity's identity, plus whether it is String-backed.</summary>
     private static (string RustType, bool IsString) IdBacking(EntityDecl entity) => entity.IdStrategy switch

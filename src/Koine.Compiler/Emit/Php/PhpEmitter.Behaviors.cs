@@ -197,7 +197,8 @@ public sealed partial class PhpEmitter
     /// Emits a Koine <c>create</c> factory as a <c>public static function</c> returning the entity.
     /// The body mirrors the C#/Python/TS factory contract:
     /// <list type="number">
-    ///   <item>mint the identity (<c>$id = &lt;IdName&gt;::generate()</c>);</item>
+    ///   <item>obtain the identity — mint it (<c>$id = &lt;IdName&gt;::generate()</c>) by default, or bind
+    ///   it to an explicit identity-typed parameter (#324) instead of generating;</item>
     ///   <item>check preconditions;</item>
     ///   <item>construct the instance;</item>
     ///   <item>record creation events;</item>
@@ -248,8 +249,18 @@ public sealed partial class PhpEmitter
         var inits = factory.Body.OfType<Initialization>().ToList();
         var emits = factory.Body.OfType<EmitClause>().ToList();
 
-        // 1. Mint the identity.
-        sb.Append(Indent).Append(Indent).Append("$id = ").Append(idName).Append("::generate();\n");
+        // 1. Identity. By default mint it (`<IdName>::generate()`); when the factory supplies it as an
+        //    explicit identity-typed parameter (#324), bind `$id` to that parameter instead — omit when
+        //    the parameter is already named `id`, else alias it (`$id = $bookId;`).
+        Param? explicitId = MemberAnalysis.ExplicitIdParameter(entity, factory);
+        if (explicitId is null)
+        {
+            sb.Append(Indent).Append(Indent).Append("$id = ").Append(idName).Append("::generate();\n");
+        }
+        else if (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(explicitId.Name)) is var idParam && idParam != "id")
+        {
+            sb.Append(Indent).Append(Indent).Append("$id = $").Append(idParam).Append(";\n");
+        }
 
         // 2. Preconditions.
         foreach (RequiresClause req in requires)
