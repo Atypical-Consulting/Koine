@@ -4,7 +4,7 @@
 // responses + per-file `textDocument/publishDiagnostics` notifications back through onMessage.
 // Mirrors the request handlers in src/Koine.Cli/LspServer.cs for the nine methods Studio uses.
 import type { LspTransport } from '@/host/types';
-import { loadWasmApi, type KoineWasmApi } from '@/host/browser/wasm';
+import { loadWasmApi, getWasmWorkerClient, type KoineWasmApi } from '@/host/browser/wasm';
 
 interface JsonRpc {
   id?: number | string | null;
@@ -17,6 +17,14 @@ export class WasmLspTransport implements LspTransport {
   private msgCb?: (json: string) => void;
   // Open documents (uri → full text), the in-memory workspace the compiler diagnoses/compiles.
   private docs = new Map<string, string>();
+  // Supersede state for the keystroke-driven DiagnoseWorkspace operation (#353). Each diagnose run gets
+  // a fresh AbortController; a newer run aborts the prior one — routed over the worker client, the abort
+  // drops the stale call's pending id so its late reply is ignored. `diagnoseSeq` is the belt-and-
+  // suspenders guard for the main-thread fallback (no worker client to cancel): a stale resolution that
+  // still lands is dropped rather than overwriting newer diagnostics. Scoped to diagnostics() only, so
+  // independent one-shot operations (emitPreview, runScenario, …) are never superseded.
+  private diagnoseAbort: AbortController | null = null;
+  private diagnoseSeq = 0;
 
   onMessage(cb: (json: string) => void): void {
     this.msgCb = cb;
@@ -54,7 +62,33 @@ export class WasmLspTransport implements LspTransport {
 
   /** Run the merged-workspace diagnostics and turn them into publishDiagnostics notifications. */
   private async diagnostics(api: KoineWasmApi): Promise<object[]> {
-    const buckets = JSON.parse(await api.DiagnoseWorkspace(this.filesJson())) as {
+    // Supersede any in-flight diagnose: aborting drops its worker call id so its late reply is ignored.
+    this.diagnoseAbort?.abort();
+    const controller = new AbortController();
+    this.diagnoseAbort = controller;
+    const mySeq = ++this.diagnoseSeq;
+
+    const filesJson = this.filesJson();
+    let raw: string;
+    try {
+      // Route through the worker client when present so the AbortSignal actually cancels the in-flight
+      // call (#338's `{ signal }` seam). The main-thread fallback (no worker client) has no cancellation,
+      // so use the proxy and rely on the sequence-guard below to drop a stale resolution.
+      const client = getWasmWorkerClient();
+      raw = client
+        ? await client.call('DiagnoseWorkspace', [filesJson], { signal: controller.signal })
+        : await api.DiagnoseWorkspace(filesJson);
+    } catch (err) {
+      // A superseded diagnose (its signal aborted) is dropped silently — there is nothing to publish.
+      if (controller.signal.aborted) return [];
+      throw err;
+    }
+
+    // Main-thread fallback has no real cancellation; guard against a stale resolution landing late and
+    // overwriting newer diagnostics.
+    if (mySeq !== this.diagnoseSeq) return [];
+
+    const buckets = JSON.parse(raw) as {
       uri: string;
       diagnostics: unknown[];
     }[];
