@@ -51,5 +51,5 @@ objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "
 # `user` feature for `unistd::User::from_uid`, which wraps the reentrant `getpwuid_r` so the lookup is
 # thread-safe and needs no `unsafe`.
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.28", features = ["user"] }
+nix = { version = "0.31", features = ["user"] }
 
