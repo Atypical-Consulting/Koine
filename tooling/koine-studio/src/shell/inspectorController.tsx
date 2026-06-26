@@ -499,10 +499,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function applyScope(scope: ContextScope, persist: boolean): void {
     // Write the app store's `activeContext` slice (the single source of truth): the ModelOutlinePanel
     // subscribes to it and re-renders the scoped tree, and every other scoped render path reads it back.
+    // The status-bar readout + the scoped-surface re-filter are NOT driven here — the `activeContext`
+    // subscription below (in createInspectorController) owns them, firing on the slice write this performs.
+    // That's what keeps EVERY writer of the slice in lockstep: this dropdown path AND the Domain
+    // navigator's drill (#453), which calls setActiveContext directly and so used to skip those two
+    // imperative side-effects entirely (#531). Persisting stays here — only a deliberate switcher choice
+    // persists; non-deliberate changes (following a selection, or falling back off a vanished context)
+    // are view-only so they never overwrite the user's last explicit choice in storage.
     activeContext.set(scope);
     if (persist) deps.saveActiveContext(contextWorkspaceKey(), scope);
-    syncContextStatusBar();
-    rerenderScopedSurfaces();
   }
 
   /** A deliberate scope change from the switcher — persisted so a reload restores it. */
@@ -595,6 +600,21 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (activeCenter() === 'visual') void loadDiagrams();
     invalidateBottomPanels(); // the Events/Relationships/Context Map tables are graph-derived too
   }
+
+  // The store's `activeContext` slice is the single source of truth for the active scope: ANY writer —
+  // the toolbar dropdown (via applyScope) OR the Domain navigator's drill (#453), which calls
+  // setActiveContext directly — must drive the status-bar readout AND the scoped-surface re-filter.
+  // Subscribing here (rather than running those two only inside applyScope) is what keeps the navigator
+  // drill and the dropdown in lockstep (#531): before, the drill wrote the slice but skipped applyScope's
+  // two imperative side-effects, so the status bar read "All contexts" and the canvas stayed unfiltered
+  // while the dropdown already showed the drilled context. Guarded on a real value change so an unrelated
+  // slice write (setCenter / setSelection / …) is ignored; captured + unsubscribed on dispose (like the
+  // dirty-count subscription) so a deferred change can't repaint a torn-down host.
+  const unsubscribeActiveContext = appStore.subscribe((s, prev) => {
+    if (s.activeContext === prev.activeContext) return;
+    syncContextStatusBar();
+    rerenderScopedSurfaces();
+  });
 
   // --- doc-view cache + assistant domain index -------------------------------
 
@@ -1954,6 +1974,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     domainNavigator?.unmount();
     // Drop the Source Control dirty-count subscription (#470) for the same reason.
     unsubscribeDirtyCount();
+    // Drop the activeContext subscription (#531) too — its callback re-renders scoped surfaces, which
+    // would throw into a torn-down host if a deferred slice change fired after dispose.
+    unsubscribeActiveContext();
     if (inspectorSheet) {
       window.removeEventListener('resize', onViewportResize);
       inspectorSheet.destroy();
