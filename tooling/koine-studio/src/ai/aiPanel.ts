@@ -14,6 +14,7 @@ import {
   type ConstraintMechanism,
 } from '@/ai/grammarConstraint';
 import { KOINE_PRIMER } from '@/ai/assistantTools';
+import { createEditSession, type EditSession, type StagedEdit } from '@/ai/editSession';
 import { renderMarkdown } from '@/editor/editor';
 import { loadChat, saveChat, clearChat } from '@/settings/persistence';
 
@@ -91,6 +92,18 @@ export interface AssistantPanelOptions {
    * falls back to the parse-and-repair path. Fetched defensively (a throw is treated as "unavailable").
    */
   getGrammar?: () => Promise<string>;
+  /**
+   * Snapshot the open workspace's .koi files as relPath→current-text, captured fresh per send. When
+   * present & non-empty together with {@link runEditTool}, the assistant can edit ACROSS files.
+   */
+  getWorkspaceFiles?: () => Record<string, string>;
+  /** Host executor for the list/read/write edit tools against the per-turn staging session. */
+  runEditTool?: (name: string, argsJson: string, session: EditSession) => Promise<string>;
+  /**
+   * Commit an accepted multi-file change set: write each accepted file through the workspace
+   * controller (new files under the folder root), then re-validate. Resolves when writes complete.
+   */
+  onApplyChangeSet?: (files: StagedEdit[]) => Promise<void>;
 }
 
 export interface AssistantPanel {
@@ -209,6 +222,133 @@ function extractKoine(markdown: string): string | null {
   if (koine) return koine[1].replace(/\n+$/, '');
   const any = markdown.match(/```[^\n]*\n([\s\S]*?)```/);
   return any ? any[1].replace(/\n+$/, '') : null;
+}
+
+/**
+ * A minimal line-level diff for the change-set preview: an LCS walk marks lines only in the new body
+ * with `+`, lines only in the old with `-`, and shared lines with a leading space. Presentation only
+ * (the test asserts the badges/toggles/apply, not the diff content), so a compact LCS is plenty.
+ */
+function lineDiff(oldText: string, newText: string): string {
+  const a = oldText.length ? oldText.split('\n') : [];
+  const b = newText.length ? newText.split('\n') : [];
+  const m = a.length;
+  const n = b.length;
+  // lcs[i][j] = length of the longest common subsequence of a[i..] and b[j..].
+  const lcs: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    }
+  }
+  const out: string[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < m && j < n) {
+    if (a[i] === b[j]) {
+      out.push(`  ${a[i]}`);
+      i++;
+      j++;
+    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+      out.push(`- ${a[i]}`);
+      i++;
+    } else {
+      out.push(`+ ${b[j]}`);
+      j++;
+    }
+  }
+  while (i < m) out.push(`- ${a[i++]}`);
+  while (j < n) out.push(`+ ${b[j++]}`);
+  return out.join('\n');
+}
+
+/**
+ * Render a reviewable, per-file change set for an AGENTIC turn that STAGED multi-file edits: one row
+ * per staged file (an accept checkbox, a new/modified badge, the relPath, and an inline line-diff of
+ * the file's before-text vs the staged body), plus an "Apply N files" button (whose label/disabled
+ * track the accepted count) and a "Discard" button. Apply commits only the still-accepted files via
+ * `handlers.onApply`, then becomes a terminal "Applied ✓" and drops Discard; Discard removes the panel.
+ */
+function renderChangeSet(
+  bubble: HTMLElement,
+  staged: StagedEdit[],
+  before: Record<string, string>,
+  handlers: { onApply: (accepted: StagedEdit[]) => void | Promise<void>; onDiscard: () => void },
+): void {
+  const panel = document.createElement('div');
+  panel.className = 'koi-changeset';
+  // A labelled group so assistive tech announces the scope of the review (WCAG 2.1 AA 1.3.1 / 4.1.2).
+  panel.setAttribute('role', 'group');
+  panel.setAttribute('aria-label', `${staged.length} proposed file change${staged.length === 1 ? '' : 's'}`);
+
+  // The set of still-accepted edits (all on by default); the Apply label + the committed list read from it.
+  const accepted = new Set<StagedEdit>(staged);
+
+  const applyBtn = document.createElement('button');
+  applyBtn.type = 'button';
+  applyBtn.className = 'koi-changeset-apply';
+
+  const discardBtn = document.createElement('button');
+  discardBtn.type = 'button';
+  discardBtn.className = 'koi-changeset-discard';
+  discardBtn.textContent = 'Discard';
+
+  function refreshApply(): void {
+    const n = accepted.size;
+    applyBtn.textContent = `Apply ${n} file${n === 1 ? '' : 's'}`;
+    applyBtn.disabled = n === 0;
+  }
+
+  for (const file of staged) {
+    const row = document.createElement('div');
+    row.className = 'koi-changeset-file';
+
+    const check = document.createElement('input');
+    check.type = 'checkbox';
+    check.className = 'koi-changeset-accept';
+    check.checked = true;
+    check.setAttribute('aria-label', `Accept changes to ${file.relPath}`);
+    check.addEventListener('change', () => {
+      if (check.checked) accepted.add(file);
+      else accepted.delete(file);
+      refreshApply();
+    });
+    row.appendChild(check);
+
+    const badge = document.createElement('span');
+    badge.className = `koi-changeset-badge ${file.isNew ? 'koi-changeset-badge-new' : 'koi-changeset-badge-modified'}`;
+    badge.textContent = file.isNew ? 'new' : 'modified';
+    row.appendChild(badge);
+
+    const path = document.createElement('span');
+    path.className = 'koi-changeset-path';
+    path.textContent = file.relPath;
+    row.appendChild(path);
+
+    const diff = document.createElement('pre');
+    diff.className = 'koi-changeset-diff';
+    diff.textContent = lineDiff(before[file.relPath] ?? '', file.body);
+    row.appendChild(diff);
+
+    panel.appendChild(row);
+  }
+
+  applyBtn.addEventListener('click', () => {
+    const list = staged.filter((f) => accepted.has(f));
+    applyBtn.disabled = true; // prevent a double-apply while the writes are in flight
+    void Promise.resolve(handlers.onApply(list)).then(() => {
+      applyBtn.textContent = `Applied ${list.length} file${list.length === 1 ? '' : 's'} ✓`;
+      discardBtn.remove();
+    });
+  });
+  discardBtn.addEventListener('click', () => {
+    handlers.onDiscard();
+    panel.remove();
+  });
+
+  refreshApply();
+  panel.append(applyBtn, discardBtn);
+  bubble.appendChild(panel);
 }
 
 export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPanel {
@@ -612,6 +752,12 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       }
       const mechanism = chooseMechanism(constrainOn, provider, baseUrl, !!gbnf);
 
+      // Build the per-turn multi-file staging session ONLY in workspace mode: tools are on AND the host
+      // supplies the edit executor AND there are workspace files to edit across. The model's writes land
+      // in `editSession`; after the turn resolves, `editSession.staged()` holds the proposed full files.
+      const wsFiles = opts.getUseTools() && opts.runEditTool && opts.getWorkspaceFiles ? opts.getWorkspaceFiles() : null;
+      const editSession = wsFiles && Object.keys(wsFiles).length > 0 ? createEditSession(wsFiles) : null;
+
       full = await runAssistant({
         provider,
         baseUrl,
@@ -630,12 +776,26 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         // Withhold the tools when the user hasn't opted into the agentic loop, so the model gets a
         // plain streaming request (no `tools` ⇒ local servers stream instead of buffering).
         runCompilerTool: opts.getUseTools() ? opts.runCompilerTool : undefined,
+        // Offer the multi-file edit surface alongside the compiler tools when this is a workspace turn.
+        ...(editSession && opts.runEditTool ? { editSession, runEditTool: opts.runEditTool } : {}),
         onToolCall: addToolStatus,
       });
       commitAssistantTurn(full);
-      // The apply-gate lives here: a constrained turn validates (and, on the repair path, re-prompts)
-      // before "Apply to editor" is enabled, so unparseable text can never be applied (#257).
-      await renderConstrainedReply(replyBubble, full, offerApply, mechanism, ctx);
+      if (editSession && editSession.staged().length > 0) {
+        // The model staged a multi-file change: render the body, then a reviewable per-file change set
+        // the user accepts before any disk write (the single-file Apply gate is for non-staged replies).
+        replyBubble.innerHTML = `<div class="koi-md">${renderMarkdown(full)}</div>`;
+        renderChangeSet(replyBubble, editSession.staged(), wsFiles ?? {}, {
+          onApply: async (accepted) => {
+            await opts.onApplyChangeSet?.(accepted);
+          },
+          onDiscard: () => {},
+        });
+      } else {
+        // The apply-gate lives here: a constrained turn validates (and, on the repair path, re-prompts)
+        // before "Apply to editor" is enabled, so unparseable text can never be applied (#257).
+        await renderConstrainedReply(replyBubble, full, offerApply, mechanism, ctx);
+      }
     } catch (e) {
       // Keep the stored history in lock-step with the transcript on both failure paths.
       const aborted = aborter?.signal.aborted ?? false;

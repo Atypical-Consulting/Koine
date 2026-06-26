@@ -1646,6 +1646,14 @@ export function init(): () => void {
       // The GBNF comes from the host's resident compiler. Browser-host only — the desktop host omits
       // gbnfGrammar(), so the panel falls back to parse-and-repair there.
       getGrammar: platform.gbnfGrammar ? () => platform.gbnfGrammar!() : undefined,
+      // Workspace snapshot for multi-file agentic editing: relPath→current text of every open buffer.
+      getWorkspaceFiles: () => Object.fromEntries([...workspace.buffers.values()].map((b) => [b.relPath, b.text])),
+      // Host executor for the staged list/read/write edit tools (browser WASM / desktop MCP).
+      runEditTool: platform.runEditTool ? (name, argsJson, session) => platform.runEditTool!(name, argsJson, session) : undefined,
+      // Commit an accepted multi-file change set through the controller (new files under the folder root).
+      onApplyChangeSet: async (files) => {
+        for (const f of files) await workspace.applyFileEdit(f.relPath, f.body);
+      },
     });
     return assistant;
   }
