@@ -787,9 +787,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
   // #470: keep the panel's `dirtyCount` prop live so the commit guard sees buffers dirtied AFTER it last
   // mounted. A dirty-count change re-paints the panel in place (no nonce bump → no git re-fetch), only
-  // while the SC tab is the active right view; closed/unmounted → nothing to repaint.
+  // while the SC tab is the active right view; closed/unmounted → nothing to repaint. The unsubscribe is
+  // captured and called on dispose() so a deferred dirty-count change can't repaint a torn-down host.
   let lastDirtyCount = appStore.getState().dirtyCount();
-  appStore.subscribe((s) => {
+  const unsubscribeDirtyCount = appStore.subscribe((s) => {
     const dc = s.dirtyCount();
     if (dc === lastDirtyCount) return;
     lastDirtyCount = dc;
@@ -1951,6 +1952,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Drop the Domain navigator's store subscription so a deferred store change can't repaint a torn-down
     // host (the same hazard the debounce clears, for the navigator's #453 subscription).
     domainNavigator?.unmount();
+    // Drop the Source Control dirty-count subscription (#470) for the same reason.
+    unsubscribeDirtyCount();
     if (inspectorSheet) {
       window.removeEventListener('resize', onViewportResize);
       inspectorSheet.destroy();

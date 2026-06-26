@@ -892,6 +892,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     try {
       const token = await platform.createFile(owningRoot, relPath, body); // new file under the folder root
       await refreshEntries();
+      onSavedCb?.(); // #470: a new (untracked) file hit disk — refresh the SC panel if its tab is open
       return await ensureBuffer(token);
     } catch (e) {
       console.error('applyFileEdit create failed:', e);
@@ -1003,8 +1004,8 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       if (saved > 0) {
         lsp.didSave();
         renderTree();
+        onSavedCb?.(); // #470: at least one buffer hit disk — refresh the SC panel if its tab is open
       }
-      if (saved > 0) onSavedCb?.(); // #470: refresh the SC panel — at least one buffer hit disk
       if (failures > 0) {
         deps.setStatus(`Save failed for ${failures} file${failures === 1 ? '' : 's'}`, 'error');
       } else {
