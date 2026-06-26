@@ -61,6 +61,7 @@ public class AnalyzerPlatformTests
         SemanticValidator.BuiltInAnalyzers.Select(a => a.Id).ShouldBe(new[]
         {
             "koine.unique-type-names",
+            "koine.unique-spec-predicate-names",
             "koine.context-map",
             "koine.per-context",
             "koine.reference-discipline",

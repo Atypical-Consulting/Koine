@@ -1,3 +1,4 @@
+using System.Text;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 
@@ -21,6 +22,7 @@ public sealed class SemanticValidator
     internal static readonly IReadOnlyList<IModelAnalyzer> BuiltInAnalyzers = new IModelAnalyzer[]
     {
         new UniqueTypeNamesAnalyzer(),
+        new UniqueSpecPredicateNamesAnalyzer(),
         new ContextMapAnalyzer(),
         new PerContextAnalyzer(),
         new ReferenceDisciplineAnalyzer(),
@@ -313,6 +315,130 @@ public sealed class SemanticValidator
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Issue #419: reports two specs in the same bounded context whose names normalize to the same
+    /// emitted predicate. The spec emitters generate one boolean predicate per spec into a single
+    /// per-context <c>&lt;Context&gt;Specifications</c> class (PHP/TS prepend <c>is</c> → <c>isFreeOrder</c>;
+    /// C# uses the spec name directly), with no dedup guard — so two distinct spec names that fold to
+    /// the same identifier silently emit a duplicate function (a PHP fatal or a TS compile error,
+    /// depending on the emitter and the pair). This target-agnostic check catches that once, at
+    /// validation time, before any emitter runs.
+    ///
+    /// <para>The collision key is deliberately the <b>strictest</b> fold any shipped emitter applies —
+    /// PHP's, which is case-insensitive (method names) and collapses underscores (see
+    /// <see cref="CanonicalPascalCase"/>). It therefore flags every pair that would collide in at least
+    /// one of PHP/TS, and may conservatively flag a pair that would <i>not</i> collide in C# (which omits
+    /// the <c>is</c> prefix and is case-sensitive) — an accepted trade-off (issue #419): rejecting a
+    /// model that would emit a broken artifact for <i>any</i> shipped target is the safe call.</para>
+    ///
+    /// <para>The spec surface gathered per context mirrors the emitters exactly: context-level
+    /// <see cref="ContextNode.Specs"/> plus aggregate-nested <see cref="AggregateDecl.Specs"/>. The
+    /// predicate is per-context (not per-target), so two specs on different target types still collide.
+    /// On the first colliding pair the diagnostic carries the second spec's span.</para>
+    /// </summary>
+    internal static void ValidateUniqueSpecPredicateNames(KoineModel model, List<Diagnostic> diagnostics)
+    {
+        foreach (ContextNode ctx in model.Contexts)
+        {
+            // Same spec surface the emitters gather: context-level specs + aggregate-nested specs.
+            IEnumerable<SpecDecl> specs =
+                ctx.Specs.Concat(ctx.Types.OfType<AggregateDecl>().SelectMany(a => a.Specs));
+
+            var seen = new Dictionary<string, SpecDecl>(StringComparer.Ordinal);
+            foreach (SpecDecl spec in specs)
+            {
+                // The PascalCase subject (with a leading `Is` word stripped) drives both the collision
+                // key and the displayed predicate, so compute it once.
+                var subject = SpecPredicateSubject(spec.Name);
+                var key = CanonicalKey(subject);
+                if (key.Length == 0)
+                {
+                    continue; // a name with no alphanumeric content emits no usable predicate
+                }
+
+                if (seen.TryGetValue(key, out SpecDecl? first))
+                {
+                    diagnostics.Add(Diagnostic.FromSpan(DiagnosticCodes.DuplicateSpecPredicate,
+                        $"spec '{spec.Name}' emits the same predicate ('is{subject}') as spec '{first.Name}'",
+                        spec.Span));
+                }
+                else
+                {
+                    seen[key] = spec;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The canonical, case- and separator-insensitive collision key for a spec predicate
+    /// <paramref name="subject"/>: lowercase every letter/digit and drop everything else. Two specs
+    /// collide iff their keys are equal (e.g. <c>Active</c> → <c>active</c>; <c>FreeOrder</c> →
+    /// <c>freeorder</c>). This is the strictest (PHP-equivalent) fold — see
+    /// <see cref="ValidateUniqueSpecPredicateNames"/> for why that is the intended conservative choice.
+    /// </summary>
+    private static string CanonicalKey(string subject) =>
+        new(subject.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    /// <summary>
+    /// The PascalCase spec subject with a redundant leading <c>Is</c> word stripped — mirrors the
+    /// emitters' <c>SpecPredicateSubject</c> (#396): <c>IsFreeOrder</c> → <c>FreeOrder</c>, but a name
+    /// that merely starts with "Is" (e.g. <c>Island</c>) is left intact because the char after "Is"
+    /// must be uppercase to count as a word prefix.
+    /// </summary>
+    private static string SpecPredicateSubject(string name)
+    {
+        var pascal = CanonicalPascalCase(name);
+        return pascal.Length > 2 && pascal[0] == 'I' && pascal[1] == 's' && char.IsUpper(pascal[2])
+            ? pascal[2..]
+            : pascal;
+    }
+
+    /// <summary>
+    /// Target-agnostic PascalCase canonicalization. It intentionally matches PHP's
+    /// <c>ToPascalCase</c> — the strictest of the shipped emitters — collapsing underscores
+    /// (<c>free_order</c> → <c>FreeOrder</c>) and upper-casing the first char (<c>freeOrder</c> →
+    /// <c>FreeOrder</c>). Note C#/TS only upper-case the first char (so <c>free_order</c> →
+    /// <c>Free_order</c> there); folding underscores here is what makes the key the conservative
+    /// least-common-denominator described on <see cref="ValidateUniqueSpecPredicateNames"/>. Kept in
+    /// <c>Semantics/</c> rather than reused from any <c>Emit/</c> naming helper so the check stays
+    /// layer-clean and target-agnostic.
+    /// </summary>
+    private static string CanonicalPascalCase(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return name;
+        }
+
+        // Fast-path: already PascalCase (starts uppercase, no underscores).
+        if (char.IsUpper(name[0]) && !name.Contains('_'))
+        {
+            return name;
+        }
+
+        var sb = new StringBuilder(name.Length);
+        var capitalizeNext = true;
+        foreach (char c in name)
+        {
+            if (c == '_')
+            {
+                capitalizeNext = true;
+            }
+            else if (capitalizeNext)
+            {
+                sb.Append(char.ToUpperInvariant(c));
+                capitalizeNext = false;
+            }
+            else
+            {
+                sb.Append(c);
+            }
+        }
+
+        return sb.ToString();
     }
 
     internal static void ValidateType(
