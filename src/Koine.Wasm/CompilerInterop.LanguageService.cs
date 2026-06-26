@@ -55,8 +55,7 @@ public static partial class CompilerInterop
         {
             var files = DeserializeFiles(filesJson);
             var byUri = files.ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
-            var sources = files.Select(f => new SourceFile(f.Uri, f.Text)).ToList();
-            var diags = Compiler.DiagnoseWorkspace(sources);
+            var diags = Compiler.DiagnoseWorkspace(GetWarmCompilation(files));
 
             var buckets = files.ToDictionary(f => f.Uri, _ => new List<WDiagnostic>(), StringComparer.Ordinal);
             foreach (var d in diags)
@@ -193,9 +192,8 @@ public static partial class CompilerInterop
     {
         try
         {
-            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
-            var (model, _) = Compiler.Parse(sources);
-            var markdown = model is null ? "" : new GlossaryEmitter().Emit(model)[0].Contents;
+            var model = GetWarmCompilation(DeserializeFiles(filesJson)).Model;
+            var markdown = new GlossaryEmitter().Emit(model)[0].Contents;
             return JsonSerializer.Serialize(new WGlossaryResult(markdown), LangJson.Default.WGlossaryResult);
         }
         catch
@@ -213,13 +211,7 @@ public static partial class CompilerInterop
     {
         try
         {
-            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
-            var (model, _) = Compiler.Parse(sources);
-            if (model is null)
-            {
-                return SerializeContextMap(new WContextMapResult([], [], new()));
-            }
-
+            var model = GetWarmCompilation(DeserializeFiles(filesJson)).Model;
             var contexts = model.Contexts.Select(c => c.Name).ToArray();
             var relations = model.ContextMap is null
                 ? []
@@ -244,13 +236,7 @@ public static partial class CompilerInterop
     {
         try
         {
-            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
-            var (model, _) = Compiler.Parse(sources);
-            if (model is null)
-            {
-                return JsonSerializer.Serialize(new WGlossaryModel([]), LangJson.Default.WGlossaryModel);
-            }
-
+            var model = GetWarmCompilation(DeserializeFiles(filesJson)).Model;
             var entries = GlossaryModelBuilder.Build(model).Entries
                 .Select(e => new WGlossaryEntry(e.Id, e.Name, e.Kind, e.Context, e.QualifiedName, e.Doc, SpanRange(e.NameSpan)))
                 .ToArray();
@@ -272,13 +258,9 @@ public static partial class CompilerInterop
     {
         try
         {
-            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
-            var (model, _) = Compiler.Parse(sources);
-            if (model is null)
-            {
-                return JsonSerializer.Serialize(new WSetDocResult(null, []), LangJson.Default.WSetDocResult);
-            }
-
+            var files = DeserializeFiles(filesJson);
+            var model = GetWarmCompilation(files).Model;
+            var sources = files.Select(f => new SourceFile(f.Uri, f.Text)).ToList();
             var result = SetDocEditor.Build(model, sources, id, text);
             var edits = result.Edits.Select(e => new WTextEdit(SpanRange(e.Range), e.NewText)).ToArray();
             return JsonSerializer.Serialize(new WSetDocResult(result.Uri, edits), LangJson.Default.WSetDocResult);
@@ -299,14 +281,13 @@ public static partial class CompilerInterop
     {
         try
         {
-            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
-            var (model, diags) = Compiler.Parse(sources);
-            if (model is null || diags.Any(d => d.Severity == DiagnosticSeverity.Error))
+            var comp = GetWarmCompilation(DeserializeFiles(filesJson));
+            if (comp.SyntaxDiagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
             {
                 return JsonSerializer.Serialize(EmptyModelNode, LangJson.Default.WModelNode);
             }
 
-            WModelNode node = MapModelNode(ModelRoundTripService.ModelToJson(model, qualifiedName));
+            WModelNode node = MapModelNode(ModelRoundTripService.ModelToJson(comp.Model, qualifiedName));
             return JsonSerializer.Serialize(node, LangJson.Default.WModelNode);
         }
         catch
@@ -325,11 +306,10 @@ public static partial class CompilerInterop
     {
         try
         {
-            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
-            var (model, diags) = Compiler.Parse(sources);
-            WModelMember[] members = model is null || diags.Any(d => d.Severity == DiagnosticSeverity.Error)
+            var comp = GetWarmCompilation(DeserializeFiles(filesJson));
+            WModelMember[] members = comp.SyntaxDiagnostics.Any(d => d.Severity == DiagnosticSeverity.Error)
                 ? []
-                : ModelRoundTripService.MembersOf(model, qualifiedName).Select(MapModelMember).ToArray();
+                : ModelRoundTripService.MembersOf(comp.Model, qualifiedName).Select(MapModelMember).ToArray();
             return JsonSerializer.Serialize(new WModelMembersResult(members), LangJson.Default.WModelMembersResult);
         }
         catch
@@ -424,8 +404,7 @@ public static partial class CompilerInterop
     {
         try
         {
-            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
-            var hover = LanguageService.HoverAt(docs, activeUri, line, character);
+            var hover = LanguageService.HoverAt(GetWarmCompilation(DeserializeFiles(filesJson)), activeUri, line, character);
             var dto = hover is null ? null : new WHoverResult(new WMarkupContent("markdown", hover.Markdown));
             return JsonSerializer.Serialize(dto, LangJson.Default.WHoverResult);
         }
@@ -475,8 +454,7 @@ public static partial class CompilerInterop
     {
         try
         {
-            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
-            var help = LanguageService.SignatureHelpAt(docs, activeUri, line, character);
+            var help = LanguageService.SignatureHelpAt(GetWarmCompilation(DeserializeFiles(filesJson)), activeUri, line, character);
             if (help is null)
             {
                 return "null";
@@ -506,8 +484,7 @@ public static partial class CompilerInterop
     {
         try
         {
-            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
-            var def = LanguageService.DefinitionAt(docs, activeUri, line, character);
+            var def = LanguageService.DefinitionAt(GetWarmCompilation(DeserializeFiles(filesJson)), activeUri, line, character);
             var dto = def is null ? null : new WLocation(def.Uri, SpanRange(def.Target));
             return JsonSerializer.Serialize(dto, LangJson.Default.WLocation);
         }
@@ -612,8 +589,7 @@ public static partial class CompilerInterop
     {
         try
         {
-            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
-            var lenses = LanguageService.CodeLenses(docs, activeUri)
+            var lenses = LanguageService.CodeLenses(GetWarmCompilation(DeserializeFiles(filesJson)), activeUri)
                 .Select(l => new WCodeLens(SpanRange(l.Range), l.Title))
                 .ToArray();
             return JsonSerializer.Serialize(lenses, LangJson.Default.WCodeLensArray);
@@ -739,8 +715,7 @@ public static partial class CompilerInterop
     {
         try
         {
-            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
-            var refs = LanguageService.ReferencesAt(docs, activeUri, line, character)
+            var refs = LanguageService.ReferencesAt(GetWarmCompilation(DeserializeFiles(filesJson)), activeUri, line, character)
                 .Select(r => new WLocation(r.Uri, RangeOf(r)))
                 .ToArray();
             return JsonSerializer.Serialize(refs, LangJson.Default.WLocationArray);
@@ -763,8 +738,7 @@ public static partial class CompilerInterop
     {
         try
         {
-            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
-            var highlights = LanguageService.ReferencesAt(docs, activeUri, line, character)
+            var highlights = LanguageService.ReferencesAt(GetWarmCompilation(DeserializeFiles(filesJson)), activeUri, line, character)
                 .Where(r => string.Equals(r.Uri, activeUri, StringComparison.Ordinal))
                 .Select(r => new WDocumentHighlight(RangeOf(r), 1)) // LSP DocumentHighlightKind.Text
                 .ToArray();
@@ -787,8 +761,7 @@ public static partial class CompilerInterop
     {
         try
         {
-            var comp = KoineCompilation.Create(
-                DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList());
+            var comp = GetWarmCompilation(DeserializeFiles(filesJson));
             var hints = LanguageService.InlayHintsAt(comp, activeUri, startLine, startChar, endLine, endChar)
                 .Select(h => new WInlayHint(
                     new WPosition(h.Line, h.Character),
@@ -813,8 +786,7 @@ public static partial class CompilerInterop
     {
         try
         {
-            var comp = KoineCompilation.Create(
-                DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList());
+            var comp = GetWarmCompilation(DeserializeFiles(filesJson));
             var items = LanguageService.PrepareCallHierarchy(comp, activeUri, line, character)
                 .Select(MapCallHierarchyItem)
                 .ToArray();
@@ -841,8 +813,7 @@ public static partial class CompilerInterop
                 return "[]";
             }
 
-            var comp = KoineCompilation.Create(
-                DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList());
+            var comp = GetWarmCompilation(DeserializeFiles(filesJson));
             var calls = LanguageService.IncomingCalls(comp, item)
                 .Select(c => new WCallHierarchyIncomingCall(MapCallHierarchyItem(c.From), []))
                 .ToArray();
@@ -869,8 +840,7 @@ public static partial class CompilerInterop
                 return "[]";
             }
 
-            var comp = KoineCompilation.Create(
-                DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList());
+            var comp = GetWarmCompilation(DeserializeFiles(filesJson));
             var calls = LanguageService.OutgoingCalls(comp, item)
                 .Select(c => new WCallHierarchyOutgoingCall(MapCallHierarchyItem(c.To), []))
                 .ToArray();
@@ -933,8 +903,7 @@ public static partial class CompilerInterop
     {
         try
         {
-            var comp = KoineCompilation.Create(
-                DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList());
+            var comp = GetWarmCompilation(DeserializeFiles(filesJson));
             var items = LanguageService.PrepareTypeHierarchy(comp, activeUri, line, character)
                 .Select(MapTypeHierarchyItem)
                 .ToArray();
@@ -961,8 +930,7 @@ public static partial class CompilerInterop
                 return "[]";
             }
 
-            var comp = KoineCompilation.Create(
-                DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList());
+            var comp = GetWarmCompilation(DeserializeFiles(filesJson));
             var items = LanguageService.Supertypes(comp, item)
                 .Select(MapTypeHierarchyItem)
                 .ToArray();
@@ -989,8 +957,7 @@ public static partial class CompilerInterop
                 return "[]";
             }
 
-            var comp = KoineCompilation.Create(
-                DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList());
+            var comp = GetWarmCompilation(DeserializeFiles(filesJson));
             var items = LanguageService.Subtypes(comp, item)
                 .Select(MapTypeHierarchyItem)
                 .ToArray();
@@ -1058,14 +1025,14 @@ public static partial class CompilerInterop
     {
         try
         {
-            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
-            var range = LanguageService.PrepareRenameAt(docs, activeUri, line, character);
+            var comp = GetWarmCompilation(DeserializeFiles(filesJson));
+            var range = LanguageService.PrepareRenameAt(comp, activeUri, line, character);
             if (range is null)
             {
                 return "null";
             }
 
-            var name = LanguageService.NameAt(docs, activeUri, line, character);
+            var name = LanguageService.NameAt(comp, activeUri, line, character);
             return JsonSerializer.Serialize(new WPrepareRename(RangeOf(range), name), LangJson.Default.WPrepareRename);
         }
         catch
@@ -1084,8 +1051,7 @@ public static partial class CompilerInterop
     {
         try
         {
-            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
-            var refs = LanguageService.RenameAt(docs, activeUri, line, character, newName);
+            var refs = LanguageService.RenameAt(GetWarmCompilation(DeserializeFiles(filesJson)), activeUri, line, character, newName);
             if (refs is null)
             {
                 return "null";
@@ -1171,13 +1137,7 @@ public static partial class CompilerInterop
     {
         try
         {
-            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
-            var (model, _) = Compiler.Parse(sources);
-            if (model is null)
-            {
-                return JsonSerializer.Serialize(new WDocsResult([]), LangJson.Default.WDocsResult);
-            }
-
+            var model = GetWarmCompilation(DeserializeFiles(filesJson)).Model;
             var emitter = new DocsEmitter();
             var diagramsByFile = emitter.EmitDiagrams(model);
             var files = emitter.Emit(model)
@@ -1209,9 +1169,8 @@ public static partial class CompilerInterop
     {
         try
         {
-            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
-            var (model, diags) = Compiler.Parse(sources);
-            if (model is null || diags.Any(d => d.Severity == DiagnosticSeverity.Error))
+            var comp = GetWarmCompilation(DeserializeFiles(filesJson));
+            if (comp.SyntaxDiagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
             {
                 return ScenarioService.WriteJson(
                     ScenarioErrorTree(target, operation, "The model has errors; fix them before running a scenario."));
@@ -1219,7 +1178,7 @@ public static partial class CompilerInterop
 
             using JsonDocument givenDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(givenJson) ? "{}" : givenJson);
             using JsonDocument argsDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argsJson) ? "{}" : argsJson);
-            var semantic = new SemanticModel(model);
+            var semantic = comp.SemanticModel;
             return ScenarioService.WriteJson(
                 ScenarioService.Run(semantic, target, operation, givenDoc.RootElement, argsDoc.RootElement));
         }
@@ -1241,14 +1200,13 @@ public static partial class CompilerInterop
     {
         try
         {
-            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
-            var (model, diags) = Compiler.Parse(sources);
-            if (model is null || diags.Any(d => d.Severity == DiagnosticSeverity.Error))
+            var comp = GetWarmCompilation(DeserializeFiles(filesJson));
+            if (comp.SyntaxDiagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
             {
                 return ScenarioService.WriteJson(new Dictionary<string, object?> { ["targets"] = Array.Empty<object>() });
             }
 
-            return ScenarioService.WriteJson(ScenarioService.Catalog(new SemanticModel(model)));
+            return ScenarioService.WriteJson(ScenarioService.Catalog(comp.SemanticModel));
         }
         catch
         {
@@ -1337,6 +1295,59 @@ public static partial class CompilerInterop
         try
         { return DeserializeFiles(filesJson); }
         catch { return []; }
+    }
+
+    // ---- warm/incremental compilation (issue #334) --------------------------------------------------
+    // Every LSP-shaped export above is stateless by contract: the browser backend passes the full
+    // open-document snapshot as JSON on each call. Re-building the model cold on every keystroke costs
+    // O(files) re-parses even for a one-character edit on a multi-file domain. So we retain the LAST
+    // KoineCompilation (issue #70's immutable, per-file content-hashed snapshot) and reconcile it to
+    // each incoming snapshot: an unchanged file keeps its already-parsed unit by reference and only the
+    // edited file re-parses.
+    //
+    // Correctness: this is pure CONTENT-keyed memoization, never a mutable "session". The reconcile
+    // engine (KoineCompilation.Reconcile) re-parses on any text difference and reproduces a cold build's
+    // first-seen order, so the warm snapshot is byte-identical to KoineCompilation.Create(files) of the
+    // same inputs — every handler returns exactly what the stateless path would (WasmWarmCompilationTests
+    // proves it). The browser runtime is single-threaded (WasmEnableThreads=false) and no two [JSExport]
+    // calls run concurrently, so a plain static field needs no locking.
+
+    /// <summary>The retained warm snapshot — an LRU of size 1 (the most recently reconciled snapshot).</summary>
+    private static KoineCompilation? _warm;
+
+    /// <summary>
+    /// Upper bounds on what is RETAINED between calls, so a pathological workspace can't pin unbounded
+    /// heap in the single-threaded browser. A snapshot past either cap is still served for the current
+    /// call but not kept warm (the next call rebuilds cold). Generous for real domains — the six-context
+    /// pizzeria template is ~6 files / a few KB.
+    /// </summary>
+    private const int MaxWarmDocuments = 256;
+    private const int MaxWarmChars = 8 * 1024 * 1024;
+
+    /// <summary>
+    /// Resolves the warm <see cref="KoineCompilation"/> for the open-document set <paramref name="files"/>:
+    /// reconciles the held snapshot to it (re-parsing only changed/new files, dropping removed ones) and
+    /// retains the result when it is within bound. The returned snapshot is byte-identical to a cold
+    /// <see cref="KoineCompilation.Create(System.Collections.Generic.IReadOnlyList{SourceFile})"/>, so
+    /// substituting it at the stateless call sites cannot change any handler's result.
+    /// </summary>
+    private static KoineCompilation GetWarmCompilation(IReadOnlyList<WSourceFileDto> files)
+    {
+        // One pass: materialize the SourceFiles and measure the retained size for the bound.
+        var sources = new List<SourceFile>(files.Count);
+        long totalChars = 0;
+        foreach (var f in files)
+        {
+            sources.Add(new SourceFile(f.Uri, f.Text));
+            totalChars += f.Text.Length;
+        }
+
+        var comp = KoineCompilation.Reconcile(_warm, sources);
+
+        // Retain as the warm snapshot only when small enough to keep on the single-threaded browser
+        // heap; a workspace past either cap is still served for this call but rebuilt cold next time.
+        _warm = files.Count <= MaxWarmDocuments && totalChars <= MaxWarmChars ? comp : null;
+        return comp;
     }
 
     private static string SerializeEmit(WEmitPreviewResult r) =>
