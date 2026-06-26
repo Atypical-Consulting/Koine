@@ -183,22 +183,25 @@
     }
   }
 
-  /* Stop affordance — shown only while a compile is in flight (#353). */
+  /* Stop affordance — shown only while a compile is in flight (#353). Filled danger button: #fff on
+     #c0392b is ~5.5:1, meeting WCAG 2.1 AA (>=4.5:1) for normal-size text in both light and dark themes
+     (the background is theme-independent). An outline red-on-surface variant fell below AA on the dark
+     theme, so the control is filled. */
   .koi-stop {
     appearance: none;
     font: 600 0.76rem/1 var(--koi-font-mono);
     padding: 0.32rem 0.6rem;
     border-radius: var(--koi-radius-sm);
-    border: 1px solid #d14b3c;
-    background: var(--koi-surface);
-    color: #d14b3c;
+    border: 1px solid #c0392b;
+    background: #c0392b;
+    color: #fff;
     cursor: pointer;
     white-space: nowrap;
-    transition: background 0.12s, color 0.12s;
+    transition: background 0.12s, border-color 0.12s;
   }
   .koi-stop:hover {
-    background: #d14b3c;
-    color: var(--koi-on-accent, #fff);
+    background: #a93226;
+    border-color: #a93226;
   }
   .koi-stop[hidden] {
     display: none;

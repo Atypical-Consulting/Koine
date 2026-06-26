@@ -162,11 +162,17 @@ export function mountPlayground(root: HTMLElement): void {
     setStatus('compiling…', 'busy');
     setBusy(true);
     const signal = compileSup.next();
+    // Capture the target this compile is FOR: `target` is mutable (the tab buttons reassign it), so a
+    // tab switch mid-compile must not make us cache/paint this result under the wrong target.
+    const compiledTarget = target;
     const source = editor.getDoc();
     const started = performance.now();
     try {
-      const result = await compile(source, target, { signal });
-      cache.set(target, result);
+      const result = await compile(source, compiledTarget, { signal });
+      cache.set(compiledTarget, result);
+      // The user switched tabs while this was compiling: the result is valid for its target (now
+      // cached) but the view shows a different one — don't paint over it.
+      if (compiledTarget !== target) return;
       if (pickDefault) activeFile = defaultFileIndex(result);
       else if (result.files.length) activeFile = Math.min(activeFile, result.files.length - 1);
       paint(result, performance.now() - started);
@@ -234,10 +240,12 @@ export function mountPlayground(root: HTMLElement): void {
   // --- Stop: abandon a runaway compile and re-boot a fresh worker (#353) ---
   if (stopBtn) {
     stopBtn.onclick = () => {
+      // Drop the in-flight compile/lint, then terminate the worker and boot a fresh generation.
+      // terminateAndRespawn() already re-points the singleton at the booting fresh worker, so no
+      // separate preload is needed — the next edit's compile awaits it.
       compileSup.abort();
       lintSup.abort();
       terminateAndRespawn();
-      preloadCompiler(); // warm the fresh worker so the next compile is fast
       setBusy(false);
       setStatus('stopped — edit to recompile', 'idle');
     };

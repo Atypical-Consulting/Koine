@@ -4,7 +4,8 @@
 // responses + per-file `textDocument/publishDiagnostics` notifications back through onMessage.
 // Mirrors the request handlers in src/Koine.Cli/LspServer.cs for the nine methods Studio uses.
 import type { LspTransport } from '@/host/types';
-import { loadWasmApi, getWasmWorkerClient, type KoineWasmApi } from '@/host/browser/wasm';
+import { loadWasmApi, getWasmWorkerClient, mapWorkerCallError, type KoineWasmApi } from '@/host/browser/wasm';
+import { CancelledError } from '@/host/browser/workerClient';
 
 interface JsonRpc {
   id?: number | string | null;
@@ -79,9 +80,12 @@ export class WasmLspTransport implements LspTransport {
         ? await client.call('DiagnoseWorkspace', [filesJson], { signal: controller.signal })
         : await api.DiagnoseWorkspace(filesJson);
     } catch (err) {
-      // A superseded diagnose (its signal aborted) is dropped silently — there is nothing to publish.
-      if (controller.signal.aborted) return [];
-      throw err;
+      // Drop silently — there is nothing to publish — when this diagnose was cancelled: either
+      // superseded by a newer edit (its own signal aborted) or hard-cancelled by the Stop affordance
+      // (terminateAndRespawn rejects every in-flight call with CancelledError). Any other failure is a
+      // real error: surface it, re-mapped to the actionable stale-bundle message when applicable.
+      if (controller.signal.aborted || err instanceof CancelledError) return [];
+      throw mapWorkerCallError(err);
     }
 
     // Main-thread fallback has no real cancellation; guard against a stale resolution landing late and
