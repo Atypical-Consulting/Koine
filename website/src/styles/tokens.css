@@ -56,6 +56,14 @@
   --koi-hl-comment: #6b779e;
   --koi-hl-meta: #7c3aed;
   --koi-hl-punct: #5b668c;
+
+  /* Semantic-token hues (#367) — the LSP-resolved highlighting the playground editor paints over the
+     static grammar. value/type reuses --koi-hl-type and keyword reuses --koi-hl-keyword; enum /
+     enumMember / property / parameter get their own distinct hues (matching Koine Studio's palette). */
+  --koi-hl-sem-enum: #8a5a00;
+  --koi-hl-sem-enum-member: #a64d00;
+  --koi-hl-sem-property: #0f7a5f;
+  --koi-hl-sem-parameter: #a83232;
 }
 
 /* Dark variant — navy canvas, cyan lines (mapped onto Starlight's dark theme too). */
@@ -89,6 +97,12 @@
   --koi-hl-comment: #7e8ab5;
   --koi-hl-meta: #c4a7ff;
   --koi-hl-punct: #93a0c8;
+
+  /* Semantic-token hues (#367), dark theme — brighter variants for the navy canvas (matching Studio). */
+  --koi-hl-sem-enum: #ffd866;
+  --koi-hl-sem-enum-member: #fc9867;
+  --koi-hl-sem-property: #83e8c4;
+  --koi-hl-sem-parameter: #ff9d8a;
 }
 
 /* The signature blueprint grid backdrop — apply to a positioned container. */

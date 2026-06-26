@@ -34,6 +34,7 @@ import { python } from '@codemirror/legacy-modes/mode/python';
 import { tags as t } from '@lezer/highlight';
 import { linter, lintGutter, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
 import type { KoineDiagnostic } from './koine';
+import { semanticTokensExtension, type SemanticTokensFn } from './semanticTokens';
 
 // --- .koi token highlighter -------------------------------------------------
 
@@ -210,6 +211,10 @@ export interface KoineEditorOptions {
   doc: string;
   onChange?: (doc: string) => void;
   lintSource?: (doc: string) => Promise<KoineDiagnostic[]>;
+  /** Semantic-tokens provider (#367): resolves the LSP delta-encoded int stream for the current
+   *  document. When supplied, the editor paints semantic highlighting on top of the static grammar;
+   *  omit it (or return an empty `data`) to keep the static StreamLanguage highlighting authoritative. */
+  onSemanticTokens?: SemanticTokensFn;
 }
 
 export interface KoineEditor {
@@ -268,6 +273,10 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         keymap.of([...closeBracketsKeymap, ...searchKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
         koineLanguage,
         syntaxHighlighting(koineHighlight),
+        // Semantic highlighting (#367) layers AFTER the static grammar so its mark decorations win for
+        // identifiers the binder can resolve (value vs entity vs enum vs property vs parameter); an empty
+        // token stream paints nothing, leaving the static grammar in charge (graceful degradation).
+        ...(opts.onSemanticTokens ? [semanticTokensExtension(opts.onSemanticTokens)] : []),
         lintGutter(),
         lintExt,
         sharedTheme,

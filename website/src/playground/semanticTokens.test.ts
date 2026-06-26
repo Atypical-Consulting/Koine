@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { Text } from '@codemirror/state';
-import { decodeSemanticTokens, SEMANTIC_TOKEN_TYPES } from './semanticTokens';
+import { buildSemanticDecorations, decodeSemanticTokens, SEMANTIC_TOKEN_TYPES } from './semanticTokens';
 
 // The pure decode for LSP semantic tokens (issue #367, the docs-site playground consumer): the 5-int
 // delta stream `[deltaLine, deltaStartChar, length, tokenType, tokenModifiers]` → absolute,
@@ -119,5 +119,17 @@ describe('decodeSemanticTokens', () => {
     // One full token + 3 leftover ints — the partial tail is ignored, not decoded.
     const tokens = decodeSemanticTokens([0, 0, 5, 4, 0, 0, 6, 5], doc);
     expect(tokens).toEqual([{ from: 0, to: 5, cls: 'cm-st-keyword' }]);
+  });
+});
+
+describe('buildSemanticDecorations (the path the editor ViewPlugin paints from)', () => {
+  test('produces a non-empty decoration set for a representative source', () => {
+    // 'value' (keyword) + 'Money' (type, declaration) on line 0 — two real semantic tokens.
+    const decos = buildSemanticDecorations([0, 0, 5, 4, 0, 0, 6, 5, 0, DECLARATION], doc);
+    expect(decos.size).toBe(2);
+  });
+
+  test('an empty stream yields Decoration.none (size 0) — static grammar stays authoritative', () => {
+    expect(buildSemanticDecorations([], doc).size).toBe(0);
   });
 });

@@ -102,6 +102,16 @@ function semanticTokensToDecorations(tokens: DecodedSemanticToken[]): Decoration
   return Decoration.set(decos, true);
 }
 
+/**
+ * Decode the `data` stream and build the CodeMirror mark-decoration set in one step — the exact path the
+ * editor's ViewPlugin paints from. Exported (and DOM-free, since it never touches an EditorView) so the
+ * decode → decoration pipeline can be unit-tested without a browser: an empty stream yields
+ * `Decoration.none` (size 0), so the static grammar stays authoritative.
+ */
+export function buildSemanticDecorations(data: number[], doc: Text): DecorationSet {
+  return semanticTokensToDecorations(decodeSemanticTokens(data, doc));
+}
+
 // Dispatched purely to make the semantic-tokens ViewPlugin re-evaluate its decorations once an async
 // fetch resolves outside any transaction.
 const semanticTokensRedrawEffect = StateEffect.define<null>();
@@ -180,10 +190,10 @@ export function semanticTokensExtension(provider: SemanticTokensFn, debounceMs =
       }
 
       private build(view: EditorView): DecorationSet {
-        // An empty/absent stream decodes to [], which semanticTokensToDecorations turns into
+        // An empty/absent stream decodes to [], which buildSemanticDecorations turns into
         // Decoration.none — so the static grammar highlighting stays authoritative (single source of
         // truth for the empty-stream contract; no separate early return needed).
-        return semanticTokensToDecorations(decodeSemanticTokens(this.tokens?.data ?? [], view.state.doc));
+        return buildSemanticDecorations(this.tokens?.data ?? [], view.state.doc);
       }
 
       destroy(): void {
