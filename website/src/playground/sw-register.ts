@@ -7,6 +7,8 @@
 //
 // Idempotent: safe to call from every mountPlayground() (the landing page can mount more than one IDE).
 
+import { basePath } from '../lib/base';
+
 let registered = false;
 
 /** SW script URL + scope for an Astro base (e.g. '/Koine/' → '/Koine/koine-sw.js', scope '/Koine/'). */
@@ -45,7 +47,7 @@ export function registerPlaygroundServiceWorker(): void {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
   registered = true;
 
-  const { url, scope } = serviceWorkerUrls(import.meta.env.BASE_URL);
+  const { url, scope } = serviceWorkerUrls(basePath());
   const register = (): void => {
     // Stays registered even if this attempt fails — registration is opportunistic and re-running it
     // (or precache) per mount/navigation would just duplicate work.
