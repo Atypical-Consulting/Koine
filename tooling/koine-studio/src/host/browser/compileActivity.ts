@@ -15,12 +15,42 @@
 //
 // One-shot LSP requests (hover/completion/definition/…) and lightweight model-projection queries are
 // intentionally NOT counted — Stop is about abandoning a running compile, not IntelliSense traffic.
+//
+// Change notification (#516). The bare counter has no way to tell a consumer "busy began/ended", so a
+// status-bar "compiling…" indicator would have to poll. `onCompileActivityChange(listener)` adds a tiny
+// subscribe/notify seam: listeners fire ONLY on the idle↔busy (0↔1) boundary — the start that flips idle
+// to busy and the end that flips busy back to idle — never on a nested 1↔2 increment, so a subscriber
+// sees exactly the "busy began / busy ended" transitions, not every compile-call enqueue. Additive: the
+// producer side (`transport.ts`) is untouched; existing `markCompileStart`/`markCompileEnd`/
+// `isCompileInFlight` signatures are unchanged.
 
 let inFlight = 0;
+
+const listeners = new Set<() => void>();
+
+/** Notify every subscriber of an idle↔busy boundary transition. */
+function notify(): void {
+  // Iterate a snapshot so a listener that unsubscribes itself during dispatch can't mutate the live Set.
+  for (const listener of [...listeners]) listener();
+}
+
+/**
+ * Subscribe to idle↔busy transitions of the compile-in-flight signal. The listener fires on the 0→1 edge
+ * (a compile started from idle) and the 1→0 edge (the last compile ended), but NOT on nested
+ * increments/decrements that keep the count busy. Returns an unsubscribe function; calling it (idempotently)
+ * removes the listener so it stops firing.
+ */
+export function onCompileActivityChange(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
 
 /** Record the start of a compile/diagnose call (increments the in-flight count). */
 export function markCompileStart(): void {
   inFlight++;
+  if (inFlight === 1) notify(); // 0 → 1: idle → busy
 }
 
 /**
@@ -28,7 +58,10 @@ export function markCompileStart(): void {
  * unmatched end can never drive the count negative and wedge `isCompileInFlight()` permanently false.
  */
 export function markCompileEnd(): void {
-  if (inFlight > 0) inFlight--;
+  if (inFlight > 0) {
+    inFlight--;
+    if (inFlight === 0) notify(); // 1 → 0: busy → idle
+  }
 }
 
 /** True while at least one compile/diagnose call is outstanding. */
