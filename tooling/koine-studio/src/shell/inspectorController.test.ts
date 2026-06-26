@@ -768,6 +768,37 @@ describe('createInspectorController — bounded-context scope', () => {
   });
 });
 
+describe('createInspectorController — Domain-navigator drill syncs the status bar + canvas (#531)', () => {
+  // Regression: drilling into a context from the Domain navigator (#453) writes the `activeContext`
+  // slice DIRECTLY (setActiveContext), NOT through the dropdown's applyScope choke point. The
+  // store-subscribing surfaces (the dropdown, the construct palette) react, but the status-bar readout
+  // (#sb-context) and the Visual canvas re-filter are driven imperatively — so they used to stay stale
+  // ("Context: All contexts" + an unfiltered canvas) while the dropdown showed the drilled context. The
+  // fix subscribes those two surfaces to the slice, so ANY writer keeps them in lockstep.
+  test('a direct setActiveContext write (the navigator drill) updates #sb-context AND re-filters the canvas', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init(); // boots Visual — so the diagram (loadDiagrams → lsp.livingDocs) is the live scoped surface
+    await ctl.refreshContextList(); // learn 'Billing' is a real context + sync the status bar to "All contexts"
+    await flush();
+
+    // Baseline: nothing drilled yet — the status bar reads the unscoped label.
+    expect(el('sb-context').textContent).toBe('Context: All contexts');
+    const diagramsBefore = lsp.livingDocs.mock.calls.length;
+
+    // Simulate the Domain-navigator drill: write the slice DIRECTLY (NOT via the dropdown / applyScope),
+    // exactly as domainNavigator.ts's onOpenContext does.
+    deps.store.getState().setActiveContext('Billing');
+    await flush();
+
+    // (a) the status bar mirrors the drilled context…
+    expect(el('sb-context').textContent).toBe('Context: Billing');
+    // (b) …and the scoped-surface re-filter ran — the Visual canvas re-fetched its (now-scoped) diagrams.
+    expect(lsp.livingDocs.mock.calls.length).toBeGreaterThan(diagramsBefore);
+  });
+});
+
 describe('createInspectorController — Source Control live refresh-on-save (#470)', () => {
   // A git-capable platform: canUseGit true + the git surface as spies, so the mounted SourceControlPanel
   // actually fetches (gitStatus) and we can assert a re-fetch. The panel's fetch runs in its own
