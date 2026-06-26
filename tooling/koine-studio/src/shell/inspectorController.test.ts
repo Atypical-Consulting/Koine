@@ -911,3 +911,100 @@ describe('createInspectorController — construct palette', () => {
     expect(btn.disabled).toBe(true);
   });
 });
+
+// #475 — On a NARROW viewport the global bottom strip (#458) DEFAULTS to collapsed on the two
+// reading-heavy center views (Documentation, Assistant) so the reading/chat pane gets full height on a
+// phone; the strip stays present (only its `.collapsed` default flips, never `.hidden`). An explicit
+// persisted collapse preference (koine.studio.diagCollapsed) always wins, and desktop + narrow
+// Visual/Code keep the expanded default. The strip is `.collapsed` ⇔ the class is on #diagnostics.
+describe('createInspectorController — narrow-viewport bottom-strip default (#475)', () => {
+  const DIAG_KEY = 'koine.studio.diagCollapsed';
+  const origWidth = window.innerWidth;
+  const setWidth = (value: number) =>
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value });
+  const collapsed = () => el('diagnostics').classList.contains('collapsed');
+
+  afterEach(() => {
+    setWidth(origWidth);
+    localStorage.removeItem(DIAG_KEY);
+  });
+
+  test('narrow + Documentation (Glossary) ⇒ strip collapsed by default, still visible', () => {
+    setWidth(500);
+    localStorage.removeItem(DIAG_KEY); // no explicit preference
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init(); // boots Visual — a working view, so expanded
+    expect(collapsed()).toBe(false);
+
+    ctl.selectDocsTab('glossary'); // → Documentation
+    expect(collapsed()).toBe(true);
+    expect(el('diagnostics').hidden).toBe(false); // GLOBAL per #458 — only collapsed, never hidden
+    ctl.dispose();
+  });
+
+  test('narrow + Assistant ⇒ strip collapsed by default', () => {
+    setWidth(500);
+    localStorage.removeItem(DIAG_KEY);
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    ctl.selectCenter('assistant');
+    expect(collapsed()).toBe(true);
+    ctl.dispose();
+  });
+
+  test('narrow + Visual/Code (the working views) ⇒ strip stays expanded', () => {
+    setWidth(500);
+    localStorage.removeItem(DIAG_KEY);
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    expect(collapsed()).toBe(false); // Visual
+    ctl.selectCenter('technical');
+    expect(collapsed()).toBe(false); // Code
+    ctl.dispose();
+  });
+
+  test('an explicit expanded preference wins over the narrow Documentation default', () => {
+    setWidth(500);
+    localStorage.setItem(DIAG_KEY, '0'); // user deliberately chose expanded (chevron wrote '0')
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    ctl.selectDocsTab('glossary');
+    expect(collapsed()).toBe(false); // the user's choice wins, not the narrow default
+    ctl.dispose();
+  });
+
+  test('an explicit collapsed preference still applies on narrow Visual (user wins both ways)', () => {
+    setWidth(500);
+    localStorage.setItem(DIAG_KEY, '1'); // user deliberately collapsed everywhere
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init(); // Visual — would be expanded by default, but the preference collapses it
+    expect(collapsed()).toBe(true);
+    ctl.dispose();
+  });
+
+  test('desktop + Documentation/Assistant ⇒ strip keeps the expanded default (unchanged)', () => {
+    setWidth(1280);
+    localStorage.removeItem(DIAG_KEY);
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    ctl.selectDocsTab('glossary');
+    expect(collapsed()).toBe(false);
+    ctl.selectCenter('assistant');
+    expect(collapsed()).toBe(false);
+    ctl.dispose();
+  });
+
+  test('crossing BP_NARROW live (rotate to portrait) re-evaluates the Documentation default', () => {
+    setWidth(1280);
+    localStorage.removeItem(DIAG_KEY);
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    ctl.selectDocsTab('glossary');
+    expect(collapsed()).toBe(false); // wide → expanded
+
+    setWidth(500);
+    window.dispatchEvent(new Event('resize'));
+    expect(collapsed()).toBe(true); // crossed to narrow on Documentation → collapsed
+    ctl.dispose();
+  });
+});
