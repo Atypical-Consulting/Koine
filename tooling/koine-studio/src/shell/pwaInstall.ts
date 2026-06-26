@@ -8,6 +8,8 @@
 // The controller is deliberately DOM-light and pure so it unit-tests under vitest; the shell
 // (ide.tsx) owns the markup and wires it via `connectInstallAffordance` below.
 
+import { localStorageFlag, type StorageLike } from './localStorageFlag';
+
 /** localStorage key recording that the user dismissed the in-app install affordance (non-nagging). */
 export const INSTALL_DISMISSED_KEY = 'koine.studio.installDismissed';
 
@@ -19,12 +21,11 @@ export interface BeforeInstallPromptEvent extends Event {
   readonly userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 }
 
-/** The slice of the Web Storage API this controller needs; lets tests pass an in-memory stand-in. */
-export interface InstallStorage {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  removeItem(key: string): void;
-}
+/**
+ * The slice of the Web Storage API this controller needs; lets tests pass an in-memory stand-in.
+ * Aliases the shared {@link StorageLike} (#514) so the dismissal flag and the helper agree on one shape.
+ */
+export type InstallStorage = StorageLike;
 
 /** The result of asking the browser to install: the user's choice, or "unavailable" if not armed. */
 export type InstallOutcome = 'accepted' | 'dismissed' | 'unavailable';
@@ -46,22 +47,10 @@ export interface InstallController {
   subscribe(listener: () => void): () => void;
 }
 
-/** A best-effort `InstallStorage` backed by `localStorage`, degrading to a no-op if storage is absent. */
-function defaultStorage(): InstallStorage {
-  try {
-    if (typeof localStorage !== 'undefined') return localStorage;
-  } catch {
-    // localStorage access can throw (sandboxed iframe / disabled cookies) — fall through to the no-op.
-  }
-  return {
-    getItem: () => null,
-    setItem: () => {},
-    removeItem: () => {},
-  };
-}
-
 export function createInstallController(opts: { storage?: InstallStorage } = {}): InstallController {
-  const storage = opts.storage ?? defaultStorage();
+  // The persisted dismissal flag — throw-safe and best-effort via the shared helper (#514). When no
+  // storage is injected the helper falls back to its own best-effort `localStorage` adapter.
+  const dismissedFlag = localStorageFlag(INSTALL_DISMISSED_KEY, opts.storage);
   let deferred: BeforeInstallPromptEvent | null = null;
   const listeners = new Set<() => void>();
 
@@ -70,11 +59,7 @@ export function createInstallController(opts: { storage?: InstallStorage } = {})
   }
 
   function isDismissed(): boolean {
-    try {
-      return storage.getItem(INSTALL_DISMISSED_KEY) === '1';
-    } catch {
-      return false;
-    }
+    return dismissedFlag.isSet();
   }
 
   function onBeforeInstallPrompt(event: BeforeInstallPromptEvent): void {
@@ -112,11 +97,9 @@ export function createInstallController(opts: { storage?: InstallStorage } = {})
   }
 
   function dismiss(): void {
-    try {
-      storage.setItem(INSTALL_DISMISSED_KEY, '1');
-    } catch {
-      // storage unavailable (private mode) — dismissal won't persist across loads, but still hide now.
-    }
+    // Best-effort persist (a private-mode write that throws is swallowed by the helper — dismissal
+    // simply won't survive a reload), then hide the affordance now regardless.
+    dismissedFlag.set();
     deferred = null;
     notify();
   }
