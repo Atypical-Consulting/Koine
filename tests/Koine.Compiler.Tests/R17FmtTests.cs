@@ -258,6 +258,33 @@ public class R17FmtTests
         Fmt.FormatRange(src, startLine: 1, startCharacter: 0, endLine: 1, endCharacter: 0).ShouldBeNull();
     }
 
+    [Fact]
+    public void FormatRange_collapses_a_selected_blank_run_with_no_trailing_newline()
+    {
+        // A blank-run collapse on a document that does NOT end in a newline: the #380 EOF anchoring must
+        // still hold — the edit collapses the blanks without inventing a trailing newline on the last line.
+        const string src = "context Foo { }\n\n\n\ncontext Bar { }";
+        var edit = Fmt.FormatRange(src, startLine: 1, startCharacter: 0, endLine: 1, endCharacter: 0);
+
+        edit.ShouldNotBeNull();
+        edit.StartLine.ShouldBe(1);
+        Apply(src, edit).ShouldBe("context Foo { }\n\ncontext Bar { }"); // collapsed; no trailing newline added
+    }
+
+    [Fact]
+    public void FormatRange_covers_a_blank_run_and_an_adjacent_reformatted_line_in_one_edit()
+    {
+        // The selection spans both a collapsing blank run (lines 2–4) AND the over-indented line after it
+        // (line 5). The edit must be a single edit whose start is pulled back onto the first selected blank,
+        // collapsing the run and re-indenting the line together.
+        const string src = "context S {\n  a: X\n\n\n\n        b: Y\n}\n";
+        var edit = Fmt.FormatRange(src, startLine: 2, startCharacter: 0, endLine: 5, endCharacter: 12);
+
+        edit.ShouldNotBeNull();
+        edit.StartLine.ShouldBe(2); // pulled back to the first selected blank, not left at the changed region
+        Apply(src, edit).ShouldBe(Fmt.Format(src).Text);
+    }
+
     /// <summary>Applies a whole-line <see cref="FormatRangeEdit"/> to LF-normalized source (test helper).</summary>
     private static string Apply(string source, FormatRangeEdit edit)
     {
