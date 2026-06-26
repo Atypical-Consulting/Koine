@@ -205,6 +205,12 @@
   background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
 }
 
+/* Cross-axis "Reveal in Files" (#453): a transient accent ring marks the just-revealed row so the eye
+   lands on it after the rail flips to the Files axis. Cleared on the next reveal / re-render. */
+.explorer-row.is-revealed {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--koi-accent) 55%, transparent);
+}
+
 /* Focus lives on the <li role=treeitem> (the focusable unit); paint the ring on its row. */
 .explorer-tree li[role='treeitem']:focus {
   outline: none;

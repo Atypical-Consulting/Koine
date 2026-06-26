@@ -7,8 +7,7 @@
 //   • the BOTTOM strip (Problems / Events / Relationships / Context Map) with its lazy loaders,
 //     collapse toggle and resizer,
 //   • the per-view LAZY LOADERS and their stale-token / debounce lifecycle (the Generated preview,
-//     the diagrams, the always-visible left-rail Explorer + Overview model, the glossary, the ADR
-//     docs, and the bottom tables),
+//     the diagrams, the left-rail Domain navigator, the glossary, the ADR docs, and the bottom tables),
 //   • the bounded-context SCOPE switcher (#146) and the selection-driven Properties inspector +
 //     cross-highlight cluster (#142), and the joined model index it reads.
 //
@@ -63,17 +62,16 @@ import {
   isAllContexts,
   listContexts,
   scopeDocsFiles,
-  scopeGlossaryModel,
   type ContextScope,
 } from '@/model/activeContext';
 import type { SelectedElement } from '@/model/selection';
-import { renderOverviewCounts, type ModelOutlineHandlers } from '@/model/modelOutline';
+import { type ModelOutlineHandlers } from '@/model/modelOutline';
+import { mountDomainNavigator, type DomainNavigatorHandle, type TacticalHandlers } from '@/model/domainNavigator';
 import { buildInspectorElement, renderRules, type InspectorElement, type InspectorHandlers } from '@/model/inspector';
-import { buildModelIndex, lookupElement, type ModelIndex } from '@/model/modelIndex';
+import { buildModelIndex, lookupElement, resolveInspectableQn, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
 import { SourceControlPanel } from '@/model/SourceControlPanel';
 import { ContextBreadcrumb } from '@/model/ContextBreadcrumb';
-import { ModelOutlinePanel } from '@/model/ModelOutlinePanel';
 import { EventsPanel } from '@/model/EventsPanel';
 import { RelationshipsPanel } from '@/model/RelationshipsPanel';
 import { GlossaryPanel } from '@/model/GlossaryPanel';
@@ -179,6 +177,12 @@ export interface InspectorControllerDeps {
   onCopyDiagramMermaid(): void;
   /** Jump to a RAW 1-based source span (opens the owning file if needed) — the bottom tables' row click. */
   gotoSourceSpan(span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>): void;
+  /**
+   * Reveal a bounded context's `.koi` in the Files axis (the tactical "Reveal in Files" target, #453).
+   * ide.ts owns the explorer instance, so it forwards to `explorer.revealByContext`; the tactical leaf
+   * has already switched the rail to the Files axis (setAxis) before this fires.
+   */
+  revealInFiles(context: string): void;
 
   /** The assistant panel, created lazily by ide.ts the first time its tab is shown. */
   ensureAssistant(): InspectorAssistant;
@@ -231,6 +235,12 @@ export interface InspectorController {
 
   // View selection (palette commands + toolbar/tab clicks route here).
   selectCenter(view: CenterView): void;
+  /**
+   * Switch the left rail's active navigator axis (#453): show the Domain pane (the strategic/tactical DDD
+   * navigator) or the Files pane (the workspace `.koi` tree), hiding the other, and persist the choice.
+   * ide.ts's ⌘B drives this so the file tree and the Domain view never both claim the rail.
+   */
+  setAxis(axis: 'domain' | 'files'): void;
   selectTech(view: TechView): void;
   selectDocsTab(view: DocsView): void;
   selectBottomTab(tab: BottomTab): void;
@@ -305,10 +315,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   });
   el('view-preview').appendChild(copyBtn);
 
-  // Left-rail hosts (always visible, repainted together from the model): the Explorer construct
-  // tree and the Overview per-context counts.
-  const explorerBody = el('rail-explorer-body');
-  const overviewBody = el('rail-overview-body');
+  // Left-rail host: the Domain axis's strategic/tactical navigator (#453). mountDomainNavigator owns this
+  // node — it self-fetches its strategic data and reads the store for altitude + scope — so loadModel
+  // mounts it once and thereafter just reloads it. (The former Overview counts surface was removed with
+  // the section stack.)
+  const domainPane = el('rail-domain-pane');
+  // The mounted Domain navigator (#453), created lazily on the first loadModel and reused thereafter — so
+  // a model reload re-fetches its strategic data rather than re-mounting (which would drop its store
+  // subscription + breadcrumb state). Disposed on tear-down to drop that subscription.
+  let domainNavigator: DomainNavigatorHandle | null = null;
   // The Documentation center tab's three sub-views: Glossary (the ubiquitous language), Decisions (the
   // ADR list) and Notes — the latter two split from the former combined "Decisions & Notes" surface.
   const glossaryView = el('view-glossary');
@@ -384,6 +399,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     docs: 'glossary',
     bottom: 'problems',
     right: 'props',
+    // The Domain navigator starts at the strategic altitude (#453) for a fresh workspace session — reset
+    // here for the same reason the tabs above are: the injected store is, in production, the app-wide
+    // singleton reused across reopens, so a prior session left on tactical mustn't leak into a fresh boot.
+    navAltitude: 'strategic',
   });
   // The docViews slice (#193) is the single source of truth for which lazily-loaded, model-derived
   // surfaces — the Generated preview, the left-rail model, the diagram, the glossary, and the bottom
@@ -816,12 +835,84 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     set: (element) => appStore.getState().setSelection(element),
   };
 
+  // The Domain navigator's wiring (#453), passed to mountDomainNavigator: its strategic doorways route to
+  // focusContextMap() / focusDocs() (the bottom strip is global since #451, so focusContextMap just opens
+  // the Context Map tab in place), and its onSelect/goto drive the inspector + jump-to-source for the
+  // tactical leaves (wired through renderTactical in Task 4).
   const modelOutlineHandlers: ModelOutlineHandlers = {
     onSelect: (entry) => selection.set({ qualifiedName: entry.qualifiedName, context: entry.context }),
     goto: (line, col) => editor.goto(line, col),
-    onOpenContextMap: () => selectBottomTab('contextmap'),
+    onOpenContextMap: () => focusContextMap(),
     onOpenGlossary: () => focusDocs(),
   };
+
+  // --- rail axis switch: Domain vs Files (#453) ------------------------------
+  // The left rail shows ONE of two top-level navigators: the Domain pane (#rail-domain-pane — the
+  // strategic/tactical DDD navigator) or the Files pane (#rail-files — the workspace `.koi` tree). The
+  // axis is persisted so a reload restores the last-used navigator; Domain is the default. ide.ts's ⌘B
+  // and the tactical "Reveal in Files" affordance both drive setAxis (the file tree and the Domain view
+  // never both claim the rail). The segmented control's two buttons live in #rail-axis-switch.
+  const RAIL_AXIS_KEY = 'koine.studio.railAxis';
+  type RailAxis = 'domain' | 'files';
+  const filesPane = document.getElementById('rail-files');
+  const axisButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('#rail-axis-switch [data-axis]'));
+
+  // Paint the active axis: surface its pane, hide the other, and reflect the segmented control. Showing
+  // Files also force-expands its section (its own collapse is ide.ts's #rail-sect chrome) so a reveal
+  // always lands on a visible row.
+  function applyAxis(axis: RailAxis): void {
+    domainPane.hidden = axis !== 'domain';
+    if (filesPane) {
+      filesPane.hidden = axis !== 'files';
+      if (axis === 'files') {
+        filesPane.dataset.open = 'true';
+        filesPane.querySelector('.rail-sect-head')?.setAttribute('aria-expanded', 'true');
+      }
+    }
+    for (const b of axisButtons) b.setAttribute('aria-selected', String(b.dataset.axis === axis));
+  }
+
+  function setAxis(axis: RailAxis): void {
+    applyAxis(axis);
+    try {
+      localStorage.setItem(RAIL_AXIS_KEY, axis);
+    } catch {
+      // no persistence available — the in-session choice still applies
+    }
+  }
+
+  for (const b of axisButtons) {
+    b.addEventListener('click', () => setAxis((b.dataset.axis as RailAxis) ?? 'domain'));
+  }
+
+  // The Domain navigator's TACTICAL leaf wiring (#453): a leaf click selects-and-jumps; its ⋯ overflow's
+  // "Reveal in Files" switches the rail to the Files axis then reveals the node's `.koi`. Selection +
+  // jump-to-source reuse the same seams the Model outline / diagram use, so the surfaces stay consistent.
+  const tacticalHandlers: TacticalHandlers = {
+    // Select the node — derive its bounded context from the qualified-name prefix (the model graph
+    // carries no separate context field), falling back to the active scope when the name is unqualified.
+    onSelect: (node) => selection.set({ qualifiedName: node.qualifiedName, context: nodeContext(node) }),
+    // Resolve the node to the nearest inspectable element and jump to its declaration (the editor's
+    // 1-based goto contract; the glossary nameRange is 0-based, hence the +1). Unresolvable → no-op.
+    goto: (node) => {
+      if (!modelIndex) return;
+      const qn = resolveInspectableQn(modelIndex, node.qualifiedName);
+      const entry = qn ? lookupElement(modelIndex, qn)?.element.entry : undefined;
+      if (!entry) return;
+      modelOutlineHandlers.goto(entry.nameRange.start.line + 1, entry.nameRange.start.character + 1);
+    },
+    reveal: (node) => deps.revealInFiles(nodeContext(node)),
+    setAxis: (axis) => setAxis(axis),
+  };
+
+  // A model node's bounded context: the segment before the first dot of its qualified name (the model
+  // graph names a context child `Context.X`), or the active scope when the name is unqualified.
+  function nodeContext(node: ModelNode): string {
+    const dot = node.qualifiedName.indexOf('.');
+    if (dot > 0) return node.qualifiedName.slice(0, dot);
+    const scope = activeContext.get();
+    return isAllContexts(scope) ? '' : scope;
+  }
   const inspectorHandlers: InspectorHandlers = {
     onGoto: (range) => editor.gotoRange(range.start, range.end),
     onRename: (element, newName) => deps.onRenameElement(element, newName),
@@ -944,55 +1035,43 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     el('rview-rules').replaceChildren(renderRules(element));
   }
 
-  // Repaint the always-visible left rail: the Explorer construct tree + the Overview counts, both
-  // scoped to the active bounded context (#146). The inspector resolves any selection against the whole
-  // model, so only the navigator + counts are narrowed.
+  // Repaint the Domain axis's strategic/tactical navigator (#453) and the model-index-derived chrome
+  // (breadcrumb, palette, inspector). The navigator OWNS #rail-domain-pane: it self-fetches its strategic
+  // data and reads the store for altitude + scope, so loadModel mounts it once and thereafter just reloads
+  // it. The inspector resolves any selection against the whole model, so it tracks the model index here.
   async function loadModel(): Promise<void> {
     // Capture the 'model' stale-token before the await; markLoaded only takes if it's still current
     // after, so an edit mid-fetch leaves the surface stale for the next show (the slice discipline).
     const token = appStore.getState().currentToken('model');
-    // The status/empty/error states write the explorer host imperatively via docMessage; the tree itself
-    // is a Preact panel painted via renderPanel, which drops the loading line first so the outline
-    // replaces it rather than stacking beside it.
-    docMessage(explorerBody, 'Loading model…');
+    // The navigator's strategic data is scope-INDEPENDENT and it repaints from its own cache on
+    // activeContext/outlineFilter store changes — so only re-fetch when the MODEL actually changed, not on
+    // a pure scope/filter re-render (rerenderScopedSurfaces keeps the model index, so a null index is the
+    // reliable "the model was (re)loaded" signal — an edit nulls it via invalidateDocViews). Captured
+    // BEFORE ensureModelIndex() rebuilds it.
+    const hadIndex = modelIndex != null;
+    // Mount the navigator once (it paints a loading placeholder + its own empty state, and surfaces a
+    // fetch failure in the pane itself); a reload re-fetches its strategic data. Kicking this off before
+    // the await runs its fetch in parallel with the model index build, so the rail paints promptly. Its
+    // Context Map / Ubiquitous Language doorways route to the same focuses the docs footer used.
+    if (!domainNavigator) {
+      domainNavigator = mountDomainNavigator(domainPane, appStore, lsp, modelOutlineHandlers, tacticalHandlers);
+    } else if (!hadIndex) {
+      domainNavigator.reload();
+    }
     try {
-      const index = await ensureModelIndex();
+      await ensureModelIndex();
       // The model index just (re)built — re-pass it to the breadcrumb so the selected element's type icon
       // resolves (the panel tracks selection itself, but reads the construct off the index prop). The
       // palette likewise reads the index to gate its aggregate-scoped buttons (#254), so re-pass it too.
       renderBreadcrumb();
       renderCanvasPalette();
-      const scopedGlossary = scopeGlossaryModel(index.glossary, activeContext.get());
-      if (!scopedGlossary.entries.length) {
-        docMessage(
-          explorerBody,
-          index.glossary.entries.length
-            ? 'No elements in this context — switch to “All contexts” to see the whole model.'
-            : 'No elements yet — declare some types, or fix syntax errors to populate the model.',
-        );
-        overviewBody.replaceChildren();
-        renderSelectedInspector();
-        appStore.getState().markLoaded('model', token);
-        return;
-      }
-      // Explorer = the construct tree as a Preact panel scoped from the store's activeContext slice, with
-      // its inline counts suppressed; the dedicated Overview section owns the tallies (renderOverviewCounts),
-      // so the two never double up. The panel owns the leaf `is-selected` cross-highlight on its own.
-      renderPanel(
-        explorerBody,
-        <ModelOutlinePanel
-          store={appStore}
-          model={index.glossary}
-          handlers={modelOutlineHandlers}
-          index={index}
-        />,
-      );
-      overviewBody.replaceChildren(renderOverviewCounts(scopedGlossary));
       renderSelectedInspector();
       applySelectionHighlight();
       appStore.getState().markLoaded('model', token);
     } catch (e) {
-      docMessage(explorerBody, 'Model request failed: ' + String(e), 'error');
+      // The navigator owns #rail-domain-pane and surfaces its own fetch failure there; a failing model
+      // index (the inspector/breadcrumb source) is reported on the status pill instead.
+      deps.setStatus('Model request failed: ' + String(e), 'error');
     }
   }
 
@@ -1279,10 +1358,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     t.addEventListener('click', () => selectDocsTab(t.dataset.docs as DocsView));
   }
 
-  // The left rail's "Documentation" section: four shortcuts into the model's prose surfaces. Context
-  // Map opens the bottom strip's map; the other three each open their own Documentation page (Glossary,
-  // Decisions, Notes). querySelectorAll keeps this resilient to fixtures that omit the rail, and
-  // selectBottomTab (declared below) is hoisted, so referencing it here is fine.
+  // The left rail's documentation footer: shortcuts into the model's prose surfaces. ADR + Notes each
+  // open their own Documentation page; the contextmap/glossary actions are retained (the footer no
+  // longer renders those buttons — they moved into the Domain axis, #453 — so they simply bind to
+  // nothing, and a later task can re-wire them from the strategic view). querySelectorAll keeps this
+  // resilient to fixtures that omit the rail, and selectBottomTab (declared below) is hoisted, so
+  // referencing it here is fine.
   const docLinkActions: Record<string, () => void> = {
     contextmap: () => focusContextMap(),
     glossary: () => focusDocs(),
@@ -1800,6 +1881,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function init(): void {
     applyCenterChrome();
     setTarget(currentTarget);
+    // Restore the persisted rail axis (Domain default), painting the matching navigator pane (#453).
+    let storedAxis: RailAxis = 'domain';
+    try {
+      if (localStorage.getItem(RAIL_AXIS_KEY) === 'files') storedAxis = 'files';
+    } catch {
+      // no persistence available — fall back to the Domain default
+    }
+    applyAxis(storedAxis);
     // Mount the top-bar scope path once at boot (hidden until refreshContextList finds a context). It
     // tracks scope/selection via the store thereafter; setContextOptions + loadModel re-render it when
     // the contexts list or model index changes.
@@ -1814,6 +1903,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     clearTimeout(copyResetTimer);
     clearTimeout(editDebounce);
     clearTimeout(bottomPanelDebounce);
+    // Drop the Domain navigator's store subscription so a deferred store change can't repaint a torn-down
+    // host (the same hazard the debounce clears, for the navigator's #453 subscription).
+    domainNavigator?.unmount();
     if (inspectorSheet) {
       window.removeEventListener('resize', onViewportResize);
       inspectorSheet.destroy();
@@ -1824,6 +1916,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     selection,
     activeContext,
     selectCenter,
+    setAxis,
     selectTech,
     selectDocsTab,
     selectBottomTab,

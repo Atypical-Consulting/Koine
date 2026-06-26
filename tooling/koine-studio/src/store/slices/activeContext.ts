@@ -1,11 +1,21 @@
 import type { StoreApi } from 'zustand/vanilla';
 import { ALL_CONTEXTS, type ContextScope } from '@/model/activeContext';
 
+/** The Domain navigator's altitude (#453): the bird's-eye STRATEGIC level (bounded contexts + the
+ *  cross-context doorways) vs the drilled-in TACTICAL level (one context's aggregates and internals). */
+export type NavAltitude = 'strategic' | 'tactical';
+
 export interface ActiveContextSlice {
   /** The active bounded-context scope (a context name, or ALL_CONTEXTS). */
   activeContext: ContextScope;
   /** Set the scope; a no-op when unchanged (so subscribers don't churn). */
   setActiveContext(scope: ContextScope): void;
+  /** The Domain navigator's altitude (#453) — strategic (the context list) or tactical (one context's
+   *  internals). Lives beside `activeContext` because the two move together: drilling into a context sets
+   *  the scope AND descends to tactical; the breadcrumb climbs back to strategic. Defaults to strategic. */
+  navAltitude: NavAltitude;
+  /** Set the navigator altitude; a no-op when unchanged (so subscribers don't churn). */
+  setNavAltitude(altitude: NavAltitude): void;
   /** The model's bounded contexts — the scope selector's options after "All contexts" — in model order.
    *  Surfaced in the store (not just the breadcrumb) so the construct palette can react to it: it enables
    *  the add buttons under "All contexts" when there's a single, unambiguous, home context. */
@@ -23,6 +33,11 @@ export function createActiveContextSlice(
     setActiveContext: (scope) => {
       if (scope === get().activeContext) return; // same value in = no churn
       set({ activeContext: scope });
+    },
+    navAltitude: 'strategic',
+    setNavAltitude: (altitude) => {
+      if (altitude === get().navAltitude) return; // same value in = no churn
+      set({ navAltitude: altitude });
     },
     contexts: [],
     setContexts: (list) => {

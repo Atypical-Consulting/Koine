@@ -293,34 +293,9 @@ const APP_HTML = `
         </div>
       </header>
       <main id="split">
-        <aside id="leftrail" class="pane">
-          <section class="rail-sect" id="rail-files" data-open="true">
-            <div class="rail-sect-head-row">
-              <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="filetree-body">Files</button>
-              <span id="filetree-title" class="rail-sect-meta">Scratch</span>
-            </div>
-            <div class="rail-sect-body" id="filetree-body"></div>
-          </section>
-          <section class="rail-sect" id="rail-explorer" data-open="true">
-            <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-explorer-body">Explorer</button>
-            <div class="rail-sect-body" id="rail-explorer-body"></div>
-          </section>
-          <section class="rail-sect" id="rail-overview" data-open="true">
-            <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-overview-body">Overview</button>
-            <div class="rail-sect-body" id="rail-overview-body"></div>
-          </section>
-          <section class="rail-sect" id="rail-docs" data-open="true">
-            <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="rail-docs-body">Documentation</button>
-            <nav class="rail-sect-body" id="rail-docs-body" aria-label="Documentation">
-              <ul class="koi-doclinks">
-                <li><button type="button" class="koi-doclink" data-doclink="contextmap"><span class="koi-doclink-label">Context Map</span></button></li>
-                <li><button type="button" class="koi-doclink" data-doclink="glossary"><span class="koi-doclink-label">Ubiquitous Language</span></button></li>
-                <li><button type="button" class="koi-doclink" data-doclink="adr"><span class="koi-doclink-label">ADR</span></button></li>
-                <li><button type="button" class="koi-doclink" data-doclink="notes"><span class="koi-doclink-label">Notes</span></button></li>
-              </ul>
-            </nav>
-          </section>
-        </aside>
+        <!-- The rail's inner markup is owned by leftRail.ts and injected by init() (leftRailMarkup),
+             exactly as index.html does — so this stays a thin shell and can't drift from the real ids. -->
+        <aside id="leftrail" class="pane"></aside>
         <div class="koi-resizer" id="leftrail-resizer"></div>
         <section id="center" class="pane">
           <div id="center-tabs" role="tablist">

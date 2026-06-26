@@ -13,6 +13,7 @@ import {
   type InspectorControllerDeps,
   type InspectorControllerLsp,
 } from '@/shell/inspectorController';
+import { leftRailMarkup } from '@/shell/leftRail';
 import { createAppStore } from '@/store/index';
 import * as maxgraphRenderer from '@/diagrams/diagrams-maxgraph';
 import type { ContextMapGraphHooks } from '@/diagrams/diagrams-maxgraph';
@@ -25,6 +26,7 @@ import type {
   EmitPreviewResult,
   GlossaryEntry,
   GlossaryModel,
+  ModelNode,
   SetDocResult,
   SourceSpan,
 } from '@/lsp/lsp';
@@ -36,18 +38,7 @@ const APP_HTML = `
   <div id="app">
     <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
     <main id="split">
-      <aside id="leftrail" class="pane">
-        <div class="rail-sect-body" id="rail-explorer-body"></div>
-        <div class="rail-sect-body" id="rail-overview-body"></div>
-        <nav class="rail-sect-body" id="rail-docs-body" aria-label="Documentation">
-          <ul class="koi-doclinks">
-            <li><button type="button" class="koi-doclink" data-doclink="contextmap"><span class="koi-doclink-label">Context Map</span></button></li>
-            <li><button type="button" class="koi-doclink" data-doclink="glossary"><span class="koi-doclink-label">Ubiquitous Language</span></button></li>
-            <li><button type="button" class="koi-doclink" data-doclink="adr"><span class="koi-doclink-label">ADR</span></button></li>
-            <li><button type="button" class="koi-doclink" data-doclink="notes"><span class="koi-doclink-label">Notes</span></button></li>
-          </ul>
-        </nav>
-      </aside>
+      <aside id="leftrail" class="pane">${leftRailMarkup()}</aside>
       <section id="center" class="pane">
         <div id="center-tabs" role="tablist">
           <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Visual</button>
@@ -169,7 +160,7 @@ function makeLsp() {
   return {
     glossaryModel: vi.fn(async (): Promise<GlossaryModel> => glossaryFixture()),
     livingDocs: vi.fn(async (): Promise<DocsResult> => ({ files: [] })),
-    model: vi.fn(async () => ({ kind: 'model', qualifiedName: '', title: '', members: [], children: [] })),
+    model: vi.fn(async (): Promise<ModelNode> => ({ kind: 'model', qualifiedName: '', title: '', members: [], children: [] })),
     contextMap: vi.fn(async (): Promise<ContextMapResult> => ({ contexts: ['Billing'], relations: [] })),
     emitPreview: vi.fn(
       async (target: string): Promise<EmitPreviewResult> => ({
@@ -248,6 +239,7 @@ function makeDeps(lsp: Lsp, over: Partial<InspectorControllerDeps> = {}): Inspec
     onExportDiagram: vi.fn(),
     onCopyDiagramMermaid: vi.fn(),
     gotoSourceSpan: vi.fn(),
+    revealInFiles: vi.fn(),
     ensureAssistant: vi.fn(() => makeAssistant()),
     initEdgeResizer: vi.fn(),
     ...over,
@@ -546,22 +538,112 @@ describe('createInspectorController — bottom strip lazy loading', () => {
     expect(deps.gotoSourceSpan).not.toHaveBeenCalled();
   });
 
-  test('the rail Context Map link opens the map in the now-global strip without leaving the view (#451)', async () => {
-    const lsp = makeLsp();
-    const ctl = createInspectorController(makeDeps(lsp));
+  // NOTE: the rail's Context Map / Ubiquitous Language doclinks moved out of the docs footer into the
+  // Domain axis (#453); the footer now carries only ADR + Notes. The Context Map doorway is rebuilt in
+  // the strategic Domain view (below). Per #451 the bottom strip is global, so the doorway opens the
+  // Context Map in place without leaving the current center.
+});
+
+describe('createInspectorController — rail axis switch (#453)', () => {
+  test('the Files axis button surfaces #rail-files and hides the Domain pane; Domain switches back', () => {
+    localStorage.removeItem('koine.studio.railAxis');
+    const ctl = createInspectorController(makeDeps(makeLsp()));
     ctl.init();
 
-    // Land on Documentation — the bottom strip is now visible here (it's global).
+    const domainPane = el('rail-domain-pane');
+    const filesPane = el('rail-files');
+    // Domain is the default axis.
+    expect(domainPane.hidden).toBe(false);
+    expect(filesPane.hidden).toBe(true);
+
+    // Clicking the Files axis tab shows the file tree and hides the Domain navigator.
+    (document.querySelector('#rail-axis-switch [data-axis="files"]') as HTMLButtonElement).click();
+    expect(domainPane.hidden).toBe(true);
+    expect(filesPane.hidden).toBe(false);
+    expect(document.querySelector('#rail-axis-switch [data-axis="files"]')!.getAttribute('aria-selected')).toBe('true');
+
+    // setAxis('domain') (ide.ts's ⌘B path) hands the rail back to the Domain navigator.
+    ctl.setAxis('domain');
+    expect(domainPane.hidden).toBe(false);
+    expect(filesPane.hidden).toBe(true);
+  });
+});
+
+describe('createInspectorController — Domain navigator doorways + cross-axis glue (#453)', () => {
+  test('the strategic Context Map doorway opens the Context Map in the now-global bottom strip, in place (#451/#453)', async () => {
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    ctl.refreshActiveSurfaces(); // mounts the Domain navigator, which self-fetches + paints the doorways
+    await flush();
+
+    // Land on Documentation — the bottom strip is global (#451), so it stays visible here.
     ctl.selectDocsTab('adr');
+    expect(el('center-docs').hidden).toBe(false);
     expect(el('diagnostics').hidden).toBe(false);
 
-    // The rail's Context Map link just opens the Context Map bottom tab, in place.
-    document.querySelector<HTMLButtonElement>('.koi-doclink[data-doclink="contextmap"]')!.click();
+    // Drive the REAL strategic Context Map doorway → modelOutlineHandlers.onOpenContextMap →
+    // focusContextMap() → selectBottomTab('contextmap'): with the global strip (#451) it opens the
+    // Context Map tab IN PLACE, without leaving the current center. (Drives the #453 doorway, not the
+    // removed footer doclink.)
+    const doorway = el('rail-domain-pane').querySelector<HTMLButtonElement>('[data-door="contextmap"]')!;
+    doorway.click();
     await flush();
 
     expect(el('center-docs').hidden).toBe(false); // still on Documentation…
     expect(el('diagnostics').hidden).toBe(false); // …strip visible…
     expect(el('panel-contextmap').hidden).toBe(false); // …showing the Context Map.
+  });
+
+  test('a tactical leaf: selecting jumps via goto; "Reveal in Files" calls revealInFiles with the leaf context', async () => {
+    const lsp = makeLsp();
+    // Give the model graph a real aggregate-owned leaf so the tactical view has a row to act on (the
+    // shared makeLsp().model is an empty graph). The aggregate carries the `<Ctx>.<Agg>` qualified name.
+    lsp.model = vi.fn(async (): Promise<ModelNode> => ({
+      kind: 'model',
+      qualifiedName: '',
+      title: '',
+      members: [],
+      children: [
+        {
+          kind: 'context',
+          qualifiedName: 'Billing',
+          title: 'Billing',
+          members: [],
+          children: [
+            {
+              kind: 'aggregate',
+              qualifiedName: 'Billing.Invoice',
+              title: 'Invoice',
+              members: [],
+              children: [{ kind: 'value', qualifiedName: 'Billing.Money', title: 'Money', members: [], children: [] }],
+            },
+          ],
+        },
+      ],
+    }));
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces(); // mount + fetch the navigator (strategic rows + the tactical tree) and the model index
+    await flush();
+
+    // Drill into Billing → tactical, exposing its aggregate's leaf rows.
+    (el('rail-domain-pane').querySelector('[data-ctx="Billing"]') as HTMLButtonElement).click();
+    await flush();
+
+    // Selecting the Money leaf resolves through nodeContext/resolveInspectableQn and jumps to source.
+    const leaf = el('rail-domain-pane').querySelector<HTMLButtonElement>('.koi-tactical-leaf[data-name="Money"]')!;
+    leaf.click();
+    expect(deps.editor.goto).toHaveBeenCalled();
+    expect(deps.store.getState().selection?.qualifiedName).toBe('Billing.Money');
+
+    // Its ⋯ overflow → "Reveal in Files" reveals the leaf's bounded context in the Files axis.
+    leaf.closest('.koi-tactical-leaf-row')!.querySelector<HTMLButtonElement>('.koi-tactical-more')!.click();
+    const item = Array.from(document.querySelectorAll<HTMLButtonElement>('.koi-tactical-menu-item')).find(
+      (b) => b.textContent === 'Reveal in Files',
+    )!;
+    item.click();
+    expect(deps.revealInFiles).toHaveBeenCalledWith('Billing');
   });
 });
 
@@ -569,17 +651,21 @@ describe('createInspectorController — loading states clear on success', () => 
   // Regression: docMessage writes a raw <p>Loading…</p> the Preact reconciler can't see, so a
   // bare render(<Panel/>, host) used to APPEND the panel beside the loading line — both showed at
   // once. Every Preact-panel host must replace its loading line, not stack on top of it.
-  test('loadModel replaces the "Loading model…" line — it does not stack beside the outline', async () => {
+  test('loadModel paints the strategic Domain navigator — its loading placeholder is replaced', async () => {
     const lsp = makeLsp();
     const ctl = createInspectorController(makeDeps(lsp));
     ctl.init();
 
-    ctl.refreshActiveSurfaces(); // → loadModel paints the left-rail Explorer outline
+    ctl.refreshActiveSurfaces(); // → loadModel mounts the Domain navigator, which self-fetches + paints
     await flush();
 
-    const explorer = el('rail-explorer-body');
-    expect(explorer.textContent).toContain('Money'); // the outline rendered
-    expect(explorer.textContent).not.toContain('Loading model'); // …without the loading line left behind
+    // The Domain pane now shows the STRATEGIC context list (a row per bounded context, #453), not the old
+    // per-construct outline — so the glossaryFixture's 'Billing' context appears…
+    const domainPane = el('rail-domain-pane');
+    expect(domainPane.querySelector('[data-ctx="Billing"]')).not.toBeNull();
+    expect(domainPane.textContent).toContain('Billing');
+    // …and neither the navigator's loading placeholder nor any stale loading line is left behind.
+    expect(domainPane.textContent).not.toContain('Loading');
   });
 
   test('the glossary replaces its "Loading glossary…" line on success', async () => {

@@ -12,4 +12,15 @@
   --koi-ddd-service: #fb923c; /* orange — domain services */
   --koi-ddd-repository: #94a3b8; /* slate — repositories / types */
   --koi-ddd-spec: #c084fc; /* violet — specifications / rules */
+
+  /* Behavioural & lifecycle constructs (#453). The model graph emits `states` today; commands, queries,
+     read models, policies and factories are Phase 2 — these hues are defined ahead of the rows so the
+     tactical tree (and a future Explorer bucket) lights up the moment they appear. Distinct from the
+     structural hues above. */
+  --koi-ddd-state-machine: #06b6d4; /* cyan — an entity/aggregate lifecycle (the `states` kind) */
+  --koi-ddd-command: #ef4444; /* red — an imperative command (intent to change state) */
+  --koi-ddd-query: #38bdf8; /* sky — a read query */
+  --koi-ddd-read-model: #a3e635; /* lime — a denormalised read model / projection */
+  --koi-ddd-policy: #d946ef; /* magenta — a policy / process manager (reacts to events) */
+  --koi-ddd-factory: #f59e0b; /* amber — a factory (constructs aggregates) */
 }
