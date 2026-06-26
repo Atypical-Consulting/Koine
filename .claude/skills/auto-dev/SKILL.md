@@ -97,7 +97,8 @@ Track these as todos. Steps 4–6 are the long-running supervision loop.
    state file.
 3. **Dispatch the first N workers** — area-isolated, using the worker-prompt contract.
 4. **Supervise (loop)** — on every worker report / idle notification: reconcile against GitHub, re-drive
-   any merge that stalled at "ready", end merged workers, refill their slots from the queue.
+   any merge that stalled at "ready", end merged workers, refill their slots from the queue; **re-survey
+   the backlog (Step 2) every ~5 merges** since `merge-pr` follow-ups + off-scope filings keep growing it.
 5. **Heartbeat** — keep a self-paced wakeup armed (via `loop`) as the safety net; poll CI only when
    actively driving a merge.
 6. **Stop & report** — when the queue drains (or the user stops), let the last workers finish, then
@@ -143,7 +144,7 @@ Persist a **state file** outside the repo (a scratch/temp dir, not a tracked pat
 context compaction and `loop` re-fires. Keep it small and current:
 
 ```markdown
-# auto-dev state — <repo>, N=<concurrency>
+# auto-dev state — <repo>, N=<concurrency> · merges: <total> · queue last refreshed @ <merge# of last refresh>
 ## In flight
 - Slot A → #<n> (<area>) — <phase: implementing / PR #<pr> ready→merging / merged>
 - Slot B → ...
@@ -234,6 +235,18 @@ After any change, update the state file (in flight, completed, filed, queue).
 land one at a time — the second worker's `merge-pr` will sync the freshly-moved `main` and resolve. You
 don't need to block; just don't be surprised by a transient conflict, and re-nudge if needed.
 
+**Re-survey the backlog every ~5 merges — the queue is NOT static.** Every PR you land tends to spawn
+more issues: `merge-pr` files deferred work as fresh follow-ups, and workers file off-scope discoveries
+via `create-issue`. So the open-issue set *grows as you drain it*, and the newcomers are often small and
+in areas your current workers don't hold — which is exactly what breaks a same-area logjam (e.g. when
+every remaining small issue is in one subsystem, a freshly-filed diagnostic/test follow-up in another
+subsystem becomes the ideal next pick). Don't run the whole session off the initial Step 2 snapshot:
+after **roughly every 5 merges** — or sooner if refills start clustering into one area or the eligible
+queue looks empty — **re-run the Step 2 survey**, fold the newcomers in (small-first, area-tagged, plan-
+and eligibility-checked), and note what changed. Keep a **merge counter** in the state file (increment on
+each confirmed merge; record the count at the last refresh) so a `loop` re-fire knows when the next
+refresh is due. A stale queue silently costs you: missed easy disjoint wins and mis-ordered work.
+
 ## Step 5 — Heartbeat
 
 The wake signals that matter — worker reports and idle notifications — arrive on their own; **don't poll
@@ -277,6 +290,10 @@ skipping the next slot that frees. Hold the line at N unless told otherwise.
   bug inside its PR muddies the diff and the issue's scope; a filed follow-up keeps both clean.
 - **Effort labels drive ordering, plans drive eligibility.** No plan → not eligible (seed one with
   `create-issue` first if the user insists). Manual-QA → skip with a noted reason.
+- **The backlog grows as you drain it.** `merge-pr` follow-ups and off-scope filings add fresh issues
+  mid-run — often small and in subsystems your current workers don't hold. Re-survey every ~5 merges
+  (Step 4) so you keep working off the *live* backlog, not a stale opening snapshot, and don't miss the
+  easy disjoint-area wins that break a same-area logjam.
 - **The state file is your memory.** Keep it terse and current so a compaction or `loop` re-fire
   reconstructs the fleet exactly.
 ```
