@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
+import { ChangeSet, Text } from '@codemirror/state';
 import type { FsEntry, Platform } from '@/host';
 import type { SourceSpan } from '@/lsp/lsp';
-import { REVIEWS_FILE, createReviewStore, type ReviewStore } from '@/review/reviewStore';
+import { REVIEWS_FILE, createReviewStore, remapSpans, type ReviewStore, type ReviewThread } from '@/review/reviewStore';
 
 // --- in-memory mock of the host file abstraction -----------------------------
 // Only the four methods reviewStore touches are implemented (listDir / readTextFile / writeTextFile /
@@ -200,5 +201,129 @@ describe('reviewStore — persistence', () => {
     expect(store.list()).toHaveLength(1);
     expect(files.size).toBe(0); // nothing written to disk
     await expect(store.load()).resolves.toBeUndefined(); // load is a no-op, never throws
+  });
+});
+
+// --- Task 2: span re-anchoring on document edits -----------------------------
+// The fixtures use the document "hello\nworld" (length 11): line 1 = [0,5], '\n' at 5,
+// line 2 "world" = [6,11). The span under test pins "world": offset 6, length 5.
+describe('reviewStore — remapSpans (pure re-anchoring)', () => {
+  /** A throwaway open thread on `span` (only the span/status matter to remapSpans). */
+  function thread(s: SourceSpan, status: ReviewThread['status'] = 'open'): ReviewThread {
+    return { id: 'review-x', file: 'model.koi', span: s, status, comments: [{ author: 'a', body: 'b', ts: 1 }] };
+  }
+  /** The "world" span on line 2 of "hello\nworld". */
+  function worldSpan(): SourceSpan {
+    return { file: 'model.koi', line: 2, column: 1, endLine: 2, endColumn: 6, offset: 6, length: 5 };
+  }
+
+  it('an edit BEFORE the span shifts it (offset += inserted length; line/column recompute)', () => {
+    const before = Text.of(['hello', 'world']);
+    const change = ChangeSet.of({ from: 0, to: 0, insert: 'XY' }, before.length);
+    const after = Text.of(['XYhello', 'world']); // "XYhello\nworld", length 13
+    const input = thread(worldSpan());
+
+    const out = remapSpans([input], change, after);
+
+    expect(out).not.toBe(input as unknown); // a fresh array
+    expect(out[0]).not.toBe(input); // a fresh thread (purity)
+    expect(out[0].span.offset).toBe(8); // 6 + 2 inserted
+    expect(out[0].span.length).toBe(5); // unchanged
+    expect(out[0].span.line).toBe(2);
+    expect(out[0].span.column).toBe(1);
+    expect(out[0].span.endLine).toBe(2);
+    expect(out[0].span.endColumn).toBe(6);
+    expect(out[0].status).toBe('open');
+    // input is not mutated
+    expect(input.span.offset).toBe(6);
+  });
+
+  it('an edit INSIDE the span grows/shrinks it (length changes; start offset unchanged)', () => {
+    const before = Text.of(['hello', 'world']);
+
+    // grow: insert 3 chars at offset 8 (inside "world")
+    const grow = ChangeSet.of({ from: 8, to: 8, insert: '!!!' }, before.length);
+    const grownDoc = Text.of(['hello', 'wo!!!rld']);
+    const grown = remapSpans([thread(worldSpan())], grow, grownDoc);
+    expect(grown[0].span.offset).toBe(6); // start unchanged
+    expect(grown[0].span.length).toBe(8); // 5 + 3 inserted
+    expect(grown[0].status).toBe('open');
+
+    // shrink: delete the 2 chars at [7,9) (inside "world")
+    const shrink = ChangeSet.of({ from: 7, to: 9, insert: '' }, before.length);
+    const shrunkDoc = Text.of(['hello', 'wrld']);
+    const shrunk = remapSpans([thread(worldSpan())], shrink, shrunkDoc);
+    expect(shrunk[0].span.offset).toBe(6); // start unchanged
+    expect(shrunk[0].span.length).toBe(3); // 5 - 2 deleted
+    expect(shrunk[0].status).toBe('open');
+  });
+
+  it('deleting the WHOLE span orphans the thread but KEEPS it in the list (not dropped)', () => {
+    const before = Text.of(['hello', 'world']);
+    const change = ChangeSet.of({ from: 6, to: 11, insert: '' }, before.length); // delete "world"
+    const after = Text.of(['hello', '']); // "hello\n", length 6
+    const out = remapSpans([thread(worldSpan())], change, after);
+
+    expect(out).toHaveLength(1); // kept, not dropped
+    expect(out[0].status).toBe('orphaned');
+    expect(out[0].span.length).toBe(0);
+    // re-anchored to a valid, in-range offset (recompute must not throw)
+    expect(out[0].span.offset).toBeGreaterThanOrEqual(0);
+    expect(out[0].span.offset).toBeLessThanOrEqual(after.length);
+  });
+
+  it('preserves resolved status and never resurrects an orphaned thread to open', () => {
+    const before = Text.of(['hello', 'world']);
+
+    // a RESOLVED thread whose span is deleted keeps 'resolved' (only open flips to orphaned)
+    const del = ChangeSet.of({ from: 6, to: 11, insert: '' }, before.length);
+    const after = Text.of(['hello', '']);
+    expect(remapSpans([thread(worldSpan(), 'resolved')], del, after)[0].status).toBe('resolved');
+
+    // an ORPHANED thread that SURVIVES an edit stays orphaned, with its position re-anchored
+    const ins = ChangeSet.of({ from: 0, to: 0, insert: 'XY' }, before.length);
+    const grownDoc = Text.of(['XYhello', 'world']);
+    const survived = remapSpans([thread(worldSpan(), 'orphaned')], ins, grownDoc);
+    expect(survived[0].status).toBe('orphaned');
+    expect(survived[0].span.offset).toBe(8);
+  });
+});
+
+describe('reviewStore — remap (store wiring)', () => {
+  it('store.remap shifts spans, persists, and notifies; an identity change is a no-op', async () => {
+    const { platform } = fakeFs();
+    const store = createReviewStore(platform, () => FOLDER);
+    const t = store.add(
+      'model.koi',
+      { file: 'model.koi', line: 2, column: 1, endLine: 2, endColumn: 6, offset: 6, length: 5 },
+      'q',
+      'alice',
+    );
+    await flushPersist();
+
+    const cb = vi.fn();
+    store.subscribe(cb);
+
+    const before = Text.of(['hello', 'world']);
+    const change = ChangeSet.of({ from: 0, to: 0, insert: 'XY' }, before.length);
+    const after = Text.of(['XYhello', 'world']);
+    store.remap(change, after);
+
+    const shifted = store.list().find((x) => x.id === t.id)!;
+    expect(shifted.span.offset).toBe(8);
+    expect(shifted.span.length).toBe(5);
+    expect(shifted.span.line).toBe(2);
+    expect(shifted.span.column).toBe(1);
+    expect(cb).toHaveBeenCalledTimes(1); // a real move notifies once
+
+    await flushPersist();
+    const fresh = createReviewStore(platform, () => FOLDER);
+    await fresh.load();
+    expect(fresh.list()[0].span.offset).toBe(8); // the shifted span was persisted
+
+    // an identity change moves nothing: no extra notify (and no needless write)
+    const identity = ChangeSet.of([], after.length);
+    store.remap(identity, after);
+    expect(cb).toHaveBeenCalledTimes(1);
   });
 });

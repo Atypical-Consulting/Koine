@@ -11,6 +11,7 @@
 //
 // Like the diagram layout, review/comment state is a Studio-only VIEW concern: it NEVER round-trips into
 // the `.koi` semantic model or the emitter output. All filesystem access goes through {@link Platform}.
+import { MapMode, type ChangeSet, type Text } from '@codemirror/state';
 import type { Platform } from '@/host';
 import type { SourceSpan } from '@/lsp/lsp';
 
@@ -58,6 +59,12 @@ export interface ReviewStore {
   setStatus(id: string, status: ReviewThread['status']): void;
   /** Delete a thread (no-op when the id is unknown). */
   remove(id: string): void;
+  /**
+   * Re-anchor every thread's span through a CodeMirror {@link ChangeSet} after the document was
+   * edited, so a comment keeps pointing at the text it was filed against (and orphans when that text
+   * was deleted). Persists + notifies only when something actually moved. See {@link remapSpans}.
+   */
+  remap(change: ChangeSet, doc: Text): void;
   /** Register a callback fired after every mutation; returns a function that unsubscribes it. */
   subscribe(cb: () => void): () => void;
 }
@@ -138,6 +145,71 @@ function parse(text: string): ReviewThread[] {
   } catch {
     return [];
   }
+}
+
+/** Structural span equality (every numeric field + file) so a no-op remap can skip persist/notify. */
+function sameSpan(a: SourceSpan, b: SourceSpan): boolean {
+  return (
+    a.file === b.file &&
+    a.line === b.line &&
+    a.column === b.column &&
+    a.endLine === b.endLine &&
+    a.endColumn === b.endColumn &&
+    a.offset === b.offset &&
+    a.length === b.length
+  );
+}
+
+/**
+ * Re-anchor each thread's span through a CodeMirror {@link ChangeSet} so comments follow the text they
+ * were filed against. A PURE function: it never mutates its arguments and always returns a new array of
+ * new threads/spans.
+ *
+ * Each span's start offset is mapped with `assoc = 1` and its end with `assoc = -1`, both in
+ * {@link MapMode.TrackDel} mode. `TrackDel` yields `null` (older CodeMirror docs say `-1`) when a
+ * deletion straddled that position — and a span whose endpoints survive but collapse to zero width has
+ * had every character deleted. Either signal means "the whole span is gone": the thread is KEPT but
+ * orphaned (re-anchored to where the text used to be, via a plain — never-`null` — `mapPos`, with a
+ * zero-width span). Only an `'open'` thread flips to `'orphaned'`; `'resolved'`/`'orphaned'` status is
+ * preserved (a surviving orphaned thread is re-anchored, never resurrected to open). For a surviving
+ * span the new line/column (and end-exclusive endLine/endColumn) are recomputed from the NEW `doc`.
+ */
+export function remapSpans(threads: ReviewThread[], change: ChangeSet, doc: Text): ReviewThread[] {
+  const clamp = (offset: number): number => Math.max(0, Math.min(offset, doc.length));
+  const lineColOf = (offset: number): { line: number; column: number } => {
+    const line = doc.lineAt(offset);
+    return { line: line.number, column: offset - line.from + 1 }; // 1-based column
+  };
+  return threads.map((thread) => {
+    const start = change.mapPos(thread.span.offset, 1, MapMode.TrackDel);
+    const end = change.mapPos(thread.span.offset + thread.span.length, -1, MapMode.TrackDel);
+    const deleted =
+      start == null || start < 0 || end == null || end < 0 || (thread.span.length > 0 && end <= start);
+
+    let offset: number;
+    let length: number;
+    if (deleted) {
+      offset = clamp(change.mapPos(thread.span.offset, 1)); // plain map: a valid in-range anchor
+      length = 0;
+    } else {
+      offset = clamp(start);
+      length = Math.max(0, clamp(end) - offset);
+    }
+
+    const startPos = lineColOf(offset);
+    const endPos = lineColOf(clamp(offset + length));
+    const span: SourceSpan = {
+      file: thread.span.file,
+      line: startPos.line,
+      column: startPos.column,
+      endLine: endPos.line,
+      endColumn: endPos.column,
+      offset,
+      length,
+    };
+    const status: ReviewThread['status'] = deleted && thread.status === 'open' ? 'orphaned' : thread.status;
+    return { ...thread, span, status };
+  });
 }
 
 /**
@@ -248,6 +320,13 @@ export function createReviewStore(platform: Platform, folderToken: () => string 
     remove(id) {
       const next = threads.filter((t) => t.id !== id);
       if (next.length === threads.length) return; // unknown id: no change, no churn
+      threads = next;
+      mutated();
+    },
+    remap(change, doc) {
+      const next = remapSpans(threads, change, doc); // index-aligned: same count, same order/ids
+      const changed = next.some((t, i) => t.status !== threads[i].status || !sameSpan(t.span, threads[i].span));
+      if (!changed) return; // nothing moved: avoid a needless write + render
       threads = next;
       mutated();
     },
