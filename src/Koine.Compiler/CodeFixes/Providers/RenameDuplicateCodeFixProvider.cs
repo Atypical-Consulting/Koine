@@ -1,5 +1,6 @@
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
+using Koine.Compiler.Services;
 
 namespace Koine.Compiler.CodeFixes.Providers;
 
@@ -48,7 +49,7 @@ public sealed class RenameDuplicateCodeFixProvider : ICodeFixProvider
             return [];
         }
 
-        var unique = UniqueName(name, existing);
+        var unique = ModelNavigation.UniqueName(name, existing);
         return
         [
             new CodeFix(
@@ -68,11 +69,11 @@ public sealed class RenameDuplicateCodeFixProvider : ICodeFixProvider
         KoineModel model,
         Diagnostic diagnostic,
         out string name,
-        out IReadOnlyCollection<string> existing,
+        out ISet<string> existing,
         out bool lastOccurrence)
     {
         name = string.Empty;
-        existing = [];
+        existing = new HashSet<string>(StringComparer.Ordinal);
         lastOccurrence = false;
 
         switch (diagnostic.Code)
@@ -109,7 +110,7 @@ public sealed class RenameDuplicateCodeFixProvider : ICodeFixProvider
                 // checked against the enclosing type's member names.
                 foreach (TypeDecl type in AllTypes(model))
                 {
-                    IReadOnlyList<Member> members = MembersOf(type);
+                    IReadOnlyList<Member> members = type.MembersOf();
                     foreach (Member member in members)
                     {
                         if (!member.Span.IsNone && member.Span.Offset == diagnostic.Span.Offset)
@@ -224,7 +225,7 @@ public sealed class RenameDuplicateCodeFixProvider : ICodeFixProvider
             if (c == name[0]
                 && i + name.Length <= end
                 && string.CompareOrdinal(sourceText, i, name, 0, name.Length) == 0
-                && IsWholeWord(sourceText, i, name.Length))
+                && SourceTextGeometry.IsWholeWordAt(sourceText, i, name.Length))
             {
                 found = i;
                 if (!lastOccurrence)
@@ -245,59 +246,9 @@ public sealed class RenameDuplicateCodeFixProvider : ICodeFixProvider
         }
 
         // 1-based line/column for the located token; offset/length drive the edit slice.
-        var (line, column) = LineColumn(sourceText, found);
-        var (endLine, endColumn) = LineColumn(sourceText, found + name.Length);
+        var (line, column) = SourceTextGeometry.LineColumn(sourceText, found);
+        var (endLine, endColumn) = SourceTextGeometry.LineColumn(sourceText, found + name.Length);
         return new SourceSpan(line, column, endLine, endColumn, found, name.Length, span.File);
-    }
-
-    /// <summary>True when the identifier at <paramref name="at"/> is not bordered by an identifier char.</summary>
-    private static bool IsWholeWord(string text, int at, int length)
-    {
-        if (at > 0 && IsIdentChar(text[at - 1]))
-        {
-            return false;
-        }
-
-        var afterIndex = at + length;
-        return afterIndex >= text.Length || !IsIdentChar(text[afterIndex]);
-    }
-
-    private static bool IsIdentChar(char c) => char.IsLetterOrDigit(c) || c == '_';
-
-    /// <summary>The 1-based (line, column) of the 0-based <paramref name="offset"/> in <paramref name="text"/>.</summary>
-    private static (int Line, int Column) LineColumn(string text, int offset)
-    {
-        var line = 1;
-        var column = 1;
-        for (var i = 0; i < offset && i < text.Length; i++)
-        {
-            if (text[i] == '\n')
-            {
-                line++;
-                column = 1;
-            }
-            else
-            {
-                column++;
-            }
-        }
-
-        return (line, column);
-    }
-
-    /// <summary>The first <c>name2</c>, <c>name3</c>, … not present in <paramref name="existing"/>.</summary>
-    private static string UniqueName(string name, IReadOnlyCollection<string> existing)
-    {
-        var n = 2;
-        string candidate;
-        do
-        {
-            candidate = $"{name}{n}";
-            n++;
-        }
-        while (existing.Contains(candidate));
-
-        return candidate;
     }
 
     /// <summary>Every declared type across all contexts and aggregates.</summary>
@@ -325,18 +276,8 @@ public sealed class RenameDuplicateCodeFixProvider : ICodeFixProvider
     }
 
     /// <summary>Every type and service name in the model — the namespace a renamed type/service must avoid.</summary>
-    private static IReadOnlyCollection<string> DeclaredNames(KoineModel model) =>
+    private static ISet<string> DeclaredNames(KoineModel model) =>
         AllTypes(model).Select(t => t.Name)
             .Concat(AllServices(model).Select(s => s.Name))
             .ToHashSet(StringComparer.Ordinal);
-
-    /// <summary>The field members of <paramref name="type"/>, or empty for a kind that carries none.</summary>
-    private static IReadOnlyList<Member> MembersOf(TypeDecl type) => type switch
-    {
-        ValueObjectDecl v => v.Members,
-        EntityDecl e => e.Members,
-        EventDecl ev => ev.Members,
-        IntegrationEventDecl ie => ie.Members,
-        _ => [],
-    };
 }

@@ -75,8 +75,8 @@ internal sealed class RefactorService
     {
         foreach (TypeDecl type in EnumerateTypes(_model))
         {
-            IReadOnlyList<Member>? members = MembersOf(type);
-            if (members is null || members.Count == 0 || type.Span.IsNone)
+            IReadOnlyList<Member> members = type.MembersOf();
+            if (members.Count == 0 || type.Span.IsNone)
             {
                 continue;
             }
@@ -158,8 +158,8 @@ internal sealed class RefactorService
 
         // Finding 4 — disambiguate the placeholder names against what already exists, so the
         // refactor never silently shadows an existing type or member by reusing a taken name.
-        var voName = UniqueName("ExtractedValue", ExistingTypeNames());
-        var fieldName = UniqueName("extracted", MemberNamesOf(type));
+        var voName = ModelNavigation.UniqueName("ExtractedValue", ExistingTypeNames());
+        var fieldName = ModelNavigation.UniqueName("extracted", MemberNamesOf(type));
 
         // Finding 2 — build the moved body from the VERBATIM combined source slice, spanning from
         // the start of the FIRST selected field's leading comment/doc trivia to the END of the last
@@ -212,8 +212,8 @@ internal sealed class RefactorService
     {
         foreach (TypeDecl type in EnumerateTypes(_model))
         {
-            IReadOnlyList<Member>? members = MembersOf(type);
-            if (members is null || members.Count == 0 || type.Span.IsNone)
+            IReadOnlyList<Member> members = type.MembersOf();
+            if (members.Count == 0 || type.Span.IsNone)
             {
                 continue;
             }
@@ -253,9 +253,9 @@ internal sealed class RefactorService
         // silently shadows an existing type or member by reusing a taken name. The identity type name
         // is derived from the (already-disambiguated) entity name, then itself disambiguated.
         ISet<string> existingTypes = ExistingTypeNames();
-        var entityName = UniqueName("ExtractedEntity", existingTypes);
-        var idName = UniqueName(entityName + "Id", existingTypes);
-        var fieldName = UniqueName("extracted", MemberNamesOf(type));
+        var entityName = ModelNavigation.UniqueName("ExtractedEntity", existingTypes);
+        var idName = ModelNavigation.UniqueName(entityName + "Id", existingTypes);
+        var fieldName = ModelNavigation.UniqueName("extracted", MemberNamesOf(type));
 
         // Build the moved body from the VERBATIM combined source slice, spanning from the start of the
         // FIRST selected field's leading comment/doc trivia to the END of the last selected field (plus
@@ -380,7 +380,7 @@ internal sealed class RefactorService
 
         // Disambiguate the placeholder aggregate name against every existing type, so the new name
         // never collides with an existing type and never equals the root name.
-        var aggName = UniqueName("ExtractedAggregate", ExistingTypeNames());
+        var aggName = ModelNavigation.UniqueName("ExtractedAggregate", ExistingTypeNames());
 
         // The verbatim slice spanning the whole selected run: from the start of the FIRST type's
         // leading-trivia/doc block through the end of the LAST type's body (plus any same-line trailing
@@ -424,12 +424,7 @@ internal sealed class RefactorService
         // Locate the member field whose type-name reference contains the selection, and the VO it names.
         foreach (TypeDecl host in EnumerateTypes(_model))
         {
-            if (MembersOf(host) is not { } members)
-            {
-                continue;
-            }
-
-            foreach (Member member in members)
+            foreach (Member member in host.MembersOf())
             {
                 if (!ReferenceContainsSelection(member, startOffset, endOffset))
                 {
@@ -519,12 +514,7 @@ internal sealed class RefactorService
         var count = 0;
         foreach (TypeDecl t in EnumerateTypes(_model))
         {
-            if (MembersOf(t) is not { } members)
-            {
-                continue;
-            }
-
-            foreach (Member m in members)
+            foreach (Member m in t.MembersOf())
             {
                 if (TypeRefMentions(m.Type, name))
                 {
@@ -837,33 +827,12 @@ internal sealed class RefactorService
     private static HashSet<string> MemberNamesOf(TypeDecl type)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
-        if (MembersOf(type) is { } members)
+        foreach (Member m in type.MembersOf())
         {
-            foreach (Member m in members)
-            {
-                names.Add(m.Name);
-            }
+            names.Add(m.Name);
         }
 
         return names;
-    }
-
-    /// <summary><paramref name="baseName"/>, or <c>baseName2</c>, <c>baseName3</c>, … — the first not in <paramref name="taken"/>.</summary>
-    private static string UniqueName(string baseName, ISet<string> taken)
-    {
-        if (!taken.Contains(baseName))
-        {
-            return baseName;
-        }
-
-        for (var n = 2; ; n++)
-        {
-            var candidate = baseName + n;
-            if (!taken.Contains(candidate))
-            {
-                return candidate;
-            }
-        }
     }
 
     /// <summary>Every type declaration in the model, descending into aggregate boundaries.</summary>
@@ -895,16 +864,6 @@ internal sealed class RefactorService
             }
         }
     }
-
-    /// <summary>The fielded members of a type whose fields are extractable, or <c>null</c>.</summary>
-    private static IReadOnlyList<Member>? MembersOf(TypeDecl type) => type switch
-    {
-        ValueObjectDecl v => v.Members,
-        EntityDecl e => e.Members,
-        EventDecl ev => ev.Members,
-        IntegrationEventDecl ie => ie.Members,
-        _ => null,
-    };
 
     private static bool ContainsSelection(SourceSpan span, int startOffset, int endOffset)
     {
@@ -971,24 +930,5 @@ internal sealed class RefactorService
     }
 
     /// <summary>The 1-based (line, column) of the absolute character <paramref name="offset"/> in the source.</summary>
-    private (int Line, int Column) LineColumnOf(int offset)
-    {
-        var line = 1;
-        var col = 1;
-        var max = Math.Min(offset, _source.Length);
-        for (var i = 0; i < max; i++)
-        {
-            if (_source[i] == '\n')
-            {
-                line++;
-                col = 1;
-            }
-            else
-            {
-                col++;
-            }
-        }
-
-        return (line, col);
-    }
+    private (int Line, int Column) LineColumnOf(int offset) => SourceTextGeometry.LineColumn(_source, offset);
 }

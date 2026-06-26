@@ -887,7 +887,7 @@ public sealed class KoineLanguageService
         // chain alone can skip intermediate declarations (e.g. an entity is not the graph-parent of
         // its members), so we also fold in the DocumentSymbols outline — which nests
         // member ⊂ type ⊂ context by span — and rank the union by containment (innermost first).
-        var (pl, pc) = OffsetToLineColumn(source, offset);
+        var (pl, pc) = SourceTextGeometry.LineColumn(source, offset);
         var spans = new List<SourceSpan>();
 
         void Consider(SourceSpan span)
@@ -969,28 +969,6 @@ public sealed class KoineLanguageService
     /// <summary>A monotone size proxy for a span (line-weighted) used only to order nested spans.</summary>
     private static long SpanSize(SourceSpan span) =>
         ((long)(span.EndLine - span.Line) << 20) + (span.EndColumn - span.Column);
-
-    /// <summary>The 1-based line/column of a 0-based absolute <paramref name="offset"/> in <paramref name="source"/>.</summary>
-    private static (int Line, int Column) OffsetToLineColumn(string source, int offset)
-    {
-        var line = 1;
-        var column = 1;
-        var end = Math.Min(offset, source.Length);
-        for (var i = 0; i < end; i++)
-        {
-            if (source[i] == '\n')
-            {
-                line++;
-                column = 1;
-            }
-            else
-            {
-                column++;
-            }
-        }
-
-        return (line, column);
-    }
 
     /// <summary>
     /// True when <paramref name="outer"/> contains <paramref name="inner"/> and is strictly larger on
