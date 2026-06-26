@@ -441,18 +441,17 @@ for (const r of results) {
 const checksOk = passed === results.length;
 console.log(checksOk ? '\nSMOKE TEST PASSED' : '\nSMOKE TEST FAILED');
 
-// Benchmark: time compiling the pizzeria template and report bundle size (issues #327, #333).
-let benchOk = true;
-if (BENCH) {
-  benchOk = runBenchmark();
-}
+// Benchmark: time the pizzeria compile and guard a soft regression threshold (issues #327, #333).
+// Runs on every invocation so CI gets a perf number + regression gate on every push; `--bench` adds
+// the best/median + bundle-size breakdown (the interpreter-vs-AOT comparison harness, #327).
+const benchOk = runBenchmark();
 
 process.exit(checksOk && benchOk ? 0 : 1);
 
 // ---------------------------------------------------------------------------------------------
 
 function runBenchmark() {
-  console.log('\n--- benchmark (KOINE_WASM_BENCH / --bench) ---');
+  console.log('\n--- pizzeria compile benchmark (issues #327, #333) ---');
 
   // Compile the whole pizzeria template the way Studio does: every .koi as a SourceFile in one
   // workspace, so the cross-context imports and the context map resolve (single-source Compile
@@ -492,16 +491,32 @@ function runBenchmark() {
   const median = samples[Math.floor(samples.length / 2)];
   const ms = (n) => n.toFixed(1);
 
-  // Sum the published _framework/ as shipped to the browser: this is what AOT grows.
-  const framework = join(here, 'bin', 'Release', 'net10.0', 'browser-wasm', 'AppBundle', '_framework');
-  const frameworkBytes = dirBytes(framework);
-  const frameworkMB = (frameworkBytes / (1024 * 1024)).toFixed(2);
-
+  // The headline number CI logs on every push (grep-friendly `elapsed=`), guarded by a generous soft
+  // threshold so a gross regression — e.g. a trim change forcing an interpreter fallback — reddens the
+  // build while normal slow-runner jitter does not. Tunable via KOINE_WASM_BENCH_MAX_MS; the precise
+  // per-device budget is #219's job.
+  const DEFAULT_MAX_MS = 10000;
+  const rawMax = Number(process.env.KOINE_WASM_BENCH_MAX_MS);
+  const maxMs = Number.isFinite(rawMax) && rawMax > 0 ? rawMax : DEFAULT_MAX_MS;
   console.log(
-    `\npizzeria compile: best ${ms(best)} ms, median ${ms(median)} ms (over ${RUNS} runs, ${WARMUP} warmup)`,
+    `pizzeria compile: elapsed=${ms(median)}ms (best ${ms(best)} ms, over ${RUNS} runs, ${WARMUP} warmup; threshold ${maxMs} ms)`,
   );
-  console.log(`bundle (_framework total): ${frameworkBytes} bytes (${frameworkMB} MB)`);
-  console.log(`BENCH RESULT  pizzeria_ms_best=${ms(best)}  pizzeria_ms_median=${ms(median)}  framework_mb=${frameworkMB}`);
+
+  // `--bench` adds the published _framework/ bundle size + the AOT-comparison BENCH RESULT line (#327).
+  if (BENCH) {
+    const framework = join(here, 'bin', 'Release', 'net10.0', 'browser-wasm', 'AppBundle', '_framework');
+    const frameworkBytes = dirBytes(framework);
+    const frameworkMB = (frameworkBytes / (1024 * 1024)).toFixed(2);
+    console.log(`bundle (_framework total): ${frameworkBytes} bytes (${frameworkMB} MB)`);
+    console.log(`BENCH RESULT  pizzeria_ms_best=${ms(best)}  pizzeria_ms_median=${ms(median)}  framework_mb=${frameworkMB}`);
+  }
+
+  if (median > maxMs) {
+    console.log(
+      `BENCHMARK FAILED — pizzeria compile median ${ms(median)}ms exceeded the ${maxMs}ms soft threshold (set KOINE_WASM_BENCH_MAX_MS to retune).`,
+    );
+    return false;
+  }
   return true;
 }
 
