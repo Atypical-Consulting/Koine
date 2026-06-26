@@ -253,14 +253,13 @@ public class R8ExplicitIdFactoryTests
         blob.ShouldNotContain("BookId::generate()"); // no client-side generate
         blob.ShouldContain("new self($id,");          // parameter threaded into construction
 
-        // Validate the emitted PHP with `php -l` (the syntax gate every PhpSnapshotTests model uses),
-        // not `phpstan --level max`: phpstan analyses the whole output including the always-emitted
-        // KoineRuntime.php, which carries pre-existing numeric-string typing gaps in its bc-math
-        // helpers that are unrelated to this factory feature (see follow-up). Syntax-checking proves
-        // the factory we emit is well-formed, which is what this test is about.
-        var php = TestSupport.SyntaxCheckPhp(result.Files);
+        // Type-check the emitted PHP at `phpstan --level max` — full parity with the TypeScript
+        // (`tsc --strict`) and Python (`mypy --strict`) cases above. phpstan analyses the whole
+        // output including the always-emitted KoineRuntime.php, whose bc-math helpers are now typed
+        // as numeric-string (#478), so the runtime no longer drags the emitted model below max level.
+        var php = TestSupport.TypeCheckPhp(result.Files);
         TestSupport.RequireOrSkip(php.ToolchainAvailable,
-            "No php interpreter available; PHP syntax check skipped (CI runs it for real).");
+            "No phpstan toolchain available; PHP type-check skipped (CI runs it for real).");
         php.Ok.ShouldBeTrue(string.Join("\n", php.Errors));
     }
 
