@@ -595,6 +595,63 @@ describe('multi-file change set (agentic edits)', () => {
     expect(accepted[0].relPath).toBe('orders.koi');
   });
 
+  test('surfaces the end-of-turn validation diagnostics in the change set, before apply (issue #474)', async () => {
+    // The model stages a BROKEN file; the agentic loop's single end-of-turn validation reports the
+    // error via onStagedValidation. The change-set panel must show those diagnostics alongside the
+    // staged file so a write that broke the model is visible BEFORE the user applies anything.
+    const DIAG = 'ok: false — 1 error(s), 0 warning(s):\n- [error] 1:16 unexpected end of input';
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders {'); // unbalanced — broken
+      req.onStagedValidation?.(DIAG);
+      req.onText('Staged one edit.');
+      return 'Staged one edit.';
+    });
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        runEditTool: vi.fn(async () => 'ok'),
+        validateStaged: vi.fn(async () => DIAG),
+        onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    // The staged file row is present...
+    expect(container.querySelector('.koi-changeset-file')?.textContent).toContain('orders.koi');
+    // ...and the end-of-turn diagnostics are rendered, pre-apply.
+    const diag = container.querySelector('.koi-changeset-diagnostics');
+    expect(diag).not.toBeNull();
+    expect(diag?.textContent).toContain('1 error');
+    expect(diag?.textContent).toContain('unexpected end of input');
+  });
+
+  test('a CLEAN end-of-turn validation shows the change set without a diagnostics block', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* ok */ }');
+      req.onStagedValidation?.('ok: true — no diagnostics. The model compiles.');
+      req.onText('Staged one edit.');
+      return 'Staged one edit.';
+    });
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        runEditTool: vi.fn(async () => 'ok'),
+        validateStaged: vi.fn(async () => 'ok: true — no diagnostics. The model compiles.'),
+        onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    // No errors ⇒ no alarming diagnostics block (the clean `ok: true` summary isn't shown).
+    expect(container.querySelector('.koi-changeset-diagnostics')).toBeNull();
+  });
+
   test('a non-staged generative turn still shows single-file Apply (no change set)', async () => {
     // An ordinary generative reply (a fenced koine block, nothing staged) → the legacy single-file gate.
     vi.mocked(runAssistant).mockImplementation(async (req: any) => {

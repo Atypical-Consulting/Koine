@@ -4,7 +4,11 @@
 import type { EditSession } from '@/ai/editSession';
 import type { FsEntry, GitLogEntry, GitStatus, KoiFile, LspTransport, Platform, SourceDoc } from '@/host/types';
 import { WasmLspTransport } from '@/host/browser/transport';
-import { runEditTool as runEditToolImpl, runWasmTool } from '@/host/browser/tools';
+import {
+  runEditTool as runEditToolImpl,
+  runWasmTool,
+  validateStagedWorkspace as validateStagedWorkspaceImpl,
+} from '@/host/browser/tools';
 import { loadWasmApi } from '@/host/browser/wasm';
 import * as fs from '@/host/browser/fs';
 import { saveMetaFor } from '@/host/saveMeta';
@@ -45,9 +49,15 @@ export class BrowserPlatform implements Platform {
     return runWasmTool(name, argsJson);
   }
 
-  // The host-local edit tools dispatch against the per-turn staging session (in-process WASM validate).
+  // The host-local edit tools dispatch against the per-turn staging session (stage-only; the
+  // whole-workspace validation runs once per turn via validateStagedWorkspace, issue #474).
   runEditTool(name: string, argsJson: string, session: EditSession): Promise<string> {
     return runEditToolImpl(name, argsJson, session);
+  }
+
+  // Validate the whole staged workspace once at end of an agentic turn (in-process WASM DiagnoseWorkspace).
+  validateStagedWorkspace(session: EditSession): Promise<string> {
+    return validateStagedWorkspaceImpl(session);
   }
 
   // The GBNF grammar for grammar-constrained decoding (#257) comes straight from the resident
