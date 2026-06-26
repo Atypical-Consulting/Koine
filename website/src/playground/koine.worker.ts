@@ -17,10 +17,11 @@
 //              | { type: 'boot-failure'; error: string }
 
 import type { WorkerRequest, WorkerResponse, WorkerSignal } from './workerClient';
+import { basePath } from '../lib/base';
 
 /** Base-aware URL of the published dotnet.js loader (respects Astro's base, e.g. `/Koine/`). */
 function dotnetEntryUrl(): string {
-  const base = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '');
+  const base = basePath();
   return `${base}/koine-wasm/_framework/dotnet.js`;
 }
 
