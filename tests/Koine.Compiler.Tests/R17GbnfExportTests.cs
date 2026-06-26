@@ -212,8 +212,13 @@ public class R17GbnfExportTests
             string? literalName = vocabulary.GetLiteralName(tokenType);
             if (literalName is null)
             {
-                // No fixed literal: Identifier, IntLiteral/DecimalLiteral/StringLiteral, the
-                // BoolLiteral 'true'|'false' alternation, Regex, WS/trivia, EOF — nothing to surface.
+                // Tokens with no single fixed literal in the vocabulary — Identifier,
+                // IntLiteral/DecimalLiteral/StringLiteral, Regex, WS/trivia, EOF, and the
+                // BoolLiteral 'true'|'false' alternation: there is no one literal to assert
+                // against here, so they are skipped (true/false are still surfaced by the `bool`
+                // rule). A future *keyword* added as an alternation token would likewise carry a
+                // null literal and escape this guard; single-literal keywords — the common form,
+                // and the one the motivating regression takes — are what it protects.
                 continue;
             }
 
