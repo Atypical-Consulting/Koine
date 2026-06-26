@@ -18,6 +18,7 @@ import {
   connectUpdateAffordance,
   createUpdateController,
   registerStudioServiceWorker,
+  scheduleCompilerPrecache,
 } from '@/shell/serviceWorkerUpdate';
 
 // Home actions: each queues what the editor should do on its next boot (the start-intent), remembers a
@@ -126,6 +127,10 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
     if (!ideStarted) {
       ideStarted = true;
       ideDispose = init();
+      // Warm the offline WASM compiler cache now that the editor (the only surface that needs the
+      // multi-MB bundle) is in use — on idle, never blocking first paint, and never on a Home-only
+      // visit. No-op where the SW didn't register (unsupported browser / Tauri desktop). (#443)
+      scheduleCompilerPrecache();
     }
   }
 

@@ -129,12 +129,14 @@ describe('koine-studio-sw — pure helpers', () => {
     expect(cacheNameFor('sha256-a+b')).not.toBe(cacheNameFor('sha256-a/b'));
   });
 
-  it('shellCacheName / shellAssetUrls build the base-aware shell precache list', () => {
+  it('shellCacheName / shellAssetUrls build the base-aware shell precache list (just the document)', () => {
     expect(shellCacheName().startsWith(SHELL_CACHE_PREFIX)).toBe(true);
     const urls = shellAssetUrls('/studio/');
     expect(urls).toContain('/studio/');
     expect(urls).toContain('/studio/index.html');
-    expect(urls).toContain('/studio/manifest.webmanifest');
+    // The manifest/icons are NOT precached here — the browser holds its own copies and the fetch
+    // handler never serves them, so listing them would be dead work.
+    expect(urls).not.toContain('/studio/manifest.webmanifest');
     // base '/' must not produce a doubled slash
     expect(shellAssetUrls('/')).toContain('/index.html');
   });

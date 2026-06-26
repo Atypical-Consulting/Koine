@@ -139,9 +139,16 @@ function whenIdle(fn: () => void): void {
   else setTimeout(fn, 2000);
 }
 
-/** Once the SW is active, ask it (on idle) to precache the whole framework bundle. Best-effort. */
-function scheduleIdlePrecache(nav: { serviceWorker?: { ready?: Promise<{ active?: { postMessage(m: unknown): void } | null }> } }): void {
-  const ready = nav.serviceWorker?.ready;
+/**
+ * Once the SW is active, ask it (on idle) to precache the whole multi-MB WASM compiler bundle so the
+ * *next* launch boots offline. Call this only when the surface that needs the compiler is actually in
+ * use (the editor route) — never on a Home-only visit — so a visitor who never opens the editor isn't
+ * billed a background download. Best-effort: a no-op where the SW API is absent / not yet active.
+ */
+export function scheduleCompilerPrecache(deps: { navigatorRef?: Navigator } = {}): void {
+  const nav = deps.navigatorRef ?? (typeof navigator !== 'undefined' ? navigator : undefined);
+  if (!nav || !('serviceWorker' in nav)) return;
+  const ready = (nav.serviceWorker as { ready?: Promise<{ active?: { postMessage(m: unknown): void } | null }> }).ready;
   if (!ready || typeof ready.then !== 'function') return;
   ready
     .then((reg) => whenIdle(() => reg.active?.postMessage({ type: 'precache' })))
@@ -198,7 +205,8 @@ export function registerStudioServiceWorker(deps: RegisterServiceWorkerDeps = {}
       .register(url, { type: 'module', scope })
       .then((registration) => {
         watchForUpdates(registration as unknown as RegistrationLike, onUpdateReady, hadController);
-        scheduleIdlePrecache(nav);
+        // NB: the WASM bundle is NOT precached here — that's gated to editor-route entry
+        // (scheduleCompilerPrecache, called from main.ts) so a Home-only visit never downloads it.
       })
       .catch(() => {
         /* opportunistic — leave the app online-only on failure */

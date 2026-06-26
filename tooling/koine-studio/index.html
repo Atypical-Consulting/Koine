@@ -86,8 +86,8 @@
                a non-blocking "reload to update" so an installed PWA never gets stuck on a stale offline
                cache. Reuses the install affordance's classes (focusable buttons, AA contrast); the "×"
                hides it for the session. -->
-          <div id="sw-update" class="install-affordance" hidden>
-            <button type="button" id="btn-sw-reload" class="install-btn" aria-label="Reload to update Koine Studio" title="A new version is available — reload to update">
+          <div id="sw-update" class="install-affordance" role="status" aria-live="polite" hidden>
+            <button type="button" id="btn-sw-reload" class="install-btn" aria-label="Update Koine Studio — reload for the new version" title="A new version is available — reload to update">
               <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.4V5h-2.6" /></svg>
               <span class="install-btn-label">Update</span>
             </button>

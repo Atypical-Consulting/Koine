@@ -36,7 +36,7 @@
 //     runtime, no manual cache-busting.
 //   - The shell/static cache is named for SHELL_VERSION; `activate` evicts older shell generations.
 //
-// Served from public/ at <base>koine-studio-sw.js; registered (base-aware) by src/shell/registerServiceWorker.ts.
+// Served from public/ at <base>koine-studio-sw.js; registered (base-aware) by src/shell/serviceWorkerUpdate.ts.
 // The fetch handler anchors on this SW's own registration scope, so when Studio is deployed UNDER the
 // docs site at /Koine/studio/ it handles /Koine/studio/koine-wasm/_framework/* — disjoint from the
 // Playground SW (scope /Koine/, which deliberately excludes /studio/ per #328).
@@ -64,20 +64,16 @@ export function shellCacheName() {
 }
 
 /**
- * The stable (non-fingerprinted) shell URLs to precache at install so the IDE boots offline:
- * the base document, index.html, the PWA manifest, and the launcher icons. The content-hashed JS/CSS
- * chunks index.html references are cached on demand (cache-first) — their names aren't known here.
+ * The stable (non-fingerprinted) shell URLs to precache at install so the IDE boots offline: the base
+ * document and index.html (what the navigation fallback serves). The content-hashed JS/CSS chunks
+ * index.html references are cached on demand (cache-first) — their names aren't known here. The PWA
+ * manifest + launcher icons are deliberately NOT listed: the browser keeps its own install-time copies
+ * and the running app uses inline SVG marks, so precaching them here would be dead work the fetch
+ * handler never serves.
  */
 export function shellAssetUrls(scope) {
   const b = scope.endsWith('/') ? scope : scope + '/';
-  return [
-    b,
-    `${b}index.html`,
-    `${b}manifest.webmanifest`,
-    `${b}icons/icon-192.png`,
-    `${b}icons/icon-512.png`,
-    `${b}icons/icon-512-maskable.png`,
-  ];
+  return [b, `${b}index.html`];
 }
 
 /**
@@ -229,19 +225,21 @@ export async function handleManifestRequest(request, frameworkBase, deps) {
   try {
     const response = await deps.fetch(request);
     if (response && response.ok) {
-      const { generation } = parseBootManifest(await response.clone().text(), frameworkBase);
-      if (generation) {
-        const cacheName = cacheNameFor(generation);
-        const cache = await deps.caches.open(cacheName);
-        try {
+      // Parse + (re)cache + evict inside an INNER try: an unparseable-but-200 manifest must still serve
+      // the fresh response we already hold (don't discard a good 200 by falling through to the cache).
+      try {
+        const { generation } = parseBootManifest(await response.clone().text(), frameworkBase);
+        if (generation) {
+          const cacheName = cacheNameFor(generation);
+          const cache = await deps.caches.open(cacheName);
           await cache.put(request, response.clone());
-        } catch {
-          /* ignore — the live response is still returned below */
+          // A new build ⇒ new resources.hash ⇒ new cache name ⇒ evict the stale generation(s) here, on
+          // the manifest re-read every boot does. (Eviction can't wait for `activate`: a byte-identical
+          // koine-studio-sw.js never re-installs, so a bundle-only change would otherwise never clean up.)
+          await evictStaleCaches(cacheName, deps);
         }
-        // A new build ⇒ new resources.hash ⇒ new cache name ⇒ evict the stale generation(s) here, on
-        // the manifest re-read every boot does. (Eviction can't wait for `activate`: a byte-identical
-        // koine-studio-sw.js never re-installs, so a bundle-only change would otherwise never clean up.)
-        await evictStaleCaches(cacheName, deps);
+      } catch {
+        /* unparseable manifest / opaque body — still serve the fresh response below */
       }
       return response;
     }
@@ -262,13 +260,17 @@ export async function handleNavigationRequest(request, scopePath, deps) {
   try {
     const response = await deps.fetch(request);
     if (response && response.ok) {
+      // A redirected response can't be replayed for a navigation ("redirected response… not allowed"),
+      // so rebuild a clean, non-redirected response from its body — used for BOTH the cache and the
+      // return so an offline reload of the cached shell is replayable too.
+      const clean = response.redirected ? new Response(response.clone().body, response) : response;
       try {
         const cache = await deps.caches.open(shellCacheName());
-        await cache.put(indexUrl, response.clone());
+        await cache.put(indexUrl, clean.clone());
       } catch {
-        /* ignore — the live response is still returned */
+        /* ignore — the clean response is still returned */
       }
-      return response;
+      return clean;
     }
   } catch {
     /* offline — fall through to the cached shell */

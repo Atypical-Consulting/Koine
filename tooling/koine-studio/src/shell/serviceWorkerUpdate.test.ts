@@ -11,6 +11,7 @@ import {
   createUpdateController,
   connectUpdateAffordance,
   registerStudioServiceWorker,
+  scheduleCompilerPrecache,
 } from './serviceWorkerUpdate';
 
 // --- minimal fakes for the SW registration lifecycle ----------------------------------------------
@@ -153,6 +154,35 @@ describe('serviceWorkerUpdate — connectUpdateAffordance', () => {
     d.reloadButton.click();
     expect(reload).toHaveBeenCalledTimes(1);
     dispose();
+  });
+});
+
+describe('serviceWorkerUpdate — scheduleCompilerPrecache', () => {
+  it('is a no-op when the Service Worker API is unavailable (no throw)', () => {
+    expect(() => scheduleCompilerPrecache({ navigatorRef: {} as Navigator })).not.toThrow();
+  });
+
+  it('is a no-op when the controller is not yet ready (no throw)', () => {
+    expect(() =>
+      scheduleCompilerPrecache({ navigatorRef: { serviceWorker: {} } as unknown as Navigator }),
+    ).not.toThrow();
+  });
+
+  it('posts a precache message to the active worker once ready (on idle)', async () => {
+    const postMessage = vi.fn();
+    const ready = Promise.resolve({ active: { postMessage } });
+    const original = (globalThis as { requestIdleCallback?: unknown }).requestIdleCallback;
+    (globalThis as { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback = (cb) => cb();
+    try {
+      scheduleCompilerPrecache({
+        navigatorRef: { serviceWorker: { ready } } as unknown as Navigator,
+      });
+      await ready;
+      await Promise.resolve();
+      expect(postMessage).toHaveBeenCalledWith({ type: 'precache' });
+    } finally {
+      (globalThis as { requestIdleCallback?: unknown }).requestIdleCallback = original;
+    }
   });
 });
 
