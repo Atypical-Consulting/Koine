@@ -756,6 +756,37 @@ public class KoineLanguageServiceTests
     }
 
     [Fact]
+    public void RenameEdits_corenames_the_id_even_when_invoked_from_another_file()
+    {
+        // The aggregate root Order (with id OrderId) is declared in ordering.koi; shipping.koi only
+        // references it. Renaming from the REFERENCE in shipping.koi must still co-rename OrderId — the
+        // co-rename can't depend on which file the rename was invoked from (R13/R14 multi-file).
+        var ordering =
+            "context Ordering {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var shipping = "context Shipping {\n  value Parcel { order: Order }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///ordering.koi"] = ordering,
+            ["file:///shipping.koi"] = shipping,
+        };
+        var refLine = shipping.Split('\n')[1];
+        var col = refLine.IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var edits = Svc.RenameEditsAt(docs, "file:///shipping.koi", line: 1, character: col, newName: "PurchaseOrder");
+
+        edits.ShouldNotBeNull();
+        edits.ShouldContain(e => e.NewText == "PurchaseOrder");
+        // The OrderId co-rename fires even though shipping.koi doesn't declare the root.
+        edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Uri == "file:///ordering.koi");
+    }
+
+    [Fact]
     public void RenameEdits_does_not_corename_a_non_conventional_identity()
     {
         // The root's identity is the primitive Guid, not <Root>Id — so there is nothing to co-rename and,

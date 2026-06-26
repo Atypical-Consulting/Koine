@@ -2055,21 +2055,29 @@ public sealed class KoineLanguageService
     private static IReadOnlyList<RenameEdit>? IdentityCoRenameEdits(
         KoineCompilation compilation, string activeUri, string oldName, string newName)
     {
-        SemanticModel? model = compilation.SemanticModelFor(activeUri);
-        if (model is null)
+        // Resolve the aggregate's OWN root entity across the WHOLE workspace, not just the active file: a
+        // rename can be invoked from a reference in a different file than the one declaring the root
+        // (R13/R14 multi-file), and an aggregate's root entity lives in that aggregate's nested types —
+        // `AggregateDecl.RootEntity()` resolves it precisely (never a same-named non-root entity).
+        EntityDecl? root = null;
+        foreach (var uri in compilation.Uris)
         {
-            return null;
+            if (compilation.SemanticModelFor(uri) is not { } model)
+            {
+                continue;
+            }
+
+            root = model.Index.AllTypes()
+                .OfType<AggregateDecl>()
+                .Where(a => a.RootName == oldName)
+                .Select(a => a.RootEntity())
+                .FirstOrDefault(e => e is not null);
+            if (root is not null)
+            {
+                break;
+            }
         }
 
-        ModelIndex index = model.Index;
-
-        // The renamed symbol must be the declared root of some aggregate (not a value object/event/etc).
-        if (!index.AllTypes().OfType<AggregateDecl>().Any(a => a.RootName == oldName))
-        {
-            return null;
-        }
-
-        EntityDecl? root = index.AllTypes().OfType<EntityDecl>().FirstOrDefault(e => e.Name == oldName);
         if (root is null)
         {
             return null;
@@ -2090,8 +2098,9 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        int? idOffset = root.IdentityNameSpan.IsNone ? null : root.IdentityNameSpan.Offset;
-        IReadOnlyList<Reference> idRefs = compilation.WorkspaceIndex.FindReferences(activeUri, oldIdName, idOffset, null);
+        // Resolve the identity type workspace-wide (offset: null) so the co-rename is independent of which
+        // file the rename was invoked from — its declaration and every cross-file `: <Root>Id` use rename.
+        IReadOnlyList<Reference> idRefs = compilation.WorkspaceIndex.FindReferences(activeUri, oldIdName, offset: null, enclosingType: null);
         return idRefs.Count == 0 ? null : idRefs.Select(r => new RenameEdit(r, newIdName)).ToList();
     }
 
