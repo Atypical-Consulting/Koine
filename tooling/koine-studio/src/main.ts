@@ -55,6 +55,20 @@ function homeCallbacks(): WelcomeCallbacks {
 export function bootStudio(homeRoot: HTMLElement | null = document.getElementById('home-root')): () => void {
   const appEl = document.getElementById('app');
 
+  // Perceivability signal for the toolbar affordances (#573). The install/update affordances live in the
+  // toolbar inside #app, which is route-hidden until the editor route. Their shared live region is
+  // body-level (#522), so without a gate an affordance armed on Home — the install one is wired at boot,
+  // and `beforeinstallprompt` often fires pre-editor — would be announced to a screen reader before its
+  // control is reachable. Gate the announcement on the route: `route === 'editor'` is the canonical
+  // "#app is shown" signal (apply() un-hides #app exactly then), read live from the store so it's
+  // correct regardless of subscriber order; the route→editor edge flushes any deferred announcement,
+  // never dropping it.
+  const isToolbarPerceivable = (): boolean => appStore.getState().route === 'editor';
+  const subscribeToolbarPerceivable = (cb: () => void): (() => void) =>
+    appStore.subscribe((s, prev) => {
+      if (s.route !== prev.route) cb();
+    });
+
   // PWA install affordance (#442): wired here, at boot, rather than in the lazy IDE init() — the
   // browser's one-shot `beforeinstallprompt` fires early in page load, often while a first-time visitor
   // is still on Home (before the editor route ever activates init()). Capturing it here, regardless of
@@ -71,6 +85,9 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
           root: installRoot,
           installButton: installButton as HTMLButtonElement,
           dismissButton: installDismiss as HTMLButtonElement,
+          // Defer the "can be installed" announcement until the editor toolbar is perceivable (#573).
+          isPerceivable: isToolbarPerceivable,
+          subscribePerceivable: subscribeToolbarPerceivable,
         })
       : null;
 
@@ -90,6 +107,9 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
           root: swUpdateRoot,
           reloadButton: swReloadButton as HTMLButtonElement,
           dismissButton: swDismissButton as HTMLButtonElement,
+          // Defer the "new version" announcement until the editor toolbar is perceivable (#573).
+          isPerceivable: isToolbarPerceivable,
+          subscribePerceivable: subscribeToolbarPerceivable,
         })
       : null;
   registerStudioServiceWorker({ onUpdateReady: () => updateController.markUpdateReady() });

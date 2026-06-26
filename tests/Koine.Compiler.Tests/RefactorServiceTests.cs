@@ -570,4 +570,56 @@ public class RefactorServiceTests
         moves.ShouldContain(a => a.Title == "Move to context 'B'");
         moves.ShouldContain(a => a.Title == "Move to context 'C'");
     }
+
+    // ---- Reindent robustness (tabs + column-0) ----------------------------
+
+    [Fact]
+    public void Extracting_from_a_tab_indented_source_produces_space_clean_indentation()
+    {
+        // Tab-indented members. Re-indenting must strip the leading TABS (not just spaces), so a moved
+        // line does not end up as the new space-indent stacked on a leftover tab ("   \tcity").
+        var src =
+            "context C {\n" +
+            "\tvalue Address {\n" +
+            "\t\tstreet: String\n" +
+            "\t\tcity: String\n" +
+            "\t}\n" +
+            "}\n";
+        // Select from the start of "street" (line 2, char 2 — after two tabs) through the end of "city"
+        // (line 3, char 6).
+        var extract = ExtractValueObjectAt(src, 2, 2, 3, 6);
+        var applied = Apply(src, extract);
+        Parse(applied); // re-parses cleanly
+
+        var lines = applied.Replace("\r\n", "\n").Split('\n');
+        var cityLine = lines.Single(l => l.TrimStart(' ', '\t') == "city: String");
+        var cityIndent = cityLine[..(cityLine.Length - cityLine.TrimStart(' ', '\t').Length)];
+        cityIndent.ShouldNotContain('\t'); // re-indented cleanly to spaces, no leftover tab
+    }
+
+    [Fact]
+    public void Moving_a_column0_declaration_indents_its_body_under_the_keyword()
+    {
+        // A type written flush against the context (column 0) with a flat body. The move must still nest
+        // the body one level under the keyword in the target context rather than collapsing it flat.
+        var src =
+            "context A {\n" +
+            "value Address {\n" +
+            "street: String\n" +
+            "}\n" +
+            "}\n" +
+            "context B {\n" +
+            "value Tag { name: String }\n" +
+            "}\n";
+        // "value Address" is on line 1 (0-based) at column 0; cursor inside it.
+        var move = MoveToContextAt(src, "B", 1, 2, 1, 2);
+        var applied = Apply(src, move);
+        Parse(applied); // re-parses cleanly
+
+        var lines = applied.Replace("\r\n", "\n").Split('\n');
+        var keywordLine = lines.Single(l => l.TrimStart().StartsWith("value Address", StringComparison.Ordinal));
+        var bodyLine = lines.Single(l => l.TrimStart() == "street: String");
+        static int Indent(string l) => l.Length - l.TrimStart(' ').Length;
+        Indent(bodyLine).ShouldBeGreaterThan(Indent(keywordLine)); // body nested under its keyword
+    }
 }
