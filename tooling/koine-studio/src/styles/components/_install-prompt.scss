@@ -1,0 +1,81 @@
+// Dismissible in-app PWA install affordance (#442). Lives in the toolbar's right zone; revealed only
+// when the browser fires `beforeinstallprompt` (connectInstallAffordance toggles the container's
+// `hidden`). Two controls: a primary "Install" pill and a compact "×" dismiss (the dismiss reuses the
+// toolbar's shared `.icon-btn`). Both meet the mobile a11y bar from #422 — a >=44x44 CSS px tap target
+// (via an invisible centred hit area so the visible chrome stays toolbar-compact), WCAG 2.1 AA contrast
+// in light + dark, and a visible focus ring.
+
+.install-affordance {
+  display: flex;
+  align-items: center;
+  // Wide enough that the dismiss button's 44px tap overlay (≈7px wider than its 30px box on each side)
+  // cannot reach back over the Install button's edge — otherwise the later-painted dismiss overlay would
+  // capture clicks aimed at Install (a single-shot, persisted action). See the `::after` floor below.
+  gap: var(--koi-space-2);
+
+  // connectInstallAffordance toggles this; the flex display above would otherwise outrank the UA
+  // `[hidden]` rule and keep it visible.
+  &[hidden] {
+    display: none;
+  }
+}
+
+// Shared tap-target floor: an invisible, centred overlay guaranteeing a >=44x44px hit area without
+// growing the visible button (so the toolbar height never jumps when the affordance appears). Applies to
+// the Install pill and the dismiss (which otherwise inherits its chrome from `.icon-btn`).
+.install-btn,
+.install-dismiss {
+  position: relative;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 2px;
+  }
+}
+
+// The primary "Install" pill: an accent-bordered, accent-tinted surface with an accent icon — reads as
+// the install verb while staying lighter than the toolbar's Generate primary. The LABEL uses --koi-fg
+// (not the accent) so it clears WCAG 2.1 AA (4.5:1) on the light tint, where accent-coloured text would
+// only reach ~3.2:1; the accent glyph is a graphical object (≥3:1), which it meets.
+.install-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+  height: 30px;
+  padding: 0 var(--koi-space-2);
+  color: var(--koi-fg);
+  background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 45%, transparent);
+  border-radius: var(--koi-radius-sm);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background var(--koi-dur-fast) ease,
+    border-color var(--koi-dur-fast) ease;
+
+  .tb-ico {
+    color: var(--koi-accent);
+  }
+
+  &:hover {
+    background: color-mix(in srgb, var(--koi-accent) 22%, transparent);
+    border-color: var(--koi-accent);
+  }
+}
+
+.install-btn-label {
+  white-space: nowrap;
+}
