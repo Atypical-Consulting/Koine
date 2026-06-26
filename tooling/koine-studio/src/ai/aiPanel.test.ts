@@ -419,6 +419,54 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
     expect(container.querySelector('.koi-assistant-chip')).toBeNull();
   });
+
+  // #447: the GBNF and the compiler tools are mutually exclusive at the decoder — a grammar that only
+  // accepts `.koi` can't also emit the tool-call JSON the agentic loop needs. When the grammar is
+  // EFFECTIVE for the turn (mechanism === 'gbnf'), grammar wins: the request must keep the grammar and
+  // WITHHOLD the tools, never advertise tools the GBNF would silently render uncallable.
+  test('both tools AND grammar on (gbnf turn): keeps the grammar, withholds the tools (grammar wins)', async () => {
+    mockReply('context X {}');
+    const container = document.createElement('div');
+    const runCompilerTool = vi.fn(() => Promise.resolve(CLEAN));
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true, // tools ON…
+        getConstrainGrammar: () => true, // …and grammar ON, on a grammar-capable backend
+        getGrammar: () => Promise.resolve('root ::= "x"'),
+        runCompilerTool,
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(vi.mocked(runAssistant)).toHaveBeenCalled());
+    const req = vi.mocked(runAssistant).mock.calls[0][0];
+    expect(req.grammar).toBe('root ::= "x"'); // grammar rode along
+    expect(req.runCompilerTool).toBeUndefined(); // tools withheld — the GBNF can't call them
+  });
+
+  // The runtime guard is gated on the grammar being EFFECTIVE: on a non-capable backend the grammar
+  // falls back to parse-and-repair (mechanism === 'repair'), the GBNF is never attached, so the tools
+  // must still run (the existing behavior) rather than being needlessly withheld.
+  test('both on but a NON-capable backend (repair turn): no grammar, tools still advertised', async () => {
+    mockReply();
+    const container = document.createElement('div');
+    const runCompilerTool = vi.fn(() => Promise.resolve(CLEAN));
+    createAssistantPanel(
+      opts(container, {
+        getProvider: () => 'anthropic',
+        getBaseUrl: () => '',
+        getUseTools: () => true,
+        getConstrainGrammar: () => true,
+        runCompilerTool,
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(vi.mocked(runAssistant)).toHaveBeenCalled());
+    const req = vi.mocked(runAssistant).mock.calls[0][0];
+    expect(req.grammar).toBeUndefined(); // Anthropic can't be token-masked
+    expect(req.runCompilerTool).toBe(runCompilerTool); // tools still run — grammar wasn't effective
+  });
 });
 
 // --- multi-file change set (#... agentic edits): the per-file review/apply panel ----------------

@@ -184,7 +184,10 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   }
 
   // An iOS-style on/off switch backed by role=switch (toggles on click; label via aria-label).
-  function toggle(ariaLabel: string, onChange: (on: boolean) => void): { el: HTMLButtonElement; set(on: boolean): void } {
+  function toggle(
+    ariaLabel: string,
+    onChange: (on: boolean) => void,
+  ): { el: HTMLButtonElement; set(on: boolean): void; setDisabled(disabled: boolean): void } {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'koi-switch';
@@ -195,12 +198,19 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     thumb.className = 'koi-switch-thumb';
     btn.appendChild(thumb);
     const set = (on: boolean) => btn.setAttribute('aria-checked', String(on));
+    // Grey out + block interaction (e.g. a mutually-exclusive sibling is on). The native `disabled`
+    // attribute is what actually blocks the click (a disabled <button> dispatches no click event, so
+    // onChange can't fire); aria-disabled is set alongside it as an explicit, redundant signal.
+    const setDisabled = (disabled: boolean) => {
+      btn.disabled = disabled;
+      btn.setAttribute('aria-disabled', String(disabled));
+    };
     btn.addEventListener('click', () => {
       const next = btn.getAttribute('aria-checked') !== 'true';
       set(next);
       onChange(next);
     });
-    return { el: btn, set };
+    return { el: btn, set, setDisabled };
   }
 
   // A segmented radio group (e.g. Dark / Light). Each option is a button; one is checked at a time.
@@ -910,16 +920,36 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   aiModelInput.spellcheck = false;
   aiModelInput.placeholder = 'claude-opus-4-8';
 
-  const aiAgenticTools = toggle('Compiler tools', (on) => commit({ aiAgenticTools: on }));
+  // #447: Compiler tools and grammar-constraint are mutually exclusive — a GBNF that only accepts `.koi`
+  // can't also emit the tool-call JSON the agentic loop needs, so with both on the grammar would
+  // silently disable the tools. Enabling one CLEARS the other (grammar is the default winner); the
+  // losing toggle is greyed by syncAiExclusivity() so the broken pairing can never be set.
+  const aiAgenticTools = toggle('Compiler tools', (on) => {
+    if (on) aiConstrainGrammar.set(false); // tools win this turn → reflect grammar going off
+    commit(on ? { aiAgenticTools: true, aiConstrainGrammar: false } : { aiAgenticTools: false });
+    syncAiExclusivity();
+  });
   const aiInlineCompletions = toggle('AI inline completions', (on) => commit({ aiInlineCompletions: on }));
-  const aiConstrainGrammar = toggle('Constrain AI output to the Koine grammar', (on) =>
-    commit({ aiConstrainGrammar: on }),
-  );
+  const aiConstrainGrammar = toggle('Constrain AI output to the Koine grammar', (on) => {
+    if (on) aiAgenticTools.set(false); // grammar wins this turn → reflect tools going off
+    commit(on ? { aiConstrainGrammar: true, aiAgenticTools: false } : { aiConstrainGrammar: false });
+    syncAiExclusivity();
+  });
+
+  // Reflect the mutual exclusion in the UI: whichever of the two is on disables (greys) the other, so
+  // it can't be turned on alongside. Reads the live aria-checked state so it stays correct after each
+  // toggle and on open. A function declaration (hoisted) so the toggle closures above can call it.
+  function syncAiExclusivity(): void {
+    const toolsOn = aiAgenticTools.el.getAttribute('aria-checked') === 'true';
+    const grammarOn = aiConstrainGrammar.el.getAttribute('aria-checked') === 'true';
+    aiAgenticTools.setDisabled(grammarOn);
+    aiConstrainGrammar.setDisabled(toolsOn);
+  }
 
   const baseUrlRow = row('Base URL', 'Endpoint for the OpenAI-compatible provider.', aiBaseUrlInput);
   const agenticToolsRow = row(
     'Compiler tools',
-    'Let the model validate, compile and format your model mid-chat. Off keeps replies streaming — some local servers (LM Studio) stop streaming when tools are offered.',
+    'Let the model validate, compile and format your model mid-chat. Off keeps replies streaming — some local servers (LM Studio) stop streaming when tools are offered. Mutually exclusive with grammar-constraint below — turn that off to use tools.',
     aiAgenticTools.el,
   );
   const inlineCompletionsRow = row(
@@ -929,7 +959,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   );
   const constrainGrammarRow = row(
     'Constrain AI output to the Koine grammar',
-    "Guarantee the assistant's generated .koi parses: grammar-capable local models are constrained to the Koine grammar, while other providers validate-and-repair the model before Apply is enabled.",
+    "Guarantee the assistant's generated .koi parses: grammar-capable local models are constrained to the Koine grammar, while other providers validate-and-repair the model before Apply is enabled. Mutually exclusive with Compiler tools — grammar wins, since a grammar-constrained model can't also call tools.",
     aiConstrainGrammar.el,
   );
   function syncProviderFields(): void {
@@ -1389,9 +1419,15 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     aiBaseUrlInput.value = s.aiBaseUrl;
     aiKeyInput.value = s.aiApiKey;
     aiModelInput.value = s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
-    aiAgenticTools.set(s.aiAgenticTools);
+    // #447: Compiler-tools and grammar-constraint are mutually exclusive. A legacy persisted state with
+    // BOTH on is the silently-broken combination → normalize to grammar-wins (tools off) and persist
+    // the correction, so the panel never even shows the broken pairing.
+    const bothAiOn = s.aiAgenticTools && s.aiConstrainGrammar;
+    if (bothAiOn) patchSettings({ aiAgenticTools: false });
+    aiAgenticTools.set(bothAiOn ? false : s.aiAgenticTools);
     aiInlineCompletions.set(s.aiInlineCompletions);
     aiConstrainGrammar.set(s.aiConstrainGrammar);
+    syncAiExclusivity();
     mcpEnableToggle.set(s.mcpEnabled);
     mcpClientSelect.value = s.mcpClient;
     renderRecipe();
