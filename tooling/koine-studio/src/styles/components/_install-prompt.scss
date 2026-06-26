@@ -1,0 +1,90 @@
+// Dismissible in-app PWA install affordance (#442). Lives in the toolbar's right zone; revealed only
+// when the browser fires `beforeinstallprompt` (connectInstallAffordance toggles the container's
+// `hidden`). Two controls: a primary "Install" pill and a compact "×" dismiss. Both meet the mobile
+// a11y bar from #422 — a >=44x44 CSS px tap target (via an invisible centred hit area so the visible
+// chrome stays toolbar-compact), WCAG 2.1 AA contrast in light + dark, and a visible focus ring.
+
+.install-affordance {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-0-5, 0.2rem);
+
+  // connectInstallAffordance toggles this; the flex display above would otherwise outrank the UA
+  // `[hidden]` rule and keep it visible.
+  &[hidden] {
+    display: none;
+  }
+}
+
+// Shared tap-target floor: an invisible, centred overlay guaranteeing a >=44x44px hit area without
+// growing the visible button (so the toolbar height never jumps when the affordance appears).
+.install-btn,
+.install-dismiss {
+  position: relative;
+  cursor: pointer;
+  font-family: var(--koi-font-body);
+  transition:
+    background var(--koi-dur-fast, 0.12s) ease,
+    color var(--koi-dur-fast, 0.12s) ease,
+    border-color var(--koi-dur-fast, 0.12s) ease;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 2px;
+  }
+}
+
+// The primary "Install" pill: accent text on an accent-tinted surface — reads as the install verb while
+// staying lighter than the toolbar's Generate primary. The accent token is theme-tuned for AA contrast.
+.install-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1, 0.35rem);
+  height: 30px;
+  padding: 0 var(--koi-space-2, 0.6rem);
+  color: var(--koi-accent);
+  background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 45%, transparent);
+  border-radius: var(--koi-radius-sm, 6px);
+  font-size: var(--koi-text-sm, 0.85rem);
+  font-weight: 600;
+  line-height: 1;
+
+  &:hover {
+    background: color-mix(in srgb, var(--koi-accent) 22%, transparent);
+    border-color: var(--koi-accent);
+  }
+}
+
+.install-btn-label {
+  white-space: nowrap;
+}
+
+// The "×" dismiss: a compact square ghost, muted until hover — quiet so it never competes with Install.
+.install-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  color: var(--koi-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm, 6px);
+
+  &:hover {
+    color: var(--koi-fg);
+    background: var(--koi-surface);
+    border-color: var(--koi-line);
+  }
+}

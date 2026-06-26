@@ -129,3 +129,50 @@ export function createInstallController(opts: { storage?: InstallStorage } = {})
     subscribe,
   };
 }
+
+/** The DOM the install affordance drives: the affordance container plus its two buttons. */
+export interface InstallAffordanceDom {
+  /** The container toggled visible/hidden as a unit (holds the Install + dismiss buttons). */
+  root: HTMLElement;
+  /** The primary "Install" button — click triggers `promptInstall()`. */
+  installButton: HTMLButtonElement;
+  /** The close "×" button — click triggers `dismiss()`. */
+  dismissButton: HTMLButtonElement;
+  /** The event source for `beforeinstallprompt`/`appinstalled` (defaults to `window`). */
+  target?: EventTarget;
+}
+
+/**
+ * Wire an {@link InstallController} to its DOM affordance: register the browser install events, toggle
+ * the affordance visibility from `canInstall()`, and route clicks to prompt/dismiss. Returns a disposer
+ * that removes every listener. Pure of any global lookups so it unit-tests under happy-dom.
+ */
+export function connectInstallAffordance(
+  controller: InstallController,
+  dom: InstallAffordanceDom,
+): () => void {
+  const target = dom.target ?? window;
+
+  const sync = (): void => {
+    dom.root.hidden = !controller.canInstall();
+  };
+  const onBip = (e: Event): void => controller.onBeforeInstallPrompt(e as BeforeInstallPromptEvent);
+  const onInstalled = (): void => controller.onAppInstalled();
+  const onInstallClick = (): void => void controller.promptInstall();
+  const onDismissClick = (): void => controller.dismiss();
+
+  target.addEventListener('beforeinstallprompt', onBip);
+  target.addEventListener('appinstalled', onInstalled);
+  dom.installButton.addEventListener('click', onInstallClick);
+  dom.dismissButton.addEventListener('click', onDismissClick);
+  const unsub = controller.subscribe(sync);
+  sync(); // reflect the initial state immediately
+
+  return () => {
+    target.removeEventListener('beforeinstallprompt', onBip);
+    target.removeEventListener('appinstalled', onInstalled);
+    dom.installButton.removeEventListener('click', onInstallClick);
+    dom.dismissButton.removeEventListener('click', onDismissClick);
+    unsub();
+  };
+}

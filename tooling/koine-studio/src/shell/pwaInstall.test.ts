@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
+  connectInstallAffordance,
   createInstallController,
   INSTALL_DISMISSED_KEY,
   type BeforeInstallPromptEvent,
@@ -138,5 +139,103 @@ describe('createInstallController', () => {
     expect(c.canInstall()).toBe(true);
     expect(() => c.dismiss()).not.toThrow();
     expect(c.canInstall()).toBe(false);
+  });
+});
+
+describe('connectInstallAffordance', () => {
+  // Build the affordance DOM the shell mounts: a container with an Install button and a dismiss "×".
+  function makeDom() {
+    const root = document.createElement('div');
+    const installButton = document.createElement('button');
+    const dismissButton = document.createElement('button');
+    root.append(installButton, dismissButton);
+    document.body.append(root);
+    // A private event bus so the test never depends on (or pollutes) the real window.
+    const target = new EventTarget();
+    return { root, installButton, dismissButton, target };
+  }
+
+  // A dispatchable `beforeinstallprompt`: cancelable (so preventDefault sets defaultPrevented) with the
+  // non-standard prompt()/userChoice surface bolted on.
+  function dispatchBip(target: EventTarget, outcome: 'accepted' | 'dismissed' = 'accepted') {
+    const e = new Event('beforeinstallprompt', { cancelable: true }) as BeforeInstallPromptEvent;
+    const prompt = vi.fn(() => Promise.resolve());
+    (e as unknown as { prompt: typeof prompt }).prompt = prompt;
+    (e as unknown as { userChoice: Promise<unknown> }).userChoice = Promise.resolve({ outcome, platform: 'web' });
+    target.dispatchEvent(e);
+    return { e, prompt };
+  }
+
+  it('keeps the affordance hidden until a beforeinstallprompt arrives, then reveals it', () => {
+    const dom = makeDom();
+    const controller = createInstallController({ storage: memStorage() });
+    const dispose = connectInstallAffordance(controller, dom);
+
+    expect(dom.root.hidden).toBe(true);
+
+    const { e } = dispatchBip(dom.target);
+    expect(e.defaultPrevented).toBe(true); // mini-infobar suppressed
+    expect(dom.root.hidden).toBe(false);
+
+    dispose();
+  });
+
+  it('clicking Install invokes the prompt and hides the affordance (single-use)', () => {
+    const dom = makeDom();
+    const controller = createInstallController({ storage: memStorage() });
+    const dispose = connectInstallAffordance(controller, dom);
+
+    const { prompt } = dispatchBip(dom.target);
+    expect(dom.root.hidden).toBe(false);
+
+    dom.installButton.click();
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(dom.root.hidden).toBe(true); // stash cleared synchronously before the await
+
+    dispose();
+  });
+
+  it('clicking dismiss hides the affordance and persists the dismissal', () => {
+    const dom = makeDom();
+    const storage = memStorage();
+    const controller = createInstallController({ storage });
+    const dispose = connectInstallAffordance(controller, dom);
+
+    dispatchBip(dom.target);
+    expect(dom.root.hidden).toBe(false);
+
+    dom.dismissButton.click();
+    expect(dom.root.hidden).toBe(true);
+    expect(storage.getItem(INSTALL_DISMISSED_KEY)).toBe('1');
+
+    // A re-fired event stays hidden — respects the persisted dismissal.
+    dispatchBip(dom.target);
+    expect(dom.root.hidden).toBe(true);
+
+    dispose();
+  });
+
+  it('hides the affordance on appinstalled', () => {
+    const dom = makeDom();
+    const controller = createInstallController({ storage: memStorage() });
+    const dispose = connectInstallAffordance(controller, dom);
+
+    dispatchBip(dom.target);
+    expect(dom.root.hidden).toBe(false);
+
+    dom.target.dispatchEvent(new Event('appinstalled'));
+    expect(dom.root.hidden).toBe(true);
+
+    dispose();
+  });
+
+  it('dispose() detaches every listener', () => {
+    const dom = makeDom();
+    const controller = createInstallController({ storage: memStorage() });
+    const dispose = connectInstallAffordance(controller, dom);
+    dispose();
+
+    dispatchBip(dom.target);
+    expect(dom.root.hidden).toBe(true); // no longer listening, so it never armed
   });
 });

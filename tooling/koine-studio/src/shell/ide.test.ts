@@ -285,6 +285,10 @@ const APP_HTML = `
         </div>
         <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
         <div class="toolbar-right">
+          <div id="install-affordance" class="install-affordance" hidden>
+            <button type="button" id="btn-install" class="install-btn" aria-label="Install Koine Studio">Install</button>
+            <button type="button" id="btn-install-dismiss" class="install-dismiss" aria-label="Dismiss install prompt">×</button>
+          </div>
           <button type="button" id="palette-hint" class="palette-hint">K</button>
           <button type="button" id="btn-theme" class="icon-btn">theme</button>
           <button type="button" id="btn-prefs" class="icon-btn">prefs</button>
