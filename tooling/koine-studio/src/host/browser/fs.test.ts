@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   __setFolderForTest,
   __resetFsForTest,
   __clearDbForTest,
   listEntries,
   listDir,
+  listKoiFiles,
   createFile,
   createFolder,
   deleteEntry,
@@ -567,5 +568,142 @@ describe('saveProjectToRoot / workspace root', () => {
     const name = await pickWorkspaceRoot(); // forces a re-pick → `second`
     expect(name).toBe('work');
     expect(await workspaceRootName()).toBe('work');
+  });
+});
+
+// --- persisted-example IndexedDB reload round-trip (#535 follow-up, #544) -----
+// #535 makes Studio Web auto-restore an opened example after a reload: materializeWorkspace(persist:true)
+// writes the example into OPFS and idbPut()s its directory handle, and at cold boot the shell re-acquires
+// it by token. The #535 boot tests mock `@/host` (FakePlatform.listKoiFiles ignores its token), so the
+// fs-layer promise the fix actually relies on — that a persisted `example-*` handle genuinely re-acquires
+// from IndexedDB, WITHOUT a permission prompt, once the in-memory handle caches are gone — is untested.
+// This suite drives the REAL materialize → reload → listKoiFiles path against the in-memory IndexedDB
+// (fake-indexeddb, installed in src/test-setup.ts), closing that gap.
+//
+// A real FileSystemDirectoryHandle is [Serializable]: the browser persists it to IndexedDB and restores a
+// live, usable handle on read. happy-dom ships no such handle, and a plain mock class loses its methods
+// through structured clone (prototype methods don't survive — verified empirically), so a re-acquired
+// plain mock would not be walkable. We therefore back the OPFS handle with a `Map` subclass: a Map
+// round-trips structured clone into a real Map whose `.values()` still iterates its children, so the
+// re-acquired handle exposes the one surface fs.ts's walk drives (`values()`) for the flat tree this test
+// seeds. (The model is single-level: structured clone reconstructs a bare Map and drops a CloneDir's own
+// `kind`/`name`, so a *nested* subdir wouldn't survive — a real OPFS handle keeps those at every depth.
+// This test seeds one flat `.koi`, matching the #544 example, so depth never comes into play.) And — like
+// a real OPFS handle, unlike a picked folder — the restored Map carries NO queryPermission/
+// requestPermission, so resolveFolder re-acquires it silently. That asymmetry is the whole premise of
+// #535: boot may auto-restore `example-*` but never a picked folder.
+describe('materializeWorkspace persisted-example IndexedDB reload round-trip (#544)', () => {
+  // A permission API on the LIVE handle (as a picked-folder handle would have). Structured clone drops it,
+  // so the re-acquired OPFS handle exposes none and resolveFolder's prompt branch is unreachable. The
+  // not-called assertion therefore documents/guards that the re-acquire stays on the permission-free path
+  // (it can't catch a regression that re-adds a prompt — the restored handle has no method to call — but
+  // it pins the OPFS-vs-picked asymmetry the #535 design rests on).
+  const requestPermissionSpy = vi.fn(async (_opts?: { mode: string }) => 'granted' as PermissionState);
+
+  /** A file handle seeded into the OPFS tree (materialize only exercises createWritable; walk reads name). */
+  class CloneFile {
+    readonly kind = 'file' as const;
+    constructor(
+      public name: string,
+      public contents = '',
+    ) {}
+    async getFile() {
+      const text = this.contents;
+      return { text: async () => text } as unknown as File;
+    }
+    async createWritable() {
+      return {
+        write: async (data: string | { text(): Promise<string> }) => {
+          this.contents = typeof data === 'string' ? data : await data.text();
+        },
+        close: async () => {},
+      };
+    }
+  }
+
+  // A directory handle that survives fake-indexeddb's structured clone with a working values(): children
+  // live as Map entries, so the clone (a plain Map) still iterates them via Map.prototype.values — the
+  // surface fs.ts's walk drives. Models a [Serializable] OPFS handle restored from IndexedDB, single-level
+  // (see the suite comment): the clone keeps the Map entries but drops this CloneDir's own kind/name.
+  class CloneDir extends Map<string, CloneFile | CloneDir> {
+    readonly kind = 'directory' as const;
+    constructor(public name: string) {
+      super();
+    }
+    async getDirectoryHandle(name: string, opts?: { create?: boolean }): Promise<CloneDir> {
+      const existing = this.get(name);
+      if (existing) {
+        if (existing.kind !== 'directory') throw new Error('not a directory: ' + name);
+        return existing;
+      }
+      if (!opts?.create) throw new Error('NotFound: ' + name);
+      const dir = new CloneDir(name);
+      this.set(name, dir);
+      return dir;
+    }
+    async getFileHandle(name: string, opts?: { create?: boolean }): Promise<CloneFile> {
+      const existing = this.get(name);
+      if (existing) {
+        if (existing.kind !== 'file') throw new Error('not a file: ' + name);
+        return existing;
+      }
+      if (!opts?.create) throw new Error('NotFound: ' + name);
+      const file = new CloneFile(name);
+      this.set(name, file);
+      return file;
+    }
+    async removeEntry(name: string): Promise<void> {
+      this.delete(name);
+    }
+    // Present on the LIVE handle; dropped by structured clone (an OPFS handle restores without a
+    // permission gate). queryPermission would report 'granted' even if it survived, so resolveFolder never
+    // prompts on re-acquire.
+    async queryPermission(): Promise<PermissionState> {
+      return 'granted';
+    }
+    async requestPermission(opts?: { mode: string }): Promise<PermissionState> {
+      return requestPermissionSpy(opts);
+    }
+  }
+
+  function mockOpfs(root: CloneDir): void {
+    (navigator as unknown as { storage: { getDirectory(): Promise<unknown> } }).storage = {
+      getDirectory: async () => root as never,
+    };
+  }
+
+  const originalStorage = (navigator as unknown as { storage?: unknown }).storage;
+  beforeEach(async () => {
+    __resetFsForTest();
+    await __clearDbForTest();
+    requestPermissionSpy.mockClear();
+    mockOpfs(new CloneDir('opfs-root'));
+  });
+  afterEach(async () => {
+    (navigator as unknown as { storage?: unknown }).storage = originalStorage;
+    __resetFsForTest();
+    await __clearDbForTest();
+  });
+
+  it('re-acquires a persisted example from IndexedDB after a reload, with no permission prompt', async () => {
+    const files = [{ relPath: 'subscription.koi', contents: 'context Sub {}\n' }];
+
+    // Materialize a persistent example. persistsWorkspace() is true under the mocked OPFS, so the handle
+    // is idbPut() into IndexedDB; the token is the STABLE example token (not a session-unique one).
+    const token = await materializeWorkspace('saas-subscription', files, true);
+    expect(token).toBe('example-saas-subscription');
+    expect(persistsWorkspace()).toBe(true);
+
+    // Simulate a page reload: drop every in-memory handle cache so the next resolve MUST hit IndexedDB.
+    __resetFsForTest();
+
+    // Re-acquire by token alone. A successful walk proves idbPut ran AND the handle round-tripped through
+    // IndexedDB — a non-cloneable mock would lose its methods here and the walk would throw.
+    const files2 = await listKoiFiles(token as string);
+    expect(files2.map((f) => f.relPath)).toContain('subscription.koi');
+
+    // OPFS silent-restore: the re-acquired handle carries no permission API, so resolveFolder never
+    // reached its prompt branch (see the requestPermissionSpy note above for what this does/doesn't guard).
+    expect(requestPermissionSpy).not.toHaveBeenCalled();
   });
 });
