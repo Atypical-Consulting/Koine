@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest';
 import { act } from '@testing-library/preact';
 import { EditorView } from '@codemirror/view';
-import type { FsEntry, KoiFile, LspTransport, Platform } from '@/host/types';
+import type { FsEntry, GitLogEntry, GitStatus, KoiFile, LspTransport, Platform } from '@/host/types';
 import { buildShareUrl, buildWorkspaceShareUrl } from '@/export/share';
 
 // The studio reads `__APP_VERSION__` (a vite build-time define) once at boot for the status bar.
@@ -113,6 +113,7 @@ class FakePlatform implements Platform {
   readonly canOpenFolders = true;
   readonly canSaveProjects = true;
   readonly canRunShell = false;
+  readonly canUseGit = false;
   persistsWorkspace = true;
   readonly transport = new FakeLspTransport();
 
@@ -189,6 +190,36 @@ class FakePlatform implements Platform {
   }
   gitLogForRange(): Promise<null> {
     return Promise.resolve(null);
+  }
+  // git is a desktop-only capability (#272); this browser-like fake reports canUseGit=false, so the
+  // source-control methods are never reached. They reject (rather than fake-resolve) so a test that
+  // forgot to guard fails loudly instead of passing against an unexercised path.
+  private gitUnavailable(): Promise<never> {
+    return Promise.reject(new Error('git is unavailable in this fake host'));
+  }
+  gitStatus(): Promise<GitStatus> {
+    return this.gitUnavailable();
+  }
+  gitDiff(): Promise<string> {
+    return this.gitUnavailable();
+  }
+  gitStage(): Promise<void> {
+    return this.gitUnavailable();
+  }
+  gitUnstage(): Promise<void> {
+    return this.gitUnavailable();
+  }
+  gitCommit(): Promise<void> {
+    return this.gitUnavailable();
+  }
+  gitBranches(): Promise<string[]> {
+    return this.gitUnavailable();
+  }
+  gitCheckout(): Promise<void> {
+    return this.gitUnavailable();
+  }
+  gitLog(): Promise<GitLogEntry[]> {
+    return this.gitUnavailable();
   }
   writeTextFile(path: string, contents: string): Promise<void> {
     this.files.set(this.relOf(path), contents);
