@@ -8,6 +8,19 @@ may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+- **Live Playground compiler failed to boot ("Koine worker timed out after 30s").** The marketing-site
+  Playground's in-browser compiler hung at boot: its wasm Web Worker installed the message loop with a
+  top-level `self.onmessage = …`, which clobbers the `message` channel the .NET WebAssembly runtime
+  installs while `dotnet.create()` boots inside a Worker, so the boot never settled (no `ready`, no
+  `boot-failure`) and the host waited out its 30s timer (issue #492). This is the exact #357/#358 Studio
+  hang, re-introduced on the un-ported website copy. Ported the proven Studio fix: the worker now
+  installs its RPC loop via `self.addEventListener('message', …)` **after** `dotnet.create()` resolves,
+  never as a top-level `self.onmessage =`. Added a headless-Chromium boot smoke test
+  (`website/scripts/smoke-boot.mjs`) that boots the real deploy bundle and asserts the compiler reaches
+  `ready` and round-trips a compile — wired into the docs deploy as a gate so a non-booting worker can
+  never ship silently again.
+
 ### Added
 - **Koine Studio — Source Control (git) panel.** A new right-rail **Source Control** view brings git into
   the IDE for `.koi` models kept under version control (issue #272): the current branch with a switcher,
