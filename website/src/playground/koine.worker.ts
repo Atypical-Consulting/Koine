@@ -52,23 +52,11 @@ function bootRuntime(): Promise<InteropSurface> {
 }
 
 // ---------------------------------------------------------------------------
-// Boot and post the ready / boot-failure signal.
-// ---------------------------------------------------------------------------
-
-bootRuntime()
-  .then(() => {
-    self.postMessage({ type: 'ready' } satisfies WorkerSignal);
-  })
-  .catch((err: unknown) => {
-    const message = err instanceof Error ? err.message : String(err);
-    self.postMessage({ type: 'boot-failure', error: message } satisfies WorkerSignal);
-  });
-
-// ---------------------------------------------------------------------------
 // Message loop: dispatch { id, method, args } → { id, ok, result/error }.
 // ---------------------------------------------------------------------------
 
-self.onmessage = async (ev: MessageEvent<WorkerRequest>): Promise<void> => {
+/** Dispatch one `{ id, method, args }` request → `{ id, ok, result/error }` reply. */
+async function handleMessage(ev: MessageEvent<WorkerRequest>): Promise<void> {
   const { id, method, args } = ev.data;
   try {
     const interop = await bootRuntime();
@@ -82,4 +70,29 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>): Promise<void> => {
     const error = err instanceof Error ? err.message : String(err);
     self.postMessage({ id, ok: false, error } satisfies WorkerResponse);
   }
-};
+}
+
+// ---------------------------------------------------------------------------
+// Boot, then wire the message loop and broadcast ready / boot-failure.
+//
+// CRITICAL (issues #357 / #358 / #492): the message loop is installed via
+// `self.addEventListener('message', …)` AFTER the runtime has booted — NOT as a top-level
+// `self.onmessage = …`. Assigning `self.onmessage` synchronously at worker startup clobbers the
+// `message` channel the .NET WebAssembly runtime relies on while `dotnet.create()` boots inside a
+// Worker, which deadlocks the boot: `import(dotnet.js)` resolves but `create()` never settles (no
+// ready, no failure), so the host waits out its 30s timer ("Koine worker timed out after 30s"). This
+// is the exact #357/#358 Studio hang; it was re-introduced on this website copy as #492. Wiring the
+// handler only once boot has resolved leaves that channel untouched during boot. The host sends RPC
+// only after it receives `ready`, so installing the handler just before `ready` loses no messages.
+// (Mirrors tooling/koine-studio/src/host/browser/koine.worker.ts.)
+// ---------------------------------------------------------------------------
+
+bootRuntime()
+  .then(() => {
+    self.addEventListener('message', (ev: MessageEvent) => void handleMessage(ev as MessageEvent<WorkerRequest>));
+    self.postMessage({ type: 'ready' } satisfies WorkerSignal);
+  })
+  .catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    self.postMessage({ type: 'boot-failure', error: message } satisfies WorkerSignal);
+  });

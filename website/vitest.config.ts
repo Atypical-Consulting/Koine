@@ -6,6 +6,9 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    // src/**: playground worker-client unit tests. scripts/**: the smoke-test verdict logic
+    // (classifyBootOutcome) — a pure, browser-free unit (the Chromium boot itself is `npm run
+    // test:browser`, not part of this suite).
+    include: ['src/**/*.test.ts', 'scripts/**/*.test.mjs'],
   },
 });
