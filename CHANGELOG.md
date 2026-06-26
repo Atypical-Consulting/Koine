@@ -9,6 +9,15 @@ may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Koine Studio — Source Control (git) panel.** A new right-rail **Source Control** view brings git into
+  the IDE for `.koi` models kept under version control (issue #272): the current branch with a switcher,
+  changed files grouped into **Staged** / **Changes** / **Untracked** with per-row stage/unstage and an
+  inline diff, a commit box, and the recent-commit log. Git is a host capability behind a new `canUseGit`
+  flag on `Platform` — the desktop (Tauri) host shells `git` in the opened folder via new `git_*` sidecar
+  commands (`git_status`/`git_diff`/`git_stage`/`git_unstage`/`git_commit`/`git_branches`/`git_checkout`/
+  `git_log`), while the browser host (no shell) degrades gracefully to a "desktop only" empty state, and a
+  non-repo folder shows a "not a git repository" empty state. This is the umbrella git plumbing the
+  per-element inspector history (#150) reuses.
 - **TypeScript & Python infrastructure layer (`--layers infrastructure`).** The opt-in
   `--layers infrastructure` selector — previously C#-only (EF Core) — now also applies to the
   **TypeScript** and **Python** targets (issue #241), closing the largest cross-emitter parity gap.

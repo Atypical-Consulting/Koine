@@ -1,7 +1,7 @@
 // Browser platform backend: the compiler runs in-process via Koine.Wasm (WasmLspTransport) and
 // files go through the File System Access API (fs.ts). Used when the studio is served as a plain
 // web page rather than hosted in the Tauri desktop shell.
-import type { FsEntry, KoiFile, LspTransport, Platform, SourceDoc } from '@/host/types';
+import type { FsEntry, GitLogEntry, GitStatus, KoiFile, LspTransport, Platform, SourceDoc } from '@/host/types';
 import { WasmLspTransport } from '@/host/browser/transport';
 import { runWasmTool } from '@/host/browser/tools';
 import { loadWasmApi } from '@/host/browser/wasm';
@@ -98,6 +98,52 @@ export class BrowserPlatform implements Platform {
   // inspector's "Change history" section gracefully (no console errors).
   gitLogForRange(): Promise<null> {
     return Promise.resolve(null);
+  }
+
+  // --- source control (git) --------------------------------------------------
+  // git is a desktop-only capability (issue #272): a browser tab has none, so `canUseGit` is false and
+  // the Source Control panel renders its "desktop only" placeholder instead of calling anything below.
+  readonly canUseGit = false;
+
+  // The shared stub for every git method. It REJECTS (rather than returning fake-empty data) so a caller
+  // that forgot to guard on `canUseGit` gets a handled error, not a "clean working tree" that looks
+  // real. The rejection is asynchronous (never a synchronous throw) and logs nothing, so a guarded UI
+  // never reaches it and an unguarded one degrades gracefully. `Promise<never>` is assignable to every
+  // git method's return type.
+  private gitUnavailable(): Promise<never> {
+    return Promise.reject(new Error('git is unavailable in the browser host; check `canUseGit` before calling'));
+  }
+
+  gitStatus(): Promise<GitStatus> {
+    return this.gitUnavailable();
+  }
+
+  gitDiff(): Promise<string> {
+    return this.gitUnavailable();
+  }
+
+  gitStage(): Promise<void> {
+    return this.gitUnavailable();
+  }
+
+  gitUnstage(): Promise<void> {
+    return this.gitUnavailable();
+  }
+
+  gitCommit(): Promise<void> {
+    return this.gitUnavailable();
+  }
+
+  gitBranches(): Promise<string[]> {
+    return this.gitUnavailable();
+  }
+
+  gitCheckout(): Promise<void> {
+    return this.gitUnavailable();
+  }
+
+  gitLog(): Promise<GitLogEntry[]> {
+    return this.gitUnavailable();
   }
 
   readTextFile(path: string): Promise<string> {
