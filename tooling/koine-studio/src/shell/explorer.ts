@@ -14,6 +14,7 @@
 // the prompting; the actual fs work happens in the host via the ExplorerCallbacks. Dirty dot, active
 // state and the error/warning badge mirror ide.ts/renderTree so the visual language stays consistent.
 import type { FsEntry } from '@/host';
+import { createFloatingMenu } from '@/shared/floatingMenu';
 import { createModal, type ModalHandle } from '@/shared/overlay';
 
 export interface ExplorerCallbacks {
@@ -167,10 +168,20 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
   // The latest groups the tree was rendered from, so the filter field, Collapse-all and reveal-active
   // can re-render without the host re-supplying them.
   let lastGroups: ExplorerRootGroup[] = [];
-  // The single floating context menu, lazily mounted to document.body and reused.
-  let menuEl: HTMLElement | null = null;
-  // The element to return focus to when the context menu closes (the row/li or '⋯').
-  let menuTrigger: HTMLElement | null = null;
+  // The single floating context menu, built on the shared `createFloatingMenu` engine (#547) and reused.
+  // It positions at the right-click point (`at`) and captures document.activeElement as its focus-return
+  // trigger. Unlike the toolbar/leaf menus it does NOT toggle aria-expanded on that trigger (a treeitem,
+  // whose aria-expanded means its own expansion state) and does NOT guard the trigger's subtree on
+  // outside-pointerdown (the trigger may be a whole treeitem row). On every close it replays a render
+  // deferred while it was open (flushPendingRender), and it refocuses the trigger when an item is run.
+  const ctxMenu = createFloatingMenu({
+    menuClass: 'explorer-menu',
+    itemClass: 'explorer-menu-item',
+    markTriggerExpanded: false,
+    guardTriggerSubtree: false,
+    refocusTriggerOnActivate: true,
+    onClose: () => flushPendingRender(),
+  });
   // Directory tokens the user has collapsed. Honoured across re-renders so a folder doesn't pop back
   // open when the tree is rebuilt (renderTree runs on every diagnostics push).
   const collapsed = new Set<string>();
@@ -203,7 +214,7 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
   // included: rebuilding the tree mid-drag would detach the dragged <li>, defeating the DOM-containment
   // drop-validity checks (canDropInto) and tearing down the drag's visual feedback.
   function interactionOpen(): boolean {
-    return renaming || creating || dragEntry != null || menuEl != null || (confirmModal?.isOpen ?? false);
+    return renaming || creating || dragEntry != null || ctxMenu.isOpen || (confirmModal?.isOpen ?? false);
   }
 
   // --- name validation --------------------------------------------------------
@@ -918,49 +929,14 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
 
   // --- context menu -----------------------------------------------------------
 
+  // Dismiss the context menu (idempotent) AND replay any render deferred while it was open. The engine's
+  // own dismiss paths (outside-pointerdown, Escape via the overlay Esc-stack, Tab, item activation) flush
+  // via the `onClose` hook on ctxMenu; this wrapper covers the EXPLICIT calls — including ones made while
+  // no menu is open (defensively before a confirm, or inside render()) which must still flush. The
+  // engine restores focus to the trigger and the keyboard/dismissal wiring lives in createFloatingMenu.
   function closeMenu(): void {
-    if (menuEl) {
-      menuEl.remove();
-      menuEl = null;
-    }
-    document.removeEventListener('pointerdown', onDocPointerDown, true);
-    document.removeEventListener('keydown', onMenuKeydown, true);
-    // Return focus to whatever opened the menu (the treeitem / '⋯' button) so keyboard/AT users
-    // are not dropped onto document.body when the menu dismisses.
-    if (menuTrigger && menuTrigger.isConnected) menuTrigger.focus();
-    menuTrigger = null;
-    // A diagnostics re-render may have been deferred while the menu was open; replay it now (skipped
-    // when called from within render(), where `rendering` is set).
-    flushPendingRender();
-  }
-
-  function onDocPointerDown(ev: PointerEvent): void {
-    if (menuEl && !menuEl.contains(ev.target as Node)) closeMenu();
-  }
-
-  function onMenuKeydown(ev: KeyboardEvent): void {
-    if (!menuEl) return;
-    const items = Array.from(menuEl.querySelectorAll<HTMLElement>('.explorer-menu-item'));
-    const active = document.activeElement as HTMLElement | null;
-    const i = active ? items.indexOf(active) : -1;
-    if (ev.key === 'Escape' || ev.key === 'Tab') {
-      // Tab (per the APG menu pattern) and Escape both dismiss the menu rather than leaving it
-      // orphaned with focus elsewhere.
-      ev.preventDefault();
-      closeMenu();
-    } else if (ev.key === 'ArrowDown') {
-      ev.preventDefault();
-      items[Math.min(items.length - 1, i + 1)]?.focus();
-    } else if (ev.key === 'ArrowUp') {
-      ev.preventDefault();
-      items[Math.max(0, i - 1)]?.focus();
-    } else if (ev.key === 'Home') {
-      ev.preventDefault();
-      items[0]?.focus();
-    } else if (ev.key === 'End') {
-      ev.preventDefault();
-      items[items.length - 1]?.focus();
-    }
+    if (ctxMenu.isOpen) ctxMenu.close();
+    else flushPendingRender();
   }
 
   // Open the floating menu of actions for `entry` at viewport coords (x, y). `parentDir` is the
@@ -988,34 +964,17 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     spawnMenu(actions, x, y);
   }
 
+  // Spawn the context menu at viewport coords (x, y) via the shared engine: it builds the
+  // <ul role="menu"> of items, captures document.activeElement as the focus-return trigger, focuses the
+  // first item, and wires outside-pointerdown / Escape / Tab / Arrow / Home / End dismissal + nav. An
+  // activated item closes the menu (refocusing the trigger) before its `run` fires — the same order the
+  // private engine had.
   function spawnMenu(actions: MenuAction[], x: number, y: number): void {
-    const menu = document.createElement('ul');
-    menu.className = 'explorer-menu';
-    menu.setAttribute('role', 'menu');
-    menu.style.left = `${x}px`;
-    menu.style.top = `${y}px`;
-    for (const action of actions) {
-      const li = document.createElement('li');
-      li.setAttribute('role', 'none');
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'explorer-menu-item';
-      btn.setAttribute('role', 'menuitem');
-      btn.textContent = action.label;
-      btn.addEventListener('click', () => {
-        closeMenu();
-        action.run();
-      });
-      li.appendChild(btn);
-      menu.appendChild(li);
-    }
-    // Remember the trigger (the focused treeitem or '⋯' button) so closeMenu can restore focus.
-    menuTrigger = document.activeElement as HTMLElement | null;
-    document.body.appendChild(menu);
-    menuEl = menu;
-    menu.querySelector<HTMLElement>('.explorer-menu-item')?.focus();
-    document.addEventListener('pointerdown', onDocPointerDown, true);
-    document.addEventListener('keydown', onMenuKeydown, true);
+    ctxMenu.open({
+      trigger: document.activeElement as HTMLElement | null,
+      at: { x, y },
+      items: actions.map((action, i) => ({ id: String(i), label: action.label, run: action.run })),
+    });
   }
 
   // Locate the live <li> for an entry (by token) and start inline rename on it.

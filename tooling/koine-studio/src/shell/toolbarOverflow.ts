@@ -3,11 +3,11 @@
 // At phone width (≤ $bp-narrow) the _toolbar.scss media query hides the secondary toolbar actions
 // (Save to disk, Check, Install, the ⌘K palette hint, Toggle theme, Settings) and reveals a single
 // `#btn-toolbar-overflow` kebab. This module builds that kebab's menu from the SAME command registry
-// the command palette uses (so handlers never drift) and renders a floating menu that mirrors the
-// domain navigator's leaf `⋯` menu: a `<ul role="menu">` mounted on document.body, positioned at the
-// trigger, dismissed on outside-pointerdown / Escape / Tab / action, with focus returned to the kebab.
+// the command palette uses (so handlers never drift) and renders it via the shared `createFloatingMenu`
+// engine (#547) — a `<ul role="menu">` mounted on document.body, positioned at the trigger, dismissed on
+// outside-pointerdown / Escape / Tab / action, with focus returned to the kebab.
 
-import { el } from '@/shared/el';
+import { createFloatingMenu } from '@/shared/floatingMenu';
 import type { Command } from '@/shared/palette';
 
 export interface OverflowMenuItem {
@@ -62,105 +62,36 @@ export function buildOverflowItems(deps: OverflowItemDeps): OverflowMenuItem[] {
 }
 
 // The single floating menu (mounted to document.body and reused), module-scoped so opening one closes
-// any other — mirroring the domain navigator's leaf menu.
-let menuEl: HTMLElement | null = null;
-let menuTrigger: HTMLElement | null = null;
+// any other. Built on the shared `createFloatingMenu` engine (#547); right-aligned under the kebab and
+// closed WITHOUT refocusing it on item activation (the action it runs — open Settings / the palette,
+// toggle theme, … — owns focus next; refocusing the kebab first would yank it back).
+const overflowMenu = createFloatingMenu({
+  menuClass: 'koi-overflow-menu',
+  itemClass: 'koi-overflow-menu-item',
+  ariaLabel: 'More actions',
+});
 
 /** True while the overflow menu is open. */
 export function isOverflowMenuOpen(): boolean {
-  return menuEl !== null;
+  return overflowMenu.isOpen;
 }
 
 /**
  * Tear down the menu and its global listeners. Idempotent. `refocus` returns focus to the kebab (the
- * normal dismiss path); an item activation passes `false` because the action it runs (open Settings,
- * open the palette, …) owns focus next — refocusing the kebab first would steal it back.
+ * normal dismiss path).
  */
 export function closeOverflowMenu(refocus = true): void {
-  if (!menuEl) return;
-  menuEl.remove();
-  menuEl = null;
-  document.removeEventListener('pointerdown', onPointerDown, true);
-  document.removeEventListener('keydown', onKeydown, true);
-  const trigger = menuTrigger;
-  menuTrigger = null;
-  if (trigger) {
-    trigger.setAttribute('aria-expanded', 'false');
-    if (refocus && trigger.isConnected) trigger.focus();
-  }
-}
-
-function menuItems(): HTMLElement[] {
-  return menuEl ? Array.from(menuEl.querySelectorAll<HTMLElement>('[role="menuitem"]')) : [];
-}
-
-function onPointerDown(ev: PointerEvent): void {
-  if (menuEl && !menuEl.contains(ev.target as Node) && ev.target !== menuTrigger) closeOverflowMenu();
-}
-
-function onKeydown(ev: KeyboardEvent): void {
-  if (!menuEl) return;
-  const items = menuItems();
-  const i = items.indexOf(document.activeElement as HTMLElement);
-  if (ev.key === 'Escape' || ev.key === 'Tab') {
-    ev.preventDefault();
-    closeOverflowMenu();
-  } else if (ev.key === 'ArrowDown') {
-    ev.preventDefault();
-    items[Math.min(items.length - 1, i + 1)]?.focus();
-  } else if (ev.key === 'ArrowUp') {
-    ev.preventDefault();
-    items[Math.max(0, i - 1)]?.focus();
-  } else if (ev.key === 'Home') {
-    ev.preventDefault();
-    items[0]?.focus();
-  } else if (ev.key === 'End') {
-    ev.preventDefault();
-    items[items.length - 1]?.focus();
-  }
+  overflowMenu.close(refocus);
 }
 
 /** Open the overflow menu at `trigger`, listing `items`. Closes any already-open menu first. */
 export function openOverflowMenu(trigger: HTMLElement, items: OverflowMenuItem[]): void {
-  closeOverflowMenu(false);
-
-  const menu = el('ul', { class: 'koi-overflow-menu', attrs: { role: 'menu', 'aria-label': 'More actions' } });
-  for (const it of items) {
-    const btn = el('button', {
-      class: 'koi-overflow-menu-item',
-      text: it.label,
-      attrs: { type: 'button', role: 'menuitem' },
-      on: {
-        click: () => {
-          // Close WITHOUT refocusing the kebab: the action (open Settings / palette, toggle theme, …)
-          // takes focus next; refocusing the trigger first would yank it back.
-          closeOverflowMenu(false);
-          it.run();
-        },
-      },
-    });
-    menu.appendChild(el('li', { attrs: { role: 'none' } }, btn));
-  }
-
   // Right-align under the trigger so the menu hangs off the toolbar's right edge (where the kebab lives).
-  const rect = trigger.getBoundingClientRect();
-  menu.style.top = `${rect.bottom}px`;
-  menu.style.right = `${Math.max(0, window.innerWidth - rect.right)}px`;
-
-  menuTrigger = trigger;
-  trigger.setAttribute('aria-expanded', 'true');
-  document.body.appendChild(menu);
-  menuEl = menu;
-  menuItems()[0]?.focus();
-  document.addEventListener('pointerdown', onPointerDown, true);
-  document.addEventListener('keydown', onKeydown, true);
+  overflowMenu.open({ trigger, items, align: 'right' });
 }
 
 /** Toggle the menu: open it (building items lazily) if closed, close it if already open. */
 export function toggleOverflowMenu(trigger: HTMLElement, getItems: () => OverflowMenuItem[]): void {
-  if (isOverflowMenuOpen()) {
-    closeOverflowMenu();
-    return;
-  }
-  openOverflowMenu(trigger, getItems());
+  if (overflowMenu.isOpen) overflowMenu.close();
+  else openOverflowMenu(trigger, getItems());
 }

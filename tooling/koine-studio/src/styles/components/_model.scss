@@ -511,28 +511,11 @@
 .koi-tactical-menu {
   @include a.popover-surface;
   z-index: var(--koi-z-popover);
-  min-width: 168px;
+  min-width: a.$menu-min-width;
 }
 
 .koi-tactical-menu-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--koi-radius-sm);
-  color: var(--koi-fg);
-  cursor: pointer;
-  padding: var(--koi-space-1-5) var(--koi-space-2-5);
-  font-family: var(--koi-font-body);
-  font-size: var(--koi-text-base);
-}
-
-.koi-tactical-menu-item:hover,
-.koi-tactical-menu-item:focus-visible {
-  background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
-  border-color: color-mix(in srgb, var(--koi-accent) 40%, var(--koi-line));
-  outline: none;
+  @include a.menu-item;
 }
 
 /* The aggregate head reads as the boundary owner — a touch heavier than its owned leaves. */
