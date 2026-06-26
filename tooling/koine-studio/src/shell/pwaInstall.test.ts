@@ -159,6 +159,7 @@ describe('connectInstallAffordance', () => {
   // Build the affordance DOM the shell mounts: a container with an Install button and a dismiss "×".
   function makeDom() {
     const root = document.createElement('div');
+    root.hidden = true; // mirror the shipped markup (index.html ships #install-affordance hidden)
     const installButton = document.createElement('button');
     const dismissButton = document.createElement('button');
     root.append(installButton, dismissButton);
