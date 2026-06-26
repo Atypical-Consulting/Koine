@@ -1169,6 +1169,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // its own sheet — symmetric with the resize-path's instance setDetent('peek'), and split-brain-proof
     // if more than one sheet ever exists (#221).
     if (inspectorSheet && isNarrowViewport() && sel) inspectorSheet.setDetent('half');
+    // Desktop equivalent of the mobile sheet-raise above (#533): a fresh selection auto-activates the
+    // right rail's Properties tab so the just-selected element's inspector is visible without a second
+    // click — even when the user had Source Control / Rules / Notes open. Only on a NEW, non-null
+    // selection (a deselect leaves the user's current tab as-is, mirroring the `&& sel` guard above), and
+    // only when not already on Properties so an in-scope selection doesn't trigger a redundant repaint.
+    if (sel && appStore.getState().right !== 'props') selectRightView('props');
     // Re-pass the current model index to the palette so its aggregate-scoped buttons (#254) re-gate against
     // the freshly-selected element — a diagram click rebuilds the index before setting the selection, so
     // resolving the selection's kind here uses the up-to-date index rather than a stale captured prop.
