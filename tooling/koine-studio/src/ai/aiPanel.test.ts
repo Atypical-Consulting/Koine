@@ -214,6 +214,45 @@ describe('explain action (panel integration)', () => {
     expect(openedPrefs).toBe(true);
   });
 
+  test('a 401 with no key configured says "no API key configured", not "rejected" (#530)', async () => {
+    const container = document.createElement('div');
+    // openai + a loopback baseUrl ⇒ needsKey === false, so the pre-flight blank-key guard is bypassed
+    // and the request actually goes out with no key; the server still 401s (e.g. a local proxy that
+    // requires auth, or a future call site). The error mapper must not claim a key was "rejected".
+    createAssistantPanel(
+      makeOpts(container, {
+        getProvider: () => 'openai',
+        getBaseUrl: () => 'http://localhost:1234/v1',
+        getApiKey: () => '',
+      }),
+    );
+    vi.mocked(runAssistant).mockRejectedValueOnce(
+      new Error('401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}'),
+    );
+    container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
+    await settle();
+
+    const reply = container.querySelector('.koi-msg-assistant:last-of-type');
+    expect(reply?.textContent).toMatch(/no api key configured/i);
+    expect(reply?.textContent).not.toMatch(/rejected/i);
+    // Still actionable: the Open Settings affordance is present on this path too.
+    expect(reply?.querySelector('.koi-link-btn')).not.toBeNull();
+  });
+
+  test('a whitespace-only key is treated as blank: Add-key note, no provider call (#530)', async () => {
+    const container = document.createElement('div');
+    // anthropic (default) ⇒ needsKey; a whitespace-only stored key is truthy but unusable — the
+    // pre-flight guard must short-circuit to the "add a key" note WITHOUT calling the provider.
+    createAssistantPanel(makeOpts(container, { getApiKey: () => '   ' }));
+    vi.mocked(runAssistant).mockClear();
+    container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
+    await settle();
+
+    const reply = container.querySelector('.koi-msg-assistant:last-of-type');
+    expect(reply?.textContent).toMatch(/add your api key in settings/i);
+    expect(vi.mocked(runAssistant)).not.toHaveBeenCalled();
+  });
+
   test('a non-auth request failure surfaces the JSON "message", not the whole blob', async () => {
     const container = document.createElement('div');
     createAssistantPanel(makeOpts(container));
