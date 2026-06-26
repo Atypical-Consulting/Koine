@@ -148,12 +148,16 @@ export async function capabilities(opts?: CallOptions): Promise<Capabilities> {
  *  to {@link BUILTIN_EMIT_TARGETS} when the runtime can't report them (offline boot, missing export, or
  *  an empty list) so the Playground always offers a usable set. */
 export async function listEmitTargets(opts?: CallOptions): Promise<EmitTarget[]> {
+  const fallback = () => BUILTIN_EMIT_TARGETS.map((t) => ({ ...t }));
   try {
     const client = await loadApi();
     const parsed = JSON.parse(await client.call('ListEmitTargets', [], opts)) as { targets?: EmitTarget[] };
     const targets = parsed.targets ?? [];
-    return targets.length > 0 ? targets.map((t) => ({ ...t })) : BUILTIN_EMIT_TARGETS.map((t) => ({ ...t }));
-  } catch {
-    return BUILTIN_EMIT_TARGETS.map((t) => ({ ...t }));
+    if (targets.length > 0) return targets.map((t) => ({ ...t }));
+    console.warn('Koine playground: compiler reported no emit targets — using the built-in fallback set.');
+    return fallback();
+  } catch (e) {
+    console.warn('Koine playground: could not read emit targets from the compiler — using the built-in fallback set.', e);
+    return fallback();
   }
 }
