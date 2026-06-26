@@ -83,7 +83,7 @@ export function filterTemplates(templates: readonly Template[], filter: Template
 const HERO_SNIPPET = `<span class="koi-syn-kw">value</span> <span class="koi-syn-type">Money</span> <span class="koi-syn-punct">{</span>
   <span class="koi-syn-id">amount</span><span class="koi-syn-punct">:</span>   <span class="koi-syn-type">Decimal</span>
   <span class="koi-syn-id">currency</span><span class="koi-syn-punct">:</span> <span class="koi-syn-type">Currency</span>
-  <span class="koi-syn-kw">invariant</span> <span class="koi-syn-id">amount</span> <span class="koi-syn-punct">&gt;=</span> <span class="koi-syn-num">0</span>   <span class="koi-syn-str">"a monetary amount cannot be negative"</span>
+  <span class="koi-syn-kw">invariant</span> <span class="koi-syn-id">amount</span> <span class="koi-syn-punct">&gt;=</span> <span class="koi-syn-num">0</span> <span class="koi-syn-str">"a monetary amount cannot be negative"</span>
 <span class="koi-syn-punct">}</span>`;
 
 /** Plus / folder marks reused from the toolbar's New / Open buttons so the start actions read as the

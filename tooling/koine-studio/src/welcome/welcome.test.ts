@@ -473,6 +473,18 @@ describe('mountHome — Resume editing control', () => {
   });
 });
 
+describe('Home hero snippet', () => {
+  test('collapses the spacing before the invariant message to a single space', () => {
+    const el = document.createElement('div');
+    mountHome(el, makeCallbacks(), SAMPLE);
+    const code = el.querySelector('.koi-welcome-snippet-code')!.textContent ?? '';
+    // Exactly one space between the `0` literal and the invariant message string.
+    expect(code).toContain('0 "a monetary amount cannot be negative"');
+    // The old three-space gap is gone.
+    expect(code).not.toContain('0   "a monetary');
+  });
+});
+
 // The search input is debounced; tests enable fake timers and flush the debounce window.
 function setSearch(root: HTMLElement, value: string): void {
   vi.useFakeTimers();
