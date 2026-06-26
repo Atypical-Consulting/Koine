@@ -217,4 +217,93 @@ public class R17FmtTests
         edit.EndLine.ShouldBe(3); // anchored within the last line (no line 4 exists)
         edit.EndCharacter.ShouldBe("        }".Length);
     }
+
+    // ---- range formatting over collapsible blank-line runs (#390) -----------
+
+    [Fact]
+    public void FormatRange_collapses_a_selected_trailing_blank_run()
+    {
+        // Canonical content (`context Foo { }`) followed by a run of trailing blank lines that canonical
+        // formatting removes. Selecting the FIRST blank (line 1) used to return no edit: the common-prefix
+        // diff attributed the surviving blank to the unchanged region, so the changed region began AFTER
+        // the selected blank and the intersection collapsed to empty. The edit must now fire and delete
+        // the redundant blanks.
+        const string src = "context Foo { }\n\n\n\n";
+        var edit = Fmt.FormatRange(src, startLine: 1, startCharacter: 0, endLine: 1, endCharacter: 0);
+
+        edit.ShouldNotBeNull();
+        edit.StartLine.ShouldBe(1); // the edit starts at the selected blank, not after it
+        Apply(src, edit).ShouldBe(Fmt.Format(src).Text); // applying it makes the selection canonical
+    }
+
+    [Fact]
+    public void FormatRange_collapses_a_selected_interior_blank_run()
+    {
+        // Three interior blank lines collapse to one. Selecting the first of them (line 1) must produce a
+        // deleting edit, not null — same swallowed-by-the-common-prefix defect as the trailing case.
+        const string src = "context Foo { }\n\n\n\ncontext Bar { }\n";
+        var edit = Fmt.FormatRange(src, startLine: 1, startCharacter: 0, endLine: 1, endCharacter: 0);
+
+        edit.ShouldNotBeNull();
+        edit.StartLine.ShouldBe(1);
+        Apply(src, edit).ShouldBe(Fmt.Format(src).Text);
+    }
+
+    [Fact]
+    public void FormatRange_returns_null_when_the_selected_blank_run_is_already_canonical()
+    {
+        // A single blank line between declarations is already canonical, so a selection of it has nothing
+        // to collapse — the re-attribution must not manufacture a spurious edit.
+        const string src = "context Foo { }\n\ncontext Bar { }\n";
+        Fmt.FormatRange(src, startLine: 1, startCharacter: 0, endLine: 1, endCharacter: 0).ShouldBeNull();
+    }
+
+    [Fact]
+    public void FormatRange_collapses_a_selected_blank_run_with_no_trailing_newline()
+    {
+        // A blank-run collapse on a document that does NOT end in a newline: the #380 EOF anchoring must
+        // still hold — the edit collapses the blanks without inventing a trailing newline on the last line.
+        const string src = "context Foo { }\n\n\n\ncontext Bar { }";
+        var edit = Fmt.FormatRange(src, startLine: 1, startCharacter: 0, endLine: 1, endCharacter: 0);
+
+        edit.ShouldNotBeNull();
+        edit.StartLine.ShouldBe(1);
+        Apply(src, edit).ShouldBe("context Foo { }\n\ncontext Bar { }"); // collapsed; no trailing newline added
+    }
+
+    [Fact]
+    public void FormatRange_covers_a_blank_run_and_an_adjacent_reformatted_line_in_one_edit()
+    {
+        // The selection spans both a collapsing blank run (lines 2–4) AND the over-indented line after it
+        // (line 5). The edit must be a single edit whose start is pulled back onto the first selected blank,
+        // collapsing the run and re-indenting the line together.
+        const string src = "context S {\n  a: X\n\n\n\n        b: Y\n}\n";
+        var edit = Fmt.FormatRange(src, startLine: 2, startCharacter: 0, endLine: 5, endCharacter: 12);
+
+        edit.ShouldNotBeNull();
+        edit.StartLine.ShouldBe(2); // pulled back to the first selected blank, not left at the changed region
+        Apply(src, edit).ShouldBe(Fmt.Format(src).Text);
+    }
+
+    /// <summary>Applies a whole-line <see cref="FormatRangeEdit"/> to LF-normalized source (test helper).</summary>
+    private static string Apply(string source, FormatRangeEdit edit)
+    {
+        var norm = source.Replace("\r\n", "\n").Replace('\r', '\n');
+        var lines = norm.Split('\n');
+
+        int Offset(int line, int character)
+        {
+            var offset = 0;
+            for (var i = 0; i < line; i++)
+            {
+                offset += lines[i].Length + 1; // +1 for the '\n' that terminated line i
+            }
+
+            return offset + character;
+        }
+
+        var start = Offset(edit.StartLine, edit.StartCharacter);
+        var end = Offset(edit.EndLine, edit.EndCharacter);
+        return norm[..start] + edit.NewText + norm[end..];
+    }
 }
