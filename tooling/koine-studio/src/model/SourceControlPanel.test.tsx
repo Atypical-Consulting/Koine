@@ -1,8 +1,13 @@
-import { describe, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent, render, waitFor } from '@testing-library/preact';
 import { SourceControlPanel, type GitSurface } from '@/model/SourceControlPanel';
 import type { GitFile, GitLogEntry, GitStatus } from '@/host/types';
+import { koiConfirm } from '@/shared/overlay';
 import { axe } from 'vitest-axe';
+
+// The save-all-before-commit prompt (#470) uses the shared Koine confirm dialog. Mock it so the
+// commit path resolves deterministically (true/false) without opening a real modal overlay.
+vi.mock('@/shared/overlay', () => ({ koiConfirm: vi.fn() }));
 
 const TOKEN = 'file:///work';
 
@@ -121,5 +126,85 @@ describe('SourceControlPanel', () => {
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
     await view.findByRole('region', { name: 'Staged Changes' });
     expect(await axe(view.container)).toHaveNoViolations();
+  });
+});
+
+describe('SourceControlPanel — save-all-before-commit prompt (#470)', () => {
+  beforeEach(() => {
+    vi.mocked(koiConfirm).mockReset();
+  });
+
+  // Drive a Commit on a panel with one staged file + a typed message, then return the call order so a
+  // test can assert onSaveAll ran (or didn't) BEFORE gitCommit.
+  async function commitWith(props: { dirtyCount?: number; onSaveAll?: () => Promise<void> }) {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const order: string[] = [];
+    git.gitCommit.mockImplementation(async () => {
+      order.push('commit');
+    });
+    const onSaveAll = props.onSaveAll
+      ? vi.fn(async () => {
+          order.push('saveAll');
+          await props.onSaveAll!();
+        })
+      : undefined;
+    const view = render(
+      <SourceControlPanel git={git} folderToken={TOKEN} dirtyCount={props.dirtyCount} onSaveAll={onSaveAll} />,
+    );
+    const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: 'Add order total' } });
+    const commitBtn = view.getByRole('button', { name: 'Commit' }) as HTMLButtonElement;
+    expect(commitBtn.disabled).toBe(false);
+    fireEvent.click(commitBtn);
+    return { git, onSaveAll, order };
+  }
+
+  test('unsaved buffers → confirm + await onSaveAll BEFORE gitCommit', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const { git, onSaveAll, order } = await commitWith({ dirtyCount: 2, onSaveAll: async () => {} });
+
+    await waitFor(() => expect(git.gitCommit).toHaveBeenCalledWith(TOKEN, 'Add order total'));
+    expect(koiConfirm).toHaveBeenCalledTimes(1);
+    expect(onSaveAll).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['saveAll', 'commit']); // saved first, then committed
+  });
+
+  test('no unsaved buffers (dirtyCount 0) → straight to gitCommit, no prompt', async () => {
+    const { git, onSaveAll } = await commitWith({ dirtyCount: 0, onSaveAll: async () => {} });
+
+    await waitFor(() => expect(git.gitCommit).toHaveBeenCalledWith(TOKEN, 'Add order total'));
+    expect(koiConfirm).not.toHaveBeenCalled();
+    expect(onSaveAll).not.toHaveBeenCalled();
+  });
+
+  test('props omitted → behaves exactly as before (gitCommit directly, no prompt)', async () => {
+    const { git } = await commitWith({});
+
+    await waitFor(() => expect(git.gitCommit).toHaveBeenCalledWith(TOKEN, 'Add order total'));
+    expect(koiConfirm).not.toHaveBeenCalled();
+  });
+
+  test('a failed onSaveAll aborts the commit (does NOT call gitCommit)', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const { git, onSaveAll } = await commitWith({
+      dirtyCount: 1,
+      onSaveAll: async () => {
+        throw new Error('disk full');
+      },
+    });
+
+    await waitFor(() => expect(onSaveAll).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 20)); // let any (erroneous) commit microtask flush
+    expect(git.gitCommit).not.toHaveBeenCalled();
+  });
+
+  test('declining the prompt aborts the commit (no save, no gitCommit)', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(false);
+    const { git, onSaveAll } = await commitWith({ dirtyCount: 1, onSaveAll: async () => {} });
+
+    await waitFor(() => expect(koiConfirm).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(onSaveAll).not.toHaveBeenCalled();
+    expect(git.gitCommit).not.toHaveBeenCalled();
   });
 });

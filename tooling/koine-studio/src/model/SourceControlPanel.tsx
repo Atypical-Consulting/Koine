@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { GitFile, GitLogEntry, GitStatus, Platform } from '@/host/types';
+import { koiConfirm } from '@/shared/overlay';
 
 // The Source Control panel (issue #272): the right-rail git surface — a branch header + switcher, the
 // changed files grouped into Staged / Changes / Untracked with per-row Stage/Unstage + inline diff, a
@@ -74,6 +75,19 @@ export function SourceControlPanel(props: {
   folderToken: string;
   /** Bumped by the controller to force a re-fetch (e.g. on a workspace folder switch); optional. */
   refreshNonce?: number;
+  /**
+   * How many open editor buffers have unsaved changes (#470). When > 0, **Commit** first prompts a
+   * Save-all (via {@link onSaveAll}) so the commit reflects what the editor shows rather than the
+   * stale on-disk state. Optional — omitted (or 0) keeps the original "commit what's on disk" behavior,
+   * so the existing component test and any non-shell mount are unaffected.
+   */
+  dirtyCount?: number;
+  /**
+   * Persist every dirty editor buffer (#109's Save-all). Awaited before {@link git}'s `gitCommit` when
+   * {@link dirtyCount} > 0; a rejection aborts the commit (the unsaved tree is never half-committed).
+   * Optional — paired with {@link dirtyCount}.
+   */
+  onSaveAll?: () => Promise<void>;
 }) {
   const { git, folderToken } = props;
 
@@ -82,6 +96,11 @@ export function SourceControlPanel(props: {
   const [branches, setBranches] = useState<string[]>([]);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  // A commit-in-flight latch (#470). The save-all-before-commit path awaits onSaveAll(), whose save
+  // fires the controller's live refresh — a nonce bump that re-runs the fetch effect and can momentarily
+  // clear `busy` WHILE the commit is still in flight. This latch keeps the Commit button disabled across
+  // the whole commit so that transient `busy=false` window can't admit a second (duplicate) commit.
+  const [committing, setCommitting] = useState(false);
   // `null` while loading or healthy; `'not-a-repo'` once gitStatus rejects (non-git folder / git failure).
   const [error, setError] = useState<'not-a-repo' | null>(null);
   // A surfaced failure from a mutation (stage/unstage/commit/checkout) — shown as an alert, then cleared
@@ -157,9 +176,29 @@ export function SourceControlPanel(props: {
   function onCommit(): void {
     const msg = message.trim();
     if (!msg) return;
+    setCommitting(true);
     void mutate(async () => {
-      await git.gitCommit(folderToken, msg);
-      setMessage('');
+      try {
+        // Git commits what's on disk, so unsaved editor buffers would be silently excluded. With unsaved
+        // work, prompt a Save-all first (#470) so the commit reflects what the editor shows. Declining
+        // aborts the commit (the draft survives); a failed save propagates and `mutate` surfaces it — so we
+        // never commit a half-saved tree. No unsaved work (or props omitted) → straight to gitCommit.
+        const unsaved = props.dirtyCount ?? 0;
+        if (unsaved > 0 && props.onSaveAll) {
+          const ok = await koiConfirm({
+            title: 'Save changes before committing?',
+            message: `You have ${unsaved} unsaved file${unsaved === 1 ? '' : 's'}. Git commits what's saved to disk — save all first so this commit includes your latest edits.`,
+            confirmLabel: 'Save all & commit',
+            cancelLabel: 'Cancel',
+          });
+          if (!ok) return; // declined — abort without committing a stale tree
+          await props.onSaveAll();
+        }
+        await git.gitCommit(folderToken, msg);
+        setMessage('');
+      } finally {
+        setCommitting(false);
+      }
     });
   }
 
@@ -316,7 +355,7 @@ export function SourceControlPanel(props: {
             <button
               type="button"
               class="koi-sc-commit-btn koi-docs-save"
-              disabled={busy || message.trim().length === 0 || !hasStaged}
+              disabled={busy || committing || message.trim().length === 0 || !hasStaged}
               onClick={onCommit}
             >
               Commit
