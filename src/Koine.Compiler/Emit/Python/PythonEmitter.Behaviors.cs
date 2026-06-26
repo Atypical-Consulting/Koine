@@ -318,8 +318,9 @@ public sealed partial class PythonEmitter
     /// <c>def &lt;snake&gt;(cls, &lt;params&gt;) -&gt; &lt;Entity&gt;:</c>. The body mirrors the
     /// C#/TS factory contract:
     /// <list type="number">
-    ///   <item>mint the identity (<c>id = &lt;IdName&gt;.new()</c>) first, so it is in scope for the
-    ///   preconditions and payloads;</item>
+    ///   <item>obtain the identity first, so it is in scope for the preconditions and payloads — mint
+    ///   it (<c>id = &lt;IdName&gt;.new()</c>) by default, or bind it to an explicit identity-typed
+    ///   parameter (#324) instead of generating;</item>
     ///   <item>each <c>requires</c> precondition raises before any state is constructed;</item>
     ///   <item>construct the instance (<c>instance = cls(...)</c>), each constructor field drawn — in
     ///   priority order — from an explicit <c>field &lt;- value</c> initialization, a same-named
@@ -362,8 +363,19 @@ public sealed partial class PythonEmitter
         var inits = factory.Body.OfType<Initialization>().ToList();
         var emits = factory.Body.OfType<EmitClause>().ToList();
 
-        // 1. Mint the identity (no side effects), in scope for preconditions + payloads.
-        sb.Append(Indent).Append(Indent).Append("id = ").Append(idName).Append(".new()\n");
+        // 1. Identity (no side effects), in scope for preconditions + payloads. By default mint it
+        //    (`<IdName>.new()`); when the factory supplies it as an explicit identity-typed parameter
+        //    (#324), bind `id` to that parameter instead — omit when the parameter is already named
+        //    `id`, else alias it (`id = book_id`).
+        Param? explicitId = MemberAnalysis.ExplicitIdParameter(entity, factory);
+        if (explicitId is null)
+        {
+            sb.Append(Indent).Append(Indent).Append("id = ").Append(idName).Append(".new()\n");
+        }
+        else if (PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(explicitId.Name)) is var idParam && idParam != "id")
+        {
+            sb.Append(Indent).Append(Indent).Append("id = ").Append(idParam).Append('\n');
+        }
 
         // 2. Preconditions — checked before any state is constructed.
         foreach (RequiresClause req in requires)
