@@ -1,4 +1,6 @@
+using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
+using Koine.Compiler.Semantics;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
@@ -14,6 +16,38 @@ namespace Koine.Compiler.Tests;
 public class SpecPredicateCollisionTests
 {
     private static IReadOnlyList<Diagnostic> Diagnose(string source) => new KoineCompiler().Diagnose(source);
+
+    /// <summary>
+    /// Validates <paramref name="source"/> telling the semantic pass which emit target(s) are enabled
+    /// (issue #495). The no-target <see cref="Diagnose(string)"/> path stays conservative (all targets).
+    /// </summary>
+    private static IReadOnlyList<Diagnostic> Diagnose(string source, EmitTargetSet targets)
+    {
+        (KoineModel? model, _) = new KoineCompiler().Parse(source);
+        return new SemanticValidator().Validate(new SemanticModel(model!), targets);
+    }
+
+    [Fact]
+    public void Validator_accepts_enabled_targets_and_the_all_targets_default_stays_strict()
+    {
+        // Issue #495, Task 1: the validator can be *told* the enabled targets, and being told "all
+        // shipped targets" (the default when no target context exists) reproduces today's strict
+        // KOI1007 error — byte-identical to the no-target path.
+        const string src = """
+            context Promotions {
+              value Order { discountedTotal: Int }
+              spec FreeOrder  on Order = discountedTotal == 0
+              spec free_order on Order = discountedTotal == 0
+            }
+            """;
+
+        Diagnose(src, EmitTargetSet.All).ShouldContain(d =>
+            d.Code == DiagnosticCodes.DuplicateSpecPredicate && d.Severity == DiagnosticSeverity.Error);
+
+        // The no-target default must match the explicit all-targets request exactly.
+        Diagnose(src).Count(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate)
+            .ShouldBe(Diagnose(src, EmitTargetSet.All).Count(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate));
+    }
 
     [Fact]
     public void Is_prefixed_and_bare_spec_on_same_type_collide()
@@ -206,5 +240,106 @@ public class SpecPredicateCollisionTests
             """;
 
         Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Issue #495 — target-aware severity. A pair that collides only under the conservative all-targets
+    // (PHP-strict) fold, but not under any *enabled* target's own identifier rule, is relaxed from a
+    // hard error to a warning. Pairs that genuinely break an enabled target keep the error.
+    // ---------------------------------------------------------------------------------------------
+
+    private const string UnderscoreFoldPair = """
+        context Promotions {
+          value Order { discountedTotal: Int }
+          spec FreeOrder  on Order = discountedTotal == 0
+          spec free_order on Order = discountedTotal == 1
+        }
+        """;
+
+    private const string IsStripPair = """
+        context Acct {
+          value Account { balance: Int }
+          spec IsActive on Account = balance > 0
+          spec Active   on Account = balance > 1
+        }
+        """;
+
+    private static bool HasError(IReadOnlyList<Diagnostic> diags) =>
+        diags.Any(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate && d.Severity == DiagnosticSeverity.Error);
+
+    private static bool HasWarning(IReadOnlyList<Diagnostic> diags) =>
+        diags.Any(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate && d.Severity == DiagnosticSeverity.Warning);
+
+    [Fact]
+    public void CSharp_only_relaxes_the_underscore_fold_collision_to_a_warning()
+    {
+        // `FreeOrder` + `free_order` collide only under PHP's underscore fold; C# emits `FreeOrder` and
+        // `Free_order` (distinct), so a C#-only build must not be hard-blocked — downgraded to a warning.
+        IReadOnlyList<Diagnostic> diags = Diagnose(UnderscoreFoldPair, EmitTargetSet.CSharp);
+        HasError(diags).ShouldBeFalse();
+        HasWarning(diags).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void CSharp_only_relaxes_the_is_strip_collision_to_a_warning()
+    {
+        // `IsActive` + `Active` collide in PHP/TS (both → `isActive`) but never in C# (`IsActive` vs
+        // `Active`). A C#-only build is therefore valid — warn, don't error.
+        IReadOnlyList<Diagnostic> diags = Diagnose(IsStripPair, EmitTargetSet.CSharp);
+        HasError(diags).ShouldBeFalse();
+        HasWarning(diags).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Php_enabled_keeps_the_hard_error_on_both_axes()
+    {
+        // PHP folds case AND separators, so both pairs genuinely break a PHP build — still a hard error.
+        HasError(Diagnose(UnderscoreFoldPair, EmitTargetSet.Php)).ShouldBeTrue();
+        HasError(Diagnose(IsStripPair, EmitTargetSet.Php)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void All_targets_default_keeps_the_hard_error_on_both_axes()
+    {
+        // The conservative default (every shipped predicate emitter) keeps today's strict error.
+        HasError(Diagnose(UnderscoreFoldPair, EmitTargetSet.All)).ShouldBeTrue();
+        HasError(Diagnose(IsStripPair, EmitTargetSet.All)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void TypeScript_only_errors_on_the_is_strip_axis_but_warns_on_the_underscore_axis()
+    {
+        // TS strips a leading `Is` word (so `IsActive`+`Active` both emit `isActive` → real collision),
+        // but keeps underscores (so `FreeOrder`+`free_order` emit `isFreeOrder`/`isFree_order` → distinct).
+        HasError(Diagnose(IsStripPair, EmitTargetSet.TypeScript)).ShouldBeTrue();
+
+        IReadOnlyList<Diagnostic> underscore = Diagnose(UnderscoreFoldPair, EmitTargetSet.TypeScript);
+        HasError(underscore).ShouldBeFalse();
+        HasWarning(underscore).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Mixing_a_case_sensitive_target_with_php_still_hard_errors()
+    {
+        // The pair breaks PHP, and PHP is enabled — a mixed C#+PHP build keeps the error (PHP breaks).
+        HasError(Diagnose(UnderscoreFoldPair, EmitTargetSet.CSharp | EmitTargetSet.Php)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void CSharp_only_still_lets_KOI1005_own_the_exact_duplicate_without_KOI1007()
+    {
+        // The #494 contract holds regardless of target: an exact same-target duplicate (`Active`+`active`)
+        // is KOI1005's, so KOI1007 stays silent at *every* severity — the relaxation must not resurrect it.
+        const string src = """
+            context Acct {
+              value Account { balance: Int }
+              spec Active on Account = balance > 0
+              spec active on Account = balance > 1
+            }
+            """;
+
+        IReadOnlyList<Diagnostic> diags = Diagnose(src, EmitTargetSet.CSharp);
+        diags.Count(d => d.Code == DiagnosticCodes.DuplicateSpecPredicate).ShouldBe(0);
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.DuplicateSpec);
     }
 }
