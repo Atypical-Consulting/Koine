@@ -79,6 +79,12 @@ public sealed partial class PhpEmitter
                 sb.Append('\n');
                 var methodName = PhpNaming.EscapeIdentifier(PhpNaming.MethodName(p.Name));
                 var returnType = typeMapper.Map(p.Type);
+                // Route the accessor return through the same DocType refinement every other
+                // value-returning member uses, for uniformity and to refine a collection/Range
+                // return should the model surface ever allow one. Today the semantic validator
+                // (KOI0909) restricts an associated-data field to String/Int/Decimal/Bool, so
+                // DocType is always null here and this emits nothing — a deliberate no-op.
+                WriteMethodDoc(sb, Indent, typeMapper, NoDocParams, p.Type, null);
                 sb.Append(Indent).Append("public function ").Append(methodName).Append("(): ").Append(returnType).Append('\n');
                 sb.Append(Indent).Append("{\n");
                 sb.Append(Indent).Append(Indent).Append("return match($this) {\n");

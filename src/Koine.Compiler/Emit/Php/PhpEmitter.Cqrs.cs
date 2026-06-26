@@ -34,29 +34,41 @@ public sealed partial class PhpEmitter
         var name = PhpNaming.ClassName(rm.Name);
         var sourceName = PhpNaming.ClassName(rm.SourceType);
 
-        // Each field carries its PHP type-hint, camelCase property name, and the projection
-        // expression (rooted at $src) used in the mapper.
-        var fields = new List<(string PhpType, string Prop, string Rhs)>();
+        // Each field carries its PHP type-hint, camelCase property name, the projection
+        // expression (rooted at $src) used in the mapper, and its declared Koine type (for the
+        // phpstan PHPDoc refinement of a collection/Range field — null when a direct field's source
+        // member type can't be resolved, i.e. the `mixed` fallback).
+        var fields = new List<(string PhpType, string Prop, string Rhs, TypeRef? Type)>();
         foreach (ReadModelField f in rm.Fields)
         {
             var prop = PhpNaming.PropertyName(f.Name);
             string phpType, rhs;
+            TypeRef? fieldType;
             if (f.Projection is null)
             {
                 // Direct field: type and value come from the like-named source member.
-                phpType = emit.Index.TryGetMemberType(contextName, rm.SourceType, f.Name, out TypeRef t)
-                    ? typeMapper.Map(t)
-                    : "mixed";
+                if (emit.Index.TryGetMemberType(contextName, rm.SourceType, f.Name, out TypeRef t))
+                {
+                    phpType = typeMapper.Map(t);
+                    fieldType = t;
+                }
+                else
+                {
+                    phpType = "mixed";
+                    fieldType = null;
+                }
+
                 rhs = "$src->" + prop;
             }
             else
             {
                 phpType = typeMapper.Map(f.Type!);
+                fieldType = f.Type;
                 var expectedEnum = emit.Index.Classify(f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
                 rhs = translator.Translate(f.Projection, PhpExpressionTranslator.NameMode.Property, expectedEnum);
             }
 
-            fields.Add((phpType, prop, rhs));
+            fields.Add((phpType, prop, rhs, fieldType));
         }
 
         var sb = new StringBuilder();
@@ -65,6 +77,16 @@ public sealed partial class PhpEmitter
         // final readonly class with promoted properties in the constructor.
         sb.Append("final readonly class ").Append(name).Append('\n');
         sb.Append("{\n");
+
+        // PHPDoc refines a promoted property whose native hint is a bare `array` (a copied/projected
+        // collection field) or a generic `Range<T>`, so phpstan --level max sees `list<T>` /
+        // `array<K,V>` / `Range<T>`. On a promoted parameter the `@param` types property and parameter.
+        var docParams = fields
+            .Where(f => f.Type is not null)
+            .Select(f => (f.Prop, f.Type!))
+            .ToList();
+        WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null);
+
         sb.Append(Indent).Append("public function __construct(\n");
         if (fields.Count == 0)
         {
@@ -74,7 +96,7 @@ public sealed partial class PhpEmitter
         {
             for (int i = 0; i < fields.Count; i++)
             {
-                var (phpType, prop, _) = fields[i];
+                var (phpType, prop, _, _) = fields[i];
                 bool last = i == fields.Count - 1;
                 sb.Append(Indent).Append(Indent)
                   .Append("public ").Append(phpType).Append(" $").Append(prop);
@@ -102,7 +124,7 @@ public sealed partial class PhpEmitter
         }
         else
         {
-            foreach (var (_, _, rhs) in fields)
+            foreach (var (_, _, rhs, _) in fields)
             {
                 sb.Append(Indent).Append(Indent).Append(rhs).Append(",\n");
             }
@@ -139,6 +161,14 @@ public sealed partial class PhpEmitter
         // Criteria DTO as a final readonly class.
         sb.Append("final readonly class ").Append(name).Append('\n');
         sb.Append("{\n");
+
+        // PHPDoc refines a collection/Range criterion whose native hint is a bare `array`/`Range`,
+        // so phpstan --level max sees `list<T>` / `array<K,V>` / `Range<T>`.
+        var criteriaDocParams = q.Criteria
+            .Select(p => (PhpNaming.PropertyName(p.Name), p.Type))
+            .ToList();
+        WriteMethodDoc(sb, Indent, typeMapper, criteriaDocParams, null, null);
+
         sb.Append(Indent).Append("public function __construct(\n");
         if (q.Criteria.Count == 0)
         {
@@ -165,12 +195,20 @@ public sealed partial class PhpEmitter
 
         sb.Append("}\n");
 
-        // Handler seam: an interface extending the generic QueryHandler contract.
+        // Handler seam: an interface extending the generic QueryHandler contract. The `@extends`
+        // binds QueryHandler's TQuery/TResult to the concrete query and result, so phpstan
+        // --level max sees the generic arguments instead of `missingType.generics`; a list result
+        // threads `list<T>` via DocType (a bare `array` `@return` is `missingType.iterableValue`).
+        var resultDoc = typeMapper.DocType(q.ResultType) ?? resultType;
         sb.Append('\n');
-        sb.Append("/** Handles ").Append(name).Append(", returning ").Append(resultType).Append(". */\n");
+        sb.Append("/**\n");
+        sb.Append(" * Handles ").Append(name).Append(", returning ").Append(resultDoc).Append(".\n");
+        sb.Append(" *\n");
+        sb.Append(" * @extends QueryHandler<").Append(name).Append(", ").Append(resultDoc).Append(">\n");
+        sb.Append(" */\n");
         sb.Append("interface ").Append(handlerName).Append(" extends QueryHandler\n");
         sb.Append("{\n");
-        sb.Append(Indent).Append("/** @return ").Append(resultType).Append(" */\n");
+        sb.Append(Indent).Append("/** @return ").Append(resultDoc).Append(" */\n");
         sb.Append(Indent).Append("public function handle(mixed $query): mixed;\n");
         sb.Append("}\n");
 
