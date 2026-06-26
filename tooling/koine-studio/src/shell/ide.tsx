@@ -97,6 +97,7 @@ import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from '@/ex
 import { handleBeforeUnload } from '@/shell/dirty';
 import { render } from 'preact';
 import { createHistoryController } from '@/shell/historyController';
+import { installExportMenuDismiss } from '@/shell/exportMenuDismiss';
 import { HistoryControls } from '@/shell/HistoryControls';
 import { MobileZoneBar } from '@/shell/MobileZoneBar';
 import { type MobileZone } from '@/store/slices/uiChrome';
@@ -1331,6 +1332,10 @@ export function init(): () => void {
     return document.querySelector('.koi-palette-backdrop:not([hidden]), .koi-modal-backdrop:not([hidden])') !== null;
   }
 
+  // Dismiss the diagram Export ▾ disclosure on an outside-click or when any overlay opens, so the
+  // native <details> menu can't linger above a modal scrim (#534). Teardown runs on IDE unmount.
+  const teardownExportMenuDismiss = installExportMenuDismiss();
+
   // --- save (format + write to disk) ----------------------------------------
   // The editor intercepts Cmd/Ctrl-S and calls onFormat; we additionally write the formatted
   // active buffer to disk. To run AFTER the format edits land, save is also wired here on the
@@ -2363,5 +2368,6 @@ export function init(): () => void {
     unsubReviewStore(); // release the editor-repaint subscription (the editorSession is destroyed above)
     workspace.setAutoSave(false);
     unsubRouteIntent();
+    teardownExportMenuDismiss(); // drop the global Export-menu dismissal listeners (#534)
   };
 }
