@@ -20,10 +20,11 @@ response as a `Promise`. Cancellation is supported in two modes, both now **wire
   `controller.ts` does the same per-edit for `compile`/`diagnose`. A superseded call's late reply never
   overwrites newer state.
 - **Terminate-and-respawn** — a runaway compile is abandoned by terminating the worker and booting a
-  fresh one. Exposed as the **"Stop compilation"** command palette entry in Studio (shown only on the
-  worker boot path — see `stopCompile.ts`) and a **Stop** button in the playground toolbar. Awaiting
-  `whenReady()` across a respawn now rejects rather than hangs (the outgoing generation's ready-promise
-  is settled on respawn).
+  fresh one. Exposed as the **"Stop compilation"** command palette entry in Studio (offered only while a
+  compile is actually in flight — `canStopCompile()` = a worker exists **and** `isCompileInFlight()`,
+  see `stopCompile.ts` / `compileActivity.ts` — matching the playground's busy-only **Stop** button) and
+  a **Stop** button in the playground toolbar. Awaiting `whenReady()` across a respawn now rejects rather
+  than hangs (the outgoing generation's ready-promise is settled on respawn).
 
 `WasmEnableThreads` stays **`false`** in `src/Koine.Wasm/Koine.Wasm.csproj`. The worker uses
 plain structured-clone `postMessage`, so **no `SharedArrayBuffer` and no COOP/COEP
