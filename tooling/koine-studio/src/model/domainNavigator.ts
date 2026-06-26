@@ -8,8 +8,8 @@
 // under happy-dom — mirroring `modelOutline.ts` / `glossary.ts`. The counts shown here are NOT computed
 // independently: they reuse `countsByContext` (the one tally source shared with the Model outline), so
 // the two navigators can never disagree on a context's size.
-import type { ContextMapResult, GlossaryModel } from '@/lsp/lsp';
-import { countsByContext, type ModelOutlineHandlers } from '@/model/modelOutline';
+import type { ContextMapResult, GlossaryModel, ModelNode } from '@/lsp/lsp';
+import { constructForKind, countsByContext, type ModelOutlineHandlers } from '@/model/modelOutline';
 import { filterGlossaryModel, isAllContexts } from '@/model/activeContext';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
@@ -130,12 +130,26 @@ export function renderStrategic(model: GlossaryModel, relLinks: number, h: Strat
 // the matching level, and re-paints when those change — the store being the single source of truth so a
 // scope switch or a breadcrumb click stays consistent with every other scoped surface (#146).
 
-/** The slim LSP surface the strategic level fetches from: the glossary inventory (the context list +
- * per-context counts) and the context map (only its relation count is read). A structural interface, so
- * the controller's richer client and a test stub both satisfy it without coupling to the full class. */
+/** The slim LSP surface the navigator fetches from: the glossary inventory (the strategic context list +
+ * per-context counts), the context map (only its relation count is read), and the structured model graph
+ * ({@link ModelNode}) the TACTICAL tree walks. A structural interface, so the controller's richer client
+ * and a test stub both satisfy it without coupling to the full class. */
 export interface DomainNavigatorLsp {
   glossaryModel(): Promise<GlossaryModel>;
   contextMap(): Promise<ContextMapResult>;
+  /** The whole structured model graph (root `kind: 'model'` → bounded-context children) — the tactical tree's source. */
+  model(): Promise<ModelNode>;
+}
+
+/** Wiring for the tactical level — what a leaf (an owned construct or a context-level peer) does when
+ * activated. Kept deliberately minimal: Task 5 (#453) wires the real select → goto + Reveal-in-Files and
+ * may widen this. The leaves already carry their `data-construct` / `data-name`, so a click resolves to a
+ * model element without re-rendering the tree. */
+export interface TacticalHandlers {
+  /** Select a tactical node — drives the inspector + cross-highlight. */
+  onSelect(node: ModelNode): void;
+  /** Reveal/jump to a node's declaration (Task 5 resolves the node → source position + Files reveal). */
+  goto(node: ModelNode): void;
 }
 
 /**
@@ -167,11 +181,20 @@ export function mountDomainNavigator(
   lsp: DomainNavigatorLsp,
   handlers: DomainNavigatorHandlers = {},
 ): DomainNavigatorHandle {
-  // The strategic data is fetched once and cached; store-driven changes (altitude / scope / filter)
+  // The navigator data is fetched once and cached; store-driven changes (altitude / scope / filter)
   // re-render synchronously from the cache, and reload() re-fetches after an edit. `null` = not yet
   // loaded (a loading placeholder shows). A monotonic seq drops a superseded fetch (last write wins).
-  let cache: { model: GlossaryModel; relLinks: number } | null = null;
+  // `tree` is the structured model graph the TACTICAL view walks (best-effort: `null` if it failed).
+  let cache: { model: GlossaryModel; relLinks: number; tree: ModelNode | null } | null = null;
   let fetchSeq = 0;
+
+  // The tactical-leaf seam (Task 5 wires the real select → goto + Reveal-in-Files). A structural no-op
+  // for now — the leaves carry their data-construct / data-name so Task 5 can resolve a click without
+  // re-rendering the tree.
+  const tacticalHandlers: TacticalHandlers = {
+    onSelect: () => {},
+    goto: () => {},
+  };
 
   const strategicHandlers: StrategicHandlers = {
     // Drilling in is one gesture across two store fields: narrow the scope AND descend to tactical. The
@@ -189,7 +212,10 @@ export function mountDomainNavigator(
     const s = store.getState();
     // Tactical only when a real context is in scope; the unscoped sentinel falls back to strategic.
     if (s.navAltitude === 'tactical' && !isAllContexts(s.activeContext)) {
-      host.replaceChildren(renderTacticalView(s.activeContext, store));
+      // Resolve the scoped context's node from the cached model graph; a missing node (not yet fetched,
+      // or absent) yields an empty tactical body under the breadcrumb rather than a crash.
+      const ctxNode = findContextNode(cache?.tree, s.activeContext);
+      host.replaceChildren(renderTacticalView(s.activeContext, store, ctxNode, tacticalHandlers));
       return;
     }
     if (!cache) {
@@ -211,12 +237,18 @@ export function mountDomainNavigator(
   async function doFetch(): Promise<void> {
     const seq = ++fetchSeq;
     try {
-      const [model, contextMap] = await Promise.all([lsp.glossaryModel(), lsp.contextMap()]);
+      // The model graph is fetched alongside the strategic data (and degrades to an empty tactical tree
+      // on its own failure) so a drill-in repaints synchronously from cache, like every other altitude.
+      const [model, contextMap, tree] = await Promise.all([
+        lsp.glossaryModel(),
+        lsp.contextMap(),
+        lsp.model().catch(() => null),
+      ]);
       if (seq !== fetchSeq) return; // a newer reload superseded this fetch
-      cache = { model, relLinks: contextMap.relations.length };
+      cache = { model, relLinks: contextMap.relations.length, tree };
     } catch {
       if (seq !== fetchSeq) return;
-      cache = { model: { entries: [] }, relLinks: 0 }; // best-effort: render the empty strategic state
+      cache = { model: { entries: [] }, relLinks: 0, tree: null }; // best-effort: render the empty strategic state
     }
     render();
   }
@@ -246,10 +278,15 @@ export function mountDomainNavigator(
 
 /**
  * The TACTICAL view for a bounded context: a breadcrumb that zooms back to the strategic context list,
- * then the context's aggregate-centric body. The breadcrumb is owned here; the body is the {@link
- * renderTactical} seam Task 4 fills in.
+ * then the context's aggregate-centric body ({@link renderTactical}). The breadcrumb is owned here; the
+ * body walks `ctxNode` (the context's structured model node, or `null` while it loads / when absent).
  */
-function renderTacticalView(context: string, store: StoreApi<AppState>): HTMLElement {
+function renderTacticalView(
+  context: string,
+  store: StoreApi<AppState>,
+  ctxNode: ModelNode | null,
+  h: TacticalHandlers,
+): HTMLElement {
   const root = document.createElement('div');
   root.className = 'koi-domain koi-domain-tactical';
 
@@ -264,23 +301,118 @@ function renderTacticalView(context: string, store: StoreApi<AppState>): HTMLEle
   back.addEventListener('click', () => store.getState().setNavAltitude('strategic'));
   root.appendChild(back);
 
-  root.appendChild(renderTactical(context));
+  root.appendChild(renderTactical(ctxNode, h));
   return root;
 }
 
+/** Find the bounded-context node for `context` in the model graph: the root's `kind: 'context'` child
+ * whose name matches. The graph names a context by both `title` and `qualifiedName`, so match either. */
+function findContextNode(root: ModelNode | null | undefined, context: string): ModelNode | null {
+  return (
+    root?.children.find((c) => c.kind === 'context' && (c.title === context || c.qualifiedName === context)) ??
+    null
+  );
+}
+
+/** A small shape-coded construct glyph, keyed by the slug the shared grammar ({@link constructForKind})
+ * resolves — the SAME `.koi-model-icon[data-construct]` the Explorer outline + diagram nodes wear, so a
+ * value object reads as the same blue lozenge everywhere. */
+function constructGlyph(slug: string): HTMLElement {
+  const icon = document.createElement('span');
+  icon.className = 'koi-model-icon';
+  icon.dataset.construct = slug;
+  icon.setAttribute('aria-hidden', 'true');
+  return icon;
+}
+
+/** One tactical leaf — an owned construct (under an aggregate) or a context-level peer. Carries
+ * `data-construct` (its glyph slug) + `data-name` (its title) so Task 5 can resolve a click to the model
+ * element and cross-highlight it. Icon first, then the name text, so `leaf.textContent === node.title`. */
+function tacticalLeaf(node: ModelNode, h: TacticalHandlers): HTMLElement {
+  const { slug } = constructForKind(node.kind);
+  const leaf = document.createElement('button');
+  leaf.type = 'button';
+  leaf.className = 'koi-tactical-leaf';
+  leaf.dataset.construct = slug;
+  leaf.dataset.name = node.title;
+  leaf.setAttribute('role', 'treeitem');
+  leaf.append(constructGlyph(slug), node.title);
+  leaf.addEventListener('click', () => {
+    h.onSelect(node);
+    h.goto(node);
+  });
+  return leaf;
+}
+
+/** One aggregate node: a head row (the `⬡` aggregate glyph + name, carrying the aggregate's qualified
+ * name) with its owned constructs nested beneath in a {@link tacticalLeaf} spine, so ownership reads as
+ * containment. The container carries `data-qname` for Task 5's cross-highlight; the head is the selectable
+ * row for the aggregate itself. */
+function aggregateNode(agg: ModelNode, h: TacticalHandlers): HTMLElement {
+  const node = document.createElement('div');
+  node.className = 'koi-agg';
+  node.dataset.qname = agg.qualifiedName;
+  node.setAttribute('role', 'treeitem');
+  node.setAttribute('aria-expanded', 'true');
+
+  const { slug } = constructForKind(agg.kind);
+  const head = document.createElement('button');
+  head.type = 'button';
+  head.className = 'koi-agg-head';
+  head.dataset.construct = slug;
+  const headName = document.createElement('span');
+  headName.className = 'koi-agg-name';
+  headName.textContent = agg.title;
+  head.append(constructGlyph(slug), headName);
+  head.addEventListener('click', () => {
+    h.onSelect(agg);
+    h.goto(agg);
+  });
+  node.appendChild(head);
+
+  // The owned constructs (entity / value / enum / event / state machine), nested in a bracketed spine
+  // that makes the aggregate's boundary visible.
+  const spine = document.createElement('div');
+  spine.className = 'koi-agg-spine';
+  spine.setAttribute('role', 'group');
+  for (const child of agg.children) spine.appendChild(tacticalLeaf(child, h));
+  node.appendChild(spine);
+  return node;
+}
+
 /**
- * The TACTICAL body for a bounded context — its aggregates and their internals. A placeholder for now:
- * the full aggregate-centric tree (the glyph grammar, the drill-down) lands in Task 4 (#453), which fills
- * THIS function in (likely widening its signature to take the context's model node + tactical handlers).
- * The breadcrumb above it is owned by {@link mountDomainNavigator}, so Task 4 only replaces this body.
+ * The TACTICAL body for a bounded context — aggregate-centric: each `aggregate` child becomes a node with
+ * its owned constructs nested beneath ({@link aggregateNode}); every OTHER top-level child (a value object,
+ * enum, event, … declared at the context level rather than inside an aggregate) is a peer under a quiet
+ * `context` divider — no orphan "Aggregates" header. A `null`/empty `ctxNode` (loading, or a context with
+ * no declarations) renders an empty body, not a crash.
  */
-function renderTactical(context: string): HTMLElement {
+export function renderTactical(ctxNode: ModelNode | null | undefined, h: TacticalHandlers): HTMLElement {
   const body = document.createElement('div');
   body.className = 'koi-domain-tactical-body';
-  const note = document.createElement('p');
-  note.className = 'muted';
-  note.textContent = `Aggregates and internals of ${context} appear here.`;
-  body.appendChild(note);
+  body.setAttribute('role', 'tree');
+  if (ctxNode) body.setAttribute('aria-label', `${ctxNode.title} aggregates`);
+
+  const children = ctxNode?.children ?? [];
+  const aggregates = children.filter((c) => c.kind === 'aggregate');
+  const peers = children.filter((c) => c.kind !== 'aggregate');
+
+  for (const agg of aggregates) body.appendChild(aggregateNode(agg, h));
+
+  if (peers.length) {
+    const peerGroup = document.createElement('div');
+    peerGroup.className = 'koi-ctx-peers';
+    peerGroup.setAttribute('role', 'group');
+    for (const peer of peers) peerGroup.appendChild(tacticalLeaf(peer, h));
+    body.appendChild(peerGroup);
+  }
+
+  if (!aggregates.length && !peers.length) {
+    const note = document.createElement('p');
+    note.className = 'muted koi-tactical-empty';
+    note.textContent = 'No aggregates or types here yet.';
+    body.appendChild(note);
+  }
   return body;
 }
 

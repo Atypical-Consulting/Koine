@@ -24,6 +24,20 @@ export const CONSTRUCTS: ReadonlyArray<{ label: string; kinds: ReadonlyArray<str
   { label: 'Domain Events', kinds: ['event'] },
   { label: 'Integration Events', kinds: ['integration event'] },
   { label: 'Types', kinds: ['type'] },
+  // Behavioural & lifecycle constructs (#453). The glossary (`KindOf`) does not surface these kinds as
+  // outline rows yet, and the structured model graph only emits `states` today (Phase 2 brings the rest),
+  // so these buckets stay empty — and are dropped from the outline — for now. They live HERE, in the one
+  // construct table, so the SAME grammar resolves a glyph (slug + colour) for a `states`/`command`/… node
+  // the instant it starts appearing in the tactical tree — no second, divergent map.
+  { label: 'State Machines', kinds: ['states'] },
+  { label: 'Commands', kinds: ['command'] },
+  { label: 'Queries', kinds: ['query'] },
+  { label: 'Read Models', kinds: ['read-model'] },
+  { label: 'Policies', kinds: ['policy'] },
+  { label: 'Domain Services', kinds: ['service'] },
+  { label: 'Repositories', kinds: ['repository'] },
+  { label: 'Factories', kinds: ['factory'] },
+  { label: 'Specifications', kinds: ['spec'] },
 ];
 
 const LABEL_OF_KIND = new Map<string, string>(
@@ -219,6 +233,18 @@ const CONSTRUCT_SLUG: Record<string, string> = {
   'Domain Events': 'event',
   'Integration Events': 'integration-event',
   Types: 'type',
+  // Behavioural & lifecycle slugs (#453) — `_model.scss` shapes/colours these. Note `state-machine`
+  // (the model graph's `states` kind) and the `spec` slug, which shares `--koi-ddd-spec` with the
+  // canvas palette's `rule` button rather than forking a separate hue.
+  'State Machines': 'state-machine',
+  Commands: 'command',
+  Queries: 'query',
+  'Read Models': 'read-model',
+  Policies: 'policy',
+  'Domain Services': 'service',
+  Repositories: 'repository',
+  Factories: 'factory',
+  Specifications: 'spec',
 };
 
 export function constructSlug(label: string): string {
@@ -236,6 +262,17 @@ const SINGULAR_LABEL_OF_KIND: Record<string, string> = {
   event: 'Domain Event',
   'integration event': 'Integration Event',
   type: 'Type',
+  // Behavioural & lifecycle kinds (#453). `states` is the model graph's state-machine kind (NOT
+  // "state-machine"); the rest are Phase-2 and not emitted yet, but resolve a singular label now.
+  states: 'State Machine',
+  command: 'Command',
+  query: 'Query',
+  'read-model': 'Read Model',
+  policy: 'Policy',
+  service: 'Domain Service',
+  repository: 'Repository',
+  factory: 'Factory',
+  spec: 'Specification',
 };
 
 /**

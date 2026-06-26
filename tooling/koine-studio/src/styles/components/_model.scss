@@ -204,9 +204,118 @@
   border-radius: 5px;
   background: var(--koi-ddd-repository);
 }
-.koi-model-icon[data-construct='rule'] {
+/* `rule` (the canvas palette's aggregate-scoped rule button) and `spec` (the model graph's specification
+   kind) are the same DDD concept, so they share the one `--koi-ddd-spec` hue rather than forking it. */
+.koi-model-icon[data-construct='rule'],
+.koi-model-icon[data-construct='spec'] {
   border-radius: 3px;
   background: var(--koi-ddd-spec);
+}
+
+/* Behavioural & lifecycle constructs (#453). Colour is the primary signal (the --koi-ddd-* palette); the
+   shape reinforces it — a hollow diamond reads as a lifecycle, a ring as a read request, filled glyphs as
+   the messages/handlers that flow through the model. The model graph only emits `state-machine` today;
+   the rest are Phase 2, styled ahead of their rows. */
+.koi-model-icon[data-construct='state-machine'] {
+  background: transparent;
+  border: 2px solid var(--koi-ddd-state-machine);
+  border-radius: 1px;
+  transform: rotate(45deg); /* a hollow diamond — a lifecycle / decision node */
+}
+.koi-model-icon[data-construct='command'] {
+  border-radius: 2px;
+  background: var(--koi-ddd-command);
+}
+.koi-model-icon[data-construct='query'] {
+  border-radius: 2px;
+  background: transparent;
+  border: 2px solid var(--koi-ddd-query); /* a hollow square — a read request */
+}
+.koi-model-icon[data-construct='read-model'] {
+  border-radius: 2px;
+  background: var(--koi-ddd-read-model);
+}
+.koi-model-icon[data-construct='policy'] {
+  border-radius: 50%;
+  background: var(--koi-ddd-policy); /* a filled circle — fires in reaction, like an event */
+}
+.koi-model-icon[data-construct='factory'] {
+  border-radius: 3px;
+  background: var(--koi-ddd-factory); /* a rounded square — it builds aggregates */
+}
+
+/* --- Domain navigator: the TACTICAL tree (#453) ------------------------------------------------
+   The aggregate-centric drill-down shown under the breadcrumb once a context is in scope: each aggregate
+   owns a bracketed spine of its constructs; declarations that live at the context level (not inside an
+   aggregate) sit below as peers. Leaves reuse the Explorer's mono, shape-coded look (.koi-model-leaf) so
+   a value object reads the same blue lozenge in both navigators. */
+.koi-domain-tactical-body {
+  padding: var(--koi-space-1) var(--koi-space-2) var(--koi-space-3);
+}
+
+.koi-agg {
+  margin-bottom: var(--koi-space-2);
+}
+
+.koi-agg-head,
+.koi-tactical-leaf {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-1-5);
+  width: 100%;
+  box-sizing: border-box;
+  /* WCAG 2.5.8 target size — keep each row a comfortable click/pointer target, like .koi-model-leaf. */
+  min-height: 26px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--koi-fg);
+  padding: var(--koi-space-0-75) var(--koi-space-1-5);
+  border-radius: var(--koi-radius-xs);
+  cursor: pointer;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-base-plus);
+
+  &:hover {
+    background: var(--koi-surface);
+  }
+
+  /* Cross-highlight hook (Task 5 toggles this from the selection slice, like the Explorer leaves). */
+  &.is-selected {
+    background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+    color: var(--koi-accent);
+  }
+}
+
+/* The aggregate head reads as the boundary owner — a touch heavier than its owned leaves. */
+.koi-agg-head {
+  font-weight: 600;
+}
+
+.koi-agg-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The spine: a quiet bracket down the aggregate's left edge so its ownership of the nested constructs
+   reads as containment — the indent + hairline say "these belong to the aggregate above". */
+.koi-agg-spine {
+  margin-left: var(--koi-space-2-5);
+  padding-left: var(--koi-space-2);
+  border-left: 1px solid var(--koi-line);
+}
+
+/* Context-level peers (declarations not owned by any aggregate) sit below the aggregates, divided by a
+   hairline so the two altitudes don't blur together — no "Aggregates" header is needed. */
+.koi-ctx-peers {
+  margin-top: var(--koi-space-2);
+  padding-top: var(--koi-space-2);
+  border-top: 1px solid var(--koi-line);
+}
+
+.koi-tactical-empty {
+  padding: var(--koi-space-1) var(--koi-space-1-5);
 }
 
 .koi-model-navs {

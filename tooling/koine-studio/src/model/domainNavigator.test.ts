@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mountDomainNavigator, renderStrategic } from '@/model/domainNavigator';
+import { mountDomainNavigator, renderStrategic, renderTactical, type TacticalHandlers } from '@/model/domainNavigator';
 import { createAppStore } from '@/store/index';
-import type { ContextMapResult, GlossaryEntry, GlossaryModel, Range } from '@/lsp/lsp';
+import type { ContextMapResult, GlossaryEntry, GlossaryModel, ModelNode, Range } from '@/lsp/lsp';
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -48,6 +48,39 @@ describe('renderStrategic', () => {
     expect(el.textContent).toContain('4');
     (el.querySelector('[data-ctx="Ordering"]') as HTMLButtonElement).click();
     expect(onOpenContext).toHaveBeenCalledWith('Ordering');
+  });
+});
+
+// --- the tactical body: an aggregate-centric tree over the model graph (Task 4, #453) -----------
+// Synthetic `ModelNode`s mirroring `koine/model`'s shape (the production graph is verified separately);
+// `data-name` on a leaf is the node's `title`, and an aggregate is named `<Ctx>.<Agg>` like the graph.
+function modelNode(kind: string, title: string, children: ModelNode[] = []): ModelNode {
+  return { kind, qualifiedName: title, title, members: [], children };
+}
+const entity = (title: string) => modelNode('entity', title);
+const value = (title: string) => modelNode('value', title);
+const event = (title: string) => modelNode('event', title);
+const aggNode = (title: string, children: ModelNode[]) => modelNode('aggregate', title, children);
+// A `context` ModelNode; its aggregate children get the `<Ctx>.<Agg>` qualified name the graph emits.
+function ctxNode(name: string, children: ModelNode[]): ModelNode {
+  const stamped = children.map((c) =>
+    c.kind === 'aggregate' ? { ...c, qualifiedName: `${name}.${c.title}` } : c,
+  );
+  return { kind: 'context', qualifiedName: name, title: name, members: [], children: stamped };
+}
+const noopTacticalHandlers = (): TacticalHandlers => ({ onSelect: () => {}, goto: () => {} });
+
+describe('renderTactical', () => {
+  it('nests owned constructs under their aggregate; context-level types are peers', () => {
+    const ctx = ctxNode('Ordering', [
+      aggNode('Order', [entity('Order'), value('Money'), event('OrderPlaced')]),
+      value('Currency'),
+    ]);
+    const el = renderTactical(ctx, noopTacticalHandlers());
+    const agg = el.querySelector('[data-qname="Ordering.Order"]')!;
+    expect(agg.querySelector('[data-construct="value"][data-name="Money"]')).toBeTruthy();
+    expect(agg.querySelector('[data-construct="event"][data-name="OrderPlaced"]')).toBeTruthy();
+    expect(el.querySelector('.koi-ctx-peers [data-name="Currency"]')).toBeTruthy();
   });
 });
 
