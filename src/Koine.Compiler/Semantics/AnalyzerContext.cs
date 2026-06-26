@@ -18,17 +18,11 @@ public sealed class AnalyzerContext
 {
     private readonly Dictionary<string, TypeResolver> _resolvers = new(StringComparer.Ordinal);
 
-    /// <summary>Creates a context over <paramref name="semantic"/> that reports into <paramref name="sink"/>.</summary>
-    internal AnalyzerContext(SemanticModel semantic, List<Diagnostic> sink)
-        : this(semantic, sink, EmitTargetSet.All)
-    {
-    }
-
     /// <summary>
     /// Creates a context over <paramref name="semantic"/> that reports into <paramref name="sink"/>,
     /// telling target-aware analyzers which <paramref name="enabledTargets"/> the compile is building
-    /// for (issue #495). The parameterless-targets constructor defaults to <see cref="EmitTargetSet.All"/>
-    /// (the conservative all-targets behaviour), so existing call sites are unchanged.
+    /// for (issue #495). Callers with no target context pass <see cref="EmitTargetSet.All"/> (the
+    /// conservative all-targets behaviour) explicitly — there is no silent default.
     /// </summary>
     internal AnalyzerContext(SemanticModel semantic, List<Diagnostic> sink, EmitTargetSet enabledTargets)
     {
