@@ -136,6 +136,17 @@ export interface InstallAffordanceDom {
   target?: EventTarget;
   /** Polite live-region announcer for the reveal (defaults to the shared {@link defaultAnnounce}; injectable for tests). */
   announce?: (message: string) => void;
+  /**
+   * Whether the affordance's control is currently perceivable — its `#app` ancestor is route-visible
+   * (the editor route is shown). Defaults to always-perceivable, i.e. announce immediately. When this
+   * returns `false` on the reveal edge, the announcement is deferred rather than dropped (#573).
+   */
+  isPerceivable?: () => boolean;
+  /**
+   * Subscribe to "became perceivable" edges (e.g. the editor route is shown). Used to flush a deferred
+   * announcement; returns an unsubscribe fn disposed with the affordance. Omit to never defer (#573).
+   */
+  subscribePerceivable?: (cb: () => void) => () => void;
 }
 
 /**
@@ -149,16 +160,34 @@ export function connectInstallAffordance(
 ): () => void {
   const target = dom.target ?? window;
   const announce = dom.announce ?? defaultAnnounce;
+  const isPerceivable = dom.isPerceivable ?? ((): boolean => true);
 
-  // Announce only on the hidden→visible edge, so assistive tech hears about the affordance once when it
-  // appears — not on every controller notification, nor when it's hidden/dismissed. Seed from the
-  // current DOM state (the markup ships `hidden`) so a reveal during the initial `sync()` still fires.
+  // Announce on the hidden→visible edge, so assistive tech hears about the affordance once when it
+  // appears — not on every controller notification, nor when it's hidden/dismissed. The shared live
+  // region is body-level (#522), so it can announce while the control is still inside a route-hidden
+  // `#app`. The perceivability gate (#573) closes that gap: when the reveal edge fires before the
+  // control is perceivable, defer the announcement and flush it via the same `announce(...)` once the
+  // toolbar becomes perceivable — never dropping it. Seed `wasVisible` from the current DOM state (the
+  // markup ships `hidden`) so a reveal during the initial `sync()` still fires.
   let wasVisible = !dom.root.hidden;
+  let pending = false; // a reveal that fired while not perceivable, awaiting a perceivable edge to flush
   const sync = (): void => {
     const visible = controller.canInstall();
     dom.root.hidden = !visible;
-    if (visible && !wasVisible) announce(INSTALL_ANNOUNCEMENT);
+    if (visible && !wasVisible) {
+      if (isPerceivable()) announce(INSTALL_ANNOUNCEMENT);
+      else pending = true; // not perceivable yet → defer until it is
+    } else if (!visible) {
+      pending = false; // hidden/dismissed before it could flush → drop the deferred announcement
+    }
     wasVisible = visible;
+  };
+  const flushPending = (): void => {
+    // Flush a deferred reveal once the control is both perceivable and still visible — exactly once.
+    if (pending && isPerceivable() && controller.canInstall()) {
+      pending = false;
+      announce(INSTALL_ANNOUNCEMENT);
+    }
   };
   const onBip = (e: Event): void => controller.onBeforeInstallPrompt(e as BeforeInstallPromptEvent);
   const onInstalled = (): void => controller.onAppInstalled();
@@ -170,6 +199,7 @@ export function connectInstallAffordance(
   dom.installButton.addEventListener('click', onInstallClick);
   dom.dismissButton.addEventListener('click', onDismissClick);
   const unsub = controller.subscribe(sync);
+  const unsubPerceivable = dom.subscribePerceivable?.(flushPending);
   sync(); // reflect the initial state immediately
 
   return () => {
@@ -178,5 +208,6 @@ export function connectInstallAffordance(
     dom.installButton.removeEventListener('click', onInstallClick);
     dom.dismissButton.removeEventListener('click', onDismissClick);
     unsub();
+    unsubPerceivable?.();
   };
 }
