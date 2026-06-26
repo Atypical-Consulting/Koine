@@ -146,9 +146,12 @@ jobs:
       # wire-parity tests (tests/Koine.Wasm.Tests, which run on desktop .NET) cannot do: catch a
       # trim/runtime failure in the reflection-rooted paths (Ast/NodeWalker reflects, ANTLR
       # deserializes its ATN — both rooted whole in Koine.Wasm.csproj precisely because TrimMode=full
-      # would otherwise drop them). The same run benchmarks the pizzeria compile and prints its
-      # `elapsed=` perf number (issues #327/#219), failing on a gross regression. A red exit fails CI.
-      # Node is already on PATH from the Setup Node step above.
+      # would otherwise drop them). This is the default (interpreter) publish, NOT the AOT bundle the
+      # docs site deploys (-p:KoineWasmAot=true; ~30s slower) — but PublishTrimmed/TrimMode=full are
+      # identical in both modes, so the trim/reflection breakage this guards is mode-independent; the
+      # AOT bundle's boot is covered separately by the Studio browser smoke. The same run benchmarks
+      # the pizzeria compile and prints its `elapsed=` perf number (issues #327/#219), failing on a
+      # gross regression. A red exit fails CI. Node is already on PATH from the Setup Node step above.
       - name: Smoke-test the published wasm bundle
         run: |
           dotnet publish src/Koine.Wasm -c Release

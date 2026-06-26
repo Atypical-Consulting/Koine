@@ -117,6 +117,16 @@ function expectTrue(cond, message) {
   }
 }
 
+// Every emit target carries id/displayName/fileExtension — shared by Capabilities + ListEmitTargets,
+// which surface the registry's single SupportedEmitTargets() list, so the assertion lives once.
+function expectTargets(targets) {
+  expectArray(targets);
+  expectTrue(
+    targets.length > 0 && targets.every((t) => t.id && t.displayName && t.fileExtension),
+    'every emit target needs id/displayName/fileExtension',
+  );
+}
+
 // 0-based (line, character) one column into `needle` found at/after `after` — a cursor INSIDE the
 // identifier (TokenLocator selects on a strictly-interior hit), mirroring the wire-parity tests.
 function posOf(text, needle, after) {
@@ -176,8 +186,7 @@ check('Capabilities', () => {
   expectTrue(typeof c.version === 'string' && c.version.length > 0, 'version should be a non-empty string');
   expectArray(c.exports);
   expectTrue(c.exports.includes('Capabilities') && c.exports.includes('Compile'), 'exports should list itself and Compile');
-  expectArray(c.targets);
-  expectTrue(c.targets.length > 0 && c.targets.every((t) => t.id && t.displayName && t.fileExtension), 'every target needs id/displayName/fileExtension');
+  expectTargets(c.targets);
 });
 
 check('SemanticTokens', () => {
@@ -210,24 +219,28 @@ check('EmitPreview', () => {
 
 check('ListEmitTargets', () => {
   const r = expectObject(parse(api.ListEmitTargets()), 'targets');
-  expectArray(r.targets);
-  expectTrue(r.targets.length > 0 && r.targets.every((t) => t.id && t.displayName && t.fileExtension), 'every target needs id/displayName/fileExtension');
+  expectTargets(r.targets);
 });
 
 check('Glossary', () => {
   const r = expectObject(parse(api.Glossary(ORDERING_FILES)), 'markdown');
-  expectTrue(typeof r.markdown === 'string', 'glossary markdown should be a string');
+  // Non-empty, not just a string: "" is the catch / null-model fallback this test must NOT pass on.
+  expectTrue(typeof r.markdown === 'string' && r.markdown.length > 0, 'a model with named types should yield non-empty glossary markdown');
 });
 
 check('ContextMap', () => {
   const r = expectObject(parse(api.ContextMap(ORDERING_FILES)), 'contexts', 'relations', 'contextSpans');
-  expectArray(r.contexts);
   expectArray(r.relations);
+  // Non-empty: [] is the catch / null-model fallback; the declared `context Ordering` must appear.
+  expectArray(r.contexts);
+  expectTrue(r.contexts.length > 0, 'the declared context Ordering should appear, not the empty fallback');
 });
 
 check('GlossaryModel', () => {
   const r = expectObject(parse(api.GlossaryModel(ORDERING_FILES)), 'entries');
   expectArray(r.entries);
+  // Non-empty: [] is the catch / null-model fallback; the workspace's named types must surface.
+  expectTrue(r.entries.length > 0, 'a model with named types should surface glossary entries');
 });
 
 check('SetDoc', () => {
@@ -246,6 +259,9 @@ check('Model', () => {
   const r = expectObject(parse(api.Model(ORDERING_FILES, null)), 'kind', 'qualifiedName', 'title', 'members', 'children');
   expectTrue(r.kind === 'model', `root node kind should be 'model', got '${r.kind}'`);
   expectArray(r.children);
+  // Non-empty: EmptyModelNode {kind:'model', children:[]} is the catch / error-model fallback — the
+  // reflection-heavy ModelRoundTripService path must actually project the context's types.
+  expectTrue(r.children.length > 0, 'the model tree should project the workspace context, not the empty fallback');
 });
 
 check('ModelMembers', () => {
@@ -269,10 +285,9 @@ check('ApplyModelEdit', () => {
 // ---- positional LSP surface (0-based cursor in the active document) --------------------------
 
 check('Hover', () => {
-  const r = expectObjectOrNull(parse(api.Hover(ORDERING_FILES, ORDERING_URI, pOrder.line, pOrder.character)), 'contents');
-  if (r) {
-    expectObject(r.contents, 'kind', 'value');
-  }
+  // The cursor sits on the entity name `Order`, which has a hover — `null` is the catch fallback.
+  const r = expectObject(parse(api.Hover(ORDERING_FILES, ORDERING_URI, pOrder.line, pOrder.character)), 'contents');
+  expectObject(r.contents, 'kind', 'value');
 });
 
 check('Completions', () => {
@@ -288,11 +303,14 @@ check('SignatureHelp', () => {
 });
 
 check('Definition', () => {
-  expectObjectOrNull(parse(api.Definition(ORDERING_FILES, ORDERING_URI, pOrder.line, pOrder.character)), 'uri', 'range');
+  // `Order` resolves to its declaration — `null` is the catch fallback.
+  expectObject(parse(api.Definition(ORDERING_FILES, ORDERING_URI, pOrder.line, pOrder.character)), 'uri', 'range');
 });
 
 check('References', () => {
-  expectArray(parse(api.References(ORDERING_FILES, ORDERING_URI, pOrder.line, pOrder.character)));
+  // `Order` is referenced (its declaration + the aggregate root) — [] is the catch fallback.
+  const r = expectArray(parse(api.References(ORDERING_FILES, ORDERING_URI, pOrder.line, pOrder.character)));
+  expectTrue(r.length > 0, 'the entity Order should have references');
 });
 
 check('DocumentHighlightsAt', () => {
@@ -303,7 +321,8 @@ check('DocumentHighlightsAt', () => {
 });
 
 check('PrepareRename', () => {
-  expectObjectOrNull(parse(api.PrepareRename(ORDERING_FILES, ORDERING_URI, pOrder.line, pOrder.character)), 'range');
+  // `Order` is a renameable identifier — `null` is the catch / not-renameable fallback.
+  expectObject(parse(api.PrepareRename(ORDERING_FILES, ORDERING_URI, pOrder.line, pOrder.character)), 'range');
 });
 
 check('Rename', () => {
@@ -400,9 +419,10 @@ check(['PrepareTypeHierarchy', 'Supertypes', 'Subtypes'], () => {
 check('Docs', () => {
   const r = expectObject(parse(api.Docs(ORDERING_FILES)), 'files');
   expectArray(r.files);
-  if (r.files.length) {
-    expectObject(r.files[0], 'path', 'contents', 'diagrams');
-  }
+  // Non-empty: {files:[]} is the catch / null-model fallback; the DocsEmitter (Mermaid, reflection-
+  // heavy) must emit at least one living-doc file for the aggregate + state machine.
+  expectTrue(r.files.length > 0, 'a non-trivial model should emit living-documentation files');
+  expectObject(r.files[0], 'path', 'contents', 'diagrams');
 });
 
 check('ScenarioCatalog', () => {
