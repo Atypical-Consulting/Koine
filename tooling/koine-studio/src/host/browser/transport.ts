@@ -6,6 +6,7 @@
 import type { LspTransport } from '@/host/types';
 import { loadWasmApi, getWasmWorkerClient, mapWorkerCallError, type KoineWasmApi } from '@/host/browser/wasm';
 import { CancelledError } from '@/host/browser/workerClient';
+import { markCompileEnd, markCompileStart } from '@/host/browser/compileActivity';
 
 interface JsonRpc {
   id?: number | string | null;
@@ -61,6 +62,22 @@ export class WasmLspTransport implements LspTransport {
     return JSON.stringify(Array.from(this.docs, ([uri, text]) => ({ uri, text })));
   }
 
+  /**
+   * Bracket a compile-driven worker call so the Stop-command gate (#469) reflects an actual in-flight
+   * compile. markCompileEnd() runs in `finally` so a clean resolve, a supersede-abort, a Stop's
+   * CancelledError, and a real error all decrement — the gate never sticks visible after a compile.
+   * Used for the diagnose, emit-preview, and run-scenario worker compiles; one-shot LSP requests
+   * (hover/completion/…) are intentionally NOT bracketed (Stop is about compiles, not IntelliSense).
+   */
+  private async withCompileActivity<T>(run: () => Promise<T>): Promise<T> {
+    markCompileStart();
+    try {
+      return await run();
+    } finally {
+      markCompileEnd();
+    }
+  }
+
   /** Run the merged-workspace diagnostics and turn them into publishDiagnostics notifications. */
   private async diagnostics(api: KoineWasmApi): Promise<object[]> {
     // Supersede any in-flight diagnose: aborting drops its worker call id so its late reply is ignored.
@@ -70,37 +87,39 @@ export class WasmLspTransport implements LspTransport {
     const mySeq = ++this.diagnoseSeq;
 
     const filesJson = this.filesJson();
-    let raw: string;
-    try {
-      // Route through the worker client when present so the AbortSignal actually cancels the in-flight
-      // call (#338's `{ signal }` seam). The main-thread fallback (no worker client) has no cancellation,
-      // so use the proxy and rely on the sequence-guard below to drop a stale resolution.
-      const client = getWasmWorkerClient();
-      raw = client
-        ? await client.call('DiagnoseWorkspace', [filesJson], { signal: controller.signal })
-        : await api.DiagnoseWorkspace(filesJson);
-    } catch (err) {
-      // Drop silently — there is nothing to publish — when this diagnose was cancelled: either
-      // superseded by a newer edit (its own signal aborted) or hard-cancelled by the Stop affordance
-      // (terminateAndRespawn rejects every in-flight call with CancelledError). Any other failure is a
-      // real error: surface it, re-mapped to the actionable stale-bundle message when applicable.
-      if (controller.signal.aborted || err instanceof CancelledError) return [];
-      throw mapWorkerCallError(err);
-    }
+    return this.withCompileActivity(async () => {
+      let raw: string;
+      try {
+        // Route through the worker client when present so the AbortSignal actually cancels the in-flight
+        // call (#338's `{ signal }` seam). The main-thread fallback (no worker client) has no cancellation,
+        // so use the proxy and rely on the sequence-guard below to drop a stale resolution.
+        const client = getWasmWorkerClient();
+        raw = client
+          ? await client.call('DiagnoseWorkspace', [filesJson], { signal: controller.signal })
+          : await api.DiagnoseWorkspace(filesJson);
+      } catch (err) {
+        // Drop silently — there is nothing to publish — when this diagnose was cancelled: either
+        // superseded by a newer edit (its own signal aborted) or hard-cancelled by the Stop affordance
+        // (terminateAndRespawn rejects every in-flight call with CancelledError). Any other failure is a
+        // real error: surface it, re-mapped to the actionable stale-bundle message when applicable.
+        if (controller.signal.aborted || err instanceof CancelledError) return [];
+        throw mapWorkerCallError(err);
+      }
 
-    // Main-thread fallback has no real cancellation; guard against a stale resolution landing late and
-    // overwriting newer diagnostics.
-    if (mySeq !== this.diagnoseSeq) return [];
+      // Main-thread fallback has no real cancellation; guard against a stale resolution landing late and
+      // overwriting newer diagnostics.
+      if (mySeq !== this.diagnoseSeq) return [];
 
-    const buckets = JSON.parse(raw) as {
-      uri: string;
-      diagnostics: unknown[];
-    }[];
-    return buckets.map((b) => ({
-      jsonrpc: '2.0',
-      method: 'textDocument/publishDiagnostics',
-      params: { uri: b.uri, diagnostics: b.diagnostics },
-    }));
+      const buckets = JSON.parse(raw) as {
+        uri: string;
+        diagnostics: unknown[];
+      }[];
+      return buckets.map((b) => ({
+        jsonrpc: '2.0',
+        method: 'textDocument/publishDiagnostics',
+        params: { uri: b.uri, diagnostics: b.diagnostics },
+      }));
+    });
   }
 
   private async handle(msg: JsonRpc): Promise<object[]> {
@@ -200,7 +219,15 @@ export class WasmLspTransport implements LspTransport {
         return [result(JSON.parse(await api.Format(this.docs.get(uri ?? '') ?? '')))];
 
       case 'koine/emitPreview':
-        return [result(JSON.parse(await api.EmitPreview(this.filesJson(), msg.params?.target ?? 'csharp')))];
+        // A real compile (emit the target output): bracket it so the Stop command (#469) is offered while
+        // it runs — in the worker boot path EmitPreview forwards through the worker client and is abortable.
+        return [
+          result(
+            JSON.parse(
+              await this.withCompileActivity(() => api.EmitPreview(this.filesJson(), msg.params?.target ?? 'csharp')),
+            ),
+          ),
+        ];
 
       case 'koine/emitTargets':
         return [result(JSON.parse(await api.ListEmitTargets()))];
@@ -233,15 +260,18 @@ export class WasmLspTransport implements LspTransport {
         return [result(JSON.parse(await api.Docs(this.filesJson())))];
 
       case 'koine/runScenario':
+        // A real compile (compile + execute a scenario): bracket it so Stop (#469) is offered while it runs.
         return [
           result(
             JSON.parse(
-              await api.RunScenario(
-                this.filesJson(),
-                msg.params?.target ?? '',
-                msg.params?.operation ?? '',
-                JSON.stringify(msg.params?.given ?? {}),
-                JSON.stringify(msg.params?.args ?? {}),
+              await this.withCompileActivity(() =>
+                api.RunScenario(
+                  this.filesJson(),
+                  msg.params?.target ?? '',
+                  msg.params?.operation ?? '',
+                  JSON.stringify(msg.params?.given ?? {}),
+                  JSON.stringify(msg.params?.args ?? {}),
+                ),
               ),
             ),
           ),

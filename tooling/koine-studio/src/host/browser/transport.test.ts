@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 // Each export is a spy returning canned JSON in the camelCase shapes CompilerInterop emits.
 const api = vi.hoisted(() => ({
   DiagnoseWorkspace: vi.fn<(f: string) => string>(() => '[]'),
+  EmitPreview: vi.fn<(f: string, target: string) => string>(() => '{}'),
   InlayHints:
     vi.fn<
       (f: string, u: string, sl: number, sc: number, el: number, ec: number) => string
@@ -23,6 +24,7 @@ vi.mock('@/host/browser/wasm', () => ({
 }));
 
 import { WasmLspTransport } from '@/host/browser/transport';
+import { isCompileInFlight } from '@/host/browser/compileActivity';
 
 const URI = 'file:///a.koi';
 
@@ -213,6 +215,109 @@ describe('WasmLspTransport — supersede stale diagnostics (#353)', () => {
 
     expect(published).toHaveLength(1);
     expect(published[0].diagnostics[0]?.code).toBe('NEW');
+
+    api.DiagnoseWorkspace.mockReturnValue('[]'); // restore the default for any later tests
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Compile-in-flight activity for the Stop-command gate (#469)
+// ---------------------------------------------------------------------------
+
+describe('WasmLspTransport — compile-in-flight activity (#469)', () => {
+  afterEach(() => {
+    wasmState.workerClient = null;
+    // Each test settles every diagnose it starts, so the transport balances start/end back to idle.
+    expect(isCompileInFlight()).toBe(false);
+  });
+
+  test('isCompileInFlight() is true while a worker DiagnoseWorkspace is outstanding, false once it resolves', async () => {
+    const calls: RecordedCall[] = [];
+    wasmState.workerClient = makeFakeWorkerClient(calls);
+
+    const transport = new WasmLspTransport();
+    transport.onMessage(() => {});
+    await transport.start();
+
+    expect(isCompileInFlight()).toBe(false);
+
+    // didOpen triggers a diagnose (call #0) that stays pending until we settle it.
+    const open = transport.send(
+      JSON.stringify({ method: 'textDocument/didOpen', params: { textDocument: { uri: URI, text: 'a' } } }),
+    );
+    expect(calls).toHaveLength(1);
+    expect(isCompileInFlight()).toBe(true); // compile in flight
+
+    calls[0].resolve('[]');
+    await open;
+    expect(isCompileInFlight()).toBe(false); // settled → idle
+  });
+
+  test('the in-flight count returns to idle when a diagnose settles via the supersede/abort path', async () => {
+    const calls: RecordedCall[] = [];
+    wasmState.workerClient = makeFakeWorkerClient(calls);
+
+    const transport = new WasmLspTransport();
+    transport.onMessage(() => {});
+    await transport.start();
+
+    // First diagnose in flight (call #0).
+    const c1 = transport.send(
+      JSON.stringify({ method: 'textDocument/didOpen', params: { textDocument: { uri: URI, text: 'a' } } }),
+    );
+    expect(isCompileInFlight()).toBe(true);
+
+    // A newer edit supersedes it: the prior call's signal aborts (rejecting it) and call #1 issues.
+    const c2 = transport.send(
+      JSON.stringify({ method: 'textDocument/didChange', params: { textDocument: { uri: URI }, contentChanges: [{ text: 'aa' }] } }),
+    );
+    expect(calls).toHaveLength(2);
+    expect(calls[0].signal?.aborted).toBe(true);
+    expect(isCompileInFlight()).toBe(true); // call #1 keeps it in flight while #0 unwinds via abort
+
+    // Settle the latest; the aborted #0 (finally) and resolved #1 (finally) both decrement → idle.
+    calls[1].resolve('[]');
+    await Promise.all([c1, c2]);
+    expect(isCompileInFlight()).toBe(false);
+  });
+
+  test('a non-diagnose compile (koine/emitPreview) is also bracketed as in flight', async () => {
+    // EmitPreview is a real compile too (the issue spec names "diagnose + emitPreview"). Drive it through
+    // the api proxy as a controllable pending promise and assert the counter brackets it.
+    let resolveEmit!: (v: string) => void;
+    api.EmitPreview.mockImplementation(
+      () => new Promise<string>((resolve) => { resolveEmit = resolve; }) as unknown as string,
+    );
+
+    const transport = new WasmLspTransport();
+    transport.onMessage(() => {});
+    await transport.start();
+    expect(isCompileInFlight()).toBe(false);
+
+    const p = transport.send(JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'koine/emitPreview', params: { target: 'csharp' } }));
+    expect(isCompileInFlight()).toBe(true); // emit compile in flight
+
+    resolveEmit('{}');
+    await p;
+    expect(isCompileInFlight()).toBe(false); // settled → idle
+
+    api.EmitPreview.mockReturnValue('{}'); // restore the default for any later tests
+  });
+
+  test('the in-flight count returns to idle when a compile rejects with a real error', async () => {
+    // A genuine compiler failure (not a cancel) must still decrement via the `finally`, or the gate sticks.
+    api.DiagnoseWorkspace.mockImplementationOnce(
+      () => Promise.reject(new Error('compiler boom')) as unknown as string,
+    );
+
+    const transport = new WasmLspTransport();
+    transport.onMessage(() => {});
+    await transport.start();
+
+    await expect(
+      transport.send(JSON.stringify({ method: 'textDocument/didOpen', params: { textDocument: { uri: URI, text: 'a' } } })),
+    ).rejects.toThrow();
+    expect(isCompileInFlight()).toBe(false); // errored → idle (finally ran)
 
     api.DiagnoseWorkspace.mockReturnValue('[]'); // restore the default for any later tests
   });
