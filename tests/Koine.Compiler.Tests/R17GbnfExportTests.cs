@@ -348,6 +348,58 @@ public class R17GbnfExportTests
             .ShouldBeFalse("input nested past the matcher's depth bound must be rejected, not overflow the stack");
     }
 
+    // -------------------------------------------------------------------------
+    // Task 2 (issue #450) — the harness tokenizes exactly as the compiler does.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The recogniser must consume the same token stream the compiler's parser sees, so the harness
+    /// tokenises through the real <see cref="KoineLexer"/> rather than a hand-maintained parallel
+    /// keyword/role/operator list (a third copy that could drift from <c>KoineLexer.g4</c> and let the
+    /// GBNF tests pass against a tokenisation the compiler would never produce). This pins the two cases
+    /// the lexer split exists for: a <c>matches /regex/</c> literal is one <c>regex</c> token (not two
+    /// <c>/</c> operators), and a hyphenated context-map role is one token even at a maximal-munch
+    /// boundary — <c>shared-kernel-x</c> is <c>shared-kernel</c> + <c>-</c> + <c>x</c>, exactly as the
+    /// real lexer munches it (a parallel tokenizer that splits on every <c>-</c> gets this wrong).
+    /// </summary>
+    [Fact]
+    public void Harness_tokenizes_constructs_exactly_as_the_real_lexer()
+    {
+        // `matches /regex/` → a single regex literal, never two `/` division operators.
+        AssertTokens(
+            "spec S on Code = c matches /[A-Z]/",
+            (TokenKind.Exact, "spec"), (TokenKind.Identifier, "S"), (TokenKind.Exact, "on"),
+            (TokenKind.Identifier, "Code"), (TokenKind.Exact, "="), (TokenKind.Identifier, "c"),
+            (TokenKind.Exact, "matches"), (TokenKind.Regex, "/[A-Z]/"));
+
+        // A hyphenated role keyword is one token even when a further `-` follows it — the maximal-munch
+        // boundary the dedicated lexer tokens exist for.
+        AssertTokens(
+            "A -> B : shared-kernel-x",
+            (TokenKind.Identifier, "A"), (TokenKind.Exact, "->"), (TokenKind.Identifier, "B"),
+            (TokenKind.Exact, ":"), (TokenKind.Exact, "shared-kernel"), (TokenKind.Exact, "-"),
+            (TokenKind.Identifier, "x"));
+
+        // Every literal kind + keyword/identifier/punctuation classification.
+        AssertTokens(
+            "value V { n: Int = 42, d: Decimal = 3.14, s: String = \"hi\" }",
+            (TokenKind.Exact, "value"), (TokenKind.Identifier, "V"), (TokenKind.Exact, "{"),
+            (TokenKind.Identifier, "n"), (TokenKind.Exact, ":"), (TokenKind.Identifier, "Int"),
+            (TokenKind.Exact, "="), (TokenKind.Int, "42"), (TokenKind.Exact, ","),
+            (TokenKind.Identifier, "d"), (TokenKind.Exact, ":"), (TokenKind.Identifier, "Decimal"),
+            (TokenKind.Exact, "="), (TokenKind.Decimal, "3.14"), (TokenKind.Exact, ","),
+            (TokenKind.Identifier, "s"), (TokenKind.Exact, ":"), (TokenKind.Identifier, "String"),
+            (TokenKind.Exact, "="), (TokenKind.String, "\"hi\""), (TokenKind.Exact, "}"));
+    }
+
+    private static void AssertTokens(string source, params (TokenKind Kind, string Text)[] expected)
+    {
+        List<KoineToken>? actual = KoineTokenizer.Tokenize(source);
+
+        actual.ShouldNotBeNull();
+        actual.Select(t => (t.Kind, t.Text)).ShouldBe(expected);
+    }
+
     private static IEnumerable<string> RuleReferences(string body)
     {
         var stripped = new StringBuilder();
