@@ -254,10 +254,14 @@ public class R8ExplicitIdFactoryTests
         blob.ShouldContain("new self($id,");          // parameter threaded into construction
 
         // Validate the emitted PHP with `php -l` (the syntax gate every PhpSnapshotTests model uses),
-        // not `phpstan --level max`: phpstan analyses the whole output including the always-emitted
-        // KoineRuntime.php, which carries pre-existing numeric-string typing gaps in its bc-math
-        // helpers that are unrelated to this factory feature (see follow-up). Syntax-checking proves
-        // the factory we emit is well-formed, which is what this test is about.
+        // not `phpstan --level max`. The runtime's bc-math operands are now numeric-string-typed and
+        // KoineRuntime.php type-checks clean at max level on its own (see PhpConformanceTests.
+        // Emitted_runtime_typechecks_at_phpstan_level_max, #478). But the PER-MODEL emitter
+        // (entities/enums/repositories/value objects) still has pre-existing level-max typing gaps
+        // unrelated to this factory feature — e.g. a redundant `instanceof` on the entity guard and
+        // untyped `array` shapes — so a whole-model phpstan gate is not yet green. Full emitted-model
+        // phpstan parity is tracked as a separate follow-up; syntax-checking here proves the factory
+        // we emit is well-formed, which is what this test is about.
         var php = TestSupport.SyntaxCheckPhp(result.Files);
         TestSupport.RequireOrSkip(php.ToolchainAvailable,
             "No php interpreter available; PHP syntax check skipped (CI runs it for real).");
