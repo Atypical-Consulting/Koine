@@ -128,6 +128,18 @@
               <circle cx="10" cy="10.5" r="1.7" />
             </svg>
           </button>
+          <!-- Mobile overflow "More" (⋮) menu (#528). Hidden on desktop; the
+               @media (max-width: $bp-narrow) block in _toolbar.scss reveals it and hides the secondary
+               inline actions (Save/Check/Install/⌘K/theme/Settings), which this kebab then collects into a
+               floating menu (wired in ide.tsx → toolbarOverflow.ts) so every action stays reachable on a
+               phone. -->
+          <button type="button" id="btn-toolbar-overflow" class="icon-btn" title="More actions" aria-label="More actions" aria-haspopup="menu" aria-expanded="false" hidden>
+            <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="8" cy="3.2" r="1.15" fill="currentColor" stroke="none" />
+              <circle cx="8" cy="8" r="1.15" fill="currentColor" stroke="none" />
+              <circle cx="8" cy="12.8" r="1.15" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
           <div id="status" data-kind="connecting" role="status" aria-live="polite">connecting…</div>
           <button type="button" id="unsaved-indicator" class="unsaved-indicator" hidden></button>
         </div>
