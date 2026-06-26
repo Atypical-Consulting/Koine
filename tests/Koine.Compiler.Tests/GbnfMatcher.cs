@@ -43,21 +43,41 @@ internal static class GbnfMatcher
         }
 
         var run = new Run(grammar, tokens);
-        return run.Match(new Ref("root"), 0, 0).Contains(tokens.Count);
+        try
+        {
+            return run.Match(new Ref("root"), 0, 0).Contains(tokens.Count);
+        }
+        catch (DepthLimitExceededException)
+        {
+            // The input nested past the matcher's depth bound — reject it cleanly rather than letting
+            // the recursion overflow the stack and abort the whole test host.
+            return false;
+        }
     }
+
+    /// <summary>
+    /// Raised by <see cref="Run.Match"/> when recursion passes the depth bound. It unwinds the entire
+    /// match (rather than returning an empty set) so that a depth-truncated partial result is never
+    /// memoised — a memoised empty set, keyed only by (rule, position), would otherwise poison a later
+    /// shallower lookup of the same rule/position and wrongly reject valid input.
+    /// </summary>
+    private sealed class DepthLimitExceededException : Exception;
 
     /// <summary>One recognition pass over a fixed token list, carrying the per-pass memo table.</summary>
     private sealed class Run
     {
         /// <summary>
-        /// Caps the recogniser's recursion depth. The exported GBNF is recursive
-        /// (<c>primary ::= … | "(" ws expression ws ")"</c>), so input nested N levels deep recurses N
-        /// times; without a bound, pathological input overflows the stack and aborts the whole test host
-        /// instead of being rejected. The deepest a real <c>templates/**</c> model drives the matcher is
-        /// 99 levels (pizzeria/ordering.koi), while the recogniser empirically overflows the test
-        /// thread's ~1 MB stack near depth ~2000. 500 sits between the two — ~5× over the deepest real
-        /// template, ~4× below the overflow point — so legitimate models always pass and anything past
-        /// the bound is rejected as no-match rather than crashing.
+        /// Caps the recogniser's recursion depth — the <c>depth</c> threaded through <see cref="Match"/>,
+        /// which increments on every grammar-node descent (so one level of source nesting costs a whole
+        /// expression-precedence chain, tens of depth units, not one). The exported GBNF is recursive
+        /// (<c>primary ::= … | "(" ws expression ws ")"</c>), so without a bound, deeply-nested input
+        /// recurses without limit and overflows the stack, aborting the whole test host instead of being
+        /// rejected. Both bounds below are measured in those <c>depth</c> units: the deepest a real
+        /// <c>templates/**</c> model drives the matcher is depth 99 (pizzeria/ordering.koi), and the
+        /// recogniser empirically overflows the test thread's ~1 MB stack near depth 2000. 500 sits
+        /// between the two — ~5× over the deepest real template, ~4× below the overflow point — so every
+        /// legitimate model passes and anything past the bound is rejected (via
+        /// <see cref="DepthLimitExceededException"/>) rather than crashing.
         /// </summary>
         private const int MaxDepth = 500;
 
@@ -77,8 +97,9 @@ internal static class GbnfMatcher
         {
             if (depth > MaxDepth)
             {
-                // Past the depth bound: reject cleanly (no-match) rather than recursing into a stack overflow.
-                return new HashSet<int>();
+                // Past the depth bound: abort the whole match (see DepthLimitExceededException) instead
+                // of recursing into a stack overflow — and instead of memoising a truncated no-match.
+                throw new DepthLimitExceededException();
             }
 
             switch (node)
