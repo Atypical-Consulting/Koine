@@ -267,9 +267,9 @@ public sealed partial class DocsEmitter
         _ => new DiagramMember(row.Name, "field")
     };
 
-    /// <summary>The readable type text for a field row: the synthetic primitive name, else <see cref="KoineType"/>.</summary>
+    /// <summary>The readable type text for a field row: its <see cref="KoineType"/>, else empty.</summary>
     private static string RowType(ClassRow row) =>
-        row.PrimitiveType ?? (row.Type is { } t ? KoineType(t) : string.Empty);
+        row.Type is { } t ? KoineType(t) : string.Empty;
 
     /// <summary>Formats a method row as <c>name(p1: T1, p2: T2): Ret</c> (the return suffix is dropped when void).</summary>
     private static string FormatMethod(ClassRow row)
