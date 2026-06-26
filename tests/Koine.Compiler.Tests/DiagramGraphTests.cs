@@ -200,6 +200,38 @@ public class DiagramGraphTests
     }
 
     [Fact]
+    public void Versioned_aggregate_roots_synthetic_version_row_uses_the_koine_Int_type_name()
+    {
+        // A `versioned` aggregate injects a synthetic optimistic-concurrency row. It must read like
+        // every other field — the target-agnostic Koine primitive `Int`, not the lowercase C# `int`
+        // that would leak the emitter primitive into the diagram/inspector model Studio renders
+        // verbatim (#532). The C# emitter still emits `public int Version`; only the label changes.
+        const string source = """
+            context Billing {
+              aggregate Subscriptions root Subscription versioned {
+                entity Subscription identified by SubscriptionId {
+                  failedAttempts: Int
+                }
+              }
+            }
+            """;
+
+        var (model, diagnostics) = new KoineCompiler().Parse(new[] { new SourceFile("billing.koi", source) });
+        diagnostics.ShouldBeEmpty();
+        DiagramGraph context = new DocsEmitter().EmitDiagrams(model!)["docs/Billing.md"]
+            .First(d => d.Kind == "context").Graph;
+
+        DiagramNode rootNode = context.Nodes
+            .Where(n => n.Kind == "aggregate-root")
+            .ToList()
+            .ShouldHaveSingleItem();
+
+        var fields = rootNode.Members!.Where(m => m.Kind == "field").Select(m => m.Text).ToList();
+        fields.ShouldContain("version: Int"); // the Koine primitive name, consistent with sibling rows
+        fields.ShouldNotContain("version: int"); // not the lowercase C# emitter primitive
+    }
+
+    [Fact]
     public void Value_object_node_carries_its_invariants_as_business_rules()
     {
         DiagramGraph context = ContextGraph();
