@@ -6,13 +6,15 @@
 // (`getWasmWorkerClient() !== null`), so it was offered the whole session and an idle Stop pointlessly
 // terminated + re-instantiated the multi-MB .NET WASM runtime.
 //
-// This module is a tiny module-level counter the worker transport (`transport.ts`) brackets around its
-// compile/diagnose call — `markCompileStart()` before issuing, `markCompileEnd()` in a `finally` so
-// success, supersede-abort, `CancelledError` (a Stop mid-compile), and real errors all decrement — and
-// the Stop gate (`stopCompile.ts`) reads via `isCompileInFlight()`. Additive: no public API change.
+// This module is a tiny module-level counter the worker transport (`transport.ts`) brackets around each
+// compile-driven worker call — the keystroke diagnose (`DiagnoseWorkspace`), the emit-preview compile
+// (`EmitPreview`), and the run-scenario compile (`RunScenario`) — via `withCompileActivity()`:
+// `markCompileStart()` before issuing, `markCompileEnd()` in a `finally` so success, supersede-abort,
+// `CancelledError` (a Stop mid-compile), and real errors all decrement. The Stop gate (`stopCompile.ts`)
+// reads it via `isCompileInFlight()`. Additive: no public API change.
 //
-// One-shot LSP requests (hover/completion/definition/…) are intentionally NOT counted — Stop is about
-// compiles, not IntelliSense traffic.
+// One-shot LSP requests (hover/completion/definition/…) and lightweight model-projection queries are
+// intentionally NOT counted — Stop is about abandoning a running compile, not IntelliSense traffic.
 
 let inFlight = 0;
 

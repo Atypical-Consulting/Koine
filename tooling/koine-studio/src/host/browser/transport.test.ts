@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 // Each export is a spy returning canned JSON in the camelCase shapes CompilerInterop emits.
 const api = vi.hoisted(() => ({
   DiagnoseWorkspace: vi.fn<(f: string) => string>(() => '[]'),
+  EmitPreview: vi.fn<(f: string, target: string) => string>(() => '{}'),
   InlayHints:
     vi.fn<
       (f: string, u: string, sl: number, sc: number, el: number, ec: number) => string
@@ -278,5 +279,46 @@ describe('WasmLspTransport — compile-in-flight activity (#469)', () => {
     calls[1].resolve('[]');
     await Promise.all([c1, c2]);
     expect(isCompileInFlight()).toBe(false);
+  });
+
+  test('a non-diagnose compile (koine/emitPreview) is also bracketed as in flight', async () => {
+    // EmitPreview is a real compile too (the issue spec names "diagnose + emitPreview"). Drive it through
+    // the api proxy as a controllable pending promise and assert the counter brackets it.
+    let resolveEmit!: (v: string) => void;
+    api.EmitPreview.mockImplementation(
+      () => new Promise<string>((resolve) => { resolveEmit = resolve; }) as unknown as string,
+    );
+
+    const transport = new WasmLspTransport();
+    transport.onMessage(() => {});
+    await transport.start();
+    expect(isCompileInFlight()).toBe(false);
+
+    const p = transport.send(JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'koine/emitPreview', params: { target: 'csharp' } }));
+    expect(isCompileInFlight()).toBe(true); // emit compile in flight
+
+    resolveEmit('{}');
+    await p;
+    expect(isCompileInFlight()).toBe(false); // settled → idle
+
+    api.EmitPreview.mockReturnValue('{}'); // restore the default for any later tests
+  });
+
+  test('the in-flight count returns to idle when a compile rejects with a real error', async () => {
+    // A genuine compiler failure (not a cancel) must still decrement via the `finally`, or the gate sticks.
+    api.DiagnoseWorkspace.mockImplementationOnce(
+      () => Promise.reject(new Error('compiler boom')) as unknown as string,
+    );
+
+    const transport = new WasmLspTransport();
+    transport.onMessage(() => {});
+    await transport.start();
+
+    await expect(
+      transport.send(JSON.stringify({ method: 'textDocument/didOpen', params: { textDocument: { uri: URI, text: 'a' } } })),
+    ).rejects.toThrow();
+    expect(isCompileInFlight()).toBe(false); // errored → idle (finally ran)
+
+    api.DiagnoseWorkspace.mockReturnValue('[]'); // restore the default for any later tests
   });
 });
