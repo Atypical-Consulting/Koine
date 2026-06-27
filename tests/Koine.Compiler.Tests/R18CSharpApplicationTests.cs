@@ -1,4 +1,5 @@
 using Koine.Cli;
+using Koine.Cli.Commands;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Services;
@@ -146,6 +147,94 @@ public class R18CSharpApplicationTests
         KoineConfig.ParseLayers("Domain , Application ,").ShouldBe(new[] { "domain", "application" });
         KoineConfig.ParseLayers("  ").ShouldBeNull();
         KoineConfig.ParseLayers(null).ShouldBeNull();
+    }
+
+    // ------------------------------------------------------------------
+    // Issue #618 — the Application sub-options (--app-mediatr/--app-mapping)
+    // imply the Application layer, mirroring how application/infrastructure
+    // already imply domain. Without this they were silently inert unless
+    // --layers application was passed too.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void App_mediatr_flag_implies_the_application_layer()
+    {
+        var settings = new BuildSettings { Path = "x.koi", AppMediatr = true };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+        plan.Options.ApplicationMediatr.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void App_mapping_flag_implies_the_application_layer()
+    {
+        var settings = new BuildSettings { Path = "x.koi", AppMapping = "mapperly" };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+        plan.Options.ApplicationMapping.ShouldBe("mapperly");
+    }
+
+    [Fact]
+    public void Explicit_app_mapping_plain_also_implies_the_application_layer()
+    {
+        // An explicitly-typed --app-mapping plain is intentional, so it implies the layer too.
+        var settings = new BuildSettings { Path = "x.koi", AppMapping = "plain" };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+    }
+
+    [Fact]
+    public void Explicit_layers_domain_is_upgraded_to_include_application_for_app_flags()
+    {
+        // --layers domain --app-mediatr: the explicit domain selection must not block the implication.
+        var settings = new BuildSettings { Path = "x.koi", Layers = "domain", AppMediatr = true };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+    }
+
+    [Fact]
+    public void Application_layer_already_present_is_not_duplicated_by_app_flags()
+    {
+        var settings = new BuildSettings { Path = "x.koi", Layers = "application", AppMediatr = true };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+    }
+
+    [Fact]
+    public void App_flags_preserve_a_requested_infrastructure_layer()
+    {
+        var settings = new BuildSettings { Path = "x.koi", Layers = "infrastructure", AppMediatr = true };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application", "infrastructure" });
+    }
+
+    [Fact]
+    public void No_app_flags_leaves_layers_null_domain_only()
+    {
+        // No-regression guarantee: absent app sub-options ⇒ Layers stays null (Domain-only).
+        var settings = new BuildSettings { Path = "x.koi" };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Config_supplied_application_mediatr_upgrades_layers_without_a_layers_flag()
+    {
+        var settings = new BuildSettings
+        {
+            Path = "x.koi",
+            Config = WriteConfig("targets.csharp.application.mediatr = true\n"),
+        };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+    }
+
+    private static string WriteConfig(string contents)
+    {
+        var path = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(), $"koine-{System.Guid.NewGuid():N}.toml");
+        System.IO.File.WriteAllText(path, contents);
+        return path;
     }
 
     [Fact]
