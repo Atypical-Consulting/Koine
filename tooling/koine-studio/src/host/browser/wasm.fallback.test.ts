@@ -226,6 +226,57 @@ describe('loadWasmApi — main-thread fallback (issue #357)', () => {
     appendSpy.mockRestore();
   });
 
+  // Issue #643: the inline-<script> loader injects a one-shot `<script type="module">` whose only job is
+  // to `import(url)` and call back through a `window` bridge. Once it has settled (success, DOM error, or
+  // timeout) the node is inert and must be detached from `document.head` — leaving it attached is sloppy
+  // housekeeping that accumulates a node per total-boot-failure retry under the dev server.
+
+  test('detaches the injected inline-<script> from document.head once the loader settles (issue #643)', async () => {
+    const { createKoineWorkerClient } = await import('@/host/browser/workerClient');
+    (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
+      call: vi.fn(),
+      whenReady: vi.fn<() => Promise<void>>().mockRejectedValue(new Error('worker boot failed')),
+      dispose: vi.fn(),
+    });
+
+    const wasm = await import('@/host/browser/wasm');
+    // Force the direct import to throw so the dev-server inline-<script> loader takes over.
+    wasm.__setEsModuleImporterForTests(() =>
+      Promise.reject(new Error('dev-server public-asset ?import transform failed')),
+    );
+
+    // Genuinely attach the injected node (so `isConnected` is meaningful), then drive the success bridge
+    // callback the browser would normally fire — happy-dom does not execute the injected module script.
+    let injected: Element | undefined;
+    const realAppend = document.head.appendChild.bind(document.head);
+    const appendSpy = vi.spyOn(document.head, 'appendChild').mockImplementation((node) => {
+      injected = node as Element;
+      const appended = realAppend(node);
+      queueMicrotask(() => {
+        const w = window as unknown as Record<string, (m: Record<string, unknown>) => void>;
+        const resolveKey = Object.keys(w).find((k) => /^__koineDotnet_\d+$/.test(k));
+        if (resolveKey) w[resolveKey](dotnetModuleValue({ Glossary: () => '{"markdown":"dev"}' }));
+      });
+      return appended;
+    });
+
+    // Restore in `finally` so a future regression (node left attached) can't leave this real-append
+    // spy installed and cascade into the sibling tests that assert appendChild is untouched.
+    try {
+      const api = await wasm.loadWasmApi();
+
+      expect(wasm.getWasmBootMode()).toBe('main-thread');
+      expect(await api.Glossary('[]')).toBe('{"markdown":"dev"}');
+      // The injected node was genuinely attached, then detached once the loader settled (#643).
+      expect(injected).toBeDefined();
+      expect(injected?.isConnected).toBe(false);
+      expect(document.head.contains(injected as Node)).toBe(false);
+    } finally {
+      injected?.remove();
+      appendSpy.mockRestore();
+    }
+  });
+
   // Issue #365: the inline-<script> loader exists ONLY for Vite's dev-server public-asset (`?import`)
   // transform. In a built/deployed bundle there is no such transform, so a thrown direct import is a
   // genuine load error — it must reject PROMPTLY with the real error instead of stalling on the inline
