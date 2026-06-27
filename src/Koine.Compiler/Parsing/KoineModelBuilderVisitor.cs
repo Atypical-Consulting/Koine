@@ -210,7 +210,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     {
         KoineParser.TypeNameContext[]? names = ctx.typeName();
         ContextRelationKind kind = BuildRelationKind(ctx.relationRole());
-        var bidirectional = ctx.relationArrow().BIARROW() is not null;
+        var bidirectional = ctx.relationArrow()?.BIARROW() is not null;
         List<string> sharedTypes = ctx.sharedKernelBlock() is { } sk
             ? sk.typeName().Select(t => t.GetText()).ToList()
             : new List<string>();
@@ -218,15 +218,28 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             ? acl.aclMapping().Select(BuildAclMapping).ToList()
             : new List<AclMapping>();
 
+        // On a recovered (error) parse a half-typed relation can be missing one or both type names
+        // (e.g. `contextmap { A }`); fall back to an empty name rather than indexing past the end.
+        // The syntax error is already reported by the error listener.
+        var source = names.Length > 0 ? names[0].GetText() : string.Empty;
+        var target = names.Length > 1 ? names[1].GetText() : string.Empty;
+
         return new ContextRelation(
-            names[0].GetText(), names[1].GetText(), kind, bidirectional, sharedTypes, aclMappings)
+            source, target, kind, bidirectional, sharedTypes, aclMappings)
         {
             Span = SpanOf(ctx)
         };
     }
 
-    private static ContextRelationKind BuildRelationKind(KoineParser.RelationRoleContext ctx)
+    private static ContextRelationKind BuildRelationKind(KoineParser.RelationRoleContext? ctx)
     {
+        // On a recovered (error) parse the role after `:` can be missing entirely; default to the
+        // grammar's fall-through kind rather than dereferencing null.
+        if (ctx is null)
+        {
+            return ContextRelationKind.PublishedLanguage;
+        }
+
         if (ctx.PARTNERSHIP() is not null)
         {
             return ContextRelationKind.Partnership;
