@@ -149,8 +149,10 @@ context Subscription version 1 {
       attempt:      Int
     }
 
-    /// Raised when usage is recorded that crosses the included allowance (R6). The
-    /// billing context reacts to bill the overage.
+    /// Raised on every usage recording (R6), carrying the period's billable
+    /// `overageUnits` — which is `0` while consumption stays within the included
+    /// allowance. The billing context reacts by billing any overage, filtering on
+    /// `overageUnits > 0`.
     event OverageIncurred {
       subscription: SubscriptionId
       overageUnits: Int
@@ -217,8 +219,10 @@ context Subscription version 1 {
         plan -> newPlan
       }
 
-      /// Record metered usage for the period (R5/R6). When consumption crosses the
-      /// included allowance the aggregate raises `OverageIncurred` so Billing can bill it.
+      /// Record metered usage for the period (R5/R6). The aggregate raises
+      /// `OverageIncurred` on every recording, carrying the current `overageUnits`
+      /// (which is `0` while within the included allowance) so Billing can bill any
+      /// overage.
       command recordUsage(meter: UsageMeter) {
         requires status != Cancelled   "a cancelled subscription does not accrue usage"
         usage -> meter
