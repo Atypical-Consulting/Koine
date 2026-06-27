@@ -686,7 +686,7 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        var ctx = TokenLocator.Locate(source, line, character);
+        var ctx = TokenLocator.Locate(source, line, character, navigation: true);
         return ctx.InsideStringOrRegex ? null : ctx.CurrentToken?.Text;
     }
 
@@ -701,7 +701,7 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        var ctx = TokenLocator.Locate(source, line, character);
+        var ctx = TokenLocator.Locate(source, line, character, navigation: true);
         return ctx.InsideStringOrRegex ? null : ctx.CurrentToken?.Text;
     }
 
@@ -751,7 +751,7 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        var ctx = TokenLocator.Locate(source, line, character);
+        var ctx = TokenLocator.Locate(source, line, character, navigation: true);
         var name = ctx.CurrentToken?.Text;
         if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
         {
@@ -777,7 +777,7 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        var ctx = TokenLocator.Locate(source, line, character);
+        var ctx = TokenLocator.Locate(source, line, character, navigation: true);
         var name = ctx.CurrentToken?.Text;
         if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
         {
@@ -1169,7 +1169,7 @@ public sealed class KoineLanguageService
             return [];
         }
 
-        var ctx = TokenLocator.Locate(source, line, character);
+        var ctx = TokenLocator.Locate(source, line, character, navigation: true);
         var name = ctx.CurrentToken?.Text;
         if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
         {
@@ -1539,7 +1539,7 @@ public sealed class KoineLanguageService
             return [];
         }
 
-        var ctx = TokenLocator.Locate(source, line, character);
+        var ctx = TokenLocator.Locate(source, line, character, navigation: true);
         var name = ctx.CurrentToken?.Text;
         if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
         {
@@ -1754,7 +1754,7 @@ public sealed class KoineLanguageService
             return [];
         }
 
-        var ctx = TokenLocator.Locate(source, line, character);
+        var ctx = TokenLocator.Locate(source, line, character, navigation: true);
         var name = ctx.CurrentToken?.Text;
         if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
         {
@@ -1955,7 +1955,7 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        var ctx = TokenLocator.Locate(source, line, character);
+        var ctx = TokenLocator.Locate(source, line, character, navigation: true);
         var name = ctx.CurrentToken?.Text;
         if (string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex || name == newName)
         {
@@ -2009,7 +2009,7 @@ public sealed class KoineLanguageService
         // The old name under the cursor (RenameAt already validated it resolves and differs from newName).
         if (compilation.Documents.TryGetValue(activeUri, out var source))
         {
-            var ctx = TokenLocator.Locate(source, line, character);
+            var ctx = TokenLocator.Locate(source, line, character, navigation: true);
             var oldName = ctx.CurrentToken?.Text;
             if (!string.IsNullOrEmpty(oldName))
             {
@@ -2187,7 +2187,7 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        var ctx = TokenLocator.Locate(source, line, character);
+        var ctx = TokenLocator.Locate(source, line, character, navigation: true);
         var current = ctx.CurrentToken;
         var name = current?.Text;
         if (current is null || string.IsNullOrEmpty(name) || ctx.InsideStringOrRegex)
