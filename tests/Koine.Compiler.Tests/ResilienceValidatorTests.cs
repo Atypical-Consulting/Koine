@@ -69,4 +69,32 @@ public class ResilienceValidatorTests
         only.Code.ShouldBe(DiagnosticCodes.UnknownType);
         only.Message.ShouldContain("'Strng'");
     }
+
+    // A duplicate entity field name is the single most common entity typo. It is validated-but-tolerated:
+    // ValidateMembersAndInvariants reports KOI0103 yet keeps BOTH members, then ValidateStates runs for
+    // every entity. Building its member lookup with `entity.Members.ToDictionary(m => m.Name, ...)` threw
+    // ArgumentException on the collision; because built-in analyzers run unguarded, that crash aborted the
+    // whole validate pass (and the LSP live-diagnostics loop), so the authored KOI0103 never surfaced. The
+    // lookup must be built defensively (last-wins) so the duplicate yields a clean KOI0103, not a crash.
+    private const string DuplicateFieldSource =
+        "context C {\n" +
+        "  entity E identified by EId {\n" +
+        "    x: Int\n" +
+        "    x: Int\n" +
+        "  }\n" +
+        "}\n";
+
+    [Fact]
+    public void Validating_an_entity_with_a_duplicate_field_surfaces_KOI0103_instead_of_throwing()
+    {
+        KoineModel model = BuildRecovered(DuplicateFieldSource);
+
+        // Validating must not throw (the test running to completion proves no ArgumentException from the
+        // ValidateStates member lookup) and must surface the duplicate-member diagnostic authored for it.
+        IReadOnlyList<Diagnostic> diagnostics = new SemanticValidator().Validate(new SemanticModel(model));
+
+        diagnostics.ShouldContain(
+            d => d.Code == DiagnosticCodes.DuplicateMember,
+            "expected KOI0103 DuplicateMember for the duplicate field 'x'");
+    }
 }
