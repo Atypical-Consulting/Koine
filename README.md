@@ -7,8 +7,8 @@
 [![Try it in your browser](https://img.shields.io/badge/try-in%20your%20browser-3245b8)](https://atypical-consulting.github.io/Koine/studio/)
 [![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
-[![Tests](https://img.shields.io/badge/tests-950%2B%20passing-2ea44f)](tests/)
-![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20docs%20%C2%B7%20AsyncAPI-178600)
+[![Tests](https://img.shields.io/badge/tests-1900%2B%20passing-2ea44f)](tests/)
+![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20docs%20%C2%B7%20AsyncAPI%20%C2%B7%20OpenAPI-178600)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 ## The problem
@@ -68,10 +68,23 @@ C# without installing anything.
   <em>Koine Studio — your <code>.koi</code> model (left) and the C# it compiles to (right), live in the browser.</em>
 </p>
 
-- **[Koine Studio](https://atypical-consulting.github.io/Koine/studio/)** — the full web IDE: editor
-  with live diagnostics, an emitted-code preview (C# / TypeScript), the ubiquitous-language glossary,
-  context map, and model outline. *(Also ships as a native [Tauri](https://tauri.app/) desktop app —
-  same UI, see [`tooling/koine-studio`](tooling/koine-studio).)*
+### A tour of the IDE
+
+The hero above is the editor split — but Studio is a full IDE, and a single shot can't show it. Each
+surface below is a click away in the [live Studio](https://atypical-consulting.github.io/Koine/studio/):
+
+| IDE view | What it shows |
+|----------|---------------|
+| **Editor & live diagnostics** | Your `.koi` model on the left, the emitted code on the right, with error squiggles and quick info as you type — the same parser and validator the CLI runs. |
+| **Emit-target switcher** | Flip the *same* model between **C#**, **TypeScript**, **Python**, **PHP**, and **Rust** output without leaving the page. |
+| **Context-map graph** | An interactive graph of the bounded contexts and the relationships between them. |
+| **Diagram views** | Aggregates and state machines rendered as diagrams straight from the model. |
+| **Ubiquitous-language glossary** | The generated glossary of every term in the domain, kept in lock-step with the model. |
+| **Model outline & panels** | A structural outline of the model plus a bottom **Events & Relationships** panel. |
+
+- **[Koine Studio](https://atypical-consulting.github.io/Koine/studio/)** — the full web IDE (every
+  view in the tour above), running the real compiler in your browser. *(Also ships as a native
+  [Tauri](https://tauri.app/) desktop app — same UI, see [`tooling/koine-studio`](tooling/koine-studio).)*
 - **[Playground](https://atypical-consulting.github.io/Koine/playground/)** — a lightweight,
   zero-install editor that recompiles to C#/TypeScript the moment you stop typing. Great for a quick
   taste or for following along with the [tutorial](https://atypical-consulting.github.io/Koine/start/your-first-model/).
@@ -264,9 +277,11 @@ backed by a mutable private `List<T>` (exposed read-only as `IReadOnlyList<T>`),
 so the rows persist on every provider. Scalar (`String`/`Int`/…) collections are left to EF Core's
 primitive-collection convention.
 
-Other CLI commands: `check` (model-versioning compatibility against a `--baseline`), `fmt` (canonical
-formatter), `init` (scaffold a project), `watch` (rebuild on change), and `lsp` (language server over
-stdio). See the [CLI reference](https://atypical-consulting.github.io/Koine/guides/cli/).
+Other CLI commands: `check` (model-versioning compatibility against a `--baseline`), `coverage` (proves
+*declared == emitted* and doubles as a CI gate), `fmt` (canonical formatter), `init` (scaffold a
+project), `watch` (rebuild on change), `lsp` (language server over stdio), and `mcp` (the MCP server —
+stdio by default, or `--http` to serve it over HTTP). See the
+[CLI reference](https://atypical-consulting.github.io/Koine/guides/cli/).
 
 ### The C# Application layer (opt-in)
 

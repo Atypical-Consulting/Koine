@@ -36,7 +36,7 @@ git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit -m ".
 ```bash
 ./scripts/build/build.sh    # dotnet build && dotnet test (build.ps1 / build.cmd are equivalents)
 dotnet build                # build only
-dotnet test                 # run all tests (~500)
+dotnet test                 # run all tests (~1900)
 dotnet test --filter "FullyQualifiedName~R9ValueObjectTests"   # a single test class
 
 # Run the CLI
