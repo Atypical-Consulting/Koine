@@ -949,6 +949,146 @@ describe('multi-file change set (agentic edits)', () => {
     expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).not.toMatch(/superseded/i);
   });
 
+  // #684: the reverse of the "already-applied" guard above. A panel superseded WHILE its apply is in
+  // flight must stay terminal — a late-settling FAILURE (reject from #633's .catch, or a { failed }
+  // result from the partial-failure branch) must not call refreshApply() (re-enabling Apply on the
+  // retired panel) nor overwrite the "superseded" notice with an "Apply failed" / "couldn't write" one.
+  test('superseded mid-apply: a later REJECTED apply does not un-retire the panel (#684)', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      req.onText('Edit.');
+      return 'Edit.';
+    });
+    // A deferred apply we settle by hand, so the panel can be superseded WHILE the apply is in flight.
+    let rejectApply!: (e: unknown) => void;
+    const applyGate = new Promise<{ failed: string[] }>((_res, rej) => {
+      rejectApply = rej;
+    });
+    const onApplyChangeSet = vi.fn(async () => applyGate);
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        runEditTool: vi.fn(async () => 'ok'),
+        onApplyChangeSet,
+      }),
+    );
+
+    // Turn 1 stages a change set; click Apply → onApply goes in flight (the deferred above).
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    const firstPanel = container.querySelector('.koi-changeset')!;
+    const firstApply = firstPanel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    firstApply.click();
+    await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+    expect(firstApply.disabled).toBe(true); // in-flight guard
+
+    // A new send supersedes panel 1 WHILE its apply is still in flight.
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelectorAll('.koi-changeset').length).toBe(2));
+    expect(firstApply.disabled).toBe(true);
+    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+
+    // The in-flight apply now REJECTS. The retired panel must STAY terminal: no "Apply failed"
+    // overwrite of the "superseded" notice, and Apply must NOT be re-enabled.
+    rejectApply(new Error('setDoc blew up'));
+    await new Promise((r) => setTimeout(r, 0)); // flush the rejection's .catch
+
+    expect(firstApply.disabled).toBe(true);
+    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).not.toMatch(/Apply failed/i);
+  });
+
+  test('superseded mid-apply: a later { failed } apply does not un-retire the panel (#684)', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      req.onText('Edit.');
+      return 'Edit.';
+    });
+    // A deferred apply we resolve by hand with a partial failure once the panel is already superseded.
+    let resolveApply!: (v: { failed: string[] }) => void;
+    const applyGate = new Promise<{ failed: string[] }>((res) => {
+      resolveApply = res;
+    });
+    const onApplyChangeSet = vi.fn(async () => applyGate);
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        runEditTool: vi.fn(async () => 'ok'),
+        onApplyChangeSet,
+      }),
+    );
+
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    const firstPanel = container.querySelector('.koi-changeset')!;
+    const firstApply = firstPanel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    firstApply.click();
+    await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+
+    // Supersede panel 1 while its apply is in flight.
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelectorAll('.koi-changeset').length).toBe(2));
+    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+
+    // The in-flight apply settles as a partial failure. The retired panel stays terminal: no
+    // "couldn't write …" overwrite, Apply not re-enabled.
+    resolveApply({ failed: ['orders.koi'] });
+    await new Promise((r) => setTimeout(r, 0)); // flush the .then
+
+    expect(firstApply.disabled).toBe(true);
+    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).not.toMatch(/couldn't write/i);
+  });
+
+  // #684: even a SUCCESSFUL in-flight apply that settles after a supersede must not present the retired
+  // panel as the live applied set — the disk write is unavoidable once in flight, but the panel keeps
+  // the "superseded" notice rather than flipping to a misleading "Applied ✓".
+  test('superseded mid-apply: a later SUCCESSFUL apply still shows "superseded", not "Applied ✓" (#684)', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      req.onText('Edit.');
+      return 'Edit.';
+    });
+    let resolveApply!: (v: { failed: string[] }) => void;
+    const applyGate = new Promise<{ failed: string[] }>((res) => {
+      resolveApply = res;
+    });
+    const onApplyChangeSet = vi.fn(async () => applyGate);
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        runEditTool: vi.fn(async () => 'ok'),
+        onApplyChangeSet,
+      }),
+    );
+
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    const firstPanel = container.querySelector('.koi-changeset')!;
+    const firstApply = firstPanel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    firstApply.click();
+    await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelectorAll('.koi-changeset').length).toBe(2));
+    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+
+    // The in-flight apply succeeds AFTER the supersede. The retired panel keeps its "superseded"
+    // status and Apply stays disabled — no terminal "Applied ✓" flip on a panel the user retired.
+    resolveApply({ failed: [] });
+    await new Promise((r) => setTimeout(r, 0)); // flush the .then
+
+    expect(firstApply.disabled).toBe(true);
+    expect(firstApply.textContent).not.toContain('✓');
+    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+  });
+
   // #473 (Task 2): a file edited between SEND and Apply (the staged body was computed against the OLD
   // text) must not be silently clobbered — detect the drift against a LIVE read, warn, and skip it,
   // while clean files still apply.
