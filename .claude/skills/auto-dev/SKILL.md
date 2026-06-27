@@ -69,6 +69,73 @@ green, mergeable PR, never via an `--admin` override here.
   The user may narrow it ("only `studio` issues", "everything labeled `priority: high`") — respect that.
 - **Heartbeat** — this skill is normally launched *via* `loop` in dynamic mode (no interval), so the
   loop's self-paced wakeup is the supervisor's heartbeat. If invoked directly, arm your own wakeup.
+- **Model tier** — which model each worker runs on. Default **tiered, not all-Opus** (see *Token
+  economics* below): mechanical/docs work on the cheapest capable model, typical bugs on a mid model,
+  Opus reserved for cross-cutting/hard work and failure-escalation. This is the single biggest cost
+  lever. The user may override ("run everything on Opus", "use Sonnet for all") — honor it.
+
+## Token economics — run the fleet cheap
+
+A long auto-dev run is **expensive in a specific, fixable way**, and knowing the shape lets you cut it
+by ~80% with no quality loss. Measured over a 120-merge run: **~83% of all spend was context *cache*
+(re-reading each agent's context every turn), only ~16% was generated output.** In an agentic loop you
+pay for *context volume × number of turns*, not for thinking. Three levers follow directly:
+
+**1. Tier the model to the task (the dominant lever — ~⅔ of the savings).** Cache-read tokens dominate,
+and they are ~5× cheaper on a mid model and ~15× cheaper on a small model than on the top model. Most
+fleet work is *mechanical* — make one failing test pass, fix a guard, regenerate a snapshot, edit docs —
+and doesn't need the top model. **Route each worker by its issue labels** (use the profile's effort/area
+labels; adapt the model names to whatever the runtime offers — typically a small/mid/top trio like
+Haiku/Sonnet/Opus):
+
+| Issue shape (by label) | Tier | Rationale |
+|---|---|---|
+| docs / templates / manifest, format & snapshot regen, `priority:low`+`effort:S` one-line guards | **small** (e.g. Haiku) | The failing-test-first + green-CI gates catch any miss |
+| most bugs: emitter/validator/parser guards, studio TS, CLI, LSP — single-area `effort:S/M` | **mid** (e.g. Sonnet) | One clear repro → make a test green; well within a mid model |
+| cross-cutting (touches many areas/emitters), ambiguous/design, **or any issue a lower tier failed to green** | **top** (e.g. Opus) | Reserve the costly model for genuine reasoning + escalation |
+
+The **orchestrator (you)** stays on the top model — its dispatch/conflict reasoning is worth it — but
+keep its *per-turn context* small (lever 2), because that context is what it pays to re-read every turn.
+
+**2. Shrink what gets re-read every turn (the other big chunk).**
+- **Don't accumulate a per-issue TaskList.** A task list grows unboundedly and is re-injected into your
+  context on *every* turn — pure cache-read waste multiplied by thousands of turns. **The state file is
+  your only working memory**; track the fleet there, not in a running task list.
+- **Compact deliberately — don't wait for the 100% auto-compact.** Both cost and answer quality start
+  degrading well before the window is full, so reset at a threshold (~40–50%, check with `/context`) *or*
+  every ~20 merges, whichever comes first. Compact **with a focus directive** so the summary keeps what's
+  expensive to reconstruct rather than summarizing everything equally — e.g. `/compact keep the in-flight
+  slot→issue/PR map, the merge counter, the queue order, and filed follow-ups`. Continuity otherwise
+  lives in the state file, so the **first action after any compact, `/clear`, or `loop` re-fire is to
+  re-read the state file** — that's what turns a reset into a clean base instead of amnesia.
+- **Keep worker FINAL REPORTs terse** (the structured one-liner below) — they get re-read on every later
+  reconcile turn, so prose reports tax you repeatedly.
+- **Delegate heavy reads to throwaway sub-agents.** When you (or a worker) must read widely to find a
+  small answer, spawn an `Explore` sub-agent: it does the reading and returns only the conclusion, so the
+  file-dump dies with it instead of riding in your re-read-every-turn context. This is the *right* way to
+  navigate a big codebase cheaply — push the reading into a discarded context, keep the persistent one
+  lean. (It's also why a symbol-retrieval MCP didn't pay off here: it adds per-turn schema weight and
+  extra round-trips — the opposite of this.)
+- **Strip MCP servers workers don't need.** Every connected MCP server injects its tool schemas into
+  *every* turn of *every* session — dead weight re-read thousands of times. Launch workers with
+  `--strict-mcp-config` and only the servers they actually use (usually none).
+
+**3. Take fewer turns (turns are the unit of cost).** Each tool round-trip is a turn, and every turn
+re-reads the whole context, so cutting round-trips cuts the bill directly:
+- **Batch independent tool calls into one turn** — fire parallel reads/greps/`gh` calls together rather
+  than serially. (This is exactly why ripgrep beats per-symbol retrieval: many matches per call, fewer
+  round-trips.)
+- **Let scripts collapse query+classify** — `scripts/survey.sh` and `scripts/reconcile.sh` turn a
+  multi-turn "query then reason" into one call; reach for a script over re-deriving a deterministic
+  sequence in-context.
+- **Don't poll on a short cadence** unless a green merge is truly imminent (see *Heartbeat*) — a needless
+  wake re-reads your whole context, and one *past the ~5-min cache TTL* pays a full cache **write**
+  (1.25× input), not a cheap read (0.1×), so idle ticks are doubly wasteful.
+
+**Measure it.** After a run, `scripts/usage_report.py` aggregates tokens + $-equivalent across the
+orchestrator and every worker session (and breaks it down by model, so you can see the tiering payoff).
+Track **tokens/merge** and **$/merge** across runs so a regression shows up immediately. (Dollar figures
+are API list-price equivalents; on a subscription they map to rate-limit budget, not cash.)
 
 ## How it works (the model)
 
@@ -118,27 +185,24 @@ gates). The child skills load it too; you mainly need its *Labels* and *Architec
 
 ## Step 2 — Build the work queue
 
-Survey the open issues and shape them into an ordered, filtered queue. List with labels:
+The survey — list issues → check each for a plan → classify effort → drop manual-QA → order small-first
+— is a deterministic sequence, so **run `scripts/survey.sh`** instead of re-deriving it from scratch
+every time (one `gh issue list` + jq; fewer turns = less per-turn cache re-read). It prints one bucketed,
+already-ordered row per issue:
 
-```bash
-gh issue list --state open --limit 200 \
-  --json number,title,labels \
-  --jq 'sort_by(.number) | .[] | "\(.number)\t[\(.labels|map(.name)|join(","))]\t\(.title)"'
+```
+QUEUE  #N  effort  plan=true  qa=false  [labels]  title   ← eligible (effort:S before :M), area-tag + dispatch
+HOLD   #N  ...                                            ← effort L/XL, out of the default fleet (see Large issues)
+SKIP   #N  ...                                            ← no plan, or manual-QA only — note the reason in state
 ```
 
-Then classify each issue:
-
-- **Effort** — from the profile's effort labels (`effort: S/M/L/XL`). Queue **S first, then M**; hold
-  **L/XL** out of the default fleet (they're long, conflict-prone, and usually want a human's nod — see
-  *Large issues* below).
-- **Eligibility** — keep an issue only if it can actually be built headlessly:
-  - **Has a plan.** `implement-issue` needs a `🛠️ Implementation plan` (or a legacy plan comment).
-    Cheaply check: `gh issue view <N> --json body --jq 'if (.body|test("Implementation plan|### Task|- \\[ \\]")) then "plan" else "noplan" end'`. No plan → skip it (or, if the user wants it built, file/seed a plan first via `create-issue`).
-  - **Is a code task.** Drop pure "visually QA…", "verify by hand from the UI…" issues — a headless
-    agent can't do them. Note them as *skipped* in the state file with the reason.
-- **Area** — tag each issue with the code area it touches (infer from the title/labels: e.g. `compiler`,
-  `php`, `website`, `studio-frontend`, `tests`, `ci/build`). This is what keeps concurrent workers off
-  each other's files. You don't need perfect areas — just enough to tell "these two would fight."
+What the script encodes (so you can trust the buckets): **Effort** from the profile's `effort: S/M/L/XL`
+labels (S before M; L/XL held); **plan** present (`🛠️ Implementation plan` / a task-list — no plan ⇒
+SKIP, or seed one via `create-issue` if the user insists); **manual-QA** dropped (a headless agent can't
+"visually QA…" / "verify by hand…"). The **one judgment the script leaves to you is area-tagging** the
+QUEUE rows (infer from title/labels: e.g. `compiler`, `php`, `website`, `studio-frontend`, `tests`,
+`ci/build`) — that's what keeps concurrent workers off each other's files; you don't need perfect areas,
+just enough to tell "these two would fight."
 
 Persist a **state file** outside the repo (a scratch/temp dir, not a tracked path) so the fleet survives
 context compaction and `loop` re-fires. Keep it small and current:
@@ -164,39 +228,33 @@ Choose the first N issues so that **no two share an area** — that disjointness
 strategy. Dispatch each as a **background sub-agent** using the worker-prompt contract below. Record each
 in the state file's *In flight* section.
 
+**Pick each worker's model from its labels** (see *Token economics*): small/mechanical → cheap model,
+typical single-area bug → mid model, cross-cutting/hard → top model. Pass it explicitly when you spawn
+the worker (the background-agent spawn takes a model parameter; if you launch the worker as its own CLI
+session, pass the model flag). Record the chosen tier next to the issue in the state file so a `loop`
+re-fire redispatches at the same tier — and so `usage_report.py`'s by-model rollup is interpretable.
+
 ### The worker-prompt contract
 
-Each worker gets one issue and the same standing rules. Fill in `<N>` and dispatch in the background:
+Every worker gets the same standing rules — so they live **once**, in the `/auto-dev-worker` command
+(`.claude/commands/auto-dev-worker.md`), not re-typed per dispatch. Dispatch is then a deterministic
+one-liner with the model tier set by the spawn flag:
 
-```
-You are an auto-dev worker for <repo>. Your assigned issue is #<N> ("<title>").
-Run this pipeline end-to-end, autonomously, no confirmations:
-
-1. Invoke the `implement-issue` skill with args "<N>". Let it create its OWN git worktree (do NOT reuse
-   the shared/main checkout — other workers are active), open a draft PR, implement each plan task, run
-   code-review, sync main, format, and flip the PR to ready.
-
-2. Invoke the `merge-pr` skill with args "<the PR number>". THIS IS MANDATORY — your job is NOT done at
-   "ready". Drive the PR all the way to MERGED: merge-pr waits for CI, clears blockers (red/flaky checks,
-   conflicts with main, unresolved reviews), squash-merges, files follow-ups, tears down the worktree.
-   Do NOT go idle while a merge is still achievable — if CI is mid-run, keep polling `gh pr checks <PR>`
-   and merge the instant it's green. Only stop for a genuine hard blocker.
-
-OFF-SCOPE PROTOCOL: if you hit a problem that is NOT part of #<N> — an unrelated or flaky CI failure, a
-pre-existing bug, a design smell, missing/broken tests, tech debt — do NOT fix it inline (scope-creep)
-and do NOT silently ignore it. FILE it as a new issue via the `create-issue` skill, then continue your
-own task. List anything you filed in your report.
-
-Commit identity & all repo specifics come from the repo profile (the child skills load it). Work ONLY on
-#<N>. If genuinely un-implementable (no usable plan, manual-QA only) or hard-blocked after real effort,
-STOP and report it rather than forcing a merge.
-
-Send your FINAL report to the supervisor (main), structured and nothing else:
-ISSUE: <N> | PR: <number|none> | STATUS: MERGED|BLOCKED|FAILED | DETAIL: <1–2 sentences>
-| FILED: <issues you opened, or none> | WORKTREE: <cleaned up / what remains>
+```bash
+claude -p "/auto-dev-worker <N>" --model <tier> --strict-mcp-config   # <tier> from labels; --strict-mcp-config drops unused MCP schema weight (lever 2)
 ```
 
-Why these clauses earn their place (don't trim them):
+(If you launch the worker as a background sub-agent rather than a `claude -p` session, pass the command
+file's body as the sub-agent prompt and set its model parameter to the same tier.) The command expands to
+the full contract: `implement-issue <N>` in its **own** worktree → **mandatory** `merge-pr` driven to
+MERGED (never idle at "ready") → off-scope protocol (`create-issue`, don't fix inline) → a single
+structured FINAL report line back to you:
+
+```
+ISSUE: <N> | PR: <number|none> | STATUS: MERGED|BLOCKED|FAILED | DETAIL: … | FILED: … | WORKTREE: …
+```
+
+Why those clauses earn their place (don't trim them from the command):
 - *Own worktree* — parallel workers sharing a checkout corrupt each other; isolation is non-negotiable.
 - *Mandatory merge / don't idle at ready* — the single most common failure is a worker stopping once the
   PR is "ready." The explicit "drive to MERGED, keep polling CI" is what closes that gap.
@@ -207,12 +265,10 @@ Why these clauses earn their place (don't trim them):
 ## Step 4 — Supervise (the loop)
 
 You'll be woken by a worker's report, an **idle notification**, or your heartbeat. On every wake,
-**reconcile against GitHub** — never trust a worker's silence or even its "done" without checking:
-
-```bash
-gh pr list --state open  --json number,isDraft,headRefName,mergeStateStatus --jq '.[]|"\(.number)\t\(if .isDraft then "DRAFT" else "READY" end)\t\(.mergeStateStatus)\t\(.headRefName)"'
-gh pr list --state merged --limit 8 --json number,title,mergedAt
-```
+**reconcile against GitHub** — never trust a worker's silence or even its "done" without checking. Run
+`scripts/reconcile.sh` (one call: open PRs with draft/ready + `mergeStateStatus`, plus the last 10
+merged) rather than re-typing the gh queries each tick. It gives you the ground truth; you supply the
+judgment below.
 
 Then, per slot:
 
@@ -226,8 +282,12 @@ Then, per slot:
   is green, land it (`gh pr merge <PR> --squash --delete-branch`) and shut the worker down.
 - **Worker idle with a draft PR / no PR yet** → still implementing; leave it. If it's been a long time
   with no progress, send a one-line status ping (don't read its transcript).
-- **Worker reported BLOCKED/FAILED** → record it, surface it to the user, end the agent, and refill the
-  slot with the next queued issue (don't let one blocked issue stall the fleet).
+- **Worker reported BLOCKED/FAILED** → first, **tier-escalate if it was on a lower model**: if the
+  failure looks like the model wasn't strong enough (couldn't green a test, tangled the fix) rather than
+  a genuine hard blocker (un-mergeable conflict, missing approval, no plan), re-dispatch the *same* issue
+  **once** on the top model before giving up. If it was already on the top model, or fails again → record
+  it, surface it to the user, end the agent, and refill the slot with the next queued issue (don't let
+  one blocked issue stall the fleet). This escalation is what makes cheap-by-default tiering safe.
 
 After any change, update the state file (in flight, completed, filed, queue).
 
@@ -247,6 +307,11 @@ and eligibility-checked), and note what changed. Keep a **merge counter** in the
 each confirmed merge; record the count at the last refresh) so a `loop` re-fire knows when the next
 refresh is due. A stale queue silently costs you: missed easy disjoint wins and mis-ordered work.
 
+**Keep your own context lean** — it's re-read every turn, so apply *Token economics* lever 2 right here:
+the state file is your only working memory (**no per-issue TaskList**), worker reports stay terse, and
+**compact or `/clear` yourself ~every 20 merges** (continuity is reconstructable from the state file +
+live GitHub, so clearing resets the cache-read base).
+
 ## Step 5 — Heartbeat
 
 The wake signals that matter — worker reports and idle notifications — arrive on their own; **don't poll
@@ -255,13 +320,24 @@ natural way to run auto-dev is under the `loop` skill in dynamic mode: each `loo
 reconcile tick. Use a **long fallback** (~20–30 min) for the idle heartbeat. **Drop to a short cadence
 (2–4 min) only while you're actively waiting on a specific CI run** to land a merge — that's external
 GitHub state the harness can't notify you about, so it's the one case worth polling; return to the long
-fallback once it lands.
+fallback once it lands. Each wake re-reads your whole context from cache, so a needless short tick is
+pure cost (see *Token economics*) — let event notifications, not the clock, drive the common case.
+Cache nuance: the prompt cache has a ~5-min TTL, so a wake *after* a long idle pays a full cache **write**
+rather than a cheap read — when you do wake from a long idle, batch all pending reconcile work into that
+one wake to amortize the rewrite, rather than waking repeatedly.
 
 ## Step 6 — Stop & report
 
 Stop dispatching when the eligible queue is empty (or the user says stop). Let the in-flight workers
 finish and land, end them, then give a final summary: issues merged (with PR numbers), follow-ups filed,
 anything blocked or skipped (with reasons), and what remains in the backlog (e.g. the held L/XL items).
+
+**Cost accounting.** Run `scripts/usage_report.py <project-transcript-dir> --main <orchestrator-session-id>`
+to aggregate tokens + $-equivalent across the orchestrator and every worker session, broken down by
+model. Report **tokens/merge** and **$/merge** so the user can see the run's unit economics and track
+them across runs. (The script auto-detects the transcript dir from `$PWD` if not given; dollar figures
+are API list-price equivalents — on a subscription they're rate-limit budget, not cash, and the
+authoritative cash figure for this session is the built-in `/cost`.)
 
 ---
 
@@ -295,5 +371,8 @@ skipping the next slot that frees. Hold the line at N unless told otherwise.
   (Step 4) so you keep working off the *live* backlog, not a stale opening snapshot, and don't miss the
   easy disjoint-area wins that break a same-area logjam.
 - **The state file is your memory.** Keep it terse and current so a compaction or `loop` re-fire
-  reconstructs the fleet exactly.
+  reconstructs the fleet exactly — and it's your *only* working memory (no per-issue TaskList).
+- **Cost lives in *Token economics*, not here.** The whole money story is stated once in that section —
+  ~83% of spend is per-turn context re-read, so tier the model to the task (cheap-by-default + top-model
+  escalation) and shrink per-turn context. Re-read that section; this list won't re-summarize it.
 ```
