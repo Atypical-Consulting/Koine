@@ -18,57 +18,45 @@ description: >-
 
 # Resolve the repo profile (config for the issue/PR lifecycle skills)
 
-## What this does and why
+## What this does
 
-`create-issue`, `implement-issue`, and `merge-pr` are deliberately generic *workflows* wrapped around
-a thin layer of **repo-specific facts** — what to put in a commit author line, how to build and test,
-which label means "high priority", whether the repo squashes or rebases, which files conflict and how
-to resolve them. Hardcoding those facts welds the skills to one repo. This skill lifts them out into a
-single committed file, **`.claude/skills/repo-profile.md`**, that the three skills read at their
-preconditions step. Drop the four skills into a new repository, run this once, and the lifecycle skills
-speak that repo's language.
+`create-issue`, `implement-issue`, and `merge-pr` are generic *workflows* wrapped around a thin layer
+of **repo-specific facts** — the commit author line, how to build and test, which label means "high
+priority", whether the repo squashes or rebases, which files conflict and how to resolve them.
+Hardcoding those welds the skills to one repo. This skill lifts them into a single committed file,
+**`.claude/skills/repo-profile.md`**, that the three skills read at their preconditions step. Drop the
+four skills into a new repo, run this once, and the lifecycle skills speak that repo's language.
 
-The profile is **data, not a skill** — a plain markdown file living next to the skill folders. The
-skill loader ignores it (it has no `SKILL.md`), and because it's committed it travels with the repo for
-every contributor and every fresh checkout.
+The profile is **data, not a skill** — a plain markdown file with no `SKILL.md`, so the loader ignores
+it; being committed, it travels with the repo. **Idempotent:** the first call detects-and-writes; later
+calls just read it back. Only `--refresh` (or an explicit ask) regenerates it.
 
-**Idempotent:** the first call detects-and-writes; every later call just reads the file back and returns
-its values. Only `--refresh` (or an explicit user ask) regenerates it.
-
-## Autonomy contract (important)
+## Autonomy contract
 
 Run **hands-off**. Detection is best-effort inference, not interrogation: inspect the repo, fill what
-you can prove, and for anything you genuinely can't determine, write a clearly-marked
-`<!-- TODO: ... -->` placeholder into the profile and flag it in the report rather than stopping. Only
-stop for a real blocker:
+you can prove, and for anything you can't determine write a clearly-marked `<!-- TODO: ... -->`
+placeholder and flag it in the report rather than stopping. Stop only for a real blocker:
 
-- Not inside a git repository (there's no repo to profile).
-- `gh` is unauthenticated *and* the facts you need (labels, repo slug, merge style) can't be read any
-  other way — say so and tell the user to run `! gh auth login -h github.com`.
+- Not inside a git repository (nothing to profile).
+- `gh` unauthenticated *and* the facts you need (labels, repo slug, merge style) can't be read another way — say so and tell the user to run `! gh auth login -h github.com`.
 
-A profile with a few honest TODOs the user can fill in 30 seconds is far more useful than no profile.
-Never invent a value you couldn't verify — a wrong build command or commit identity is worse than a
-flagged blank.
+A profile with a few honest TODOs beats no profile. Never invent a value you couldn't verify — a wrong
+build command or commit identity is worse than a flagged blank.
 
 ## Inputs
 
-- **`--refresh`** (optional) — regenerate the profile even if one already exists (re-detect everything,
-  preserving any human-edited TODO answers you can still see).
-- A path argument (optional) — profile a repo other than the current directory; defaults to the repo
-  containing the working directory.
+- **`--refresh`** (optional) — regenerate even if a profile exists (re-detect everything, preserving any human-edited TODO answers you can still see).
+- A path argument (optional) — profile a repo other than the current directory.
 
 ## Checklist
 
 Create a task per item and work them in order.
 
-1. **Locate the profile** — if `.claude/skills/repo-profile.md` exists and `--refresh` wasn't asked,
-   read it, return its values, and stop (the fast path).
+1. **Locate the profile** — if `.claude/skills/repo-profile.md` exists and `--refresh` wasn't asked, read it, return its values, stop (fast path).
 2. **Preconditions** — confirm you're in a git repo; check `gh` (needed for labels / slug / merge style).
-3. **Detect the facts** — repo identity, commit identity, build system + commands, CI gates,
-   integration style, labels, issue templates, conflict hot-spots, architecture grain (see Step 3).
-4. **Write the profile** — fill `references/profile-template.md`'s schema and save to
-   `.claude/skills/repo-profile.md`.
-5. **Report** — where it wrote, the key detected values, and every TODO it left for the user.
+3. **Detect the facts** — repo identity, commit identity, build system + commands, CI gates, integration style, labels, issue templates, conflict hot-spots, architecture grain (Step 3).
+4. **Write the profile** — fill `references/profile-template.md`'s schema, save to `.claude/skills/repo-profile.md`.
+5. **Report** — where it wrote, the key detected values, every TODO left for the user.
 
 ---
 
@@ -79,11 +67,9 @@ PROFILE=.claude/skills/repo-profile.md
 if [ -f "$PROFILE" ]; then echo "profile exists"; else echo "no profile — will generate"; fi
 ```
 
-If it exists and the user didn't ask to refresh: **read it and return**. Surface its headline values
-(commit identity, build/test/format commands, integration style) so the calling skill — or the user —
-sees what's in force. Do not regenerate. Done.
-
-If it's missing, or `--refresh` was passed, continue to detection.
+If it exists and the user didn't ask to refresh: **read it and return.** Surface its headline values
+(commit identity, build/test/format commands, integration style) so the caller sees what's in force.
+Don't regenerate. If missing, or `--refresh` was passed, continue to detection.
 
 ## Step 2 — Preconditions
 
@@ -99,8 +85,8 @@ the user to authenticate for a complete profile.
 
 ## Step 3 — Detect the facts
 
-Infer each field from evidence in the repo. The table says where to look; `references/profile-template.md`
-holds the full schema and a worked Koine example.
+Infer each field from evidence. The table says where to look; `references/profile-template.md` holds the
+full schema and a worked Koine example.
 
 | Field | How to detect |
 |---|---|
@@ -109,16 +95,16 @@ holds the full schema and a worked Koine example.
 | **Commit identity** | A workspace/repo `CLAUDE.md` rule wins if present (grep for a `user.email=`/commit-identity line). Otherwise `git config user.email` / `user.name`, cross-checked against recent `git log` authors. State the source. |
 | **Build system + commands** | Detect by marker files (below), then read the real scripts. Don't guess the test command — read it. |
 | **CI gates** | `.github/workflows/*.yml` — the exact `build` / `test` / `format`/`lint` commands CI runs and **fails on**. These are the gates `implement-issue` Step 9 and `merge-pr` Step 4 must satisfy locally. |
-| **Integration style** | Branch protection: `gh api repos/{owner}/{repo}/branches/<default> --jq .protection` for `required_*`; and inspect history — squash leaves `… (#N)` subjects on a linear `main`; merge commits present → merge; linear with no merge commits → rebase. |
-| **Label taxonomy** | `gh label list --limit 200` → classify into type (bug/enhancement), priority tiers, effort sizes, and scope/area labels. Record the *exact* live strings (e.g. `priority: high`), since the skills apply them verbatim. |
-| **Issue templates** | `ls .github/ISSUE_TEMPLATE/` — record which forms exist (feature_request, bug_report, …) so `create-issue` reconstructs them. |
-| **Conflict hot-spots** | Derive from the build system: version file, changelog, dependency lockfile, generated/snapshot files, plus any the CI/build obviously produces. Note the resolution rule per file (union / regenerate / take-higher). |
-| **Architecture grain / invariants** | Best-effort from `CLAUDE.md` / `README` — any "keep X target-agnostic", "touch layers in order", "never do Y" rules that should shape an implementation plan. Blank-with-TODO is fine if the repo states none. |
-| **Test framework + filter idiom** | From the test runner: how to run *one* suite fast (the per-task filter the lifecycle skills rely on) and any local-vs-CI caveats (e.g. "skip the storybook project locally"). |
+| **Integration style** | Branch protection: `gh api repos/{owner}/{repo}/branches/<default> --jq .protection` for `required_*`; and inspect history — squash leaves `… (#N)` subjects on a linear `main`; merge commits → merge; linear with none → rebase. |
+| **Label taxonomy** | `gh label list --limit 200` → classify into type (bug/enhancement), priority tiers, effort sizes, scope/area labels. Record the *exact* live strings (e.g. `priority: high`), since the skills apply them verbatim. |
+| **Issue templates** | `ls .github/ISSUE_TEMPLATE/` — record which forms exist so `create-issue` reconstructs them. |
+| **Conflict hot-spots** | Derive from the build system: version file, changelog, dependency lockfile, generated/snapshot files. Note the resolution rule per file (union / regenerate / take-higher). |
+| **Architecture grain / invariants** | Best-effort from `CLAUDE.md` / `README` — any "keep X target-agnostic", "touch layers in order", "never do Y" rules that should shape a plan. Blank-with-TODO is fine if the repo states none. |
+| **Test framework + filter idiom** | From the test runner: how to run *one* suite fast (the per-task filter the lifecycle skills rely on) and any local-vs-CI caveats. |
 | **Worktree home** | The repo's conventional ignored worktree dir if any (e.g. `.claude/worktrees/`), else the skills' default. |
 | **Environment gotchas** | Anything that bites automation: sandboxed git network, a workload that must be installed, CI-only steps. Check a repo `CLAUDE.md` and the memory index. |
 
-**Build-system detection (first match wins; a repo may have several — record each relevant one):**
+**Build-system detection (first match wins; a monorepo may have several — record each relevant one, scoped by path):**
 
 | Marker file(s) | Stack | Typical commands to read/record |
 |---|---|---|
@@ -129,15 +115,11 @@ holds the full schema and a worked Koine example.
 | `pyproject.toml`, `setup.py` | Python | read the runner (pytest/unittest); `ruff`/`black --check`; the env manager (uv/poetry/pip) |
 | `pom.xml`, `build.gradle` | JVM | `mvn`/`gradle` `verify`/`test`; spotless/checkstyle |
 
-A monorepo can carry more than one — record the ones the lifecycle skills will actually run in, scoped
-by path.
-
 ## Step 4 — Write the profile
 
 Fill the schema in `references/profile-template.md` with the detected values and write it to
-`.claude/skills/repo-profile.md`. Keep every field; for the undetectable ones leave an explicit
-`<!-- TODO: <what's needed and where to find it> -->` so a human can complete it in seconds. Then read
-it back to confirm it wrote.
+`.claude/skills/repo-profile.md`. Keep every field; for undetectable ones leave an explicit
+`<!-- TODO: <what's needed and where to find it> -->`. Read it back to confirm it wrote.
 
 ```bash
 mkdir -p .claude/skills
@@ -146,32 +128,21 @@ test -f .claude/skills/repo-profile.md && echo "profile written"
 ```
 
 The file is meant to be **committed** — it's repo config, like `.github/` or `settings.json`. Mention
-that in the report; don't commit it yourself unless the user asked (filing/committing is the lifecycle
-skills' job, not this one's).
+that in the report; don't commit it yourself unless asked (committing is the lifecycle skills' job).
 
 ## Step 5 — Report
 
 Short and concrete:
-- Where the profile lives (`.claude/skills/repo-profile.md`) and whether you generated it or read it back.
-- The headline values: repo slug, commit identity (+ its source), build/test/format commands, integration
-  style, the label axes found.
-- Every `TODO` you left, so the user can fill them — these are the facts you couldn't prove, not optional.
-- A reminder that `create-issue` / `implement-issue` / `merge-pr` now read this file at their
-  preconditions step, and that committing it makes it travel with the repo.
+- Where the profile lives and whether you generated it or read it back.
+- The headline values: repo slug, commit identity (+ source), build/test/format commands, integration style, label axes found.
+- Every `TODO` you left — these are facts you couldn't prove, not optional.
+- A reminder that the three lifecycle skills read this file at their preconditions step, and that committing it makes it travel with the repo.
 
 ---
 
 ## Notes on quality
 
-- **Read, don't guess.** A profile's value is that it's *true*. Read the CI workflow for the real gates,
-  read `package.json` scripts for the real test command, read `gh label list` for the real label strings.
-  An inferred-but-wrong build command silently breaks every downstream skill.
-- **TODOs beat fabrication.** When you can't determine a field, a flagged blank is honest and fixable; a
-  confident wrong value is a landmine. Never write a commit identity or merge style you didn't verify.
-- **Idempotent by design.** Re-running must not clobber human edits — the fast path returns the existing
-  file untouched; only `--refresh` regenerates, and even then preserve TODO answers a human filled in
-  where you still can.
-- **The profile is the source of truth; the skills' inline values are defaults.** Where a lifecycle
-  skill shows a concrete value (a commit email, `dotnet test`, the `studio` label), that's the *Koine*
-  profile's value used as a worked example. In another repo the profile overrides it — the skills are
-  written to prefer the profile.
+- **Read, don't guess.** Read the CI workflow for the real gates, `package.json` scripts for the real test command, `gh label list` for the real strings. An inferred-but-wrong build command silently breaks every downstream skill.
+- **TODOs beat fabrication.** A flagged blank is honest and fixable; a confident wrong value is a landmine. Never write a commit identity or merge style you didn't verify.
+- **Idempotent by design.** The fast path returns the existing file untouched; only `--refresh` regenerates, and even then preserve human-filled TODO answers where you can.
+- **The profile is the source of truth; the skills' inline values are defaults.** Where a lifecycle skill shows a concrete value (a commit email, `dotnet test`, the `studio` label), that's the *Koine* profile's value as a worked example — another repo's profile overrides it.
