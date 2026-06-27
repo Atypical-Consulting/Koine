@@ -31,11 +31,24 @@ public sealed partial class PhpEmitter
             vo.Members,
             emit.EnumMemberToType);
 
+        // A value object folded with `sum` implements the runtime `Summable` seam so the generic
+        // `Decimal::sum(@template T of Summable)` helper preserves its type under phpstan --level max
+        // (issue #692). `add()` is already emitted demand-driven (WriteAdditiveOp / WriteQuantityOps);
+        // implementing the interface only adds the `implements` clause and widens `add()`'s parameter
+        // to the interface type (PHP forbids narrowing it to the concrete class on an implementer).
+        bool isSummable = emit.AdditiveNeeds.Contains(vo.Name);
+
         var sb = new StringBuilder();
 
         WriteDoc(sb, vo.Doc, "");
 
-        sb.Append("final class ").Append(name).Append('\n');
+        sb.Append("final class ").Append(name);
+        if (isSummable)
+        {
+            sb.Append(" implements \\Koine\\Runtime\\Summable");
+        }
+
+        sb.Append('\n');
         sb.Append("{\n");
 
         // Constructor with promoted readonly properties.
@@ -62,7 +75,7 @@ public sealed partial class PhpEmitter
         // Quantity-specific arithmetic methods.
         if (vo.IsQuantity)
         {
-            WriteQuantityOps(sb, name, fields);
+            WriteQuantityOps(sb, name, fields, isSummable);
         }
         else
         {
@@ -228,7 +241,8 @@ public sealed partial class PhpEmitter
     /// </summary>
     private static void WriteQuantityOps(
         StringBuilder sb, string name,
-        IReadOnlyList<Member> fields)
+        IReadOnlyList<Member> fields,
+        bool isSummable)
     {
         Member? amount = fields.FirstOrDefault(m => m.Type.Name == "Decimal" && !m.Type.IsOptional);
         Member? unit = fields.FirstOrDefault(m => !ReferenceEquals(m, amount) && !m.Type.IsOptional);
@@ -254,7 +268,19 @@ public sealed partial class PhpEmitter
             ("subtract", "subtract", "-") })
         {
             sb.Append('\n');
-            sb.Append(Indent).Append("public function ").Append(methodName).Append("(self $other): self\n");
+            // A summed quantity implements `Summable`, so its `add()` takes the interface type (PHP
+            // forbids narrowing it to the concrete class) with `@param self` narrowing it back for the
+            // body; `subtract()` is not part of the interface and keeps the concrete `self` parameter.
+            if (methodName == "add" && isSummable)
+            {
+                sb.Append(Indent).Append("/** @param self $other */\n");
+                sb.Append(Indent).Append("public function add(\\Koine\\Runtime\\Summable $other): self\n");
+            }
+            else
+            {
+                sb.Append(Indent).Append("public function ").Append(methodName).Append("(self $other): self\n");
+            }
+
             sb.Append(Indent).Append("{\n");
             sb.Append(Indent).Append(Indent).Append("if ($this->").Append(u).Append(" !== $other->").Append(u).Append(") {\n");
             sb.Append(Indent).Append(Indent).Append(Indent)
@@ -342,7 +368,11 @@ public sealed partial class PhpEmitter
             StringComparer.Ordinal);
 
         sb.Append('\n');
-        sb.Append(Indent).Append("public function add(self $other): self\n");
+        // The native parameter is the `Summable` interface (the class `implements` it) — PHP forbids an
+        // implementer from narrowing it to the concrete class — and `@param self` narrows it back so the
+        // body's `$other->prop` access stays phpstan --level max clean (issue #692).
+        sb.Append(Indent).Append("/** @param self $other */\n");
+        sb.Append(Indent).Append("public function add(\\Koine\\Runtime\\Summable $other): self\n");
         sb.Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append("return new self(\n");
 

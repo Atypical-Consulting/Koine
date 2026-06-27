@@ -203,6 +203,41 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #692 acceptance: a <c>sum</c> fold whose element <em>and</em> result are a value object
+    /// (the pizzeria-style <c>total: Money = lines.sum(l =&gt; l)</c>) must type-check under
+    /// <c>phpstan --level max</c> and stay type-preserving — the getter returns the value-object type,
+    /// not <c>Decimal</c>. Before the fix the emitted <c>Decimal::sum(array&lt;Money&gt;)</c> reported
+    /// <c>return.type</c> (the getter returns <c>Decimal</c> where <c>Money</c> is declared) and
+    /// <c>argument.type</c> (<c>array&lt;Money&gt;</c> given, <c>array&lt;Decimal&gt;</c> expected); the
+    /// generic <c>@template T of Summable</c> helper makes the fold preserve the element type. The
+    /// Decimal-element fold (issue #601) stays clean too — see the runtime/model gates above. Skipped
+    /// (not failed) only when no <c>phpstan</c> is present locally; CI installs the toolchain and runs
+    /// it for real.
+    /// </summary>
+    [Fact]
+    public void Value_object_element_sum_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  value Basket {\n" +
+            "    lines: List<Money>\n" +
+            "    total: Money = lines.sum(l => l)\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// The always-on syntax gate: a valid PHP snippet must pass <c>php -l</c>.
     /// Skipped (not failed) only when no interpreter is present; with one it MUST parse cleanly.
     /// </summary>

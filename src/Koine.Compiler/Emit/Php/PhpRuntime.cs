@@ -121,13 +121,41 @@ internal static class PhpRuntime
         "}\n" +
         "\n" +
         "/**\n" +
+        " * A value that folds with itself under add() — the seam the generic Decimal::sum() helper\n" +
+        " * binds to (@template T of Summable) so a value-object projection sums to its own type and\n" +
+        " * stays phpstan --level max clean (issue #692). The native parameter is the interface type so\n" +
+        " * an implementing value object never trips PHP's parameter-contravariance rule; the @param self\n" +
+        " * narrows it back for the implementer body, and @return static preserves the element type.\n" +
+        " */\n" +
+        "interface Summable\n" +
+        "{\n" +
+        "    /**\n" +
+        "     * @param self $other\n" +
+        "     * @return static\n" +
+        "     */\n" +
+        "    public function add(self $other): self;\n" +
+        "}\n" +
+        "\n" +
+        "/**\n" +
+        " * A value with a total order via compareTo() — the seam the generic Decimal::min()/max()\n" +
+        " * helpers bind to (@template T of Comparable). Value objects are not orderable in the model\n" +
+        " * (KOI0212 rejects a value-object min/max selector), so Decimal is the only implementer today;\n" +
+        " * the bound keeps the Decimal-element min/max type-preserving and symmetric with Summable.\n" +
+        " */\n" +
+        "interface Comparable\n" +
+        "{\n" +
+        "    /** @param self $other */\n" +
+        "    public function compareTo(self $other): int;\n" +
+        "}\n" +
+        "\n" +
+        "/**\n" +
         " * A string-backed arbitrary-precision decimal value (no float).\n" +
         " *\n" +
         " * Arithmetic delegates to PHP's BCMath extension (bcadd, bcsub, bcmul, bcdiv).\n" +
         " * The scale (number of decimal places) defaults to 10; supply a higher value for\n" +
         " * use-cases that demand finer precision.\n" +
         " */\n" +
-        "class Decimal\n" +
+        "final class Decimal implements Summable, Comparable\n" +
         "{\n" +
         "    /** @var numeric-string The validated decimal string; numeric by construction. */\n" +
         "    private string $value;\n" +
@@ -148,7 +176,8 @@ internal static class PhpRuntime
         "        return $this->value;\n" +
         "    }\n" +
         "\n" +
-        "    public function add(self $other): self\n" +
+        "    /** @param self $other */\n" +
+        "    public function add(Summable $other): self\n" +
         "    {\n" +
         "        return new self(bcadd($this->value, $other->value, $this->scale), $this->scale);\n" +
         "    }\n" +
@@ -171,7 +200,8 @@ internal static class PhpRuntime
         "        return new self(bcdiv($this->value, $other->value, $this->scale), $this->scale);\n" +
         "    }\n" +
         "\n" +
-        "    public function compareTo(self $other): int\n" +
+        "    /** @param self $other */\n" +
+        "    public function compareTo(Comparable $other): int\n" +
         "    {\n" +
         "        return bccomp($this->value, $other->value, $this->scale);\n" +
         "    }\n" +
@@ -191,11 +221,15 @@ internal static class PhpRuntime
         "     *\n" +
         "     * A string-backed decimal has no implicit zero, so an EMPTY array raises a domain error\n" +
         "     * rather than fabricating one (parity with the C#/TypeScript/Python empty-fold guard).\n" +
-        "     * A value-object projection whose add() returns its own type folds here too.\n" +
+        "     * A value-object projection whose add() returns its own type folds here too, and the\n" +
+        "     * @template T of Summable bound keeps the result the element's own type (issue #692):\n" +
+        "     * an array<Money> sums to a Money, not a Decimal, under phpstan --level max.\n" +
         "     *\n" +
-        "     * @param array<self> $values\n" +
+        "     * @template T of Summable\n" +
+        "     * @param array<T> $values\n" +
+        "     * @return T\n" +
         "     */\n" +
-        "    public static function sum(array $values): self\n" +
+        "    public static function sum(array $values): Summable\n" +
         "    {\n" +
         "        if ($values === []) {\n" +
         "            throw new DomainInvariantViolationException('collection', 'cannot sum an empty collection (no zero value)');\n" +
@@ -215,9 +249,11 @@ internal static class PhpRuntime
         "     * An EMPTY array raises a domain error (a collection with no element has no minimum),\n" +
         "     * mirroring the C#/TypeScript/Python empty-fold guard.\n" +
         "     *\n" +
-        "     * @param array<self> $values\n" +
+        "     * @template T of Comparable\n" +
+        "     * @param array<T> $values\n" +
+        "     * @return T\n" +
         "     */\n" +
-        "    public static function min(array $values): self\n" +
+        "    public static function min(array $values): Comparable\n" +
         "    {\n" +
         "        if ($values === []) {\n" +
         "            throw new DomainInvariantViolationException('collection', 'cannot take min of an empty collection (no value)');\n" +
@@ -239,9 +275,11 @@ internal static class PhpRuntime
         "     * An EMPTY array raises a domain error (a collection with no element has no maximum),\n" +
         "     * mirroring the C#/TypeScript/Python empty-fold guard.\n" +
         "     *\n" +
-        "     * @param array<self> $values\n" +
+        "     * @template T of Comparable\n" +
+        "     * @param array<T> $values\n" +
+        "     * @return T\n" +
         "     */\n" +
-        "    public static function max(array $values): self\n" +
+        "    public static function max(array $values): Comparable\n" +
         "    {\n" +
         "        if ($values === []) {\n" +
         "            throw new DomainInvariantViolationException('collection', 'cannot take max of an empty collection (no value)');\n" +
