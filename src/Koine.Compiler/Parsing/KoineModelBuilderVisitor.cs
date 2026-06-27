@@ -434,14 +434,28 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     private PolicyDecl BuildPolicy(KoineParser.PolicyDeclContext ctx)
     {
         KoineParser.PolicyReactionContext? reactionCtx = ctx.policyReaction();
-        List<PolicyArg> args = reactionCtx.policyArgList() is { } al
-            ? al.policyArg().Select(a =>
-                new PolicyArg(a.softName().GetText(), BuildExpression(a.expression())) { Span = SpanOf(a) }).ToList()
-            : new List<PolicyArg>();
-        var reaction = new PolicyReaction(reactionCtx.typeName().GetText(), reactionCtx.softName().GetText(), args)
+        PolicyReaction reaction;
+        if (reactionCtx is null)
         {
-            Span = SpanOf(reactionCtx)
-        };
+            // Recovered (error) parse: `policy <Name> when <Event> then` with no reaction after `then`
+            // (a normal mid-typing state in the live editor). Yield an empty-placeholder reaction
+            // rather than throwing — the syntax error itself is reported by the parser's error path.
+            reaction = new PolicyReaction(string.Empty, string.Empty, new List<PolicyArg>()) { Span = SpanOf(ctx) };
+        }
+        else
+        {
+            // Read names null-tolerantly so a partial reaction (e.g. a missing field token) on a
+            // recovered tree still builds, mirroring BuildEmitClause.
+            List<PolicyArg> args = reactionCtx.policyArgList() is { } al
+                ? al.policyArg().Select(a =>
+                    new PolicyArg(a.softName()?.GetText() ?? string.Empty, BuildExpression(a.expression())) { Span = SpanOf(a) }).ToList()
+                : new List<PolicyArg>();
+            reaction = new PolicyReaction(reactionCtx.typeName()?.GetText() ?? string.Empty, reactionCtx.softName()?.GetText() ?? string.Empty, args)
+            {
+                Span = SpanOf(reactionCtx)
+            };
+        }
+
         // `when <Identifier>` is the event; the policy's own name is Identifier(0).
         return new PolicyDecl(ctx.Identifier(0).GetText(), ctx.Identifier(1).GetText(), reaction)
         {
