@@ -278,12 +278,20 @@ declare(strict_types=1);
 
 namespace Koine\Shop\ValueObjects;
 
-/** A cart whose totals fold its money lines (the #601 Decimal-fold path). */
+/**
+ * A cart whose totals fold its money lines (the #601 Decimal-fold path), plus an Int
+ * collection folded by min/max (the #691 path — Int min/max must lower to PHP's builtin
+ * min()/max(), not Decimal::min/max which would call compareTo() on raw ints).
+ */
 final class Cart
 {
-    /** @param list<Money> $items */
+    /**
+     * @param list<Money> $items
+     * @param list<int> $counts
+     */
     public function __construct(
-        public readonly array $items
+        public readonly array $items,
+        public readonly array $counts
     ) {
     }
 
@@ -302,9 +310,20 @@ final class Cart
         return \Koine\Runtime\Decimal::max(array_map(fn($m) => $m->amount, $this->items));
     }
 
+    public function fewest(): int
+    {
+        return (fn($__xs) => $__xs === [] ? throw new \Koine\Runtime\DomainInvariantViolationException('collection', 'cannot take min of an empty collection (no value)') : min($__xs))(array_map(fn($c) => $c, $this->counts));
+    }
+
+    public function most(): int
+    {
+        return (fn($__xs) => $__xs === [] ? throw new \Koine\Runtime\DomainInvariantViolationException('collection', 'cannot take max of an empty collection (no value)') : max($__xs))(array_map(fn($c) => $c, $this->counts));
+    }
+
     public function equals(self $other): bool
     {
-        return $this->items === $other->items;
+        return $this->items === $other->items
+            && $this->counts === $other->counts;
     }
 }
 
