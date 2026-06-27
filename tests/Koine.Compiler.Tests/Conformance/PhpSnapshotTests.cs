@@ -459,12 +459,17 @@ public class PhpSnapshotTests
             invariant amount >= 0 "an amount cannot be negative"
           }
 
-          /// A cart whose totals fold its money lines (the #601 Decimal-fold path).
+          /// A cart whose totals fold its money lines (the #601 Decimal-fold path), plus an Int
+          /// collection folded by min/max (the #691 path — Int min/max must lower to PHP's builtin
+          /// min()/max(), not Decimal::min/max which would call compareTo() on raw ints).
           value Cart {
             items:    List<Money>
             total:    Decimal = items.sum(m => m.amount)
             cheapest: Decimal = items.min(m => m.amount)
             priciest: Decimal = items.max(m => m.amount)
+            counts:   List<Int>
+            fewest:   Int     = counts.min(c => c)
+            most:     Int     = counts.max(c => c)
           }
         }
         """;
