@@ -2009,11 +2009,19 @@ public sealed class KoineLanguageService
         // The old name under the cursor (RenameAt already validated it resolves and differs from newName).
         if (compilation.Documents.TryGetValue(activeUri, out var source))
         {
-            var oldName = TokenLocator.Locate(source, line, character).CurrentToken?.Text;
-            if (!string.IsNullOrEmpty(oldName)
-                && IdentityCoRenameEdits(compilation, activeUri, oldName, newName) is { } idEdits)
+            var ctx = TokenLocator.Locate(source, line, character);
+            var oldName = ctx.CurrentToken?.Text;
+            if (!string.IsNullOrEmpty(oldName))
             {
-                edits.AddRange(idEdits);
+                // Resolve the SYMBOL the cursor actually lands on (offset + enclosing-type scope, exactly
+                // as RenameAt does) and gate the <Root>Id co-rename on it — not the bare token text — so a
+                // same-named non-root symbol (enum member, value object, …) never triggers it (#621).
+                var offset = OffsetOf(source, line, character);
+                Symbol? target = compilation.WorkspaceIndex.ResolveSymbol(activeUri, oldName, offset, ctx.EnclosingTypeName);
+                if (IdentityCoRenameEdits(compilation, activeUri, oldName, newName, target) is { } idEdits)
+                {
+                    edits.AddRange(idEdits);
+                }
             }
         }
 
@@ -2029,9 +2037,12 @@ public sealed class KoineLanguageService
     /// use across the workspace) is paired with <c>&lt;newName&gt;Id</c>. Returns null for a non-root entity,
     /// a non-conventional identity (e.g. <c>identified by Guid</c>), or a name collision — the caller then
     /// renames just the root and Studio surfaces the left-behind Id (#550, Approach 2 fallback).
+    /// <para><paramref name="resolvedTarget"/> is the symbol the cursor actually resolved to; the
+    /// co-rename gates on it being the aggregate root entity's OWN declaration, so a same-named non-root
+    /// symbol (an enum member, value object, command, … sharing the root's text) never fires it (#621).</para>
     /// </summary>
     private static IReadOnlyList<RenameEdit>? IdentityCoRenameEdits(
-        KoineCompilation compilation, string activeUri, string oldName, string newName)
+        KoineCompilation compilation, string activeUri, string oldName, string newName, Symbol? resolvedTarget)
     {
         // Resolve the aggregate's OWN root entity across the WHOLE workspace, not just the active file: a
         // rename can be invoked from a reference in a different file than the one declaring the root
@@ -2057,6 +2068,16 @@ public sealed class KoineLanguageService
         }
 
         if (root is null)
+        {
+            return null;
+        }
+
+        // #621: gate on the RESOLVED symbol, not the bare token text. Fire only when the cursor resolved
+        // to the root entity's OWN type declaration — comparing the resolved symbol's declaration span to
+        // the root entity's name span (the same DeclSpan-identity check FindReferences uses for enum
+        // members). A same-named non-root symbol (enum member, value object, …) resolves elsewhere and is
+        // rejected here, so renaming it no longer rewrites the unrelated root's <Root>Id.
+        if (resolvedTarget is not TypeSymbol || resolvedTarget.DeclSpan != root.NameSpan)
         {
             return null;
         }
