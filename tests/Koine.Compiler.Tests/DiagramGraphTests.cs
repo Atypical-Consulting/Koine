@@ -456,6 +456,93 @@ public class DiagramGraphTests
         context.Nodes.Where(n => n.Kind is not "event").ShouldAllBe(n => n.Doc == null);
     }
 
+    /// <summary>
+    /// The event-flow chain (issue #439): the context class-diagram graph also carries a <c>command</c>
+    /// node per command/factory and a <c>policy</c> node per policy, wired into the existing domain
+    /// <c>event</c> nodes by the directed chain <c>command --emits--&gt; event --triggers--&gt; policy
+    /// --issues--&gt; command</c>, so Studio's Flow canvas renders the whole producer/reactor chain.
+    /// </summary>
+    [Fact]
+    public void Command_and_policy_nodes_complete_the_event_flow_chain()
+    {
+        DiagramGraph graph = PaymentContextGraph();
+
+        // A command node per command (here the `capture` command emits the event) and the issued `record`
+        // command, plus a policy node — all carrying source-jump qualified names. They are NOT events, so
+        // they stay simple boxes (no stereotype/members) and carry no "When" doc.
+        DiagramNode capture = graph.Nodes.First(n => n.Kind == "command" && n.Label == "capture");
+        capture.QualifiedName.ShouldBe("Payment.Charge.capture");
+        capture.Stereotype.ShouldBeNull();
+        (capture.Members ?? []).ShouldBeEmpty();
+        capture.Doc.ShouldBeNull();
+
+        DiagramNode record = graph.Nodes.First(n => n.Kind == "command" && n.Label == "record");
+        record.QualifiedName.ShouldBe("Payment.LedgerEntry.record");
+
+        DiagramNode policy = graph.Nodes.First(n => n.Kind == "policy" && n.Label == "PostToLedger");
+        policy.QualifiedName.ShouldBe("Payment.PostToLedger");
+        policy.Stereotype.ShouldBeNull();
+        (policy.Members ?? []).ShouldBeEmpty();
+
+        // The complete chain: command --emits--> event --triggers--> policy --issues--> command.
+        DiagramNode captured = graph.Nodes.First(n => n.Kind == "event" && n.Label == "ChargeCaptured");
+        graph.Edges.ShouldContain(e => e.From == capture.Id && e.To == captured.Id && e.Label == "emits");
+        graph.Edges.ShouldContain(e => e.From == captured.Id && e.To == policy.Id && e.Label == "triggers");
+        graph.Edges.ShouldContain(e => e.From == policy.Id && e.To == record.Id && e.Label == "issues");
+    }
+
+    /// <summary>A two-aggregate context with a full command → event → policy → command chain (mirrors the
+    /// pizzeria/saas payment context): <c>capture</c> emits <c>ChargeCaptured</c>; the <c>PostToLedger</c>
+    /// policy reacts and issues <c>Books.record</c>.</summary>
+    private const string PaymentFixture = """
+        context Payment {
+          enum ChargeStatus { Authorized, Captured }
+
+          event ChargeCaptured {
+            charge: ChargeId
+            capturedAmount: Decimal
+          }
+
+          aggregate Billing root Charge {
+            entity Charge identified by ChargeId {
+              amount: Decimal
+              status: ChargeStatus = Authorized
+
+              states status {
+                Authorized -> Captured
+                Captured
+              }
+
+              command capture {
+                requires status == Authorized "only an authorized charge can be captured"
+                status -> Captured
+                emit ChargeCaptured(charge: id, capturedAmount: amount)
+              }
+            }
+          }
+
+          aggregate Books root LedgerEntry {
+            entity LedgerEntry identified by LedgerEntryId {
+              balance: Decimal
+
+              command record(amount: Decimal) {
+                balance -> amount
+              }
+            }
+          }
+
+          policy PostToLedger when ChargeCaptured then Books.record(amount: capturedAmount)
+        }
+        """;
+
+    /// <summary>The Payment context's class-diagram graph (carrying the command/policy event-flow chain).</summary>
+    private static DiagramGraph PaymentContextGraph()
+    {
+        var (model, diagnostics) = new KoineCompiler().Parse(new[] { new SourceFile("payment.koi", PaymentFixture) });
+        diagnostics.ShouldBeEmpty();
+        return new DocsEmitter().EmitDiagrams(model!)["docs/Payment.md"].First(d => d.Kind == "context").Graph;
+    }
+
     /// <summary>The Ordering context's class-diagram graph from the fixture.</summary>
     private static DiagramGraph ContextGraph() =>
         Descriptors()["docs/Ordering.md"].First(d => d.Kind == "context").Graph;
