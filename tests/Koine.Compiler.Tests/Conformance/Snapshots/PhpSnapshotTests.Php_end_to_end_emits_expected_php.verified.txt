@@ -231,7 +231,7 @@ class Invoice
         $this->total = $total;
         $this->status = $status;
         if (strlen($customerId) <= 0) {
-            throw new \Koine\Runtime\DomainInvariantViolationException("Invoice", "customer id must not be empty");
+            throw new \Koine\Runtime\DomainInvariantViolationException("Invoice", 'customer id must not be empty');
         }
     }
 
@@ -243,7 +243,7 @@ class Invoice
     private function checkInvariants(): void
     {
         if (strlen($this->customerId) <= 0) {
-            throw new \Koine\Runtime\DomainInvariantViolationException("Invoice", "customer id must not be empty");
+            throw new \Koine\Runtime\DomainInvariantViolationException("Invoice", 'customer id must not be empty');
         }
     }
 
@@ -281,7 +281,7 @@ class Invoice
     public function issue(): void
     {
         if ($this->status !== InvoiceStatus::DRAFT) {
-            throw new \Koine\Runtime\DomainInvariantViolationException("Invoice", "only a draft invoice can be issued");
+            throw new \Koine\Runtime\DomainInvariantViolationException("Invoice", 'only a draft invoice can be issued');
         }
         $this->status = InvoiceStatus::ISSUED;
         $this->checkInvariants();
@@ -292,7 +292,7 @@ class Invoice
     {
         $id = InvoiceId::generate();
         if (strlen($customerId) <= 0) {
-            throw new \Koine\Runtime\DomainInvariantViolationException("Invoice", "customer id required");
+            throw new \Koine\Runtime\DomainInvariantViolationException("Invoice", 'customer id required');
         }
         $instance = new self($id, $customerId, $total, InvoiceStatus::DRAFT);
         $instance->domainEvents[] = new InvoiceCreated($id, $customerId);
@@ -450,7 +450,7 @@ final class Amount
         public readonly \Koine\Runtime\Decimal $value
     ) {
         if ($value->compareTo(new \Koine\Runtime\Decimal('0')) < 0) {
-            throw new \Koine\Runtime\DomainInvariantViolationException("Amount", "amount cannot be negative");
+            throw new \Koine\Runtime\DomainInvariantViolationException("Amount", 'amount cannot be negative');
         }
     }
 
