@@ -438,6 +438,29 @@ public class PhpExpressionTests
     }
 
     [Fact]
+    public void Min_of_Int_projection_uses_guarded_builtin_min()
+    {
+        // Int projection: PHP's builtin min() is integer-exact (parity with array_sum for sum) — the
+        // Decimal helper would call compareTo() on raw ints. The empty-guard raises the same
+        // DomainInvariantViolationException the Decimal/C# paths use AND narrows the array to
+        // non-empty so phpstan --level max types min() as int (a bare min(array<int>) is int|false).
+        var selector = new LambdaExpr("c", Id("c"));
+        var expr = new CallExpr(Id("counts"), "min", new Expr[] { selector });
+        Translate(expr).ShouldBe(
+            "(fn($__xs) => $__xs === [] ? throw new \\Koine\\Runtime\\DomainInvariantViolationException('collection', 'cannot take min of an empty collection (no value)') : min($__xs))(array_map(fn($c) => $c, $this->counts))");
+    }
+
+    [Fact]
+    public void Max_of_Int_projection_uses_guarded_builtin_max()
+    {
+        // Symmetric to min: an Int projection lowers to the guarded builtin max(), not Decimal::max.
+        var selector = new LambdaExpr("c", Id("c"));
+        var expr = new CallExpr(Id("counts"), "max", new Expr[] { selector });
+        Translate(expr).ShouldBe(
+            "(fn($__xs) => $__xs === [] ? throw new \\Koine\\Runtime\\DomainInvariantViolationException('collection', 'cannot take max of an empty collection (no value)') : max($__xs))(array_map(fn($c) => $c, $this->counts))");
+    }
+
+    [Fact]
     public void DistinctBy_with_primitive_selector_lowers_to_unique_count_comparison()
     {
         // String projection: PHP `array_unique` (SORT_STRING) dedupes scalars by value correctly,

@@ -833,10 +833,10 @@ internal sealed class PhpExpressionTranslator
                 sb.Append(')');
                 return;
             case "min":
-                sb.Append(@"\Koine\Runtime\Decimal::min(").Append(RenderArrayMap(call, t)).Append(')');
+                WriteMinMax(call, t, sb, isMin: true);
                 return;
             case "max":
-                sb.Append(@"\Koine\Runtime\Decimal::max(").Append(RenderArrayMap(call, t)).Append(')');
+                WriteMinMax(call, t, sb, isMin: false);
                 return;
             case "sum":
                 WriteSum(call, t, sb);
@@ -898,6 +898,35 @@ internal sealed class PhpExpressionTranslator
         else
         {
             sb.Append(@"\Koine\Runtime\Decimal::sum(").Append(mapped).Append(')');
+        }
+    }
+
+    /// <summary>
+    /// Lowers a <c>.min(p =&gt; body)</c> / <c>.max(p =&gt; body)</c> call.
+    /// When the projected element type is a bare <c>Int</c>, PHP's builtin <c>min</c>/<c>max</c> is
+    /// used (integer-exact — parity with the <c>Int</c> branch of <see cref="WriteSum"/>); the
+    /// <c>Decimal</c> runtime helper would call <c>compareTo()</c> on raw ints (a fatal at runtime,
+    /// <c>argument.type</c> under phpstan). The empty case is guarded so it raises the same
+    /// <c>DomainInvariantViolationException</c> the <c>Decimal::min/max</c> helper (and the
+    /// C#/TypeScript/Python targets) use — keeping the empty-min/max contract element-type-agnostic —
+    /// and the guard also narrows the mapped array to non-empty so <c>phpstan --level max</c> types the
+    /// builtin as <c>int</c> rather than <c>int|false</c>. For <c>Decimal</c> or value-object
+    /// projections the runtime <c>\Koine\Runtime\Decimal::min/max</c> is kept (it guards empty itself).
+    /// </summary>
+    private void WriteMinMax(CallExpr call, string target, StringBuilder sb, bool isMin)
+    {
+        TypeRef? selectorType = InferSelectorType(call);
+        var mapped = RenderArrayMap(call, target);
+        var op = isMin ? "min" : "max";
+        if (selectorType?.Name == "Int")
+        {
+            var rule = $"cannot take {op} of an empty collection (no value)";
+            sb.Append("(fn($__xs) => $__xs === [] ? throw new \\Koine\\Runtime\\DomainInvariantViolationException('collection', '")
+              .Append(rule).Append("') : ").Append(op).Append("($__xs))(").Append(mapped).Append(')');
+        }
+        else
+        {
+            sb.Append(@"\Koine\Runtime\Decimal::").Append(op).Append('(').Append(mapped).Append(')');
         }
     }
 
