@@ -41,10 +41,12 @@ describe('loadWasmApi — main-thread fallback (issue #357)', () => {
     vi.resetModules();
   });
 
-  // Guard against an env stub (vi.stubEnv('DEV', …)) leaking into a sibling test if an assertion
-  // throws before the in-test restore runs — the dev-case tests rely on vitest's default DEV===true.
+  // Guard against an env stub (vi.stubEnv('DEV', …)) or fake-timer install leaking into a sibling test
+  // if an assertion throws before the in-test restore runs — the dev-case tests rely on vitest's default
+  // DEV===true, and the boot-timeout tests (issue #625) install fake timers.
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.useRealTimers();
   });
 
   test('falls back to a main-thread boot when the worker boot rejects (timeout)', async () => {
@@ -259,5 +261,69 @@ describe('loadWasmApi — main-thread fallback (issue #357)', () => {
     createSpy.mockRestore();
     appendSpy.mockRestore();
     // env restore is handled by the describe-level afterEach (matches the house devMode.test.ts pattern).
+  });
+
+  // Issue #625: the worker fast-path is watchdog-guarded twice (koine.worker.ts BOOT_WATCHDOG_MS +
+  // workerClient.ts BOOT_TIMEOUT_MS), so whenReady() always settles and the main-thread fallback runs.
+  // But the fallback itself awaited dotnetModuleLoader / dotnet.create() / getAssemblyExports() with NO
+  // ceiling — so a stalled prod runtime fetch turned the "never brick the studio" backstop into the exact
+  // silent indefinite hang it exists to prevent (no error, no retry). The fallback must now fail fast.
+
+  test('main-thread fallback times out instead of hanging when the runtime boot stalls (issue #625)', async () => {
+    const { createKoineWorkerClient } = await import('@/host/browser/workerClient');
+    (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
+      call: vi.fn(),
+      whenReady: vi.fn<() => Promise<void>>().mockRejectedValue(new Error('Koine worker timed out after 30s')),
+      dispose: vi.fn(),
+    });
+
+    const wasm = await import('@/host/browser/wasm');
+
+    vi.useFakeTimers();
+    try {
+      // A loader that never settles → bootMainThread() would hang forever without the timeout ceiling.
+      wasm.__setDotnetModuleLoaderForTests(() => new Promise<Record<string, unknown>>(() => {}));
+
+      const stalled = wasm.loadWasmApi();
+      const rejection = expect(stalled).rejects.toThrow(/main-thread runtime boot did not settle/i);
+      // Advance past the ceiling — the boot must reject (not hang). advanceTimersByTimeAsync flushes the
+      // intervening microtasks (the worker whenReady() rejection → main-thread fallback → armed race).
+      await vi.advanceTimersByTimeAsync(25_000);
+      await rejection;
+
+      // The rejection must NOT be cached (apiPromise cleared via attempt.catch) — a later call re-attempts
+      // from scratch and can succeed once the runtime fetch recovers.
+      wasm.__setDotnetModuleLoaderForTests(fakeDotnetModule({ ListEmitTargets: () => '{"targets":[]}' }));
+      const api = await wasm.loadWasmApi();
+      expect(wasm.getWasmBootMode()).toBe('main-thread');
+      expect(await api.ListEmitTargets()).toBe('{"targets":[]}');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('a main-thread boot that resolves under the ceiling clears its timeout (no leak) — issue #625', async () => {
+    const { createKoineWorkerClient } = await import('@/host/browser/workerClient');
+    (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
+      call: vi.fn(),
+      whenReady: vi.fn<() => Promise<void>>().mockRejectedValue(new Error('worker boot failed')),
+      dispose: vi.fn(),
+    });
+
+    const wasm = await import('@/host/browser/wasm');
+
+    vi.useFakeTimers();
+    try {
+      wasm.__setDotnetModuleLoaderForTests(fakeDotnetModule({ Glossary: () => '{"markdown":"ok"}' }));
+
+      const api = await wasm.loadWasmApi();
+      expect(wasm.getWasmBootMode()).toBe('main-thread');
+      expect(await api.Glossary('[]')).toBe('{"markdown":"ok"}');
+      // A boot that resolved under the ceiling must have cleared its timeout timer — no dangling timer
+      // (and so no unhandled rejection from a timeout that fires after a successful boot).
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
