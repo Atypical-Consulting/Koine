@@ -18,7 +18,7 @@
     "ddd"
   ],
   "contexts": ["Catalog", "Inventory", "Loans", "Reservations", "Members"],
-  "coreAggregate": "Loan",
+  "coreAggregate": "Lending",
   "entryFile": "loans.koi",
   "teaches": [
     "the Book-vs-BookCopy identity distinction: one abstract title, many physical copies, two contexts",
