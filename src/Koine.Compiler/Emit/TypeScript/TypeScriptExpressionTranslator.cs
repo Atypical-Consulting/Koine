@@ -587,7 +587,8 @@ internal sealed class TypeScriptExpressionTranslator
         // ops below lower to (every/some/map/reduce). Normalize a Set receiver to an array first so
         // those methods exist. The validator restricts these ops (and `contains`) to List/Set — never
         // Map — so a size-backed receiver here is always a Set; `[...set]` spreads its values.
-        var iter = IsSizeBacked(call.Target) ? $"[...{t}]" : t;
+        var sizeBacked = IsSizeBacked(call.Target);
+        var iter = sizeBacked ? $"[...{t}]" : t;
 
         switch (call.Method)
         {
@@ -603,7 +604,7 @@ internal sealed class TypeScriptExpressionTranslator
                 return;
             case "contains":
                 // String/List membership -> .includes; Set membership -> .has (ReadonlySet has no .includes).
-                sb.Append(t).Append(IsSizeBacked(call.Target) ? ".has(" : ".includes(");
+                sb.Append(t).Append(sizeBacked ? ".has(" : ".includes(");
                 Write(call.Args[0], sb);
                 sb.Append(')');
                 return;
