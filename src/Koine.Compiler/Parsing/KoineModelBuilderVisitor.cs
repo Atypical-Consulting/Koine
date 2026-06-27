@@ -434,30 +434,28 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     private PolicyDecl BuildPolicy(KoineParser.PolicyDeclContext ctx)
     {
         KoineParser.PolicyReactionContext? reactionCtx = ctx.policyReaction();
+        PolicyReaction reaction;
         if (reactionCtx is null)
         {
             // Recovered (error) parse: `policy <Name> when <Event> then` with no reaction after `then`
             // (a normal mid-typing state in the live editor). Yield an empty-placeholder reaction
             // rather than throwing — the syntax error itself is reported by the parser's error path.
-            var placeholder = new PolicyReaction(string.Empty, string.Empty, new List<PolicyArg>()) { Span = SpanOf(ctx) };
-            return new PolicyDecl(ctx.Identifier(0).GetText(), ctx.Identifier(1).GetText(), placeholder)
+            reaction = new PolicyReaction(string.Empty, string.Empty, new List<PolicyArg>()) { Span = SpanOf(ctx) };
+        }
+        else
+        {
+            // Read names null-tolerantly so a partial reaction (e.g. a missing field token) on a
+            // recovered tree still builds, mirroring BuildEmitClause.
+            List<PolicyArg> args = reactionCtx.policyArgList() is { } al
+                ? al.policyArg().Select(a =>
+                    new PolicyArg(a.softName()?.GetText() ?? string.Empty, BuildExpression(a.expression())) { Span = SpanOf(a) }).ToList()
+                : new List<PolicyArg>();
+            reaction = new PolicyReaction(reactionCtx.typeName()?.GetText() ?? string.Empty, reactionCtx.softName()?.GetText() ?? string.Empty, args)
             {
-                Span = SpanOf(ctx),
-                NameSpan = SpanOf(ctx.Identifier(0)),
-                Doc = DocFor(ctx),
-                LeadingTrivia = LeadingTriviaFor(ctx),
-                TrailingTrivia = TrailingTriviaFor(ctx)
+                Span = SpanOf(reactionCtx)
             };
         }
 
-        List<PolicyArg> args = reactionCtx.policyArgList() is { } al
-            ? al.policyArg().Select(a =>
-                new PolicyArg(a.softName()?.GetText() ?? string.Empty, BuildExpression(a.expression())) { Span = SpanOf(a) }).ToList()
-            : new List<PolicyArg>();
-        var reaction = new PolicyReaction(reactionCtx.typeName()?.GetText() ?? string.Empty, reactionCtx.softName()?.GetText() ?? string.Empty, args)
-        {
-            Span = SpanOf(reactionCtx)
-        };
         // `when <Identifier>` is the event; the policy's own name is Identifier(0).
         return new PolicyDecl(ctx.Identifier(0).GetText(), ctx.Identifier(1).GetText(), reaction)
         {
