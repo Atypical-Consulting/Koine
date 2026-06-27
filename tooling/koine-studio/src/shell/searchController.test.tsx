@@ -139,4 +139,30 @@ describe('SearchPanel', () => {
     // a.koi's write throws, but b.koi is still written — one failure must not abort the batch.
     await waitFor(() => expect(opts.writeFile).toHaveBeenCalledWith('file:///b.koi', 'value Cash\n'));
   });
+
+  test('every search field carries a unique, non-empty id and name and keeps its aria-label', () => {
+    // Chrome's "A form field element should have an id or name attribute" check (and Lighthouse's
+    // Agentic-Browsing audit) is satisfied by id/name specifically, not aria-label — assert both,
+    // while the accessible name (aria-label) stays intact. See issue #642.
+    const view = mount(makeOpts());
+    const fields = [
+      { sel: '.koi-search-query', label: 'Search text' },
+      { sel: '.koi-search-replace', label: 'Replace with' },
+      { sel: '.koi-search-include', label: 'Files to include' },
+    ];
+    const ids: string[] = [];
+    const names: string[] = [];
+    for (const f of fields) {
+      const el = view.container.querySelector<HTMLInputElement>(f.sel);
+      expect(el, f.sel).toBeTruthy();
+      expect(el!.id, `${f.sel} id`).toBeTruthy();
+      expect(el!.getAttribute('name'), `${f.sel} name`).toBeTruthy();
+      expect(el!.getAttribute('aria-label')).toBe(f.label);
+      ids.push(el!.id);
+      names.push(el!.getAttribute('name')!);
+    }
+    // No two fields share an id or a name.
+    expect(new Set(ids).size).toBe(fields.length);
+    expect(new Set(names).size).toBe(fields.length);
+  });
 });
