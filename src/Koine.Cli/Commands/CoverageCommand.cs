@@ -20,6 +20,10 @@ internal sealed class CoverageSettings : CommandSettings
     [CommandOption("--json")]
     [Description("Emit the report as stable JSON instead of the human-readable summary.")]
     public bool Json { get; init; }
+
+    [CommandOption("--config <FILE>")]
+    [Description("Read defaults (target) from this koine.config instead of discovering one.")]
+    public string? Config { get; init; }
 }
 
 /// <summary>
@@ -32,9 +36,24 @@ internal sealed class CoverageCommand : Command<CoverageSettings>
 {
     protected override int Execute(CommandContext context, CoverageSettings settings, CancellationToken cancellationToken)
     {
-        // Resolve the target against any koine.config beside the input (an explicit --target wins),
-        // defaulting to csharp — the same resolution build uses, minus the --out concern.
-        KoineConfig config = KoineConfig.Discover(settings.Path);
+        // Resolve the target against a koine.config (explicit --config, or one discovered beside the
+        // input) — an explicit --target wins, defaulting to csharp. The same resolution build/check use,
+        // minus the --out concern.
+        KoineConfig config;
+        if (settings.Config is not null)
+        {
+            if (!File.Exists(settings.Config))
+            {
+                return CliError.Runtime($"config not found: {settings.Config}");
+            }
+
+            config = KoineConfig.Parse(File.ReadAllText(settings.Config));
+        }
+        else
+        {
+            config = KoineConfig.Discover(settings.Path);
+        }
+
         var resolvedTarget = settings.Target ?? config.Target ?? "csharp";
         var targetOptions = config.OptionsFor(resolvedTarget);
 
