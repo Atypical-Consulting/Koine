@@ -627,8 +627,7 @@ internal sealed class TypeScriptExpressionTranslator
                 WriteSum(call, iter, sb);
                 return;
             case "distinctBy":
-                sb.Append("new Set(").Append(iter).Append(".map(").Append(RenderLambda(call))
-                  .Append(")).size === ").Append(iter).Append(".length");
+                WriteDistinctBy(call, iter, sb);
                 return;
             default:
                 sb.Append("/* unsupported call '").Append(call.Method).Append("' */ undefined");
@@ -657,6 +656,34 @@ internal sealed class TypeScriptExpressionTranslator
         else
         {
             sb.Append(target).Append(".map(").Append(RenderLambda(call)).Append(").reduce((a, b) => a + b, 0)");
+        }
+    }
+
+    /// <summary>
+    /// <c>distinctBy</c> — "every projection is distinct", the TS counterpart of C#'s
+    /// <c>.Select(selector).Distinct().Count() == .Count</c>. A JS <c>Set</c> dedupes by reference
+    /// identity (SameValueZero) and cannot take a custom equality, so for a value-object / branded-Id
+    /// / <c>Decimal</c> selector — all emitted as classes with a structural <c>equals</c> — two
+    /// structurally-equal-but-distinct instances would survive as separate entries and the invariant
+    /// would never fire, diverging from C#'s structural <c>Distinct()</c> (issue #609). For those
+    /// selectors we count distinct projections structurally via the runtime <c>structuralEquals</c>
+    /// (keeping each value's first occurrence, O(n²) like <c>structuralEquals</c> is used elsewhere;
+    /// invariant collections are small). A primitive selector (<c>string</c>/<c>number</c>/
+    /// <c>boolean</c>) already dedupes by value under SameValueZero, so it keeps the fast Set path.
+    /// </summary>
+    private void WriteDistinctBy(CallExpr call, string target, StringBuilder sb)
+    {
+        TypeRef? selectorType = InferSelectorType(call);
+        if (_resolver.IsValueLike(selectorType) || selectorType?.Name == "Decimal")
+        {
+            sb.Append(target).Append(".map(").Append(RenderLambda(call))
+              .Append(").filter((__x, __i, __xs) => __xs.findIndex((__y) => structuralEquals(__x, __y)) === __i).length === ")
+              .Append(target).Append(".length");
+        }
+        else
+        {
+            sb.Append("new Set(").Append(target).Append(".map(").Append(RenderLambda(call))
+              .Append(")).size === ").Append(target).Append(".length");
         }
     }
 
