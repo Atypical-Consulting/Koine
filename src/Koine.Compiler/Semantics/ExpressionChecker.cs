@@ -424,6 +424,15 @@ internal sealed class ExpressionChecker
             return;
         }
 
+        // A user-declared member named after a built-in member-op (count/length/…) shadows
+        // the op: resolve it as an ordinary field access — no string/collection-op diagnostic
+        // (#605). Mirrors the plain-field branch below and TypeResolver.VisitMemberAccess.
+        if (target is not null && _resolver.IsUserType(target)
+            && _index.TryGetMemberType(target.Qualifier ?? _resolver.Context, target.Name, op, out _))
+        {
+            return;
+        }
+
         if (BuiltinOps.StringMemberOps.Contains(op))
         {
             if (target is not null && target.Name != "String")

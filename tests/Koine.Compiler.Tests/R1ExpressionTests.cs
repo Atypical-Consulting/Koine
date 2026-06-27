@@ -297,6 +297,40 @@ public class R1ExpressionTests
     }
 
     [Fact]
+    public void User_field_named_after_member_op_shadows_the_builtin_op()
+    {
+        // #605: a value/entity member named after a built-in member-op (count, length,
+        // isEmpty, …) must resolve as an ordinary field access — not be shadowed by the
+        // built-in op and raise a false KOI0207 (collection op) / KOI0206 (string op).
+        // `count: Money` also exercises the inference fix: the built-in `count` op infers
+        // `Int`, so only a declared-member-first resolver yields the real `Money` type.
+        const string src =
+            "context Demo {\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  value Inner {\n" +
+            "    count:  Money\n" +
+            "    length: Int\n" +
+            "  }\n" +
+            "  value Outer {\n" +
+            "    inner: Inner\n" +
+            "    total: Money = inner.count\n" +
+            "    invariant inner.length > 0 \"length must be positive\"\n" +
+            "  }\n" +
+            "}\n";
+
+        // No false collection/string member-op diagnostic on the user fields, and
+        // `total: Money = inner.count` only type-checks when `inner.count` infers to Money.
+        Diagnose(src).ShouldBeEmpty();
+
+        // The emitted C# compiles — `inner.count`/`inner.length` map to the declared
+        // properties, with the inferred types agreeing with the checker.
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var (asm, errors) = TestSupport.Compile(result.Files);
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+    }
+
+    [Fact]
     public void Numeric_min_and_double_negation_compile_and_run()
     {
         const string src =
