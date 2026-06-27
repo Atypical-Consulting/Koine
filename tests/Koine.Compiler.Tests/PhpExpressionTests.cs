@@ -21,7 +21,10 @@ public class PhpExpressionTests
           enum OrderStatus { Draft, Placed, Cancelled }
           enum MassUnit { Gram, Kilogram }
 
-          value Money { amount: Decimal }
+          value Money {
+            amount: Decimal
+            discount: Decimal?
+          }
 
           quantity Weight {
             amount: Decimal
@@ -435,11 +438,56 @@ public class PhpExpressionTests
     }
 
     [Fact]
-    public void DistinctBy_lowers_to_unique_count_comparison()
+    public void DistinctBy_with_primitive_selector_lowers_to_unique_count_comparison()
     {
+        // String projection: PHP `array_unique` (SORT_STRING) dedupes scalars by value correctly,
+        // so the primitive selector keeps the fast `array_unique` path.
+        var selector = new LambdaExpr("t", Id("t"));
+        var expr = new CallExpr(Id("tags"), "distinctBy", new Expr[] { selector });
+        Translate(expr).ShouldBe("count(array_unique(array_map(fn($t) => $t, $this->tags))) === count($this->tags)");
+    }
+
+    [Fact]
+    public void DistinctBy_with_value_object_selector_dedupes_structurally()
+    {
+        // Value-object projection (Money): `array_unique` would string-cast each object — fatal on a
+        // VO with no __toString. Dedupe structurally via the generated `equals()`, matching C#'s
+        // `.Distinct()` and the TS fix in #609. No `array_unique` in the emitted form.
+        var selector = new LambdaExpr("m", Id("m"));
+        var expr = new CallExpr(Id("lines"), "distinctBy", new Expr[] { selector });
+        Translate(expr).ShouldBe(
+            "(fn($__xs) => count(array_filter($__xs, fn($__x, $__i) => " +
+            "array_key_first(array_filter($__xs, fn($__y) => $__y->equals($__x))) === $__i, " +
+            "ARRAY_FILTER_USE_BOTH)) === count($__xs))(array_map(fn($m) => $m, $this->lines))");
+    }
+
+    [Fact]
+    public void DistinctBy_with_decimal_selector_dedupes_structurally()
+    {
+        // Decimal projection: `array_unique` happens to work (runtime Decimal has __toString), but for
+        // parity with C#/TS and the value-object branch a Decimal selector also dedupes via `equals()`.
         var selector = new LambdaExpr("m", new MemberAccessExpr(Id("m"), "amount"));
         var expr = new CallExpr(Id("lines"), "distinctBy", new Expr[] { selector });
-        Translate(expr).ShouldBe("count(array_unique(array_map(fn($m) => $m->amount, $this->lines))) === count($this->lines)");
+        Translate(expr).ShouldBe(
+            "(fn($__xs) => count(array_filter($__xs, fn($__x, $__i) => " +
+            "array_key_first(array_filter($__xs, fn($__y) => $__y->equals($__x))) === $__i, " +
+            "ARRAY_FILTER_USE_BOTH)) === count($__xs))(array_map(fn($m) => $m->amount, $this->lines))");
+    }
+
+    [Fact]
+    public void DistinctBy_with_optional_value_like_selector_is_null_safe()
+    {
+        // Optional projection (Decimal?): the mapped array can hold PHP `null`s, and the generated
+        // `equals(self $other)` is non-nullable — so the structural fold guards null first (two nulls
+        // are equal; null vs. a value are not), matching C#'s `.Distinct()` null semantics instead of
+        // crashing. Without the guard `$__y->equals($__x)` would fatal on a null element.
+        var selector = new LambdaExpr("m", new MemberAccessExpr(Id("m"), "discount"));
+        var expr = new CallExpr(Id("lines"), "distinctBy", new Expr[] { selector });
+        Translate(expr).ShouldBe(
+            "(fn($__xs) => count(array_filter($__xs, fn($__x, $__i) => " +
+            "array_key_first(array_filter($__xs, fn($__y) => $__x === null ? $__y === null : " +
+            "($__y !== null && $__y->equals($__x)))) === $__i, " +
+            "ARRAY_FILTER_USE_BOTH)) === count($__xs))(array_map(fn($m) => $m->discount, $this->lines))");
     }
 
     // =========================================================================

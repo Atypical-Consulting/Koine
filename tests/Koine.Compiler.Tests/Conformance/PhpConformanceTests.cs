@@ -139,6 +139,38 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #676 acceptance: a <c>distinctBy</c> over a value-object selector must type-check under
+    /// <c>phpstan --level max</c>. The fix lowers it to a structural distinct count over the generated
+    /// <c>equals()</c> (never <c>array_unique</c>, whose <c>SORT_STRING</c> cast fatals on a VO with no
+    /// <c>__toString</c>); this guards that the emitted fold is strict-type clean. Skipped (not failed)
+    /// only when no <c>phpstan</c> is present locally; CI installs the toolchain and runs it for real.
+    /// </summary>
+    [Fact]
+    public void DistinctBy_over_value_object_selector_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Sku { code: String }\n" +
+            "  value Line {\n" +
+            "    sku: Sku\n" +
+            "    tag: Sku?\n" +
+            "  }\n" +
+            "  value Basket {\n" +
+            "    lines: List<Line>\n" +
+            "    uniqueSkus: Bool = lines.distinctBy(l => l.sku)\n" +
+            "    uniqueTags: Bool = lines.distinctBy(l => l.tag)\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// The always-on syntax gate: a valid PHP snippet must pass <c>php -l</c>.
     /// Skipped (not failed) only when no interpreter is present; with one it MUST parse cleanly.
     /// </summary>
