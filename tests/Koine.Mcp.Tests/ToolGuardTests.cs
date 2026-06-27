@@ -1,6 +1,7 @@
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Mcp.Tools;
+using ModelContextProtocol;
 
 namespace Koine.Mcp.Tests;
 
@@ -149,22 +150,59 @@ public sealed class ToolGuardTests
         validateDisabled.Diagnostics.Count.ShouldBe(compileDisabled.Diagnostics.Count);
     }
 
-    // ---- koine_coverage shares the same input guard (no NRE / silent file drop) ----
+    // ---- koine_coverage must error (never report a vacuous IsComplete:true) on the
+    //      non-analyzable paths: bad target, unparseable model, guard failure (#622) ----
 
     [Fact]
-    public void Coverage_with_invalid_input_returns_an_empty_report_without_crashing()
+    public void Coverage_with_unknown_target_throws_naming_the_target()
+    {
+        // A typo'd / unsupported target previously returned an empty report whose IsComplete is
+        // vacuously true — indistinguishable from "fully covered". It must instead surface as a tool
+        // error carrying the bad target (the EmitterFactory message is no longer discarded with out _).
+        var ex = Should.Throw<McpException>(() =>
+            CoverageTool.Coverage(Files("context Billing { enum Color { Red, Green } }"), "ruby"));
+
+        ex.Message.ShouldContain("ruby");
+    }
+
+    [Fact]
+    public void Coverage_with_unparseable_model_throws_pointing_at_koine_validate()
+    {
+        // An unclosed context fails to parse, so no files are emitted and coverage is meaningless.
+        // Reporting that as an empty (vacuously-complete) report lies; it must error and point the
+        // caller at koine_validate for the diagnostics.
+        var ex = Should.Throw<McpException>(() =>
+            CoverageTool.Coverage(Files("context Billing { enum Color { Red, Green }")));
+
+        ex.Message.ShouldContain("koine_validate");
+    }
+
+    [Fact]
+    public void Coverage_with_invalid_input_throws_instead_of_a_vacuous_report()
     {
         // Without the guard a null source NREs in the compile path (finding 7) and duplicate paths
-        // silently drop a file (finding 3). Coverage surfaces no diagnostics, so the guard degrades
-        // both to an empty report rather than throwing or miscounting.
-        var nullSource = CoverageTool.Coverage(new[] { new KoineFile("a.koi", null!) });
-        nullSource.Items.ShouldBeEmpty();
+        // silently drop a file (finding 3). Coverage has no diagnostics channel, so a guard failure
+        // must now THROW with the guard's actual message — the way koine_compile reports it — not
+        // degrade to an empty report whose IsComplete is vacuously true (#622).
+        var nullSource = Should.Throw<McpException>(() =>
+            CoverageTool.Coverage(new[] { new KoineFile("a.koi", null!) }));
+        nullSource.Message.ShouldNotBeNullOrWhiteSpace();
 
-        var duplicate = CoverageTool.Coverage(new[]
+        Should.Throw<McpException>(() => CoverageTool.Coverage(new[]
         {
             new KoineFile("dup.koi", "context A { enum Color { Red } }"),
             new KoineFile("dup.koi", "context B { enum Shade { Dark } }"),
-        });
-        duplicate.Items.ShouldBeEmpty();
+        }));
+    }
+
+    [Fact]
+    public void Coverage_with_valid_model_and_supported_target_returns_a_real_report()
+    {
+        // Happy path is unchanged: a valid model + supported target produces a populated report whose
+        // rollups reflect real analysis, not a vacuously-empty one.
+        var report = CoverageTool.Coverage(Files("context Billing { enum Color { Red, Green } }"));
+
+        report.Items.ShouldNotBeEmpty();
+        report.Total.ShouldBeGreaterThan(0);
     }
 }
