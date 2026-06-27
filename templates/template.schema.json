@@ -59,7 +59,7 @@
     "coreAggregate": {
       "type": "string",
       "minLength": 1,
-      "description": "The headline aggregate that anchors the template."
+      "description": "The declared aggregate that anchors the template — its name, e.g. \"Sales\" for `aggregate Sales root Order`. For a template that declares no aggregate, the headline entity instead. Must name a real aggregate (or, when none is declared, a real entity) in the compiled model — enforced by TemplatesValidationTests."
     },
     "entryFile": {
       "type": "string",
