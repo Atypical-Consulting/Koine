@@ -174,6 +174,52 @@ describe('explorer', () => {
     expect(renamed[1]).toBe('common.koi');
   });
 
+  // Chrome's "form field should have an id or name attribute" check (and the Lighthouse
+  // Agentic-Browsing audit) wants id/name specifically — assert it on each explorer input while the
+  // accessible name (aria-label) is preserved. See issue #642.
+  it('the file-filter input carries a non-empty id and name and keeps its aria-label', () => {
+    const ex = createExplorer(makeCallbacks());
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    const filter = ex.el.querySelector<HTMLInputElement>('.explorer-filter')!;
+    expect(filter).not.toBeNull();
+    expect(filter.id).toBeTruthy();
+    expect(filter.getAttribute('name')).toBeTruthy();
+    expect(filter.getAttribute('aria-label')).toBe('Filter workspace files');
+  });
+
+  it('the inline new-file input carries a non-empty id and name', () => {
+    const ex = createExplorer(makeCallbacks());
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    // First .explorer-tool is "New file" — clicking it inserts the inline create input.
+    ex.el.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click();
+    const input = ex.el.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
+    expect(input).not.toBeNull();
+    expect(input.id).toBeTruthy();
+    expect(input.getAttribute('name')).toBeTruthy();
+  });
+
+  it('the inline rename input carries a non-empty id and name distinct from the create input', () => {
+    const ex = createExplorer(makeCallbacks());
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+
+    const row = Array.from(ex.el.querySelectorAll<HTMLElement>('li[data-kind="file"] > .explorer-row')).find(
+      (r) => r.querySelector('.explorer-name')?.textContent === 'shared.koi',
+    )!;
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true }));
+
+    const input = row.querySelector<HTMLInputElement>('.explorer-rename')!;
+    expect(input).not.toBeNull();
+    expect(input.id).toBeTruthy();
+    expect(input.getAttribute('name')).toBeTruthy();
+    // The create input uses a different id, so the two can never collide if both are on screen.
+    expect(input.id).not.toBe('koi-explorer-new');
+  });
+
   it('shows an in-pane confirm before deleting on the Delete key, then deletes on confirm', async () => {
     const cb = makeCallbacks();
     const ex = createExplorer(cb);
