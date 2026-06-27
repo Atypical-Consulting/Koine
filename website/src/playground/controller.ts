@@ -4,7 +4,7 @@
 // #438) with syntax-highlighted output, a grouped file tree, copy + download-as-zip, a mobile
 // editor/output toggle, and the "Open in Studio" handoff.
 import { createKoineEditor, createOutputView, highlightModeForTarget, type KoineEditor, type OutputView } from './editor';
-import { capabilities, compile, getBootMode, listEmitTargets, preloadCompiler, terminateAndRespawn, type CompileResult, type EmitTarget, type Target } from './koine';
+import { capabilities, compile, getBootMode, listEmitTargets, preloadCompiler, semanticTokens, terminateAndRespawn, type CompileResult, type EmitTarget, type Target } from './koine';
 import { createSuperseder } from './supersede';
 import { registerPlaygroundServiceWorker } from './sw-register';
 import { DEFAULT_SAMPLE } from './samples';
@@ -200,6 +200,12 @@ export function mountPlayground(root: HTMLElement): void {
         return [];
       }
     },
+    // Semantic highlighting (#367): the extension fetches tokens for the live document (debounced on
+    // change). `editor` isn't assigned yet during the editor's own construction (the plugin's first
+    // fetch runs synchronously inside `new EditorView`), so fall back to `initialDoc` for that first
+    // paint; every later fetch reads the current buffer. Token fetches degrade silently (the extension
+    // swallows a rejected/terminated call), so no superseder is needed here.
+    onSemanticTokens: () => semanticTokens(editor ? editor.getDoc() : initialDoc),
   });
 
   // --- file picker ---
