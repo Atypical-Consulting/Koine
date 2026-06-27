@@ -60,6 +60,58 @@ public class OutputWriterTests
     }
 
     [Fact]
+    public void WriteOutputAtomic_prunes_roots_absent_from_the_current_run()
+    {
+        var dir = FreshDir();
+
+        // Run 1: two distinct top-level roots (two bounded contexts).
+        OutputWriter.WriteOutputAtomic(dir, new[]
+        {
+            new EmittedFile("Catalog/ValueObjects/Sku.cs", "// catalog\n"),
+            new EmittedFile("Shipping/ValueObjects/Weight.cs", "// shipping\n"),
+        });
+
+        Directory.Exists(Path.Combine(dir, "Catalog")).ShouldBeTrue();
+        Directory.Exists(Path.Combine(dir, "Shipping")).ShouldBeTrue();
+
+        // Run 2: the Shipping context is removed/renamed out of the model.
+        OutputWriter.WriteOutputAtomic(dir, new[]
+        {
+            new EmittedFile("Catalog/ValueObjects/Sku.cs", "// catalog\n"),
+        });
+
+        // The abandoned root is pruned; the surviving root is untouched.
+        Directory.Exists(Path.Combine(dir, "Shipping")).ShouldBeFalse();
+        File.Exists(Path.Combine(dir, "Catalog", "ValueObjects", "Sku.cs")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void WriteOutputAtomic_does_not_prune_directories_it_never_recorded()
+    {
+        var dir = FreshDir();
+
+        OutputWriter.WriteOutputAtomic(dir, new[]
+        {
+            new EmittedFile("Catalog/A.cs", "// a\n"),
+        });
+
+        // A folder the user dropped into --out by hand — Koine never recorded it.
+        var userDir = Path.Combine(dir, "UserStuff");
+        Directory.CreateDirectory(userDir);
+        File.WriteAllText(Path.Combine(userDir, "keep.txt"), "mine");
+
+        // Re-emit the same model.
+        OutputWriter.WriteOutputAtomic(dir, new[]
+        {
+            new EmittedFile("Catalog/A.cs", "// a\n"),
+        });
+
+        // Pruning is scoped to roots Koine recorded, so the user's folder survives.
+        Directory.Exists(userDir).ShouldBeTrue();
+        File.Exists(Path.Combine(userDir, "keep.txt")).ShouldBeTrue();
+    }
+
+    [Fact]
     public void WriteFileAtomic_emits_utf8_without_bom_and_lf_only()
     {
         var path = Path.Combine(FreshDir(), "glossary.md");
