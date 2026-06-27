@@ -855,6 +855,34 @@ public class KoineLanguageServiceTests
         edits.ShouldAllBe(e => e.NewText == "RefId");
     }
 
+    [Fact]
+    public void RenameEdits_does_not_corename_a_same_named_non_root_symbol()
+    {
+        // #621: an enum member `Order` merely SHARES the name of the aggregate root `Order`. The
+        // <Root>Id co-rename must gate on the RESOLVED symbol, not the bare cursor token text — so
+        // renaming the enum member touches only it and must NOT fabricate an OrderId -> FooId edit.
+        var src =
+            "context Sales {\n" +
+            "  enum Phase { Order, Done }\n" +
+            "  aggregate Orders root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        // Cursor on the enum member `Order` (line index 1), NOT the root entity declaration.
+        var enumLine = src.Split('\n')[1];
+        var col = enumLine.IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var edits = Svc.RenameEditsAt(Doc(src), U, line: 1, character: col, newName: "Foo");
+
+        edits.ShouldNotBeNull();
+        // The enum member renames …
+        edits.ShouldContain(e => e.NewText == "Foo");
+        // … but the unrelated aggregate-root identity OrderId is left untouched (no spurious FooId).
+        edits.ShouldNotContain(e => e.NewText == "FooId");
+    }
+
     // ---- Linked editing ---------------------------------------------------
 
     [Fact]

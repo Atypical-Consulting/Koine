@@ -298,6 +298,16 @@ public sealed class WorkspaceIndex
     }
 
     /// <summary>
+    /// The resolved rename/find-references target under the cursor — the same precise
+    /// position→symbol resolution <see cref="FindReferences"/> and <see cref="WouldCollide"/> use,
+    /// surfaced so a caller can gate on the symbol's IDENTITY rather than its bare token text. The
+    /// aggregate-root <c>&lt;Root&gt;Id</c> co-rename uses this to fire only on the root entity's own
+    /// declaration, never a same-named non-root symbol (enum member, value object, …) — #621.
+    /// </summary>
+    internal Symbol? ResolveSymbol(string activeUri, string name, int? offset, string? enclosingType) =>
+        ResolveTarget(activeUri, name, offset, enclosingType);
+
+    /// <summary>
     /// Resolves the rename/find-references target under the cursor to a <see cref="Symbol"/>:
     /// the precise position→node resolution first (so a field reference inside an expression
     /// resolves to its member, and a declaration site resolves to its OWN declaration even when its
