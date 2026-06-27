@@ -7,8 +7,8 @@
 [![Try it in your browser](https://img.shields.io/badge/try-in%20your%20browser-3245b8)](https://atypical-consulting.github.io/Koine/studio/)
 [![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
-[![Tests](https://img.shields.io/badge/tests-950%2B%20passing-2ea44f)](tests/)
-![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20docs%20%C2%B7%20AsyncAPI-178600)
+[![Tests](https://img.shields.io/badge/tests-1900%2B%20passing-2ea44f)](tests/)
+![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20docs%20%C2%B7%20AsyncAPI%20%C2%B7%20OpenAPI-178600)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 ## The problem
@@ -69,9 +69,10 @@ C# without installing anything.
 </p>
 
 - **[Koine Studio](https://atypical-consulting.github.io/Koine/studio/)** — the full web IDE: editor
-  with live diagnostics, an emitted-code preview (C# / TypeScript), the ubiquitous-language glossary,
-  context map, and model outline. *(Also ships as a native [Tauri](https://tauri.app/) desktop app —
-  same UI, see [`tooling/koine-studio`](tooling/koine-studio).)*
+  with live diagnostics, a multi-target emitted-code preview (C# · TypeScript · Python · PHP · Rust),
+  the ubiquitous-language glossary, an interactive context-map graph, rendered aggregate/state-machine
+  diagrams, and a model outline with a bottom Events & Relationships panel. *(Also ships as a native
+  [Tauri](https://tauri.app/) desktop app — same UI, see [`tooling/koine-studio`](tooling/koine-studio).)*
 - **[Playground](https://atypical-consulting.github.io/Koine/playground/)** — a lightweight,
   zero-install editor that recompiles to C#/TypeScript the moment you stop typing. Great for a quick
   taste or for following along with the [tutorial](https://atypical-consulting.github.io/Koine/start/your-first-model/).
@@ -264,9 +265,11 @@ backed by a mutable private `List<T>` (exposed read-only as `IReadOnlyList<T>`),
 so the rows persist on every provider. Scalar (`String`/`Int`/…) collections are left to EF Core's
 primitive-collection convention.
 
-Other CLI commands: `check` (model-versioning compatibility against a `--baseline`), `fmt` (canonical
-formatter), `init` (scaffold a project), `watch` (rebuild on change), and `lsp` (language server over
-stdio). See the [CLI reference](https://atypical-consulting.github.io/Koine/guides/cli/).
+Other CLI commands: `check` (model-versioning compatibility against a `--baseline`), `coverage` (proves
+*declared == emitted* and doubles as a CI gate), `fmt` (canonical formatter), `init` (scaffold a
+project), `watch` (rebuild on change), `lsp` (language server over stdio), and `mcp` (the MCP server —
+stdio by default, or `--http` to serve it over HTTP). See the
+[CLI reference](https://atypical-consulting.github.io/Koine/guides/cli/).
 
 ### The C# Application layer (opt-in)
 
