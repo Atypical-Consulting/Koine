@@ -291,7 +291,9 @@ public sealed partial class PhpEmitter
 
         var factoryParams = new HashSet<string>(factory.Parameters.Select(p => p.Name), StringComparer.Ordinal);
         var args = new List<string> { "$id" };
-        foreach (Member m in ctorMembers)
+        // Walk the ctor members in the SAME order the constructor signature uses (defaulted/optional
+        // last), so these positional `new self($id, …)` args line up with the reordered parameters.
+        foreach (Member m in OrderCtorParams(ctorMembers))
         {
             var param = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
             if (initByField.TryGetValue(m.Name, out Expr? value))
@@ -459,7 +461,9 @@ public sealed partial class PhpEmitter
         }
 
         var memberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
-        var ctorFields = ev.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
+        // Match the event constructor's parameter order (OrderCtorParams moves defaulted/optional
+        // fields last), not declaration order, so these positional args bind to the right properties.
+        var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames))).ToList();
         var argByField = emit.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
         var args = ctorFields
@@ -508,10 +512,16 @@ public sealed partial class PhpEmitter
         sb.Append("final class ").Append(name).Append('\n');
         sb.Append("{\n");
 
+        // Defaulted/optional members move last so PHP never sees a required parameter after an
+        // optional one (phpstan `parameter.requiredAfterOptional`); declaration order is preserved
+        // within each group (stable sort). The `emit` statements that construct this event
+        // positionally reorder their args to match (BuildEmitStatement).
+        var ordered = OrderCtorParams(fields).ToList();
+
         // PHPDoc refines a promoted property whose native hint loses type info: a bare collection
         // `array` (List/Set/Map) or a generic `Range<T>`. On a promoted constructor parameter the
         // `@param` types both the parameter and the property for phpstan --level max.
-        var docParams = fields
+        var docParams = ordered
             .Select(m => (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name)), m.Type))
             .ToList();
         WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null);
@@ -519,9 +529,9 @@ public sealed partial class PhpEmitter
         // Constructor-promoted readonly properties for all stored fields.
         sb.Append(Indent).Append("public function __construct(\n");
 
-        for (int i = 0; i < fields.Count; i++)
+        for (int i = 0; i < ordered.Count; i++)
         {
-            Member m = fields[i];
+            Member m = ordered[i];
             var propName = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
             var typeName = typeMapper.Map(m.Type);
             sb.Append(Indent).Append(Indent).Append("public readonly ").Append(typeName).Append(" $").Append(propName);
@@ -538,7 +548,7 @@ public sealed partial class PhpEmitter
                 sb.Append(" = null");
             }
 
-            var sep = i < fields.Count - 1 ? "," : "";
+            var sep = i < ordered.Count - 1 ? "," : "";
             sb.Append(sep).Append('\n');
         }
 

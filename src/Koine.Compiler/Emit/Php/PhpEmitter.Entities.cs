@@ -159,27 +159,33 @@ public sealed partial class PhpEmitter
         PhpExpressionTranslator translator,
         PhpTypeMapper typeMapper)
     {
+        // Defaulted/optional fields move last so PHP never sees a required parameter after an optional
+        // one (phpstan `parameter.requiredAfterOptional`). The non-defaulted `$id` parameter still
+        // leads; declaration order is preserved within each group (stable sort). Factories that
+        // construct positionally (`new self($id, …)`) reorder their args to match.
+        var ordered = OrderCtorParams(fields).ToList();
+
         // PHPDoc refines any collection-typed constructor parameter (e.g. `@param list<OrderLine> $lines`)
         // so phpstan --level max sees the element type the bare `array` hint erases.
-        var docParams = fields
+        var docParams = ordered
             .Select(m => (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name)), m.Type))
             .ToList();
         WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null);
 
         sb.Append(Indent).Append("public function __construct(\n");
 
-        // The identity parameter comes first.
+        // The identity parameter comes first (always required — no default).
         sb.Append(Indent).Append(Indent).Append(idTypeName).Append(" $id");
-        if (fields.Count > 0)
+        if (ordered.Count > 0)
         {
             sb.Append(",\n");
         }
 
         // All stored fields as plain parameters (not constructor-promoted because the entity
         // must be mutable — promoted readonly would prevent reassignment in commands).
-        for (int i = 0; i < fields.Count; i++)
+        for (int i = 0; i < ordered.Count; i++)
         {
-            Member m = fields[i];
+            Member m = ordered[i];
             var paramName = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
             var typeName = typeMapper.Map(m.Type);
             sb.Append(Indent).Append(Indent).Append(typeName).Append(" $").Append(paramName);
@@ -196,7 +202,7 @@ public sealed partial class PhpEmitter
                 sb.Append(" = null");
             }
 
-            var sep = i < fields.Count - 1 ? "," : "";
+            var sep = i < ordered.Count - 1 ? "," : "";
             sb.Append(sep).Append('\n');
         }
 

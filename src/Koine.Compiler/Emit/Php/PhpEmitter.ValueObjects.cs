@@ -99,10 +99,15 @@ public sealed partial class PhpEmitter
         PhpExpressionTranslator translator,
         PhpTypeMapper typeMapper)
     {
+        // Defaulted/optional members move last so PHP never sees a required parameter after an
+        // optional one (phpstan `parameter.requiredAfterOptional`); declaration order is preserved
+        // within each group (stable sort), matching the C# emitter.
+        var ordered = OrderCtorParams(fields).ToList();
+
         // PHPDoc refines a promoted property whose native hint loses type info: a generic `Range<T>`
         // (e.g. `@param Range<\DateTimeImmutable> $window`) or a bare collection `array`. On a promoted
         // constructor parameter the `@param` types both the parameter and the property for phpstan.
-        var docParams = fields
+        var docParams = ordered
             .Select(m => (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name)), m.Type))
             .ToList();
         WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null);
@@ -110,9 +115,9 @@ public sealed partial class PhpEmitter
         sb.Append(Indent).Append("public function __construct(\n");
 
         // Constructor-promoted readonly properties for all stored fields.
-        for (int i = 0; i < fields.Count; i++)
+        for (int i = 0; i < ordered.Count; i++)
         {
-            Member m = fields[i];
+            Member m = ordered[i];
             var propName = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
             var typeName = typeMapper.Map(m.Type);
             sb.Append(Indent).Append(Indent).Append("public readonly ").Append(typeName).Append(" $").Append(propName);
@@ -126,7 +131,7 @@ public sealed partial class PhpEmitter
             {
                 sb.Append(" = null");
             }
-            var sep = i < fields.Count - 1 ? "," : "";
+            var sep = i < ordered.Count - 1 ? "," : "";
             sb.Append(sep).Append('\n');
         }
 
@@ -235,9 +240,10 @@ public sealed partial class PhpEmitter
         var amt = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(amount.Name));
         var u = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(unit.Name));
 
-        // Build a constructor call placing amount/unit at their declared positions.
+        // Build a constructor call placing amount/unit at their positions in the reordered ctor
+        // signature (defaulted/optional params last), so the positional args line up.
         string Construct(string amtExpr, string unitExpr) =>
-            "new self(" + string.Join(", ", fields.Select(m =>
+            "new self(" + string.Join(", ", OrderCtorParams(fields).Select(m =>
                 ReferenceEquals(m, amount) ? amtExpr
                 : ReferenceEquals(m, unit) ? unitExpr
                 : "$this->" + PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name)))) + ")";
@@ -293,9 +299,11 @@ public sealed partial class PhpEmitter
         sb.Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append("return new self(\n");
 
-        for (int i = 0; i < fields.Count; i++)
+        // Positional args must follow the reordered ctor signature (defaulted/optional last).
+        var ordered = OrderCtorParams(fields).ToList();
+        for (int i = 0; i < ordered.Count; i++)
         {
-            Member m = fields[i];
+            Member m = ordered[i];
             var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
             string arg;
             if (numeric.Contains(m.Name))
@@ -315,7 +323,7 @@ public sealed partial class PhpEmitter
             {
                 arg = "$this->" + prop;
             }
-            var sep = i < fields.Count - 1 ? "," : "";
+            var sep = i < ordered.Count - 1 ? "," : "";
             sb.Append(Indent).Append(Indent).Append(Indent).Append(arg).Append(sep).Append('\n');
         }
 
@@ -338,9 +346,11 @@ public sealed partial class PhpEmitter
         sb.Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append("return new self(\n");
 
-        for (int i = 0; i < fields.Count; i++)
+        // Positional args must follow the reordered ctor signature (defaulted/optional last).
+        var ordered = OrderCtorParams(fields).ToList();
+        for (int i = 0; i < ordered.Count; i++)
         {
-            Member m = fields[i];
+            Member m = ordered[i];
             var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
             string arg;
             if (numeric.Contains(m.Name))
@@ -358,7 +368,7 @@ public sealed partial class PhpEmitter
             {
                 arg = "$this->" + prop;
             }
-            var sep = i < fields.Count - 1 ? "," : "";
+            var sep = i < ordered.Count - 1 ? "," : "";
             sb.Append(Indent).Append(Indent).Append(Indent).Append(arg).Append(sep).Append('\n');
         }
 
