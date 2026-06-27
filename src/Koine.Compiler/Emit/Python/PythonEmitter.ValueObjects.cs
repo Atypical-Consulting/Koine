@@ -9,10 +9,12 @@ namespace Koine.Compiler.Emit.Python;
 /// defaults, computed (derived) members are <c>@property</c> getters, and invariants run in
 /// <c>__post_init__</c> raising <see cref="PyRuntime"/>'s <c>DomainInvariantViolationError</c>.
 /// Frozen-dataclass equality and hashing come free from <c>frozen=True</c> (structural by field) —
-/// except when the value object has a <c>Map</c> field: a <c>Map&lt;K,V&gt;</c> maps to a dict-backed
-/// <c>Mapping</c> (unhashable), so the dataclass's free structural hash would throw at runtime. Such a
-/// value object instead emits <c>eq=False</c> plus explicit structural <c>__eq__</c>/<c>__hash__</c>
-/// that fold each Map field into a hashable <c>frozenset(self.&lt;field&gt;.items())</c>.
+/// except when the value object's type reaches a <c>Map</c>: a <c>Map&lt;K,V&gt;</c> maps to a
+/// dict-backed <c>Mapping</c> (unhashable), so the dataclass's free structural hash would throw at
+/// runtime. Such a value object instead emits <c>eq=False</c> plus explicit structural
+/// <c>__eq__</c>/<c>__hash__</c> that fold every reachable Map into a hashable
+/// <c>frozenset(items())</c> — recursing through nested <c>List&lt;Map&gt;</c> / <c>Map&lt;K, Map&gt;</c>
+/// shapes, not just top-level Map fields.
 /// A <c>quantity</c> additionally gets unit-checked <c>__add__</c>/<c>__sub__</c> and scalar
 /// <c>__mul__</c>/<c>__truediv__</c> dunder operators (mirroring the C#/TS quantity semantics).
 /// </summary>
@@ -31,12 +33,15 @@ public sealed partial class PythonEmitter
         // (Initializer present, not derived) carries a default; an optional field defaults to None.
         var ordered = fields.OrderBy(m => HasDefault(m) ? 1 : 0).ToList();
 
-        // A `Map<K,V>` field maps to a dict-backed `Mapping`, which is unhashable — so the dataclass's
-        // free structural `__hash__` (from `frozen=True`/`eq=True`) would throw `TypeError: unhashable
-        // type: 'dict'` the moment the value object is hashed (set member, dict key, nested Set/Map
-        // key). When a Map field is present we drop `eq` and emit explicit structural `__eq__`/`__hash__`
-        // instead (see WriteValueObjectHashableDunders). Value objects without a Map field are unchanged.
-        var hasMapField = ordered.Any(m => PythonTypeMapper.IsMap(m.Type));
+        // A `Map<K,V>` maps to a dict-backed `Mapping`, which is unhashable — so the dataclass's free
+        // structural `__hash__` (from `frozen=True`/`eq=True`) would throw `TypeError: unhashable type:
+        // 'dict'` the moment the value object is hashed (set member, dict key, nested Set/Map key). The
+        // hazard is a `Mapping` reachable ANYWHERE inside a field's type, not just at the top level:
+        // `List<Map>` (a tuple of dicts) and `Map<K, Map>` (a dict-valued dict) are unhashable too. When
+        // any field's type contains a Map (`ContainsMap`, recursing through `Element`/`Value`) we drop
+        // `eq` and emit explicit structural `__eq__`/`__hash__` instead (see
+        // WriteValueObjectHashableDunders). Value objects with no reachable Map are unchanged.
+        var hasMapField = ordered.Any(m => ContainsMap(m.Type));
 
         var translator = new PythonExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, typeMapper, ContextOf(ns));
 
@@ -125,14 +130,17 @@ public sealed partial class PythonEmitter
     }
 
     /// <summary>
-    /// Explicit structural <c>__eq__</c>/<c>__hash__</c> for a frozen value object that has a
-    /// <c>Map</c> field. A frozen dataclass's free structural hash assumes every field is hashable, but
-    /// a <c>Map&lt;K,V&gt;</c> maps to a <c>Mapping</c> built from a plain <c>dict</c> (unhashable), so
-    /// the generated hash throws <c>TypeError: unhashable type: 'dict'</c> the moment the value object
-    /// is hashed. Equality stays structural (a value object's identity is its data, not a synthetic id),
-    /// and each Map field folds into a hashable <c>frozenset(self.&lt;field&gt;.items())</c> — guarded
-    /// against <c>None</c> when the field is optional. This mirrors the entity emitter's explicit-dunder
-    /// workaround (<c>eq=False</c> + hand-written dunders) while staying structural rather than id-based.
+    /// Explicit structural <c>__eq__</c>/<c>__hash__</c> for a frozen value object whose type reaches a
+    /// <c>Map</c>. A frozen dataclass's free structural hash assumes every field is hashable, but a
+    /// <c>Map&lt;K,V&gt;</c> maps to a <c>Mapping</c> built from a plain <c>dict</c> (unhashable), so the
+    /// generated hash throws <c>TypeError: unhashable type: 'dict'</c> the moment the value object is
+    /// hashed. Equality stays structural and needs no special-casing — Python's <c>==</c> already recurses
+    /// through nested <c>dict</c>/<c>tuple</c> structures. The hash, though, must fold every reachable Map
+    /// into a hashable form: <see cref="HashableExpr"/> recurses through the field's type, turning each
+    /// <c>Map</c> into <c>frozenset(items())</c> (re-mapping the value side when it too contains a Map) and
+    /// each <c>List&lt;…Map…&gt;</c> into a tuple of folded elements — guarded against <c>None</c> for
+    /// optional containers. This mirrors the entity emitter's explicit-dunder workaround
+    /// (<c>eq=False</c> + hand-written dunders) while staying structural rather than id-based.
     /// </summary>
     private void WriteValueObjectHashableDunders(StringBuilder sb, string name, IReadOnlyList<Member> fields)
     {
@@ -150,24 +158,81 @@ public sealed partial class PythonEmitter
         }
         sb.Append('\n');
 
-        // __hash__: hash a tuple of the fields. A Map field is unhashable as-is, so it folds to
-        // `frozenset(self.<field>.items())`; an optional Map is guarded against `None`.
-        var parts = fields.Select(m =>
-        {
-            var f = Field(m);
-            if (!PythonTypeMapper.IsMap(m.Type))
-            {
-                return "self." + f;
-            }
-            var items = "frozenset(self." + f + ".items())";
-            return m.Type.IsOptional ? items + " if self." + f + " is not None else None" : items;
-        }).ToList();
+        // __hash__: hash a tuple of the fields, with every reachable Map folded to a hashable form.
+        // A field whose type contains no Map renders as-is (`self.<field>`); a Map-bearing field is
+        // rewritten by HashableExpr (which also guards optionals against `None`).
+        var parts = fields.Select(m => HashableExpr(m.Type, "self." + Field(m), 0)).ToList();
 
         // A one-element tuple needs the trailing comma (`(x,)`); multi-element joins normally.
         var tuple = parts.Count == 1 ? "(" + parts[0] + ",)" : "(" + string.Join(", ", parts) + ")";
         sb.Append('\n');
         sb.Append(Indent).Append("def __hash__(self) -> int:\n");
         sb.Append(Indent).Append(Indent).Append("return hash(").Append(tuple).Append(")\n");
+    }
+
+    /// <summary>
+    /// True when a <c>Map</c> is reachable anywhere inside <paramref name="type"/> — at the top level
+    /// (<c>Map&lt;K,V&gt;</c>) or nested under a container (<c>List&lt;Map&gt;</c>, <c>Map&lt;K, Map&gt;</c>,
+    /// <c>Map&lt;K, List&lt;Map&gt;&gt;</c>, …). A <c>Map</c> is the only Python type Koine emits that is
+    /// unhashable (a dict-backed <c>Mapping</c>), so this is exactly the predicate for "the free structural
+    /// hash would throw". Recurses through <see cref="TypeRef.Element"/> (a List/Set/Range element or a
+    /// Map key) and <see cref="TypeRef.Value"/> (a Map value).
+    /// </summary>
+    private static bool ContainsMap(TypeRef type) =>
+        PythonTypeMapper.IsMap(type)
+        || (type.Element is not null && ContainsMap(type.Element))
+        || (type.Value is not null && ContainsMap(type.Value));
+
+    /// <summary>
+    /// A hashable Python expression for <paramref name="access"/> (an attribute access or a comprehension
+    /// variable) of type <paramref name="type"/>, folding every reachable <c>Map</c> into a
+    /// <c>frozenset</c>. The general structural-equality philosophy of <see cref="WriteValueObjectHashableDunders"/>,
+    /// generalized to any nesting depth:
+    /// <list type="bullet">
+    ///   <item>a <c>Map</c> whose value contains a Map →
+    ///     <c>frozenset((k, &lt;fold(value)&gt;) for k, v in &lt;access&gt;.items())</c>;</item>
+    ///   <item>any other <c>Map</c> → <c>frozenset(&lt;access&gt;.items())</c> (the existing single-level fold);</item>
+    ///   <item>a <c>List</c> whose element contains a Map →
+    ///     <c>tuple(&lt;fold(element)&gt; for x in &lt;access&gt;)</c> (a Koine <c>List</c> is already a tuple,
+    ///     so it only needs re-mapping when an element is/contains a Map);</item>
+    ///   <item>anything else (scalars, enums, value objects, a <c>Set</c>/<c>List</c>/<c>Range</c> with no
+    ///     reachable Map) → <paramref name="access"/> unchanged — already hashable.</item>
+    /// </list>
+    /// Optional containers are guarded with <c>… if &lt;access&gt; is not None else None</c>. Comprehension
+    /// variables are suffixed with <paramref name="depth"/> so a generator nested inside another never
+    /// shadows its enclosing loop variable. (A <c>Map</c> key, a <c>Set</c> element, and a <c>Range</c>
+    /// bound must already be hashable/comparable to exist at runtime, so a Map can only ever be reached via
+    /// a List element or a Map value — the two cases folded here.)
+    /// </summary>
+    private static string HashableExpr(TypeRef type, string access, int depth)
+    {
+        string core;
+        if (PythonTypeMapper.IsMap(type) && type.Value is not null && ContainsMap(type.Value))
+        {
+            // The value side is itself unhashable; re-map it so each (key, value) pair is hashable.
+            var k = "k" + depth;
+            var v = "v" + depth;
+            core = $"frozenset(({k}, {HashableExpr(type.Value, v, depth + 1)}) for {k}, {v} in {access}.items())";
+        }
+        else if (PythonTypeMapper.IsMap(type))
+        {
+            // Hashable-valued Map: the single-level fold (matches the pre-#657 output exactly).
+            core = $"frozenset({access}.items())";
+        }
+        else if (PythonTypeMapper.IsList(type) && type.Element is not null && ContainsMap(type.Element))
+        {
+            // A List is already a tuple; re-map its elements only because an element reaches a Map.
+            var x = "x" + depth;
+            core = $"tuple({HashableExpr(type.Element, x, depth + 1)} for {x} in {access})";
+        }
+        else
+        {
+            // Already hashable (scalar/enum/value-object, or a container with no reachable Map). `None`
+            // is itself hashable, so an optional such field needs no guard.
+            return access;
+        }
+
+        return type.IsOptional ? $"{core} if {access} is not None else None" : core;
     }
 
     /// <summary>Emits one invariant guard inside <c>__post_init__</c> (self.<i>field</i> reads).</summary>
