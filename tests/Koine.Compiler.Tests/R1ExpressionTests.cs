@@ -363,6 +363,59 @@ public class R1ExpressionTests
         stats.GetProperty("Lowest")!.GetValue(s).ShouldBe(1);
     }
 
+    [Fact]
+    public void Min_and_max_over_empty_collection_throw_domain_error()
+    {
+        // #628: min/max over a possibly-empty collection must throw a clear
+        // DomainInvariantViolationException, not leak LINQ's opaque
+        // "Sequence contains no elements" InvalidOperationException — mirroring the
+        // value-object `sum` fold and the TS (#610) / Python / Rust emitters.
+        const string src =
+            "context E {\n" +
+            "  value Stats {\n" +
+            "    xs:       List<Int>\n" +
+            "    prices:   List<Decimal>\n" +
+            "    lowest:   Int     = xs.min(x => x)\n" +
+            "    highest:  Int     = xs.max(x => x)\n" +
+            "    cheapest: Decimal = prices.min(p => p)\n" +
+            "  }\n" +
+            "}\n";
+        Diagnose(src).ShouldBeEmpty();
+
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var (asm, errors) = TestSupport.Compile(result.Files);
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+
+        var stats = asm!.GetType("E.Stats")!;
+
+        // Populated → correct min/max (the guard's non-empty branch still folds right).
+        var ints = (System.Collections.IList)Activator.CreateInstance(typeof(List<int>))!;
+        ints.Add(3);
+        ints.Add(1);
+        ints.Add(2);
+        var decs = (System.Collections.IList)Activator.CreateInstance(typeof(List<decimal>))!;
+        decs.Add(9m);
+        decs.Add(4m);
+        decs.Add(7m);
+        var s = Activator.CreateInstance(stats, ints, decs);
+        stats.GetProperty("Lowest")!.GetValue(s).ShouldBe(1);
+        stats.GetProperty("Highest")!.GetValue(s).ShouldBe(3);
+        stats.GetProperty("Cheapest")!.GetValue(s).ShouldBe(4m);
+
+        // Empty → reading the derived member throws the domain error (wrapped by the
+        // reflection getter), not InvalidOperationException("Sequence contains no elements").
+        var empty = Activator.CreateInstance(stats,
+            Activator.CreateInstance(typeof(List<int>)),
+            Activator.CreateInstance(typeof(List<decimal>)));
+        var exMin = Should.Throw<TargetInvocationException>(() => stats.GetProperty("Lowest")!.GetValue(empty));
+        exMin.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
+        var exMax = Should.Throw<TargetInvocationException>(() => stats.GetProperty("Highest")!.GetValue(empty));
+        exMax.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
+        var exDec = Should.Throw<TargetInvocationException>(() => stats.GetProperty("Cheapest")!.GetValue(empty));
+        exDec.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
+    }
+
     // ---- R1.4 `now` as a first-class builtin -------------------------------
 
     [Fact]
