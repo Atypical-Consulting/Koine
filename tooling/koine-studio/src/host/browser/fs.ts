@@ -809,8 +809,19 @@ function triggerDownload(name: string, blob: Blob): void {
   const a = document.createElement('a');
   a.href = url;
   a.download = name;
+  a.style.display = 'none';
+  // Attach the anchor before click() — some engines historically require an in-document anchor for a
+  // download-driven click — and DEFER the cleanup. a.click() only *schedules* the download; the
+  // browser reads the blob on a later tick, so revoking the object-URL synchronously races that fetch
+  // and cancels the download on Firefox/Safari (worse for large zip blobs). Revoke + detach on the
+  // next macrotask instead (the canonical MDN pattern), which still frees the blob — just one tick
+  // later — with no behaviour change on Chromium. (#623)
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+    a.remove();
+  }, 0);
 }
 
 function downloadFile(name: string, contents: string): void {
