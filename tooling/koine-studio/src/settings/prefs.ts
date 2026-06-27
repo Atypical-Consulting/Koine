@@ -1052,6 +1052,10 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   mcpUrlInput.readOnly = true;
   mcpUrlInput.spellcheck = false;
   mcpUrlInput.placeholder = 'starting…';
+  // This input is appended directly (not via row(), which assigns id/name elsewhere), so give it a
+  // stable id/name (Chrome form-field id/name check; the aria-label stays the accessible name).
+  mcpUrlInput.id = 'koi-mcp-url';
+  mcpUrlInput.name = 'koi-mcp-url';
   mcpUrlInput.setAttribute('aria-label', 'Koine MCP endpoint URL');
 
   const mcpCopyBtn = document.createElement('button');

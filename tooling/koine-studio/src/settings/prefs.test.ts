@@ -65,6 +65,17 @@ describe('Settings → MCP panel', () => {
     expect(snippet().textContent).toContain('PORT');
   });
 
+  it('the MCP endpoint URL input carries a non-empty id and name and keeps its aria-label', async () => {
+    // This input is appended directly (it bypasses row(), which is what assigns id/name elsewhere),
+    // so Chrome's "form field should have an id or name attribute" check flags it. See issue #642.
+    openPrefs();
+    await settle();
+    const url = endpointUrl();
+    expect(url.id).toBeTruthy();
+    expect(url.getAttribute('name')).toBeTruthy();
+    expect(url.getAttribute('aria-label')).toBe('Koine MCP endpoint URL');
+  });
+
   it('enabling starts the sidecar and the snippet picks up the live URL', async () => {
     const mcpEndpoint = vi.fn(async () => URL);
     openPrefs({ mcpEndpoint });
