@@ -130,8 +130,9 @@ A real .NET project that regenerates and compiles the generated C# as part of it
 demo compiles the pizzeria **template in place** rather than a local `Models/` copy, so building the
 demo is what proves that template emits compiling C# end-to-end. So `dotnet build demo/Pizzeria.Domain`
 is an end-to-end check that the CLI + emitter produce compiling code for a six-context pizzeria domain.
-`Generated/` is wiped each build and excluded from the default compile glob; `glossary.md` is committed
-documentation.
+`Generated/` is wiped each build and excluded from the default compile glob; `glossary.md` is likewise
+regenerated each build and git-ignored (not committed) — the committed reference copy is
+`demo/reference/pizzeria.glossary.md`.
 
 ## When adding language features
 

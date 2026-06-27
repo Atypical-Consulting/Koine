@@ -15,8 +15,10 @@
     <KoineModelsDir>$(MSBuildProjectDirectory)/../../templates/pizzeria</KoineModelsDir>
     <KoineGeneratedDir>$(MSBuildProjectDirectory)/Generated</KoineGeneratedDir>
     <!-- Ubiquitous-language glossary, emitted alongside the C# at build time.
-         Lives at the project root (not Generated/, which is wiped and excluded
-         from @(Compile)) so it persists as committed documentation. -->
+         Lives at the project root rather than under Generated/ (which the target
+         wipes each build and excludes from @(Compile)). Like Generated/, it is
+         regenerated on every build and git-ignored (see .gitignore) — it is NOT
+         committed. The committed reference copy is demo/reference/pizzeria.glossary.md. -->
     <KoineGlossaryFile>$(MSBuildProjectDirectory)/glossary.md</KoineGlossaryFile>
   </PropertyGroup>
 
