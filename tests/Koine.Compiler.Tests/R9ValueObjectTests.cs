@@ -318,4 +318,65 @@ public class R9ValueObjectTests
         Diagnose("context C { value Range { lo: Int } }").ShouldContain(d => d.Code == DiagnosticCodes.ReservedTypeName);
         Diagnose("context C { value List { x: Int } }").ShouldContain(d => d.Code == DiagnosticCodes.ReservedTypeName);
     }
+
+    // ======================================================================
+    // Demand-driven operators must cover invariants and read-model projections (#600)
+    // ======================================================================
+
+    [Fact]
+    public void Value_object_sum_inside_an_invariant_gets_an_additive_operator()
+    {
+        // The ONLY VO `sum` fold is in the entity invariant. OperatorNeedsAnalyzer must still
+        // record Money's `operator +`, or the emitted `CheckInvariants()` references an operator
+        // that was never generated (CS0019). Compile() asserts the emitted C# compiles.
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0
+              }
+              value CartLine {
+                subtotal: Money
+              }
+              entity Cart identified by CartId {
+                lines: List<CartLine>
+                invariant lines.sum(l => l.subtotal).amount >= 0
+              }
+            }
+            """;
+        var (asm, files) = Compile(src);
+        asm.GetType("Shop.Money").ShouldNotBeNull();
+        files.ShouldContain("operator +");
+    }
+
+    [Fact]
+    public void Value_object_arithmetic_inside_a_read_model_projection_gets_operators()
+    {
+        // The ONLY VO `sum` fold and `* scalar` multiply live in read-model derived fields.
+        // OperatorNeedsAnalyzer must record Money's `operator +` and `operator *`, or the
+        // emitted projection mapper references operators that were never generated (CS0019).
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0
+              }
+              value CartLine {
+                subtotal: Money
+              }
+              entity Cart identified by CartId {
+                lines: List<CartLine>
+                fee:   Money
+              }
+              readmodel CartSummary from Cart {
+                grandTotal: Money = lines.sum(l => l.subtotal)
+                doubleFee:  Money = fee * 2
+              }
+            }
+            """;
+        var (asm, files) = Compile(src);
+        asm.GetType("Shop.CartSummary").ShouldNotBeNull();
+        files.ShouldContain("operator +");
+        files.ShouldContain("operator *");
+    }
 }
