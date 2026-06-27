@@ -512,7 +512,12 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       return { ok: false, reason: 'unreadable' };
     }
     if (!files.length) {
-      deps.setStatus('no .koi files in folder', 'error');
+      // Only surface the global red error when no model is currently loaded. A populated workspace
+      // means this empty listing is a spurious/late re-scan (e.g. the materialized-example race in
+      // #627, where compile-green renders first and an empty folder scan arrives after); raising the
+      // error here would clobber the healthy status with a false "no .koi files in folder". The
+      // emptiness is checked BEFORE the reset below, so `buffers` still reflects the loaded workspace.
+      if (buffers.size === 0) deps.setStatus('no .koi files in folder', 'error');
       return { ok: false, reason: 'empty' };
     }
 
@@ -619,7 +624,10 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       return { ok: false, reason: 'unreadable' };
     }
     if (!files.length) {
-      deps.setStatus('no .koi files in folder', 'error');
+      // addRoot is additive, so a loaded workspace is the normal case — an empty union must not raise
+      // the global red error and clobber the healthy status (#627). Only surface it when nothing is
+      // loaded (buffers.size === 0); the caller still gets reason:'empty' and the root isn't appended.
+      if (buffers.size === 0) deps.setStatus('no .koi files in folder', 'error');
       return { ok: false, reason: 'empty' };
     }
 
