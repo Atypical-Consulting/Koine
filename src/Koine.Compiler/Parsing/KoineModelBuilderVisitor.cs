@@ -277,9 +277,12 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     {
         KoineParser.QualifiedTypeContext? from = ctx.qualifiedType(0);
         KoineParser.QualifiedTypeContext? to = ctx.qualifiedType(1);
+        // On a recovered (error) parse a half-typed mapping can be missing its `-> Z.W` (or a type
+        // half), so `qualifiedType`/`typeName` children can be null; fall back to an empty name rather
+        // than dereferencing null, mirroring BuildTypeRef. The syntax error is reported elsewhere.
         return new AclMapping(
-            from.typeName(0).GetText(), from.typeName(1).GetText(),
-            to.typeName(0).GetText(), to.typeName(1).GetText())
+            from?.typeName(0)?.GetText() ?? string.Empty, from?.typeName(1)?.GetText() ?? string.Empty,
+            to?.typeName(0)?.GetText() ?? string.Empty, to?.typeName(1)?.GetText() ?? string.Empty)
         {
             Span = SpanOf(ctx)
         };
