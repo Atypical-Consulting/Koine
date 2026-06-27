@@ -140,6 +140,24 @@ public class PythonExpressionTests
     }
 
     [Fact]
+    public void NestedIntDivision_floors_at_every_level()
+    {
+        // `(total / quantity) / quantity` — the inner `Int / Int` resolves to `Int`, so the outer
+        // division is also `Int / Int` and both must floor.
+        var inner = new BinaryExpr(BinaryOp.Div, Id("total"), Id("quantity"));
+        var outer = new BinaryExpr(BinaryOp.Div, inner, Id("quantity"));
+        Translate(outer).ShouldBe("((self.total // self.quantity) // self.quantity)");
+    }
+
+    [Fact]
+    public void IntDivByIntLiteral_floors()
+    {
+        // A bare integer literal divisor resolves to `Int`, so it must floor-divide too.
+        var expr = new BinaryExpr(BinaryOp.Div, Id("total"), Int("2"));
+        Translate(expr).ShouldBe("(self.total // 2)");
+    }
+
+    [Fact]
     public void DecimalDivisor_stays_true_division()
     {
         // A Decimal operand makes the result Decimal; decimal.Decimal `/` is the correct (true)
