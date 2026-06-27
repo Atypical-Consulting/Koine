@@ -5,7 +5,8 @@ Gateway) tied together by a **context map**, and shows the Koine-generated C# be
 from a real .NET project**. It compiles straight from the **`templates/pizzeria`** model — the
 single validated source of truth (issue #101) — so **building the demo is what proves the
 pizzeria template emits compiling, runnable C# end-to-end**. Between the `.koi` template and
-`Samples.cs` it exercises **every shipped Koine feature (R1–R15)**.
+`Samples.cs` it exercises **every shipped tactical & strategic Koine feature (R1–R15)**; the
+multi-target emitters (R16) and editor tooling (R17) are shown in the CLI sections below.
 
 ```
 templates/pizzeria/             # the SOURCE of truth — Koine .koi files (compiled as ONE model)
@@ -153,6 +154,7 @@ A worked before/after lives under [`../examples/versioning/`](../examples/versio
 dotnet run --project src/Koine.Cli -- check examples/versioning/v2 --baseline examples/versioning/v1
 #   breaking KOI1511: field 'coupon' of published integration event 'OrderPlaced' was removed.
 #   non-breaking: field 'note' of published integration event 'OrderPlaced' was added.
+#   breaking KOI1517: Published integration event 'OrderPlaced' changed its payload shape.
 #   error: 2 breaking change(s) to published surfaces      (exit code 1)
 ```
 
@@ -176,8 +178,9 @@ dotnet run --project src/Koine.Cli -- init /tmp/my-pizzeria
 dotnet run --project src/Koine.Cli -- watch templates/pizzeria --out /tmp/out
 ```
 
-> R16 multi-target emitters (TypeScript/SQL/… beyond C#) are **in progress**; today the
-> shipped `--target` is `csharp` (plus the `glossary` output above).
+> Koine emits more than C#. The shipped `--target` values are `csharp` (the most complete),
+> `typescript`, `python`, `php`, and `rust`, plus the non-code outputs `glossary`, `docs`,
+> `asyncapi`, and `openapi`. Try e.g. `--target php` or `--target typescript`.
 
 ## Diagnostics quality
 
