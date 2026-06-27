@@ -361,6 +361,8 @@ function importEsModuleViaScript(url: string): Promise<Record<string, unknown>> 
     const w = window as unknown as Record<string, unknown>;
     const script = document.createElement('script');
     script.type = 'module';
+    // Captured so `cleanup()` can cancel the safety-net timer below once the loader settles early (#705).
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const cleanup = () => {
       delete w[id];
       delete w[`${id}_err`];
@@ -368,6 +370,11 @@ function importEsModuleViaScript(url: string): Promise<Record<string, unknown>> 
       // timeout) this closure is the single teardown they all route through (issue #643). `remove()`
       // is a no-op if the node was never appended, so it is safe on every settle path.
       script.remove();
+      // Cancel the safety-net timer on the same single-teardown seam, so it can't linger (and fire as a
+      // guarded no-op behind `if (w[id])`) for up to 8s after an early settle (issue #705).
+      // `clearTimeout(undefined)` is a no-op; on the timeout's own path this clears the already-fired
+      // handle, which is harmless.
+      clearTimeout(timer);
     };
     w[id] = (mod: Record<string, unknown>) => {
       cleanup();
@@ -388,8 +395,9 @@ function importEsModuleViaScript(url: string): Promise<Record<string, unknown>> 
     document.head.appendChild(script);
     // Safety net: an inline module script raises no DOM `error` event on a parse/load failure, and a
     // CSP that blocks inline scripts fires no callback at all — so without this the boot would hang.
-    // Reject fast with a cause-naming message instead (issue #359).
-    setTimeout(() => {
+    // Reject fast with a cause-naming message instead (issue #359). Captured so an early settle can
+    // cancel it via `cleanup()` (issue #705).
+    timer = setTimeout(() => {
       if (w[id]) {
         cleanup();
         reject(
