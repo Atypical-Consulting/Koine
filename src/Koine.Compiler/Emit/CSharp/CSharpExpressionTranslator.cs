@@ -764,10 +764,10 @@ internal sealed class CSharpExpressionTranslator
                 sb.Append('!').Append(t).Append(".Any(").Append(RenderLambda(call, mode)).Append(')');
                 return;
             case "min":
-                sb.Append(t).Append(".Min(").Append(RenderLambda(call, mode)).Append(')');
+                WriteMinMax(call, t, mode, sb, isMin: true);
                 return;
             case "max":
-                sb.Append(t).Append(".Max(").Append(RenderLambda(call, mode)).Append(')');
+                WriteMinMax(call, t, mode, sb, isMin: false);
                 return;
             case "sum":
                 WriteSum(call, t, mode, sb);
@@ -827,6 +827,29 @@ internal sealed class CSharpExpressionTranslator
         {
             sb.Append(target).Append(".Sum(").Append(RenderLambda(call, mode)).Append(')');
         }
+    }
+
+    private void WriteMinMax(CallExpr call, string target, NameMode mode, StringBuilder sb, bool isMin)
+    {
+        // The semantic checker constrains min/max selectors to comparable scalars (numeric
+        // value types, incl. Decimal — see ExpressionChecker), so the projected sequence is
+        // always a NON-nullable value type and LINQ's .Min()/.Max() throws the opaque
+        // InvalidOperationException("Sequence contains no elements") on an EMPTY collection.
+        // Mirror WriteSum (and the TS #610 / Python / Rust targets): materialize the
+        // projection once, then a list pattern folds a non-empty list with .Min()/.Max() and
+        // an empty one throws a clear DomainInvariantViolationException instead of leaking
+        // LINQ's exception. Parenthesized so the low-precedence throw/?: stays self-contained
+        // when this min/max is embedded in a larger expression.
+        var op = isMin ? "min" : "max";
+        var fold = isMin ? "Min" : "Max";
+        var rule = $"cannot take {op} of an empty collection (no value)";
+        // Unique binding name (sharing _sumCounter) so sibling aggregates in one expression never collide.
+        var bind = "__mm" + _sumCounter++;
+        sb.Append('(').Append(target).Append(".Select(").Append(RenderLambda(call, mode))
+          .Append(").ToList() is { Count: > 0 } ").Append(bind)
+          .Append(" ? ").Append(bind).Append('.').Append(fold).Append("()")
+          .Append(" : throw new DomainInvariantViolationException(type: \"collection\", rule: \"")
+          .Append(rule).Append("\"))");
     }
 
     /// <summary>The inferred type a collection call's lambda selector produces.</summary>
