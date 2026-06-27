@@ -33,6 +33,10 @@ export interface UiChromeSlice {
   docs: DocsView;
   bottom: BottomTab;
   right: RightView;
+  /** Whether the desktop right Properties rail is collapsed. Runtime source of truth, mirrored to
+   *  `layoutStore` for persistence (#193: the slice owns chrome state, not the DOM). Independent of
+   *  `right` — collapsing remembers the last active view, so re-expanding restores it. */
+  rightCollapsed: boolean;
   /** The active mobile zone (single source of truth for the narrow-viewport shell). ide.tsx mirrors it
    *  to #split[data-mobile-zone] so the @media rules show/hide zones; the MobileZoneBar reads + writes it. */
   mobileZone: MobileZone;
@@ -45,13 +49,15 @@ export interface UiChromeSlice {
   setDocs(v: DocsView): void;
   setBottom(t: BottomTab): void;
   setRight(v: RightView): void;
+  setRightCollapsed(v: boolean): void;
+  toggleRightCollapsed(): void;
   setOutlineFilter(q: string): void;
   setMobileZone(z: MobileZone): void;
 }
 
 export function createUiChromeSlice(
   set: StoreApi<UiChromeSlice>['setState'],
-  _get: StoreApi<UiChromeSlice>['getState'],
+  get: StoreApi<UiChromeSlice>['getState'],
 ): UiChromeSlice {
   return {
     center: DEFAULT_CENTER,
@@ -59,6 +65,7 @@ export function createUiChromeSlice(
     docs: 'glossary',
     bottom: 'problems',
     right: 'props',
+    rightCollapsed: false,
     outlineFilter: '',
     mobileZone: DEFAULT_MOBILE_ZONE,
     setCenter: (v) => set({ center: v }),
@@ -66,6 +73,8 @@ export function createUiChromeSlice(
     setDocs: (v) => set({ docs: v, center: 'docs' }),
     setBottom: (t) => set({ bottom: t }),
     setRight: (v) => set({ right: v }),
+    setRightCollapsed: (v) => set({ rightCollapsed: v }),
+    toggleRightCollapsed: () => set({ rightCollapsed: !get().rightCollapsed }),
     setOutlineFilter: (q) => set({ outlineFilter: q }),
     setMobileZone: (z) => set({ mobileZone: z }),
   };

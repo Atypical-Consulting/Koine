@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import { createStore } from 'zustand/vanilla';
 import { createCommandPalette, type Command } from '@/shared/palette';
 import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
+import { createUiChromeSlice, type UiChromeSlice } from '@/store/slices/uiChrome';
 
 // Each createCommandPalette() self-mounts one .koi-palette-backdrop on document.body. Wipe the body
 // between tests so stale backdrops/handlers (and the central Esc listener's stack entries) don't leak.
@@ -441,7 +443,7 @@ describe('overlay-stack integration (Esc)', () => {
   });
 });
 
-// The layout command builder is a pure module (src/shell/layoutCommands.ts) so the five view-layout
+// The layout command builder is a pure module (src/shell/layoutCommands.ts) so the six view-layout
 // commands the shell spreads into its palette provider can be unit-tested without ide.tsx's giant
 // closure. Each command's run() must call exactly the matching injected action.
 describe('layoutCommands — the view-layout palette commands', () => {
@@ -453,6 +455,7 @@ describe('layoutCommands — the view-layout palette commands', () => {
       closeGroup: vi.fn(),
       togglePanelSide: vi.fn(),
       toggleSideRail: vi.fn(),
+      toggleProperties: vi.fn(),
     };
   }
 
@@ -464,11 +467,24 @@ describe('layoutCommands — the view-layout palette commands', () => {
     { id: 'editor.closeGroup', action: 'closeGroup' },
     { id: 'layout.panelSide', action: 'togglePanelSide' },
     { id: 'layout.sideRail', action: 'toggleSideRail' },
+    { id: 'layout.toggleProperties', action: 'toggleProperties' },
   ];
 
-  test('returns exactly the five layout commands, by id', () => {
+  test('returns exactly the six layout commands, by id', () => {
     const cmds = layoutCommands(spyActions());
     expect(cmds.map((c) => c.id)).toEqual(wiring.map((w) => w.id));
+  });
+
+  test('the Toggle Properties panel command, wired to the store, flips rightCollapsed (#500)', () => {
+    const store = createStore<UiChromeSlice>((set, get) => createUiChromeSlice(set, get));
+    const cmd = layoutCommands({
+      ...spyActions(),
+      toggleProperties: () => store.getState().toggleRightCollapsed(),
+    }).find((c) => c.id === 'layout.toggleProperties')!;
+    expect(cmd.title).toBe('Toggle Properties panel');
+    expect(store.getState().rightCollapsed).toBe(false);
+    cmd.run();
+    expect(store.getState().rightCollapsed).toBe(true);
   });
 
   test('every command carries a non-empty title', () => {

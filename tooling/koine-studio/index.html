@@ -295,6 +295,13 @@
             </div>
           </div>
         </aside>
+
+        <!-- Right-edge tool-window stripe (#500): a slim, always-on Rider-style bar of icon toggles —
+             one per right-rail view — that open/close (and switch) the #right Properties panel. The
+             buttons are injected at boot by rightStripMarkup(); inspectorController wires the
+             toggle/switch behaviour and the live aria-pressed state. Desktop-only — hidden below
+             $bp-narrow, where the inspector bottom-sheet (#221) owns Properties. -->
+        <div id="right-strip" class="pane" role="toolbar" aria-label="Tool windows" aria-orientation="vertical"><!-- injected at boot: rightStripMarkup() --></div>
       </main>
 
       <!-- Bottom status bar: a pure projection of existing state (active context, model validity,

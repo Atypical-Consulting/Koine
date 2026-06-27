@@ -20,12 +20,14 @@ export interface LayoutActions {
   togglePanelSide(): void;
   /** Move the side rail (the element inspector) between the right edge and the left edge. */
   toggleSideRail(): void;
+  /** Open/close the right Properties panel — the tool-window stripe's collapse toggle (#500). */
+  toggleProperties(): void;
 }
 
 /**
- * Build the five layout palette commands. Ids are pinned (`editor.split`, `editor.toggleOrientation`,
- * `editor.closeGroup`, `layout.panelSide`, `layout.sideRail`) so anything keyed on them stays stable;
- * each command's run() invokes exactly the matching action.
+ * Build the six layout palette commands. Ids are pinned (`editor.split`, `editor.toggleOrientation`,
+ * `editor.closeGroup`, `layout.panelSide`, `layout.sideRail`, `layout.toggleProperties`) so anything
+ * keyed on them stays stable; each command's run() invokes exactly the matching action.
  */
 export function layoutCommands(actions: LayoutActions): Command[] {
   return [
@@ -39,5 +41,6 @@ export function layoutCommands(actions: LayoutActions): Command[] {
     { id: 'editor.closeGroup', title: 'Close editor group', group: 'View', run: () => actions.closeGroup() },
     { id: 'layout.panelSide', title: 'Move panel (bottom / right)', group: 'View', run: () => actions.togglePanelSide() },
     { id: 'layout.sideRail', title: 'Move side rail (left / right)', group: 'View', run: () => actions.toggleSideRail() },
+    { id: 'layout.toggleProperties', title: 'Toggle Properties panel', group: 'View', run: () => actions.toggleProperties() },
   ];
 }
