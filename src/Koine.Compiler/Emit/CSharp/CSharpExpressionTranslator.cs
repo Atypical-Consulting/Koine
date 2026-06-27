@@ -693,6 +693,18 @@ internal sealed class CSharpExpressionTranslator
     private void WriteMemberAccess(MemberAccessExpr ma, NameMode mode, StringBuilder sb)
     {
         var t = Render(ma.Target, mode);
+
+        // A user type that declares a member named after a built-in member-op (isEmpty/trim/…)
+        // shadows the op shortcut — emit a plain property access, exactly mirroring the #605
+        // semantic resolution one layer down. Without this, a field named e.g. `isEmpty` would
+        // resolve correctly yet still emit `t.Count == 0`, which fails to compile (#672).
+        if (_resolver.Infer(ma.Target, EffectiveScope()) is { } receiverType
+            && _index.TryGetMemberType(receiverType.Qualifier ?? _resolver.Context, receiverType.Name, ma.MemberName, out _))
+        {
+            sb.Append(t).Append('.').Append(CSharpNaming.ToPascalCase(ma.MemberName));
+            return;
+        }
+
         switch (ma.MemberName)
         {
             // Collection ops.

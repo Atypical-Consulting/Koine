@@ -530,6 +530,18 @@ internal sealed class TypeScriptExpressionTranslator
         var target = new StringBuilder();
         Write(ma.Target, target);
         var t = target.ToString();
+
+        // A user type that declares a member named after a built-in member-op (isEmpty/trim/…)
+        // shadows the op shortcut — emit a plain property access, exactly mirroring the #605
+        // semantic resolution one layer down. Without this, a field named e.g. `isEmpty` would
+        // resolve correctly yet still emit `t.length === 0`, which is wrong TypeScript (#672).
+        if (_resolver.Infer(ma.Target, EffectiveScope()) is { } receiverType
+            && _index.TryGetMemberType(receiverType.Qualifier ?? _resolver.Context, receiverType.Name, ma.MemberName, out _))
+        {
+            sb.Append(t).Append('.').Append(TypeScriptNaming.ToCamelCase(ma.MemberName));
+            return;
+        }
+
         switch (ma.MemberName)
         {
             case "isEmpty":
