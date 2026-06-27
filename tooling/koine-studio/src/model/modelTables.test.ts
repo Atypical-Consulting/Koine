@@ -183,6 +183,89 @@ describe('extractEventFlow', () => {
   });
 });
 
+describe('extractEventFlow command → event → policy → command chain (#439)', () => {
+  // The enriched context graph the compiler now emits: a `capture` command emits `ChargeCaptured`; the
+  // `PostToLedger` policy reacts and issues `record`. (Mirrors the pizzeria/saas payment context.)
+  const chain: DiagramGraph = {
+    nodes: [
+      node('cmd_Charge_capture', 'capture', 'command', 'Payment.Charge.capture', span(10)),
+      node('ChargeCaptured', 'ChargeCaptured', 'event', 'Payment.ChargeCaptured', span(5)),
+      node('policy_PostToLedger', 'PostToLedger', 'policy', 'Payment.PostToLedger', span(20)),
+      node('cmd_LedgerEntry_record', 'record', 'command', 'Payment.LedgerEntry.record', span(30)),
+    ],
+    edges: [
+      edge('cmd_Charge_capture', 'ChargeCaptured', 'emits'),
+      edge('ChargeCaptured', 'policy_PostToLedger', 'triggers'),
+      edge('policy_PostToLedger', 'cmd_LedgerEntry_record', 'issues'),
+    ],
+  };
+
+  test('produces command + policy cards with the bare behaviour/policy name', () => {
+    const { nodes } = extractEventFlow(chain);
+
+    const capture = nodes.find((n) => n.qualifiedName === 'Payment.Charge.capture')!;
+    expect(capture.kind).toBe('command');
+    expect(capture.label).toBe('capture'); // the bare name, NOT 'Charge.capture'
+    expect(capture.context).toBe('Payment');
+    expect(capture.span!.line).toBe(10); // carried for click-to-source
+
+    const policy = nodes.find((n) => n.qualifiedName === 'Payment.PostToLedger')!;
+    expect(policy.kind).toBe('policy');
+    expect(policy.label).toBe('PostToLedger');
+
+    expect(nodes.find((n) => n.qualifiedName === 'Payment.ChargeCaptured')!.kind).toBe('domain-event');
+  });
+
+  test('wires the full chain as flow edges carrying the emit/trigger/issue verbs', () => {
+    const { edges } = extractEventFlow(chain);
+    const flow = (from: string, to: string) =>
+      edges.find((e) => e.kind === 'flow' && e.from === from && e.to === to);
+
+    expect(flow('cmd_Charge_capture', 'ChargeCaptured')?.label).toBe('emits');
+    expect(flow('ChargeCaptured', 'policy_PostToLedger')?.label).toBe('triggers');
+    expect(flow('policy_PostToLedger', 'cmd_LedgerEntry_record')?.label).toBe('issues');
+  });
+
+  test('a command → event edge does not hijack the event’s aggregate publisher', () => {
+    // The domain event is owned by an aggregate (composition edge) AND emitted by a command. The publisher
+    // must stay the aggregate (the command is the chain producer, surfaced separately) — guards a regression
+    // where the command → event edge would be read as the event's publisher.
+    const both: DiagramGraph = {
+      nodes: [
+        node('Order', 'Order', 'aggregate-root', 'Sales.Order', span(3)),
+        node('OrderPlaced', 'OrderPlaced', 'event', 'Sales.OrderPlaced', span(12)),
+        node('cmd_Order_place', 'place', 'command', 'Sales.Order.place', span(15)),
+      ],
+      edges: [
+        edge('Order', 'OrderPlaced'), // aggregate composition (owns the event)
+        edge('cmd_Order_place', 'OrderPlaced', 'emits'), // command emit — must NOT become the publisher
+      ],
+    };
+
+    // The Events table still attributes the event to the aggregate, not the command.
+    expect(extractEvents(both).find((r) => r.name === 'OrderPlaced')!.publishedBy).toBe('Order');
+
+    // The flow keeps the aggregate → event arrow AND adds the command → event chain edge.
+    const { nodes, edges } = extractEventFlow(both);
+    expect(nodes.find((n) => n.id === 'Order')!.kind).toBe('aggregate');
+    expect(edges.some((e) => e.kind === 'flow' && e.from === 'Order' && e.to === 'OrderPlaced')).toBe(true);
+    expect(edges.some((e) => e.kind === 'flow' && e.from === 'cmd_Order_place' && e.to === 'OrderPlaced')).toBe(true);
+  });
+
+  test('an unwired command/policy still yields an orphan card', () => {
+    const orphans: DiagramGraph = {
+      nodes: [
+        node('cmd_X_do', 'do', 'command', 'X.E.do', span(1)),
+        node('policy_P', 'P', 'policy', 'X.P', span(2)),
+      ],
+      edges: [],
+    };
+    const { nodes, edges } = extractEventFlow(orphans);
+    expect(nodes.map((n) => n.kind).sort()).toEqual(['command', 'policy']);
+    expect(edges).toEqual([]);
+  });
+});
+
 describe('extractRelationships', () => {
   test('maps composition edges to source/relation/target', () => {
     const rows = extractRelationships(combined, { contexts: [], relations: [] });
