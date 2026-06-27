@@ -51,6 +51,23 @@ public class ScenarioRunnerTests
         }
         """;
 
+    // A command whose precondition matches a field against a catastrophic-backtracking pattern.
+    // `(x+)+y` over a long run of x's with no trailing y forces the .NET backtracking engine down an
+    // exponential number of partitions — the regex never completes without a match timeout (#626).
+    private const string MatchModel = """
+        context Reg {
+          aggregate Docs root Document {
+            entity Document identified by DocId {
+              body: String
+
+              command check {
+                requires body matches /(x+)+y/   "body must look like x's then a y"
+              }
+            }
+          }
+        }
+        """;
+
     private static SemanticModel Build(string src)
     {
         var (model, diagnostics) = new KoineCompiler().Parse(src);
@@ -186,5 +203,39 @@ public class ScenarioRunnerTests
 
         result.Ok.ShouldBeFalse();
         result.Notes.ShouldNotBeEmpty();
+    }
+
+    // ----------------------------------------------------------------------
+    // A model-authored regex with catastrophic backtracking must not hang the
+    // interpreter (which runs synchronously inside the LSP / single-threaded WASM
+    // host). It is bounded by a match timeout and degrades to an indeterminate
+    // outcome instead of wedging the run forever (#626).
+    // ----------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_catastrophic_backtracking_matches_pattern_is_bounded_not_hung()
+    {
+        var sema = Build(MatchModel);
+        var scenario = new Scenario(
+            "Document", "check",
+            new Dictionary<string, ScenarioValue>
+            {
+                // 64 'x's and no trailing 'y': `(x+)+y` backtracks exponentially over this non-match.
+                ["body"] = ScenarioValue.FromString(new string('x', 64)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        // Run off-thread and race it against a generous wall-clock budget so a genuine hang fails this
+        // assertion fast rather than wedging the whole test run (the pre-fix behaviour). The 1s match
+        // timeout means a bounded run completes in ~1s, comfortably inside the budget.
+        var run = Task.Run(() => ScenarioInterpreter.Run(sema, scenario));
+        await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+        run.IsCompleted.ShouldBeTrue(
+            "a catastrophic-backtracking `matches` pattern must be bounded by a match timeout, not hang the interpreter");
+
+        // The runaway match degrades to an indeterminate precondition (Unknown), not a crash or a hang.
+        ScenarioResult result = await run;
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Indeterminate);
     }
 }
