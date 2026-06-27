@@ -1,169 +1,136 @@
 ---
 name: create-issue
 description: >-
-  Create a fully-seeded GitHub issue for the Koine project — and do NOT settle for a bare
-  `gh issue create`. This files a template-compliant issue whose DESCRIPTION carries a brainstorm →
-  spec → implementation-plan trail (via the superpowers skills), turning a one-line idea into
-  something a contributor can pick up cold. ALWAYS reach for this whenever the user wants to open,
-  file, add, raise, create, log, or track a NEW issue / feature request / idea / ticket / backlog
-  item for this repo — including loose phrasings like "track this idea", "add an issue for X",
-  "log a feature", "make a ticket", "raise an issue", or "capture this for later", and batches of
-  several ideas at once. Use it even though you could obviously create the issue yourself with `gh`:
-  the whole point is the seeded brainstorm/spec/plan, so filing a plain issue instead is the wrong
-  move. Does NOT apply to managing EXISTING issues (commenting on, closing, or listing them), or to
-  standalone brainstorming/planning when there's no issue to file.
+  Create a fully-seeded GitHub issue for the Koine project — don't settle for a bare `gh issue create`.
+  Files a template-compliant issue whose DESCRIPTION carries a brainstorm → spec → implementation-plan
+  trail (via the superpowers skills), turning a one-line idea into something a contributor can pick up
+  cold. ALWAYS reach for this whenever the user wants to open, file, add, raise, create, log, or track a
+  NEW issue / feature request / idea / ticket / backlog item for this repo — including loose phrasings
+  like "track this idea", "add an issue for X", "log a feature", "make a ticket", "raise an issue",
+  "capture this for later", and batches of several ideas at once. Use it even though you could file the
+  issue yourself with `gh` — the whole point is the seeded brainstorm/spec/plan. Does NOT apply to
+  managing EXISTING issues (commenting on, closing, or listing them), or to standalone
+  brainstorming/planning when there's no issue to file.
 ---
 
 # Create a Koine GitHub issue (template-compliant, auto-seeded)
 
-## What this does and why
+## What this does
 
-A good idea deserves more than a one-line ticket. This skill turns a raw idea into an issue that
-a future contributor (or future you) can pick up cold: a single self-contained **description** that
-obeys the project's own issue template and then walks the idea from fuzzy to actionable —
+Turns a raw idea into an issue a future contributor can pick up cold: one self-contained
+**description** that obeys the project's issue template, then walks the idea from fuzzy to actionable —
 
-1. **Brainstorm** — frames the problem, lays out 2-3 approaches with trade-offs, and recommends one.
+1. **Brainstorm** — frames the problem, lays out 2-3 approaches with trade-offs, recommends one.
 2. **Spec** — the formal design doc for the chosen approach.
-3. **Implementation plan** — bite-sized, testable tasks an engineer can execute.
+3. **Implementation plan** — bite-sized, testable tasks an engineer (or `implement-issue`) can execute.
 
-The brainstorm and plan are produced with the **superpowers** skills (`superpowers:brainstorming`
-and `superpowers:writing-plans`) so the artifacts match how this project actually plans work.
+Brainstorm and plan come from the **superpowers** skills (`superpowers:brainstorming`,
+`superpowers:writing-plans`) so the artifacts match how the project plans work.
 
-**Everything lives in the issue body, not in comments — that's deliberate.** The description is what
-a reader sees first; comments sit below the fold. More concretely, GitHub's task-list **progress
-meter** (the `3 of 8` bar on issue lists and project boards) counts checkboxes in the *body* only —
-checkboxes posted in a comment are tickable but never feed it. Since the whole value of the plan is
-that it's *trackable*, it belongs in the body, where ticking a task actually moves the needle. The
-sibling `implement-issue` skill also reads the plan straight from the description.
+**Everything lives in the issue body, not comments — deliberately.** GitHub's task-list **progress
+meter** (the `3 of 8` bar on issue lists / project boards) counts checkboxes in the *body* only, and
+`implement-issue` reads the plan straight from the description. So the trackable plan belongs in the
+body, where ticking a task moves the needle.
 
-## Autonomy contract (important)
+## Autonomy contract
 
-The user wants this to run **hands-off**. The superpowers skills are normally interactive — they
-ask questions one at a time and stop at approval gates. Here you run them in **one-shot autonomous
-mode**: never block waiting for the user. Whenever a sub-skill would ask a clarifying question or
-wait for sign-off, instead **pick the most reasonable default**, state the assumption inline in the
-artifact (e.g. a short "Assumptions" note), and keep going. Only stop to ask the user if something
-is a genuine blocker you cannot reasonably assume your way past (e.g. `gh` is not authenticated, or
-the idea is too vague to even name). Make decisions; don't hold up the line.
+Run **hands-off**. The superpowers skills are normally interactive (ask one question at a time, stop at
+approval gates); here you run them in **one-shot autonomous mode**. Whenever a sub-skill would ask or
+wait for sign-off, **pick the most reasonable default**, state the assumption inline (a short
+"Assumptions" note), and keep going. Only stop for a genuine blocker you can't assume past (`gh` not
+authenticated, or an idea too vague to even name). Decide; don't hold up the line.
 
 ## Checklist
 
-Create a task for each item and complete them in order. For a batch of ideas, run steps 2-8 once
-per idea.
+Create a task per item and complete in order. For a batch of ideas, run steps 2-8 once per idea.
 
 1. **Preconditions** — confirm `gh` works and you're in the repo.
 2. **Capture the idea(s)** — from the user's message; don't interrogate.
-3. **Check for duplicates & related issues** — don't refile something that already exists; link what's adjacent.
+3. **Check for duplicates & related issues** — don't refile what exists; link what's adjacent.
 4. **Build the template-compliant body fields** — read the live issue template and fill it.
-5. **Brainstorm + Spec** — written as collapsible `<details>` sections (both via `superpowers:brainstorming`).
-6. **Implementation plan** (via `superpowers:writing-plans`) — a *visible* body section whose `- [ ]`
-   checkboxes feed the issue's progress meter; never tuck it inside a `<details>`.
-7. **Assemble the description, choose labels, create the issue** — one body, one `gh issue create`,
-   labels (type + priority + effort, plus any scope label) from the profile's *Labels* taxonomy applied
-   at creation, then read the issue back to confirm it rendered.
-8. **Report** — list each issue with its URL, and point the user at `/implement-issue` to build it.
+5. **Brainstorm + Spec** — collapsible `<details>` sections (via `superpowers:brainstorming`).
+6. **Implementation plan** (via `superpowers:writing-plans`) — a *visible* section whose `- [ ]` checkboxes feed the progress meter; never inside a `<details>`.
+7. **Assemble the description, choose labels, create the issue** — one body, one `gh issue create`, labels (type + priority + effort + any scope) from the profile, then read the issue back.
+8. **Report** — list each issue with its URL, point the user at `/implement-issue`.
 
 ---
 
 ## Step 1 — Preconditions
 
-**Load the repo profile first.** Every repo-specific fact this skill needs — the label taxonomy, the
-issue-template defaults, the architecture grain a plan must respect — lives in the repo profile, not
-inline here. Run the **`get-repo-profile`** skill; it returns `.claude/skills/repo-profile.md`
-(generating it on first use), and the steps below cite its named sections (*Labels*, *Issue templates*,
-*Architecture grain*). If no profile exists and you genuinely can't generate one, say so in the report
-rather than inventing repo specifics.
+**Load the repo profile first.** Every repo-specific fact — label taxonomy, issue-template defaults,
+architecture grain — lives there, not inline. Run **`get-repo-profile`**; it returns
+`.claude/skills/repo-profile.md` (generating it on first use), and the steps below cite its sections
+(*Labels*, *Issue templates*, *Architecture grain*). If you genuinely can't generate one, say so in the
+report rather than inventing repo specifics.
 
 ```bash
 gh api user --jq .login      # must print a login; if 401, the token is invalid
 ```
 
-If this fails with an auth error, stop and tell the user to run `! gh auth login -h github.com`
-in the prompt (the `!` prefix runs it in this session so the token lands in your environment).
-Re-check before continuing — don't draft issues you can't file.
-
-Confirm the working directory is the repo you mean to file in (the `gh` commands target its `origin`).
+If this fails with an auth error, stop and tell the user to run `! gh auth login -h github.com` in the
+prompt (the `!` prefix runs it in this session so the token lands in your environment). Re-check before
+continuing. Confirm the working directory is the repo you mean to file in (`gh` targets its `origin`).
 
 ## Step 2 — Capture the idea(s)
 
-Pull the idea(s) straight from the user's request. They may give one ("add Rust generation") or
-several at once ("add python gen, add php gen, build an IDE"). Do **not** open a Q&A — infer scope
-from the prompt, the README, the project's roadmap docs, and the codebase. If the user named several
-ideas, treat each as its own issue and loop.
-
-For each idea, settle on a crisp **title** (imperative, e.g. "Add Python emitter target") before
-writing anything.
+Pull the idea(s) from the user's request — one ("add Rust generation") or several ("add python gen,
+php gen, an IDE"). Don't open a Q&A — infer scope from the prompt, README, roadmap docs, and codebase.
+Treat each named idea as its own issue and loop. For each, settle on a crisp **title** (imperative,
+e.g. "Add Python emitter target") before writing anything.
 
 ## Step 3 — Check for duplicates & related issues
 
-Filing a duplicate is noise the maintainer has to clean up, and an issue that ignores its neighbours
-reads like it landed from orbit. So before drafting, see what already exists — search open *and*
-closed issues for the idea's key terms:
+A duplicate is noise; an issue that ignores its neighbours reads like it landed from orbit. Search open
+*and* closed issues for the idea's key terms first:
 
 ```bash
 gh issue list --state all --search "python emitter" --limit 10 \
   --json number,title,state,url --jq '.[] | "#\(.number) [\(.state)] \(.title)"'
 ```
 
-Then act on the verdict the way the Autonomy contract says — decide, don't interrogate:
+Then decide (don't interrogate):
 
-- **Clear duplicate** (an open issue already captures this idea): don't file a second one. Report
-  *"looks like #N already covers this — skipped"* and move on; only file anyway if the user asked you to.
-- **Related but distinct** (adjacent work, a dependency, a closed issue worth linking): proceed, and
-  carry the links forward. You'll add a short `**Related:** #N, #M` line near the top of the body in
-  Step 7 — GitHub auto-renders those cross-references, and it's where the prior art your brainstorm
-  builds on gets cited.
+- **Clear duplicate** (open issue already captures it): don't refile. Report *"#N already covers this — skipped"* and move on; file anyway only if asked.
+- **Related but distinct**: proceed, carry the links forward — add a `**Related:** #N, #M` line near the top of the body in Step 7 (GitHub auto-renders the cross-references, and it's where your brainstorm's prior art gets cited).
 - **Nothing similar**: proceed clean.
 
 ## Step 4 — Build the template-compliant body fields
 
-These fields are the **visible top of the description**; the brainstorm/spec/plan come after. The
-fields MUST match the project's own issue form — never invent your own structure. Read the live
-template so this stays correct even if the template changes:
+These are the **visible top of the description** (brainstorm/spec/plan come after). They MUST match the
+project's issue form — never invent structure. Read the live template:
 
 ```bash
 ls .github/ISSUE_TEMPLATE/
 cat .github/ISSUE_TEMPLATE/feature_request.yml
 ```
 
-`gh issue create` does not apply a form template automatically, so you reconstruct it as markdown:
+`gh issue create` doesn't apply a form template, so reconstruct it as markdown:
 
-- Use the **feature_request** template for ideas/enhancements (the common case). Use `bug_report`
-  only if the user is clearly filing a defect.
-- For each `textarea`/`input` field in the YAML, emit a `## <label>` heading and fill it from the
-  idea. Honor `validations.required` — every required field must have real content.
-- For each `dropdown`, pick the single option that best fits and write it under its heading, copied
-  verbatim from the option list in the live YAML you just read.
-- The template's declared `labels:` are applied at creation in Step 7, not written into the body.
+- Use **feature_request** for ideas/enhancements (common case); `bug_report` only for a clear defect.
+- For each `textarea`/`input` field, emit a `## <label>` heading and fill it. Honor `validations.required`.
+- For each `dropdown`, pick the best-fitting option and write it under its heading, verbatim from the live YAML.
+- The template's declared `labels:` apply at creation in Step 7, not in the body.
 
 See `references/issue-template.md` for a worked feature_request example and the exact field→heading
-mapping. Hold this markdown — you'll stitch it together with the rest in Step 7.
+mapping. Hold this markdown for Step 7.
 
 ## Step 5 — Brainstorm & Spec (collapsible body sections)
 
-Invoke `superpowers:brainstorming` to load its current methodology, then apply it **autonomously**
-(per the Autonomy contract — no questions, pick the recommended option, note assumptions). The
-brainstorming skill explores context, weighs approaches, and writes a design doc/spec; you split its
-output into two sections so the trail reads brainstorm → spec.
+Invoke `superpowers:brainstorming`, then apply it **autonomously** (no questions, pick the recommended
+option, note assumptions). Split its output into two sections so the trail reads brainstorm → spec.
 
-**🧠 Brainstorm.** A focused exploration, not a wall of text:
-- *Problem / context* — what need this serves, who the persona is, what exists today (cite the README /
-  the project's roadmap docs / relevant code where it helps).
-- *Approaches* — 2-3 options, each with honest trade-offs.
-- *Recommendation* — pick one and say why. This decision drives the spec and plan.
+**🧠 Brainstorm** — focused, not a wall of text: *Problem/context* (what need, who, what exists — cite
+README / roadmap / code); *Approaches* (2-3 options with honest trade-offs); *Recommendation* (pick one
+and why — this drives the spec and plan).
 
-**📋 Spec.** The formal design for the recommended approach, following the structure the
-brainstorming skill uses for its design doc (goal, scope/non-goals, the `.koi` surface or behavior,
-what it emits, key types/files touched, validation rules, edge cases, an Assumptions note for
-anything you defaulted). Keep it target-agnostic where the architecture demands it. Where the design
-has *shape* — a state machine's transitions, a context map's relationships, an aggregate's structure
-— embed a **mermaid diagram** (a `mermaid` fenced block); GitHub renders it inline, and for a
-modeling DSL like Koine a diagram often carries more than a paragraph. Use it where it genuinely
+**📋 Spec** — the formal design for the recommended approach (goal, scope/non-goals, the `.koi` surface
+or behavior, what it emits, key types/files, validation rules, edge cases, an Assumptions note).
+Target-agnostic where the architecture demands. Where the design has *shape* — a state machine, a
+context map, an aggregate — embed a **mermaid diagram**; GitHub renders it inline. Use it where it
 clarifies; don't decorate.
 
-Render both as **collapsible sections** so the description stays scannable — the reasoning is one
-click away, not a slab of text sitting on top of the plan. GitHub needs a blank line after
-`</summary>` (and before `</details>`) or the Markdown inside won't render:
+Render both as **collapsible sections** so the description stays scannable. GitHub needs a blank line
+after `</summary>` (and before `</details>`) or the Markdown won't render:
 
 ```markdown
 <details>
@@ -183,34 +150,25 @@ click away, not a slab of text sitting on top of the plan. GitHub needs a blank 
 
 ## Step 6 — Implementation plan (visible, with checkboxes)
 
-Invoke `superpowers:writing-plans` to load its current guidance, then apply it autonomously to the
-spec from Step 5, shaping the tasks to the repo profile's *Architecture grain* (the layer order a
-change walks through, and the invariants a plan must not break). Keep tasks bite-sized and each one
-independently testable.
+Invoke `superpowers:writing-plans`, then apply it autonomously to the Step 5 spec, shaping tasks to the
+profile's *Architecture grain* (layer order + invariants a plan must not break). Tasks bite-sized and
+each independently testable.
 
-**Preserve the plan's checkbox task-list format, and keep this section OUTSIDE any `<details>`.**
-`writing-plans` emits a plan whose every actionable step is a Markdown checkbox (`- [ ]`), and
-GitHub renders those as *live, tickable checkboxes* on the issue **and** counts them in the
-description's progress meter (`3 of 8 tasks`) — but only while they sit in the open body. A
-contributor — or `implement-issue` running the plan — ticks off real progress as work lands. Two
-ways to throw that away, both forbidden: collapsing steps into `- **Files:**` / `- **Test:**` prose
-paragraphs, or burying the plan in a collapsed `<details>` where (depending on GitHub's renderer) the
-meter may stop counting it. So the plan stays a flat, visible section under a `## 🛠️ Implementation
-plan` heading — keep that exact phrase; `implement-issue` anchors on it.
+**Preserve the `- [ ]` checkbox format, and keep this section OUTSIDE any `<details>`.** GitHub renders
+those as live tickable checkboxes *and* counts them in the progress meter — but only while they sit in
+the open body. Two ways to throw that away, both forbidden: flattening steps into `- **Files:**` /
+`- **Test:**` prose, or burying the plan in a collapsed `<details>` (the meter may stop counting it).
+Keep it a flat, visible section under a `## 🛠️ Implementation plan` heading — exact phrase;
+`implement-issue` anchors on it.
 
-Concretely, the plan MUST carry all three of these (issue #21's plan is the reference shape):
+The plan MUST carry all three (issue #21's plan is the reference shape):
 
-1. The writing-plans **header note, verbatim**, so an executor knows how to run it:
+1. The writing-plans **header note, verbatim**:
    `> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.`
-2. A short **Goal / Architecture / Tech Stack** preamble and a **Global Constraints** list (version
-   floors, the architecture invariants from the profile's *Architecture grain*, the commit identity
-   from the profile's *Commit identity*, and any build constraints it records) — exact values copied
-   from the spec and the profile.
-3. One `### Task N: <name>` per task, each with **Files** + **Interfaces** lines, then **every step
-   as its own `- [ ]` checkbox** (write the failing test → run it red → implement → run it green →
-   commit). The final step of each task is a `- [ ]` checkbox with the commit message.
+2. A short **Goal / Architecture / Tech Stack** preamble and a **Global Constraints** list (version floors, architecture invariants from *Architecture grain*, commit identity from *Commit identity*, build constraints) — exact values from the spec and profile.
+3. One `### Task N: <name>` per task, each with **Files** + **Interfaces** lines, then **every step as its own `- [ ]` checkbox** (write the failing test → run red → implement → run green → commit). The final step is a `- [ ]` checkbox with the commit message.
 
-Shape (abbreviated — keep the checkboxes, never flatten them into prose):
+Shape (abbreviated — keep the checkboxes, never flatten to prose):
 
 ```markdown
 ## 🛠️ Implementation plan
@@ -230,57 +188,46 @@ Shape (abbreviated — keep the checkboxes, never flatten them into prose):
 - [ ] **Step 5:** Commit: `feat(emit-py): Python backend skeleton + runtime`.
 ```
 
-Dispatching `writing-plans` to a **subagent** preserves the format most reliably — the plan comes
-back as one clean artifact instead of competing with this skill's own framing mid-stream (issue #21,
-which kept the checkboxes, was generated that way). Inline generation is fine too. Either way, hold
-the plan markdown for Step 7, where the verify-checkboxes gate runs before anything is filed.
+Dispatching `writing-plans` to a **subagent** preserves the format most reliably (issue #21 was
+generated that way); inline is fine too. Hold the plan markdown for Step 7's verify-checkboxes gate.
 
-**You now know the real scope**, so settle on the **effort** size from what you just wrote, matching it
-to the sizes in the profile's *Labels* taxonomy (a one-task tweak is the smallest; a cross-layer feature
-or a phased multi-week effort the largest). You'll apply it alongside the other labels in Step 7.
+**You now know the real scope**, so settle on the **effort** size from what you wrote, matching the
+profile's *Labels* taxonomy (one-task tweak = smallest; cross-layer/phased = largest). Apply it in Step 7.
 
 ## Step 7 — Assemble the description, choose labels, and create the issue
 
-Now stitch the one description together and file it in a single `gh issue create`. Because the plan
-already exists, you know the effort too — so **all** labels go on at creation; nothing is deferred.
+Stitch one description and file it in a single `gh issue create`. Because the plan exists, you know the
+effort too — **all** labels go on at creation.
 
-**Assemble the body** in this order, top (most-read) to bottom, into one temp file:
+**Assemble the body** top (most-read) to bottom, into one temp file:
 
 1. The template fields from Step 4 (Problem / Proposed solution / Area …) — visible.
 2. The `**Related:** #N, #M` line from Step 3, if any.
 3. The collapsible 🧠 **Brainstorm** and 📋 **Spec** from Step 5.
 4. The 🛠️ **Implementation plan** from Step 6 — **visible, never inside a `<details>`**.
 
-Then **verify the plan survived** before filing — zero checkboxes means the plan got mangled or
-dropped into prose, and you must reformat into the task/checkbox structure from Step 6:
+**Verify the plan survived** before filing — zero checkboxes means it got mangled; reformat into the
+Step 6 task/checkbox structure:
 
 ```bash
-grep -c '^- \[ \]' /tmp/koine-issue-<slug>.md   # must be > 0; expect one per actionable plan step
+grep -c '^- \[ \]' /tmp/koine-issue-<slug>.md   # must be > 0; expect one per actionable step
 ```
 
-**Choose labels.** The repo's label taxonomy lives in the profile's *Labels* section — the exact
-strings, the priority tiers and their meanings, the effort sizes, and any scope label. Applying it is
-the difference between an issue that lands sorted and one that sits unlabelled. Read the **live** set
-first (labels drift; never apply one the profile lists but the repo no longer has):
+**Choose labels.** The taxonomy (exact strings, priority tiers and meanings, effort sizes, scope) lives
+in the profile's *Labels* section. Read the **live** set first (labels drift):
 
 ```bash
 gh label list --limit 100
 ```
 
-Pick one label per axis from the profile's taxonomy — none are guesses, they're the labels your own
-analysis already implies:
+Pick one label per axis (none are guesses — your analysis already implies them):
 
-- **Type** — the feature/idea type for the common case (what the feature_request template declares), or
-  the bug type for a defect. Match whichever template you built the body from.
-- **Priority** — exactly one tier, read from how essential the idea is (the same judgment your
-  brainstorm's Recommendation makes); pick the tier whose meaning in the profile fits.
-- **Effort** — exactly one size, the one you settled on at the end of Step 6 now that the plan reveals
-  the real scope; map it to the matching size in the profile.
-- **Scope** — add a scope label from the profile when the idea falls in its area; don't invent new area
-  labels — the feature_request *Area* dropdown already captures finer scope inside the body.
+- **Type** — feature/idea for the common case (what feature_request declares), or bug for a defect; match the template you built from.
+- **Priority** — exactly one tier (the judgment your brainstorm's Recommendation makes).
+- **Effort** — exactly one size, the one you settled on in Step 6.
+- **Scope** — a profile scope label when the idea falls in its area; don't invent area labels (the *Area* dropdown captures finer scope in the body).
 
-Per the Autonomy contract, just **decide** — pick the labels your framing implies and note the call
-in the final report; don't open a Q&A about triage. Create with all of them at once:
+Decide, note the call in the report, don't open a triage Q&A. Create with all of them:
 
 ```bash
 gh issue create \
@@ -291,13 +238,12 @@ gh issue create \
   --body-file /tmp/koine-issue-<slug>.md
 ```
 
-Capture the printed URL and issue number — you need them for the report. If a chosen label isn't in
-the live list, create the issue without it rather than failing, and flag the gap in the final report.
+Capture the printed URL and number. If a chosen label isn't in the live list, create without it rather
+than failing, and flag the gap.
 
-**Read it back.** The pre-create `grep` proved your *local* file was good; this proves *GitHub* stored
-it. A malformed `<details>` block, an oversized field, or a `--body-file` that didn't carry everything
-can leave a broken issue that looks fine in the terminal — so fetch the live issue and confirm the
-plan's checkboxes survived the round-trip and the labels actually stuck:
+**Read it back.** The pre-create `grep` proved your *local* file; this proves *GitHub* stored it (a
+malformed `<details>`, an oversized field, or a `--body-file` that didn't carry everything can leave a
+broken issue that looks fine in the terminal):
 
 ```bash
 NUM=<issue-number>
@@ -307,37 +253,23 @@ echo "checkboxes — filed $filed / live $live"          # must be equal and > 0
 gh issue view "$NUM" --json labels --jq '.labels[].name'   # confirm every intended label applied
 ```
 
-If `live` ≠ `filed` (or it's zero), the body didn't round-trip — repair it and push the fix with
-`gh issue edit "$NUM" --body-file /tmp/koine-issue-<slug>.md` rather than leaving a broken issue
-behind. If a label is missing, re-add it (`gh issue edit "$NUM" --add-label …`) or flag it in the
-report. Only once the readback is clean do you move on.
+If `live` ≠ `filed` (or zero), the body didn't round-trip — repair and push with
+`gh issue edit "$NUM" --body-file …`. If a label is missing, re-add (`gh issue edit "$NUM"
+--add-label …`) or flag it. Move on only once the readback is clean.
 
 ## Step 8 — Report
 
-List every issue created with its title, URL, and the labels you applied (type / priority / effort /
-scope), and flag anything you assumed or skipped (a chosen label that wasn't in the live list, a
-duplicate you declined to refile, a field you defaulted). Surfacing the labels lets the maintainer
-re-triage with one glance if your call was off.
-
-Then **close the loop**: the description already carries an executable plan, so point the user at the
-sibling skill that runs it — **`/implement-issue #N`** turns the plan into a git worktree, a draft
-PR, and task-by-task commits, ticking the body's checkboxes as each task lands. For a batch, give the
-command per issue. Keep the report short — the issues themselves carry the detail.
+List every issue created with its title, URL, and applied labels (type / priority / effort / scope),
+and flag anything assumed or skipped (a label not in the live list, a duplicate you declined, a
+defaulted field). Then **close the loop**: point the user at **`/implement-issue #N`** to run the plan
+(worktree → draft PR → task-by-task commits, ticking the body's checkboxes). For a batch, give the
+command per issue. Keep the report short — the issues carry the detail.
 
 ---
 
 ## Notes on quality
 
-- **Stay template-driven.** Read `.github/ISSUE_TEMPLATE/*.yml` each run; don't hardcode fields that
-  could drift. The body's top section's job is to satisfy the template the maintainers chose.
-- **Ground the content in the repo.** Generic feature-request boilerplate is worthless; reference
-  real files, the layered pipeline, and the roadmap so the issue reads like it belongs here.
-- **Respect the architecture invariant.** Shape specs and plans to the profile's *Architecture grain* —
-  its layer order and its "keep X target-agnostic" rules — so a plan reads like it belongs in this repo
-  and doesn't break an invariant the maintainers rely on.
-- **The plan is a tracked checklist, not an essay.** It exists so someone can execute it task-by-task
-  and tick off progress *on the issue itself*. Preserve `writing-plans`' `- [ ]` checkboxes all the
-  way into the body, and keep the plan section visible (Step 6) — a plan flattened into prose, or
-  hidden in a collapsed block, has lost its job and its place in the progress meter.
-- **One pass, many issues.** When seeding a batch, create all issues, then give one consolidated
-  report with each issue's `/implement-issue` hand-off.
+- **Stay template-driven** — read `.github/ISSUE_TEMPLATE/*.yml` each run; don't hardcode fields that drift.
+- **Ground content in the repo** — reference real files, the layered pipeline, and the roadmap; generic boilerplate is worthless.
+- **Respect the architecture invariant** — shape specs/plans to the profile's *Architecture grain* so a plan reads like it belongs here.
+- **The plan is a tracked checklist, not an essay** — preserve `writing-plans`' `- [ ]` checkboxes into the body and keep the section visible; flattened-to-prose or hidden-in-`<details>` loses its job and its place in the progress meter.
