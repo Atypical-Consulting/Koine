@@ -414,4 +414,35 @@ public class PythonExpressionTests
         var expr = Member("lines", "isEmpty");
         t.TranslateNegated(expr).ShouldBe("not (len(self.lines) == 0)");
     }
+
+    [Fact]
+    public void User_field_named_after_member_op_emits_attribute_access_not_op_form()
+    {
+        // #672 (follow-up to #605): a user field named after an UNSAFE built-in member-op
+        // (isEmpty/trim/…) must emit a plain attribute access, mirroring the #605 semantic
+        // resolution — not the op form (`len(self.inner) == 0` / `self.inner.strip()`), which
+        // targets a receiver that has no such op and is therefore wrong Python.
+        const string src =
+            """
+            context Demo {
+              value Inner {
+                isEmpty: Bool
+                trim:    String
+              }
+              value Outer {
+                inner: Inner
+                flag: Bool   = inner.isEmpty
+                name: String = inner.trim
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var source = string.Join("\n", result.Files.Select(f => f.Contents));
+        source.ShouldContain("self.inner.is_empty");
+        source.ShouldContain("self.inner.trim");
+        source.ShouldNotContain("len(self.inner)");
+        source.ShouldNotContain("self.inner.strip()");
+    }
 }

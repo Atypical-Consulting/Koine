@@ -331,6 +331,51 @@ public class R1ExpressionTests
     }
 
     [Fact]
+    public void User_field_named_after_member_op_emits_field_access_not_op_form()
+    {
+        // #672 (follow-up to #605): #605 fixed the *semantics* so a user field named after a
+        // built-in member-op resolves as a plain field access. But the C# emitter still
+        // `switch`ed blindly on the member NAME, so an UNSAFE op name — one whose emitted form
+        // differs from a property access (isEmpty/isNotEmpty/trim/lower/upper/isBlank/isPresent/
+        // isNone) — still emitted the op form (`inner.Count == 0`, `inner.Trim()`) for a field
+        // that has no such member, failing to compile (CS1061: 'Inner' has no 'Count'/'Trim').
+        // The emitter must prefer the user-declared member, mirroring #605 one layer down.
+        const string src =
+            "context Demo {\n" +
+            "  value Inner {\n" +
+            "    isEmpty: Bool\n" +
+            "    trim:    String\n" +
+            "  }\n" +
+            "  value Outer {\n" +
+            "    inner: Inner\n" +
+            "    flag: Bool   = inner.isEmpty\n" +
+            "    name: String = inner.trim\n" +
+            "  }\n" +
+            "}\n";
+        Diagnose(src).ShouldBeEmpty();
+
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // The derived members read the declared property, not the built-in op form.
+        var source = string.Join("\n", result.Files.Select(f => f.Contents));
+        source.ShouldContain(".IsEmpty");
+        source.ShouldNotContain(".Count == 0");
+        source.ShouldNotContain(".Trim()");
+
+        // And the emitted C# compiles + runs: the derived members project the inner fields.
+        var (asm, errors) = TestSupport.Compile(result.Files);
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+
+        var inner = asm!.GetType("Demo.Inner")!;
+        var innerInstance = Activator.CreateInstance(inner, true, "hello");
+        var outer = asm.GetType("Demo.Outer")!;
+        var o = Activator.CreateInstance(outer, innerInstance);
+        outer.GetProperty("Flag")!.GetValue(o).ShouldBe(true);
+        outer.GetProperty("Name")!.GetValue(o).ShouldBe("hello");
+    }
+
+    [Fact]
     public void Numeric_min_and_double_negation_compile_and_run()
     {
         const string src =

@@ -679,4 +679,35 @@ public class PhpExpressionTests
         var expr = Member("lines", "isEmpty");
         t.TranslateNegated(expr).ShouldBe("!(count($this->lines) === 0)");
     }
+
+    [Fact]
+    public void User_field_named_after_member_op_emits_property_access_not_op_form()
+    {
+        // #672 (follow-up to #605): a user field named after an UNSAFE built-in member-op
+        // (isEmpty/trim/…) must emit a plain property access, mirroring the #605 semantic
+        // resolution — not the op form (`count($this->inner) === 0` / `trim($this->inner)`),
+        // which targets a receiver that has no such op and is therefore wrong PHP.
+        const string src =
+            """
+            context Demo {
+              value Inner {
+                isEmpty: Bool
+                trim:    String
+              }
+              value Outer {
+                inner: Inner
+                flag: Bool   = inner.isEmpty
+                name: String = inner.trim
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var source = string.Join("\n", result.Files.Select(f => f.Contents));
+        source.ShouldContain("$this->inner->isEmpty");
+        source.ShouldContain("$this->inner->trim");
+        source.ShouldNotContain("count($this->inner)");
+        source.ShouldNotContain("trim($this->inner)");
+    }
 }
