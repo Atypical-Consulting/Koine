@@ -837,6 +837,48 @@ describe('multi-file change set (agentic edits)', () => {
     expect(applyBtn.disabled).toBe(false);
   });
 
+  // #633: onApply can REJECT, not just resolve with { failed }. applyFileEdit only converts disk-write
+  // errors into a { failed } return; an un-guarded throw from a non-disk op (renderer/LSP sync, dirty
+  // refresh, saved-callback) escapes as a rejection. Without a .catch the Apply button is left stuck
+  // disabled forever, the error is swallowed, and the rejection is unhandled. A rejected apply must
+  // re-enable Apply and surface the error in the status live region.
+  test('a REJECTED apply re-enables Apply and surfaces the error (no stuck-disabled button)', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      req.editSession?.stage('events.koi', 'integration event OrderPlaced {}');
+      req.onText('Two edits.');
+      return 'Two edits.';
+    });
+    // The apply REJECTS (throws) rather than resolving with { failed } — an un-guarded throw mid-apply.
+    const onApplyChangeSet = vi.fn(async (_files: { relPath: string; body: string; isNew: boolean }[]) => {
+      throw new Error('setDoc blew up');
+    });
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        runEditTool: vi.fn(async () => 'ok'),
+        onApplyChangeSet,
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset-apply')).not.toBeNull());
+    const applyBtn = container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    applyBtn.click();
+
+    // The rejection is surfaced in the polite live region (not swallowed)…
+    await vi.waitFor(() =>
+      expect(container.querySelector('.koi-changeset-status')?.textContent).toContain('setDoc blew up'),
+    );
+    // …and Apply is re-enabled (not stuck disabled), so the user can retry the still-checked set; the
+    // panel is non-terminal (no "Applied ✓", Discard still present).
+    expect(applyBtn.disabled).toBe(false);
+    expect(applyBtn.textContent).not.toContain('✓');
+    expect(container.querySelector('.koi-changeset-discard')).not.toBeNull();
+  });
+
   // #473 (Task 1): a stale change-set panel from a prior turn must not stay clickable after a NEW send —
   // a late Apply on it would write stale full-file bodies wholesale over everything done since.
   test('a new send supersedes the prior un-applied change set (Apply + checkboxes disabled, superseded notice)', async () => {
