@@ -529,6 +529,60 @@ public static class TestSupport
         }
     }
 
+    /// <summary>
+    /// Writes the emitted Python files to a fresh temp directory and EXECUTES <paramref name="driver"/>
+    /// against them — the Python analogue of the Roslyn run-the-emitted-code meta-test, for runtime
+    /// hazards that <c>mypy</c>/<c>ast.parse</c> can't see (e.g. a frozen dataclass that type-checks
+    /// fine but throws <c>TypeError: unhashable type: 'dict'</c> when hashed). The driver runs as a
+    /// script in the package root, so it imports the emitted modules directly. When no interpreter is
+    /// found the result is <see cref="PythonCheck.Skipped"/> so the suite stays green without a Python
+    /// toolchain; when one IS present a non-zero exit (an uncaught exception) yields <c>Ok == false</c>
+    /// with stdout/stderr captured.
+    /// </summary>
+    public static PythonCheck RunPython(IEnumerable<EmittedFile> files, string driver)
+    {
+        var fileList = files.ToList();
+        if (ResolvePython() is not { } python)
+        {
+            return PythonCheck.Skipped;
+        }
+
+        string root = Path.Combine(Path.GetTempPath(), "koine-pyrun-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            foreach (EmittedFile f in fileList)
+            {
+                string path = Path.Combine(root, f.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, f.Contents);
+            }
+
+            string driverPath = Path.Combine(root, "_koine_driver.py");
+            File.WriteAllText(driverPath, driver);
+
+            var args = new List<string>(python.Arguments) { driverPath };
+            if (RunProcess(python.FileName, args, root) is not { } run)
+            {
+                return PythonCheck.Skipped;
+            }
+
+            if (run.ExitCode == 0)
+            {
+                return new PythonCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>());
+            }
+
+            var errors = (run.StdOut + run.StdErr)
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+            return new PythonCheck(ToolchainAvailable: true, Ok: false, errors);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
     /// <summary>How to invoke a tool: a program plus leading arguments (e.g. <c>python -m mypy</c>).</summary>
     private readonly record struct ToolInvocation(string FileName, IReadOnlyList<string> Arguments);
 
