@@ -8,6 +8,7 @@
 // the real panel DOM; fake timers cover the 350ms edit/bottom debounce.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { waitFor } from '@testing-library/preact';
+import { axe } from 'vitest-axe';
 import {
   createInspectorController,
   type InspectorAssistant,
@@ -1070,6 +1071,308 @@ describe('createInspectorController — right-edge tool-window stripe (#500)', (
     expect(deps.store.getState().right).toBe('notes');
     expect(stripBtn('notes').getAttribute('aria-pressed')).toBe('true');
     expect(stripBtn('props').getAttribute('aria-pressed')).toBe('false');
+    ctl.dispose();
+  });
+});
+
+describe('createInspectorController — split center layout', () => {
+  test('a 2-pane layout renders two .center-split-pane elements in #center-body', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    ctl.dispose();
+  });
+
+  test('each pane has a .center-pane-header with view selector buttons', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    const headers = document.querySelectorAll('.center-pane-header');
+    expect(headers.length).toBe(2);
+    // Each header should have view selector tabs
+    for (const header of Array.from(headers)) {
+      const tabs = header.querySelectorAll('.center-pane-tab');
+      expect(tabs.length).toBe(4); // visual, technical, docs, assistant
+    }
+
+    ctl.dispose();
+  });
+
+  test('clicking a view-selector button in pane B calls setPaneView (check via store state)', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    // Get pane B (second pane)
+    const panes = document.querySelectorAll<HTMLElement>('.center-split-pane');
+    const paneB = panes[1];
+    const paneBId = paneB.dataset.paneId!;
+
+    // Click the "Code" tab button in pane B
+    const codeTabs = paneB.querySelectorAll<HTMLButtonElement>('.center-pane-tab');
+    const codeTab = Array.from(codeTabs).find((b) => b.textContent === 'Code')!;
+    codeTab.click();
+    await waitFor(() => {
+      const layout = deps.store.getState().centerLayout;
+      const pane = layout.panes.find((p) => p.id === paneBId)!;
+      expect(pane.view).toBe('technical');
+    });
+
+    ctl.dispose();
+  });
+
+  test('clicking pane B makes pane B focused (sets focusedPaneId, adds is-focused class)', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    const panes = document.querySelectorAll<HTMLElement>('.center-split-pane');
+    const paneB = panes[1];
+    const paneBId = paneB.dataset.paneId!;
+
+    // Click the pane B element itself (not a button within it)
+    paneB.click();
+    await waitFor(() => {
+      expect(deps.store.getState().centerLayout.focusedPaneId).toBe(paneBId);
+    });
+
+    // The is-focused class should be on pane B
+    expect(paneB.classList.contains('is-focused')).toBe(true);
+    // Pane A should not have the class
+    expect(panes[0].classList.contains('is-focused')).toBe(false);
+
+    ctl.dispose();
+  });
+
+  test('reverting to single-pane removes the pane slots', async () => {
+    const { DEFAULT_CENTER_LAYOUT } = await import('@/store/slices/uiChrome');
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    // Go to split
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    // Revert to single pane
+    deps.store.getState().setCenterLayout(DEFAULT_CENTER_LAYOUT);
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(0);
+    });
+
+    ctl.dispose();
+  });
+
+  test('a 2-pane layout renders a .center-splitter between the pane slots', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    const splitters = document.querySelectorAll('.center-splitter');
+    expect(splitters.length).toBe(1);
+
+    // Splitter must be between the pane slots in DOM order
+    const children = Array.from(el('center-body').children);
+    const panes = children.filter((c) => c.classList.contains('center-split-pane'));
+    const splitterEls = children.filter((c) => c.classList.contains('center-splitter-host'));
+    expect(splitterEls.length).toBe(1);
+    // The splitter host must appear between pane[0] and pane[1]
+    const idx0 = children.indexOf(panes[0]);
+    const idxS = children.indexOf(splitterEls[0]);
+    const idx1 = children.indexOf(panes[1]);
+    expect(idxS).toBeGreaterThan(idx0);
+    expect(idxS).toBeLessThan(idx1);
+
+    ctl.dispose();
+  });
+
+  test('arrow key on the splitter calls resizeCenter (store sizes change)', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    const splitterEl = document.querySelector<HTMLElement>('[role="separator"]')!;
+    expect(splitterEl).not.toBeNull();
+
+    const sizesBefore = [...deps.store.getState().centerLayout.sizes];
+
+    // Fire ArrowRight on the splitter (row orientation → nudge pane[0] wider)
+    splitterEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+
+    await waitFor(() => {
+      const sizesAfter = deps.store.getState().centerLayout.sizes;
+      expect(sizesAfter[0]).not.toBe(sizesBefore[0]);
+    });
+
+    ctl.dispose();
+  });
+
+  test('the splitter has required aria attributes (role, aria-orientation, aria-valuenow, aria-valuemin, aria-valuemax)', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    const splitterEl = document.querySelector<HTMLElement>('[role="separator"]')!;
+    expect(splitterEl).not.toBeNull();
+    expect(splitterEl.getAttribute('aria-orientation')).toBe('vertical'); // row layout → vertical separator
+    expect(splitterEl.getAttribute('aria-valuenow')).not.toBeNull();
+    expect(splitterEl.getAttribute('aria-valuemin')).not.toBeNull();
+    expect(splitterEl.getAttribute('aria-valuemax')).not.toBeNull();
+    expect(splitterEl.tabIndex).toBe(0);
+
+    ctl.dispose();
+  });
+
+  test('vitest-axe: a 2-pane center layout has no accessibility violations', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    const centerBody = el('center-body');
+    expect(await axe(centerBody)).toHaveNoViolations();
+
+    ctl.dispose();
+  });
+
+  // --- Task 5: split/reset controls in the center tab bar ---
+
+  test('init() creates #center-split-controls inside #center-tabs', () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    const host = document.getElementById('center-split-controls');
+    expect(host).not.toBeNull();
+    expect(el('center-tabs').contains(host)).toBe(true);
+
+    ctl.dispose();
+  });
+
+  test('"Split →" button has aria-label "Split center pane right" and clicking it calls splitCenter("row")', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    const btn = document.querySelector<HTMLButtonElement>('[aria-label="Split center pane right"]');
+    expect(btn).not.toBeNull();
+
+    btn!.click();
+    await waitFor(() => {
+      expect(deps.store.getState().centerLayout.panes.length).toBe(2);
+      expect(deps.store.getState().centerLayout.orientation).toBe('row');
+    });
+
+    ctl.dispose();
+  });
+
+  test('"Split ↓" button has aria-label "Split center pane down" and clicking it calls splitCenter("column")', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    const btn = document.querySelector<HTMLButtonElement>('[aria-label="Split center pane down"]');
+    expect(btn).not.toBeNull();
+
+    btn!.click();
+    await waitFor(() => {
+      expect(deps.store.getState().centerLayout.panes.length).toBe(2);
+      expect(deps.store.getState().centerLayout.orientation).toBe('column');
+    });
+
+    ctl.dispose();
+  });
+
+  test('Reset button is absent in single-pane mode', () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    const btn = document.querySelector<HTMLButtonElement>('[aria-label="Reset center to single pane"]');
+    expect(btn).toBeNull();
+
+    ctl.dispose();
+  });
+
+  test('Reset button appears when 2+ panes; clicking it resets to DEFAULT_CENTER_LAYOUT', async () => {
+    const { DEFAULT_CENTER_LAYOUT } = await import('@/store/slices/uiChrome');
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    // Split first so the Reset button appears.
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const btn = document.querySelector<HTMLButtonElement>('[aria-label="Reset center to single pane"]');
+      expect(btn).not.toBeNull();
+    });
+
+    const resetBtn = document.querySelector<HTMLButtonElement>('[aria-label="Reset center to single pane"]')!;
+    resetBtn.click();
+
+    await waitFor(() => {
+      expect(deps.store.getState().centerLayout.panes.length).toBe(1);
+      expect(deps.store.getState().centerLayout).toEqual(DEFAULT_CENTER_LAYOUT);
+    });
+
+    // Reset button must disappear again.
+    await waitFor(() => {
+      expect(document.querySelector('[aria-label="Reset center to single pane"]')).toBeNull();
+    });
+
     ctl.dispose();
   });
 });
