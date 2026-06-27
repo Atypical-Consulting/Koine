@@ -68,10 +68,22 @@ C# without installing anything.
   <em>Koine Studio — your <code>.koi</code> model (left) and the C# it compiles to (right), live in the browser.</em>
 </p>
 
-- **[Koine Studio](https://atypical-consulting.github.io/Koine/studio/)** — the full web IDE: editor
-  with live diagnostics, a multi-target emitted-code preview (C# · TypeScript · Python · PHP · Rust),
-  the ubiquitous-language glossary, an interactive context-map graph, rendered aggregate/state-machine
-  diagrams, and a model outline with a bottom Events & Relationships panel. *(Also ships as a native
+### A tour of the IDE
+
+The hero above is the editor split — but Studio is a full IDE, and a single shot can't show it. Each
+surface below is a click away in the [live Studio](https://atypical-consulting.github.io/Koine/studio/):
+
+| IDE view | What it shows |
+|----------|---------------|
+| **Editor & live diagnostics** | Your `.koi` model on the left, the emitted code on the right, with error squiggles and quick info as you type — the same parser and validator the CLI runs. |
+| **Emit-target switcher** | Flip the *same* model between **C#**, **TypeScript**, **Python**, **PHP**, and **Rust** output without leaving the page. |
+| **Context-map graph** | An interactive graph of the bounded contexts and the relationships between them. |
+| **Diagram views** | Aggregates and state machines rendered as diagrams straight from the model. |
+| **Ubiquitous-language glossary** | The generated glossary of every term in the domain, kept in lock-step with the model. |
+| **Model outline & panels** | A structural outline of the model plus a bottom **Events & Relationships** panel. |
+
+- **[Koine Studio](https://atypical-consulting.github.io/Koine/studio/)** — the full web IDE (every
+  view in the tour above), running the real compiler in your browser. *(Also ships as a native
   [Tauri](https://tauri.app/) desktop app — same UI, see [`tooling/koine-studio`](tooling/koine-studio).)*
 - **[Playground](https://atypical-consulting.github.io/Koine/playground/)** — a lightweight,
   zero-install editor that recompiles to C#/TypeScript the moment you stop typing. Great for a quick
