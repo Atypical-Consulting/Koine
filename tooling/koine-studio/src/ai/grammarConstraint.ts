@@ -36,6 +36,77 @@ export function isGrammarCapable(provider: AiProvider, baseUrl: string): boolean
   return provider === 'openai' && isLocalProviderUrl(baseUrl);
 }
 
+/**
+ * The single string the capability probe's grammar admits (issue #446). A backend that truly honours a
+ * top-level GBNF `grammar` field can ONLY emit this; one that ignores it (Ollama's OpenAI-compatible
+ * endpoint constrains via its own `format` field and drops a top-level `grammar`) emits something else.
+ * Distinctive enough that an unconstrained model won't reproduce it by chance.
+ */
+export const GRAMMAR_PROBE_SENTINEL = 'KOINE_GBNF_PROBE_OK';
+
+/** A GBNF grammar whose ONLY accepted output is {@link GRAMMAR_PROBE_SENTINEL}. */
+export const GRAMMAR_PROBE_GBNF = `root ::= "${GRAMMAR_PROBE_SENTINEL}"`;
+
+/**
+ * Injected request runner for {@link probeGrammarCapability}: send a tiny grammar-constrained request to
+ * the endpoint and resolve its text. Injected (not imported) so the probe stays pure / unit-testable
+ * without a live LLM, matching the rest of this module's dependency-injected design.
+ */
+export type GrammarProbeRunner = (grammar: string) => Promise<string>;
+
+// Per-endpoint capability verdicts, so the (network) probe runs at most once per endpoint per session.
+// Keyed by provider + baseUrl, so switching model server / port re-probes. Module-level on purpose: the
+// verdict is a property of the endpoint, shared across every panel/turn pointed at it.
+const grammarCapabilityCache = new Map<string, boolean>();
+
+/** Forget all cached probe verdicts. A test seam (each test re-probes from scratch); also lets a future
+ *  "re-detect endpoint" action drop a stale verdict. */
+export function resetGrammarCapabilityCache(): void {
+  grammarCapabilityCache.clear();
+}
+
+/**
+ * Decide whether `baseUrl` ACTUALLY honours a top-level GBNF grammar — by behaviour, not by URL (#446).
+ *
+ * {@link isGrammarCapable} (the URL heuristic) is necessary but NOT sufficient: a loopback
+ * OpenAI-compatible endpoint might honour `grammar` (llama.cpp's server) or might silently ignore it
+ * (Ollama). This sends a request whose grammar admits only {@link GRAMMAR_PROBE_SENTINEL} and checks the
+ * reply conforms; a non-conforming reply means the grammar didn't take.
+ *
+ * Fail-safe throughout: a non-local / non-OpenAI endpoint is never probed (returns false without calling
+ * `run`); a probe that throws or times out is treated as NOT capable, so the caller degrades to
+ * parse-and-repair rather than trusting a constraint that may not exist. Only a DEFINITIVE verdict (the
+ * endpoint answered, honouring the sentinel grammar or not) is cached per endpoint, so a backend that
+ * genuinely ignores the grammar isn't re-probed every turn; a probe that ERRORED is not cached, so a
+ * transiently-unreachable (or aborted-mid-probe) endpoint re-probes on a later turn instead of being stuck
+ * on parse-and-repair for the whole session.
+ */
+export async function probeGrammarCapability(
+  provider: AiProvider,
+  baseUrl: string,
+  run: GrammarProbeRunner,
+): Promise<boolean> {
+  // Cheap URL precondition first — never spend a probe request on a backend that can't possibly honour a
+  // grammar field (Anthropic, hosted OpenAI proper, garbage URLs).
+  if (!isGrammarCapable(provider, baseUrl)) return false;
+
+  const key = `${provider} ${baseUrl}`;
+  const cached = grammarCapabilityCache.get(key);
+  if (cached !== undefined) return cached;
+
+  try {
+    const reply = await run(GRAMMAR_PROBE_GBNF);
+    const capable = reply.trim() === GRAMMAR_PROBE_SENTINEL;
+    grammarCapabilityCache.set(key, capable); // a definitive verdict — the endpoint answered; cache it
+    return capable;
+  } catch {
+    // Transient probe failure (endpoint briefly unreachable / timeout) or the turn was aborted mid-probe:
+    // fail safe to not-capable for THIS turn, but DON'T cache — that's not a property of the endpoint, so a
+    // later turn re-probes once it's reachable rather than being stuck on parse-and-repair all session.
+    return false;
+  }
+}
+
 /** Which constraint strategy a turn should use (see {@link chooseMechanism}). */
 export type ConstraintMechanism = 'gbnf' | 'repair' | 'off';
 
@@ -56,6 +127,22 @@ export function chooseMechanism(
   if (!constrainOn) return 'off';
   if (gbnfAvailable && isGrammarCapable(provider, baseUrl)) return 'gbnf';
   return 'repair';
+}
+
+/**
+ * How many parse-and-repair rounds a turn may spend, given its mechanism and the configured cap.
+ *
+ * The `'gbnf'` path gets the SAME budget as `'repair'` (issue #446). A grammar-capable backend usually
+ * makes the first candidate valid by construction, so {@link repairToValid} returns on round 0 and no
+ * repair happens. But if the backend silently IGNORED the grammar (Ollama's OpenAI-compatible endpoint
+ * constrains via its own `format` field and drops a top-level `grammar`), the unconstrained output can
+ * fail to parse — and rather than disabling Apply right there (strictly *worse* than parse-and-repair,
+ * since the user loses the repair loop they'd otherwise get), the gbnf path degrades into the same
+ * bounded repair loop. `'off'` never repairs.
+ */
+export function repairBudgetFor(mechanism: ConstraintMechanism, maxRounds: number): number {
+  if (mechanism === 'off') return 0;
+  return Math.max(0, Math.floor(maxRounds));
 }
 
 /**

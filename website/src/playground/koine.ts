@@ -42,6 +42,18 @@ export interface EmittedFile {
   contents: string;
 }
 
+/**
+ * LSP semantic tokens (full document) — the delta-encoded int stream the wasm `SemanticTokens` export
+ * returns (shipped in #361). `data` is groups of 5 ints `[deltaLine, deltaStartChar, length, tokenType,
+ * tokenModifiers]`; `resultId` supports delta requests the playground doesn't use. Mirrors the server
+ * contract (`SemanticTokens` in tooling/koine-studio/src/lsp/protocol.ts) — the editor decodes this
+ * against the fixed `SEMANTIC_TOKEN_TYPES` legend to paint semantic highlighting.
+ */
+export interface SemanticTokens {
+  data: number[];
+  resultId?: string | null;
+}
+
 export interface CompileResult {
   ok: boolean;
   target: string;
@@ -160,6 +172,15 @@ export async function diagnose(source: string, opts?: CallOptions): Promise<Koin
 export async function compile(source: string, target: Target, opts?: CallOptions): Promise<CompileResult> {
   const client = await loadApi();
   return JSON.parse(await client.call('Compile', [source, target], opts)) as CompileResult;
+}
+
+/** LSP semantic tokens for the document (#367): routes the wasm `SemanticTokens` export through the
+ *  SAME generic worker (`koine.worker.ts` dispatches `interop[method](...args)`, so no worker edit) and
+ *  parses the JSON int stream. The editor decodes this against the fixed legend to paint semantic
+ *  highlighting; an empty `data` (a non-parsing document) leaves the static grammar authoritative. */
+export async function semanticTokens(source: string, opts?: CallOptions): Promise<SemanticTokens> {
+  const client = await loadApi();
+  return JSON.parse(await client.call('SemanticTokens', [source], opts)) as SemanticTokens;
 }
 
 /** The module's self-description (#330): version + [JSExport] names + emit targets — the single source

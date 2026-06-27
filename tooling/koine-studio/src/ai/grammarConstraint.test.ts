@@ -1,9 +1,14 @@
-import { describe, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   chooseMechanism,
+  GRAMMAR_PROBE_GBNF,
+  GRAMMAR_PROBE_SENTINEL,
   isGrammarCapable,
   parseValidationOutcome,
+  probeGrammarCapability,
+  repairBudgetFor,
   repairToValid,
+  resetGrammarCapabilityCache,
   type RepairDeps,
 } from '@/ai/grammarConstraint';
 import { normalizeMcpValidate } from '@/ai/assistantTools';
@@ -54,6 +59,97 @@ describe('chooseMechanism()', () => {
     // Anthropic is never capable; OpenAI proper ignores a grammar field — both repair.
     expect(chooseMechanism(true, 'anthropic', 'https://api.anthropic.com', true)).toBe('repair');
     expect(chooseMechanism(true, 'openai', 'https://api.openai.com/v1', true)).toBe('repair');
+  });
+});
+
+describe('probeGrammarCapability()', () => {
+  // The probe replaces URL inference (#446): URL says a loopback OpenAI endpoint COULD honor a grammar,
+  // but only behavior proves it — llama.cpp's server honors a top-level `grammar`, Ollama's OpenAI-compat
+  // endpoint silently ignores it. The probe sends a tiny request whose grammar admits only the sentinel
+  // and checks the reply conforms; everything fails safe to not-capable.
+  beforeEach(() => resetGrammarCapabilityCache());
+
+  test('a backend that honours the grammar (reply IS the sentinel) is capable', async () => {
+    const run = vi.fn().mockResolvedValue(GRAMMAR_PROBE_SENTINEL);
+    expect(await probeGrammarCapability('openai', 'http://localhost:1234/v1', run)).toBe(true);
+    // The probe drove the endpoint with the sentinel-only grammar.
+    expect(run).toHaveBeenCalledWith(GRAMMAR_PROBE_GBNF);
+  });
+
+  test('a backend that IGNORES the grammar (reply is anything else, e.g. Ollama) is not capable', async () => {
+    const run = vi.fn().mockResolvedValue('{"unconstrained":"output"}');
+    expect(await probeGrammarCapability('openai', 'http://localhost:11434/v1', run)).toBe(false);
+  });
+
+  test('a probe that errors / times out fails safe to not capable', async () => {
+    const run = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+    expect(await probeGrammarCapability('openai', 'http://localhost:1234/v1', run)).toBe(false);
+  });
+
+  test('tolerates whitespace around the sentinel in the reply', async () => {
+    const run = vi.fn().mockResolvedValue(`\n  ${GRAMMAR_PROBE_SENTINEL}  \n`);
+    expect(await probeGrammarCapability('openai', 'http://localhost:1234/v1', run)).toBe(true);
+  });
+
+  test('a non-local / non-OpenAI endpoint is never probed (false, run untouched)', async () => {
+    const run = vi.fn();
+    expect(await probeGrammarCapability('openai', 'https://api.openai.com/v1', run)).toBe(false);
+    expect(await probeGrammarCapability('anthropic', 'http://localhost:1234/v1', run)).toBe(false);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  test('caches the verdict per endpoint — a second call does not re-probe', async () => {
+    const run = vi.fn().mockResolvedValue(GRAMMAR_PROBE_SENTINEL);
+    expect(await probeGrammarCapability('openai', 'http://localhost:1234/v1', run)).toBe(true);
+    expect(await probeGrammarCapability('openai', 'http://localhost:1234/v1', run)).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  test('caches a DEFINITIVE negative (endpoint answered, reply ≠ sentinel) — not re-probed', async () => {
+    const run = vi.fn().mockResolvedValue('nope');
+    expect(await probeGrammarCapability('openai', 'http://localhost:1234/v1', run)).toBe(false);
+    expect(await probeGrammarCapability('openai', 'http://localhost:1234/v1', run)).toBe(false);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  test('does NOT cache a probe ERROR — a transiently-down/aborted endpoint re-probes next turn', async () => {
+    // First probe errors (endpoint down) → false but uncached; second probe succeeds → capable.
+    const run = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+      .mockResolvedValueOnce(GRAMMAR_PROBE_SENTINEL);
+    expect(await probeGrammarCapability('openai', 'http://localhost:1234/v1', run)).toBe(false);
+    expect(await probeGrammarCapability('openai', 'http://localhost:1234/v1', run)).toBe(true);
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  test('cache is keyed per endpoint — a different host/port re-probes', async () => {
+    const run = vi.fn().mockResolvedValue(GRAMMAR_PROBE_SENTINEL);
+    await probeGrammarCapability('openai', 'http://localhost:1234/v1', run);
+    await probeGrammarCapability('openai', 'http://localhost:11434/v1', run);
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('repairBudgetFor()', () => {
+  // The repair-round budget is what makes the gbnf path self-heal (#446): 'gbnf' now gets the SAME
+  // budget as 'repair', so a grammar a backend silently ignored (Ollama) falls into parse-and-repair
+  // instead of stopping after the single validate — the gbnf path is never strictly worse than repair.
+  test("'off' never repairs", () => {
+    expect(repairBudgetFor('off', 3)).toBe(0);
+  });
+
+  test("'repair' gets the full round budget", () => {
+    expect(repairBudgetFor('repair', 3)).toBe(3);
+  });
+
+  test("'gbnf' ALSO gets the full budget — a failed validate degrades to parse-and-repair", () => {
+    expect(repairBudgetFor('gbnf', 3)).toBe(3);
+  });
+
+  test('floors and clamps the round count (never negative, integral)', () => {
+    expect(repairBudgetFor('repair', -1)).toBe(0);
+    expect(repairBudgetFor('gbnf', 2.9)).toBe(2);
   });
 });
 

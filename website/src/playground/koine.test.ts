@@ -86,6 +86,48 @@ describe('playground koine.ts — worker proxy', () => {
     expect(result.version).toBe('0.17.3'); // the version the playground renders comes from here
   });
 
+  it('semanticTokens() round-trips through the mocked worker client and JSON.parses the int stream (#367)', async () => {
+    // The wasm SemanticTokens export returns the LSP delta-encoded `{ data, resultId }` as a JSON
+    // string; the facade routes `SemanticTokens` through the SAME generic worker (no worker edit) and
+    // parses it into a typed `{ data: number[] }`.
+    const tokens = { data: [0, 0, 5, 4, 0, 0, 6, 5, 0, 0], resultId: null };
+    const mockCall = vi.fn<(method: string, args: unknown[]) => Promise<string>>();
+    mockCall.mockResolvedValue(JSON.stringify(tokens));
+
+    const { createKoineWorkerClient } = await import('./workerClient');
+    (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
+      call: mockCall,
+      whenReady: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+    });
+
+    const { semanticTokens } = await import('./koine');
+    const src = 'value Money { amount Int }';
+    const result = await semanticTokens(src);
+
+    expect(mockCall).toHaveBeenCalledWith('SemanticTokens', [src], undefined);
+    expect(result).toEqual(tokens);
+    expect(result.data).toEqual([0, 0, 5, 4, 0, 0, 6, 5, 0, 0]);
+  });
+
+  it('semanticTokens() forwards the AbortSignal opts to the worker client call (#367)', async () => {
+    const mockCall = vi.fn<(method: string, args: unknown[], opts?: unknown) => Promise<string>>();
+    mockCall.mockResolvedValue(JSON.stringify({ data: [] }));
+
+    const { createKoineWorkerClient } = await import('./workerClient');
+    (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
+      call: mockCall,
+      whenReady: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      dispose: vi.fn(),
+    });
+
+    const { semanticTokens } = await import('./koine');
+    const ac = new AbortController();
+    await semanticTokens('value Foo { }', { signal: ac.signal });
+
+    expect(mockCall).toHaveBeenCalledWith('SemanticTokens', ['value Foo { }'], { signal: ac.signal });
+  });
+
   it('preloadCompiler() returns void synchronously (fire and forget — does not block)', async () => {
     // The whenReady mock that delays resolution; preloadCompiler must not await it
     let resolveWhenReady!: () => void;
