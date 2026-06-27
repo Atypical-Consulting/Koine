@@ -19,6 +19,7 @@ import {
 import { createEditorSession } from '@/shell/editorSession';
 import { createInspectorController } from '@/shell/inspectorController';
 import { leftRailMarkup } from '@/shell/leftRail';
+import { rightStripMarkup } from '@/shell/rightStrip';
 import { openInspectorSheet } from '@/shell/inspectorSheet';
 import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
@@ -519,6 +520,11 @@ export function init(): () => void {
   // <aside id="leftrail"> a thin shell. Inject it here — synchronously, before any rail el(...) lookup or
   // the inspector controller below — so #filetree-body / #rail-domain-pane / the doclinks all resolve.
   el<HTMLElement>('leftrail').innerHTML = leftRailMarkup();
+
+  // The right-edge tool-window stripe's buttons are owned by rightStrip.ts (single source of truth, #500);
+  // index.html keeps <div id="right-strip"> a thin shell. Inject before the inspector controller below so
+  // its `.rstrip-btn` lookup + wiring resolve, mirroring the leftRail injection above.
+  el<HTMLElement>('right-strip').innerHTML = rightStripMarkup();
 
   const treeBodyEl = el<HTMLElement>('filetree-body');
   const treeTitleEl = el<HTMLElement>('filetree-title');
