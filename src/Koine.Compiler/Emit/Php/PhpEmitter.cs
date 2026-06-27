@@ -192,4 +192,30 @@ public sealed partial class PhpEmitter : IEmitter
                 break;
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Constructor parameter ordering
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Orders constructor parameters so those carrying a PHP default value (constant-initializer
+    /// defaults and optional <c>= null</c> fields) come last, as PHP requires — a required parameter
+    /// after an optional/defaulted one is illegal (PHP silently drops the default and
+    /// <c>phpstan --level max</c> reports <c>parameter.requiredAfterOptional</c>). Within each group
+    /// declaration order is preserved (stable sort), mirroring the C# emitter's <c>OrderCtorParams</c>.
+    /// <para>
+    /// Every site that builds a PHP constructor signature — and every positional <c>new self(...)</c> /
+    /// event-construction call that must line up with it — routes through this so signatures and call
+    /// sites stay consistent.
+    /// </para>
+    /// </summary>
+    private static IEnumerable<Member> OrderCtorParams(IEnumerable<Member> members) =>
+        members.OrderBy(m => HasCtorDefault(m) ? 1 : 0);
+
+    /// <summary>
+    /// True when a stored member emits with a PHP constructor default: a constant-initializer member
+    /// (<c>= &lt;default&gt;</c>) or an optional member (<c>= null</c>). The caller passes the already
+    /// stored-field-filtered list, so derived members never reach here.
+    /// </summary>
+    private static bool HasCtorDefault(Member m) => m.Initializer is not null || m.Type.IsOptional;
 }
