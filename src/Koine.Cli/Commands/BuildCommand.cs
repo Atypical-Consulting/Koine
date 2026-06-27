@@ -101,6 +101,16 @@ internal class BuildSettings : CommandSettings
         var applicationMediatr = AppMediatr || targetOptions.ApplicationMediatr;
         var applicationMapping = AppMapping ?? targetOptions.ApplicationMapping;
 
+        // The DTO/read-model mapping strategy (issue #630): validate the resolved value — the explicit
+        // --app-mapping flag or the application.mapping config key — against the modes the emitter
+        // understands. An unknown/typo'd value (e.g. "mapperley") is a hard error rather than a silent
+        // fall-back to plain, matching how --layers rejects an unknown layer name.
+        if (applicationMapping is { } mapping && !ValidAppMappings.Contains(mapping))
+        {
+            error = $"unknown app-mapping '{mapping}' (valid modes: plain, mapperly)";
+            return false;
+        }
+
         // The Application sub-options imply the Application layer (issue #618). A user who reaches for
         // --app-mediatr/--app-mapping clearly wants the Application layer, so honor that the same way
         // application/infrastructure already imply domain — otherwise the flag is a silent no-op when
@@ -127,6 +137,12 @@ internal class BuildSettings : CommandSettings
     /// <summary>The C# layers a user may request (issues #128/#129).</summary>
     private static readonly IReadOnlySet<string> ValidLayers =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "domain", "application", "infrastructure" };
+
+    /// <summary>The DTO/read-model mapping strategies a user may request via <c>--app-mapping</c> /
+    /// <c>application.mapping</c> (issue #630). An unknown value is a hard error, not a silent
+    /// fall-back to <c>plain</c>.</summary>
+    private static readonly IReadOnlySet<string> ValidAppMappings =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "plain", "mapperly" };
 
     /// <summary>
     /// Resolves the layer selector: the explicit <c>--layers</c> flag wins over the config's
