@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Services;
@@ -71,6 +72,22 @@ public class TemplatesValidationTests
     [MemberData(nameof(TemplateFolders))]
     public void Template_compiles_green_in_directory_mode(string folder)
     {
+        var result = CompileTemplate(folder);
+        var errors = result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+
+        errors.ShouldBeEmpty(
+            $"template '{Path.GetFileName(folder)}' did not compile cleanly:\n" +
+            string.Join("\n", errors.Select(d => $"{d.File}:{d.Line}:{d.Column}: {d.Code}: {d.Message}")));
+        result.Files.ShouldNotBeEmpty($"template '{Path.GetFileName(folder)}' emitted no C# files");
+    }
+
+    /// <summary>
+    /// Compiles a template folder in directory mode (every <c>.koi</c> under it as one model, so
+    /// cross-file imports and context maps resolve) and returns the full <see cref="CompileResult"/> —
+    /// including the bound <see cref="KoineModel"/> — for the assertions below to read.
+    /// </summary>
+    private static CompileResult CompileTemplate(string folder)
+    {
         var sources = Directory
             .EnumerateFiles(folder, "*.koi", SearchOption.AllDirectories)
             .OrderBy(p => p, StringComparer.Ordinal)
@@ -78,14 +95,7 @@ public class TemplatesValidationTests
             .ToList();
 
         sources.ShouldNotBeEmpty($"template '{Path.GetFileName(folder)}' has no .koi files to compile");
-
-        var result = new KoineCompiler().Compile(sources, new CSharpEmitter());
-        var errors = result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
-
-        errors.ShouldBeEmpty(
-            $"template '{Path.GetFileName(folder)}' did not compile cleanly:\n" +
-            string.Join("\n", errors.Select(d => $"{d.File}:{d.Line}:{d.Column}: {d.Code}: {d.Message}")));
-        result.Files.ShouldNotBeEmpty($"template '{Path.GetFileName(folder)}' emitted no C# files");
+        return new KoineCompiler().Compile(sources, new CSharpEmitter());
     }
 
     [Theory]
@@ -134,6 +144,47 @@ public class TemplatesValidationTests
                 property.Name,
                 $"template '{folderName}' manifest has an unknown property '{property.Name}' (the schema forbids additionalProperties)");
         }
+    }
+
+    /// <summary>
+    /// The <c>coreAggregate</c> field must follow one convention (issue #640): it names the declared
+    /// aggregate that anchors the template; a template that declares no aggregate names its headline
+    /// entity instead. Compiles each template to its <see cref="KoineModel"/> and asserts the manifest
+    /// value resolves to a real declaration — so the field can never silently drift to a concept that
+    /// is not actually in the model (e.g. the historical <c>library -&gt; "Loan"</c>, a root entity, not
+    /// the <c>aggregate Lending</c> it belongs to).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(TemplateFolders))]
+    public void Template_coreAggregate_names_a_declared_aggregate_or_entity(string folder)
+    {
+        string folderName = Path.GetFileName(folder);
+        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "template.json")));
+        string coreAggregate = RequiredString(doc.RootElement, "coreAggregate", folderName);
+
+        var result = CompileTemplate(folder);
+        result.Model.ShouldNotBeNull($"template '{folderName}' produced no model to validate coreAggregate against");
+
+        var declaredTypes = result.Model!.Contexts.SelectMany(c => c.AllTypeDecls()).ToList();
+        var aggregateNames = declaredTypes.OfType<AggregateDecl>()
+            .Select(a => a.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var entityNames = declaredTypes.OfType<EntityDecl>()
+            .Select(e => e.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        // The convention: name a declared aggregate; only when the template declares no aggregate at
+        // all may coreAggregate fall back to a declared (headline) entity. So a template that DOES
+        // declare aggregates must point at one of them, never at a mere entity.
+        bool hasAggregate = aggregateNames.Count > 0;
+        var allowed = hasAggregate ? aggregateNames : entityNames;
+
+        allowed.ShouldContain(
+            coreAggregate,
+            $"template '{folderName}' coreAggregate '{coreAggregate}' must name a declared " +
+            $"{(hasAggregate ? "aggregate" : "entity")}; declared " +
+            $"{(hasAggregate ? "aggregates" : "entities")}: " +
+            $"{string.Join(", ", allowed.OrderBy(n => n, StringComparer.Ordinal))}");
     }
 
     private static string RequiredString(JsonElement obj, string property, string folderName)

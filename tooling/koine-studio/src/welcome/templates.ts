@@ -31,7 +31,7 @@ export interface Template {
   tags: string[];
   /** Names of the bounded contexts the template defines. */
   contexts: string[];
-  /** The headline aggregate that anchors the template. */
+  /** The declared aggregate that anchors the template (its name); the headline entity for a template that declares no aggregate. */
   coreAggregate: string;
   /** The primary `.koi` file opened first; its contents are `source`. */
   entryFile: string;
