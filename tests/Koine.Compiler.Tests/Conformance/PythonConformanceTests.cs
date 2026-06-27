@@ -426,6 +426,67 @@ public class PythonConformanceTests
         AssertStrictlyTypeChecks(result.Files);
     }
 
+    /// <summary>
+    /// Issue #613: a single-line <c>///</c> doc whose text ends in a double-quote must not abut the
+    /// closing <c>"""</c> delimiter. The buggy emit concatenated them into <c>""""</c> (four quotes) —
+    /// the tokenizer closes the docstring after the first three and is left with a dangling <c>"</c>,
+    /// a module-level <c>SyntaxError</c> that breaks the WHOLE emitted module. The emitter now promotes
+    /// such a docstring to the multi-line form (closing <c>"""</c> on its own line), so the content and
+    /// the delimiter never collide. Toolchain-free: asserts the emitted shape directly.
+    /// </summary>
+    [Fact]
+    public void Single_line_doc_ending_in_quote_does_not_collide_with_closing_delimiter()
+    {
+        const string source = """
+            context Vault {
+              /// Wrap the key "K"
+              value WrapKey {
+                code: String
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var module = FileText(result.Files, "vault/value_objects/wrap_key.py");
+        // The trailing quote must not merge with the closing delimiter into a four-quote run.
+        module.ShouldNotContain("\"\"\"\"");
+        // It is promoted to the multi-line form: content then the closing """ on its OWN line.
+        module.ShouldContain("\"\"\"Wrap the key \"K\"\n");
+    }
+
+    /// <summary>
+    /// Issue #613, the parse safety net: a single-line doc abutting the closing delimiter in any of
+    /// the awkward ways — a trailing single/double quote, a lone quote, an embedded triple-quote run,
+    /// or a trailing backslash — must always emit a module that <c>ast.parse</c>s. Skipped (not failed)
+    /// only when no Python interpreter is present; with one it MUST parse.
+    /// </summary>
+    [Theory]
+    [InlineData("Wrap the key \"K\"")] // ends in one quote (the reported bug)
+    [InlineData("She said \"\"")]       // ends in two quotes
+    [InlineData("\"")]                   // the doc IS a lone quote
+    [InlineData("A literal \"\"\" run")] // an embedded triple-quote run
+    [InlineData("A path C:\\")]          // ends in a backslash
+    public void Single_line_doc_with_delimiter_edges_emits_parseable_python(string doc)
+    {
+        string source = $$"""
+            context Vault {
+              /// {{doc}}
+              value WrapKey {
+                code: String
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.PythonCheck syntax = TestSupport.SyntaxCheckPython(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {

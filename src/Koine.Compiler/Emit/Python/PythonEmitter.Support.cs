@@ -467,7 +467,19 @@ public sealed partial class PythonEmitter
         var lines = doc.Split('\n');
         if (lines.Length == 1)
         {
-            sb.Append(indent).Append("\"\"\"").Append(EscapeDoc(lines[0])).Append("\"\"\"\n");
+            var escaped = EscapeDoc(lines[0]);
+
+            // A trailing `"` would abut the closing delimiter into `""""` — the tokenizer closes the
+            // docstring after three quotes and is left with a dangling `"`, a module-level SyntaxError.
+            // Promote it to the multi-line form (closing `"""` on its own line), the already-safe shape.
+            if (escaped.EndsWith('"'))
+            {
+                sb.Append(indent).Append("\"\"\"").Append(escaped).Append('\n')
+                    .Append(indent).Append("\"\"\"\n");
+                return;
+            }
+
+            sb.Append(indent).Append("\"\"\"").Append(escaped).Append("\"\"\"\n");
             return;
         }
 
