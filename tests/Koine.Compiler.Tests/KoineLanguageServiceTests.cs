@@ -1087,4 +1087,84 @@ public class KoineLanguageServiceTests
                 $"ReferencesAt(compilation) must contain reference at {refItem.Uri}:{refItem.Line}:{refItem.StartColumn}");
         }
     }
+
+    // ---- Navigation resolves at an identifier's FIRST column (#620) -------
+    // TokenLocator's (start, end] containment is correct for completion but leaves an
+    // identifier's first column dead for navigation. These pin the cursor exactly on the
+    // first column (not one column in, as the older tests had to) and require resolution.
+
+    [Fact]
+    public void Hover_resolves_at_an_identifiers_first_column()
+    {
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal }\n" + // "Money" decl: 'M' at column 8
+            "  value Line { price: Money }\n" +
+            "}\n";
+        var hover = Svc.HoverAt(Doc(src), U, line: 1, character: 8); // on the 'M', the start column
+        hover.ShouldNotBeNull();
+        hover.Markdown.ShouldContain("Money");
+    }
+
+    [Fact]
+    public void Definition_resolves_at_an_identifiers_first_column()
+    {
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  value Line { price: Money }\n" + // the "Money" use: 'M' at column 22
+            "}\n";
+        var def = Svc.DefinitionAt(Doc(src), U, line: 2, character: 22); // on the 'M', the start column
+        def.ShouldNotBeNull();
+        def.Target.Line.ShouldBe(2); // 1-based line of "value Money"
+    }
+
+    [Fact]
+    public void References_resolve_at_an_identifiers_first_column()
+    {
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal }\n" + // "Money" decl: 'M' at column 8
+            "  value Line { price: Money }\n" +
+            "}\n";
+        var refs = Svc.ReferencesAt(Doc(src), U, line: 1, character: 8); // on the 'M', the start column
+        refs.Count.ShouldBe(2); // declaration + one use
+    }
+
+    [Fact]
+    public void PrepareRename_resolves_at_an_identifiers_first_column()
+    {
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal }\n" + // "Money" decl: 'M' at column 8
+            "  value Line { price: Money }\n" +
+            "}\n";
+        Svc.PrepareRenameAt(Doc(src), U, line: 1, character: 8).ShouldNotBeNull(); // on the 'M'
+    }
+
+    [Fact]
+    public void Rename_resolves_at_an_identifiers_first_column()
+    {
+        var src =
+            "context C {\n" +
+            "  value Money { amount: Decimal }\n" + // "Money" decl: 'M' at column 8
+            "  value Line { price: Money }\n" +
+            "}\n";
+        var edits = Svc.RenameAt(Doc(src), U, line: 1, character: 8, newName: "Cash"); // on the 'M'
+        edits.ShouldNotBeNull();
+        edits.Count.ShouldBe(2); // declaration + one use
+    }
+
+    [Fact]
+    public void Hover_resolves_a_single_character_type_on_its_sole_glyph()
+    {
+        var src =
+            "context C {\n" +
+            "  value M { amount: Decimal }\n" + // single-char type 'M' at column 8 (length 1)
+            "  value Line { m: M }\n" +
+            "}\n";
+        var hover = Svc.HoverAt(Doc(src), U, line: 1, character: 8); // on 'M' itself — its only glyph
+        hover.ShouldNotBeNull();
+        hover.Markdown.ShouldContain("amount"); // a member of M, proving the type resolved
+    }
 }

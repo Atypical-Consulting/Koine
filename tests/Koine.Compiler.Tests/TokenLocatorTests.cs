@@ -88,4 +88,49 @@ public class TokenLocatorTests
         var ctx = TokenLocator.Locate("value V {\n  status: Dr\n}\n", line: 1, character: 11);
         ctx.Partial.ShouldBe("D");
     }
+
+    // ---- Navigation vs completion containment at the first column (#620) ----
+
+    [Fact]
+    public void Navigation_resolves_a_token_at_its_first_column()
+    {
+        // "  amount: Decimal" — 'amount' starts at column 2.
+        var src = "value V {\n  amount: Decimal\n}\n";
+
+        // Completion's (start, end] containment treats the first column as NOT inside
+        // the token (the caret there belongs to whatever sits to its left).
+        TokenLocator.Locate(src, line: 1, character: 2).CurrentToken.ShouldBeNull();
+
+        // Navigation opts into inclusive-start [start, end] containment, so the same
+        // first column now resolves the identifier under it.
+        var nav = TokenLocator.Locate(src, line: 1, character: 2, navigation: true);
+        nav.CurrentToken.ShouldNotBeNull();
+        nav.CurrentToken!.Text.ShouldBe("amount");
+    }
+
+    [Fact]
+    public void Navigation_resolves_a_single_character_identifier_on_its_only_glyph()
+    {
+        // "value V {" — the single-char type name 'V' sits at column 6. Its only inside
+        // position under completion's (start, end] is its end (column 7), so its sole
+        // glyph (column 6) is dead for navigation until inclusive-start containment.
+        var src = "value V {\n}\n";
+
+        TokenLocator.Locate(src, line: 0, character: 6).CurrentToken.ShouldBeNull();
+
+        var nav = TokenLocator.Locate(src, line: 0, character: 6, navigation: true);
+        nav.CurrentToken.ShouldNotBeNull();
+        nav.CurrentToken!.Text.ShouldBe("V");
+    }
+
+    [Fact]
+    public void Completion_containment_is_unchanged_inside_and_at_the_end_of_a_token()
+    {
+        // The default (navigation: false) call keeps completion's (start, end] bias: a caret
+        // one column in resolves the token, and a caret at its end still belongs to it.
+        var src = "value V {\n  amount: Decimal\n}\n"; // 'amount' spans columns [2, 8)
+
+        TokenLocator.Locate(src, line: 1, character: 3).CurrentToken!.Text.ShouldBe("amount"); // one in
+        TokenLocator.Locate(src, line: 1, character: 8).CurrentToken!.Text.ShouldBe("amount"); // at end
+    }
 }

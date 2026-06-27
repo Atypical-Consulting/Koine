@@ -45,7 +45,15 @@ internal static class TokenLocator
     /// Never throws: lexer error listeners are removed and malformed input yields a
     /// context with null tokens.
     /// </summary>
-    public static TokenContext Locate(string source, int line, int character)
+    /// <param name="navigation">
+    /// When <c>true</c>, the word-token under the cursor is matched with inclusive-start
+    /// <c>[start, end]</c> containment so a cursor at an identifier's <em>first</em> column still
+    /// resolves it — what hover, go-to-definition, find-references, rename, and call/type hierarchy
+    /// want. The default <c>false</c> keeps completion's <c>(start, end]</c> bias, where a caret on a
+    /// boundary belongs to the token to its left (so typing extends that token). String/regex/comment
+    /// containment (which gates <see cref="TokenContext.InsideStringOrRegex"/>) is unaffected either way.
+    /// </param>
+    public static TokenContext Locate(string source, int line, int character, bool navigation = false)
     {
         var lexer = new KoineLexer(new AntlrInputStream(source));
         lexer.RemoveErrorListeners();
@@ -95,7 +103,7 @@ internal static class TokenLocator
         IToken? current = null;
         foreach (IToken t in def)
         {
-            if (IsWord(t) && Contains(t, targetLine, targetCol))
+            if (IsWord(t) && Contains(t, targetLine, targetCol, inclusiveStart: navigation))
             {
                 current = t;
                 break;
@@ -155,8 +163,13 @@ internal static class TokenLocator
         return s.Length > 0 && (char.IsLetter(s[0]) || s[0] == '_');
     }
 
-    /// <summary>True when the cursor sits within <c>(start, end]</c> of the token on its line.</summary>
-    private static bool Contains(IToken t, int line, int col)
+    /// <summary>
+    /// True when the cursor sits within the token on its line. The end is always inclusive; the
+    /// <em>start</em> is exclusive by default (completion's <c>(start, end]</c> bias — a caret on the
+    /// boundary belongs to the token on its left) and inclusive when <paramref name="inclusiveStart"/>
+    /// is set (navigation's <c>[start, end]</c> — a cursor on the identifier's first column resolves it).
+    /// </summary>
+    private static bool Contains(IToken t, int line, int col, bool inclusiveStart = false)
     {
         if (t.Line != line)
         {
@@ -165,7 +178,7 @@ internal static class TokenLocator
 
         int start = t.Column;
         int end = start + (t.Text?.Length ?? 0);
-        return col > start && col <= end;
+        return (inclusiveStart ? col >= start : col > start) && col <= end;
     }
 
     private static bool EndsAtOrBefore(IToken t, int line, int col)
