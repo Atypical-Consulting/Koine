@@ -742,7 +742,15 @@ internal sealed class ScenarioInterpreter
 
         try
         {
-            return new ScenarioValue.Bool(Regex.IsMatch(text.Value, m.Pattern));
+            // The pattern is authored verbatim in the model, so a pathological one (e.g. `(x+)+y`)
+            // can backtrack effectively forever. Bound it with a match timeout — the interpreter runs
+            // synchronously inside the LSP / single-threaded WASM host, where an unbounded match wedges
+            // the editor — and degrade a runaway pattern to the existing "indeterminate" result (#626).
+            return new ScenarioValue.Bool(Regex.IsMatch(text.Value, m.Pattern, RegexOptions.None, TimeSpan.FromSeconds(1)));
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return new ScenarioValue.Unknown($"regex /{m.Pattern}/ timed out");
         }
         catch (ArgumentException)
         {
