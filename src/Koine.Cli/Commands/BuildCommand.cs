@@ -98,11 +98,24 @@ internal class BuildSettings : CommandSettings
             return false;
         }
 
+        var applicationMediatr = AppMediatr || targetOptions.ApplicationMediatr;
+        var applicationMapping = AppMapping ?? targetOptions.ApplicationMapping;
+
+        // The Application sub-options imply the Application layer (issue #618). A user who reaches for
+        // --app-mediatr/--app-mapping clearly wants the Application layer, so honor that the same way
+        // application/infrastructure already imply domain — otherwise the flag is a silent no-op when
+        // the resolved layers default to Domain-only. Run this after layer resolution so an explicit
+        // --layers domain (or a config block) is still upgraded to include application.
+        if (applicationMediatr || applicationMapping is not null)
+        {
+            resolvedLayers = WithApplicationLayer(resolvedLayers);
+        }
+
         targetOptions = targetOptions with
         {
             Layers = resolvedLayers,
-            ApplicationMediatr = AppMediatr || targetOptions.ApplicationMediatr,
-            ApplicationMapping = AppMapping ?? targetOptions.ApplicationMapping,
+            ApplicationMediatr = applicationMediatr,
+            ApplicationMapping = applicationMapping,
         };
 
         plan = new BuildPlan(
@@ -170,6 +183,27 @@ internal class BuildSettings : CommandSettings
 
         resolved = layers;
         return true;
+    }
+
+    /// <summary>
+    /// Returns <paramref name="resolved"/> with the <c>application</c> layer guaranteed present (issue
+    /// #618: the <c>--app-mediatr</c>/<c>--app-mapping</c> sub-options imply the Application layer).
+    /// <c>domain</c> stays first and a previously requested <c>infrastructure</c> layer is preserved,
+    /// matching the canonical order <see cref="TryResolveLayers"/> produces; <c>application</c> is
+    /// never duplicated when it was already selected.
+    /// </summary>
+    private static IReadOnlyList<string> WithApplicationLayer(IReadOnlyList<string>? resolved)
+    {
+        var wantsInfrastructure = resolved is not null
+            && resolved.Any(l => string.Equals(l, "infrastructure", StringComparison.OrdinalIgnoreCase));
+
+        var layers = new List<string> { "domain", "application" };
+        if (wantsInfrastructure)
+        {
+            layers.Add("infrastructure");
+        }
+
+        return layers;
     }
 }
 
