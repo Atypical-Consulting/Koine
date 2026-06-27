@@ -842,8 +842,7 @@ internal sealed class PhpExpressionTranslator
                 WriteSum(call, t, sb);
                 return;
             case "distinctBy":
-                var mapped = RenderArrayMap(call, t);
-                sb.Append("count(array_unique(").Append(mapped).Append(")) === count(").Append(t).Append(')');
+                WriteDistinctBy(call, t, sb);
                 return;
             default:
                 sb.Append("null /* unsupported call '").Append(call.Method).Append("' */");
@@ -899,6 +898,37 @@ internal sealed class PhpExpressionTranslator
         else
         {
             sb.Append(@"\Koine\Runtime\Decimal::sum(").Append(mapped).Append(')');
+        }
+    }
+
+    /// <summary>
+    /// <c>distinctBy</c> — "every projection is distinct", the PHP counterpart of C#'s
+    /// <c>.Select(selector).Distinct().Count() == .Count</c>. <c>array_unique</c> defaults to
+    /// <c>SORT_STRING</c>, which compares elements by their string cast <c>(string)$elem</c>; a
+    /// value-object / branded-Id selector projects to a <c>final class</c> with no <c>__toString</c>,
+    /// so the cast throws a fatal PHP <c>Error</c> at runtime (issue #676, the PHP counterpart of the
+    /// TypeScript #609 fix). For a value-like / <c>Decimal</c> selector we therefore count distinct
+    /// projections structurally via the generated <c>equals()</c> — keeping each value's first
+    /// occurrence (O(n²), like the TS <c>structuralEquals</c> fold; invariant collections are small).
+    /// A primitive selector (<c>string</c>/<c>int</c>/<c>bool</c>) already dedupes by value under
+    /// <c>array_unique</c>, so it keeps the faster path.
+    /// </summary>
+    private void WriteDistinctBy(CallExpr call, string target, StringBuilder sb)
+    {
+        var mapped = RenderArrayMap(call, target);
+        TypeRef? selectorType = InferSelectorType(call);
+        if (_resolver.IsValueLike(selectorType) || selectorType?.Name == "Decimal")
+        {
+            // Bind the mapped array once, then keep an element only when it is the first occurrence
+            // of its value under structural `equals()` — `array_key_first(array_filter(...))` is the
+            // PHP analogue of TS's `findIndex(... structuralEquals ...) === i`.
+            sb.Append("(fn($__xs) => count(array_filter($__xs, fn($__x, $__i) => ")
+              .Append("array_key_first(array_filter($__xs, fn($__y) => $__y->equals($__x))) === $__i, ")
+              .Append("ARRAY_FILTER_USE_BOTH)) === count($__xs))(").Append(mapped).Append(')');
+        }
+        else
+        {
+            sb.Append("count(array_unique(").Append(mapped).Append(")) === count(").Append(target).Append(')');
         }
     }
 
