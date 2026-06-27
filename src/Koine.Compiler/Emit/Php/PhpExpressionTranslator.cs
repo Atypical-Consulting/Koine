@@ -728,6 +728,18 @@ internal sealed class PhpExpressionTranslator
         TypeRef? targetType = _resolver.Infer(ma.Target, EffectiveScope());
         bool isString = targetType?.Name == "String";
 
+        // A user type that declares a member named after a built-in member-op (isEmpty/trim/…)
+        // shadows the op shortcut — emit a plain property access, exactly mirroring the #605
+        // semantic resolution one layer down. Without this, a field named e.g. `isEmpty` would
+        // resolve correctly yet still emit `count($t) === 0`, which is wrong PHP (#672).
+        if (targetType is not null
+            && _index.TryGetMemberType(targetType.Qualifier ?? _resolver.Context, targetType.Name, ma.MemberName, out _))
+        {
+            sb.Append(t).Append("->")
+              .Append(PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(ma.MemberName)));
+            return;
+        }
+
         switch (ma.MemberName)
         {
             case "isEmpty":
