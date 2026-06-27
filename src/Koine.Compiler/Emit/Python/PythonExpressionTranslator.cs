@@ -298,7 +298,7 @@ internal sealed class PythonExpressionTranslator
         }
 
         WriteOperand(bin.Left, sb, EnumTypeName(bin.Right));
-        sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
+        sb.Append(' ').Append(BinaryOperatorFor(bin)).Append(' ');
         WriteOperand(bin.Right, sb, EnumTypeName(bin.Left));
 
         if (parenthesize)
@@ -698,6 +698,27 @@ internal sealed class PythonExpressionTranslator
         return false;
     }
 
+    // Pick the Python operator for a binary expression. Almost all ops are a pure `BinaryOp -> string`
+    // map (OperatorOf), but division needs the operand TYPES: Koine types `Int / Int` as `Int`
+    // (matching C# integer division), yet Python `/` is *true* division and yields a float. So when
+    // both operands resolve to `Int`, lower to floor division (`//`) — keeping the result int-typed
+    // and int-valued (and `mypy --strict`-clean). Decimal/value-object operands keep `/` (the correct
+    // `decimal.Decimal` true division). This is the one place with both the operator and the operand
+    // type context in scope, so the lowering lives here rather than in the type-blind OperatorOf. (#611)
+    private string BinaryOperatorFor(BinaryExpr bin)
+    {
+        if (bin.Op == BinaryOp.Div)
+        {
+            TypeScope scope = EffectiveScope();
+            if (_resolver.Infer(bin.Left, scope) is { Name: "Int" }
+                && _resolver.Infer(bin.Right, scope) is { Name: "Int" })
+            {
+                return "//";
+            }
+        }
+        return OperatorOf(bin.Op);
+    }
+
     private static string OperatorOf(BinaryOp op) => op switch
     {
         BinaryOp.Or => "or",
@@ -711,9 +732,8 @@ internal sealed class PythonExpressionTranslator
         BinaryOp.Add => "+",
         BinaryOp.Sub => "-",
         BinaryOp.Mul => "*",
-        // Caveat: Python `int / int` is `float`. We mirror the TypeScript translator and emit `/`
-        // for Div — Phase-1 fixtures use Decimal/Mul arithmetic, not Int division, so this is safe
-        // for now; a future Int-division lowering (`//`) can be added when a fixture needs it.
+        // `Int / Int` floor-divides — see BinaryOperatorFor, which lowers it to `//` before this map
+        // is reached; Div here is the true-division fall-through for Decimal/value-object operands.
         BinaryOp.Div => "/",
         _ => "?"
     };
