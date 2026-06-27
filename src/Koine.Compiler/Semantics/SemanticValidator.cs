@@ -1092,7 +1092,12 @@ public sealed class SemanticValidator
             // Reaction argument values resolve against the event's fields.
             TypeScope eventScope = ev is not null ? TypeScope.FromMembers(ev.Members, index) : new TypeScope(Array.Empty<KeyValuePair<string, KoineType>>());
             var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics);
-            var cmdParams = cmd?.Parameters.ToDictionary(p => p.Name, p => p.Type, StringComparer.Ordinal);
+            // A command may declare duplicate parameter names (already flagged KOI0504); build the
+            // lookup duplicate-tolerantly (first-wins) so the policy validator does not throw on the
+            // duplicate key and the real diagnostic — and the rest of the built-in pass — survive (#604).
+            var cmdParams = cmd?.Parameters
+                .GroupBy(p => p.Name, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First().Type, StringComparer.Ordinal);
             var provided = new HashSet<string>(StringComparer.Ordinal);
 
             foreach (PolicyArg arg in reaction.Args)
