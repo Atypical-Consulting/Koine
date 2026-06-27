@@ -83,11 +83,12 @@ import { guardedLoad } from '@/shell/guardedLoad';
 import { createInspectorSheet, type InspectorSheet } from '@/shell/inspectorSheet';
 import { isNarrowViewport } from '@/shared/breakpoint';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
-import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';
+import { DEFAULT_CENTER, DEFAULT_CENTER_LAYOUT, isValidCenter, type CenterLayout, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
 import { escapeHtml, fileUriToPath, formatAclMapping, renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
 import { EMIT_TARGETS } from '@/shared/emitTargets';
+import { applySplitPaneLayout } from '@/shell/CenterSplitPanes';
 
 // LSP SymbolKind for a namespace — the kind the language service tags each top-level `context`
 // document symbol with. Used by followActiveFileContext to read a file's bounded context(s).
@@ -149,6 +150,10 @@ export interface InspectorControllerDeps {
   // --- store seams (persist/restore the per-workspace center pane + scope) ---
   saveWorkspaceCenter(id: string): void;
   loadWorkspaceCenter(): string | null;
+  /** Persist/restore the full multi-pane center layout (Task 2 of #720). Optional so existing
+   *  callers that only wire the legacy center-pane pair don't need to be updated. */
+  saveWorkspaceCenterLayout?: (layout: CenterLayout) => void;
+  loadWorkspaceCenterLayout?: () => CenterLayout;
   saveActiveContext(workspaceKey: string, scope: string): void;
   loadActiveContext(workspaceKey: string): string | null;
 
@@ -301,6 +306,62 @@ function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
   if (!node) throw new Error(`missing #${id}`);
   return node as T;
+}
+
+// --- SplitControls component --------------------------------------------------
+// Three compact buttons rendered into the right side of #center-tabs so the user
+// can trigger a split-right, split-down, or reset-to-single-pane without a
+// keyboard shortcut. Dynamically shown/hidden: the Reset button appears only
+// when 2+ panes are open; the two Split buttons are always present.
+//
+// Rendered via Preact into a #center-split-controls host that init() creates and
+// appends to #center-tabs. The host is re-rendered whenever centerLayout changes
+// (the same subscription that drives updateCenterSplitLayout / applyCenterChrome).
+
+function SplitControls({
+  hasSplit,
+  onSplitRow,
+  onSplitColumn,
+  onReset,
+}: {
+  hasSplit: boolean;
+  onSplitRow(): void;
+  onSplitColumn(): void;
+  onReset(): void;
+}) {
+  return (
+    <div class="center-split-btns" aria-label="Center layout controls">
+      <button
+        type="button"
+        class="center-split-btn"
+        title="Split right"
+        aria-label="Split center pane right"
+        onClick={onSplitRow}
+      >
+        Split →
+      </button>
+      <button
+        type="button"
+        class="center-split-btn"
+        title="Split down"
+        aria-label="Split center pane down"
+        onClick={onSplitColumn}
+      >
+        Split ↓
+      </button>
+      {hasSplit && (
+        <button
+          type="button"
+          class="center-split-btn center-split-btn--reset"
+          title="Reset to single pane"
+          aria-label="Reset center to single pane"
+          onClick={onReset}
+        >
+          Reset
+        </button>
+      )}
+    </div>
+  );
 }
 
 export function createInspectorController(deps: InspectorControllerDeps): InspectorController {
@@ -1273,6 +1334,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
   renderCanvasPalette();
 
+  const centerBodyEl = el('center-body');
   const centerTechnicalEl = el('center-technical');
   const centerDocsEl = el('center-docs');
   const editorPaneEl = el('editor-pane');
@@ -1286,16 +1348,29 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // so the highlighted tab and the shown view can never diverge. No data fetch, so the boot frame can
   // land before the workspace document is open.
   function applyCenterChrome(): void {
+    const { centerLayout } = appStore.getState();
+    const isSplit = centerLayout.panes.length >= 2;
     const center = activeCenter();
     const tech = activeTech();
     const docs = activeDocs();
-    centerVisualEl.hidden = center !== 'visual';
-    centerTechnicalEl.hidden = center !== 'technical';
-    centerDocsEl.hidden = center !== 'docs';
-    // The assistant is its own top-level center pane now (#235) — a peer of Visual/Code/Documentation,
-    // reachable in one click from any view, not a Code sub-tab. Its host (#view-assistant) is the
-    // center-host itself, so it's shown/hidden purely by the active center.
-    assistantView.hidden = center !== 'assistant';
+
+    if (isSplit) {
+      // In split mode the visibility of center-host elements is driven by which pane they live in;
+      // hide/show is NOT controlled here — updateCenterSplitLayout handles the DOM move + each pane's
+      // .center-pane-content is the new containing block. We still need to hide/show the sub-views
+      // within the technical and docs panes though.
+      updateCenterSplitLayout();
+    } else {
+      // Single-pane: the classic hide/show path.
+      centerVisualEl.hidden = center !== 'visual';
+      centerTechnicalEl.hidden = center !== 'technical';
+      centerDocsEl.hidden = center !== 'docs';
+      // The assistant is its own top-level center pane now (#235) — a peer of Visual/Code/Documentation,
+      // reachable in one click from any view, not a Code sub-tab. Its host (#view-assistant) is the
+      // center-host itself, so it's shown/hidden purely by the active center.
+      assistantView.hidden = center !== 'assistant';
+    }
+
     // The bottom strip (Problems/Events/Relationships/Context Map/Terminal) is GLOBAL: it serves every
     // center view and is hidden only by its own collapse toggle (#diag-collapse), never by the active
     // view. (Previously hidden on Documentation + Assistant for full-height reading/chat; the collapse
@@ -1307,14 +1382,21 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // expanded default. Only the strip's *default collapse* changes here — its global visibility (above) does not.
     applyDefaultDiagCollapsed();
     for (const t of centerTabs) t.setAttribute('aria-selected', String(t.dataset.center === center));
-    const techVisible = center === 'technical';
+    // In split mode, a sub-view must be visible when ANY pane shows its parent center panel —
+    // not just the focused pane. Using only `center` (= focused pane's view) would hide, e.g.,
+    // the editor in pane B whenever pane A (focused) is on 'visual'.
+    const techVisible = isSplit
+      ? centerLayout.panes.some((p) => p.view === 'technical')
+      : center === 'technical';
     editorPaneEl.hidden = !(techVisible && tech === 'editor');
     previewEl.hidden = !(techVisible && tech === 'preview');
     checkView.hidden = !(techVisible && tech === 'check');
     scenariosView.hidden = !(techVisible && tech === 'scenarios');
     for (const t of techTabs) t.setAttribute('aria-selected', String(t.dataset.tech === tech));
     // Documentation sub-views: Glossary (the ubiquitous language), Decisions (the ADR list) and Notes.
-    const docsVisible = center === 'docs';
+    const docsVisible = isSplit
+      ? centerLayout.panes.some((p) => p.view === 'docs')
+      : center === 'docs';
     glossaryView.hidden = !(docsVisible && docs === 'glossary');
     adrView.hidden = !(docsVisible && docs === 'adr');
     notesView.hidden = !(docsVisible && docs === 'notes');
@@ -1324,8 +1406,42 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (!editorPaneEl.hidden) editor.view.requestMeasure();
   }
 
+  // Sync the split pane DOM with the current centerLayout. Called from applyCenterChrome in multi-pane
+  // mode, and from the centerLayout subscription in init() so layout changes trigger a re-render.
+  function updateCenterSplitLayout(): void {
+    applySplitPaneLayout({
+      centerBodyEl,
+      getLayout: () => appStore.getState().centerLayout,
+      onPaneViewSelect: (paneId: string, view: CenterView) => {
+        // Focus the pane first so lazy-loader guards (which check focusedPaneId) always fire,
+        // even when the user clicks a tab in a non-focused pane (Bug 5 fix).
+        appStore.getState().focusPane(paneId);
+        appStore.getState().setPaneView(paneId, view);
+        applyCenterChrome();
+        // Trigger any lazy loaders for the newly visible view (now always the focused pane).
+        if (view === 'visual' && appStore.getState().isStale('diagrams')) void loadDiagrams();
+        else if (view === 'technical') ensureTechLoaded();
+        else if (view === 'docs') ensureDocsLoaded();
+        else if (view === 'assistant') ensureAssistantShown();
+      },
+      onPaneFocus: (paneId: string) => {
+        appStore.getState().focusPane(paneId);
+        applyCenterChrome();
+      },
+      onResize: (sizes: number[]) => {
+        appStore.getState().resizeCenter(sizes);
+      },
+    });
+  }
+
   function selectCenter(view: CenterView): void {
-    appStore.getState().setCenter(view);
+    const { centerLayout } = appStore.getState();
+    if (centerLayout.panes.length >= 2) {
+      // In split mode: change the view of the focused pane.
+      appStore.getState().setPaneView(centerLayout.focusedPaneId, view);
+    } else {
+      appStore.getState().setCenter(view);
+    }
     applyCenterChrome();
     if (view === 'visual' && appStore.getState().isStale('diagrams')) void loadDiagrams();
     else if (view === 'technical') ensureTechLoaded();
@@ -1537,6 +1653,44 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       saveLayout({ rightCollapsed: s.rightCollapsed });
     }
   });
+
+  // --- split/reset controls in the center tab bar (#720 Task 5) ---------------
+  // A small cluster of buttons in the right side of #center-tabs lets the user trigger a split-right,
+  // split-down, or reset-to-single-pane without a keyboard shortcut. The host is created dynamically so
+  // the HTML doesn't need to pre-declare it; the Preact component is re-rendered whenever the layout
+  // changes (via the centerLayout subscription below) so the Reset button appears/disappears correctly.
+  let splitControlsHost: HTMLElement | null = null;
+
+  function renderSplitControls(): void {
+    if (!splitControlsHost) return;
+    const { centerLayout } = appStore.getState();
+    render(
+      <SplitControls
+        hasSplit={centerLayout.panes.length >= 2}
+        onSplitRow={() => { appStore.getState().splitCenter('row'); }}
+        onSplitColumn={() => { appStore.getState().splitCenter('column'); }}
+        onReset={() => { appStore.getState().setCenterLayout(DEFAULT_CENTER_LAYOUT); }}
+      />,
+      splitControlsHost,
+    );
+  }
+
+  // Subscribe to centerLayout changes so any external mutation (e.g. splitCenter(), setCenterLayout(),
+  // focusPane()) immediately re-renders the split DOM and re-applies the chrome — mirrors the
+  // unsubscribeRightCollapsed pattern above. Also re-renders the split controls so the Reset button
+  // tracks the pane count. Disposed in dispose() to prevent callbacks firing into a torn-down DOM after
+  // the controller is destroyed.
+  const unsubscribeCenterLayout = appStore.subscribe(
+    (s: import('@/store/index').AppState, prev: import('@/store/index').AppState) => {
+      if (s.centerLayout !== prev.centerLayout) {
+        updateCenterSplitLayout();
+        applyCenterChrome();
+        renderSplitControls();
+        // Persist the new layout so a reload restores the split state (Bug 3 fix).
+        deps.saveWorkspaceCenterLayout?.(s.centerLayout);
+      }
+    },
+  );
 
   // --- compatibility check (on-demand) ---------------------------------------
   // The check only runs when the user picks a baseline, so the panel would otherwise be an empty void
@@ -2053,6 +2207,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // tracks scope/selection via the store thereafter; setContextOptions + loadModel re-render it when
     // the contexts list or model index changes.
     renderBreadcrumb();
+    // Create the split-controls host dynamically and append it to the right end of #center-tabs, then
+    // do the initial render. The centerLayout subscription above keeps it in sync thereafter.
+    const centerTabsEl = el('center-tabs');
+    splitControlsHost = document.createElement('div');
+    splitControlsHost.id = 'center-split-controls';
+    centerTabsEl.appendChild(splitControlsHost);
+    renderSplitControls();
   }
 
   // Cancel any pending debounce/reset timers. The IDE runs for the page lifetime in production (so this
@@ -2074,6 +2235,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Drop the right-strip collapse subscription (#500) — its callback mutates the captured #split /
     // .rstrip-btn nodes and persists, which must not fire into a torn-down host after dispose.
     unsubscribeRightCollapsed();
+    // Drop the center-layout split-pane subscription (#720) — its callback re-renders the split pane DOM,
+    // which must not fire into a torn-down host after dispose.
+    unsubscribeCenterLayout();
     // The viewport-resize listener is registered unconditionally now (#475 re-evaluates the strip default
     // on a narrow↔wide cross even without the inspector sheet), so always detach it; the sheet teardown is
     // still sheet-gated.

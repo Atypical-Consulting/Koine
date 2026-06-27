@@ -4,8 +4,10 @@ import { createAppStore } from '@/store/index';
 import {
   createUiChromeSlice,
   DEFAULT_CENTER,
+  DEFAULT_CENTER_LAYOUT,
   DEFAULT_MOBILE_ZONE,
   isValidCenter,
+  isValidCenterLayout,
   isValidMobileZone,
   type UiChromeSlice,
 } from '@/store/slices/uiChrome';
@@ -87,5 +89,139 @@ describe('uiChrome mobileZone', () => {
   test('isValidMobileZone guards bad values', () => {
     expect(isValidMobileZone('files')).toBe(true);
     expect(isValidMobileZone('nope')).toBe(false);
+  });
+});
+
+describe('center layout', () => {
+  test('default layout is a single visual pane equal to DEFAULT_CENTER_LAYOUT', () => {
+    const s = make();
+    expect(s.getState().centerLayout).toEqual(DEFAULT_CENTER_LAYOUT);
+    expect(s.getState().centerLayout.panes).toHaveLength(1);
+    expect(s.getState().centerLayout.panes[0].view).toBe('visual');
+    expect(s.getState().centerLayout.sizes).toEqual([1]);
+  });
+
+  test('splitCenter("row") yields 2 panes with normalized sizes (each 0.5)', () => {
+    const s = make();
+    s.getState().splitCenter('row');
+    expect(s.getState().centerLayout.panes).toHaveLength(2);
+    expect(s.getState().centerLayout.orientation).toBe('row');
+    for (const size of s.getState().centerLayout.sizes) {
+      expect(size).toBeCloseTo(0.5);
+    }
+  });
+
+  test('setPaneView changes only the targeted pane view', () => {
+    const s = make();
+    s.getState().splitCenter('row');
+    const panes = s.getState().centerLayout.panes;
+    const firstId = panes[0].id;
+    const secondId = panes[1].id;
+    s.getState().setPaneView(secondId, 'docs');
+    const updated = s.getState().centerLayout.panes;
+    expect(updated.find((p) => p.id === firstId)!.view).toBe('visual');
+    expect(updated.find((p) => p.id === secondId)!.view).toBe('docs');
+  });
+
+  test('resizeCenter updates sizes', () => {
+    const s = make();
+    s.getState().splitCenter('row');
+    s.getState().resizeCenter([0.3, 0.7]);
+    const { sizes } = s.getState().centerLayout;
+    expect(sizes[0]).toBeCloseTo(0.3);
+    expect(sizes[1]).toBeCloseTo(0.7);
+  });
+
+  test('resizeCenter normalizes when sizes array is too long (extra size is dropped)', () => {
+    const s = make();
+    s.getState().splitCenter('row');
+    // pass 3 sizes for 2 panes — extra should be dropped, remainder normalized
+    s.getState().resizeCenter([0.4, 0.4, 0.2]);
+    const { sizes } = s.getState().centerLayout;
+    expect(sizes).toHaveLength(2);
+    const total = sizes.reduce((a, b) => a + b, 0);
+    expect(total).toBeCloseTo(1);
+  });
+
+  test('resizeCenter normalizes when sizes array is too short (missing size filled in)', () => {
+    const s = make();
+    s.getState().splitCenter('row');
+    // pass 1 size for 2 panes — missing slot filled with 0.5, then normalized
+    s.getState().resizeCenter([0.6]);
+    const { sizes } = s.getState().centerLayout;
+    expect(sizes).toHaveLength(2);
+    const total = sizes.reduce((a, b) => a + b, 0);
+    expect(total).toBeCloseTo(1);
+  });
+
+  test('closePane collapses back to single pane when there are 2 panes', () => {
+    const s = make();
+    s.getState().splitCenter('row');
+    const panes = s.getState().centerLayout.panes;
+    s.getState().closePane(panes[1].id);
+    expect(s.getState().centerLayout.panes).toHaveLength(1);
+    expect(s.getState().centerLayout.sizes).toEqual([1]);
+  });
+
+  test('focusPane updates focusedPaneId', () => {
+    const s = make();
+    s.getState().splitCenter('row');
+    const panes = s.getState().centerLayout.panes;
+    const secondId = panes[1].id;
+    s.getState().focusPane(secondId);
+    expect(s.getState().centerLayout.focusedPaneId).toBe(secondId);
+  });
+
+  test('isValidCenterLayout rejects null, missing panes, empty panes array, unknown view value', () => {
+    expect(isValidCenterLayout(null)).toBe(false);
+    expect(isValidCenterLayout({})).toBe(false);
+    expect(isValidCenterLayout({ orientation: 'row', panes: [], sizes: [], focusedPaneId: 'x' })).toBe(false);
+    expect(
+      isValidCenterLayout({
+        orientation: 'row',
+        panes: [{ id: 'p', view: 'unknown-view' }],
+        sizes: [1],
+        focusedPaneId: 'p',
+      }),
+    ).toBe(false);
+    expect(isValidCenterLayout(DEFAULT_CENTER_LAYOUT)).toBe(true);
+  });
+
+  test('isValidCenterLayout rejects a stale focusedPaneId that references no pane', () => {
+    // A persisted layout where the focused pane was removed (e.g. after a code change that renamed
+    // IDs) should fail validation so the consumer falls back to DEFAULT_CENTER_LAYOUT.
+    expect(
+      isValidCenterLayout({
+        orientation: 'row',
+        panes: [{ id: 'pane-1', view: 'visual' }],
+        sizes: [1],
+        focusedPaneId: 'stale-id-not-in-panes',
+      }),
+    ).toBe(false);
+  });
+
+  test('splitCenter gives the new pane a view distinct from the existing pane', () => {
+    const s = make();
+    // The initial single pane is 'visual'; the new pane must not also be 'visual'.
+    s.getState().splitCenter('row');
+    const panes = s.getState().centerLayout.panes;
+    expect(panes).toHaveLength(2);
+    expect(panes[0].view).toBe('visual');
+    expect(panes[1].view).not.toBe('visual');
+  });
+
+  test('legacy setCenter sets the focused pane view', () => {
+    const s = make();
+    s.getState().setCenter('technical');
+    expect(s.getState().center).toBe('technical');
+    expect(s.getState().centerLayout.panes[0].view).toBe('technical');
+  });
+
+  test('setTech sets tech sub-view AND focused pane view to "technical"', () => {
+    const s = make();
+    s.getState().setTech('preview');
+    expect(s.getState().tech).toBe('preview');
+    expect(s.getState().center).toBe('technical');
+    expect(s.getState().centerLayout.panes[0].view).toBe('technical');
   });
 });

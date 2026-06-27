@@ -13,6 +13,7 @@ import type { ChatMessage } from '@/ai/ai';
 import { sanitizeGroups, sanitizeNotes, type DiagramGroup, type DiagramNote } from '@/diagrams/diagramContract';
 import { isEmitTarget } from '@/shared/emitTargets';
 import { DEFAULT_BINDINGS, type BindingId } from '@/editor/keybindings';
+import { DEFAULT_CENTER_LAYOUT, isValidCenter, isValidCenterLayout, type CenterLayout } from '@/store/slices/uiChrome';
 
 // --- settings model ----------------------------------------------------------
 
@@ -111,6 +112,7 @@ const SETTINGS_KEY = 'koine.studio.settings';
 const RECENT_KEY = 'koine.studio.recentFolders';
 const SCRATCH_KEY = 'koine.studio.scratch';
 const WORKSPACE_CENTER_KEY = 'koine.studio.workspaceCenter';
+const WORKSPACE_CENTER_LAYOUT_KEY = 'koine.studio.workspaceCenterLayout';
 // The most-recently opened workspace token (#535), so a reload can restore it instead of silently
 // reverting to the empty default. Only OPFS-internal tokens are auto-restored at boot (see ide.ts).
 const LAST_WORKSPACE_KEY = 'koine.studio.lastWorkspace';
@@ -520,6 +522,35 @@ export function loadWorkspaceCenter(): string | null {
 /** Persist the active center-pane id (best-effort). */
 export function saveWorkspaceCenter(id: string): void {
   writeRaw(WORKSPACE_CENTER_KEY, id);
+}
+
+/** Load the persisted CenterLayout. Falls back to DEFAULT_CENTER_LAYOUT on absent/malformed data;
+ *  migrates a legacy koine.studio.workspaceCenter single-view value to a one-pane layout. */
+export function loadWorkspaceCenterLayout(): CenterLayout {
+  const raw = readRaw(WORKSPACE_CENTER_LAYOUT_KEY);
+  if (raw !== null) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (isValidCenterLayout(parsed)) return parsed;
+    } catch {
+      // malformed JSON — fall through to migration / default
+    }
+  }
+  // Migrate legacy single-view string
+  const legacy = readRaw(WORKSPACE_CENTER_KEY);
+  if (legacy !== null && isValidCenter(legacy)) {
+    return { ...DEFAULT_CENTER_LAYOUT, panes: [{ id: 'pane-0', view: legacy }] };
+  }
+  return DEFAULT_CENTER_LAYOUT;
+}
+
+/** Persist the CenterLayout (best-effort). */
+export function saveWorkspaceCenterLayout(layout: CenterLayout): void {
+  try {
+    writeRaw(WORKSPACE_CENTER_LAYOUT_KEY, JSON.stringify(layout));
+  } catch {
+    // serialization error — best effort
+  }
 }
 
 // --- last opened workspace (#535) --------------------------------------------

@@ -15,6 +15,8 @@ import {
   clearLegacyScratch,
   loadWorkspaceCenter,
   saveWorkspaceCenter,
+  loadWorkspaceCenterLayout,
+  saveWorkspaceCenterLayout,
   getLastWorkspace,
   setLastWorkspace,
   clearLastWorkspace,
@@ -40,6 +42,8 @@ import {
   resolveKeybindings,
   clearKeybindingOverrides,
 } from '@/settings/persistence';
+import { DEFAULT_CENTER_LAYOUT, isValidCenterLayout } from '@/store/slices/uiChrome';
+import type { CenterLayout } from '@/store/slices/uiChrome';
 import { BUILTIN_EMIT_TARGETS, setEmitTargets } from '@/shared/emitTargets';
 import { DEFAULT_BINDINGS } from '@/editor/keybindings';
 import type { ChatMessage } from '@/ai/ai';
@@ -388,6 +392,46 @@ describe('workspace center-pane persistence', () => {
     expect(loadWorkspaceCenter()).toBe('docs');
     saveWorkspaceCenter('technical'); // a later save overwrites the prior one
     expect(loadWorkspaceCenter()).toBe('technical');
+  });
+});
+
+describe('center layout persistence', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('returns DEFAULT_CENTER_LAYOUT when nothing is stored', () => {
+    expect(loadWorkspaceCenterLayout()).toEqual(DEFAULT_CENTER_LAYOUT);
+  });
+
+  test('round-trips a 2-pane layout', () => {
+    const layout: CenterLayout = {
+      orientation: 'row',
+      panes: [
+        { id: 'pane-0', view: 'visual' },
+        { id: 'pane-1', view: 'docs' },
+      ],
+      sizes: [0.5, 0.5],
+      focusedPaneId: 'pane-0',
+    };
+    saveWorkspaceCenterLayout(layout);
+    expect(loadWorkspaceCenterLayout()).toEqual(layout);
+  });
+
+  test('returns DEFAULT_CENTER_LAYOUT when stored JSON is malformed', () => {
+    localStorage.setItem('koine.studio.workspaceCenterLayout', '{not valid json');
+    expect(loadWorkspaceCenterLayout()).toEqual(DEFAULT_CENTER_LAYOUT);
+  });
+
+  test('migrates a legacy workspaceCenter = "docs" to a one-pane layout with view: "docs"', () => {
+    localStorage.setItem('koine.studio.workspaceCenter', 'docs');
+    const result = loadWorkspaceCenterLayout();
+    expect(isValidCenterLayout(result)).toBe(true);
+    expect(result.panes).toHaveLength(1);
+    expect(result.panes[0].view).toBe('docs');
+  });
+
+  test('ignores a legacy workspaceCenter with an unknown view and returns default', () => {
+    localStorage.setItem('koine.studio.workspaceCenter', 'unknown-view');
+    expect(loadWorkspaceCenterLayout()).toEqual(DEFAULT_CENTER_LAYOUT);
   });
 });
 
