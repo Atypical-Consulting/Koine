@@ -101,8 +101,13 @@ keep its *per-turn context* small (lever 2), because that context is what it pay
 - **Don't accumulate a per-issue TaskList.** A task list grows unboundedly and is re-injected into your
   context on *every* turn — pure cache-read waste multiplied by thousands of turns. **The state file is
   your only working memory**; track the fleet there, not in a running task list.
-- **Compact/`/clear` the orchestrator every ~20 merges.** Continuity lives in the state file, so a clear
-  resets the cache-read base instead of dragging an ever-growing transcript across the whole run.
+- **Compact deliberately — don't wait for the 100% auto-compact.** Both cost and answer quality start
+  degrading well before the window is full, so reset at a threshold (~40–50%, check with `/context`) *or*
+  every ~20 merges, whichever comes first. Compact **with a focus directive** so the summary keeps what's
+  expensive to reconstruct rather than summarizing everything equally — e.g. `/compact keep the in-flight
+  slot→issue/PR map, the merge counter, the queue order, and filed follow-ups`. Continuity otherwise
+  lives in the state file, so the **first action after any compact, `/clear`, or `loop` re-fire is to
+  re-read the state file** — that's what turns a reset into a clean base instead of amnesia.
 - **Keep worker FINAL REPORTs terse** (the structured one-liner below) — they get re-read on every later
   reconcile turn, so prose reports tax you repeatedly.
 - **Don't poll on a short cadence** unless a green merge is truly imminent (see *Heartbeat*). Every wake
