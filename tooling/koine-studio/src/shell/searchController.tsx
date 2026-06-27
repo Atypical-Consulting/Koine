@@ -194,6 +194,8 @@ export function SearchPanel(props: SearchPanelProps) {
       <div class="koi-search-head">
         <input
           class="koi-search-query"
+          id="koi-search-query"
+          name="koi-search-query"
           type="text"
           placeholder="Search"
           aria-label="Search text"
@@ -238,6 +240,8 @@ export function SearchPanel(props: SearchPanelProps) {
       <div class="koi-search-replace-row">
         <input
           class="koi-search-replace"
+          id="koi-search-replace"
+          name="koi-search-replace"
           type="text"
           placeholder="Replace"
           aria-label="Replace with"
@@ -259,6 +263,8 @@ export function SearchPanel(props: SearchPanelProps) {
       </div>
       <input
         class="koi-search-include"
+        id="koi-search-include"
+        name="koi-search-include"
         type="text"
         placeholder="files to include (e.g. *.koi)"
         aria-label="Files to include"

@@ -120,6 +120,10 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
   const filterInput = document.createElement('input');
   filterInput.type = 'search';
   filterInput.className = 'explorer-filter';
+  // A stable id/name keeps the field uniquely identifiable (Chrome's "form field should have an
+  // id or name" check + Lighthouse Agentic-Browsing audit; the aria-label is the accessible name).
+  filterInput.id = 'koi-explorer-filter';
+  filterInput.name = 'koi-explorer-filter';
   filterInput.placeholder = 'Filter files…';
   filterInput.setAttribute('aria-label', 'Filter workspace files');
   filterInput.spellcheck = false;
@@ -733,6 +737,10 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'explorer-rename';
+    // Distinct id/name from the rename input below — only one inline edit is ever open at a time,
+    // so these stay unique (Chrome form-field id/name check; aria-label is the accessible name).
+    input.id = 'koi-explorer-new';
+    input.name = 'koi-explorer-new';
     input.placeholder = kind === 'dir' ? 'folder name' : 'name.koi';
     input.setAttribute('aria-label', kind === 'dir' ? 'New folder name' : 'New file name');
     input.spellcheck = false;
@@ -821,6 +829,10 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     const input = document.createElement('input');
     input.className = 'explorer-rename';
     input.type = 'text';
+    // Distinct id/name from the new-file input above (Chrome form-field id/name check;
+    // the per-entry aria-label remains the accessible name).
+    input.id = 'koi-explorer-rename';
+    input.name = 'koi-explorer-rename';
     input.value = entry.name;
     input.setAttribute('aria-label', `Rename ${entry.name}`);
     input.spellcheck = false;
