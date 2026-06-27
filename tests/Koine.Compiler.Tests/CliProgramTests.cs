@@ -230,6 +230,20 @@ public class CliProgramTests
     }
 
     [Fact]
+    public void Watch_missing_parent_directory_reports_a_runtime_error_with_a_hint_on_stderr()
+    {
+        // Parent directory does not exist: watch must give the same clean contract as build,
+        // not a raw ArgumentException from the FileSystemWatcher constructor.
+        var (code, _, stderr) = Run("watch", "/no/such/dir/file.koi");
+
+        code.ShouldBe(1);
+        stderr.ShouldContain("not found");
+        stderr.ShouldContain("koine init");        // actionable hint
+        stderr.ShouldNotContain("USAGE");          // not a help dump
+        stderr.ShouldNotContain("Parameter 'path'");   // not the raw ArgumentException
+    }
+
+    [Fact]
     public void Unsupported_target_reports_a_runtime_error_on_stderr()
     {
         var (path, dir) = TempModel(Program.ScaffoldModel);

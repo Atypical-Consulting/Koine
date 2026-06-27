@@ -28,6 +28,13 @@ internal sealed class WatchCommand : Command<WatchSettings>
             ? plan.File
             : Path.GetDirectoryName(Path.GetFullPath(plan.File)) ?? ".";
 
+        // The FileSystemWatcher constructor throws a raw ArgumentException if the directory is
+        // missing; surface the same clean error/hint contract `build` gives instead.
+        if (!Directory.Exists(watchDir))
+        {
+            return CliError.Runtime($"input not found: {plan.File}", "run `koine init` to scaffold a starter model");
+        }
+
         using var watcher = new FileSystemWatcher(watchDir, "*.koi");
         watcher.IncludeSubdirectories = true;
         watcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size;
