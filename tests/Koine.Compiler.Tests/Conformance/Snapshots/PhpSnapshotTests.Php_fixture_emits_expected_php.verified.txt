@@ -234,7 +234,7 @@ class Order
         $this->lines = $lines;
         $this->status = $status;
         if (count($lines) === 0) {
-            throw new \Koine\Runtime\DomainInvariantViolationException("Order", "an order must have at least one line");
+            throw new \Koine\Runtime\DomainInvariantViolationException("Order", 'an order must have at least one line');
         }
     }
 
@@ -246,7 +246,7 @@ class Order
     private function checkInvariants(): void
     {
         if (count($this->lines) === 0) {
-            throw new \Koine\Runtime\DomainInvariantViolationException("Order", "an order must have at least one line");
+            throw new \Koine\Runtime\DomainInvariantViolationException("Order", 'an order must have at least one line');
         }
     }
 
@@ -284,7 +284,7 @@ class Order
     public function place(): void
     {
         if ($this->status !== OrderStatus::DRAFT) {
-            throw new \Koine\Runtime\DomainInvariantViolationException("Order", "only a draft order can be placed");
+            throw new \Koine\Runtime\DomainInvariantViolationException("Order", 'only a draft order can be placed');
         }
         $this->status = OrderStatus::PLACED;
         $this->checkInvariants();
@@ -296,7 +296,7 @@ class Order
     {
         $id = OrderId::generate();
         if (count($lines) === 0) {
-            throw new \Koine\Runtime\DomainInvariantViolationException("Order", "cannot open an empty order");
+            throw new \Koine\Runtime\DomainInvariantViolationException("Order", 'cannot open an empty order');
         }
         $instance = new self($id, $customer, $lines, OrderStatus::DRAFT);
         $instance->domainEvents[] = new OrderOpened($id, $customer, count($lines));
@@ -620,7 +620,7 @@ final class Money
         public readonly string $currency
     ) {
         if ($amount->compareTo(new \Koine\Runtime\Decimal('0')) < 0) {
-            throw new \Koine\Runtime\DomainInvariantViolationException("Money", "an amount cannot be negative");
+            throw new \Koine\Runtime\DomainInvariantViolationException("Money", 'an amount cannot be negative');
         }
     }
 
@@ -693,7 +693,7 @@ final class OrderLine
         public readonly Money $unitPrice
     ) {
         if ($quantity < 1) {
-            throw new \Koine\Runtime\DomainInvariantViolationException("OrderLine", "a line needs at least one unit");
+            throw new \Koine\Runtime\DomainInvariantViolationException("OrderLine", 'a line needs at least one unit');
         }
     }
 

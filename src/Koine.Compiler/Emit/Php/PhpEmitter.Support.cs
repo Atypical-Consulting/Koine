@@ -603,9 +603,12 @@ public sealed partial class PhpEmitter
         sb.Append(indent).Append(" */\n");
     }
 
-    /// <summary>A PHP double-quoted string literal for an invariant rule message.</summary>
+    /// <summary>A PHP single-quoted string literal for an invariant rule message.
+    /// Single quotes (unlike double quotes) never interpolate <c>$var</c>, so a message
+    /// containing a literal <c>$</c> is reproduced verbatim and stays phpstan-clean.
+    /// Escape order matters: backslash first, then the single quote.</summary>
     private static string RuleLiteral(string rule) =>
-        "\"" + rule.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+        "'" + rule.Replace("\\", "\\\\").Replace("'", "\\'") + "'";
 
     // -------------------------------------------------------------------------
     // Enum member map, for translator qualification

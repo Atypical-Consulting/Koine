@@ -391,7 +391,7 @@ final class OrderLine
         public readonly int $quantity
     ) {
         if ($quantity < 1) {
-            throw new \Koine\Runtime\DomainInvariantViolationException("OrderLine", "a line needs at least one unit");
+            throw new \Koine\Runtime\DomainInvariantViolationException("OrderLine", 'a line needs at least one unit');
         }
     }
 
