@@ -1243,7 +1243,15 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var i = 1; // index 0 is the primary
         while (i < children.Count)
         {
-            // children[i] is DOT; the member/method name follows it.
+            // children[i] is DOT; the member/method name follows it. On a recovered parse of a
+            // truncated chain (e.g. a dangling `.`), ANTLR may leave the DOT as the last child with
+            // no name following — stop the walk and return the best-effort partial expression rather
+            // than reading past the end (#603). The real syntax error is already reported by the parser.
+            if (i + 1 >= children.Count)
+            {
+                break;
+            }
+
             var name = children[i + 1].GetText();
             i += 2;
 
@@ -1253,7 +1261,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             {
                 i++; // consume '('
                 IReadOnlyList<Expr> args = Array.Empty<Expr>();
-                if (children[i] is KoineParser.ArgListContext argList)
+                // A recovered parse of an unclosed call (e.g. `a.b(`) leaves `(` as the last child and
+                // synthesizes no `)`; guard before reading the optional argument list so the walk
+                // yields an argument-less CallExpr instead of an ArgumentOutOfRangeException (#603).
+                if (i < children.Count && children[i] is KoineParser.ArgListContext argList)
                 {
                     args = BuildArgList(argList);
                     i++;

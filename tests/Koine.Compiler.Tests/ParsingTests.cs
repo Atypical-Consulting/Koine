@@ -134,4 +134,29 @@ public class ParsingTests
 
         diagnostics[0].Code.ShouldBe(DiagnosticCodes.SyntaxError);
     }
+
+    [Theory]
+    // Regression for #603: a recovered parse of a malformed/unclosed postfix chain
+    // (`.method(args)` / `.member`) must never throw out of the model builder. The walk in
+    // BuildPostfix read `children[i]` / `children[i + 1]` past the end of the truncated subtree —
+    // ANTLR's recovery does not synthesize the missing `)` / member name — so an unclosed call or a
+    // dangling dot surfaced an ArgumentOutOfRangeException straight out of the public Parse API.
+    // Each case must instead yield a clean syntax diagnostic carrying line/column.
+    [InlineData("context C { value V { x: Int = a.b( } }")]   // unclosed empty call — `(` is the last child
+    [InlineData("context C { value V { x: Int = a.b(1 } }")]  // unclosed call with one argument
+    [InlineData("context C { value V { x: Int = a. } }")]     // dangling dot — no member name follows
+    [InlineData("context C { value V { x: Int = a.b(). } }")] // dangling dot after a closed call
+    public void Malformed_postfix_chain_yields_a_syntax_diagnostic_not_a_throw(string source)
+    {
+        // The throw used to come straight out of the public API; calling it must not throw.
+        var (model, diagnostics) = Should.NotThrow(() => new KoineCompiler().Parse(source, "t.koi"));
+
+        // The parser's own syntax error is surfaced as a clean diagnostic with a line/column, and the
+        // best-effort partial model is still returned (never null) for downstream semantic analysis.
+        model.ShouldNotBeNull();
+        diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+        var error = diagnostics.First(d => d.Severity == DiagnosticSeverity.Error);
+        error.Line.ShouldBeGreaterThan(0);
+        error.Column.ShouldBeGreaterThan(0);
+    }
 }
