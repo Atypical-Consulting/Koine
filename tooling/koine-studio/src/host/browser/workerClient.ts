@@ -181,7 +181,9 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
     const onLoadError = (e: { message?: string } | undefined): void => {
       if (myGeneration !== generation) return;
       clearTimeout(bootTimer);
-      readyReject(new Error(`Koine worker failed to load: ${e?.message ?? 'unknown error'}`));
+      // `||` not `??`: a sanitized cross-origin worker ErrorEvent reports `message === ''` (the browser's
+      // "Script error."), so fall through an empty string to the generic tail rather than emit a blank one.
+      readyReject(new Error(`Koine worker failed to load: ${e?.message || 'unknown error'}`));
     };
     worker.onerror = onLoadError;
     worker.onmessageerror = onLoadError;

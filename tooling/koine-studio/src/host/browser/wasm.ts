@@ -519,8 +519,14 @@ async function bootMainThread(): Promise<KoineWasmApi> {
       (timer as NodeJS.Timeout).unref();
     }
   });
+  const boot = bootMainThreadRuntime();
+  // If the timeout wins the race, `boot` may still reject LATER (a slow boot that fails just after the
+  // ceiling) — that rejection has lost the race, so attach a no-op catch to keep it from surfacing as an
+  // unhandled rejection. The race still observes `boot`'s rejection independently, so a genuine load error
+  // that beats the timeout propagates to the caller unchanged.
+  boot.catch(() => {});
   try {
-    return await Promise.race([bootMainThreadRuntime(), timeout]);
+    return await Promise.race([boot, timeout]);
   } finally {
     clearTimeout(timer);
   }
