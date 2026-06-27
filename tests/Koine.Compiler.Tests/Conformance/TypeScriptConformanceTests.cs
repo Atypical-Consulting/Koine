@@ -112,6 +112,47 @@ public class TypeScriptConformanceTests
     }
 
     /// <summary>
+    /// Issues #608/#607/#606 acceptance: collection ops on a <c>Set</c> (and emptiness on a
+    /// <c>Map</c>) must type-check under <c>--strict</c>. A <c>Set&lt;T&gt;</c> maps to
+    /// <c>ReadonlySet&lt;T&gt;</c> and a <c>Map&lt;K,V&gt;</c> to <c>ReadonlyMap&lt;K,V&gt;</c>, which
+    /// expose <c>size</c>/<c>has</c> but none of the JS Array surface — so the lambda/aggregate ops
+    /// must normalize the receiver to an array, <c>contains</c> must lower to <c>.has</c>, and
+    /// <c>isEmpty</c>/<c>isNotEmpty</c> to <c>.size</c>. Before the fix this emitted Array methods on a
+    /// <c>ReadonlySet</c> and failed with TS2339/TS7006.
+    /// </summary>
+    [Fact]
+    public void Set_and_map_collection_ops_typecheck_under_strict()
+    {
+        const string src =
+            "context C {\n" +
+            "  value T {\n" +
+            "    tags:   Set<String>\n" +
+            "    scores: Set<Int>\n" +
+            "    counts: Map<String, Int>\n" +
+            "    allOk:      Bool = tags.all(t => t.length > 0)\n" +
+            "    anyOk:      Bool = tags.any(t => t.length > 0)\n" +
+            "    noneOk:     Bool = tags.none(t => t.length > 0)\n" +
+            "    hasX:       Bool = tags.contains(\"x\")\n" +
+            "    emptyS:     Bool = tags.isEmpty\n" +
+            "    notEmptyS:  Bool = tags.isNotEmpty\n" +
+            "    emptyM:     Bool = counts.isEmpty\n" +
+            "    notEmptyM:  Bool = counts.isNotEmpty\n" +
+            "    distinctT:  Bool = tags.distinctBy(t => t)\n" +
+            "    maxScore:   Int  = scores.max(s => s)\n" +
+            "    minScore:   Int  = scores.min(s => s)\n" +
+            "    totalScore: Int  = scores.sum(s => s)\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("c.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue("Set/Map collection ops should type-check under --strict:\n" + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
     /// Issue #241 acceptance: the full emitted set for a multi-aggregate context with a declarative finder
     /// — domain + the opt-in Infrastructure layer (concrete repositories over the in-memory store, the unit
     /// of work, the pipeline behaviors and the composition root) — must type-check under
