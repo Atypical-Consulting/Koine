@@ -197,6 +197,19 @@ public sealed class TypeResolver
             }
 
             var op = n.MemberName;
+
+            // A field access on a value/entity type, resolved in the receiver's qualifier
+            // context else this resolver's context (R13.2). A user-declared member named
+            // after a built-in member-op (count/length/…) is resolved here first, so it
+            // shadows the op shortcuts below and the inferred type stays the declared one
+            // rather than being masked as Int/Bool/String (#605).
+            KoineType target = Visit(n.Target);
+            if (!target.IsError && target.Name is not null
+                && Index.TryGetMemberType(target.Qualifier ?? _owner.Context, target.Name, op, out TypeRef mt))
+            {
+                return KoineType.From(mt, Index);
+            }
+
             if (op == "length")
             {
                 return Int;
@@ -225,14 +238,6 @@ public sealed class TypeResolver
             if (op is "isPresent" or "isNone")
             {
                 return Bool;
-            }
-
-            // Otherwise a field access on a value/entity type — resolved in the receiver's
-            // qualifier context, else this resolver's context (R13.2).
-            KoineType target = Visit(n.Target);
-            if (!target.IsError && Index.TryGetMemberType(target.Qualifier ?? _owner.Context, target.Name!, op, out TypeRef mt))
-            {
-                return KoineType.From(mt, Index);
             }
 
             return ErrorType.Instance;
