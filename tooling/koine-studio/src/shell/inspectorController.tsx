@@ -1364,6 +1364,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         appStore.getState().focusPane(paneId);
         applyCenterChrome();
       },
+      onResize: (sizes: number[]) => {
+        appStore.getState().resizeCenter(sizes);
+      },
     });
   }
 

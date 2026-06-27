@@ -305,3 +305,38 @@
   overflow: hidden;
   min-height: 0;
 }
+
+// --- Center splitter (between adjacent pane slots) ---------------------------
+
+.center-splitter-host {
+  // The host is a zero-size flex child that the Preact component fills.
+  display: contents;
+}
+
+.center-splitter {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: var(--koi-border, #e0e0e0);
+  position: relative;
+  outline: none;
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent, #1d76db);
+    outline-offset: 0;
+  }
+
+  // Extend the grab area 4px on each side without changing visual width.
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0 -4px;
+  }
+
+  &--column {
+    cursor: row-resize;
+
+    &::after {
+      inset: -4px 0;
+    }
+  }
+}

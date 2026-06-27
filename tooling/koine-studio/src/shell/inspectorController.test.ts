@@ -8,6 +8,7 @@
 // the real panel DOM; fake timers cover the 350ms edit/bottom debounce.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { waitFor } from '@testing-library/preact';
+import { axe } from 'vitest-axe';
 import {
   createInspectorController,
   type InspectorAssistant,
@@ -1188,6 +1189,101 @@ describe('createInspectorController — split center layout', () => {
       const panes = document.querySelectorAll('.center-split-pane');
       expect(panes.length).toBe(0);
     });
+
+    ctl.dispose();
+  });
+
+  test('a 2-pane layout renders a .center-splitter between the pane slots', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    const splitters = document.querySelectorAll('.center-splitter');
+    expect(splitters.length).toBe(1);
+
+    // Splitter must be between the pane slots in DOM order
+    const children = Array.from(el('center-body').children);
+    const panes = children.filter((c) => c.classList.contains('center-split-pane'));
+    const splitterEls = children.filter((c) => c.classList.contains('center-splitter-host'));
+    expect(splitterEls.length).toBe(1);
+    // The splitter host must appear between pane[0] and pane[1]
+    const idx0 = children.indexOf(panes[0]);
+    const idxS = children.indexOf(splitterEls[0]);
+    const idx1 = children.indexOf(panes[1]);
+    expect(idxS).toBeGreaterThan(idx0);
+    expect(idxS).toBeLessThan(idx1);
+
+    ctl.dispose();
+  });
+
+  test('arrow key on the splitter calls resizeCenter (store sizes change)', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    const splitterEl = document.querySelector<HTMLElement>('[role="separator"]')!;
+    expect(splitterEl).not.toBeNull();
+
+    const sizesBefore = [...deps.store.getState().centerLayout.sizes];
+
+    // Fire ArrowRight on the splitter (row orientation → nudge pane[0] wider)
+    splitterEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+
+    await waitFor(() => {
+      const sizesAfter = deps.store.getState().centerLayout.sizes;
+      expect(sizesAfter[0]).not.toBe(sizesBefore[0]);
+    });
+
+    ctl.dispose();
+  });
+
+  test('the splitter has required aria attributes (role, aria-orientation, aria-valuenow, aria-valuemin, aria-valuemax)', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    const splitterEl = document.querySelector<HTMLElement>('[role="separator"]')!;
+    expect(splitterEl).not.toBeNull();
+    expect(splitterEl.getAttribute('aria-orientation')).toBe('vertical'); // row layout → vertical separator
+    expect(splitterEl.getAttribute('aria-valuenow')).not.toBeNull();
+    expect(splitterEl.getAttribute('aria-valuemin')).not.toBeNull();
+    expect(splitterEl.getAttribute('aria-valuemax')).not.toBeNull();
+    expect(splitterEl.tabIndex).toBe(0);
+
+    ctl.dispose();
+  });
+
+  test('vitest-axe: a 2-pane center layout has no accessibility violations', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    const centerBody = el('center-body');
+    expect(await axe(centerBody)).toHaveNoViolations();
 
     ctl.dispose();
   });
