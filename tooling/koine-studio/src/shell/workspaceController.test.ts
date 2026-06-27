@@ -364,6 +364,39 @@ describe('createWorkspaceController — opening a folder', () => {
     expect(hideWelcome).not.toHaveBeenCalled();
   });
 
+  it('an empty folder STILL raises the red error when no workspace is loaded (#627)', async () => {
+    const platform = new FakePlatform();
+    const setStatus = vi.fn();
+    platform.listKoiFiles = vi.fn(async () => []);
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { setStatus }));
+    const result = await ws.openFolderPath(ROOT, { recent: false });
+    // Cold/empty workspace (buffers.size === 0): the genuine "you picked an empty folder" error stays.
+    expect(result).toEqual({ ok: false, reason: 'empty' });
+    expect(setStatus).toHaveBeenCalledWith('no .koi files in folder', 'error');
+  });
+
+  it('an empty re-scan does NOT clobber the status of an already-loaded workspace (#627)', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    const setStatus = vi.fn();
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { setStatus }));
+    await ws.openFolderPath(ROOT_A, { recent: false }); // a healthy workspace is loaded (buffers.size === 1)
+    expect(ws.buffers.size).toBe(1);
+    setStatus.mockClear();
+
+    // A late/empty folder listing returns zero .koi files while the clean workspace is still loaded —
+    // exactly the materialized-example race in #627 (compile-green renders, then an empty scan arrives).
+    platform.listKoiFiles = vi.fn(async () => []);
+    const result = await ws.openFolderPath(ROOT, { recent: false });
+
+    // The caller still learns the listing was empty, but the global red status is NOT raised: the
+    // loaded workspace's healthy status must survive (no false "no .koi files in folder" clobber).
+    expect(result).toEqual({ ok: false, reason: 'empty' });
+    expect(setStatus).not.toHaveBeenCalledWith('no .koi files in folder', 'error');
+    // And the loaded workspace is untouched — the empty branch returns before the reset/clear.
+    expect(ws.buffers.size).toBe(1);
+  });
+
   test('openWorkspaceWith1File materializes a 1-file workspace and opens it', async () => {
     const platform = new FakePlatform();
     const trace: string[] = [];
@@ -1096,6 +1129,23 @@ describe('createWorkspaceController — multi-root', () => {
     const result = await ws.addRoot(ROOT_B); // ROOT_B was never seeded → no .koi files
 
     expect(result).toEqual({ ok: false, reason: 'empty' });
+    expect(ws.rootsList()).toEqual([ROOT_A]);
+  });
+
+  test('addRoot of an empty folder does NOT raise the global error when a workspace is loaded (#627)', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    const setStatus = vi.fn();
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { setStatus }));
+    await ws.openFolderPath(ROOT_A, { recent: false }); // a healthy workspace is loaded (buffers.size === 1)
+    setStatus.mockClear();
+
+    const result = await ws.addRoot(ROOT_B); // ROOT_B never seeded → empty listing, but a workspace is loaded
+
+    // Same #627 invariant for the additive multi-root path: an empty union must not clobber the loaded
+    // workspace's healthy status. The caller still gets reason:'empty'; the root is not appended.
+    expect(result).toEqual({ ok: false, reason: 'empty' });
+    expect(setStatus).not.toHaveBeenCalledWith('no .koi files in folder', 'error');
     expect(ws.rootsList()).toEqual([ROOT_A]);
   });
 
