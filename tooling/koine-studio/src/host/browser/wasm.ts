@@ -359,9 +359,15 @@ function importEsModuleViaScript(url: string): Promise<Record<string, unknown>> 
   return new Promise((resolve, reject) => {
     const id = `__koineDotnet_${++loaderSeq}`;
     const w = window as unknown as Record<string, unknown>;
+    const script = document.createElement('script');
+    script.type = 'module';
     const cleanup = () => {
       delete w[id];
       delete w[`${id}_err`];
+      // Detach the one-shot loader node once it has settled — by any path (success, DOM error, or
+      // timeout) this closure is the single teardown they all route through (issue #643). `remove()`
+      // is a no-op if the node was never appended, so it is safe on every settle path.
+      script.remove();
     };
     w[id] = (mod: Record<string, unknown>) => {
       cleanup();
@@ -371,8 +377,6 @@ function importEsModuleViaScript(url: string): Promise<Record<string, unknown>> 
       cleanup();
       reject(new Error(message));
     };
-    const script = document.createElement('script');
-    script.type = 'module';
     // The inline module is never seen by Vite; its own `import()` is a plain browser fetch.
     script.textContent =
       `import(${JSON.stringify(url)}).then(` +
