@@ -220,21 +220,19 @@ public class R18CSharpApplicationTests
     [Fact]
     public void Config_supplied_application_mediatr_upgrades_layers_without_a_layers_flag()
     {
-        var settings = new BuildSettings
-        {
-            Path = "x.koi",
-            Config = WriteConfig("targets.csharp.application.mediatr = true\n"),
-        };
-        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
-        plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
-    }
-
-    private static string WriteConfig(string contents)
-    {
-        var path = System.IO.Path.Combine(
+        var configPath = System.IO.Path.Combine(
             System.IO.Path.GetTempPath(), $"koine-{System.Guid.NewGuid():N}.toml");
-        System.IO.File.WriteAllText(path, contents);
-        return path;
+        System.IO.File.WriteAllText(configPath, "targets.csharp.application.mediatr = true\n");
+        try
+        {
+            var settings = new BuildSettings { Path = "x.koi", Config = configPath };
+            settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+            plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+        }
+        finally
+        {
+            System.IO.File.Delete(configPath);
+        }
     }
 
     [Fact]
