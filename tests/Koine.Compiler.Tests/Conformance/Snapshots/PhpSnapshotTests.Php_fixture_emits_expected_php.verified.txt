@@ -95,13 +95,41 @@ class Range
 }
 
 /**
+ * A value that folds with itself under add() — the seam the generic Decimal::sum() helper
+ * binds to (@template T of Summable) so a value-object projection sums to its own type and
+ * stays phpstan --level max clean (issue #692). The native parameter is the interface type so
+ * an implementing value object never trips PHP's parameter-contravariance rule; the @param self
+ * narrows it back for the implementer body, and @return static preserves the element type.
+ */
+interface Summable
+{
+    /**
+     * @param self $other
+     * @return static
+     */
+    public function add(self $other): self;
+}
+
+/**
+ * A value with a total order via compareTo() — the seam the generic Decimal::min()/max()
+ * helpers bind to (@template T of Comparable). Value objects are not orderable in the model
+ * (KOI0212 rejects a value-object min/max selector), so Decimal is the only implementer today;
+ * the bound keeps the Decimal-element min/max type-preserving and symmetric with Summable.
+ */
+interface Comparable
+{
+    /** @param self $other */
+    public function compareTo(self $other): int;
+}
+
+/**
  * A string-backed arbitrary-precision decimal value (no float).
  *
  * Arithmetic delegates to PHP's BCMath extension (bcadd, bcsub, bcmul, bcdiv).
  * The scale (number of decimal places) defaults to 10; supply a higher value for
  * use-cases that demand finer precision.
  */
-class Decimal
+final class Decimal implements Summable, Comparable
 {
     /** @var numeric-string The validated decimal string; numeric by construction. */
     private string $value;
@@ -122,7 +150,8 @@ class Decimal
         return $this->value;
     }
 
-    public function add(self $other): self
+    /** @param self $other */
+    public function add(Summable $other): self
     {
         return new self(bcadd($this->value, $other->value, $this->scale), $this->scale);
     }
@@ -145,7 +174,8 @@ class Decimal
         return new self(bcdiv($this->value, $other->value, $this->scale), $this->scale);
     }
 
-    public function compareTo(self $other): int
+    /** @param self $other */
+    public function compareTo(Comparable $other): int
     {
         return bccomp($this->value, $other->value, $this->scale);
     }
@@ -165,11 +195,15 @@ class Decimal
      *
      * A string-backed decimal has no implicit zero, so an EMPTY array raises a domain error
      * rather than fabricating one (parity with the C#/TypeScript/Python empty-fold guard).
-     * A value-object projection whose add() returns its own type folds here too.
+     * A value-object projection whose add() returns its own type folds here too, and the
+     * @template T of Summable bound keeps the result the element's own type (issue #692):
+     * an array<Money> sums to a Money, not a Decimal, under phpstan --level max.
      *
-     * @param array<self> $values
+     * @template T of Summable
+     * @param array<T> $values
+     * @return T
      */
-    public static function sum(array $values): self
+    public static function sum(array $values): Summable
     {
         if ($values === []) {
             throw new DomainInvariantViolationException('collection', 'cannot sum an empty collection (no zero value)');
@@ -189,9 +223,11 @@ class Decimal
      * An EMPTY array raises a domain error (a collection with no element has no minimum),
      * mirroring the C#/TypeScript/Python empty-fold guard.
      *
-     * @param array<self> $values
+     * @template T of Comparable
+     * @param array<T> $values
+     * @return T
      */
-    public static function min(array $values): self
+    public static function min(array $values): Comparable
     {
         if ($values === []) {
             throw new DomainInvariantViolationException('collection', 'cannot take min of an empty collection (no value)');
@@ -213,9 +249,11 @@ class Decimal
      * An EMPTY array raises a domain error (a collection with no element has no maximum),
      * mirroring the C#/TypeScript/Python empty-fold guard.
      *
-     * @param array<self> $values
+     * @template T of Comparable
+     * @param array<T> $values
+     * @return T
      */
-    public static function max(array $values): self
+    public static function max(array $values): Comparable
     {
         if ($values === []) {
             throw new DomainInvariantViolationException('collection', 'cannot take max of an empty collection (no value)');

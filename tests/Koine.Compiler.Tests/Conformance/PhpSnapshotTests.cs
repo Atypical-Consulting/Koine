@@ -496,4 +496,66 @@ public class PhpSnapshotTests
         TestSupport.RequireOrSkip(typeCheck.ToolchainAvailable, NoToolchainNotice);
         typeCheck.Ok.ShouldBeTrue(string.Join("\n", typeCheck.Errors));
     }
+
+    // -----------------------------------------------------------------------
+    // #692: a `sum` fold whose element AND result are a value object (the
+    // pizzeria-style `total: Money = lines.sum(l => l)`). #601 added the runtime
+    // `Decimal::sum` helper typed `array<self>: self`, which is right for the
+    // Decimal-element fold but mis-typed the value-object fold: the getter
+    // returns `Money` while `Decimal::sum` returns `Decimal`, so `phpstan
+    // --level max` reported `return.type` + `argument.type`. The fix makes the
+    // helper generic (`@template T of Summable @return T`) and the summed value
+    // object implement the runtime `Summable` seam, so the fold preserves the
+    // element type — `array<Money>` sums to a `Money`. (A value-object min/max is
+    // a non-issue here: the validator's KOI0212 rejects a non-orderable min/max
+    // selector, so a value object never reaches `Decimal::min/max`.)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// The issue #692 repro: a value object (<c>Money</c>) summed whole — <c>total: Money =
+    /// lines.sum(l =&gt; l)</c> — so the fold's element and result are both <c>Money</c>. The summed
+    /// <c>Money</c> implements <c>\Koine\Runtime\Summable</c> and its <c>add()</c> takes the interface
+    /// type (PHP forbids narrowing it to the concrete class) with <c>@param self</c>; the getter keeps
+    /// the <c>Decimal::sum(...)</c> call shape and returns <c>Money</c>.
+    /// </summary>
+    internal const string ValueObjectFoldFixture = """
+        context Shop {
+          /// A monetary amount. Never negative.
+          value Money {
+            amount: Decimal
+            invariant amount >= 0 "an amount cannot be negative"
+          }
+
+          /// A basket whose total folds its money lines whole — the element AND result are Money,
+          /// so the fold must preserve the value-object type (the #692 path), not collapse to Decimal.
+          value Basket {
+            lines: List<Money>
+            total: Money = lines.sum(l => l)
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Emitted PHP for <see cref="ValueObjectFoldFixture"/> must match its reviewed snapshot AND pass
+    /// <c>phpstan analyse --level max</c> — the #692 gate over a value-object-element <c>sum</c>. Before
+    /// the fix the emitted <c>Decimal::sum(array&lt;Money&gt;)</c> tripped <c>return.type</c> +
+    /// <c>argument.type</c>; after it, the generic <c>Summable</c>-bound helper preserves the element
+    /// type and the fold type-checks.
+    /// </summary>
+    [Fact]
+    public async Task Php_value_object_fold_coverage_emits_expected_php()
+    {
+        var result = new KoineCompiler().Compile(ValueObjectFoldFixture, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // The snapshot is the always-on guarantee — it runs regardless of the PHP toolchain.
+        await Verify(TestSupport.Render(result.Files))
+            .UseDirectory("Snapshots");
+
+        // The phpstan --level max type-check gate (parity with TS/Python, #496) skips (or hard-fails
+        // under KOINE_REQUIRE_CONFORMANCE) when no phpstan toolchain is present.
+        var typeCheck = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(typeCheck.ToolchainAvailable, NoToolchainNotice);
+        typeCheck.Ok.ShouldBeTrue(string.Join("\n", typeCheck.Errors));
+    }
 }

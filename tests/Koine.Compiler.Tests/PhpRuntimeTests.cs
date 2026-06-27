@@ -68,12 +68,15 @@ public class PhpRuntimeTests
     // (.sum/.min/.max) to a runtime static call — `\Koine\Runtime\Decimal::sum/min/max(...)`.
     // Those helpers were never defined on the runtime `Decimal` class, so every emitted fold
     // fataled at runtime (`Call to undefined method ...::sum()`) and tripped phpstan
-    // --level max (`staticMethod.notFound`). The runtime must declare all three. ---
+    // --level max (`staticMethod.notFound`). The runtime must declare all three.
+    // #692: they are now generic — `@template T of Summable` (sum) / `Comparable` (min/max),
+    // native return `Summable`/`Comparable` — so a value-object fold preserves the element's own
+    // type under phpstan --level max rather than collapsing to `Decimal`. ---
 
     [Theory]
-    [InlineData("public static function sum(array $values): self")]
-    [InlineData("public static function min(array $values): self")]
-    [InlineData("public static function max(array $values): self")]
+    [InlineData("public static function sum(array $values): Summable")]
+    [InlineData("public static function min(array $values): Comparable")]
+    [InlineData("public static function max(array $values): Comparable")]
     public void KoineRuntime_php_declares_static_Decimal_fold(string signature)
     {
         var files = EmitTrivial();
