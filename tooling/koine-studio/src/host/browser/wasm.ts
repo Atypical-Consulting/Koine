@@ -461,8 +461,21 @@ export function __setDotnetModuleLoaderForTests(loader: DotnetModuleLoader | nul
   dotnetModuleLoader = loader ?? importDotnetModule;
 }
 
+/**
+ * Ceiling for the main-thread boot fallback. Aligned with `koine.worker.ts` `BOOT_WATCHDOG_MS` (20 s)
+ * so BOTH boot paths fail on the same budget. The worker fast-path is watchdog-guarded twice (issue
+ * #357), but `bootMainThreadRuntime()` awaits the loader / `dotnet.create()` / `getAssemblyExports()`
+ * with NO ceiling — so a stalled prod runtime fetch (a half-open connection during the multi-MB
+ * download, none of which carry an AbortController) turned the "never brick the studio" backstop into
+ * the exact silent indefinite hang it exists to prevent: `loadWasmApi()` never settled, so the
+ * `attempt.catch()` that clears `apiPromise` never fired and every caller awaited forever with no error
+ * and no retry. Bounding the boot guarantees `loadWasmApi()` always settles → `apiPromise` clears →
+ * retry is possible (issue #625).
+ */
+const MAIN_THREAD_BOOT_TIMEOUT_MS = 20_000;
+
 /** Boot the .NET runtime on the MAIN THREAD and resolve the compiler's [JSExport] surface. */
-async function bootMainThread(): Promise<KoineWasmApi> {
+async function bootMainThreadRuntime(): Promise<KoineWasmApi> {
   const mod = await dotnetModuleLoader(dotnetEntryUrl());
   const dotnet = mod.dotnet as {
     create(): Promise<{
@@ -479,6 +492,38 @@ async function bootMainThread(): Promise<KoineWasmApi> {
   // then guard the surface (the guard re-raises the actionable error per-call as the backstop).
   verifyBootSurface(fetchCapabilitiesRaw(raw), 'main-thread');
   return guardWasmSurface(raw);
+}
+
+/**
+ * Boot the main-thread runtime under a hard timeout ceiling so it can NEVER hang silently (issue #625).
+ * A single `Promise.race` covers the whole boot (loader + `dotnet.create()` + `getAssemblyExports()`) —
+ * if none of those settle within {@link MAIN_THREAD_BOOT_TIMEOUT_MS}, the boot rejects with an actionable
+ * message instead of hanging forever, so `loadWasmApi()`'s `attempt.catch()` clears `apiPromise` and a
+ * later call can retry. The timer is cleared on settle so a successful boot leaves no dangling timeout
+ * (and the losing race branch never rejects, so there is no unhandled rejection).
+ */
+async function bootMainThread(): Promise<KoineWasmApi> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        new Error(
+          `Koine: main-thread runtime boot did not settle within ${MAIN_THREAD_BOOT_TIMEOUT_MS / 1000}s — ` +
+            `the runtime asset fetch likely stalled (a half-open connection during the multi-MB download). ` +
+            `Retrying may recover it.`,
+        ),
+      );
+    }, MAIN_THREAD_BOOT_TIMEOUT_MS);
+    // Prevent Node.js from keeping the process alive during tests (mirrors workerClient.ts's boot timer).
+    if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
+      (timer as NodeJS.Timeout).unref();
+    }
+  });
+  try {
+    return await Promise.race([bootMainThreadRuntime(), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
