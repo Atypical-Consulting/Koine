@@ -605,7 +605,15 @@ internal static class EntityBehaviorValidator
             return;
         }
 
-        var eventFields = ev.Members.ToDictionary(m => m.Name, m => m.Type, StringComparer.Ordinal);
+        // A duplicate event field name is reported as KOI0103 yet both members are kept, so build the
+        // lookup defensively (last-wins) rather than ToDictionary — a collision here would otherwise throw
+        // and abort the whole validate pass, swallowing that very diagnostic. Mirrors ValidateStates.
+        var eventFields = new Dictionary<string, TypeRef>(StringComparer.Ordinal);
+        foreach (var m in ev.Members)
+        {
+            eventFields[m.Name] = m.Type;
+        }
+
         var provided = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var arg in emit.Args)
