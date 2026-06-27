@@ -533,10 +533,11 @@ internal sealed class TypeScriptExpressionTranslator
         switch (ma.MemberName)
         {
             case "isEmpty":
-                sb.Append(t).Append(".length === 0");
+                // List -> .length; Set/Map -> .size (ReadonlySet/ReadonlyMap have no .length).
+                sb.Append(t).Append(IsSizeBacked(ma.Target) ? ".size === 0" : ".length === 0");
                 return;
             case "isNotEmpty":
-                sb.Append(t).Append(".length !== 0");
+                sb.Append(t).Append(IsSizeBacked(ma.Target) ? ".size !== 0" : ".length !== 0");
                 return;
             case "count":
                 // List -> .length; Set/Map -> .size.
@@ -582,6 +583,12 @@ internal sealed class TypeScriptExpressionTranslator
         Write(call.Target, target);
         var t = target.ToString();
 
+        // A Set maps to ReadonlySet<T>, which has none of the JS Array methods the lambda/aggregate
+        // ops below lower to (every/some/map/reduce). Normalize a Set receiver to an array first so
+        // those methods exist. The validator restricts these ops (and `contains`) to List/Set — never
+        // Map — so a size-backed receiver here is always a Set; `[...set]` spreads its values.
+        var iter = IsSizeBacked(call.Target) ? $"[...{t}]" : t;
+
         switch (call.Method)
         {
             case "startsWith":
@@ -595,32 +602,32 @@ internal sealed class TypeScriptExpressionTranslator
                 sb.Append(')');
                 return;
             case "contains":
-                // String membership and array membership both use .includes in TS.
-                sb.Append(t).Append(".includes(");
+                // String/List membership -> .includes; Set membership -> .has (ReadonlySet has no .includes).
+                sb.Append(t).Append(IsSizeBacked(call.Target) ? ".has(" : ".includes(");
                 Write(call.Args[0], sb);
                 sb.Append(')');
                 return;
             case "all":
-                sb.Append(t).Append(".every(").Append(RenderLambda(call)).Append(')');
+                sb.Append(iter).Append(".every(").Append(RenderLambda(call)).Append(')');
                 return;
             case "any":
-                sb.Append(t).Append(".some(").Append(RenderLambda(call)).Append(')');
+                sb.Append(iter).Append(".some(").Append(RenderLambda(call)).Append(')');
                 return;
             case "none":
-                sb.Append('!').Append(t).Append(".some(").Append(RenderLambda(call)).Append(')');
+                sb.Append('!').Append(iter).Append(".some(").Append(RenderLambda(call)).Append(')');
                 return;
             case "min":
-                WriteMinMax(call, t, sb, isMin: true);
+                WriteMinMax(call, iter, sb, isMin: true);
                 return;
             case "max":
-                WriteMinMax(call, t, sb, isMin: false);
+                WriteMinMax(call, iter, sb, isMin: false);
                 return;
             case "sum":
-                WriteSum(call, t, sb);
+                WriteSum(call, iter, sb);
                 return;
             case "distinctBy":
-                sb.Append("new Set(").Append(t).Append(".map(").Append(RenderLambda(call))
-                  .Append(")).size === ").Append(t).Append(".length");
+                sb.Append("new Set(").Append(iter).Append(".map(").Append(RenderLambda(call))
+                  .Append(")).size === ").Append(iter).Append(".length");
                 return;
             default:
                 sb.Append("/* unsupported call '").Append(call.Method).Append("' */ undefined");
