@@ -1073,3 +1073,122 @@ describe('createInspectorController — right-edge tool-window stripe (#500)', (
     ctl.dispose();
   });
 });
+
+describe('createInspectorController — split center layout', () => {
+  test('a 2-pane layout renders two .center-split-pane elements in #center-body', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    ctl.dispose();
+  });
+
+  test('each pane has a .center-pane-header with view selector buttons', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    const headers = document.querySelectorAll('.center-pane-header');
+    expect(headers.length).toBe(2);
+    // Each header should have view selector tabs
+    for (const header of Array.from(headers)) {
+      const tabs = header.querySelectorAll('.center-pane-tab');
+      expect(tabs.length).toBe(4); // visual, technical, docs, assistant
+    }
+
+    ctl.dispose();
+  });
+
+  test('clicking a view-selector button in pane B calls setPaneView (check via store state)', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    // Get pane B (second pane)
+    const panes = document.querySelectorAll<HTMLElement>('.center-split-pane');
+    const paneB = panes[1];
+    const paneBId = paneB.dataset.paneId!;
+
+    // Click the "Code" tab button in pane B
+    const codeTabs = paneB.querySelectorAll<HTMLButtonElement>('.center-pane-tab');
+    const codeTab = Array.from(codeTabs).find((b) => b.textContent === 'Code')!;
+    codeTab.click();
+    await waitFor(() => {
+      const layout = deps.store.getState().centerLayout;
+      const pane = layout.panes.find((p) => p.id === paneBId)!;
+      expect(pane.view).toBe('technical');
+    });
+
+    ctl.dispose();
+  });
+
+  test('clicking pane B makes pane B focused (sets focusedPaneId, adds is-focused class)', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    const panes = document.querySelectorAll<HTMLElement>('.center-split-pane');
+    const paneB = panes[1];
+    const paneBId = paneB.dataset.paneId!;
+
+    // Click the pane B element itself (not a button within it)
+    paneB.click();
+    await waitFor(() => {
+      expect(deps.store.getState().centerLayout.focusedPaneId).toBe(paneBId);
+    });
+
+    // The is-focused class should be on pane B
+    expect(paneB.classList.contains('is-focused')).toBe(true);
+    // Pane A should not have the class
+    expect(panes[0].classList.contains('is-focused')).toBe(false);
+
+    ctl.dispose();
+  });
+
+  test('reverting to single-pane removes the pane slots', async () => {
+    const { DEFAULT_CENTER_LAYOUT } = await import('@/store/slices/uiChrome');
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    // Go to split
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(2);
+    });
+
+    // Revert to single pane
+    deps.store.getState().setCenterLayout(DEFAULT_CENTER_LAYOUT);
+    await waitFor(() => {
+      const panes = document.querySelectorAll('.center-split-pane');
+      expect(panes.length).toBe(0);
+    });
+
+    ctl.dispose();
+  });
+});

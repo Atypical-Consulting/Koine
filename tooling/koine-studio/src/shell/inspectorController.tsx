@@ -83,11 +83,12 @@ import { guardedLoad } from '@/shell/guardedLoad';
 import { createInspectorSheet, type InspectorSheet } from '@/shell/inspectorSheet';
 import { isNarrowViewport } from '@/shared/breakpoint';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
-import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';
+import { DEFAULT_CENTER, isValidCenter, type CenterLayout, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
 import { escapeHtml, fileUriToPath, formatAclMapping, renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
 import { EMIT_TARGETS } from '@/shared/emitTargets';
+import { applySplitPaneLayout } from '@/shell/CenterSplitPanes';
 
 // LSP SymbolKind for a namespace — the kind the language service tags each top-level `context`
 // document symbol with. Used by followActiveFileContext to read a file's bounded context(s).
@@ -1277,6 +1278,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
   renderCanvasPalette();
 
+  const centerBodyEl = el('center-body');
   const centerTechnicalEl = el('center-technical');
   const centerDocsEl = el('center-docs');
   const editorPaneEl = el('editor-pane');
@@ -1290,16 +1292,29 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // so the highlighted tab and the shown view can never diverge. No data fetch, so the boot frame can
   // land before the workspace document is open.
   function applyCenterChrome(): void {
+    const { centerLayout } = appStore.getState();
+    const isSplit = centerLayout.panes.length >= 2;
     const center = activeCenter();
     const tech = activeTech();
     const docs = activeDocs();
-    centerVisualEl.hidden = center !== 'visual';
-    centerTechnicalEl.hidden = center !== 'technical';
-    centerDocsEl.hidden = center !== 'docs';
-    // The assistant is its own top-level center pane now (#235) — a peer of Visual/Code/Documentation,
-    // reachable in one click from any view, not a Code sub-tab. Its host (#view-assistant) is the
-    // center-host itself, so it's shown/hidden purely by the active center.
-    assistantView.hidden = center !== 'assistant';
+
+    if (isSplit) {
+      // In split mode the visibility of center-host elements is driven by which pane they live in;
+      // hide/show is NOT controlled here — updateCenterSplitLayout handles the DOM move + each pane's
+      // .center-pane-content is the new containing block. We still need to hide/show the sub-views
+      // within the technical and docs panes though.
+      updateCenterSplitLayout();
+    } else {
+      // Single-pane: the classic hide/show path.
+      centerVisualEl.hidden = center !== 'visual';
+      centerTechnicalEl.hidden = center !== 'technical';
+      centerDocsEl.hidden = center !== 'docs';
+      // The assistant is its own top-level center pane now (#235) — a peer of Visual/Code/Documentation,
+      // reachable in one click from any view, not a Code sub-tab. Its host (#view-assistant) is the
+      // center-host itself, so it's shown/hidden purely by the active center.
+      assistantView.hidden = center !== 'assistant';
+    }
+
     // The bottom strip (Problems/Events/Relationships/Context Map/Terminal) is GLOBAL: it serves every
     // center view and is hidden only by its own collapse toggle (#diag-collapse), never by the active
     // view. (Previously hidden on Documentation + Assistant for full-height reading/chat; the collapse
@@ -1328,8 +1343,38 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (!editorPaneEl.hidden) editor.view.requestMeasure();
   }
 
+  // Sync the split pane DOM with the current centerLayout. Called from applyCenterChrome in multi-pane
+  // mode, and from the centerLayout subscription in init() so layout changes trigger a re-render.
+  function updateCenterSplitLayout(): void {
+    applySplitPaneLayout({
+      centerBodyEl,
+      getLayout: () => appStore.getState().centerLayout,
+      onPaneViewSelect: (paneId: string, view: CenterView) => {
+        appStore.getState().setPaneView(paneId, view);
+        applyCenterChrome();
+        // Trigger any lazy loaders for the newly visible view (in the focused pane).
+        if (appStore.getState().centerLayout.focusedPaneId === paneId) {
+          if (view === 'visual' && appStore.getState().isStale('diagrams')) void loadDiagrams();
+          else if (view === 'technical') ensureTechLoaded();
+          else if (view === 'docs') ensureDocsLoaded();
+          else if (view === 'assistant') ensureAssistantShown();
+        }
+      },
+      onPaneFocus: (paneId: string) => {
+        appStore.getState().focusPane(paneId);
+        applyCenterChrome();
+      },
+    });
+  }
+
   function selectCenter(view: CenterView): void {
-    appStore.getState().setCenter(view);
+    const { centerLayout } = appStore.getState();
+    if (centerLayout.panes.length >= 2) {
+      // In split mode: change the view of the focused pane.
+      appStore.getState().setPaneView(centerLayout.focusedPaneId, view);
+    } else {
+      appStore.getState().setCenter(view);
+    }
     applyCenterChrome();
     if (view === 'visual' && appStore.getState().isStale('diagrams')) void loadDiagrams();
     else if (view === 'technical') ensureTechLoaded();
@@ -1541,6 +1586,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       saveLayout({ rightCollapsed: s.rightCollapsed });
     }
   });
+
+  // Subscribe to centerLayout changes so any external mutation (e.g. splitCenter(), setCenterLayout(),
+  // focusPane()) immediately re-renders the split DOM and re-applies the chrome — mirrors the
+  // unsubscribeRightCollapsed pattern above. Disposed in dispose() to prevent callbacks firing into a
+  // torn-down DOM after the controller is destroyed.
+  const unsubscribeCenterLayout = appStore.subscribe(
+    (s: import('@/store/index').AppState, prev: import('@/store/index').AppState) => {
+      if (s.centerLayout !== prev.centerLayout) {
+        updateCenterSplitLayout();
+        applyCenterChrome();
+      }
+    },
+  );
 
   // --- compatibility check (on-demand) ---------------------------------------
   // The check only runs when the user picks a baseline, so the panel would otherwise be an empty void
@@ -2078,6 +2136,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Drop the right-strip collapse subscription (#500) — its callback mutates the captured #split /
     // .rstrip-btn nodes and persists, which must not fire into a torn-down host after dispose.
     unsubscribeRightCollapsed();
+    // Drop the center-layout split-pane subscription (#720) — its callback re-renders the split pane DOM,
+    // which must not fire into a torn-down host after dispose.
+    unsubscribeCenterLayout();
     // The viewport-resize listener is registered unconditionally now (#475 re-evaluates the strip default
     // on a narrow↔wide cross even without the inspector sheet), so always detach it; the sheet teardown is
     // still sheet-gated.
