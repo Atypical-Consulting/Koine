@@ -919,11 +919,19 @@ internal sealed class PhpExpressionTranslator
         TypeRef? selectorType = InferSelectorType(call);
         if (_resolver.IsValueLike(selectorType) || selectorType?.Name == "Decimal")
         {
+            // The generated `equals(self $other)` is non-nullable, so an optional selector (whose
+            // projection puts PHP `null`s into the mapped array) must guard null first: two nulls are
+            // equal, a null and a value are not. This mirrors C#'s `.Distinct()`, which dedupes nulls
+            // rather than crashing on them.
+            var equalsPredicate = selectorType!.IsOptional
+                ? "fn($__y) => $__x === null ? $__y === null : ($__y !== null && $__y->equals($__x))"
+                : "fn($__y) => $__y->equals($__x)";
+
             // Bind the mapped array once, then keep an element only when it is the first occurrence
             // of its value under structural `equals()` — `array_key_first(array_filter(...))` is the
             // PHP analogue of TS's `findIndex(... structuralEquals ...) === i`.
             sb.Append("(fn($__xs) => count(array_filter($__xs, fn($__x, $__i) => ")
-              .Append("array_key_first(array_filter($__xs, fn($__y) => $__y->equals($__x))) === $__i, ")
+              .Append("array_key_first(array_filter($__xs, ").Append(equalsPredicate).Append(")) === $__i, ")
               .Append("ARRAY_FILTER_USE_BOTH)) === count($__xs))(").Append(mapped).Append(')');
         }
         else

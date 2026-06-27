@@ -21,7 +21,10 @@ public class PhpExpressionTests
           enum OrderStatus { Draft, Placed, Cancelled }
           enum MassUnit { Gram, Kilogram }
 
-          value Money { amount: Decimal }
+          value Money {
+            amount: Decimal
+            discount: Decimal?
+          }
 
           quantity Weight {
             amount: Decimal
@@ -469,6 +472,22 @@ public class PhpExpressionTests
             "(fn($__xs) => count(array_filter($__xs, fn($__x, $__i) => " +
             "array_key_first(array_filter($__xs, fn($__y) => $__y->equals($__x))) === $__i, " +
             "ARRAY_FILTER_USE_BOTH)) === count($__xs))(array_map(fn($m) => $m->amount, $this->lines))");
+    }
+
+    [Fact]
+    public void DistinctBy_with_optional_value_like_selector_is_null_safe()
+    {
+        // Optional projection (Decimal?): the mapped array can hold PHP `null`s, and the generated
+        // `equals(self $other)` is non-nullable — so the structural fold guards null first (two nulls
+        // are equal; null vs. a value are not), matching C#'s `.Distinct()` null semantics instead of
+        // crashing. Without the guard `$__y->equals($__x)` would fatal on a null element.
+        var selector = new LambdaExpr("m", new MemberAccessExpr(Id("m"), "discount"));
+        var expr = new CallExpr(Id("lines"), "distinctBy", new Expr[] { selector });
+        Translate(expr).ShouldBe(
+            "(fn($__xs) => count(array_filter($__xs, fn($__x, $__i) => " +
+            "array_key_first(array_filter($__xs, fn($__y) => $__x === null ? $__y === null : " +
+            "($__y !== null && $__y->equals($__x)))) === $__i, " +
+            "ARRAY_FILTER_USE_BOTH)) === count($__xs))(array_map(fn($m) => $m->discount, $this->lines))");
     }
 
     // =========================================================================

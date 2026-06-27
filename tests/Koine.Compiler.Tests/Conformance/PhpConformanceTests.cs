@@ -151,10 +151,14 @@ public class PhpConformanceTests
         const string src =
             "context Shop {\n" +
             "  value Sku { code: String }\n" +
-            "  value Line { sku: Sku }\n" +
+            "  value Line {\n" +
+            "    sku: Sku\n" +
+            "    tag: Sku?\n" +
+            "  }\n" +
             "  value Basket {\n" +
             "    lines: List<Line>\n" +
             "    uniqueSkus: Bool = lines.distinctBy(l => l.sku)\n" +
+            "    uniqueTags: Bool = lines.distinctBy(l => l.tag)\n" +
             "  }\n" +
             "}\n";
         var result = new KoineCompiler().Compile(src, new PhpEmitter());
