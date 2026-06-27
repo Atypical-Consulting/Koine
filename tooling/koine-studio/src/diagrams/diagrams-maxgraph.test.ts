@@ -92,6 +92,30 @@ describe('selectDomainGraphs', () => {
     expect(selected).toHaveLength(1);
     expect(selected[0].nodes[0].qualifiedName).toBe('Ordering.Order');
   });
+
+  test('strips the event-flow chain command/policy nodes + their edges from the structural canvas (#439)', () => {
+    // The context graph carries the #439 event-flow chain; the structural domain canvas must keep only the
+    // class nodes/edges — commands/policies belong on the Events → Flow canvas.
+    const graph: DiagramGraph = {
+      nodes: [
+        node({ id: 'Order', qualifiedName: 'Ordering.Order', kind: 'aggregate-root', stereotype: 'aggregate root' }),
+        node({ id: 'OrderSubmitted', qualifiedName: 'Ordering.OrderSubmitted', kind: 'event' }),
+        node({ id: 'cmd_Order_submit', qualifiedName: 'Ordering.Order.submit', kind: 'command' }),
+        node({ id: 'policy_Notify', qualifiedName: 'Ordering.Notify', kind: 'policy' }),
+      ],
+      edges: [
+        { from: 'OrderSubmitted', to: 'Order', label: null },
+        { from: 'cmd_Order_submit', to: 'OrderSubmitted', label: 'emits' },
+        { from: 'OrderSubmitted', to: 'policy_Notify', label: 'triggers' },
+      ],
+    };
+
+    const [selected] = selectDomainGraphs([file([diagram('context', graph)])]);
+
+    expect(selected.nodes.map((n) => n.kind).sort()).toEqual(['aggregate-root', 'event']);
+    // Only the structural edge survives; the two chain edges touching a command/policy are dropped.
+    expect(selected.edges).toEqual([{ from: 'OrderSubmitted', to: 'Order', label: null }]);
+  });
 });
 
 describe('isClassNode', () => {
