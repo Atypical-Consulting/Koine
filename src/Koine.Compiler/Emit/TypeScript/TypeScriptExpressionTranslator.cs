@@ -675,18 +675,27 @@ internal sealed class TypeScriptExpressionTranslator
     /// <c>distinctBy</c> — "every projection is distinct", the TS counterpart of C#'s
     /// <c>.Select(selector).Distinct().Count() == .Count</c>. A JS <c>Set</c> dedupes by reference
     /// identity (SameValueZero) and cannot take a custom equality, so for a value-object / branded-Id
-    /// / <c>Decimal</c> selector — all emitted as classes with a structural <c>equals</c> — two
-    /// structurally-equal-but-distinct instances would survive as separate entries and the invariant
-    /// would never fire, diverging from C#'s structural <c>Distinct()</c> (issue #609). For those
-    /// selectors we count distinct projections structurally via the runtime <c>structuralEquals</c>
-    /// (keeping each value's first occurrence, O(n²) like <c>structuralEquals</c> is used elsewhere;
-    /// invariant collections are small). A primitive selector (<c>string</c>/<c>number</c>/
-    /// <c>boolean</c>) already dedupes by value under SameValueZero, so it keeps the fast Set path.
+    /// / entity / <c>Decimal</c> selector — all emitted as classes carrying an <c>equals</c> method —
+    /// two distinct instances that the type considers equal would survive as separate entries and the
+    /// invariant would never fire, diverging from C#'s <c>Distinct()</c> (issue #609 for value objects,
+    /// #712 for entities). For those selectors we count distinct projections via the runtime
+    /// <c>structuralEquals</c>, which delegates to the element's own <c>equals</c> when present — so a
+    /// value object compares structurally and an entity compares by id (<c>this.id.equals(other.id)</c>),
+    /// each matching its C#/PHP counterpart. (Keeps each value's first occurrence, O(n²) like
+    /// <c>structuralEquals</c> is used elsewhere; invariant collections are small.) A primitive selector
+    /// (<c>string</c>/<c>number</c>/<c>boolean</c>) already dedupes by value under SameValueZero, so it
+    /// keeps the fast Set path.
     /// </summary>
     private void WriteDistinctBy(CallExpr call, string target, StringBuilder sb)
     {
         TypeRef? selectorType = InferSelectorType(call);
-        if (_resolver.IsValueLike(selectorType) || selectorType?.Name == "Decimal")
+
+        // A value object, branded Id, or entity selector all project to a class with an `equals`
+        // method (value-likes structural, entities by id), so all three must dedupe via that method
+        // through `structuralEquals` rather than a reference-identity Set. `IsValueLike` covers value
+        // objects + Ids; `IsUserType` adds entities; their union (plus Decimal, whose runtime class
+        // also exposes `equals`) is the structural set.
+        if (_resolver.IsValueLike(selectorType) || _resolver.IsUserType(selectorType) || selectorType?.Name == "Decimal")
         {
             sb.Append(target).Append(".map(").Append(RenderLambda(call))
               .Append(").filter((__x, __i, __xs) => __xs.findIndex((__y) => structuralEquals(__x, __y)) === __i).length === ")

@@ -487,6 +487,55 @@ public class PythonConformanceTests
         syntax.Ok.ShouldBeTrue("emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
     }
 
+    /// <summary>
+    /// Issue #712 acceptance (Python half): a <c>distinctBy</c> over an <em>entity</em> selector must
+    /// dedupe <b>by id</b> at runtime, matching C#'s <c>.Distinct()</c> and PHP (post-#687). Unlike a
+    /// JS <c>Set</c> (reference identity) or PHP <c>array_unique</c> (string cast), the emitted Python
+    /// <c>len({i for i in self.items}) == len(self.items)</c> relies on the entity's identity
+    /// <c>__eq__</c>/<c>__hash__</c> (over its id) — so the set already collapses two distinct
+    /// instances that share an id. This EXECUTES the emitted code (the runtime hazard the issue
+    /// feared, which mypy/ast can't see): two lines with the same id but different <c>qty</c> count as
+    /// a duplicate; distinct ids count as all-unique. Skipped (not failed) when no Python interpreter
+    /// is present locally; CI runs it for real. No emitter change was needed — this guards the
+    /// behavior so the correct <c>set</c> path can't silently regress.
+    /// </summary>
+    [Fact]
+    public void DistinctBy_over_entity_selector_dedupes_by_id_at_runtime()
+    {
+        const string src = """
+            context Shop {
+              aggregate Cart root Basket {
+                entity Line identified by LineId { qty: Int }
+                entity Basket identified by BasketId {
+                  lines: List<Line>
+                  uniqueLines: Bool = lines.distinctBy(l => l)
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string driver = """
+            from shop.entities.line import Line
+            from shop.value_objects.line_id import LineId
+            from shop.value_objects.basket_id import BasketId
+            from shop.basket import Basket
+
+            # Two lines with the SAME id but different qty: structurally different, same identity.
+            dup = Basket(BasketId("b1"), (Line(LineId("a"), 1), Line(LineId("a"), 99), Line(LineId("c"), 2)))
+            assert dup.unique_lines is False, "same-id lines must count as a duplicate (by id), like C#.Distinct()"
+
+            # Distinct ids: every line is unique.
+            distinct = Basket(BasketId("b2"), (Line(LineId("a"), 1), Line(LineId("b"), 2)))
+            assert distinct.unique_lines is True, "distinct ids must count as all-unique"
+            """;
+
+        TestSupport.PythonCheck run = TestSupport.RunPython(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+        run.Ok.ShouldBeTrue("entity distinctBy should dedupe by id at runtime:\n" + string.Join("\n", run.Errors));
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {
