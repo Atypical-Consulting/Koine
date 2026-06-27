@@ -229,6 +229,29 @@ public class R5CommandTests
     }
 
     [Fact]
+    public void Policy_targeting_command_with_duplicate_parameters_does_not_crash_validation()
+    {
+        // Regression for #604: a policy reacting to a command whose parameters share a
+        // byte-for-byte identical name crashed ValidatePolicies — its ToDictionary lookup
+        // threw ArgumentException on the duplicate key, aborting the whole built-in pass
+        // and losing the KOI0504 diagnostic. Validation must complete and still report it.
+        const string src = "context Billing {\n  event Ev { amount: Decimal }\n  aggregate Books root LedgerEntry {\n    entity LedgerEntry identified by LedgerEntryId {\n      balance: Decimal\n      command record(amount: Decimal, amount: Decimal) { balance -> balance }\n    }\n  }\n  policy P when Ev then Books.record(amount: amount)\n}\n";
+        IReadOnlyList<Diagnostic> diagnostics = Should.NotThrow(() => Diagnose(src));
+        diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.DuplicateParameter);
+    }
+
+    [Fact]
+    public void Policy_targeting_command_with_case_only_duplicate_parameters_does_not_crash_validation()
+    {
+        // Sanity sibling of the #604 fix: case-only duplicates are flagged KOI0504 by the
+        // OrdinalIgnoreCase dup-check while the ordinal parameter lookup keeps them distinct,
+        // so the lookup must stay duplicate-tolerant for these too — no throw, KOI0504 present.
+        const string src = "context Billing {\n  event Ev { amount: Decimal }\n  aggregate Books root LedgerEntry {\n    entity LedgerEntry identified by LedgerEntryId {\n      balance: Decimal\n      command record(amount: Decimal, Amount: Decimal) { balance -> balance }\n    }\n  }\n  policy P when Ev then Books.record(amount: amount)\n}\n";
+        IReadOnlyList<Diagnostic> diagnostics = Should.NotThrow(() => Diagnose(src));
+        diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.DuplicateParameter);
+    }
+
+    [Fact]
     public void Command_name_colliding_with_a_property_is_reported()
     {
         const string src = "context C {\n  enum S { Draft, Placed }\n  entity E identified by EId {\n    status: S = Draft\n    command status { status -> Placed }\n  }\n}\n";
