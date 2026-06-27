@@ -1,15 +1,16 @@
 @use '../abstracts' as a;
 
 /* --- split body --- */
-/* Five tracks (3-column shell): one left sidebar (--koi-leftrail-w, holds Files + Explorer + Overview
-   + Documentation), its 6px resizer, the center (1fr), the center/inspector 6px resizer, and the right
-   inspector (--koi-inspector-w). */
+/* Six tracks (3-column shell + tool-window stripe): one left sidebar (--koi-leftrail-w, holds Files +
+   Explorer + Overview + Documentation), its 6px resizer, the center (1fr), the center/inspector 6px
+   resizer, the right inspector (--koi-inspector-w), and the always-on right-edge tool-window stripe
+   (--koi-rstrip-w, #500). */
 #split {
   flex: 1 1 auto;
   display: grid;
   grid-template-columns:
     var(--koi-leftrail-w, 280px) 6px
-    1fr 6px var(--koi-inspector-w, 320px);
+    1fr 6px var(--koi-inspector-w, 320px) var(--koi-rstrip-w, 2.25rem);
   min-height: 0;
 }
 
@@ -29,6 +30,9 @@
 #right {
   grid-column: 5;
 }
+#right-strip {
+  grid-column: 6;
+}
 
 /* Pin every #split child to a single grid row (#527). Column order alone is fragile: the
    data-siderail-side='left' configuration assigns the panes descending grid-column values in DOM
@@ -42,7 +46,8 @@
 #leftrail-resizer,
 #center,
 #split-resizer,
-#right {
+#right,
+#right-strip {
   grid-row: 1;
 }
 
@@ -50,6 +55,39 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+/* --- right-edge tool-window stripe (#500) ---
+   A slim, always-on vertical bar of Rider-style icon toggles docked to the far right, one per right-rail
+   view. It opens/closes (and switches) the #right Properties panel; the collapsed grid below hides #right
+   while the stripe stays put. Desktop-only — hidden below $bp-narrow (the bottom-sheet #221 owns Properties
+   there). The button styling lives in _inspector.scss alongside the rail it controls. */
+#right-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--koi-space-1);
+  padding: var(--koi-space-2) var(--koi-space-1);
+  background: var(--koi-paper-2);
+  border-left: 1px solid var(--koi-line);
+}
+
+/* --- collapsed: reclaim the inspector column ---
+   #split.right-collapsed zeros the inspector + its resizer tracks (and hides them) so #center (1fr) grows
+   into the freed width; the stripe keeps its fixed track on the far right. The siderail-left variant (#265)
+   zeros its mirrored leading tracks instead, so the reclaim works whichever edge the inspector docks to. */
+#split.right-collapsed {
+  grid-template-columns:
+    var(--koi-leftrail-w, 280px) 6px
+    1fr 0 0 var(--koi-rstrip-w, 2.25rem);
+}
+#split[data-siderail-side='left'].right-collapsed {
+  grid-template-columns:
+    0 0 1fr 6px var(--koi-leftrail-w, 280px) var(--koi-rstrip-w, 2.25rem);
+}
+#split.right-collapsed #right,
+#split.right-collapsed #split-resizer {
+  display: none;
 }
 
 /* --- side-rail on the left (issue #265) ---
@@ -62,7 +100,7 @@
 #split[data-siderail-side='left'] {
   grid-template-columns:
     var(--koi-inspector-w, 320px) 6px
-    1fr 6px var(--koi-leftrail-w, 280px);
+    1fr 6px var(--koi-leftrail-w, 280px) var(--koi-rstrip-w, 2.25rem);
 }
 #split[data-siderail-side='left'] #right {
   grid-column: 1;
@@ -136,6 +174,12 @@ body.resizing-y {
 
   #leftrail-resizer,
   #split-resizer {
+    display: none;
+  }
+
+  /* The tool-window stripe is a desktop affordance: below $bp-narrow the inspector is the bottom-sheet
+     overlay (#221) reached from the MobileZoneBar, so the stripe (and its #right panel) stay hidden. */
+  #right-strip {
     display: none;
   }
 
