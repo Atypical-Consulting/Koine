@@ -330,7 +330,7 @@ public class PhpExpressionTests
     public void Coalesce_lowers_to_null_coalescing_operator()
     {
         var expr = new CoalesceExpr(Id("note"), new LiteralExpr(LiteralKind.String, "n/a"));
-        Translate(expr).ShouldBe("($this->note ?? \"n/a\")");
+        Translate(expr).ShouldBe("($this->note ?? 'n/a')");
     }
 
     [Fact]
@@ -359,14 +359,14 @@ public class PhpExpressionTests
     public void Contains_on_string_lowers_to_str_contains()
     {
         var expr = new CallExpr(Id("code"), "contains", new Expr[] { new LiteralExpr(LiteralKind.String, "x") });
-        Translate(expr).ShouldBe("str_contains($this->code, \"x\")");
+        Translate(expr).ShouldBe("str_contains($this->code, 'x')");
     }
 
     [Fact]
     public void Contains_on_list_lowers_to_in_array()
     {
         var expr = new CallExpr(Id("tags"), "contains", new Expr[] { new LiteralExpr(LiteralKind.String, "x") });
-        Translate(expr).ShouldBe("in_array(\"x\", $this->tags, true)");
+        Translate(expr).ShouldBe("in_array('x', $this->tags, true)");
     }
 
     [Fact]
@@ -374,8 +374,8 @@ public class PhpExpressionTests
     {
         var sw = new CallExpr(Id("code"), "startsWith", new Expr[] { new LiteralExpr(LiteralKind.String, "X") });
         var ew = new CallExpr(Id("code"), "endsWith", new Expr[] { new LiteralExpr(LiteralKind.String, "Y") });
-        Translate(sw).ShouldBe("str_starts_with($this->code, \"X\")");
-        Translate(ew).ShouldBe("str_ends_with($this->code, \"Y\")");
+        Translate(sw).ShouldBe("str_starts_with($this->code, 'X')");
+        Translate(ew).ShouldBe("str_ends_with($this->code, 'Y')");
     }
 
     [Fact]
@@ -504,11 +504,81 @@ public class PhpExpressionTests
         Translate(Bool(false)).ShouldBe("false");
     }
 
+    // --- #655: expression string literals must be emitted as single-quoted PHP
+    // literals. PHP interpolates "$word" inside double-quoted strings, so an
+    // expression literal containing a '$' (e.g. `name != "$admin"`) was being turned
+    // into a reference to an undefined variable (wrong runtime value + phpstan
+    // level-max failure). Single quotes reproduce the literal verbatim and match the
+    // convention already used by the Decimal/regex arms, the runtime, and #616's
+    // RuleLiteral fix for invariant/requires messages. ---
+
     [Fact]
-    public void String_literal_is_double_quoted_and_escaped()
+    public void String_literal_is_single_quoted_and_escaped()
     {
+        // input chars: a " b \ c — only `\` is escaped (doubled); `"` is verbatim
+        // inside single quotes, so it is NOT escaped.
         var expr = new LiteralExpr(LiteralKind.String, "a\"b\\c");
-        Translate(expr).ShouldBe("\"a\\\"b\\\\c\"");
+        Translate(expr).ShouldBe("'a\"b\\\\c'");
+    }
+
+    [Fact]
+    public void String_literal_with_dollar_is_single_quoted_not_interpolated()
+    {
+        var expr = new LiteralExpr(LiteralKind.String, "$admin");
+        // single-quoted → PHP reproduces "$admin" verbatim, no variable interpolation
+        Translate(expr).ShouldBe("'$admin'");
+    }
+
+    [Fact]
+    public void String_literal_with_single_quote_is_escaped()
+    {
+        var expr = new LiteralExpr(LiteralKind.String, "it's");
+        // inside a single-quoted PHP literal a literal apostrophe is written as \'
+        Translate(expr).ShouldBe("'it\\'s'");
+    }
+
+    [Fact]
+    public void String_literal_with_backslash_is_escaped()
+    {
+        // the model already holds the single backslash "a\b"; the PHP single-quoted
+        // literal must double it back to stay verbatim.
+        var expr = new LiteralExpr(LiteralKind.String, "a\\b");
+        Translate(expr).ShouldBe("'a\\\\b'");
+    }
+
+    [Fact]
+    public void String_literal_with_newline_round_trips()
+    {
+        // the Koine lexer already unescaped "\n" to a real newline before the model;
+        // a real newline is valid and verbatim inside a single-quoted PHP literal.
+        var expr = new LiteralExpr(LiteralKind.String, "x\ny");
+        Translate(expr).ShouldBe("'x\ny'");
+    }
+
+    [Fact]
+    public void Empty_string_literal_is_empty_single_quotes()
+    {
+        var expr = new LiteralExpr(LiteralKind.String, "");
+        Translate(expr).ShouldBe("''");
+    }
+
+    [Fact]
+    public void Invariant_condition_with_dollar_literal_is_single_quoted_not_interpolated()
+    {
+        // End-to-end: an invariant whose *condition* compares against "$admin" must
+        // emit the literal single-quoted in the generated guard, so PHP does not
+        // interpolate $admin as an undefined variable (the #655 bug).
+        var result = new KoineCompiler().Compile(
+            "context C { value V { name: String\n"
+            + "  invariant name != \"$admin\" \"name cannot be admin\" } }",
+            new PhpEmitter());
+        result.Model.ShouldNotBeNull(
+            string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var php = string.Concat(result.Files.Select(f => f.Contents));
+
+        php.ShouldContain("'$admin'");
+        // the buggy double-quoted form let PHP interpolate the undefined $admin
+        php.ShouldNotContain("\"$admin\"");
     }
 
     // =========================================================================

@@ -320,8 +320,8 @@ enum Currency: int
     public function symbol(): string
     {
         return match($this) {
-            self::EUR => "€",
-            self::USD => "$",
+            self::EUR => '€',
+            self::USD => '$',
         };
     }
 

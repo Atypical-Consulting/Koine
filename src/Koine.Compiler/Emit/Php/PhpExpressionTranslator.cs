@@ -961,7 +961,7 @@ internal sealed class PhpExpressionTranslator
                 sb.Append(@"new \Koine\Runtime\Decimal('").Append(lit.Text).Append("')");
                 break;
             case LiteralKind.String:
-                sb.Append('"').Append(EscapeString(lit.Text)).Append('"');
+                sb.Append(StringLiteral(lit.Text));
                 break;
         }
     }
@@ -995,35 +995,18 @@ internal sealed class PhpExpressionTranslator
         return sb.ToString();
     }
 
-    private static string EscapeString(string s)
-    {
-        var sb = new StringBuilder(s.Length + 2);
-        foreach (var c in s)
-        {
-            switch (c)
-            {
-                case '\\':
-                    sb.Append("\\\\");
-                    break;
-                case '"':
-                    sb.Append("\\\"");
-                    break;
-                case '\n':
-                    sb.Append("\\n");
-                    break;
-                case '\r':
-                    sb.Append("\\r");
-                    break;
-                case '\t':
-                    sb.Append("\\t");
-                    break;
-                default:
-                    sb.Append(c);
-                    break;
-            }
-        }
-        return sb.ToString();
-    }
+    /// <summary>
+    /// A PHP <em>single-quoted</em> string literal for an emitted expression. Single quotes are used
+    /// so a <c>$</c> in the literal is reproduced verbatim instead of being interpolated as a PHP
+    /// variable — double-quoted PHP turns <c>"$word"</c> into a reference to <c>$word</c>, yielding the
+    /// wrong runtime value and a phpstan level-max failure. Inside single quotes only <c>\</c> and
+    /// <c>'</c> are special, so just those are escaped (backslash first); every other character —
+    /// including <c>$</c>, <c>"</c> and embedded control characters — is emitted as-is. Matches the
+    /// Decimal/regex literal arms, the runtime, and the <c>RuleLiteral</c> fix for invariant/requires
+    /// messages (#616); this is the sibling fix for the expression path (#655).
+    /// </summary>
+    private static string StringLiteral(string s) =>
+        "'" + s.Replace("\\", "\\\\").Replace("'", "\\'") + "'";
 
     private static bool TryBoolLiterals(ConditionalExpr c, out bool whenTrue)
     {
