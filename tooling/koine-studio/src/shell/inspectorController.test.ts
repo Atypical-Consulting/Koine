@@ -1287,4 +1287,92 @@ describe('createInspectorController — split center layout', () => {
 
     ctl.dispose();
   });
+
+  // --- Task 5: split/reset controls in the center tab bar ---
+
+  test('init() creates #center-split-controls inside #center-tabs', () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    const host = document.getElementById('center-split-controls');
+    expect(host).not.toBeNull();
+    expect(el('center-tabs').contains(host)).toBe(true);
+
+    ctl.dispose();
+  });
+
+  test('"Split →" button has aria-label "Split center pane right" and clicking it calls splitCenter("row")', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    const btn = document.querySelector<HTMLButtonElement>('[aria-label="Split center pane right"]');
+    expect(btn).not.toBeNull();
+
+    btn!.click();
+    await waitFor(() => {
+      expect(deps.store.getState().centerLayout.panes.length).toBe(2);
+      expect(deps.store.getState().centerLayout.orientation).toBe('row');
+    });
+
+    ctl.dispose();
+  });
+
+  test('"Split ↓" button has aria-label "Split center pane down" and clicking it calls splitCenter("column")', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    const btn = document.querySelector<HTMLButtonElement>('[aria-label="Split center pane down"]');
+    expect(btn).not.toBeNull();
+
+    btn!.click();
+    await waitFor(() => {
+      expect(deps.store.getState().centerLayout.panes.length).toBe(2);
+      expect(deps.store.getState().centerLayout.orientation).toBe('column');
+    });
+
+    ctl.dispose();
+  });
+
+  test('Reset button is absent in single-pane mode', () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    const btn = document.querySelector<HTMLButtonElement>('[aria-label="Reset center to single pane"]');
+    expect(btn).toBeNull();
+
+    ctl.dispose();
+  });
+
+  test('Reset button appears when 2+ panes; clicking it resets to DEFAULT_CENTER_LAYOUT', async () => {
+    const { DEFAULT_CENTER_LAYOUT } = await import('@/store/slices/uiChrome');
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    // Split first so the Reset button appears.
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => {
+      const btn = document.querySelector<HTMLButtonElement>('[aria-label="Reset center to single pane"]');
+      expect(btn).not.toBeNull();
+    });
+
+    const resetBtn = document.querySelector<HTMLButtonElement>('[aria-label="Reset center to single pane"]')!;
+    resetBtn.click();
+
+    await waitFor(() => {
+      expect(deps.store.getState().centerLayout.panes.length).toBe(1);
+      expect(deps.store.getState().centerLayout).toEqual(DEFAULT_CENTER_LAYOUT);
+    });
+
+    // Reset button must disappear again.
+    await waitFor(() => {
+      expect(document.querySelector('[aria-label="Reset center to single pane"]')).toBeNull();
+    });
+
+    ctl.dispose();
+  });
 });

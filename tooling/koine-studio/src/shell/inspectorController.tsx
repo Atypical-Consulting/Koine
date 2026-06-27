@@ -83,7 +83,7 @@ import { guardedLoad } from '@/shell/guardedLoad';
 import { createInspectorSheet, type InspectorSheet } from '@/shell/inspectorSheet';
 import { isNarrowViewport } from '@/shared/breakpoint';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
-import { DEFAULT_CENTER, isValidCenter, type CenterLayout, type RightView } from '@/store/slices/uiChrome';
+import { DEFAULT_CENTER, DEFAULT_CENTER_LAYOUT, isValidCenter, type CenterLayout, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
 import { escapeHtml, fileUriToPath, formatAclMapping, renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
@@ -306,6 +306,62 @@ function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
   if (!node) throw new Error(`missing #${id}`);
   return node as T;
+}
+
+// --- SplitControls component --------------------------------------------------
+// Three compact buttons rendered into the right side of #center-tabs so the user
+// can trigger a split-right, split-down, or reset-to-single-pane without a
+// keyboard shortcut. Dynamically shown/hidden: the Reset button appears only
+// when 2+ panes are open; the two Split buttons are always present.
+//
+// Rendered via Preact into a #center-split-controls host that init() creates and
+// appends to #center-tabs. The host is re-rendered whenever centerLayout changes
+// (the same subscription that drives updateCenterSplitLayout / applyCenterChrome).
+
+function SplitControls({
+  hasSplit,
+  onSplitRow,
+  onSplitColumn,
+  onReset,
+}: {
+  hasSplit: boolean;
+  onSplitRow(): void;
+  onSplitColumn(): void;
+  onReset(): void;
+}): JSX.Element {
+  return (
+    <div class="center-split-btns" aria-label="Center layout controls">
+      <button
+        type="button"
+        class="center-split-btn"
+        title="Split right"
+        aria-label="Split center pane right"
+        onClick={onSplitRow}
+      >
+        Split →
+      </button>
+      <button
+        type="button"
+        class="center-split-btn"
+        title="Split down"
+        aria-label="Split center pane down"
+        onClick={onSplitColumn}
+      >
+        Split ↓
+      </button>
+      {hasSplit && (
+        <button
+          type="button"
+          class="center-split-btn center-split-btn--reset"
+          title="Reset to single pane"
+          aria-label="Reset center to single pane"
+          onClick={onReset}
+        >
+          Reset
+        </button>
+      )}
+    </div>
+  );
 }
 
 export function createInspectorController(deps: InspectorControllerDeps): InspectorController {
@@ -1590,15 +1646,38 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     }
   });
 
+  // --- split/reset controls in the center tab bar (#720 Task 5) ---------------
+  // A small cluster of buttons in the right side of #center-tabs lets the user trigger a split-right,
+  // split-down, or reset-to-single-pane without a keyboard shortcut. The host is created dynamically so
+  // the HTML doesn't need to pre-declare it; the Preact component is re-rendered whenever the layout
+  // changes (via the centerLayout subscription below) so the Reset button appears/disappears correctly.
+  let splitControlsHost: HTMLElement | null = null;
+
+  function renderSplitControls(): void {
+    if (!splitControlsHost) return;
+    const { centerLayout } = appStore.getState();
+    render(
+      <SplitControls
+        hasSplit={centerLayout.panes.length >= 2}
+        onSplitRow={() => { appStore.getState().splitCenter('row'); }}
+        onSplitColumn={() => { appStore.getState().splitCenter('column'); }}
+        onReset={() => { appStore.getState().setCenterLayout(DEFAULT_CENTER_LAYOUT); }}
+      />,
+      splitControlsHost,
+    );
+  }
+
   // Subscribe to centerLayout changes so any external mutation (e.g. splitCenter(), setCenterLayout(),
   // focusPane()) immediately re-renders the split DOM and re-applies the chrome — mirrors the
-  // unsubscribeRightCollapsed pattern above. Disposed in dispose() to prevent callbacks firing into a
-  // torn-down DOM after the controller is destroyed.
+  // unsubscribeRightCollapsed pattern above. Also re-renders the split controls so the Reset button
+  // tracks the pane count. Disposed in dispose() to prevent callbacks firing into a torn-down DOM after
+  // the controller is destroyed.
   const unsubscribeCenterLayout = appStore.subscribe(
     (s: import('@/store/index').AppState, prev: import('@/store/index').AppState) => {
       if (s.centerLayout !== prev.centerLayout) {
         updateCenterSplitLayout();
         applyCenterChrome();
+        renderSplitControls();
       }
     },
   );
@@ -2118,6 +2197,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // tracks scope/selection via the store thereafter; setContextOptions + loadModel re-render it when
     // the contexts list or model index changes.
     renderBreadcrumb();
+    // Create the split-controls host dynamically and append it to the right end of #center-tabs, then
+    // do the initial render. The centerLayout subscription above keeps it in sync thereafter.
+    const centerTabsEl = el('center-tabs');
+    splitControlsHost = document.createElement('div');
+    splitControlsHost.id = 'center-split-controls';
+    centerTabsEl.appendChild(splitControlsHost);
+    renderSplitControls();
   }
 
   // Cancel any pending debounce/reset timers. The IDE runs for the page lifetime in production (so this

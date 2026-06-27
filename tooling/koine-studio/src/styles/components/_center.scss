@@ -240,6 +240,46 @@
   grid-row: 3;
 }
 
+// --- Split/reset controls in the center tab bar (#720 Task 5) ----------------
+
+#center-split-controls {
+  // Pushed to the right end of the flex #center-tabs row via margin-left: auto on the inner widget.
+  display: contents;
+}
+
+.center-split-btns {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+}
+
+.center-split-btn {
+  all: unset;
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 11px;
+  border-radius: 3px;
+  border: 1px solid var(--koi-border, #d0d0d0);
+  color: var(--koi-muted, #666);
+  white-space: nowrap;
+  line-height: 1.4;
+
+  &:hover {
+    background: var(--koi-paper-2, #e8e8e8);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent, #1d76db);
+    outline-offset: 1px;
+  }
+
+  &--reset {
+    color: var(--koi-accent, #1d76db);
+  }
+}
+
 // --- Split-pane layout -------------------------------------------------------
 
 #center-body[data-split='row'],
