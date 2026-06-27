@@ -232,7 +232,7 @@ class Order
         $this->lines = $lines;
         $this->status = $status;
         if (count($lines) === 0) {
-            throw new \Koine\Runtime\DomainInvariantViolationException("Order", "an order must have at least one line");
+            throw new \Koine\Runtime\DomainInvariantViolationException("Order", 'an order must have at least one line');
         }
     }
 
@@ -534,7 +534,7 @@ final class OrderLine
         public readonly int $quantity
     ) {
         if ($quantity < 1) {
-            throw new \Koine\Runtime\DomainInvariantViolationException("OrderLine", "a line needs at least one unit");
+            throw new \Koine\Runtime\DomainInvariantViolationException("OrderLine", 'a line needs at least one unit');
         }
     }
 

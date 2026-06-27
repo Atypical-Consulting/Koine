@@ -228,10 +228,10 @@ class Product
         $this->stock = $stock;
         $this->status = $status;
         if (strlen($name) <= 0) {
-            throw new \Koine\Runtime\DomainInvariantViolationException("Product", "a product must have a name");
+            throw new \Koine\Runtime\DomainInvariantViolationException("Product", 'a product must have a name');
         }
         if ($stock < 0) {
-            throw new \Koine\Runtime\DomainInvariantViolationException("Product", "stock cannot be negative");
+            throw new \Koine\Runtime\DomainInvariantViolationException("Product", 'stock cannot be negative');
         }
     }
 
