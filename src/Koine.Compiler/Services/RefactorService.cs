@@ -438,6 +438,13 @@ internal sealed class RefactorService
                 }
 
                 // Inlinability guards (the no-noise contract): single-use, self-contained.
+                // A member-less VO (the grammar allows `value Empty {}`) has nothing to inline, and
+                // BuildInline would index inlined[0]/inlined[^1] on an empty list — bail out here.
+                if (target.Members.Count == 0)
+                {
+                    return null;
+                }
+
                 if (target.Invariants.Count > 0 || target.Members.Any(m => m.Initializer is not null))
                 {
                     return null;

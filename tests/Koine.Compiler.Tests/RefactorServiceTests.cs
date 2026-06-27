@@ -440,6 +440,23 @@ public class RefactorServiceTests
         actions.ShouldNotContain(a => a.Kind == "refactor" && a.Title.StartsWith("Inline value object", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void No_inline_action_for_a_member_less_value_object_and_no_throw()
+    {
+        var src =
+            "context C {\n" +
+            "  value Empty {}\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    e: Empty\n" +
+            "  }\n" +
+            "}\n";
+        // Line 3 (0-based) = "    e: Empty"; the "Empty" reference spans cols 7..12. A member-less VO has
+        // nothing to inline, so no action is offered — and computing the refactor must not throw
+        // (BuildInline used to index inlined[0] on an empty Members list).
+        var actions = Should.NotThrow(() => RefactorsAt(src, 3, 7, 3, 12));
+        actions.ShouldNotContain(a => a.Kind == "refactor" && a.Title.StartsWith("Inline value object", StringComparison.Ordinal));
+    }
+
     /// <summary>The "Move to context 'Target'" refactor at this selection (a plain <c>refactor</c> Kind),
     /// for the named target context.</summary>
     private static CodeActionEdit MoveToContextAt(string src, string target, int sl, int sc, int el, int ec) =>
