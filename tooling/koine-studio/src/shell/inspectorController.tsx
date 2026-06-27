@@ -1490,8 +1490,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const rstripSplitEl = el('split');
   const rstripButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('#right-strip .rstrip-btn'));
   function applyRightCollapsed(collapsed: boolean): void {
-    // The collapsed grid (hide #right + #split-resizer, #center reclaims the column, #right-strip stays)
-    // is CSS, keyed off this class on #split — mirroring how `applyDiagCollapsed` keys the bottom strip.
+    // DOM/ARIA only — persistence happens once per actual collapse transition (in the subscription
+    // below), not on every right-view switch that also runs this repaint. The collapsed grid (hide
+    // #right + #split-resizer, #center reclaims the column, #right-strip stays) is CSS, keyed off this
+    // class on #split — mirroring how `applyDiagCollapsed` keys the bottom strip.
     rstripSplitEl.classList.toggle('right-collapsed', collapsed);
     const active = appStore.getState().right;
     // A stripe button reads "pressed" only while the panel is OPEN and showing that view; collapsed → none
@@ -1499,7 +1501,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     for (const b of rstripButtons) {
       b.setAttribute('aria-pressed', String(!collapsed && b.dataset.rview === active));
     }
-    saveLayout({ rightCollapsed: collapsed });
   }
   // Seed the runtime flag from persistence before any subscription is wired (so this seed doesn't echo),
   // then paint the DOM/ARIA once for the restored state.
@@ -1524,10 +1525,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
   // Keep the stripe's pressed state + the collapsed grid in sync however the state changes — a stripe
   // click, an .rtab click, the palette command, or a selection auto-activating Properties all route
-  // through the slice, so re-running applyRightCollapsed here is the single reconciliation point.
-  appStore.subscribe((s, prev) => {
+  // through the slice, so re-running applyRightCollapsed here is the single reconciliation point. Persist
+  // only on an actual collapse transition (not on every view switch that also repaints). Captured +
+  // disposed (like unsubscribeActiveContext / unsubscribeDirtyCount) so a deferred slice change can't
+  // fire applyRightCollapsed into a torn-down host's captured DOM after dispose().
+  const unsubscribeRightCollapsed = appStore.subscribe((s, prev) => {
     if (s.right !== prev.right || s.rightCollapsed !== prev.rightCollapsed) {
       applyRightCollapsed(s.rightCollapsed);
+    }
+    if (s.rightCollapsed !== prev.rightCollapsed) {
+      saveLayout({ rightCollapsed: s.rightCollapsed });
     }
   });
 
@@ -2064,6 +2071,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Drop the activeContext subscription (#531) too — its callback re-renders scoped surfaces, which
     // would throw into a torn-down host if a deferred slice change fired after dispose.
     unsubscribeActiveContext();
+    // Drop the right-strip collapse subscription (#500) — its callback mutates the captured #split /
+    // .rstrip-btn nodes and persists, which must not fire into a torn-down host after dispose.
+    unsubscribeRightCollapsed();
     // The viewport-resize listener is registered unconditionally now (#475 re-evaluates the strip default
     // on a narrow↔wide cross even without the inspector sheet), so always detach it; the sheet teardown is
     // still sheet-gated.

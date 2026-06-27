@@ -168,7 +168,16 @@ body.resizing-y {
    Diagram both live in #center (the center tab decides which). Desktop is untouched —
    every rule here is inside the media query. */
 @media (max-width: a.$bp-narrow) {
-  #split {
+  /* Reset every desktop grid variant to the single mobile column. Media queries add no specificity, so
+     the desktop `#split.right-collapsed` / `#split[data-siderail-side='left']` templates (specificity
+     (1,1,0)/(1,2,0)) would otherwise outrank a bare `#split { … }` here and survive into the mobile
+     shell — e.g. when `rightCollapsed` persisted true and the page loads narrow. Listing each variant at
+     matching-or-higher specificity, inside the query (so it also wins source-order ties), neutralizes
+     them, keeping the active zone full-width regardless of the persisted desktop layout. */
+  #split,
+  #split.right-collapsed,
+  #split[data-siderail-side='left'],
+  #split[data-siderail-side='left'].right-collapsed {
     grid-template-columns: 1fr;
   }
 
