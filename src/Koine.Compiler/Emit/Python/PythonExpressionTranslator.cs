@@ -430,6 +430,19 @@ internal sealed class PythonExpressionTranslator
         var target = new StringBuilder();
         Write(ma.Target, target);
         var t = target.ToString();
+
+        // A user type that declares a member named after a built-in member-op (isEmpty/trim/…)
+        // shadows the op shortcut — emit a plain attribute access, exactly mirroring the #605
+        // semantic resolution one layer down. Without this, a field named e.g. `isEmpty` would
+        // resolve correctly yet still emit `len(t) == 0`, which is wrong Python (#672).
+        if (_resolver.Infer(ma.Target, EffectiveScope()) is { } receiverType
+            && _index.TryGetMemberType(receiverType.Qualifier ?? _resolver.Context, receiverType.Name, ma.MemberName, out _))
+        {
+            sb.Append(t).Append('.')
+              .Append(PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(ma.MemberName)));
+            return;
+        }
+
         switch (ma.MemberName)
         {
             case "isEmpty":
