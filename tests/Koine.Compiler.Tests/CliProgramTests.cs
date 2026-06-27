@@ -378,4 +378,46 @@ public class CliProgramTests
         var (code2, _, _) = Run("check", currentFile, "--baseline", baseDir, "--config", configFile);
         code2.ShouldBe(0);
     }
+
+    // ---- coverage: --config parity with build/check (issue #631) -----------
+
+    [Fact]
+    public void Coverage_Config_ResolvesTargetFromExplicitConfigFile()
+    {
+        // The model and a koine.config selecting a non-default target live in SEPARATE temp dirs, so
+        // Discover would never find the config beside the input. coverage --config must parse the named
+        // file and measure against its target — exactly like build/check — instead of failing with
+        // "Unknown option 'config'".
+        const string src = """
+            context Sales {
+              value Money { amount: Decimal }
+            }
+            """;
+        var (modelFile, _) = TempModel(src, "domain.koi");
+        var (configFile, _) = TempModel("target = python\n", "koine.config");
+
+        var (_, stdout, stderr) = Run("coverage", modelFile, "--config", configFile);
+
+        // The flag is recognized (no Spectre "Unknown option") ...
+        (stdout + stderr).ShouldNotContain("Unknown option");
+        // ... and coverage is measured against the config's target, not the csharp default.
+        stdout.ShouldContain("Coverage for python");
+    }
+
+    [Fact]
+    public void Coverage_Config_MissingFile_ExitsWithConfigNotFound()
+    {
+        // An explicit --config that doesn't exist fails fast with the same wording build/check use.
+        const string src = """
+            context Sales {
+              value Money { amount: Decimal }
+            }
+            """;
+        var (modelFile, _) = TempModel(src, "domain.koi");
+
+        var (code, _, stderr) = Run("coverage", modelFile, "--config", "/no/such/koine.config");
+
+        code.ShouldBe(1);
+        stderr.ShouldContain("config not found:");
+    }
 }
