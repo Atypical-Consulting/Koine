@@ -516,7 +516,9 @@ public class PhpSnapshotTests
     /// lines.sum(l =&gt; l)</c> — so the fold's element and result are both <c>Money</c>. The summed
     /// <c>Money</c> implements <c>\Koine\Runtime\Summable</c> and its <c>add()</c> takes the interface
     /// type (PHP forbids narrowing it to the concrete class) with <c>@param self</c>; the getter keeps
-    /// the <c>Decimal::sum(...)</c> call shape and returns <c>Money</c>.
+    /// the <c>Decimal::sum(...)</c> call shape and returns <c>Money</c>. A summed <c>quantity</c>
+    /// (<c>Weight</c>) covers the other emit path — <c>WriteQuantityOps</c> widens the unit-checked
+    /// <c>add()</c> to the interface type while <c>subtract()</c> keeps the concrete <c>self</c>.
     /// </summary>
     internal const string ValueObjectFoldFixture = """
         context Shop {
@@ -526,11 +528,24 @@ public class PhpSnapshotTests
             invariant amount >= 0 "an amount cannot be negative"
           }
 
+          /// The units a weight can be measured in.
+          enum MassUnit { Gram, Kilogram }
+
+          /// A measured weight: an amount in a unit (a unit-checked quantity).
+          quantity Weight {
+            amount: Decimal
+            unit:   MassUnit
+          }
+
           /// A basket whose total folds its money lines whole — the element AND result are Money,
           /// so the fold must preserve the value-object type (the #692 path), not collapse to Decimal.
+          /// Its shipping weight folds a List<Weight> whole — a summed quantity, exercising the
+          /// WriteQuantityOps interface-typed add() path.
           value Basket {
-            lines: List<Money>
-            total: Money = lines.sum(l => l)
+            lines:    List<Money>
+            total:    Money = lines.sum(l => l)
+            parcels:  List<Weight>
+            shipping: Weight = parcels.sum(p => p)
           }
         }
         """;
