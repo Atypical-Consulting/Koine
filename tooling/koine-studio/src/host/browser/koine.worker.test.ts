@@ -9,10 +9,12 @@ import { createWorkerClient } from '@/host/browser/workerClient';
 // Fake WorkerLike: a controllable postMessage/onmessage pair
 // ---------------------------------------------------------------------------
 
-/** A minimal in-process worker double. Tests drive it by calling `deliver(data)`. */
+/** A minimal in-process worker double. Tests drive it by calling `deliver(data)` / `fail(message)`. */
 function makeFakeWorker() {
   // The message handler the client installs after construction.
   let messageHandler: ((ev: { data: unknown }) => void) | null = null;
+  // The error handler the client installs (a real module Worker fires `error` on a load failure).
+  let errorHandler: ((ev: { message?: string }) => void) | null = null;
 
   const fake = {
     postMessage: vi.fn<(msg: unknown) => void>(),
@@ -22,10 +24,20 @@ function makeFakeWorker() {
     set onmessage(handler: ((ev: { data: unknown }) => void) | null) {
       messageHandler = handler;
     },
+    get onerror(): ((ev: { message?: string }) => void) | null {
+      return errorHandler;
+    },
+    set onerror(handler: ((ev: { message?: string }) => void) | null) {
+      errorHandler = handler;
+    },
     terminate: vi.fn<() => void>(),
     /** Push a message from the "worker" into the client. */
     deliver(data: unknown): void {
       if (messageHandler) messageHandler({ data });
+    },
+    /** Fire a worker-load `error` event (the real Worker's failure signal when its script fails to load). */
+    fail(message: string): void {
+      if (errorHandler) errorHandler({ message });
     },
   };
 
@@ -125,6 +137,46 @@ describe('WorkerClient (workerClient.ts)', () => {
     fake.deliver({ type: 'boot-failure', error: 'dotnet.create() failed' });
 
     await expect(readyPromise).rejects.toThrow('dotnet.create() failed');
+  });
+
+  // Issue #624: a real module Worker fires an `error` event (not a `message`) when its script fails to
+  // *load* (404 / MIME mismatch / CSP-blocked module worker / parse error) — before any in-worker code,
+  // so no `ready` and no `boot-failure` ever arrive. Without an `onerror` handler the ONLY thing that
+  // rejects readyPromise is the 30 s BOOT_TIMEOUT_MS, leaving the studio dead for 30 s before failover.
+  it('whenReady() rejects promptly on a worker-load error event (no 30s wait) — issue #624', async () => {
+    const factory = makeWorkerFactory();
+    const client = createWorkerClient(factory);
+    const fake = factory.instances[0];
+
+    const readyPromise = client.whenReady();
+
+    // Fire the worker's load-error event WITHOUT advancing any timer — the rejection must come from the
+    // error handler, not the 30 s safety-net timer.
+    fake.fail('Failed to fetch dynamically imported module');
+
+    await expect(readyPromise).rejects.toThrow(/failed to load/i);
+  });
+
+  it('a worker-load error from a superseded generation is ignored — issue #624', async () => {
+    const factory = makeWorkerFactory();
+    const client = createWorkerClient(factory);
+    const oldWorker = factory.instances[0];
+
+    oldWorker.deliver({ type: 'ready' });
+    await client.whenReady();
+
+    // Respawn — the old worker's generation is now stale.
+    client.terminateAndRespawn();
+    expect(factory.instances.length).toBe(2);
+    const newWorker = factory.instances[1];
+
+    // A late load error from the OLD generation must NOT reject the new generation's ready promise.
+    const freshReady = client.whenReady();
+    oldWorker.fail('stale load error from a terminated generation');
+
+    // The fresh generation still resolves normally on its own `ready`.
+    newWorker.deliver({ type: 'ready' });
+    await expect(freshReady).resolves.toBeUndefined();
   });
 
   it('multiple concurrent calls are independently correlated', async () => {

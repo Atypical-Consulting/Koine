@@ -36,6 +36,12 @@ export type WorkerSignal = { type: 'ready' } | { type: 'boot-failure'; error: st
 export interface WorkerLike {
   postMessage(msg: unknown): void;
   onmessage: ((ev: { data: unknown }) => void) | null;
+  // A real module Worker fires an `error` event — not a `message` — when its script fails to *load*
+  // (404 / MIME mismatch / CSP-blocked module worker / parse error), all *before* the worker posts
+  // `ready`/`boot-failure`. Optional so the existing fake workers and the real-`Worker` cast both still
+  // satisfy `WorkerLike` structurally; wired in `startWorkerGeneration` to fail over fast (issue #624).
+  onerror?: ((ev: { message?: string }) => void) | null;
+  onmessageerror?: ((ev: { message?: string }) => void) | null;
   terminate(): void;
 }
 
@@ -164,6 +170,23 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
         entry.reject(new Error(reply.error));
       }
     };
+
+    // A worker-LOAD failure (404 / MIME mismatch / CSP-blocked module worker / parse error) fires the
+    // worker's `error` event before any in-worker code runs — so no `ready` and no `boot-failure` ever
+    // arrive, and the in-worker bootWatchdog can't help either (its module never executed). Without this
+    // the ONLY thing that rejects readyPromise is the 30 s BOOT_TIMEOUT_MS. Reject immediately instead so
+    // wasm.ts's catch starts the main-thread fallback in well under a second (issue #624). Symmetric with
+    // the main-thread path's eager `script` `error` listener (issue #359). Generation-guarded so a stale
+    // error from a superseded generation (after terminateAndRespawn) is ignored, mirroring `onmessage`.
+    const onLoadError = (e: { message?: string } | undefined): void => {
+      if (myGeneration !== generation) return;
+      clearTimeout(bootTimer);
+      // `||` not `??`: a sanitized cross-origin worker ErrorEvent reports `message === ''` (the browser's
+      // "Script error."), so fall through an empty string to the generic tail rather than emit a blank one.
+      readyReject(new Error(`Koine worker failed to load: ${e?.message || 'unknown error'}`));
+    };
+    worker.onerror = onLoadError;
+    worker.onmessageerror = onLoadError;
   }
 
   // Boot the initial worker generation.
@@ -234,11 +257,13 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
       // already signalled ready (the common post-boot case — rejecting a settled promise does nothing).
       readyReject(new CancelledError('Koine worker restarted'));
 
-      // Null out the old worker's message handler to prevent late messages from being processed
+      // Null out the old worker's message/error handlers to prevent late events from being processed
       // after the generation guard would catch them. Belt-and-suspenders: the generation counter
       // in the closure already guards this, but nulling is cheaper than the runtime check.
       if (currentWorker) {
         currentWorker.onmessage = null;
+        currentWorker.onerror = null;
+        currentWorker.onmessageerror = null;
         currentWorker.terminate();
       }
 
