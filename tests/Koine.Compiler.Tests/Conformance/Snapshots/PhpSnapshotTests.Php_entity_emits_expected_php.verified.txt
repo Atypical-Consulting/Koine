@@ -159,6 +159,77 @@ class Decimal
     {
         return $this->value;
     }
+
+    /**
+     * Sums a non-empty array of decimals, folding under add() from the first element.
+     *
+     * A string-backed decimal has no implicit zero, so an EMPTY array raises a domain error
+     * rather than fabricating one (parity with the C#/TypeScript/Python empty-fold guard).
+     * A value-object projection whose add() returns its own type folds here too.
+     *
+     * @param array<self> $values
+     */
+    public static function sum(array $values): self
+    {
+        if ($values === []) {
+            throw new DomainInvariantViolationException('collection', 'cannot sum an empty collection (no zero value)');
+        }
+        $items = array_values($values);
+        $total = $items[0];
+        $count = count($items);
+        for ($i = 1; $i < $count; $i++) {
+            $total = $total->add($items[$i]);
+        }
+        return $total;
+    }
+
+    /**
+     * The minimum element of a non-empty array, ordered via compareTo().
+     *
+     * An EMPTY array raises a domain error (a collection with no element has no minimum),
+     * mirroring the C#/TypeScript/Python empty-fold guard.
+     *
+     * @param array<self> $values
+     */
+    public static function min(array $values): self
+    {
+        if ($values === []) {
+            throw new DomainInvariantViolationException('collection', 'cannot take min of an empty collection (no value)');
+        }
+        $items = array_values($values);
+        $result = $items[0];
+        $count = count($items);
+        for ($i = 1; $i < $count; $i++) {
+            if ($items[$i]->compareTo($result) < 0) {
+                $result = $items[$i];
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * The maximum element of a non-empty array, ordered via compareTo().
+     *
+     * An EMPTY array raises a domain error (a collection with no element has no maximum),
+     * mirroring the C#/TypeScript/Python empty-fold guard.
+     *
+     * @param array<self> $values
+     */
+    public static function max(array $values): self
+    {
+        if ($values === []) {
+            throw new DomainInvariantViolationException('collection', 'cannot take max of an empty collection (no value)');
+        }
+        $items = array_values($values);
+        $result = $items[0];
+        $count = count($items);
+        for ($i = 1; $i < $count; $i++) {
+            if ($items[$i]->compareTo($result) > 0) {
+                $result = $items[$i];
+            }
+        }
+        return $result;
+    }
 }
 
 /**
