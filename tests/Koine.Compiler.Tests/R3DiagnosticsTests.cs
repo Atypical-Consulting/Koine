@@ -334,4 +334,19 @@ public class R3DiagnosticsTests
         warn.EndLine.ShouldBe(0);
         warn.EndColumn.ShouldBe(0);
     }
+
+    // ---- recovered parse: a trailing operator must not crash the never-throw Diagnose path (#597) ----
+
+    [Theory]
+    [InlineData("context C { value V { x: Int = a + } }")]
+    [InlineData("context C { value V { x: Int = a.+ } }")]
+    public void Diagnose_with_trailing_operator_does_not_throw_and_reports_an_error(string source)
+    {
+        // A trailing binary operator (`a +`) leaves `unaryExpr` matching neither alternative, so
+        // BuildUnary passes a null PostfixExprContext to BuildPostfix. The error-tolerant Diagnose
+        // path must report diagnostics rather than throwing a NullReferenceException.
+        var diagnostics = Should.NotThrow(() => Diagnose(source));
+
+        diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+    }
 }
