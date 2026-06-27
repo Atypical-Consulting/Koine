@@ -1264,8 +1264,17 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return BuildPostfix(ctx.postfixExpr());
     }
 
-    private Expr BuildPostfix(KoineParser.PostfixExprContext ctx)
+    private Expr BuildPostfix(KoineParser.PostfixExprContext? ctx)
     {
+        // On a recovered (error) parse the postfix expression can be absent entirely (e.g. a trailing
+        // binary operator like `a +`, where `unaryExpr` matches neither alternative); yield a
+        // placeholder empty identifier rather than throwing, matching BuildExpression. The syntax
+        // error is reported elsewhere.
+        if (ctx is null)
+        {
+            return new IdentifierExpr(string.Empty);
+        }
+
         Expr result = BuildPrimary(ctx.primary());
 
         // Walk the trailing `.member` / `.method(args)` chain in source order.
@@ -1325,8 +1334,15 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             Span = SpanOf(ctx)
         };
 
-    private Expr BuildPrimary(KoineParser.PrimaryContext ctx)
+    private Expr BuildPrimary(KoineParser.PrimaryContext? ctx)
     {
+        // Defense in depth for the recovered-parse path: a missing primary also yields the empty
+        // placeholder identifier rather than throwing (the syntax error is reported elsewhere).
+        if (ctx is null)
+        {
+            return new IdentifierExpr(string.Empty);
+        }
+
         if (ctx.literal() is { } literal)
         {
             return BuildLiteral(literal);
