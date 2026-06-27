@@ -946,19 +946,28 @@ internal sealed class PhpExpressionTranslator
     /// <c>distinctBy</c> — "every projection is distinct", the PHP counterpart of C#'s
     /// <c>.Select(selector).Distinct().Count() == .Count</c>. <c>array_unique</c> defaults to
     /// <c>SORT_STRING</c>, which compares elements by their string cast <c>(string)$elem</c>; a
-    /// value-object / branded-Id selector projects to a <c>final class</c> with no <c>__toString</c>,
-    /// so the cast throws a fatal PHP <c>Error</c> at runtime (issue #676, the PHP counterpart of the
-    /// TypeScript #609 fix). For a value-like / <c>Decimal</c> selector we therefore count distinct
-    /// projections structurally via the generated <c>equals()</c> — keeping each value's first
-    /// occurrence (O(n²), like the TS <c>structuralEquals</c> fold; invariant collections are small).
-    /// A primitive selector (<c>string</c>/<c>int</c>/<c>bool</c>) already dedupes by value under
-    /// <c>array_unique</c>, so it keeps the faster path.
+    /// value-object / branded-Id / entity selector projects to a class with no <c>__toString</c>,
+    /// so the cast throws a fatal PHP <c>Error</c> at runtime (issue #676 for value objects, #687 for
+    /// entities — the PHP counterpart of the TypeScript #609 fix). For any of those — value-like,
+    /// entity, or <c>Decimal</c> — we therefore count distinct projections structurally via the
+    /// generated <c>equals(self $other)</c> (entities carry it just like value objects) — keeping each
+    /// value's first occurrence (O(n²), like the TS <c>structuralEquals</c> fold; invariant collections
+    /// are small). A primitive selector (<c>string</c>/<c>int</c>/<c>bool</c>) already dedupes by value
+    /// under <c>array_unique</c>, so it keeps the faster path.
     /// </summary>
     private void WriteDistinctBy(CallExpr call, string target, StringBuilder sb)
     {
         var mapped = RenderArrayMap(call, target);
         TypeRef? selectorType = InferSelectorType(call);
-        if (_resolver.IsValueLike(selectorType) || selectorType?.Name == "Decimal")
+
+        // A value object, branded Id, or entity selector all project to a class without `__toString`,
+        // so all three must dedupe structurally via `equals()` rather than string-cast under
+        // `array_unique`. `IsValueLike` covers value objects + Ids; `IsUserType` adds entities; their
+        // union (plus Decimal, whose runtime class also exposes `equals()`) is the structural set.
+        bool isStructural = _resolver.IsValueLike(selectorType)
+            || _resolver.IsUserType(selectorType)
+            || selectorType?.Name == "Decimal";
+        if (isStructural)
         {
             // The generated `equals(self $other)` is non-nullable, so an optional selector (whose
             // projection puts PHP `null`s into the mapped array) must guard null first: two nulls are
