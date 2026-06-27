@@ -149,6 +149,10 @@ export interface InspectorControllerDeps {
   // --- store seams (persist/restore the per-workspace center pane + scope) ---
   saveWorkspaceCenter(id: string): void;
   loadWorkspaceCenter(): string | null;
+  /** Persist/restore the full multi-pane center layout (Task 2 of #720). Optional so existing
+   *  callers that only wire the legacy center-pane pair don't need to be updated. */
+  saveWorkspaceCenterLayout?: (layout: import('@/store/slices/uiChrome').CenterLayout) => void;
+  loadWorkspaceCenterLayout?: () => import('@/store/slices/uiChrome').CenterLayout;
   saveActiveContext(workspaceKey: string, scope: string): void;
   loadActiveContext(workspaceKey: string): string | null;
 
