@@ -277,6 +277,64 @@ describe('loadWasmApi — main-thread fallback (issue #357)', () => {
     }
   });
 
+  // Issue #705: the inline-<script> loader arms an 8s safety-net `setTimeout` (INLINE_LOADER_TIMEOUT_MS)
+  // so a CSP-blocked or unparseable inline module fails FAST instead of hanging the boot (#359). Once the
+  // loader settles early — by any path the shared `cleanup()` closure routes through (#643) — that timer
+  // must be cancelled, or it lingers pending (a guarded no-op behind `if (w[id])`) for up to 8s after a
+  // successful boot, leaving loader state uncancelled. This is the natural sibling of #643's detach.
+
+  test('clears the inline-<script> loader 8s safety-net timeout once it settles (issue #705)', async () => {
+    const { createKoineWorkerClient } = await import('@/host/browser/workerClient');
+    (createKoineWorkerClient as ReturnType<typeof vi.fn>).mockReturnValue({
+      call: vi.fn(),
+      whenReady: vi.fn<() => Promise<void>>().mockRejectedValue(new Error('worker boot failed')),
+      dispose: vi.fn(),
+    });
+
+    const wasm = await import('@/host/browser/wasm');
+    // Force the direct import to throw so the dev-server inline-<script> loader takes over.
+    wasm.__setEsModuleImporterForTests(() =>
+      Promise.reject(new Error('dev-server public-asset ?import transform failed')),
+    );
+
+    // Capture the safety-net timer handle: it is the lone `setTimeout` armed with the 8s
+    // INLINE_LOADER_TIMEOUT_MS (the #625 main-thread ceiling uses 20s, so the delay disambiguates them).
+    const realSetTimeout = globalThis.setTimeout.bind(globalThis);
+    let safetyNetHandle: ReturnType<typeof setTimeout> | undefined;
+    const setTimeoutSpy = vi
+      .spyOn(globalThis, 'setTimeout')
+      .mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) => {
+        const handle = realSetTimeout(fn as never, ms as never, ...(rest as never[]));
+        if (ms === 8_000) safetyNetHandle = handle;
+        return handle;
+      }) as never);
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+
+    // happy-dom does not execute the injected module script — drive the success bridge the browser would.
+    const appendSpy = vi.spyOn(document.head, 'appendChild').mockImplementation((node) => {
+      queueMicrotask(() => {
+        const w = window as unknown as Record<string, (m: Record<string, unknown>) => void>;
+        const resolveKey = Object.keys(w).find((k) => /^__koineDotnet_\d+$/.test(k));
+        if (resolveKey) w[resolveKey](dotnetModuleValue({ Glossary: () => '{"markdown":"dev"}' }));
+      });
+      return node;
+    });
+
+    try {
+      const api = await wasm.loadWasmApi();
+
+      expect(wasm.getWasmBootMode()).toBe('main-thread');
+      expect(await api.Glossary('[]')).toBe('{"markdown":"dev"}');
+      // The 8s safety-net timer was armed, then cancelled once the loader settled — no lingering timer.
+      expect(safetyNetHandle).toBeDefined();
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(safetyNetHandle);
+    } finally {
+      appendSpy.mockRestore();
+      clearTimeoutSpy.mockRestore();
+      setTimeoutSpy.mockRestore();
+    }
+  });
+
   // Issue #365: the inline-<script> loader exists ONLY for Vite's dev-server public-asset (`?import`)
   // transform. In a built/deployed bundle there is no such transform, so a thrown direct import is a
   // genuine load error — it must reject PROMPTLY with the real error instead of stalling on the inline
