@@ -481,6 +481,14 @@ function renderChangeSet(
       applyBtn.textContent = `Applied ${clean.length} file${clean.length === 1 ? '' : 's'} ✓`;
       status.textContent = `Applied ${clean.length} file${clean.length === 1 ? '' : 's'}.` + skipped;
       discardBtn.remove();
+    }).catch((e) => {
+      // onApply REJECTED (#633): applyFileEdit only turns disk-write errors into a { failed } result;
+      // an un-guarded throw from a non-disk op (renderer/LSP sync, dirty refresh, saved-callback) escapes
+      // as a rejection. Without this catch the Apply button stays stuck disabled, the error is swallowed,
+      // and the rejection is unhandled. Re-open Apply (re-enabling retry of the still-checked set) and
+      // surface the error in the polite live region so the failure is announced and recoverable.
+      status.textContent = `Apply failed: ${String(e)}` + skipped;
+      refreshApply();
     });
   });
   discardBtn.addEventListener('click', () => {
