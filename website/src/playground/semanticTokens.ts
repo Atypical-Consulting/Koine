@@ -138,6 +138,10 @@ const semanticTokenTheme = EditorView.baseTheme({
  * `Decoration.none`, so the static StreamLanguage grammar stays in charge — graceful degradation, never
  * a cleared/overridden buffer. Stale async results are dropped via a per-request token. The redraw on
  * resolution rides a state effect (resolution is outside any txn).
+ *
+ * The default debounce is slightly longer than Studio's (250ms vs 200ms): the playground recompiles for
+ * BOTH `compile` and `diagnose` on every debounced edit, so the token fetch is a third worker round-trip
+ * per keystroke-burst — a touch more throttling keeps the single-threaded worker responsive while typing.
  */
 export function semanticTokensExtension(provider: SemanticTokensFn, debounceMs = 250): Extension {
   const plugin = ViewPlugin.fromClass(
