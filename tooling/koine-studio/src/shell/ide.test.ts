@@ -378,6 +378,8 @@ const APP_HTML = `
             <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
           </div>
         </aside>
+        <!-- Thin shell: init() injects the tool-window stripe's buttons via rightStripMarkup() (#500). -->
+        <div id="right-strip" class="pane" role="toolbar" aria-label="Tool windows" aria-orientation="vertical"></div>
       </main>
       <footer id="statusbar">
         <span class="sb-item" id="sb-context">Context: —</span>

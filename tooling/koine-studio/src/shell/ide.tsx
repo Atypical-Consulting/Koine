@@ -2170,6 +2170,12 @@ export function init(): () => void {
       applyLayoutAttrs(layout);
       wireRailResizers(next); // re-point the inspector + left-rail handles to their swapped anchors live
     },
+    toggleProperties() {
+      // The right Properties panel's collapse flag is owned by the uiChrome slice; inspectorController
+      // subscribes to it and reconciles the DOM + persistence (the #500 stripe wiring), so the command
+      // just flips the slice. The stripe icons and this command therefore stay in lock-step.
+      appStore.getState().toggleRightCollapsed();
+    },
   };
 
   // Persist group B's re-pointed file so reload restores B to the file the user last opened into it,
@@ -2344,7 +2350,14 @@ export function init(): () => void {
     } else if (e.key === 'F1') {
       e.preventDefault();
       help.toggle();
-    } else if (mod && (e.key === 'b' || e.key === 'B')) {
+    } else if (mod && e.altKey && e.code === 'KeyB') {
+      // Mod+Alt+B → toggle the right Properties panel (the #500 tool-window stripe's collapse toggle,
+      // mirroring VS Code's secondary-side-bar chord). Matched on e.code: on macOS, Option composes the
+      // 'b' key into another glyph, so `e.key === 'b'` would miss this chord. Checked before the plain
+      // Mod+B file-tree branch below so the Alt variant isn't swallowed by it.
+      e.preventDefault();
+      layoutActions.toggleProperties();
+    } else if (mod && !e.altKey && (e.key === 'b' || e.key === 'B')) {
       // Toggle the file tree.
       e.preventDefault();
       toggleFileTree();
