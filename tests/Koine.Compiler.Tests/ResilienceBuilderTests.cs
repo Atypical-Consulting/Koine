@@ -80,4 +80,17 @@ public class ResilienceBuilderTests
         address.Name.ShouldBe("address");
         address.Type.Name.ShouldBe("String");
     }
+
+    // An incomplete `policy <Name> when <Event> then` (the reaction after `then` is missing) is a
+    // normal mid-typing state in the LSP/Studio live editor. On the recovered tree `policyReaction()`
+    // is null; BuildPolicy must yield a placeholder PolicyDecl rather than throwing an NRE so the
+    // syntax error surfaces through the usual error path.
+    [Fact]
+    public void IncompletePolicy_recovers_without_throwing()
+    {
+        KoineModel model = BuildRecovered("context C { policy P when E then }");
+
+        // The policy declaration is still built (with a placeholder reaction) instead of crashing.
+        NodeWalker.Descendants(model).OfType<PolicyDecl>().ShouldNotBeEmpty();
+    }
 }
