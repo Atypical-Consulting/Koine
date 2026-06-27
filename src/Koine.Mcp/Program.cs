@@ -19,15 +19,16 @@ namespace Koine.Mcp;
 /// </summary>
 internal static class Program
 {
-    private static async Task Main(string[] args)
+    private static async Task<int> Main(string[] args)
     {
         if (args.Contains("--http"))
         {
-            await HttpHost.RunAsync(args);
+            // Propagate the host's exit code so a process manager / launcher that gates on it sees the
+            // standalone tool fail (e.g. 1 on an out-of-range port), matching `koine mcp --http`.
+            return await HttpHost.RunAsync(args);
         }
-        else
-        {
-            await StdioHost.RunAsync(args);
-        }
+
+        await StdioHost.RunAsync(args);
+        return 0;
     }
 }

@@ -49,25 +49,30 @@ public static class HttpHost
 
     /// <summary>
     /// Builds the host, binds it (default <c>127.0.0.1:0</c> — an OS-assigned port), announces the
-    /// resolved <c>/mcp</c> URL on stderr, and serves until shutdown (Ctrl+C / SIGTERM).
+    /// resolved <c>/mcp</c> URL on stderr, and serves until shutdown (Ctrl+C / SIGTERM). Returns the
+    /// process exit code (<c>0</c> on clean shutdown, <c>1</c> on an out-of-range port).
     /// </summary>
-    public static async Task RunAsync(string[] args)
+    public static async Task<int> RunAsync(string[] args)
     {
         var (host, port) = ParseEndpoint(args);
-        await RunAsync(host, port);
+        return await RunAsync(host, port);
     }
 
     /// <summary>
     /// Builds the host bound to <paramref name="host"/>:<paramref name="port"/>, announces the
     /// resolved <c>/mcp</c> URL on stderr, and serves until shutdown (Ctrl+C / SIGTERM). Rejects an
-    /// out-of-range port and warns (but proceeds) on a non-loopback bind.
+    /// out-of-range port and warns (but proceeds) on a non-loopback bind. Returns the process exit
+    /// code so the standalone <c>koine-mcp</c> and the <c>koine mcp</c> CLI signal failure
+    /// consistently: <c>1</c> on an out-of-range port, <c>0</c> on a clean shutdown.
     /// </summary>
-    internal static async Task RunAsync(string host, int port)
+    internal static async Task<int> RunAsync(string host, int port)
     {
         if (!IsValidPort(port))
         {
-            Console.Error.WriteLine(EndpointLogPrefix + $"error: port must be 0-65535 (got {port})");
-            return;
+            // No EndpointLogPrefix here: this is an error, not the endpoint announcement, so a launcher
+            // that scrapes the prefix for the URL can't mistake it for one. Matches McpCommand's message.
+            Console.Error.WriteLine($"error: port must be 0-65535 (got {port})");
+            return 1;
         }
 
         if (!IsLoopbackHost(host))
@@ -82,6 +87,7 @@ public static class HttpHost
         // Print AFTER Start so a `--port 0` (auto) bind reports the real, resolved port.
         Console.Error.WriteLine(EndpointLogPrefix + McpUrl(app));
         await app.WaitForShutdownAsync();
+        return 0;
     }
 
     /// <summary>
