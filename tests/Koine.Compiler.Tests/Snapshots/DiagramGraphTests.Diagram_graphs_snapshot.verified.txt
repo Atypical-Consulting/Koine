@@ -21,11 +21,13 @@
       • [field] lines: List<OrderLine>
       • [field] status: OrderStatus
       • [method] submit()
+    cmd_Order_submit | command | Ordering.Order.submit | "submit" @ 38:15-38:21
   edges:
     OrderSubmitted -> Order
     OrderLine -> Money
     Order -> OrderLine
     Order -> OrderStatus
+    cmd_Order_submit -> OrderSubmitted : emits
 -- diagram: Order [statemachine]
   nodes:
     Draft | state | Ordering.Order.Draft | "Draft" @ 30:14-30:20
