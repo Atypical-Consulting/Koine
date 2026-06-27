@@ -8,7 +8,11 @@ namespace Koine.Compiler.Emit.Python;
 /// <c>@dataclass(frozen=True)</c>: stored members are typed fields, constant defaults are dataclass
 /// defaults, computed (derived) members are <c>@property</c> getters, and invariants run in
 /// <c>__post_init__</c> raising <see cref="PyRuntime"/>'s <c>DomainInvariantViolationError</c>.
-/// Frozen-dataclass equality and hashing come free from <c>frozen=True</c> (structural by field).
+/// Frozen-dataclass equality and hashing come free from <c>frozen=True</c> (structural by field) —
+/// except when the value object has a <c>Map</c> field: a <c>Map&lt;K,V&gt;</c> maps to a dict-backed
+/// <c>Mapping</c> (unhashable), so the dataclass's free structural hash would throw at runtime. Such a
+/// value object instead emits <c>eq=False</c> plus explicit structural <c>__eq__</c>/<c>__hash__</c>
+/// that fold each Map field into a hashable <c>frozenset(self.&lt;field&gt;.items())</c>.
 /// A <c>quantity</c> additionally gets unit-checked <c>__add__</c>/<c>__sub__</c> and scalar
 /// <c>__mul__</c>/<c>__truediv__</c> dunder operators (mirroring the C#/TS quantity semantics).
 /// </summary>
@@ -27,10 +31,17 @@ public sealed partial class PythonEmitter
         // (Initializer present, not derived) carries a default; an optional field defaults to None.
         var ordered = fields.OrderBy(m => HasDefault(m) ? 1 : 0).ToList();
 
+        // A `Map<K,V>` field maps to a dict-backed `Mapping`, which is unhashable — so the dataclass's
+        // free structural `__hash__` (from `frozen=True`/`eq=True`) would throw `TypeError: unhashable
+        // type: 'dict'` the moment the value object is hashed (set member, dict key, nested Set/Map
+        // key). When a Map field is present we drop `eq` and emit explicit structural `__eq__`/`__hash__`
+        // instead (see WriteValueObjectHashableDunders). Value objects without a Map field are unchanged.
+        var hasMapField = ordered.Any(m => PythonTypeMapper.IsMap(m.Type));
+
         var translator = new PythonExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, typeMapper, ContextOf(ns));
 
         var sb = new StringBuilder();
-        sb.Append("@dataclass(frozen=True)\n");
+        sb.Append(hasMapField ? "@dataclass(frozen=True, eq=False)\n" : "@dataclass(frozen=True)\n");
         sb.Append("class ").Append(name).Append(":\n");
 
         var classDoc = vo.Doc;
@@ -101,9 +112,62 @@ public sealed partial class PythonEmitter
             }
         }
 
+        // A frozen value object whose free structural hash would include a Map field (a dict-backed
+        // `Mapping`, unhashable) gets explicit structural dunders instead — see the `eq=False` header.
+        if (hasMapField)
+        {
+            WriteValueObjectHashableDunders(sb, name, ordered);
+        }
+
         return new EmittedFile(
             PathFor(ns, KindFolder.ValueObjects, vo.Name),
             Assemble(emit, ns, sb.ToString(), name));
+    }
+
+    /// <summary>
+    /// Explicit structural <c>__eq__</c>/<c>__hash__</c> for a frozen value object that has a
+    /// <c>Map</c> field. A frozen dataclass's free structural hash assumes every field is hashable, but
+    /// a <c>Map&lt;K,V&gt;</c> maps to a <c>Mapping</c> built from a plain <c>dict</c> (unhashable), so
+    /// the generated hash throws <c>TypeError: unhashable type: 'dict'</c> the moment the value object
+    /// is hashed. Equality stays structural (a value object's identity is its data, not a synthetic id),
+    /// and each Map field folds into a hashable <c>frozenset(self.&lt;field&gt;.items())</c> — guarded
+    /// against <c>None</c> when the field is optional. This mirrors the entity emitter's explicit-dunder
+    /// workaround (<c>eq=False</c> + hand-written dunders) while staying structural rather than id-based.
+    /// </summary>
+    private void WriteValueObjectHashableDunders(StringBuilder sb, string name, IReadOnlyList<Member> fields)
+    {
+        static string Field(Member m) => PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(m.Name));
+
+        // __eq__: same runtime type AND every stored field structurally equal. A Map field compares via
+        // `dict.__eq__` (order-insensitive), which is correct for value-object equality.
+        sb.Append('\n');
+        sb.Append(Indent).Append("def __eq__(self, other: object) -> bool:\n");
+        sb.Append(Indent).Append(Indent).Append("return isinstance(other, ").Append(name).Append(')');
+        foreach (Member m in fields)
+        {
+            var f = Field(m);
+            sb.Append(" and self.").Append(f).Append(" == other.").Append(f);
+        }
+        sb.Append('\n');
+
+        // __hash__: hash a tuple of the fields. A Map field is unhashable as-is, so it folds to
+        // `frozenset(self.<field>.items())`; an optional Map is guarded against `None`.
+        var parts = fields.Select(m =>
+        {
+            var f = Field(m);
+            if (!PythonTypeMapper.IsMap(m.Type))
+            {
+                return "self." + f;
+            }
+            var items = "frozenset(self." + f + ".items())";
+            return m.Type.IsOptional ? items + " if self." + f + " is not None else None" : items;
+        }).ToList();
+
+        // A one-element tuple needs the trailing comma (`(x,)`); multi-element joins normally.
+        var tuple = parts.Count == 1 ? "(" + parts[0] + ",)" : "(" + string.Join(", ", parts) + ")";
+        sb.Append('\n');
+        sb.Append(Indent).Append("def __hash__(self) -> int:\n");
+        sb.Append(Indent).Append(Indent).Append("return hash(").Append(tuple).Append(")\n");
     }
 
     /// <summary>Emits one invariant guard inside <c>__post_init__</c> (self.<i>field</i> reads).</summary>
