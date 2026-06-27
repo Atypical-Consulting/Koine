@@ -54,10 +54,12 @@ public class CliProgramTests
         var (code, stdout, _) = Run(flag);
 
         code.ShouldBe(0);
+        // The CLI must print its real InformationalVersion (the single source of truth in
+        // Directory.Build.props), so assert it equals Program.GetVersion() rather than a
+        // hardcoded literal that would need a hand-edit on every version bump (#647).
         stdout.Trim().ShouldBe(Program.GetVersion());
         // Regression: it must not fall back to the four-part AssemblyVersion default.
         stdout.Trim().ShouldNotBe("1.0.0.0");
-        stdout.Trim().ShouldBe("0.17.6");
     }
 
     // ---- global help / no args / unknown command ---------------------------
