@@ -49,8 +49,9 @@ internal sealed class McpCommand : AsyncCommand<McpCommand.Settings>
         }
 
         // Delegate straight to the shared host with the parsed settings — no string[] round-trip.
+        // The pre-check above already rejected an invalid port, so the host returns 0 on clean
+        // shutdown; propagate its status anyway to keep both entry points consistent.
         var host = string.IsNullOrWhiteSpace(settings.Host) ? HttpHost.DefaultHost : settings.Host;
-        await HttpHost.RunAsync(host, settings.Port);
-        return 0;
+        return await HttpHost.RunAsync(host, settings.Port);
     }
 }
