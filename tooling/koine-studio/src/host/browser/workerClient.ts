@@ -48,11 +48,20 @@ export interface WorkerLike {
 interface PendingCall {
   resolve(result: string): void;
   reject(err: Error): void;
+  /** Per-call timeout handle, cleared in every settle path (reply / cancel / abort / respawn). */
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 /** Options for `WorkerClient.call()`. Additive — existing callers omit entirely. */
 export interface CallOptions {
   signal?: AbortSignal;
+  /**
+   * Max ms to wait for a reply before the call rejects with a timeout error (default
+   * {@link DEFAULT_CALL_TIMEOUT_MS}). A failed worker respawn (or any lost reply) would otherwise leave
+   * the pending entry — and the caller — hanging forever (issue #635). Pass `0` to disable the timeout
+   * for a call that may legitimately run longer than the default ceiling.
+   */
+  timeoutMs?: number;
 }
 
 /** The public surface of an id-correlated worker client. */
@@ -78,6 +87,15 @@ export interface WorkerClient {
 
 /** Boot-wait timeout (ms) — mirrors the 30 s safety-net in wasm.ts. */
 const BOOT_TIMEOUT_MS = 30_000;
+
+/**
+ * Default per-call timeout (ms). A call may be posted while a worker is still booting (the worker
+ * buffers the message until its handler is installed), and booting is itself bounded by
+ * {@link BOOT_TIMEOUT_MS}; so the call ceiling is two boot windows — comfortably beyond any real
+ * LSP/compile op while still guaranteeing that a failed respawn or otherwise-lost reply can never hang
+ * the caller forever (issue #635). Callers needing longer pass an explicit `timeoutMs` (or `0` to opt out).
+ */
+export const DEFAULT_CALL_TIMEOUT_MS = 2 * BOOT_TIMEOUT_MS;
 
 /** Error thrown when a call is superseded via `cancel()` or `terminateAndRespawn()`. */
 export class CancelledError extends Error {
@@ -164,6 +182,7 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
       const entry = pending.get(reply.id);
       if (!entry) return; // stale / unknown id — ignore (includes superseded calls)
       pending.delete(reply.id);
+      if (entry.timer) clearTimeout(entry.timer);
       if (reply.ok) {
         entry.resolve(reply.result);
       } else {
@@ -194,17 +213,19 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
 
   // ---- Internal helpers ----
 
-  /** Reject and remove one pending entry. */
+  /** Reject and remove one pending entry, clearing its timeout timer. */
   function rejectPending(id: number, err: Error): void {
     const entry = pending.get(id);
     if (!entry) return;
     pending.delete(id);
+    if (entry.timer) clearTimeout(entry.timer);
     entry.reject(err);
   }
 
-  /** Reject ALL pending entries with `err` and clear the map. */
+  /** Reject ALL pending entries with `err`, clear their timers, and empty the map. */
   function rejectAll(err: Error): void {
     for (const entry of pending.values()) {
+      if (entry.timer) clearTimeout(entry.timer);
       entry.reject(err);
     }
     pending.clear();
@@ -216,9 +237,24 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
     call(method: string, args: unknown[], opts?: CallOptions): Promise<string> {
       return new Promise<string>((resolve, reject) => {
         const id = nextId++;
-        pending.set(id, { resolve, reject });
+        const entry: PendingCall = { resolve, reject };
+        pending.set(id, entry);
         const req: WorkerRequest = { id, method, args };
         currentWorker.postMessage(req);
+
+        // Per-call timeout — defaults on (issue #635) so a failed respawn or any lost reply rejects the
+        // caller instead of leaking a pending entry forever. `0` opts out for legitimately long calls.
+        const timeoutMs = opts?.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
+        if (timeoutMs > 0) {
+          const timer = setTimeout(() => {
+            rejectPending(id, new Error(`Koine worker call timed out after ${timeoutMs} ms`));
+          }, timeoutMs);
+          // Prevent the timer from keeping Node.js / the test runner alive (mirrors the boot-timer).
+          if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
+            (timer as NodeJS.Timeout).unref();
+          }
+          entry.timer = timer;
+        }
 
         // AbortSignal integration — additive; existing callers pass no opts.
         const signal = opts?.signal;

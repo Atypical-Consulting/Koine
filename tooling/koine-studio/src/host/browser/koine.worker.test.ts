@@ -3,7 +3,7 @@
 // The tests verify real client behavior: id correlation, resolve/reject routing, the `ready` signal,
 // cancellation (supersede + terminate/respawn), and AbortSignal integration.
 import { describe, expect, it, vi } from 'vitest';
-import { createWorkerClient } from '@/host/browser/workerClient';
+import { createWorkerClient, DEFAULT_CALL_TIMEOUT_MS } from '@/host/browser/workerClient';
 
 // ---------------------------------------------------------------------------
 // Fake WorkerLike: a controllable postMessage/onmessage pair
@@ -399,5 +399,103 @@ describe('WorkerClient (workerClient.ts)', () => {
     const newReady = client.whenReady();
     factory.instances[1].deliver({ type: 'ready' });
     await expect(newReady).resolves.toBeUndefined();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Per-call timeout: a failed respawn must never leave a call hanging (issue #635)
+  // ---------------------------------------------------------------------------
+
+  it('call() times out (rejects) when a failed respawn leaves the worker unable to reply', async () => {
+    const factory = makeWorkerFactory();
+    const client = createWorkerClient(factory);
+    const oldWorker = factory.instances[0];
+
+    // Old generation boots, then Stop → respawn.
+    oldWorker.deliver({ type: 'ready' });
+    await client.whenReady();
+    client.terminateAndRespawn();
+
+    // The fresh generation FAILS to boot: it posts no `ready`, no `boot-failure`, and never replies to
+    // calls. Without a per-call timeout, any call posted now hangs forever (the bug).
+    const newWorker = factory.instances[1];
+
+    const p = client.call('Hover', ['x'], { timeoutMs: 20 });
+    const req = newWorker.postMessage.mock.calls[0][0] as { id: number };
+
+    // It must REJECT with a timeout error rather than hang.
+    await expect(p).rejects.toThrow(/timed out|timeout/i);
+
+    // The pending entry must be removed: a late reply for that id must not double-settle or throw.
+    expect(() => newWorker.deliver({ id: req.id, ok: true, result: 'too-late' })).not.toThrow();
+  });
+
+  it('call() with a timeout still resolves normally when the reply arrives in time (timer is cleared)', async () => {
+    const factory = makeWorkerFactory();
+    const client = createWorkerClient(factory);
+    const fake = factory.instances[0];
+    fake.deliver({ type: 'ready' });
+
+    const p = client.call('Echo', ['hi'], { timeoutMs: 50 });
+    const req = fake.postMessage.mock.calls[0][0] as { id: number };
+    fake.deliver({ id: req.id, ok: true, result: 'ok' });
+    await expect(p).resolves.toBe('ok');
+
+    // Wait past the timeout window: a cleared timer must not later fire a (no-op) rejection or surface
+    // as an unhandled rejection. If this hangs/throws, the settle paths didn't clear the timer.
+    await new Promise((r) => setTimeout(r, 70));
+  });
+
+  it('call() with NO opts still rejects after the default ceiling (covers callers that pass no options)', async () => {
+    // The real-world broken callers (buildWorkerProxy / WasmLspTransport) post straight through
+    // `client.call(...)` with no opts — so the default ceiling, not an opt-in flag, is what fixes #635.
+    // Use fake timers so we can cross the (deliberately generous) default without a real wait.
+    vi.useFakeTimers();
+    try {
+      const factory = makeWorkerFactory();
+      const client = createWorkerClient(factory);
+      const fake = factory.instances[0];
+      fake.deliver({ type: 'ready' }); // boot succeeds (clears the boot-timer)
+
+      const settled = client.call('Diagnose', ['model']).then(
+        () => 'resolved',
+        (e: Error) => e,
+      );
+
+      // Just short of the ceiling: still pending.
+      await vi.advanceTimersByTimeAsync(DEFAULT_CALL_TIMEOUT_MS - 1);
+      // Crossing the ceiling rejects with a timeout error.
+      await vi.advanceTimersByTimeAsync(2);
+
+      const result = await settled;
+      expect(result).toBeInstanceOf(Error);
+      expect((result as Error).message).toMatch(/timed out|timeout/i);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('call({ timeoutMs: 0 }) opts out — a long-running call is never timed out', async () => {
+    vi.useFakeTimers();
+    try {
+      const factory = makeWorkerFactory();
+      const client = createWorkerClient(factory);
+      const fake = factory.instances[0];
+      fake.deliver({ type: 'ready' });
+
+      const p = client.call('LongCompile', ['model'], { timeoutMs: 0 });
+      let settled = false;
+      void p.then(() => { settled = true; }, () => { settled = true; });
+
+      // Advance well past the default ceiling — an opted-out call must stay pending.
+      await vi.advanceTimersByTimeAsync(DEFAULT_CALL_TIMEOUT_MS * 3);
+      expect(settled).toBe(false);
+
+      // It still settles normally when its (slow) reply finally arrives.
+      const req = fake.postMessage.mock.calls[0][0] as { id: number };
+      fake.deliver({ id: req.id, ok: true, result: 'done' });
+      await expect(p).resolves.toBe('done');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

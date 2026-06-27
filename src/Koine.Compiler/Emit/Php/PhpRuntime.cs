@@ -185,6 +185,77 @@ internal static class PhpRuntime
         "    {\n" +
         "        return $this->value;\n" +
         "    }\n" +
+        "\n" +
+        "    /**\n" +
+        "     * Sums a non-empty array of decimals, folding under add() from the first element.\n" +
+        "     *\n" +
+        "     * A string-backed decimal has no implicit zero, so an EMPTY array raises a domain error\n" +
+        "     * rather than fabricating one (parity with the C#/TypeScript/Python empty-fold guard).\n" +
+        "     * A value-object projection whose add() returns its own type folds here too.\n" +
+        "     *\n" +
+        "     * @param array<self> $values\n" +
+        "     */\n" +
+        "    public static function sum(array $values): self\n" +
+        "    {\n" +
+        "        if ($values === []) {\n" +
+        "            throw new DomainInvariantViolationException('collection', 'cannot sum an empty collection (no zero value)');\n" +
+        "        }\n" +
+        "        $items = array_values($values);\n" +
+        "        $total = $items[0];\n" +
+        "        $count = count($items);\n" +
+        "        for ($i = 1; $i < $count; $i++) {\n" +
+        "            $total = $total->add($items[$i]);\n" +
+        "        }\n" +
+        "        return $total;\n" +
+        "    }\n" +
+        "\n" +
+        "    /**\n" +
+        "     * The minimum element of a non-empty array, ordered via compareTo().\n" +
+        "     *\n" +
+        "     * An EMPTY array raises a domain error (a collection with no element has no minimum),\n" +
+        "     * mirroring the C#/TypeScript/Python empty-fold guard.\n" +
+        "     *\n" +
+        "     * @param array<self> $values\n" +
+        "     */\n" +
+        "    public static function min(array $values): self\n" +
+        "    {\n" +
+        "        if ($values === []) {\n" +
+        "            throw new DomainInvariantViolationException('collection', 'cannot take min of an empty collection (no value)');\n" +
+        "        }\n" +
+        "        $items = array_values($values);\n" +
+        "        $result = $items[0];\n" +
+        "        $count = count($items);\n" +
+        "        for ($i = 1; $i < $count; $i++) {\n" +
+        "            if ($items[$i]->compareTo($result) < 0) {\n" +
+        "                $result = $items[$i];\n" +
+        "            }\n" +
+        "        }\n" +
+        "        return $result;\n" +
+        "    }\n" +
+        "\n" +
+        "    /**\n" +
+        "     * The maximum element of a non-empty array, ordered via compareTo().\n" +
+        "     *\n" +
+        "     * An EMPTY array raises a domain error (a collection with no element has no maximum),\n" +
+        "     * mirroring the C#/TypeScript/Python empty-fold guard.\n" +
+        "     *\n" +
+        "     * @param array<self> $values\n" +
+        "     */\n" +
+        "    public static function max(array $values): self\n" +
+        "    {\n" +
+        "        if ($values === []) {\n" +
+        "            throw new DomainInvariantViolationException('collection', 'cannot take max of an empty collection (no value)');\n" +
+        "        }\n" +
+        "        $items = array_values($values);\n" +
+        "        $result = $items[0];\n" +
+        "        $count = count($items);\n" +
+        "        for ($i = 1; $i < $count; $i++) {\n" +
+        "            if ($items[$i]->compareTo($result) > 0) {\n" +
+        "                $result = $items[$i];\n" +
+        "            }\n" +
+        "        }\n" +
+        "        return $result;\n" +
+        "    }\n" +
         "}\n" +
         "\n" +
         "/**\n" +

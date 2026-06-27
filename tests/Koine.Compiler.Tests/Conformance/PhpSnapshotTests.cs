@@ -433,4 +433,62 @@ public class PhpSnapshotTests
         TestSupport.RequireOrSkip(typeCheck.ToolchainAvailable, NoToolchainNotice);
         typeCheck.Ok.ShouldBeTrue(string.Join("\n", typeCheck.Errors));
     }
+
+    // -----------------------------------------------------------------------
+    // #601: a Decimal/value-object collection fold (`.sum`/`.min`/`.max`) lowers
+    // to a runtime static call — `\Koine\Runtime\Decimal::sum/min/max(...)`. Those
+    // helpers were never defined on the runtime `Decimal` class, so every emitted
+    // fold fataled at runtime (`Call to undefined method ...::sum()`) and tripped
+    // `phpstan --level max` (`staticMethod.notFound`, plus a `return.type` because
+    // an undefined static returns `mixed`). #496's fixtures contained no fold, so
+    // the gate never reached this path. This fixture exercises all three folds over
+    // a `Decimal` projection so the phpstan gate now covers them.
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// A value object whose derived members fold a <c>List&lt;Money&gt;</c> down to a
+    /// <c>Decimal</c> via <c>.sum</c>/<c>.min</c>/<c>.max</c> — the #601 path, each lowering to a
+    /// runtime <c>Decimal::sum/min/max</c> static call.
+    /// </summary>
+    internal const string DecimalFoldFixture = """
+        context Shop {
+          /// A monetary amount in a currency. Never negative.
+          value Money {
+            amount:   Decimal
+            currency: String
+            invariant amount >= 0 "an amount cannot be negative"
+          }
+
+          /// A cart whose totals fold its money lines (the #601 Decimal-fold path).
+          value Cart {
+            items:    List<Money>
+            total:    Decimal = items.sum(m => m.amount)
+            cheapest: Decimal = items.min(m => m.amount)
+            priciest: Decimal = items.max(m => m.amount)
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Emitted PHP for <see cref="DecimalFoldFixture"/> must match its reviewed snapshot AND pass
+    /// <c>phpstan analyse --level max</c> — the #601 gate over Decimal collection folds. Before #601
+    /// the emitted <c>Decimal::sum/min/max</c> calls resolved to nothing (<c>staticMethod.notFound</c>);
+    /// after it, the runtime declares the three static helpers and the folds type-check.
+    /// </summary>
+    [Fact]
+    public async Task Php_decimal_fold_coverage_emits_expected_php()
+    {
+        var result = new KoineCompiler().Compile(DecimalFoldFixture, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // The snapshot is the always-on guarantee — it runs regardless of the PHP toolchain.
+        await Verify(TestSupport.Render(result.Files))
+            .UseDirectory("Snapshots");
+
+        // The phpstan --level max type-check gate (parity with TS/Python, #496) skips (or hard-fails
+        // under KOINE_REQUIRE_CONFORMANCE) when no phpstan toolchain is present.
+        var typeCheck = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(typeCheck.ToolchainAvailable, NoToolchainNotice);
+        typeCheck.Ok.ShouldBeTrue(string.Join("\n", typeCheck.Errors));
+    }
 }
