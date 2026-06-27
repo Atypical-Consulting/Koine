@@ -348,6 +348,11 @@ function renderChangeSet(
   // Whether this set has been fully applied — once true, invalidation is a no-op so a later turn can't
   // overwrite the terminal "Applied ✓" with a "superseded" notice (issue #473).
   let applied = false;
+  // Whether this set has been superseded by a later turn (#473/#684) — once true, an apply that was
+  // already in flight when the panel was retired and settles AFTERWARDS is a no-op: it must not call
+  // refreshApply() (re-enabling Apply on a retired panel) nor overwrite the "superseded" notice. The
+  // reverse of the `applied` guard above, keeping "superseded" a terminal state.
+  let invalidated = false;
 
   const applyBtn = document.createElement('button');
   applyBtn.type = 'button';
@@ -463,6 +468,10 @@ function renderChangeSet(
 
     applyBtn.disabled = true; // guard the in-flight window
     void Promise.resolve(handlers.onApply(clean)).then((result) => {
+      // A panel superseded WHILE this apply was in flight is terminal (#684): a late settle must not
+      // un-retire it. Covers both the { failed } and the success branch below — no status overwrite,
+      // no refreshApply() re-enabling Apply on a panel the user can no longer act on.
+      if (invalidated) return;
       if (result.failed.length) {
         // Partial/total failure: report exactly which files didn't write and re-open Apply so the user
         // can retry the still-checked set, rather than a false "Applied ✓".
@@ -482,6 +491,10 @@ function renderChangeSet(
       status.textContent = `Applied ${clean.length} file${clean.length === 1 ? '' : 's'}.` + skipped;
       discardBtn.remove();
     }).catch((e) => {
+      // A panel superseded mid-apply stays terminal (#684): a late rejection must not re-enable Apply
+      // or replace the "superseded" notice with an "Apply failed" one that invites a retry on a retired
+      // change set.
+      if (invalidated) return;
       // onApply REJECTED (#633): applyFileEdit only turns disk-write errors into a { failed } result;
       // an un-guarded throw from a non-disk op (renderer/LSP sync, dirty refresh, saved-callback) escapes
       // as a rejection. Without this catch the Apply button stays stuck disabled, the error is swallowed,
@@ -517,6 +530,9 @@ function renderChangeSet(
     invalidate(reason: string): void {
       // Once applied, the panel is terminal ("Applied ✓") — never overwrite that with a stale notice.
       if (applied) return;
+      // Mark the panel terminal so an apply already in flight that settles AFTER this supersede can't
+      // un-retire it (#684 — the reverse of the `applied` guard above).
+      invalidated = true;
       panel.classList.add('koi-changeset-superseded');
       applyBtn.disabled = true;
       for (const cb of checkboxes) cb.disabled = true;
