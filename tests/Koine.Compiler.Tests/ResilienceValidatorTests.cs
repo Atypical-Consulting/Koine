@@ -97,4 +97,33 @@ public class ResilienceValidatorTests
             d => d.Code == DiagnosticCodes.DuplicateMember,
             "expected KOI0103 DuplicateMember for the duplicate field 'x'");
     }
+
+    // The event-field sibling of the entity case above (#599). A duplicate event member is reported as
+    // KOI0103 yet both members are kept, so when a command/factory body emits that event,
+    // EntityBehaviorValidator.ValidateEmit folds `ev.Members` into a lookup. Built with
+    // `ev.Members.ToDictionary(m => m.Name, ...)` that threw ArgumentException on the collision; because
+    // built-in analyzers run unguarded, the crash aborted the whole validate pass and the authored KOI0103
+    // never surfaced (the CLI printed a raw `Error:` and exited 1). The lookup must be built defensively
+    // (last-wins) so the duplicate yields a clean KOI0103, not a crash.
+    private const string DuplicateEventFieldEmittedSource =
+        "context C {\n" +
+        "  event Ev { a: Int a: Int }\n" +
+        "  entity E identified by EId {\n" +
+        "    create make() { emit Ev(a: 1) }\n" +
+        "  }\n" +
+        "}\n";
+
+    [Fact]
+    public void Validating_an_emit_of_an_event_with_a_duplicate_field_surfaces_KOI0103_instead_of_throwing()
+    {
+        KoineModel model = BuildRecovered(DuplicateEventFieldEmittedSource);
+
+        // Validating must not throw (the test running to completion proves no ArgumentException from the
+        // ValidateEmit event-field lookup) and must surface the duplicate-member diagnostic authored for it.
+        IReadOnlyList<Diagnostic> diagnostics = new SemanticValidator().Validate(new SemanticModel(model));
+
+        diagnostics.ShouldContain(
+            d => d.Code == DiagnosticCodes.DuplicateMember,
+            "expected KOI0103 DuplicateMember for the duplicate event field 'a'");
+    }
 }

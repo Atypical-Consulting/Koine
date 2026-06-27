@@ -210,7 +210,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     {
         KoineParser.TypeNameContext[]? names = ctx.typeName();
         ContextRelationKind kind = BuildRelationKind(ctx.relationRole());
-        var bidirectional = ctx.relationArrow().BIARROW() is not null;
+        var bidirectional = ctx.relationArrow()?.BIARROW() is not null;
         List<string> sharedTypes = ctx.sharedKernelBlock() is { } sk
             ? sk.typeName().Select(t => t.GetText()).ToList()
             : new List<string>();
@@ -218,15 +218,28 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             ? acl.aclMapping().Select(BuildAclMapping).ToList()
             : new List<AclMapping>();
 
+        // On a recovered (error) parse a half-typed relation can be missing one or both type names
+        // (e.g. `contextmap { A }`); fall back to an empty name rather than indexing past the end.
+        // The syntax error is already reported by the error listener.
+        var source = names.Length > 0 ? names[0].GetText() : string.Empty;
+        var target = names.Length > 1 ? names[1].GetText() : string.Empty;
+
         return new ContextRelation(
-            names[0].GetText(), names[1].GetText(), kind, bidirectional, sharedTypes, aclMappings)
+            source, target, kind, bidirectional, sharedTypes, aclMappings)
         {
             Span = SpanOf(ctx)
         };
     }
 
-    private static ContextRelationKind BuildRelationKind(KoineParser.RelationRoleContext ctx)
+    private static ContextRelationKind BuildRelationKind(KoineParser.RelationRoleContext? ctx)
     {
+        // On a recovered (error) parse the role after `:` can be missing entirely; default to the
+        // grammar's fall-through kind rather than dereferencing null.
+        if (ctx is null)
+        {
+            return ContextRelationKind.PublishedLanguage;
+        }
+
         if (ctx.PARTNERSHIP() is not null)
         {
             return ContextRelationKind.Partnership;
@@ -264,9 +277,12 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     {
         KoineParser.QualifiedTypeContext? from = ctx.qualifiedType(0);
         KoineParser.QualifiedTypeContext? to = ctx.qualifiedType(1);
+        // On a recovered (error) parse a half-typed mapping can be missing its `-> Z.W` (or a type
+        // half), so `qualifiedType`/`typeName` children can be null; fall back to an empty name rather
+        // than dereferencing null, mirroring BuildTypeRef. The syntax error is reported elsewhere.
         return new AclMapping(
-            from.typeName(0).GetText(), from.typeName(1).GetText(),
-            to.typeName(0).GetText(), to.typeName(1).GetText())
+            from?.typeName(0)?.GetText() ?? string.Empty, from?.typeName(1)?.GetText() ?? string.Empty,
+            to?.typeName(0)?.GetText() ?? string.Empty, to?.typeName(1)?.GetText() ?? string.Empty)
         {
             Span = SpanOf(ctx)
         };
@@ -1248,8 +1264,17 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return BuildPostfix(ctx.postfixExpr());
     }
 
-    private Expr BuildPostfix(KoineParser.PostfixExprContext ctx)
+    private Expr BuildPostfix(KoineParser.PostfixExprContext? ctx)
     {
+        // On a recovered (error) parse the postfix expression can be absent entirely (e.g. a trailing
+        // binary operator like `a +`, where `unaryExpr` matches neither alternative); yield a
+        // placeholder empty identifier rather than throwing, matching BuildExpression. The syntax
+        // error is reported elsewhere.
+        if (ctx is null)
+        {
+            return new IdentifierExpr(string.Empty);
+        }
+
         Expr result = BuildPrimary(ctx.primary());
 
         // Walk the trailing `.member` / `.method(args)` chain in source order.
@@ -1309,8 +1334,15 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             Span = SpanOf(ctx)
         };
 
-    private Expr BuildPrimary(KoineParser.PrimaryContext ctx)
+    private Expr BuildPrimary(KoineParser.PrimaryContext? ctx)
     {
+        // Defense in depth for the recovered-parse path: a missing primary also yields the empty
+        // placeholder identifier rather than throwing (the syntax error is reported elsewhere).
+        if (ctx is null)
+        {
+            return new IdentifierExpr(string.Empty);
+        }
+
         if (ctx.literal() is { } literal)
         {
             return BuildLiteral(literal);

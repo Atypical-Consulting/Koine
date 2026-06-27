@@ -93,4 +93,37 @@ public class ResilienceCompilerTests
         result.Files.ShouldBeEmpty();
         result.Diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.SyntaxError);
     }
+
+    // ---- contextmap: a half-typed relation must not crash the never-throw Parse path (#595) ----
+
+    [Theory]
+    [InlineData("contextmap { A }")]
+    [InlineData("contextmap { A -> B }")]
+    [InlineData("contextmap { A : partnership }")]
+    public void Parse_with_malformed_contextmap_relation_does_not_throw_and_reports_a_syntax_error(string source)
+    {
+        // A half-typed `contextmap` relation recovers to a `relationDecl` with null/short children
+        // (`relationRole()`/`relationArrow()` null, fewer than two `typeName()`s). BuildRelation must
+        // yield a partial model plus a syntax diagnostic instead of throwing (NRE/IndexOutOfRange).
+        var (model, diagnostics) = Should.NotThrow(() => new KoineCompiler().Parse(source));
+
+        model.ShouldNotBeNull();
+        diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.SyntaxError);
+    }
+
+    // ---- acl: a half-typed mapping must not crash the never-throw Parse path (#596) -------------
+
+    [Fact]
+    public void Parse_with_half_typed_acl_mapping_does_not_throw_and_reports_a_syntax_error()
+    {
+        // The `acl` mapping has its first `X.Y` half but no `-> Z.W`, so the second `qualifiedType`
+        // recovers to null. BuildAclMapping must yield a partial model plus a syntax diagnostic
+        // instead of dereferencing the null type half.
+        const string source = "context C { } contextmap { A -> B : anti-corruption-layer acl { X.Y } }";
+
+        var (model, diagnostics) = Should.NotThrow(() => new KoineCompiler().Parse(source));
+
+        model.ShouldNotBeNull();
+        diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+    }
 }
