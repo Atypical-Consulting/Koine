@@ -79,7 +79,7 @@ green, mergeable PR, never via an `--admin` override here.
 A long auto-dev run is **expensive in a specific, fixable way**, and knowing the shape lets you cut it
 by ~80% with no quality loss. Measured over a 120-merge run: **~83% of all spend was context *cache*
 (re-reading each agent's context every turn), only ~16% was generated output.** In an agentic loop you
-pay for *context volume × number of turns*, not for thinking. Two levers follow directly:
+pay for *context volume × number of turns*, not for thinking. Three levers follow directly:
 
 **1. Tier the model to the task (the dominant lever — ~⅔ of the savings).** Cache-read tokens dominate,
 and they are ~5× cheaper on a mid model and ~15× cheaper on a small model than on the top model. Most
@@ -110,8 +110,27 @@ keep its *per-turn context* small (lever 2), because that context is what it pay
   re-read the state file** — that's what turns a reset into a clean base instead of amnesia.
 - **Keep worker FINAL REPORTs terse** (the structured one-liner below) — they get re-read on every later
   reconcile turn, so prose reports tax you repeatedly.
-- **Don't poll on a short cadence** unless a green merge is truly imminent (see *Heartbeat*). Every wake
-  re-reads your whole context; needless 2–4 min ticks are pure cache-read.
+- **Delegate heavy reads to throwaway sub-agents.** When you (or a worker) must read widely to find a
+  small answer, spawn an `Explore` sub-agent: it does the reading and returns only the conclusion, so the
+  file-dump dies with it instead of riding in your re-read-every-turn context. This is the *right* way to
+  navigate a big codebase cheaply — push the reading into a discarded context, keep the persistent one
+  lean. (It's also why a symbol-retrieval MCP didn't pay off here: it adds per-turn schema weight and
+  extra round-trips — the opposite of this.)
+- **Strip MCP servers workers don't need.** Every connected MCP server injects its tool schemas into
+  *every* turn of *every* session — dead weight re-read thousands of times. Launch workers with
+  `--strict-mcp-config` and only the servers they actually use (usually none).
+
+**3. Take fewer turns (turns are the unit of cost).** Each tool round-trip is a turn, and every turn
+re-reads the whole context, so cutting round-trips cuts the bill directly:
+- **Batch independent tool calls into one turn** — fire parallel reads/greps/`gh` calls together rather
+  than serially. (This is exactly why ripgrep beats per-symbol retrieval: many matches per call, fewer
+  round-trips.)
+- **Let scripts collapse query+classify** — `scripts/survey.sh` and `scripts/reconcile.sh` turn a
+  multi-turn "query then reason" into one call; reach for a script over re-deriving a deterministic
+  sequence in-context.
+- **Don't poll on a short cadence** unless a green merge is truly imminent (see *Heartbeat*) — a needless
+  wake re-reads your whole context, and one *past the ~5-min cache TTL* pays a full cache **write**
+  (1.25× input), not a cheap read (0.1×), so idle ticks are doubly wasteful.
 
 **Measure it.** After a run, `scripts/usage_report.py` aggregates tokens + $-equivalent across the
 orchestrator and every worker session (and breaks it down by model, so you can see the tiering payoff).
@@ -222,7 +241,7 @@ Every worker gets the same standing rules — so they live **once**, in the `/au
 one-liner with the model tier set by the spawn flag:
 
 ```bash
-claude -p "/auto-dev-worker <N>" --model <tier>   # <tier> chosen from the issue's labels (see below)
+claude -p "/auto-dev-worker <N>" --model <tier> --strict-mcp-config   # <tier> from labels; --strict-mcp-config drops unused MCP schema weight (lever 2)
 ```
 
 (If you launch the worker as a background sub-agent rather than a `claude -p` session, pass the command
@@ -303,6 +322,9 @@ reconcile tick. Use a **long fallback** (~20–30 min) for the idle heartbeat. *
 GitHub state the harness can't notify you about, so it's the one case worth polling; return to the long
 fallback once it lands. Each wake re-reads your whole context from cache, so a needless short tick is
 pure cost (see *Token economics*) — let event notifications, not the clock, drive the common case.
+Cache nuance: the prompt cache has a ~5-min TTL, so a wake *after* a long idle pays a full cache **write**
+rather than a cheap read — when you do wake from a long idle, batch all pending reconcile work into that
+one wake to amortize the rewrite, rather than waking repeatedly.
 
 ## Step 6 — Stop & report
 

@@ -21,6 +21,11 @@ pre-existing bug, a design smell, missing/broken tests, tech debt — do NOT fix
 and do NOT silently ignore it. FILE it as a new issue via the `create-issue` skill, then continue your
 own task. List anything you filed in your report.
 
+CONTEXT DISCIPLINE: your context is re-read every turn, so keep it lean. When you need to read widely to
+locate or understand something, dispatch an `Explore` sub-agent and use only its conclusion — don't pull
+whole files/directories into your own context where they'll be re-read for the rest of the run. Prefer
+ripgrep (many matches per call) and batch independent reads into one turn rather than many round-trips.
+
 Commit identity & all repo specifics come from the repo profile (the child skills load it). Work ONLY on
 #$1. If genuinely un-implementable (no usable plan, manual-QA only) or hard-blocked after real effort,
 STOP and report it rather than forcing a merge.
