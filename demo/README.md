@@ -154,6 +154,7 @@ A worked before/after lives under [`../examples/versioning/`](../examples/versio
 dotnet run --project src/Koine.Cli -- check examples/versioning/v2 --baseline examples/versioning/v1
 #   breaking KOI1511: field 'coupon' of published integration event 'OrderPlaced' was removed.
 #   non-breaking: field 'note' of published integration event 'OrderPlaced' was added.
+#   breaking KOI1517: Published integration event 'OrderPlaced' changed its payload shape.
 #   error: 2 breaking change(s) to published surfaces      (exit code 1)
 ```
 
