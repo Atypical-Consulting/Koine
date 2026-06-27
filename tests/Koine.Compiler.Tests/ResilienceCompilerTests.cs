@@ -126,4 +126,23 @@ public class ResilienceCompilerTests
         model.ShouldNotBeNull();
         diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
     }
+
+    // ---- integration events / imports: a half-typed decl must not crash the never-throw Parse path (#699) ----
+
+    [Theory]
+    [InlineData("context C { subscribes Foo }")] // one typeName: names[1] would IndexOutOfRange
+    [InlineData("context C { subscribes }")]     // zero typeName: names[0] would IndexOutOfRange
+    [InlineData("context C { publishes }")]      // null typeName: ctx.typeName() would NRE (latent)
+    [InlineData("context C { import Foo }")]     // truncated import: defensive coverage (latent)
+    public void Parse_with_half_typed_integration_event_or_import_does_not_throw_and_reports_a_syntax_error(string source)
+    {
+        // A half-typed `subscribes`/`publishes`/`import` declaration recovers to a builder context
+        // with null/short `typeName()` children. BuildSubscribe/BuildPublish/BuildImport must yield a
+        // partial model plus a syntax diagnostic instead of throwing (IndexOutOfRange/NRE) out of the
+        // never-throw Parse path, mirroring the #595 BuildRelation fix.
+        var (model, diagnostics) = Should.NotThrow(() => new KoineCompiler().Parse(source));
+
+        model.ShouldNotBeNull();
+        diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.SyntaxError);
+    }
 }

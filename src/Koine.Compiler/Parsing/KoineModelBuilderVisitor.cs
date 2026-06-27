@@ -289,22 +289,34 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
     }
 
     private PublishDecl BuildPublish(KoineParser.PublishDeclContext ctx) =>
-        new(ctx.typeName().GetText()) { Span = SpanOf(ctx) };
+        // On a recovered (error) parse a half-typed `publishes` can be missing its event name, so the
+        // singular `typeName()` accessor can be null; fall back to an empty name rather than
+        // dereferencing null. The syntax error is already reported by the error listener.
+        new(ctx.typeName()?.GetText() ?? string.Empty) { Span = SpanOf(ctx) };
 
     private SubscribeDecl BuildSubscribe(KoineParser.SubscribeDeclContext ctx)
     {
         KoineParser.TypeNameContext[]? names = ctx.typeName();
-        return new SubscribeDecl(names[0].GetText(), names[1].GetText()) { Span = SpanOf(ctx) };
+        // On a recovered (error) parse a half-typed `subscribes Foo` (or `subscribes` alone) yields
+        // fewer than two type names; fall back to an empty name rather than indexing past the end,
+        // mirroring the #595 BuildRelation fix. The syntax error is reported elsewhere.
+        var from = names.Length > 0 ? names[0].GetText() : string.Empty;
+        var @event = names.Length > 1 ? names[1].GetText() : string.Empty;
+        return new SubscribeDecl(from, @event) { Span = SpanOf(ctx) };
     }
 
     private ImportDecl BuildImport(KoineParser.ImportDeclContext ctx)
     {
         KoineParser.TypeNameContext[]? names = ctx.typeName();
         var isWildcard = ctx.STAR() is not null;
+        // On a recovered (error) parse a truncated `import` (e.g. `import Foo.`) can yield fewer type
+        // names than the grammar requires; guard `names` length before indexing/skipping rather than
+        // throwing. The syntax error is reported elsewhere.
         List<string> imported = isWildcard
             ? new List<string>()
             : names.Skip(1).Select(t => t.GetText()).ToList();
-        return new ImportDecl(names[0].GetText(), imported, isWildcard) { Span = SpanOf(ctx) };
+        var module = names.Length > 0 ? names[0].GetText() : string.Empty;
+        return new ImportDecl(module, imported, isWildcard) { Span = SpanOf(ctx) };
     }
 
     /// <summary>
