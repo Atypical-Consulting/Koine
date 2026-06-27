@@ -74,10 +74,17 @@ public class TypeScriptCollectionOpsTests
     public void Set_aggregate_ops_normalize_the_receiver_to_an_array()
     {
         var ts = CompileTs();
-        ts.ShouldContain("Math.max(...[...this.scores].map((s) => s))");
-        ts.ShouldContain("Math.min(...[...this.scores].map((s) => s))");
+        // min/max over a Set normalize the receiver to an array, then guard emptiness and fold with a
+        // seedless reduce (issue #610) — never a bare `Math.min/max(...spread)`, which returns
+        // ±Infinity on empty. sum keeps its neutral-zero reduce.
+        ts.ShouldContain("([...this.scores].map((s) => s) as readonly number[]).length === 0");
+        ts.ShouldContain("[...this.scores].map((s) => s).reduce((__mm0a, __mm0b) => Math.max(__mm0a, __mm0b))");
+        ts.ShouldContain("[...this.scores].map((s) => s).reduce((__mm1a, __mm1b) => Math.min(__mm1a, __mm1b))");
         ts.ShouldContain("[...this.scores].map((s) => s).reduce((a, b) => a + b, 0)");
         ts.ShouldNotContain("this.scores.map(");
+        // The old, unguarded spread form is gone (issue #610).
+        ts.ShouldNotContain("Math.max(...");
+        ts.ShouldNotContain("Math.min(...");
     }
 
     [Fact]
