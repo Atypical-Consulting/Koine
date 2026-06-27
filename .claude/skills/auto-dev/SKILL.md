@@ -69,6 +69,49 @@ green, mergeable PR, never via an `--admin` override here.
   The user may narrow it ("only `studio` issues", "everything labeled `priority: high`") — respect that.
 - **Heartbeat** — this skill is normally launched *via* `loop` in dynamic mode (no interval), so the
   loop's self-paced wakeup is the supervisor's heartbeat. If invoked directly, arm your own wakeup.
+- **Model tier** — which model each worker runs on. Default **tiered, not all-Opus** (see *Token
+  economics* below): mechanical/docs work on the cheapest capable model, typical bugs on a mid model,
+  Opus reserved for cross-cutting/hard work and failure-escalation. This is the single biggest cost
+  lever. The user may override ("run everything on Opus", "use Sonnet for all") — honor it.
+
+## Token economics — run the fleet cheap
+
+A long auto-dev run is **expensive in a specific, fixable way**, and knowing the shape lets you cut it
+by ~80% with no quality loss. Measured over a 120-merge run: **~83% of all spend was context *cache*
+(re-reading each agent's context every turn), only ~16% was generated output.** In an agentic loop you
+pay for *context volume × number of turns*, not for thinking. Two levers follow directly:
+
+**1. Tier the model to the task (the dominant lever — ~⅔ of the savings).** Cache-read tokens dominate,
+and they are ~5× cheaper on a mid model and ~15× cheaper on a small model than on the top model. Most
+fleet work is *mechanical* — make one failing test pass, fix a guard, regenerate a snapshot, edit docs —
+and doesn't need the top model. **Route each worker by its issue labels** (use the profile's effort/area
+labels; adapt the model names to whatever the runtime offers — typically a small/mid/top trio like
+Haiku/Sonnet/Opus):
+
+| Issue shape (by label) | Tier | Rationale |
+|---|---|---|
+| docs / templates / manifest, format & snapshot regen, `priority:low`+`effort:S` one-line guards | **small** (e.g. Haiku) | The failing-test-first + green-CI gates catch any miss |
+| most bugs: emitter/validator/parser guards, studio TS, CLI, LSP — single-area `effort:S/M` | **mid** (e.g. Sonnet) | One clear repro → make a test green; well within a mid model |
+| cross-cutting (touches many areas/emitters), ambiguous/design, **or any issue a lower tier failed to green** | **top** (e.g. Opus) | Reserve the costly model for genuine reasoning + escalation |
+
+The **orchestrator (you)** stays on the top model — its dispatch/conflict reasoning is worth it — but
+keep its *per-turn context* small (lever 2), because that context is what it pays to re-read every turn.
+
+**2. Shrink what gets re-read every turn (the other big chunk).**
+- **Don't accumulate a per-issue TaskList.** A task list grows unboundedly and is re-injected into your
+  context on *every* turn — pure cache-read waste multiplied by thousands of turns. **The state file is
+  your only working memory**; track the fleet there, not in a running task list.
+- **Compact/`/clear` the orchestrator every ~20 merges.** Continuity lives in the state file, so a clear
+  resets the cache-read base instead of dragging an ever-growing transcript across the whole run.
+- **Keep worker FINAL REPORTs terse** (the structured one-liner below) — they get re-read on every later
+  reconcile turn, so prose reports tax you repeatedly.
+- **Don't poll on a short cadence** unless a green merge is truly imminent (see *Heartbeat*). Every wake
+  re-reads your whole context; needless 2–4 min ticks are pure cache-read.
+
+**Measure it.** After a run, `scripts/usage_report.py` aggregates tokens + $-equivalent across the
+orchestrator and every worker session (and breaks it down by model, so you can see the tiering payoff).
+Track **tokens/merge** and **$/merge** across runs so a regression shows up immediately. (Dollar figures
+are API list-price equivalents; on a subscription they map to rate-limit budget, not cash.)
 
 ## How it works (the model)
 
@@ -164,6 +207,12 @@ Choose the first N issues so that **no two share an area** — that disjointness
 strategy. Dispatch each as a **background sub-agent** using the worker-prompt contract below. Record each
 in the state file's *In flight* section.
 
+**Pick each worker's model from its labels** (see *Token economics*): small/mechanical → cheap model,
+typical single-area bug → mid model, cross-cutting/hard → top model. Pass it explicitly when you spawn
+the worker (the background-agent spawn takes a model parameter; if you launch the worker as its own CLI
+session, pass the model flag). Record the chosen tier next to the issue in the state file so a `loop`
+re-fire redispatches at the same tier — and so `usage_report.py`'s by-model rollup is interpretable.
+
 ### The worker-prompt contract
 
 Each worker gets one issue and the same standing rules. Fill in `<N>` and dispatch in the background:
@@ -226,8 +275,12 @@ Then, per slot:
   is green, land it (`gh pr merge <PR> --squash --delete-branch`) and shut the worker down.
 - **Worker idle with a draft PR / no PR yet** → still implementing; leave it. If it's been a long time
   with no progress, send a one-line status ping (don't read its transcript).
-- **Worker reported BLOCKED/FAILED** → record it, surface it to the user, end the agent, and refill the
-  slot with the next queued issue (don't let one blocked issue stall the fleet).
+- **Worker reported BLOCKED/FAILED** → first, **tier-escalate if it was on a lower model**: if the
+  failure looks like the model wasn't strong enough (couldn't green a test, tangled the fix) rather than
+  a genuine hard blocker (un-mergeable conflict, missing approval, no plan), re-dispatch the *same* issue
+  **once** on the top model before giving up. If it was already on the top model, or fails again → record
+  it, surface it to the user, end the agent, and refill the slot with the next queued issue (don't let
+  one blocked issue stall the fleet). This escalation is what makes cheap-by-default tiering safe.
 
 After any change, update the state file (in flight, completed, filed, queue).
 
@@ -247,6 +300,13 @@ and eligibility-checked), and note what changed. Keep a **merge counter** in the
 each confirmed merge; record the count at the last refresh) so a `loop` re-fire knows when the next
 refresh is due. A stale queue silently costs you: missed easy disjoint wins and mis-ordered work.
 
+**Keep your own context lean (it's re-read every turn — see *Token economics*).** The state file is your
+only working memory — **don't also maintain a per-issue TaskList**; it grows without bound and is
+re-injected on every turn, so it quietly becomes your biggest cost. Keep worker reports terse. And on a
+long run, **compact or `/clear` yourself roughly every ~20 merges**: continuity is reconstructable from
+the state file + live GitHub, so clearing resets the cache-read base instead of dragging an
+ever-growing transcript across hundreds of merges.
+
 ## Step 5 — Heartbeat
 
 The wake signals that matter — worker reports and idle notifications — arrive on their own; **don't poll
@@ -255,13 +315,21 @@ natural way to run auto-dev is under the `loop` skill in dynamic mode: each `loo
 reconcile tick. Use a **long fallback** (~20–30 min) for the idle heartbeat. **Drop to a short cadence
 (2–4 min) only while you're actively waiting on a specific CI run** to land a merge — that's external
 GitHub state the harness can't notify you about, so it's the one case worth polling; return to the long
-fallback once it lands.
+fallback once it lands. Each wake re-reads your whole context from cache, so a needless short tick is
+pure cost (see *Token economics*) — let event notifications, not the clock, drive the common case.
 
 ## Step 6 — Stop & report
 
 Stop dispatching when the eligible queue is empty (or the user says stop). Let the in-flight workers
 finish and land, end them, then give a final summary: issues merged (with PR numbers), follow-ups filed,
 anything blocked or skipped (with reasons), and what remains in the backlog (e.g. the held L/XL items).
+
+**Cost accounting.** Run `scripts/usage_report.py <project-transcript-dir> --main <orchestrator-session-id>`
+to aggregate tokens + $-equivalent across the orchestrator and every worker session, broken down by
+model. Report **tokens/merge** and **$/merge** so the user can see the run's unit economics and track
+them across runs. (The script auto-detects the transcript dir from `$PWD` if not given; dollar figures
+are API list-price equivalents — on a subscription they're rate-limit budget, not cash, and the
+authoritative cash figure for this session is the built-in `/cost`.)
 
 ---
 
@@ -295,5 +363,13 @@ skipping the next slot that frees. Hold the line at N unless told otherwise.
   (Step 4) so you keep working off the *live* backlog, not a stale opening snapshot, and don't miss the
   easy disjoint-area wins that break a same-area logjam.
 - **The state file is your memory.** Keep it terse and current so a compaction or `loop` re-fire
-  reconstructs the fleet exactly.
+  reconstructs the fleet exactly. Corollary: **don't also keep a per-issue TaskList** — it's re-injected
+  every turn and silently becomes your largest token cost (see *Token economics*).
+- **Context is the cost, not output.** ~83% of a long run's spend is re-reading context each turn, only
+  ~16% is generated work. So the cheap wins are *fewer turns* and *smaller per-turn context*, not
+  "write less" — and the biggest one is **tiering the model to the task** (cheap-by-default with
+  top-model escalation on failure), not running the whole fleet on the top model.
+- **Tier, then escalate.** Default workers to a cheap/mid model by label; if one genuinely can't green
+  its task, re-dispatch *that* issue once on the top model. Cheap-by-default + escalation beats
+  all-top-model on cost without losing the hard cases.
 ```
