@@ -45,6 +45,32 @@ describe('uiChrome slice', () => {
     s.getState().setOutlineFilter('');
     expect(s.getState().outlineFilter).toBe('');
   });
+
+  test('rightCollapsed defaults to false and setRightCollapsed switches it', () => {
+    const s = make();
+    expect(s.getState().rightCollapsed).toBe(false);
+    s.getState().setRightCollapsed(true);
+    expect(s.getState().rightCollapsed).toBe(true);
+    s.getState().setRightCollapsed(false);
+    expect(s.getState().rightCollapsed).toBe(false);
+  });
+
+  test('toggleRightCollapsed flips the flag', () => {
+    const s = make();
+    expect(s.getState().rightCollapsed).toBe(false);
+    s.getState().toggleRightCollapsed();
+    expect(s.getState().rightCollapsed).toBe(true);
+    s.getState().toggleRightCollapsed();
+    expect(s.getState().rightCollapsed).toBe(false);
+  });
+
+  test('toggling collapse leaves the active right view unchanged (collapse is independent of the view)', () => {
+    const s = make();
+    s.getState().setRight('source-control');
+    s.getState().toggleRightCollapsed();
+    expect(s.getState().rightCollapsed).toBe(true);
+    expect(s.getState().right).toBe('source-control');
+  });
 });
 
 describe('uiChrome mobileZone', () => {

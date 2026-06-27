@@ -79,3 +79,54 @@
   overflow-y: auto;
   @include a.rail-panel-pad;
 }
+
+/* --- right-edge tool-window stripe buttons (#500) ---
+   Square icon toggles in the vertical #right-strip (container layout in _split.scss). They wear the
+   toolbar line-icon idiom (.tb-ico) but read as a tool-window stripe: a clear pressed state — the icon
+   inks up, a tinted fill lifts it off the bar, and a left accent bar ties it to the panel it opens —
+   marks the view the open panel is showing. Collapsed → no button pressed (aria-pressed='false'). */
+.rstrip-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  background: transparent;
+  color: var(--koi-muted);
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
+  cursor: pointer;
+  transition: background var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease,
+    border-color var(--koi-dur-fast) ease;
+
+  &:hover {
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+    border-color: var(--koi-line);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+
+  &[aria-pressed='true'] {
+    color: var(--koi-fg);
+    background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+
+    /* Left accent bar — the panel (#right) is docked just to the left of the stripe, so the indicator
+       faces it. Purely decorative: the pressed state is already exposed to AT via aria-pressed. */
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 2px;
+      height: 1.1rem;
+      border-radius: var(--koi-radius-2xs);
+      background: var(--koi-accent-grad);
+    }
+  }
+}

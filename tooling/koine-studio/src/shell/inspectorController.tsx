@@ -82,6 +82,7 @@ import type { AppState } from '@/store/index';
 import { guardedLoad } from '@/shell/guardedLoad';
 import { createInspectorSheet, type InspectorSheet } from '@/shell/inspectorSheet';
 import { isNarrowViewport } from '@/shared/breakpoint';
+import { loadLayout, saveLayout } from '@/shell/layoutStore';
 import { DEFAULT_CENTER, isValidCenter, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
@@ -1481,6 +1482,62 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     t.addEventListener('click', () => selectRightView(t.dataset.rview as RightView));
   }
 
+  // Right-edge tool-window stripe (#500): Rider-style toggles that open/close (and switch) the #right
+  // Properties panel from a persistent vertical bar. The collapsed flag is owned by the uiChrome slice
+  // (runtime, #193) and mirrored to layoutStore (persistence) — the same split the diagnostics strip uses
+  // (applyDiagCollapsed). The active view stays owned by uiChrome.right / selectRightView; collapse is a
+  // SEPARATE, independent flag, so re-expanding always restores the last view rather than a blank panel.
+  const rstripSplitEl = el('split');
+  const rstripButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('#right-strip .rstrip-btn'));
+  function applyRightCollapsed(collapsed: boolean): void {
+    // DOM/ARIA only — persistence happens once per actual collapse transition (in the subscription
+    // below), not on every right-view switch that also runs this repaint. The collapsed grid (hide
+    // #right + #split-resizer, #center reclaims the column, #right-strip stays) is CSS, keyed off this
+    // class on #split — mirroring how `applyDiagCollapsed` keys the bottom strip.
+    rstripSplitEl.classList.toggle('right-collapsed', collapsed);
+    const active = appStore.getState().right;
+    // A stripe button reads "pressed" only while the panel is OPEN and showing that view; collapsed → none
+    // pressed (the last active view is still remembered in uiChrome.right for the next expand).
+    for (const b of rstripButtons) {
+      b.setAttribute('aria-pressed', String(!collapsed && b.dataset.rview === active));
+    }
+  }
+  // Seed the runtime flag from persistence before any subscription is wired (so this seed doesn't echo),
+  // then paint the DOM/ARIA once for the restored state.
+  appStore.getState().setRightCollapsed(loadLayout().rightCollapsed);
+  applyRightCollapsed(appStore.getState().rightCollapsed);
+  for (const b of rstripButtons) {
+    b.addEventListener('click', () => {
+      const view = b.dataset.rview as RightView;
+      const st = appStore.getState();
+      if (st.rightCollapsed) {
+        // Collapsed → expand straight to the clicked view (Rider's "click Git to jump to Source Control").
+        st.setRightCollapsed(false);
+        selectRightView(view);
+      } else if (view === st.right) {
+        // Open on this view → collapse, reclaiming the column.
+        st.setRightCollapsed(true);
+      } else {
+        // Open on another view → switch, staying open.
+        selectRightView(view);
+      }
+    });
+  }
+  // Keep the stripe's pressed state + the collapsed grid in sync however the state changes — a stripe
+  // click, an .rtab click, the palette command, or a selection auto-activating Properties all route
+  // through the slice, so re-running applyRightCollapsed here is the single reconciliation point. Persist
+  // only on an actual collapse transition (not on every view switch that also repaints). Captured +
+  // disposed (like unsubscribeActiveContext / unsubscribeDirtyCount) so a deferred slice change can't
+  // fire applyRightCollapsed into a torn-down host's captured DOM after dispose().
+  const unsubscribeRightCollapsed = appStore.subscribe((s, prev) => {
+    if (s.right !== prev.right || s.rightCollapsed !== prev.rightCollapsed) {
+      applyRightCollapsed(s.rightCollapsed);
+    }
+    if (s.rightCollapsed !== prev.rightCollapsed) {
+      saveLayout({ rightCollapsed: s.rightCollapsed });
+    }
+  });
+
   // --- compatibility check (on-demand) ---------------------------------------
   // The check only runs when the user picks a baseline, so the panel would otherwise be an empty void
   // when its tab is first opened. Paint an explanatory idle state (with the trigger) so the surface
@@ -2014,6 +2071,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Drop the activeContext subscription (#531) too — its callback re-renders scoped surfaces, which
     // would throw into a torn-down host if a deferred slice change fired after dispose.
     unsubscribeActiveContext();
+    // Drop the right-strip collapse subscription (#500) — its callback mutates the captured #split /
+    // .rstrip-btn nodes and persists, which must not fire into a torn-down host after dispose.
+    unsubscribeRightCollapsed();
     // The viewport-resize listener is registered unconditionally now (#475 re-evaluates the strip default
     // on a narrow↔wide cross even without the inspector sheet), so always detach it; the sheet teardown is
     // still sheet-gated.

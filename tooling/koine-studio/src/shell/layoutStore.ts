@@ -16,6 +16,9 @@ export interface LayoutState {
   sideRail: 'left' | 'right';
   /** Active file URIs for group A (always present) and group B (only meaningful when split is open). */
   groupActiveUris: [string, string?];
+  /** Whether the desktop right Properties rail is collapsed (reclaiming its column). The right-edge
+   *  tool-window stripe stays docked; re-expanding restores the last active `RightView`. Desktop-only. */
+  rightCollapsed: boolean;
 }
 
 export const DEFAULT_LAYOUT: LayoutState = {
@@ -24,6 +27,7 @@ export const DEFAULT_LAYOUT: LayoutState = {
   panelSide: 'bottom',
   sideRail: 'right',
   groupActiveUris: ['', undefined],
+  rightCollapsed: false,
 };
 
 // --- storage key -------------------------------------------------------------
@@ -75,6 +79,10 @@ function coerceGroupActiveUris(v: unknown): LayoutState['groupActiveUris'] {
   return [a, b];
 }
 
+function coerceRightCollapsed(v: unknown): boolean {
+  return typeof v === 'boolean' ? v : DEFAULT_LAYOUT.rightCollapsed;
+}
+
 // --- public API --------------------------------------------------------------
 
 /**
@@ -96,6 +104,7 @@ export function loadLayout(): LayoutState {
       panelSide: coercePanelSide(parsed.panelSide),
       sideRail: coerceSideRail(parsed.sideRail),
       groupActiveUris: coerceGroupActiveUris(parsed.groupActiveUris),
+      rightCollapsed: coerceRightCollapsed(parsed.rightCollapsed),
     };
   } catch {
     return { ...DEFAULT_LAYOUT };

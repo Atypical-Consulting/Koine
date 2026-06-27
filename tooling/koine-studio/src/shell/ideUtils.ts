@@ -171,6 +171,7 @@ export function helpRows(): ShortcutRow[] {
     { keys: 'mod+.', description: 'Quick fixes & refactors' },
     { keys: 'mod+,', description: 'Settings' },
     { keys: 'mod+B', description: 'Toggle file tree' },
+    { keys: 'mod+Alt+B', description: 'Toggle Properties panel' },
     { keys: 'F1', description: 'Keyboard shortcuts' },
     { keys: 'Esc', description: 'Close the open overlay' },
   ];

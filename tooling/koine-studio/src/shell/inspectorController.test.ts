@@ -15,6 +15,8 @@ import {
   type InspectorControllerLsp,
 } from '@/shell/inspectorController';
 import { leftRailMarkup } from '@/shell/leftRail';
+import { rightStripMarkup } from '@/shell/rightStrip';
+import { loadLayout, saveLayout } from '@/shell/layoutStore';
 import { createAppStore } from '@/store/index';
 import * as maxgraphRenderer from '@/diagrams/diagrams-maxgraph';
 import type { ContextMapGraphHooks } from '@/diagrams/diagrams-maxgraph';
@@ -115,6 +117,7 @@ const APP_HTML = `
           <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
         </div>
       </aside>
+      <div id="right-strip" class="pane" role="toolbar" aria-label="Tool windows" aria-orientation="vertical">${rightStripMarkup()}</div>
     </main>
     <footer id="statusbar"><span class="sb-item" id="sb-context">Context: —</span></footer>
   </div>`;
@@ -1005,6 +1008,68 @@ describe('createInspectorController — narrow-viewport bottom-strip default (#4
     setWidth(500);
     window.dispatchEvent(new Event('resize'));
     expect(collapsed()).toBe(true); // crossed to narrow on Documentation → collapsed
+    ctl.dispose();
+  });
+});
+
+describe('createInspectorController — right-edge tool-window stripe (#500)', () => {
+  const LAYOUT_KEY = 'koine.studio.layout';
+  const stripBtn = (view: string) =>
+    document.querySelector<HTMLButtonElement>(`#right-strip [data-rview="${view}"]`)!;
+  const splitEl = () => el('split');
+
+  beforeEach(() => localStorage.removeItem(LAYOUT_KEY));
+
+  test('boots collapsed from persisted layout: #split has right-collapsed, no button pressed', () => {
+    saveLayout({ rightCollapsed: true });
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    expect(splitEl().classList.contains('right-collapsed')).toBe(true);
+    for (const v of ['props', 'rules', 'notes', 'source-control']) {
+      expect(stripBtn(v).getAttribute('aria-pressed')).toBe('false');
+    }
+    ctl.dispose();
+  });
+
+  test('clicking a stripe icon while collapsed expands to that view and presses its button', () => {
+    saveLayout({ rightCollapsed: true });
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    expect(splitEl().classList.contains('right-collapsed')).toBe(true);
+
+    stripBtn('props').click();
+    expect(splitEl().classList.contains('right-collapsed')).toBe(false);
+    expect(deps.store.getState().rightCollapsed).toBe(false);
+    expect(deps.store.getState().right).toBe('props');
+    expect(stripBtn('props').getAttribute('aria-pressed')).toBe('true');
+    ctl.dispose();
+  });
+
+  test("clicking the active view's icon again collapses and persists the flag", () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    // Open on Properties (default) — clicking Properties collapses.
+    expect(deps.store.getState().right).toBe('props');
+    stripBtn('props').click();
+    expect(splitEl().classList.contains('right-collapsed')).toBe(true);
+    expect(deps.store.getState().rightCollapsed).toBe(true);
+    expect(loadLayout().rightCollapsed).toBe(true);
+    ctl.dispose();
+  });
+
+  test('clicking a different view while open switches the view without collapsing', () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    expect(deps.store.getState().right).toBe('props');
+
+    stripBtn('notes').click();
+    expect(splitEl().classList.contains('right-collapsed')).toBe(false);
+    expect(deps.store.getState().right).toBe('notes');
+    expect(stripBtn('notes').getAttribute('aria-pressed')).toBe('true');
+    expect(stripBtn('props').getAttribute('aria-pressed')).toBe('false');
     ctl.dispose();
   });
 });
