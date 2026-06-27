@@ -64,6 +64,23 @@ public class PhpRuntimeTests
         runtime.Contents.ShouldContain("Decimal");
     }
 
+    // --- #601: the PHP translator lowers a Decimal/value-object collection fold
+    // (.sum/.min/.max) to a runtime static call — `\Koine\Runtime\Decimal::sum/min/max(...)`.
+    // Those helpers were never defined on the runtime `Decimal` class, so every emitted fold
+    // fataled at runtime (`Call to undefined method ...::sum()`) and tripped phpstan
+    // --level max (`staticMethod.notFound`). The runtime must declare all three. ---
+
+    [Theory]
+    [InlineData("public static function sum(array $values): self")]
+    [InlineData("public static function min(array $values): self")]
+    [InlineData("public static function max(array $values): self")]
+    public void KoineRuntime_php_declares_static_Decimal_fold(string signature)
+    {
+        var files = EmitTrivial();
+        var runtime = files.Single(f => f.RelativePath == PhpRuntime.FileName);
+        runtime.Contents.ShouldContain(signature);
+    }
+
     [Fact]
     public void Emit_contains_composer_json()
     {
