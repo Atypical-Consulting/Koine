@@ -37,6 +37,16 @@ public class PythonExpressionTests
             tags: List<String>
             counts: List<Int>
           }
+
+          aggregate Cart root Basket {
+            entity CartLine identified by CartLineId {
+              sku: String
+              qty: Int
+            }
+            entity Basket identified by BasketId {
+              items: List<CartLine>
+            }
+          }
         }
         """;
 
@@ -64,6 +74,28 @@ public class PythonExpressionTests
     {
         var t = Make();
         return t.Translate(expr);
+    }
+
+    // A translator whose member scope is an entity (rather than the Order value object), so a
+    // selector projecting to an entity type — e.g. distinctBy(i => i) over List<CartLine> — is
+    // reachable. CartLine/Basket are child/root entities of the Cart aggregate above (issue #712).
+    private static PythonExpressionTranslator MakeForEntity(string entityName)
+    {
+        var result = new KoineCompiler().Compile(Source, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var model = result.Model!;
+        var semantic = new SemanticModel(model);
+        ModelIndex index = semantic.Index;
+
+        var entity = model.Contexts
+            .SelectMany(c => c.AllTypeDecls())
+            .OfType<EntityDecl>()
+            .First(e => e.Name == entityName);
+
+        var typeMapper = new PythonTypeMapper(index);
+        return new PythonExpressionTranslator(
+            index, entity.Members, index.EnumMemberToType, typeMapper, context: "Shop");
     }
 
     private static IdentifierExpr Id(string name) => new(name);
@@ -325,6 +357,19 @@ public class PythonExpressionTests
         var selector = new LambdaExpr("m", new MemberAccessExpr(Id("m"), "amount"));
         var expr = new CallExpr(Id("lines"), "distinctBy", new Expr[] { selector });
         Translate(expr).ShouldBe("len({m.amount for m in self.lines}) == len(self.lines)");
+    }
+
+    [Fact]
+    public void DistinctBy_with_entity_selector_dedupes_by_id_via_the_set()
+    {
+        // Entity projection (CartLine): unlike PHP's array_unique (string cast, #687) or a JS Set
+        // (reference identity, #712-TS), a Python set dedupes by __hash__/__eq__ — and the emitter
+        // gives every entity an identity __eq__/__hash__ over its id. So `len({i for i in self.items})`
+        // already counts distinct entities BY ID, matching C#'s `.Distinct()` and PHP (post-#687). The
+        // set is the correct, idiomatic Python path here — no first-occurrence fold is needed (#712).
+        var t = MakeForEntity("Basket");
+        var expr = new CallExpr(Id("items"), "distinctBy", new Expr[] { new LambdaExpr("i", Id("i")) });
+        t.Translate(expr).ShouldBe("len({i for i in self.items}) == len(self.items)");
     }
 
     // =========================================================================
