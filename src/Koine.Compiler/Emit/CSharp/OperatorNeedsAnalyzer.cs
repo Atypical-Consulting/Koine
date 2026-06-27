@@ -49,6 +49,12 @@ internal static class OperatorNeedsAnalyzer
                     }
                 }
 
+                // Invariant conditions over the type's members can also use value-object arithmetic.
+                foreach (Invariant inv in Invariants(type))
+                {
+                    ScanForScalarMul(inv.Condition, memberTypes, index, needs);
+                }
+
                 // Command bodies and state-rule guards can also use value-object arithmetic.
                 if (type is EntityDecl entity)
                 {
@@ -93,6 +99,19 @@ internal static class OperatorNeedsAnalyzer
             ScanForScalarMul(spec.Condition, scope, index, needs);
         }
 
+        // Read-model derived-field projections (over the source type's members) can multiply a value object by a scalar.
+        foreach ((ReadModelDecl rm, string context) in AllReadModels(model))
+        {
+            var scope = ReadModelSourceMembers(context, rm.SourceType, index).ToDictionary(m => m.Name, m => m.Type, StringComparer.Ordinal);
+            foreach (ReadModelField f in rm.Fields)
+            {
+                if (f.Projection is not null)
+                {
+                    ScanForScalarMul(f.Projection, scope, index, needs);
+                }
+            }
+        }
+
         return needs.ToDictionary(kv => kv.Key, kv => (IReadOnlySet<string>)kv.Value, StringComparer.Ordinal);
     }
 
@@ -129,6 +148,12 @@ internal static class OperatorNeedsAnalyzer
                     {
                         ScanForValueObjectSum(m.Initializer, scope, resolver, needs);
                     }
+                }
+
+                // Invariant conditions over the type's members can also fold value objects with sum.
+                foreach (Invariant inv in Invariants(type))
+                {
+                    ScanForValueObjectSum(inv.Condition, scope, resolver, needs);
                 }
 
                 // Command bodies and state-rule guards can also fold value objects with sum.
@@ -208,6 +233,19 @@ internal static class OperatorNeedsAnalyzer
             ScanForValueObjectSum(spec.Condition, TypeScope.FromMembers(SpecTargetMembers(spec.TargetType, index), index), resolver, needs);
         }
 
+        // Read-model derived-field projections (over the source type's members) can fold value objects with sum too.
+        foreach ((ReadModelDecl rm, string context) in AllReadModels(model))
+        {
+            TypeScope scope = TypeScope.FromMembers(ReadModelSourceMembers(context, rm.SourceType, index), index);
+            foreach (ReadModelField f in rm.Fields)
+            {
+                if (f.Projection is not null)
+                {
+                    ScanForValueObjectSum(f.Projection, scope, resolver, needs);
+                }
+            }
+        }
+
         return needs;
     }
 
@@ -249,6 +287,51 @@ internal static class OperatorNeedsAnalyzer
 
             base.VisitCall(n);
         }
+    }
+
+    /// <summary>The invariant conditions declared on a type (value objects and entities carry them).</summary>
+    private static IReadOnlyList<Invariant> Invariants(TypeDecl type) => type switch
+    {
+        ValueObjectDecl v => v.Invariants,
+        EntityDecl e => e.Invariants,
+        _ => Array.Empty<Invariant>()
+    };
+
+    /// <summary>Every read model declared in the model, paired with its declaring context name.</summary>
+    private static IEnumerable<(ReadModelDecl ReadModel, string Context)> AllReadModels(KoineModel model)
+    {
+        foreach (ContextNode ctx in model.Contexts)
+        {
+            foreach (TypeDecl t in ctx.AllTypeDecls())
+            {
+                if (t is ReadModelDecl rm)
+                {
+                    yield return (rm, ctx.Name);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The members a read model projects from, mirroring the C# emitter's
+    /// <c>ReadModelSourceMembers</c>: entities add the synthetic <c>id</c> unless they already
+    /// declare one, and the source type is resolved in the read model's own context first (R13.2).
+    /// </summary>
+    private static IReadOnlyList<Member> ReadModelSourceMembers(string context, string sourceType, ModelIndex index)
+    {
+        if (!index.TryGetDeclIn(context, sourceType, out TypeDecl decl) && !index.TryGetDecl(sourceType, out decl))
+        {
+            return Array.Empty<Member>();
+        }
+
+        return decl switch
+        {
+            ValueObjectDecl v => v.Members,
+            EntityDecl e => e.Members.Any(m => string.Equals(m.Name, "id", StringComparison.OrdinalIgnoreCase))
+                ? e.Members
+                : e.Members.Append(new Member("id", new TypeRef(e.IdentityName), null)).ToList(),
+            _ => Array.Empty<Member>()
+        };
     }
 
     /// <summary>Every spec declared in the model (context- and aggregate-scoped).</summary>
