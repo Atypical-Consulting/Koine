@@ -519,7 +519,15 @@ internal static class EntityBehaviorValidator
         IReadOnlySet<string> enumMembers,
         List<Diagnostic> diagnostics)
     {
-        var memberByName = entity.Members.ToDictionary(m => m.Name, m => m, StringComparer.Ordinal);
+        // A duplicate field name is reported as KOI0103 yet kept in entity.Members, so build the lookup
+        // defensively (last-wins) rather than ToDictionary — a collision here would otherwise throw and
+        // abort the whole validate pass, swallowing that very diagnostic. Mirrors ValidateCommands.
+        var memberByName = new Dictionary<string, Member>(StringComparer.Ordinal);
+        foreach (var m in entity.Members)
+        {
+            memberByName[m.Name] = m;
+        }
+
         var scope = TypeScope.FromMembers(entity.Members, index);
         var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics);
 
