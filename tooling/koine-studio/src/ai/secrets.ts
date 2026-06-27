@@ -93,6 +93,10 @@ function withDeviceKeyLock<T>(fn: () => Promise<T>): Promise<T> {
   return locks ? locks.request(DEVICE_KEY_LOCK, fn) : fn();
 }
 
+// Single-flight slot for the device key: concurrent in-tab callers share this one in-flight promise
+// instead of each minting a key (see getOrCreateKey). A failure resolves to null and is NOT stored here.
+let keyPromise: Promise<CryptoKey | null> | null = null;
+
 /**
  * Read or mint the device AES-GCM key, then generate+persist it (non-extractable) at most once across
  * a first-creation race. Two layers make it atomic:
@@ -106,8 +110,6 @@ function withDeviceKeyLock<T>(fn: () => Promise<T>): Promise<T> {
  * opaque CryptoKey via structured clone, so its bytes are never exposed. Returns null when crypto/storage
  * is unavailable or any step fails; a failed attempt is not cached, so a transient error can be retried.
  */
-let keyPromise: Promise<CryptoKey | null> | null = null;
-
 function getOrCreateKey(): Promise<CryptoKey | null> {
   // Bail before memoizing so a transient crypto-unavailable context isn't cached as a permanent failure.
   if (!cryptoAvailable()) return Promise.resolve(null);
