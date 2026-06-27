@@ -183,6 +183,32 @@ public class R18CSharpApplicationTests
         plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
     }
 
+    // ------------------------------------------------------------------
+    // Issue #630 — a typo'd --app-mapping value must hard-error like an
+    // unknown --layers name, not silently fall back to plain in the emitter.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Unknown_app_mapping_is_a_hard_error()
+    {
+        var settings = new BuildSettings { Path = "x.koi", Layers = "application", AppMapping = "mapperley" };
+        settings.TryResolve(out _, out var error).ShouldBeFalse();
+        error.ShouldNotBeNull();
+        error.ShouldContain("mapperley");
+    }
+
+    [Fact]
+    public void Known_app_mapping_values_resolve_true_case_insensitively()
+    {
+        // The two modes the emitter understands, in any case, still resolve.
+        new BuildSettings { Path = "x.koi", AppMapping = "mapperly" }
+            .TryResolve(out _, out var e1).ShouldBeTrue(e1);
+        new BuildSettings { Path = "x.koi", AppMapping = "Plain" }
+            .TryResolve(out _, out var e2).ShouldBeTrue(e2);
+        new BuildSettings { Path = "x.koi", AppMapping = "MapperLy" }
+            .TryResolve(out _, out var e3).ShouldBeTrue(e3);
+    }
+
     [Fact]
     public void Explicit_layers_domain_is_upgraded_to_include_application_for_app_flags()
     {
