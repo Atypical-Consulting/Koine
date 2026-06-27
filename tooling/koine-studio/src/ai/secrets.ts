@@ -15,6 +15,8 @@ const DB_NAME = 'koine-studio-secrets';
 const STORE = 'vault';
 // The single device key lives under this reserved id; secrets are keyed by their own names.
 const KEY_ID = '__cryptoKey';
+// Web Lock name that serializes first-time device-key creation across tabs/workers (see getOrCreateKey).
+const DEVICE_KEY_LOCK = 'koine-studio-device-key';
 
 /** A persisted, encrypted secret: the GCM nonce plus the ciphertext (both structured-cloned). */
 interface SecretRecord {
@@ -76,19 +78,58 @@ function idbDelete(key: string): Promise<void> {
   );
 }
 
+/** The same-origin Web Lock manager, or null when the Web Locks API is unavailable (older browsers, the
+ *  happy-dom test env, an insecure context). Feature-detected so the absence is a clean fallback, not a throw. */
+function lockManager(): LockManager | null {
+  const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+  return locks && typeof locks.request === 'function' ? locks : null;
+}
+
+/** Run `fn` under the device-key Web Lock when the API is available, else run it directly. The lock is
+ *  same-origin and shared across tabs/workers, so it serializes first-creation even between tabs (which
+ *  each have their own module + `keyPromise`); without it, fall back best-effort (cross-tab race unchanged). */
+function withDeviceKeyLock<T>(fn: () => Promise<T>): Promise<T> {
+  const locks = lockManager();
+  return locks ? locks.request(DEVICE_KEY_LOCK, fn) : fn();
+}
+
 /**
- * The device AES-GCM key: read from IndexedDB, or generated (non-extractable) and persisted on first
- * use. The key is stored as an opaque CryptoKey via structured clone — its bytes are never exposed.
- * Returns null when crypto/storage is unavailable or any step fails.
+ * Read or mint the device AES-GCM key, then generate+persist it (non-extractable) at most once across
+ * a first-creation race. Two layers make it atomic:
+ *   1. A module-level `keyPromise` single-flights concurrent in-tab callers (e.g. boot's `initSecrets`
+ *      racing a `saveApiKey`) onto ONE generate-and-persist.
+ *   2. A same-origin Web Lock around generate+persist, re-reading KEY_ID inside the lock, serializes the
+ *      first creation across separate tabs (each has its own `keyPromise`) so a loser adopts the winner's
+ *      key instead of overwriting it.
+ * Without this, racers minted distinct keys and the last KEY_ID write won, leaving records encrypted
+ * under a now-lost key — the saved API key silently vanished on reload (#634). The key is stored as an
+ * opaque CryptoKey via structured clone, so its bytes are never exposed. Returns null when crypto/storage
+ * is unavailable or any step fails; a failed attempt is not cached, so a transient error can be retried.
  */
-async function getOrCreateKey(): Promise<CryptoKey | null> {
-  if (!cryptoAvailable()) return null;
+let keyPromise: Promise<CryptoKey | null> | null = null;
+
+function getOrCreateKey(): Promise<CryptoKey | null> {
+  // Bail before memoizing so a transient crypto-unavailable context isn't cached as a permanent failure.
+  if (!cryptoAvailable()) return Promise.resolve(null);
+  const pending = (keyPromise ??= doGetOrCreateKey());
+  return pending.then((key) => {
+    if (!key && keyPromise === pending) keyPromise = null; // don't memoize a failure — allow a later retry
+    return key;
+  });
+}
+
+async function doGetOrCreateKey(): Promise<CryptoKey | null> {
   try {
     const existing = await idbGet<CryptoKey>(KEY_ID);
     if (existing) return existing;
-    const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
-    await idbPut(KEY_ID, key);
-    return key;
+    return await withDeviceKeyLock(async () => {
+      // Re-read inside the lock: a racer that lost the lock adopts the winner's key rather than minting a second.
+      const winner = await idbGet<CryptoKey>(KEY_ID);
+      if (winner) return winner;
+      const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+      await idbPut(KEY_ID, key);
+      return key;
+    });
   } catch {
     return null;
   }
