@@ -216,11 +216,32 @@ export function selectDomainGraphs(files: DocsFile[]): DiagramGraph[] {
  * The full {@link Diagram}s (caption / kind / mermaid / graph) behind {@link selectDomainGraphs} — every
  * non-contextmap diagram that carries nodes. Kept alongside the graph selector so export (#271) can recover
  * the source captions and Mermaid that {@link mergeGraphsForView} discards when it fuses the graphs.
+ *
+ * The context diagram's graph also carries the event-flow chain's `command` / `policy` nodes (#439); those
+ * belong on the Events → Flow canvas, NOT on the structural domain/class canvas (a command already shows as
+ * a method row on its aggregate, a policy isn't a class), so they're stripped here. The strip is a no-op for
+ * graphs without them, so pre-#439 callers are unaffected.
  */
 export function selectDomainDiagrams(files: DocsFile[]): Diagram[] {
   return files
     .flatMap((f) => f.diagrams ?? [])
-    .filter((d) => d.kind !== 'contextmap' && !!d.graph && d.graph.nodes.length > 0);
+    .filter((d) => d.kind !== 'contextmap' && !!d.graph && d.graph.nodes.length > 0)
+    .map((d) => ({ ...d, graph: withoutEventFlowOnlyNodes(d.graph) }));
+}
+
+/** The diagram-node kinds that exist only for the event-flow chain (#439) and are not drawn on the
+ *  structural domain canvas. */
+const EVENT_FLOW_ONLY_KINDS = new Set(['command', 'policy']);
+
+/** A copy of `graph` with the event-flow-only nodes (commands/policies, #439) and any edge touching one
+ *  removed, so the domain/class canvas stays structural. Returns the input unchanged when there are none. */
+function withoutEventFlowOnlyNodes(graph: DiagramGraph): DiagramGraph {
+  const dropped = new Set(graph.nodes.filter((n) => EVENT_FLOW_ONLY_KINDS.has(n.kind)).map((n) => n.id));
+  if (dropped.size === 0) return graph;
+  return {
+    nodes: graph.nodes.filter((n) => !dropped.has(n.id)),
+    edges: graph.edges.filter((e) => !dropped.has(e.from) && !dropped.has(e.to)),
+  };
 }
 
 /**

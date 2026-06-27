@@ -17,9 +17,17 @@ namespace Koine.Compiler.Emit.Docs;
 ///
 /// <para><b>Kind vocabulary</b> (the frontend styles by it):
 /// node kinds — <c>"state"</c>, <c>"aggregate-root"</c>, <c>"value-object"</c>, <c>"entity"</c>,
-/// <c>"enum"</c>, <c>"event"</c>, <c>"context"</c>, <c>"integration-event"</c>;
+/// <c>"enum"</c>, <c>"event"</c>, <c>"command"</c>, <c>"policy"</c>, <c>"context"</c>,
+/// <c>"integration-event"</c>;
 /// descriptor (diagram) kinds — <c>"statemachine"</c>, <c>"aggregate"</c>, <c>"contextmap"</c>,
 /// <c>"integration-events"</c>.</para>
+///
+/// <para>The context class diagram additionally carries the <b>event-flow chain</b> (issue #439): a
+/// <c>command</c> node per command/factory and a <c>policy</c> node per policy, wired into the existing
+/// domain <c>event</c> nodes by the directed edges <c>command --emits--&gt; event</c>,
+/// <c>event --triggers--&gt; policy</c>, and <c>policy --issues--&gt; command</c> — so Studio's event-storming
+/// Flow canvas can render the whole producer/reactor chain. These ride the structured graph ONLY; the
+/// rendered Mermaid class diagram is unchanged (commands already appear as method rows on their class).</para>
 /// </summary>
 public sealed partial class DocsEmitter
 {
@@ -196,6 +204,10 @@ public sealed partial class DocsEmitter
                 BackingMember: e.BackingMember))
             .ToList();
 
+        // Enrich the structured graph with the event-flow chain (issue #439): command/policy nodes wired
+        // to the domain `event` nodes above. Graph-only — the Mermaid built below is untouched.
+        AppendEventFlowChain(ctx, nodes, edges);
+
         var mermaid = new StringBuilder();
         EmitContextClassDiagram(mermaid, ctx);
         return new DiagramDescriptor(
@@ -203,6 +215,106 @@ public sealed partial class DocsEmitter
             Kind: "context",
             Mermaid: ExtractMermaidBlock(mermaid.ToString()),
             Graph: new DiagramGraph(nodes, edges));
+    }
+
+    /// <summary>
+    /// Enriches the context class-diagram graph with the event-flow chain (issue #439): a <c>command</c>
+    /// node per command/factory on the context's entities and a <c>policy</c> node per policy, wired to the
+    /// existing domain <c>event</c> nodes (already added by the caller, keyed by their bare type name) by
+    /// the directed edges <c>command --emits--&gt; event</c> (each <c>emit</c> clause), <c>event
+    /// --triggers--&gt; policy</c> (the policy's <c>when</c> event), and <c>policy --issues--&gt; command</c>
+    /// (the policy's <c>then Target.command</c> reaction). Nodes are always emitted (even undocumented ones
+    /// or a policy with no issued command); an edge is added only when BOTH endpoints resolve to a node in
+    /// THIS graph, so a command emitting an event declared elsewhere — or a policy reacting to / dispatching
+    /// across contexts — yields a standalone card rather than a dangling edge. Appended AFTER the class
+    /// nodes/edges so the existing domain-event composition/association edges keep their order.
+    /// </summary>
+    private static void AppendEventFlowChain(ContextNode ctx, List<DiagramNode> nodes, List<DiagramEdge> edges)
+    {
+        // Event nodes live under their bare type name (the id BuildContextDescriptor gives a class node), so
+        // an `emit EventName` / `when EventName` resolves by name. Guard every chain edge against this set.
+        var nodeIds = new HashSet<string>(nodes.Select(n => n.Id), StringComparer.Ordinal);
+
+        // A policy reacts via `Aggregate.command`, but a command lives on an entity; map both the aggregate
+        // name and the entity name (→ command node id) so `then Books.record` resolves to LedgerEntry.record.
+        var rootAggregate = new Dictionary<EntityDecl, string>(ReferenceEqualityComparer.Instance);
+        foreach (AggregateDecl agg in ctx.AllTypeDecls().OfType<AggregateDecl>())
+        {
+            if (agg.RootEntity() is { } root)
+            {
+                rootAggregate[root] = agg.Name;
+            }
+        }
+
+        var commandIds = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        // One command node per command AND factory (both are event-producing behaviors; a factory's creation
+        // events would otherwise have no producer in the chain). Label is the behavior name; the qualified
+        // name points at the declaration for click-to-source.
+        foreach (EntityDecl entity in ctx.AllEntities())
+        {
+            void AddBehavior(string name, KoineNode decl, IReadOnlyList<CommandStmt> body)
+            {
+                var id = $"cmd_{Sanitize(entity.Name)}_{Sanitize(name)}";
+                if (!nodeIds.Add(id))
+                {
+                    return; // a behavior id collision (e.g. command + factory same name) — first wins
+                }
+
+                nodes.Add(new DiagramNode(
+                    id, name, "command", $"{ctx.Name}.{entity.Name}.{name}", PreferName(decl, entity)));
+                commandIds.TryAdd($"{entity.Name}.{name}", id);
+                if (rootAggregate.TryGetValue(entity, out var aggName))
+                {
+                    commandIds.TryAdd($"{aggName}.{name}", id);
+                }
+
+                // command --emits--> event(s): one edge per emit clause (a command can fan out to several).
+                foreach (EmitClause emit in body.OfType<EmitClause>())
+                {
+                    if (nodeIds.Contains(emit.EventName))
+                    {
+                        edges.Add(new DiagramEdge(id, emit.EventName, "emits", ArrowKind: "flow"));
+                    }
+                }
+            }
+
+            foreach (CommandDecl cmd in entity.Commands)
+            {
+                AddBehavior(cmd.Name, cmd, cmd.Body);
+            }
+
+            foreach (FactoryDecl factory in entity.Factories)
+            {
+                AddBehavior(factory.Name, factory, factory.Body);
+            }
+        }
+
+        // One policy node per policy, then its two chain edges (trigger + reaction) when they resolve.
+        foreach (PolicyDecl policy in ctx.Policies)
+        {
+            var policyId = $"policy_{Sanitize(policy.Name)}";
+            if (!nodeIds.Add(policyId))
+            {
+                continue; // duplicate policy name (already a validation error) — keep one node
+            }
+
+            nodes.Add(new DiagramNode(
+                policyId, policy.Name, "policy", $"{ctx.Name}.{policy.Name}", PreferName(policy, ctx)));
+
+            // event --triggers--> policy (the `when` event), only when that event is drawn in this context.
+            if (nodeIds.Contains(policy.EventName))
+            {
+                edges.Add(new DiagramEdge(policy.EventName, policyId, "triggers", ArrowKind: "flow"));
+            }
+
+            // policy --issues--> command (the `then Target.command` reaction), when it resolves to a node.
+            var key = $"{policy.Reaction.TargetType}.{policy.Reaction.CommandName}";
+            if (commandIds.TryGetValue(key, out var targetCommandId))
+            {
+                edges.Add(new DiagramEdge(policyId, targetCommandId, "issues", ArrowKind: "flow"));
+            }
+        }
     }
 
     /// <summary>True when <paramref name="name"/> appears as a type argument (element/value) anywhere in
