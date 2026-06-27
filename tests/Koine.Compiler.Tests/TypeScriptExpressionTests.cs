@@ -29,6 +29,16 @@ public class TypeScriptExpressionTests
           value Order {
             lines: List<Line>
           }
+
+          aggregate Cart root Basket {
+            entity CartLine identified by CartLineId {
+              sku: String
+              qty: Int
+            }
+            entity Basket identified by BasketId {
+              items: List<CartLine>
+            }
+          }
         }
         """;
 
@@ -52,6 +62,28 @@ public class TypeScriptExpressionTests
     }
 
     private static string Translate(Expr expr) => Make().Translate(expr);
+
+    // A translator whose member scope is an entity (rather than the Order value object), so a
+    // selector projecting to an entity type — e.g. distinctBy(i => i) over List<CartLine> — is
+    // reachable. CartLine/Basket are child/root entities of the Cart aggregate above (issue #712).
+    private static TypeScriptExpressionTranslator MakeForEntity(string entityName)
+    {
+        var result = new KoineCompiler().Compile(Source, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var model = result.Model!;
+        var semantic = new SemanticModel(model);
+        ModelIndex index = semantic.Index;
+
+        var entity = model.Contexts
+            .SelectMany(c => c.AllTypeDecls())
+            .OfType<EntityDecl>()
+            .First(e => e.Name == entityName);
+
+        var typeMapper = new TypeScriptTypeMapper(index);
+        return new TypeScriptExpressionTranslator(
+            index, entity.Members, index.EnumMemberToType, typeMapper, context: "Shop");
+    }
 
     private static IdentifierExpr Id(string name) => new(name);
 
@@ -138,6 +170,25 @@ public class TypeScriptExpressionTests
     {
         Translate(DistinctBy("qty")).ShouldBe(
             "new Set(this.lines.map((l) => l.qty)).size === this.lines.length");
+    }
+
+    [Fact]
+    public void DistinctBy_with_entity_selector_dedupes_structurally_not_by_set_identity()
+    {
+        // Entity projection (CartLine): a JS Set dedupes by reference identity, so two
+        // structurally-distinct CartLine instances would survive as distinct entries — diverging
+        // from C#'s `.Distinct()` (issue #712, the entity counterpart of the #609 value-object fix).
+        // An emitted entity carries a structural `equals` that compares by id (`this.id.equals(...)`),
+        // which the runtime `structuralEquals` delegates to, so an entity selector must route through
+        // the same fold as a value object — deduping by id, matching C# and PHP (post-#687).
+        var t = MakeForEntity("Basket");
+        var expr = new CallExpr(Id("items"), "distinctBy", new Expr[] { new LambdaExpr("i", Id("i")) });
+        var ts = t.Translate(expr);
+
+        ts.ShouldNotContain("new Set(");
+        ts.ShouldBe(
+            "this.items.map((i) => i).filter((__x, __i, __xs) => " +
+            "__xs.findIndex((__y) => structuralEquals(__x, __y)) === __i).length === this.items.length");
     }
 
     [Fact]

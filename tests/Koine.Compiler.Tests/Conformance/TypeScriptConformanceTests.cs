@@ -153,6 +153,40 @@ public class TypeScriptConformanceTests
     }
 
     /// <summary>
+    /// Issue #712 acceptance: a <c>distinctBy</c> over an <em>entity</em> selector must type-check
+    /// under <c>tsc --noEmit --strict</c>. The fix routes an entity selector through the same
+    /// <c>structuralEquals</c> fold as a value object (instead of a reference-identity <c>Set</c>);
+    /// <c>structuralEquals</c> delegates to the entity's own <c>equals</c> (by id), so the dedupe
+    /// matches C#'s <c>.Distinct()</c> and PHP (post-#687). This guards that the emitted entity fold —
+    /// <c>.map(...).filter((__x, __i, __xs) =&gt; ...structuralEquals...)</c> over an entity array — is
+    /// strict-type clean. Skipped (not failed) only when no <c>tsc</c> toolchain is present locally;
+    /// CI installs Node/tsc and runs it for real.
+    /// </summary>
+    [Fact]
+    public void DistinctBy_over_entity_selector_typechecks_under_strict()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  aggregate Cart root Basket {\n" +
+            "    entity Line identified by LineId {\n" +
+            "      qty: Int\n" +
+            "    }\n" +
+            "    entity Basket identified by BasketId {\n" +
+            "      lines: List<Line>\n" +
+            "      uniqueLines: Bool = lines.distinctBy(l => l)\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue("distinctBy over an entity selector should type-check under --strict:\n" + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
     /// Issue #241 acceptance: the full emitted set for a multi-aggregate context with a declarative finder
     /// — domain + the opt-in Infrastructure layer (concrete repositories over the in-memory store, the unit
     /// of work, the pipeline behaviors and the composition root) — must type-check under
