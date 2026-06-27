@@ -661,10 +661,12 @@ internal sealed class TypeScriptExpressionTranslator
     }
 
     /// <summary>
-    /// <c>min</c>/<c>max</c>. For a numeric (Int) selector this is <c>Math.min/max</c> over the
-    /// mapped values; for a <c>Decimal</c>/value-object selector that would be both type-unsound
-    /// (<c>Math.*</c> wants <c>number</c>) and money-lossy, so we reduce via <c>compareTo</c> with
-    /// the same empty-collection guard <see cref="WriteSum"/> uses (a seedless reduce throws on empty).
+    /// <c>min</c>/<c>max</c>. Both branches guard an empty collection (issue #610): a numeric (Int)
+    /// selector maps to <c>number</c> then folds with a seedless <c>.reduce</c> over <c>Math.min/max</c>
+    /// — never a bare <c>Math.min(...spread)</c>, which returns <c>±Infinity</c> on empty (and risks an
+    /// arity <c>RangeError</c>); a <c>Decimal</c>/value-object selector would be both type-unsound
+    /// (<c>Math.*</c> wants <c>number</c>) and money-lossy, so it reduces via <c>compareTo</c>. Either
+    /// way the empty case throws <c>DomainInvariantViolationError</c>, matching the C#/Python targets.
     /// </summary>
     private void WriteMinMax(CallExpr call, string target, StringBuilder sb, bool isMin)
     {
@@ -687,8 +689,24 @@ internal sealed class TypeScriptExpressionTranslator
         }
         else
         {
+            // Numeric (Int) selector. `Math.min(...[])` returns Infinity and `Math.max(...[])`
+            // returns -Infinity, so a bare spread silently yields a nonsense extreme on an empty
+            // collection (and risks the argument-arity RangeError on very large arrays). Mirror the
+            // value-object branch above: map once, throw DomainInvariantViolationError when empty,
+            // else fold with a seedless `.reduce` over Math.min/max — matching C#/Python semantics.
+            var op = isMin ? "min" : "max";
             var fn = isMin ? "Math.min" : "Math.max";
-            sb.Append(fn).Append("(...").Append(target).Append(".map(").Append(RenderLambda(call)).Append("))");
+            var rule = $"cannot take {op} of an empty collection (no value)";
+            var ownerName = selectorType?.Name ?? "number";
+            var elem = selectorType is null ? "number" : _typeMapper.Map(selectorType);
+            var bind = "__mm" + _sumCounter++;
+            sb.Append('(').Append(target).Append(".map(").Append(RenderLambda(call))
+              .Append(") as readonly ").Append(elem).Append("[]).length === 0\n")
+              .Append("        ? (() => { throw new DomainInvariantViolationError('")
+              .Append(ownerName).Append("', '").Append(rule.Replace("'", "\\'")).Append("'); })()\n")
+              .Append("        : ").Append(target).Append(".map(").Append(RenderLambda(call))
+              .Append(").reduce((").Append(bind).Append("a, ").Append(bind).Append("b) => ")
+              .Append(fn).Append('(').Append(bind).Append("a, ").Append(bind).Append("b))");
         }
     }
 
