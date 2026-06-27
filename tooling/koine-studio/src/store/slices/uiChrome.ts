@@ -67,6 +67,7 @@ export function isValidCenterLayout(v: unknown): v is CenterLayout {
   if (!Array.isArray(l.panes) || l.panes.length === 0) return false;
   if (!Array.isArray(l.sizes) || l.sizes.length !== l.panes.length) return false;
   if (typeof l.focusedPaneId !== 'string') return false;
+  if (!l.panes.some((p) => p.id === l.focusedPaneId)) return false;
   return l.panes.every((p) => typeof p.id === 'string' && isValidCenter(p.view));
 }
 
@@ -164,11 +165,13 @@ export function createUiChromeSlice(
     },
     splitCenter: (orientation) => {
       const { centerLayout } = get();
-      const focused =
-        centerLayout.panes.find((p) => p.id === centerLayout.focusedPaneId) ??
-        centerLayout.panes[0];
+      // Pick the first view not already used by any pane so each pane gets its
+      // own DOM element (there is only one #center-visual / #center-technical /
+      // etc. in the document — two panes claiming the same one leaves pane A blank).
+      const CYCLE_VIEWS: CenterView[] = ['technical', 'docs', 'assistant', 'visual'];
+      const newView = CYCLE_VIEWS.find((v) => !centerLayout.panes.some((p) => p.view === v)) ?? 'technical';
       const newId = newPaneId();
-      const panes = [...centerLayout.panes, { id: newId, view: focused.view }];
+      const panes = [...centerLayout.panes, { id: newId, view: newView }];
       const sizes = panes.map(() => 1 / panes.length);
       set({ centerLayout: { orientation, panes, sizes, focusedPaneId: centerLayout.focusedPaneId } });
     },

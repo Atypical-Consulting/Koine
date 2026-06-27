@@ -187,6 +187,29 @@ describe('center layout', () => {
     expect(isValidCenterLayout(DEFAULT_CENTER_LAYOUT)).toBe(true);
   });
 
+  test('isValidCenterLayout rejects a stale focusedPaneId that references no pane', () => {
+    // A persisted layout where the focused pane was removed (e.g. after a code change that renamed
+    // IDs) should fail validation so the consumer falls back to DEFAULT_CENTER_LAYOUT.
+    expect(
+      isValidCenterLayout({
+        orientation: 'row',
+        panes: [{ id: 'pane-1', view: 'visual' }],
+        sizes: [1],
+        focusedPaneId: 'stale-id-not-in-panes',
+      }),
+    ).toBe(false);
+  });
+
+  test('splitCenter gives the new pane a view distinct from the existing pane', () => {
+    const s = make();
+    // The initial single pane is 'visual'; the new pane must not also be 'visual'.
+    s.getState().splitCenter('row');
+    const panes = s.getState().centerLayout.panes;
+    expect(panes).toHaveLength(2);
+    expect(panes[0].view).toBe('visual');
+    expect(panes[1].view).not.toBe('visual');
+  });
+
   test('legacy setCenter sets the focused pane view', () => {
     const s = make();
     s.getState().setCenter('technical');

@@ -1382,14 +1382,21 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // expanded default. Only the strip's *default collapse* changes here — its global visibility (above) does not.
     applyDefaultDiagCollapsed();
     for (const t of centerTabs) t.setAttribute('aria-selected', String(t.dataset.center === center));
-    const techVisible = center === 'technical';
+    // In split mode, a sub-view must be visible when ANY pane shows its parent center panel —
+    // not just the focused pane. Using only `center` (= focused pane's view) would hide, e.g.,
+    // the editor in pane B whenever pane A (focused) is on 'visual'.
+    const techVisible = isSplit
+      ? centerLayout.panes.some((p) => p.view === 'technical')
+      : center === 'technical';
     editorPaneEl.hidden = !(techVisible && tech === 'editor');
     previewEl.hidden = !(techVisible && tech === 'preview');
     checkView.hidden = !(techVisible && tech === 'check');
     scenariosView.hidden = !(techVisible && tech === 'scenarios');
     for (const t of techTabs) t.setAttribute('aria-selected', String(t.dataset.tech === tech));
     // Documentation sub-views: Glossary (the ubiquitous language), Decisions (the ADR list) and Notes.
-    const docsVisible = center === 'docs';
+    const docsVisible = isSplit
+      ? centerLayout.panes.some((p) => p.view === 'docs')
+      : center === 'docs';
     glossaryView.hidden = !(docsVisible && docs === 'glossary');
     adrView.hidden = !(docsVisible && docs === 'adr');
     notesView.hidden = !(docsVisible && docs === 'notes');
@@ -1406,15 +1413,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       centerBodyEl,
       getLayout: () => appStore.getState().centerLayout,
       onPaneViewSelect: (paneId: string, view: CenterView) => {
+        // Focus the pane first so lazy-loader guards (which check focusedPaneId) always fire,
+        // even when the user clicks a tab in a non-focused pane (Bug 5 fix).
+        appStore.getState().focusPane(paneId);
         appStore.getState().setPaneView(paneId, view);
         applyCenterChrome();
-        // Trigger any lazy loaders for the newly visible view (in the focused pane).
-        if (appStore.getState().centerLayout.focusedPaneId === paneId) {
-          if (view === 'visual' && appStore.getState().isStale('diagrams')) void loadDiagrams();
-          else if (view === 'technical') ensureTechLoaded();
-          else if (view === 'docs') ensureDocsLoaded();
-          else if (view === 'assistant') ensureAssistantShown();
-        }
+        // Trigger any lazy loaders for the newly visible view (now always the focused pane).
+        if (view === 'visual' && appStore.getState().isStale('diagrams')) void loadDiagrams();
+        else if (view === 'technical') ensureTechLoaded();
+        else if (view === 'docs') ensureDocsLoaded();
+        else if (view === 'assistant') ensureAssistantShown();
       },
       onPaneFocus: (paneId: string) => {
         appStore.getState().focusPane(paneId);
@@ -1678,6 +1686,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         updateCenterSplitLayout();
         applyCenterChrome();
         renderSplitControls();
+        // Persist the new layout so a reload restores the split state (Bug 3 fix).
+        deps.saveWorkspaceCenterLayout?.(s.centerLayout);
       }
     },
   );
