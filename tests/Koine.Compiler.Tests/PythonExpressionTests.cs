@@ -27,6 +27,9 @@ public class PythonExpressionTests
           value Order {
             code: String
             quantity: Int
+            total: Int
+            discount: Int?
+            subtotal: Decimal
             status: OrderStatus
             note: String?
             prices: List<Decimal>
@@ -111,6 +114,58 @@ public class PythonExpressionTests
         var t = Make();
         var expr = new BinaryExpr(BinaryOp.Ge, Id("quantity"), Int("1"));
         t.Translate(expr, PythonExpressionTranslator.NameMode.Parameter).ShouldBe("(quantity >= 1)");
+    }
+
+    // =========================================================================
+    // Arithmetic — Int division must floor (Python `/` is true division → float)
+    // =========================================================================
+
+    [Fact]
+    public void IntDivInt_lowers_to_floor_division()
+    {
+        // Koine types `Int / Int` as `Int` (matching C# integer division), but Python `/` is
+        // *true* division and yields a float. The translator must emit `//` so the result stays
+        // int-typed and int-valued. Regression for #611.
+        var expr = new BinaryExpr(BinaryOp.Div, Id("total"), Id("quantity"));
+        Translate(expr).ShouldBe("(self.total // self.quantity)");
+    }
+
+    [Fact]
+    public void OptionalIntDivInt_lowers_to_floor_division()
+    {
+        // The resolver carries optionality on `Int`, so `Int? / Int` still resolves to the `Int`
+        // name and must floor-divide.
+        var expr = new BinaryExpr(BinaryOp.Div, Id("discount"), Id("quantity"));
+        Translate(expr).ShouldBe("(self.discount // self.quantity)");
+    }
+
+    [Fact]
+    public void NestedIntDivision_floors_at_every_level()
+    {
+        // `(total / quantity) / quantity` — the inner `Int / Int` resolves to `Int`, so the outer
+        // division is also `Int / Int` and both must floor.
+        var inner = new BinaryExpr(BinaryOp.Div, Id("total"), Id("quantity"));
+        var outer = new BinaryExpr(BinaryOp.Div, inner, Id("quantity"));
+        Translate(outer).ShouldBe("((self.total // self.quantity) // self.quantity)");
+    }
+
+    [Fact]
+    public void IntDivByIntLiteral_floors()
+    {
+        // A bare integer literal divisor resolves to `Int`, so it must floor-divide too.
+        var expr = new BinaryExpr(BinaryOp.Div, Id("total"), Int("2"));
+        Translate(expr).ShouldBe("(self.total // 2)");
+    }
+
+    [Fact]
+    public void DecimalDivisor_stays_true_division()
+    {
+        // A Decimal operand makes the result Decimal; decimal.Decimal `/` is the correct (true)
+        // division, so the lowering must NOT touch it.
+        var decOverInt = new BinaryExpr(BinaryOp.Div, Id("subtotal"), Id("quantity"));
+        var intOverDec = new BinaryExpr(BinaryOp.Div, Id("quantity"), Id("subtotal"));
+        Translate(decOverInt).ShouldBe("(self.subtotal / self.quantity)");
+        Translate(intOverDec).ShouldBe("(self.quantity / self.subtotal)");
     }
 
     // =========================================================================
