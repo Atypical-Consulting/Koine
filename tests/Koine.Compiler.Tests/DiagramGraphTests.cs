@@ -484,11 +484,37 @@ public class DiagramGraphTests
         policy.Stereotype.ShouldBeNull();
         (policy.Members ?? []).ShouldBeEmpty();
 
+        // A factory is an event-producing behaviour too, so it also becomes a `command` node with its
+        // emit edge — otherwise its creation event would have no producer in the chain.
+        DiagramNode authorize = graph.Nodes.First(n => n.Kind == "command" && n.Label == "authorize");
+        authorize.QualifiedName.ShouldBe("Payment.Charge.authorize");
+        DiagramNode authorized = graph.Nodes.First(n => n.Kind == "event" && n.Label == "ChargeAuthorized");
+        graph.Edges.ShouldContain(e => e.From == authorize.Id && e.To == authorized.Id && e.Label == "emits");
+
         // The complete chain: command --emits--> event --triggers--> policy --issues--> command.
         DiagramNode captured = graph.Nodes.First(n => n.Kind == "event" && n.Label == "ChargeCaptured");
         graph.Edges.ShouldContain(e => e.From == capture.Id && e.To == captured.Id && e.Label == "emits");
         graph.Edges.ShouldContain(e => e.From == captured.Id && e.To == policy.Id && e.Label == "triggers");
         graph.Edges.ShouldContain(e => e.From == policy.Id && e.To == record.Id && e.Label == "issues");
+
+        // The structural invariants the other suites assert on the Ordering fixture must also hold once the
+        // command/policy/factory chain is present: every node has a real span + unique id, every edge
+        // resolves within this graph (the policy node's span comes from a different fallback — the context).
+        var ids = graph.Nodes.Select(n => n.Id).ToList();
+        ids.Distinct(StringComparer.Ordinal).Count().ShouldBe(ids.Count, "duplicate node ids in the chain");
+        foreach (DiagramNode node in graph.Nodes)
+        {
+            node.QualifiedName.ShouldNotBeNullOrEmpty();
+            node.Span.ShouldNotBeNull();
+            node.Span!.Value.IsNone.ShouldBeFalse($"node {node.Id} must carry a real span");
+        }
+
+        var idSet = ids.ToHashSet(StringComparer.Ordinal);
+        foreach (DiagramEdge edge in graph.Edges)
+        {
+            idSet.ShouldContain(edge.From, $"edge {edge.From}->{edge.To} has an unknown source");
+            idSet.ShouldContain(edge.To, $"edge {edge.From}->{edge.To} has an unknown target");
+        }
     }
 
     /// <summary>A two-aggregate context with a full command → event → policy → command chain (mirrors the
@@ -504,6 +530,8 @@ public class DiagramGraphTests
           }
 
           aggregate Billing root Charge {
+            event ChargeAuthorized { charge: ChargeId }
+
             entity Charge identified by ChargeId {
               amount: Decimal
               status: ChargeStatus = Authorized
@@ -517,6 +545,10 @@ public class DiagramGraphTests
                 requires status == Authorized "only an authorized charge can be captured"
                 status -> Captured
                 emit ChargeCaptured(charge: id, capturedAmount: amount)
+              }
+
+              create authorize(amount: Decimal) {
+                emit ChargeAuthorized(charge: id)
               }
             }
           }
