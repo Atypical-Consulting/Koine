@@ -161,27 +161,24 @@ gates). The child skills load it too; you mainly need its *Labels* and *Architec
 
 ## Step 2 — Build the work queue
 
-Survey the open issues and shape them into an ordered, filtered queue. List with labels:
+The survey — list issues → check each for a plan → classify effort → drop manual-QA → order small-first
+— is a deterministic sequence, so **run `scripts/survey.sh`** instead of re-deriving it from scratch
+every time (one `gh issue list` + jq; fewer turns = less per-turn cache re-read). It prints one bucketed,
+already-ordered row per issue:
 
-```bash
-gh issue list --state open --limit 200 \
-  --json number,title,labels \
-  --jq 'sort_by(.number) | .[] | "\(.number)\t[\(.labels|map(.name)|join(","))]\t\(.title)"'
+```
+QUEUE  #N  effort  plan=true  qa=false  [labels]  title   ← eligible (effort:S before :M), area-tag + dispatch
+HOLD   #N  ...                                            ← effort L/XL, out of the default fleet (see Large issues)
+SKIP   #N  ...                                            ← no plan, or manual-QA only — note the reason in state
 ```
 
-Then classify each issue:
-
-- **Effort** — from the profile's effort labels (`effort: S/M/L/XL`). Queue **S first, then M**; hold
-  **L/XL** out of the default fleet (they're long, conflict-prone, and usually want a human's nod — see
-  *Large issues* below).
-- **Eligibility** — keep an issue only if it can actually be built headlessly:
-  - **Has a plan.** `implement-issue` needs a `🛠️ Implementation plan` (or a legacy plan comment).
-    Cheaply check: `gh issue view <N> --json body --jq 'if (.body|test("Implementation plan|### Task|- \\[ \\]")) then "plan" else "noplan" end'`. No plan → skip it (or, if the user wants it built, file/seed a plan first via `create-issue`).
-  - **Is a code task.** Drop pure "visually QA…", "verify by hand from the UI…" issues — a headless
-    agent can't do them. Note them as *skipped* in the state file with the reason.
-- **Area** — tag each issue with the code area it touches (infer from the title/labels: e.g. `compiler`,
-  `php`, `website`, `studio-frontend`, `tests`, `ci/build`). This is what keeps concurrent workers off
-  each other's files. You don't need perfect areas — just enough to tell "these two would fight."
+What the script encodes (so you can trust the buckets): **Effort** from the profile's `effort: S/M/L/XL`
+labels (S before M; L/XL held); **plan** present (`🛠️ Implementation plan` / a task-list — no plan ⇒
+SKIP, or seed one via `create-issue` if the user insists); **manual-QA** dropped (a headless agent can't
+"visually QA…" / "verify by hand…"). The **one judgment the script leaves to you is area-tagging** the
+QUEUE rows (infer from title/labels: e.g. `compiler`, `php`, `website`, `studio-frontend`, `tests`,
+`ci/build`) — that's what keeps concurrent workers off each other's files; you don't need perfect areas,
+just enough to tell "these two would fight."
 
 Persist a **state file** outside the repo (a scratch/temp dir, not a tracked path) so the fleet survives
 context compaction and `loop` re-fires. Keep it small and current:
@@ -215,37 +212,25 @@ re-fire redispatches at the same tier — and so `usage_report.py`'s by-model ro
 
 ### The worker-prompt contract
 
-Each worker gets one issue and the same standing rules. Fill in `<N>` and dispatch in the background:
+Every worker gets the same standing rules — so they live **once**, in the `/auto-dev-worker` command
+(`.claude/commands/auto-dev-worker.md`), not re-typed per dispatch. Dispatch is then a deterministic
+one-liner with the model tier set by the spawn flag:
 
-```
-You are an auto-dev worker for <repo>. Your assigned issue is #<N> ("<title>").
-Run this pipeline end-to-end, autonomously, no confirmations:
-
-1. Invoke the `implement-issue` skill with args "<N>". Let it create its OWN git worktree (do NOT reuse
-   the shared/main checkout — other workers are active), open a draft PR, implement each plan task, run
-   code-review, sync main, format, and flip the PR to ready.
-
-2. Invoke the `merge-pr` skill with args "<the PR number>". THIS IS MANDATORY — your job is NOT done at
-   "ready". Drive the PR all the way to MERGED: merge-pr waits for CI, clears blockers (red/flaky checks,
-   conflicts with main, unresolved reviews), squash-merges, files follow-ups, tears down the worktree.
-   Do NOT go idle while a merge is still achievable — if CI is mid-run, keep polling `gh pr checks <PR>`
-   and merge the instant it's green. Only stop for a genuine hard blocker.
-
-OFF-SCOPE PROTOCOL: if you hit a problem that is NOT part of #<N> — an unrelated or flaky CI failure, a
-pre-existing bug, a design smell, missing/broken tests, tech debt — do NOT fix it inline (scope-creep)
-and do NOT silently ignore it. FILE it as a new issue via the `create-issue` skill, then continue your
-own task. List anything you filed in your report.
-
-Commit identity & all repo specifics come from the repo profile (the child skills load it). Work ONLY on
-#<N>. If genuinely un-implementable (no usable plan, manual-QA only) or hard-blocked after real effort,
-STOP and report it rather than forcing a merge.
-
-Send your FINAL report to the supervisor (main), structured and nothing else:
-ISSUE: <N> | PR: <number|none> | STATUS: MERGED|BLOCKED|FAILED | DETAIL: <1–2 sentences>
-| FILED: <issues you opened, or none> | WORKTREE: <cleaned up / what remains>
+```bash
+claude -p "/auto-dev-worker <N>" --model <tier>   # <tier> chosen from the issue's labels (see below)
 ```
 
-Why these clauses earn their place (don't trim them):
+(If you launch the worker as a background sub-agent rather than a `claude -p` session, pass the command
+file's body as the sub-agent prompt and set its model parameter to the same tier.) The command expands to
+the full contract: `implement-issue <N>` in its **own** worktree → **mandatory** `merge-pr` driven to
+MERGED (never idle at "ready") → off-scope protocol (`create-issue`, don't fix inline) → a single
+structured FINAL report line back to you:
+
+```
+ISSUE: <N> | PR: <number|none> | STATUS: MERGED|BLOCKED|FAILED | DETAIL: … | FILED: … | WORKTREE: …
+```
+
+Why those clauses earn their place (don't trim them from the command):
 - *Own worktree* — parallel workers sharing a checkout corrupt each other; isolation is non-negotiable.
 - *Mandatory merge / don't idle at ready* — the single most common failure is a worker stopping once the
   PR is "ready." The explicit "drive to MERGED, keep polling CI" is what closes that gap.
@@ -256,12 +241,10 @@ Why these clauses earn their place (don't trim them):
 ## Step 4 — Supervise (the loop)
 
 You'll be woken by a worker's report, an **idle notification**, or your heartbeat. On every wake,
-**reconcile against GitHub** — never trust a worker's silence or even its "done" without checking:
-
-```bash
-gh pr list --state open  --json number,isDraft,headRefName,mergeStateStatus --jq '.[]|"\(.number)\t\(if .isDraft then "DRAFT" else "READY" end)\t\(.mergeStateStatus)\t\(.headRefName)"'
-gh pr list --state merged --limit 8 --json number,title,mergedAt
-```
+**reconcile against GitHub** — never trust a worker's silence or even its "done" without checking. Run
+`scripts/reconcile.sh` (one call: open PRs with draft/ready + `mergeStateStatus`, plus the last 10
+merged) rather than re-typing the gh queries each tick. It gives you the ground truth; you supply the
+judgment below.
 
 Then, per slot:
 
@@ -300,12 +283,10 @@ and eligibility-checked), and note what changed. Keep a **merge counter** in the
 each confirmed merge; record the count at the last refresh) so a `loop` re-fire knows when the next
 refresh is due. A stale queue silently costs you: missed easy disjoint wins and mis-ordered work.
 
-**Keep your own context lean (it's re-read every turn — see *Token economics*).** The state file is your
-only working memory — **don't also maintain a per-issue TaskList**; it grows without bound and is
-re-injected on every turn, so it quietly becomes your biggest cost. Keep worker reports terse. And on a
-long run, **compact or `/clear` yourself roughly every ~20 merges**: continuity is reconstructable from
-the state file + live GitHub, so clearing resets the cache-read base instead of dragging an
-ever-growing transcript across hundreds of merges.
+**Keep your own context lean** — it's re-read every turn, so apply *Token economics* lever 2 right here:
+the state file is your only working memory (**no per-issue TaskList**), worker reports stay terse, and
+**compact or `/clear` yourself ~every 20 merges** (continuity is reconstructable from the state file +
+live GitHub, so clearing resets the cache-read base).
 
 ## Step 5 — Heartbeat
 
@@ -363,13 +344,8 @@ skipping the next slot that frees. Hold the line at N unless told otherwise.
   (Step 4) so you keep working off the *live* backlog, not a stale opening snapshot, and don't miss the
   easy disjoint-area wins that break a same-area logjam.
 - **The state file is your memory.** Keep it terse and current so a compaction or `loop` re-fire
-  reconstructs the fleet exactly. Corollary: **don't also keep a per-issue TaskList** — it's re-injected
-  every turn and silently becomes your largest token cost (see *Token economics*).
-- **Context is the cost, not output.** ~83% of a long run's spend is re-reading context each turn, only
-  ~16% is generated work. So the cheap wins are *fewer turns* and *smaller per-turn context*, not
-  "write less" — and the biggest one is **tiering the model to the task** (cheap-by-default with
-  top-model escalation on failure), not running the whole fleet on the top model.
-- **Tier, then escalate.** Default workers to a cheap/mid model by label; if one genuinely can't green
-  its task, re-dispatch *that* issue once on the top model. Cheap-by-default + escalation beats
-  all-top-model on cost without losing the hard cases.
+  reconstructs the fleet exactly — and it's your *only* working memory (no per-issue TaskList).
+- **Cost lives in *Token economics*, not here.** The whole money story is stated once in that section —
+  ~83% of spend is per-turn context re-read, so tier the model to the task (cheap-by-default + top-model
+  escalation) and shrink per-turn context. Re-read that section; this list won't re-summarize it.
 ```
