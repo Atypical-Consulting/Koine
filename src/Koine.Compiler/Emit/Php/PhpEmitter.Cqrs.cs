@@ -31,6 +31,10 @@ public sealed partial class PhpEmitter
         var translator = new PhpExpressionTranslator(
             emit.Index, sourceMembers, emit.EnumMemberToType, context: contextName, memberReceiver: "src");
 
+        // Sibling names, so a directly-projected source member can be classified stored-vs-derived
+        // the same way PhpExpressionTranslator does (ordinal, like its own `_memberNames`).
+        var sourceMemberNames = new HashSet<string>(sourceMembers.Select(m => m.Name), StringComparer.Ordinal);
+
         var name = PhpNaming.ClassName(rm.Name);
         var sourceName = PhpNaming.ClassName(rm.SourceType);
 
@@ -58,7 +62,16 @@ public sealed partial class PhpEmitter
                     fieldType = null;
                 }
 
-                rhs = "$src->" + prop;
+                // A DERIVED (computed) source member is emitted as a getter METHOD on the source
+                // entity/VO (see EmitEntity / EmitValueObject), so a direct projection of it must
+                // CALL the getter — `$src->doubled()`, not a `$src->doubled` property read (an
+                // undefined property under strict_types and a phpstan --level max error). This
+                // mirrors PhpExpressionTranslator's stored-vs-derived rule for the projected-field
+                // path; stored members stay a plain property read. (#615)
+                Member? sourceMember = sourceMembers.FirstOrDefault(m => m.Name == f.Name);
+                bool derived = sourceMember is not null
+                    && MemberAnalysis.IsDerived(sourceMember, sourceMemberNames);
+                rhs = derived ? "$src->" + prop + "()" : "$src->" + prop;
             }
             else
             {

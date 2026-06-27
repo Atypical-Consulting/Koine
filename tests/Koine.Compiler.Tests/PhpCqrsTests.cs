@@ -63,6 +63,25 @@ public class PhpCqrsTests
         }
         """;
 
+    /// <summary>
+    /// A source whose member <c>doubled</c> is DERIVED (its initializer references the sibling
+    /// <c>qty</c>), directly projected by a read model. The source VO emits <c>doubled</c> as a
+    /// getter method, so the projection must CALL it (<c>$src-&gt;doubled()</c>) — a property read
+    /// would hit an undefined property. (#615)
+    /// </summary>
+    private const string DerivedDirectProjectionFixture = """
+        context Sales {
+          value Order {
+            qty:     Int
+            doubled: Int = qty * 2
+          }
+
+          readmodel OrderView from Order {
+            doubled
+          }
+        }
+        """;
+
     private static IReadOnlyList<EmittedFile> Emit(string source)
     {
         var result = new KoineCompiler().Compile(source, new PhpEmitter());
@@ -134,6 +153,43 @@ public class PhpCqrsTests
 
         // The source entity (Order) is in Entities/, so a `use` import is needed
         content.ShouldContain("use Koine\\Sales\\Entities\\Order");
+    }
+
+    // #615 — a read model that directly projects a DERIVED source member must CALL the getter
+    // method ($src->doubled()), not read it as an undefined property ($src->doubled), matching how
+    // the source VO/entity emits a computed member. A property read is null under strict_types and
+    // fails phpstan --level max.
+    [Fact]
+    public void ReadModel_direct_projection_of_derived_member_emits_getter_call()
+    {
+        var files = Emit(DerivedDirectProjectionFixture);
+        var content = FileContent(files, "src/Sales/ReadModels/OrderView.php");
+
+        // The projection function CALLS the derived getter rather than reading a bare property.
+        content.ShouldContain("function toOrderView(Order $src): OrderView");
+        content.ShouldContain("$src->doubled()");
+        content.ShouldNotContain("$src->doubled,");
+    }
+
+    // A directly-projected STORED member stays a plain property read — regression guard so the
+    // #615 fix targets only derived members.
+    [Fact]
+    public void ReadModel_direct_projection_of_stored_member_stays_a_property_read()
+    {
+        var files = Emit(DerivedDirectProjectionFixture);
+        var content = FileContent(files, "src/Sales/ReadModels/OrderView.php");
+
+        // `doubled` is the only projected field, but its derived initializer references the stored
+        // `qty`; the stored member itself is never called when referenced as a property.
+        content.ShouldNotContain("$src->qty()");
+    }
+
+    [Fact]
+    public Task ReadModel_direct_derived_projection_snapshot()
+    {
+        var files = Emit(DerivedDirectProjectionFixture);
+        var readModel = FileContent(files, "src/Sales/ReadModels/OrderView.php");
+        return Verify(readModel);
     }
 
     // -----------------------------------------------------------------------
