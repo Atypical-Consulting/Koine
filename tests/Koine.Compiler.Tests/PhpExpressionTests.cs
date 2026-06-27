@@ -45,6 +45,16 @@ public class PhpExpressionTests
             tags: List<String>
             counts: List<Int>
           }
+
+          aggregate Cart root Basket {
+            entity CartLine identified by CartLineId {
+              sku: String
+              qty: Int
+            }
+            entity Basket identified by BasketId {
+              items: List<CartLine>
+            }
+          }
         }
         """;
 
@@ -71,6 +81,27 @@ public class PhpExpressionTests
     {
         var t = Make();
         return t.Translate(expr);
+    }
+
+    // A translator whose member scope is an entity (rather than the Order value object), so a
+    // selector projecting to an entity type — e.g. distinctBy(i => i) over List<CartLine> — is
+    // reachable. CartLine/Basket are child/root entities of the Cart aggregate above.
+    private static PhpExpressionTranslator MakeForEntity(string entityName)
+    {
+        var result = new KoineCompiler().Compile(Source, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var model = result.Model!;
+        var semantic = new SemanticModel(model);
+        ModelIndex index = semantic.Index;
+
+        var entity = model.Contexts
+            .SelectMany(c => c.AllTypeDecls())
+            .OfType<EntityDecl>()
+            .First(e => e.Name == entityName);
+
+        return new PhpExpressionTranslator(
+            index, entity.Members, index.EnumMemberToType, context: "Shop");
     }
 
     private static IdentifierExpr Id(string name) => new(name);
@@ -511,6 +542,23 @@ public class PhpExpressionTests
             "array_key_first(array_filter($__xs, fn($__y) => $__x === null ? $__y === null : " +
             "($__y !== null && $__y->equals($__x)))) === $__i, " +
             "ARRAY_FILTER_USE_BOTH)) === count($__xs))(array_map(fn($m) => $m->discount, $this->lines))");
+    }
+
+    [Fact]
+    public void DistinctBy_with_entity_selector_dedupes_structurally()
+    {
+        // Entity projection (CartLine): like a value object, an entity is emitted as a class with no
+        // __toString, so `array_unique` (SORT_STRING) would string-cast each element and fatal at
+        // runtime (issue #687, the entity counterpart of the #676/#681 value-object fix). Entities
+        // carry the same generated `equals(self $other)`, so an entity selector dedupes structurally
+        // via `equals()` exactly like a value object, matching C#'s `.Distinct()`. No `array_unique`.
+        var t = MakeForEntity("Basket");
+        var selector = new LambdaExpr("i", Id("i"));
+        var expr = new CallExpr(Id("items"), "distinctBy", new Expr[] { selector });
+        t.Translate(expr).ShouldBe(
+            "(fn($__xs) => count(array_filter($__xs, fn($__x, $__i) => " +
+            "array_key_first(array_filter($__xs, fn($__y) => $__y->equals($__x))) === $__i, " +
+            "ARRAY_FILTER_USE_BOTH)) === count($__xs))(array_map(fn($i) => $i, $this->items))");
     }
 
     // =========================================================================
