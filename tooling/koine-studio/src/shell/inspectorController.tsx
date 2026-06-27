@@ -152,8 +152,8 @@ export interface InspectorControllerDeps {
   loadWorkspaceCenter(): string | null;
   /** Persist/restore the full multi-pane center layout (Task 2 of #720). Optional so existing
    *  callers that only wire the legacy center-pane pair don't need to be updated. */
-  saveWorkspaceCenterLayout?: (layout: import('@/store/slices/uiChrome').CenterLayout) => void;
-  loadWorkspaceCenterLayout?: () => import('@/store/slices/uiChrome').CenterLayout;
+  saveWorkspaceCenterLayout?: (layout: CenterLayout) => void;
+  loadWorkspaceCenterLayout?: () => CenterLayout;
   saveActiveContext(workspaceKey: string, scope: string): void;
   loadActiveContext(workspaceKey: string): string | null;
 
@@ -328,7 +328,7 @@ function SplitControls({
   onSplitRow(): void;
   onSplitColumn(): void;
   onReset(): void;
-}): JSX.Element {
+}) {
   return (
     <div class="center-split-btns" aria-label="Center layout controls">
       <button
