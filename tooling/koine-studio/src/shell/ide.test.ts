@@ -299,49 +299,30 @@ const APP_HTML = `
         <aside id="leftrail" class="pane"></aside>
         <div class="koi-resizer" id="leftrail-resizer"></div>
         <section id="center" class="pane">
-          <div id="center-tabs" role="tablist">
-            <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Canvas</button>
-            <button type="button" class="center-tab" id="center-tab-technical" role="tab" data-center="technical" aria-selected="false">Code</button>
-            <button type="button" class="center-tab" id="center-tab-output" role="tab" data-center="output" aria-selected="false">Output</button>
-            <button type="button" class="center-tab" id="center-tab-docs" role="tab" data-center="docs" aria-selected="false">Docs</button>
-          </div>
+          <div id="deck-bar"></div>
           <div id="center-body">
-            <section id="center-visual" class="center-host" role="tabpanel">
+            <section id="center-visual" class="center-host">
               <div id="canvas-palette-host"></div>
               <div id="diagram-host"></div>
             </section>
-            <section id="center-technical" class="center-host" role="tabpanel" hidden>
-              <div id="tech-tabs" role="tablist">
-                <button type="button" class="tech-tab" id="tech-tab-editor" role="tab" data-tech="editor" aria-selected="true">Editor</button>
-                <button type="button" class="tech-tab" id="tech-tab-scenarios" role="tab" data-tech="scenarios" aria-selected="false">Scenarios</button>
-              </div>
+            <section id="center-technical" class="center-host" hidden>
               <div id="tech-body">
                 <section id="editor-pane" class="tech-view"></section>
-                <div id="view-scenarios" class="tech-view" role="tabpanel" hidden></div>
+                <div id="view-scenarios" class="tech-view" hidden></div>
               </div>
             </section>
-            <section id="center-output" class="center-host" role="tabpanel" hidden>
-              <div id="output-tabs" role="tablist">
-                <button type="button" class="output-tab" id="output-tab-generated" role="tab" data-output="generated" aria-selected="true">Generated</button>
-                <button type="button" class="output-tab" id="output-tab-compatibility" role="tab" data-output="compatibility" aria-selected="false">Compatibility</button>
-                <button type="button" class="output-tab" id="output-tab-contextmap" role="tab" data-output="contextmap" aria-selected="false">Context Map</button>
-              </div>
+            <section id="center-output" class="center-host" hidden>
               <div id="output-body">
-                <div id="view-preview" class="tech-view" role="tabpanel"></div>
-                <div id="view-check" class="tech-view doc-view" role="tabpanel" hidden></div>
-                <div id="panel-contextmap" class="tech-view doc-view" role="tabpanel" hidden></div>
+                <div id="view-preview" class="tech-view"></div>
+                <div id="view-check" class="tech-view doc-view" hidden></div>
+                <div id="panel-contextmap" class="tech-view doc-view" hidden></div>
               </div>
             </section>
-            <section id="center-docs" class="center-host" role="tabpanel" hidden>
-              <div id="docs-tabs" role="tablist">
-                <button type="button" class="docs-tab" id="docs-tab-glossary" role="tab" data-docs="glossary" aria-selected="true">Glossary</button>
-                <button type="button" class="docs-tab" id="docs-tab-adr" role="tab" data-docs="adr" aria-selected="false">Decisions</button>
-                <button type="button" class="docs-tab" id="docs-tab-notes" role="tab" data-docs="notes" aria-selected="false">Notes</button>
-              </div>
+            <section id="center-docs" class="center-host" hidden>
               <div id="docs-body">
-                <div id="view-glossary" class="tech-view doc-view" role="tabpanel"></div>
-                <div id="view-docs" class="tech-view doc-view" role="tabpanel" hidden></div>
-                <div id="view-notes" class="tech-view doc-view" role="tabpanel" hidden></div>
+                <div id="view-glossary" class="tech-view doc-view"></div>
+                <div id="view-docs" class="tech-view doc-view" hidden></div>
+                <div id="view-notes" class="tech-view doc-view" hidden></div>
               </div>
             </section>
           </div>

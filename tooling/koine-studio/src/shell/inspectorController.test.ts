@@ -8,7 +8,6 @@
 // the real panel DOM; fake timers cover the 350ms edit/bottom debounce.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { waitFor } from '@testing-library/preact';
-import { axe } from 'vitest-axe';
 import {
   createInspectorController,
   type InspectorAssistant,
@@ -44,49 +43,30 @@ const APP_HTML = `
     <main id="split">
       <aside id="leftrail" class="pane">${leftRailMarkup()}</aside>
       <section id="center" class="pane">
-        <div id="center-tabs" role="tablist">
-          <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Canvas</button>
-          <button type="button" class="center-tab" id="center-tab-technical" role="tab" data-center="technical" aria-selected="false">Code</button>
-          <button type="button" class="center-tab" id="center-tab-output" role="tab" data-center="output" aria-selected="false">Output</button>
-          <button type="button" class="center-tab" id="center-tab-docs" role="tab" data-center="docs" aria-selected="false">Docs</button>
-        </div>
+        <div id="deck-bar"></div>
         <div id="center-body">
-          <section id="center-visual" class="center-host" role="tabpanel">
+          <section id="center-visual" class="center-host">
             <div id="canvas-palette-host"></div>
             <div id="diagram-host"></div>
           </section>
-          <section id="center-technical" class="center-host" role="tabpanel" hidden>
-            <div id="tech-tabs" role="tablist">
-              <button type="button" class="tech-tab" id="tech-tab-editor" role="tab" data-tech="editor" aria-selected="true">Editor</button>
-              <button type="button" class="tech-tab" id="tech-tab-scenarios" role="tab" data-tech="scenarios" aria-selected="false">Scenarios</button>
-            </div>
+          <section id="center-technical" class="center-host" hidden>
             <div id="tech-body">
               <section id="editor-pane" class="tech-view"></section>
-              <div id="view-scenarios" class="tech-view" role="tabpanel" hidden></div>
+              <div id="view-scenarios" class="tech-view" hidden></div>
             </div>
           </section>
-          <section id="center-output" class="center-host" role="tabpanel" hidden>
-            <div id="output-tabs" role="tablist">
-              <button type="button" class="output-tab" id="output-tab-generated" role="tab" data-output="generated" aria-selected="true">Generated</button>
-              <button type="button" class="output-tab" id="output-tab-compatibility" role="tab" data-output="compatibility" aria-selected="false">Compatibility</button>
-              <button type="button" class="output-tab" id="output-tab-contextmap" role="tab" data-output="contextmap" aria-selected="false">Context Map</button>
-            </div>
+          <section id="center-output" class="center-host" hidden>
             <div id="output-body">
-              <div id="view-preview" class="tech-view" role="tabpanel"></div>
-              <div id="view-check" class="tech-view doc-view" role="tabpanel" hidden></div>
-              <div id="panel-contextmap" class="tech-view doc-view" role="tabpanel" hidden></div>
+              <div id="view-preview" class="tech-view"></div>
+              <div id="view-check" class="tech-view doc-view" hidden></div>
+              <div id="panel-contextmap" class="tech-view doc-view" hidden></div>
             </div>
           </section>
-          <section id="center-docs" class="center-host" role="tabpanel" hidden>
-            <div id="docs-tabs" role="tablist">
-              <button type="button" class="docs-tab" id="docs-tab-glossary" role="tab" data-docs="glossary" aria-selected="true">Glossary</button>
-              <button type="button" class="docs-tab" id="docs-tab-adr" role="tab" data-docs="adr" aria-selected="false">Decisions</button>
-              <button type="button" class="docs-tab" id="docs-tab-notes" role="tab" data-docs="notes" aria-selected="false">Notes</button>
-            </div>
+          <section id="center-docs" class="center-host" hidden>
             <div id="docs-body">
-              <div id="view-glossary" class="tech-view doc-view" role="tabpanel"></div>
-              <div id="view-docs" class="tech-view doc-view" role="tabpanel" hidden></div>
-              <div id="view-notes" class="tech-view doc-view" role="tabpanel" hidden></div>
+              <div id="view-glossary" class="tech-view doc-view"></div>
+              <div id="view-docs" class="tech-view doc-view" hidden></div>
+              <div id="view-notes" class="tech-view doc-view" hidden></div>
             </div>
           </section>
         </div>
@@ -272,15 +252,23 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
+// In the deck, the visibility unit is the card (the .ghost class), not the host's `hidden` attribute
+// (every host is un-hidden once it's re-parented into its card). A surface is "shown" when its card is
+// mounted and not a ghost.
+function shownCenter(id: string): boolean {
+  const card = document.querySelector<HTMLElement>(`#center-body [data-surface="${id}"]`);
+  return !!card && !card.classList.contains('ghost');
+}
+
 describe('createInspectorController — center switching', () => {
-  test('init() boots Visual (default) → the visual center is shown, the others hidden', () => {
+  test('init() boots Visual (default) → the visual surface is shown, the others ghosted', async () => {
     const ctl = createInspectorController(makeDeps(makeLsp()));
     ctl.init();
 
-    expect(el('center-visual').hidden).toBe(false);
-    expect(el('center-technical').hidden).toBe(true);
-    expect(el('center-docs').hidden).toBe(true);
-    expect(el('center-tab-visual').getAttribute('aria-selected')).toBe('true');
+    await waitFor(() => expect(shownCenter('visual')).toBe(true));
+    expect(shownCenter('technical')).toBe(false);
+    expect(shownCenter('docs')).toBe(false);
+    ctl.dispose();
   });
 
   test('the bottom panel is visible in every center view (#451)', () => {
@@ -291,33 +279,37 @@ describe('createInspectorController — center switching', () => {
     expect(el('diagnostics').hidden).toBe(false); // Visual
     ctl.selectCenter('technical');
     expect(el('diagnostics').hidden).toBe(false); // Code
-    ctl.selectDocsTab('glossary'); // forces center = docs
+    ctl.selectDocsTab('glossary'); // brings up Docs
     expect(el('diagnostics').hidden).toBe(false); // Documentation
+    ctl.dispose();
   });
 
-  test('selectCenter("technical") surfaces the technical center + editor sub-view and marks the Code tab', () => {
-    const ctl = createInspectorController(makeDeps(makeLsp()));
+  test('selectCenter("technical") focuses the Code surface on the editor sub-view', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
     ctl.init();
 
     ctl.selectCenter('technical');
 
-    expect(el('center-technical').hidden).toBe(false);
-    expect(el('center-visual').hidden).toBe(true);
-    expect(el('editor-pane').hidden).toBe(false); // the technical center lands on the editor sub-tab
-    expect(el('center-tab-technical').getAttribute('aria-selected')).toBe('true');
-    expect(el('center-tab-visual').getAttribute('aria-selected')).toBe('false');
+    expect(deps.store.getState().deck.primary).toBe('technical');
+    await waitFor(() => expect(shownCenter('technical')).toBe(true));
+    expect(shownCenter('visual')).toBe(false);
+    expect(el('editor-pane').hidden).toBe(false); // the technical surface lands on the editor facet
+    ctl.dispose();
   });
 
-  test('selectCenter("docs") surfaces the Documentation center on the Glossary sub-view', () => {
-    const ctl = createInspectorController(makeDeps(makeLsp()));
+  test('selectCenter("docs") focuses the Documentation surface on the Glossary sub-view', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
     ctl.init();
 
     ctl.selectCenter('docs');
 
-    expect(el('center-docs').hidden).toBe(false);
+    expect(deps.store.getState().deck.primary).toBe('docs');
+    await waitFor(() => expect(shownCenter('docs')).toBe(true));
     expect(el('view-glossary').hidden).toBe(false);
     expect(el('view-docs').hidden).toBe(true);
-    expect(el('center-tab-docs').getAttribute('aria-selected')).toBe('true');
+    ctl.dispose();
   });
 
   test('a real center change persists via saveWorkspaceCenter; re-selecting the same center does not', () => {
@@ -330,13 +322,17 @@ describe('createInspectorController — center switching', () => {
     saveWorkspaceCenter.mockClear();
     ctl.selectCenter('technical'); // same center — no churn
     expect(saveWorkspaceCenter).not.toHaveBeenCalled();
+    ctl.dispose();
   });
 
-  test('a persisted center restores it on boot (technical)', () => {
-    const ctl = createInspectorController(makeDeps(makeLsp(), { loadWorkspaceCenter: () => 'technical' }));
+  test('a persisted center restores it on boot (technical)', async () => {
+    const deps = makeDeps(makeLsp(), { loadWorkspaceCenter: () => 'technical' });
+    const ctl = createInspectorController(deps);
     ctl.init();
-    expect(el('center-technical').hidden).toBe(false);
-    expect(el('center-visual').hidden).toBe(true);
+    expect(deps.store.getState().deck.primary).toBe('technical');
+    await waitFor(() => expect(shownCenter('technical')).toBe(true));
+    expect(shownCenter('visual')).toBe(false);
+    ctl.dispose();
   });
 });
 
@@ -591,7 +587,7 @@ describe('createInspectorController — Domain navigator doorways + cross-axis g
 
     // Land on Documentation first, so we can prove the doorway navigates AWAY to Output.
     ctl.selectDocsTab('adr');
-    expect(el('center-docs').hidden).toBe(false);
+    await waitFor(() => expect(shownCenter('docs')).toBe(true));
 
     // Drive the REAL strategic Context Map doorway → modelOutlineHandlers.onOpenContextMap →
     // focusContextMap() → selectOutput('contextmap'): the Context Map is the contextmap sub-view of the
@@ -600,8 +596,8 @@ describe('createInspectorController — Domain navigator doorways + cross-axis g
     doorway.click();
     await flush();
 
-    expect(el('center-output').hidden).toBe(false); // switched to the Output pane…
-    expect(el('center-docs').hidden).toBe(true); // …left Documentation…
+    await waitFor(() => expect(shownCenter('output')).toBe(true)); // switched to the Output surface…
+    expect(shownCenter('docs')).toBe(false); // …left Documentation…
     expect(el('panel-contextmap').hidden).toBe(false); // …showing the Context Map.
   });
 
@@ -1068,428 +1064,76 @@ describe('createInspectorController — right-edge tool-window stripe (#500)', (
   });
 });
 
-describe('createInspectorController — split center layout', () => {
-  test('a 2-pane layout renders two .center-split-pane elements in #center-body', async () => {
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
+describe('createInspectorController — deck center layout', () => {
+  test('init() mounts the deck stage: four surface cards in #center-body', async () => {
+    const ctl = createInspectorController(makeDeps(makeLsp()));
     ctl.init();
-
-    deps.store.getState().splitCenter('row');
     await waitFor(() => {
-      const panes = document.querySelectorAll('.center-split-pane');
-      expect(panes.length).toBe(2);
+      const cards = document.querySelectorAll('#center-body .deck-card');
+      expect(cards.length).toBe(4);
     });
-
+    // The DeckBar filmstrip renders into #deck-bar.
+    expect(document.querySelector('#deck-bar .deck-strip')).not.toBeNull();
     ctl.dispose();
   });
 
-  test('split unhides every host shown in a pane and hides the rest (empty-pane bug)', async () => {
-    // Regression: in single-pane mode applyCenterChrome leaves non-active hosts `hidden`. A pane whose
-    // view was NOT the active one when the split was created arrived still [hidden] (display:none) and
-    // rendered empty. Splitting must clear `hidden` on every host placed in a pane, and re-hide hosts not
-    // in any pane (so a previously-active host doesn't overlay the panes — they are position:absolute).
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init(); // boots on Visual — so #center-technical starts hidden
-
-    deps.store.getState().setCenterPreset(['technical', 'visual'], 'row');
-    await waitFor(() => {
-      // Both panes' hosts are visible…
-      expect(el('center-technical').hidden).toBe(false);
-      expect(el('center-visual').hidden).toBe(false);
-      // …and the views NOT in any pane stay hidden (no overlay).
-      expect(el('center-output').hidden).toBe(true);
-      expect(el('center-docs').hidden).toBe(true);
-    });
-
-    ctl.dispose();
-  });
-
-  test('each pane has a .center-pane-header with view selector buttons', async () => {
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init();
-
-    deps.store.getState().splitCenter('row');
-    await waitFor(() => {
-      const panes = document.querySelectorAll('.center-split-pane');
-      expect(panes.length).toBe(2);
-    });
-
-    const headers = document.querySelectorAll('.center-pane-header');
-    expect(headers.length).toBe(2);
-    // Each header should have view selector tabs
-    for (const header of Array.from(headers)) {
-      const tabs = header.querySelectorAll('.center-pane-tab');
-      expect(tabs.length).toBe(4); // visual, technical, output, docs (AI is in the right rail)
-    }
-
-    ctl.dispose();
-  });
-
-  test('a per-pane tab is disabled when that view is already shown in another pane (no blank pane)', async () => {
-    // splitCenter from Visual yields [visual, technical]. Each view is a single DOM element, so a pane
-    // must not be able to switch to a view the other pane already shows (it would blank one of them).
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init();
-
-    deps.store.getState().splitCenter('row');
-    await waitFor(() => expect(document.querySelectorAll('.center-split-pane').length).toBe(2));
-
-    const tabBy = (pane: Element, label: string) =>
-      [...pane.querySelectorAll<HTMLButtonElement>('.center-pane-tab')].find((b) => b.textContent === label)!;
-    const [paneA, paneB] = document.querySelectorAll('.center-split-pane'); // A=visual, B=technical
-
-    // In pane A (canvas), the "Code" (technical) tab is disabled because pane B shows it — and vice versa.
-    // ('visual' is labelled "Canvas" in the per-pane tabs, matching the top-level center tab.)
-    expect(tabBy(paneA, 'Code').disabled).toBe(true);
-    expect(tabBy(paneB, 'Canvas').disabled).toBe(true);
-    // Each pane's OWN view + the genuinely free views stay enabled.
-    expect(tabBy(paneA, 'Canvas').disabled).toBe(false);
-    expect(tabBy(paneA, 'Docs').disabled).toBe(false);
-
-    // Clicking the disabled tab is a no-op — pane B stays on technical.
-    tabBy(paneA, 'Code').click();
-    expect(deps.store.getState().centerLayout.panes.map((p) => p.view)).toEqual(['visual', 'technical']);
-
-    ctl.dispose();
-  });
-
-  test('split hides the top-level center view tabs (the per-pane headers are the switchers)', async () => {
-    // In split mode each pane carries its own view tab bar, so the top center tabs would be a redundant
-    // second row — #center-tabs gets `is-split` (CSS hides .center-tab). Reset removes it.
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init();
-    expect(el('center-tabs').classList.contains('is-split')).toBe(false);
-
-    deps.store.getState().splitCenter('row');
-    await waitFor(() => expect(el('center-tabs').classList.contains('is-split')).toBe(true));
-
-    // Collapse back to a single pane → the top tabs return.
-    const second = deps.store.getState().centerLayout.panes[1].id;
-    deps.store.getState().closePane(second);
-    await waitFor(() => expect(el('center-tabs').classList.contains('is-split')).toBe(false));
-
-    ctl.dispose();
-  });
-
-  test('a pane’s close (✕) button closes that pane (2 panes → single)', async () => {
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init();
-
-    deps.store.getState().splitCenter('row'); // [visual, technical]
-    await waitFor(() => expect(document.querySelectorAll('.center-split-pane').length).toBe(2));
-
-    // Close the SECOND pane (technical) — only the first (visual) remains, collapsing to single-pane mode.
-    const closeBtns = document.querySelectorAll<HTMLButtonElement>('.center-pane-close');
-    expect(closeBtns.length).toBe(2);
-    closeBtns[1].click();
-
-    await waitFor(() => {
-      expect(deps.store.getState().centerLayout.panes.map((p) => p.view)).toEqual(['visual']);
-      expect(document.querySelectorAll('.center-split-pane').length).toBe(0); // back to single (no slots)
-    });
-
-    ctl.dispose();
-  });
-
-  test('clicking a view-selector button in pane B calls setPaneView (check via store state)', async () => {
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init();
-
-    deps.store.getState().splitCenter('row');
-    await waitFor(() => {
-      const panes = document.querySelectorAll('.center-split-pane');
-      expect(panes.length).toBe(2);
-    });
-
-    // Get pane B (second pane)
-    const panes = document.querySelectorAll<HTMLElement>('.center-split-pane');
-    const paneB = panes[1];
-    const paneBId = paneB.dataset.paneId!;
-
-    // Click the "Code" tab button in pane B
-    const codeTabs = paneB.querySelectorAll<HTMLButtonElement>('.center-pane-tab');
-    const codeTab = Array.from(codeTabs).find((b) => b.textContent === 'Code')!;
-    codeTab.click();
-    await waitFor(() => {
-      const layout = deps.store.getState().centerLayout;
-      const pane = layout.panes.find((p) => p.id === paneBId)!;
-      expect(pane.view).toBe('technical');
-    });
-
-    ctl.dispose();
-  });
-
-  test('clicking pane B makes pane B focused (sets focusedPaneId, adds is-focused class)', async () => {
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init();
-
-    deps.store.getState().splitCenter('row');
-    await waitFor(() => {
-      const panes = document.querySelectorAll('.center-split-pane');
-      expect(panes.length).toBe(2);
-    });
-
-    const panes = document.querySelectorAll<HTMLElement>('.center-split-pane');
-    const paneB = panes[1];
-    const paneBId = paneB.dataset.paneId!;
-
-    // Click the pane B element itself (not a button within it)
-    paneB.click();
-    await waitFor(() => {
-      expect(deps.store.getState().centerLayout.focusedPaneId).toBe(paneBId);
-    });
-
-    // The is-focused class should be on pane B
-    expect(paneB.classList.contains('is-focused')).toBe(true);
-    // Pane A should not have the class
-    expect(panes[0].classList.contains('is-focused')).toBe(false);
-
-    ctl.dispose();
-  });
-
-  test('reverting to single-pane removes the pane slots', async () => {
-    const { DEFAULT_CENTER_LAYOUT } = await import('@/store/slices/uiChrome');
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init();
-
-    // Go to split
-    deps.store.getState().splitCenter('row');
-    await waitFor(() => {
-      const panes = document.querySelectorAll('.center-split-pane');
-      expect(panes.length).toBe(2);
-    });
-
-    // Revert to single pane
-    deps.store.getState().setCenterLayout(DEFAULT_CENTER_LAYOUT);
-    await waitFor(() => {
-      const panes = document.querySelectorAll('.center-split-pane');
-      expect(panes.length).toBe(0);
-    });
-
-    ctl.dispose();
-  });
-
-  test('a 2-pane layout renders a .center-splitter between the pane slots', async () => {
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init();
-
-    deps.store.getState().splitCenter('row');
-    await waitFor(() => {
-      const panes = document.querySelectorAll('.center-split-pane');
-      expect(panes.length).toBe(2);
-    });
-
-    const splitters = document.querySelectorAll('.center-splitter');
-    expect(splitters.length).toBe(1);
-
-    // Splitter must be between the pane slots in DOM order
-    const children = Array.from(el('center-body').children);
-    const panes = children.filter((c) => c.classList.contains('center-split-pane'));
-    const splitterEls = children.filter((c) => c.classList.contains('center-splitter-host'));
-    expect(splitterEls.length).toBe(1);
-    // The splitter host must appear between pane[0] and pane[1]
-    const idx0 = children.indexOf(panes[0]);
-    const idxS = children.indexOf(splitterEls[0]);
-    const idx1 = children.indexOf(panes[1]);
-    expect(idxS).toBeGreaterThan(idx0);
-    expect(idxS).toBeLessThan(idx1);
-
-    ctl.dispose();
-  });
-
-  test('arrow key on the splitter calls resizeCenter (store sizes change)', async () => {
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init();
-
-    deps.store.getState().splitCenter('row');
-    await waitFor(() => {
-      const panes = document.querySelectorAll('.center-split-pane');
-      expect(panes.length).toBe(2);
-    });
-
-    const splitterEl = document.querySelector<HTMLElement>('[role="separator"]')!;
-    expect(splitterEl).not.toBeNull();
-
-    const sizesBefore = [...deps.store.getState().centerLayout.sizes];
-
-    // Fire ArrowRight on the splitter (row orientation → nudge pane[0] wider)
-    splitterEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-
-    await waitFor(() => {
-      const sizesAfter = deps.store.getState().centerLayout.sizes;
-      expect(sizesAfter[0]).not.toBe(sizesBefore[0]);
-    });
-
-    ctl.dispose();
-  });
-
-  test('the splitter has required aria attributes (role, aria-orientation, aria-valuenow, aria-valuemin, aria-valuemax)', async () => {
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init();
-
-    deps.store.getState().splitCenter('row');
-    await waitFor(() => {
-      const panes = document.querySelectorAll('.center-split-pane');
-      expect(panes.length).toBe(2);
-    });
-
-    const splitterEl = document.querySelector<HTMLElement>('[role="separator"]')!;
-    expect(splitterEl).not.toBeNull();
-    expect(splitterEl.getAttribute('aria-orientation')).toBe('vertical'); // row layout → vertical separator
-    expect(splitterEl.getAttribute('aria-valuenow')).not.toBeNull();
-    expect(splitterEl.getAttribute('aria-valuemin')).not.toBeNull();
-    expect(splitterEl.getAttribute('aria-valuemax')).not.toBeNull();
-    expect(splitterEl.tabIndex).toBe(0);
-
-    ctl.dispose();
-  });
-
-  test('vitest-axe: a 2-pane center layout has no accessibility violations', async () => {
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init();
-
-    deps.store.getState().splitCenter('row');
-    await waitFor(() => {
-      const panes = document.querySelectorAll('.center-split-pane');
-      expect(panes.length).toBe(2);
-    });
-
-    const centerBody = el('center-body');
-    expect(await axe(centerBody)).toHaveNoViolations();
-
-    ctl.dispose();
-  });
-
-  // --- Task 5: split/reset controls in the center tab bar ---
-
-  test('init() creates #center-split-controls inside #center-tabs', () => {
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init();
-
-    const host = document.getElementById('center-split-controls');
-    expect(host).not.toBeNull();
-    expect(el('center-tabs').contains(host)).toBe(true);
-
-    ctl.dispose();
-  });
-
-  test('"Code ⟷ Canvas" preset button lays out a 2-pane Code|Canvas row', async () => {
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init();
-
-    const btn = document.querySelector<HTMLButtonElement>(
-      '[aria-label="Split center into Code and Canvas side by side"]',
-    );
-    expect(btn).not.toBeNull();
-
-    btn!.click();
-    await waitFor(() => {
-      const { centerLayout } = deps.store.getState();
-      expect(centerLayout.panes.map((p) => p.view)).toEqual(['technical', 'visual']);
-      expect(centerLayout.orientation).toBe('row');
-    });
-
-    ctl.dispose();
-  });
-
-  test('controller.splitCodeCanvas() applies the same preset (palette entry point)', async () => {
+  test('splitCodeCanvas() opens the Code ⟷ Canvas 2-up (Code primary, Canvas secondary)', async () => {
     const deps = makeDeps(makeLsp());
     const ctl = createInspectorController(deps);
     ctl.init();
 
     ctl.splitCodeCanvas();
-    await waitFor(() => {
-      expect(deps.store.getState().centerLayout.panes.map((p) => p.view)).toEqual(['technical', 'visual']);
-    });
 
+    const deck = deps.store.getState().deck;
+    expect(deck.primary).toBe('technical');
+    expect(deck.secondary).toBe('visual');
+    await waitFor(() => {
+      expect(shownCenter('technical')).toBe(true);
+      expect(shownCenter('visual')).toBe(true);
+      expect(shownCenter('output')).toBe(false);
+    });
     ctl.dispose();
   });
 
-  test('"Split →" button has aria-label "Split center pane right" and clicking it calls splitCenter("row")', async () => {
+  test('the deck persists via saveWorkspaceDeck on a center change', () => {
+    const saveWorkspaceDeck = vi.fn();
+    const ctl = createInspectorController(makeDeps(makeLsp(), { saveWorkspaceDeck }));
+    ctl.init();
+
+    ctl.selectCenter('docs');
+    expect(saveWorkspaceDeck).toHaveBeenCalled();
+    const calls = saveWorkspaceDeck.mock.calls;
+    const lastDeck = calls[calls.length - 1][0];
+    expect(lastDeck.primary).toBe('docs');
+    ctl.dispose();
+  });
+
+  test('a persisted deck restores the 2-up on boot', async () => {
+    const deck = { mode: 'focus', primary: 'technical', secondary: 'visual', ratio: 0.5, flipped: false } as const;
+    const deps = makeDeps(makeLsp(), { loadWorkspaceDeck: () => deck });
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    expect(deps.store.getState().deck).toEqual(deck);
+    await waitFor(() => {
+      expect(shownCenter('technical')).toBe(true);
+      expect(shownCenter('visual')).toBe(true);
+    });
+    ctl.dispose();
+  });
+
+  test('opening the bird\'s-eye overview shows all four surfaces', async () => {
     const deps = makeDeps(makeLsp());
     const ctl = createInspectorController(deps);
     ctl.init();
 
-    const btn = document.querySelector<HTMLButtonElement>('[aria-label="Split center pane right"]');
-    expect(btn).not.toBeNull();
-
-    btn!.click();
-    await waitFor(() => {
-      expect(deps.store.getState().centerLayout.panes.length).toBe(2);
-      expect(deps.store.getState().centerLayout.orientation).toBe('row');
-    });
-
-    ctl.dispose();
-  });
-
-  test('"Split ↓" button has aria-label "Split center pane down" and clicking it calls splitCenter("column")', async () => {
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init();
-
-    const btn = document.querySelector<HTMLButtonElement>('[aria-label="Split center pane down"]');
-    expect(btn).not.toBeNull();
-
-    btn!.click();
-    await waitFor(() => {
-      expect(deps.store.getState().centerLayout.panes.length).toBe(2);
-      expect(deps.store.getState().centerLayout.orientation).toBe('column');
-    });
-
-    ctl.dispose();
-  });
-
-  test('Reset button is absent in single-pane mode', () => {
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init();
-
-    const btn = document.querySelector<HTMLButtonElement>('[aria-label="Reset center to single pane"]');
-    expect(btn).toBeNull();
-
-    ctl.dispose();
-  });
-
-  test('Reset button appears when 2+ panes; clicking it resets to DEFAULT_CENTER_LAYOUT', async () => {
-    const { DEFAULT_CENTER_LAYOUT } = await import('@/store/slices/uiChrome');
-    const deps = makeDeps(makeLsp());
-    const ctl = createInspectorController(deps);
-    ctl.init();
-
-    // Split first so the Reset button appears.
-    deps.store.getState().splitCenter('row');
-    await waitFor(() => {
-      const btn = document.querySelector<HTMLButtonElement>('[aria-label="Reset center to single pane"]');
-      expect(btn).not.toBeNull();
-    });
-
-    const resetBtn = document.querySelector<HTMLButtonElement>('[aria-label="Reset center to single pane"]')!;
-    resetBtn.click();
+    deps.store.getState().toggleOverview();
 
     await waitFor(() => {
-      expect(deps.store.getState().centerLayout.panes.length).toBe(1);
-      expect(deps.store.getState().centerLayout).toEqual(DEFAULT_CENTER_LAYOUT);
+      for (const id of ['visual', 'technical', 'output', 'docs']) {
+        expect(shownCenter(id)).toBe(true);
+      }
     });
-
-    // Reset button must disappear again.
-    await waitFor(() => {
-      expect(document.querySelector('[aria-label="Reset center to single pane"]')).toBeNull();
-    });
-
     ctl.dispose();
   });
 });
+

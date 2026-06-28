@@ -1,0 +1,477 @@
+// Deck v2 center chrome — the bar (Overview toggle + surface filmstrip + hint) and the stage (four
+// surface cards morphing between 1-up / 2-up / overview via the FLIP engine in deckLayout.ts). Ported
+// from the design POC (design/center-concepts/concept-6-deck-v2.html), with the POC's `--st-*` accents
+// rewritten to the app's real `--koi-ddd-*` / `--koi-hl-*` tokens and the filmstrip's "open beside"
+// affordance restructured into a sibling button (no nested interactive). Mock content styles from the
+// POC are intentionally NOT ported — the real surfaces bring their own.
+
+.deck-bar,
+.deck-stage {
+  --ease: cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+/* ---- Bar ---------------------------------------------------------------- */
+
+.deck-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--koi-paper-2);
+  border-bottom: 1px solid var(--koi-line);
+}
+
+.deck-over {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--koi-muted);
+  padding: 6px 13px;
+  border-radius: var(--koi-radius-sm);
+  border: 1px solid var(--koi-line);
+  transition:
+    color 0.24s var(--ease),
+    background 0.24s var(--ease),
+    border-color 0.24s var(--ease);
+
+  svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  &:hover {
+    color: var(--koi-fg);
+    border-color: var(--koi-accent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+
+  &.on {
+    color: var(--koi-on-accent);
+    background: var(--koi-accent);
+    border-color: var(--koi-accent);
+  }
+}
+
+/* ---- Filmstrip ---------------------------------------------------------- */
+
+.deck-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.deck-chip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  color: var(--koi-muted);
+  border-radius: var(--koi-radius-pill);
+  border: 1px solid transparent;
+  transition:
+    color 0.24s var(--ease),
+    background 0.24s var(--ease),
+    border-color 0.24s var(--ease);
+
+  &:hover {
+    color: var(--koi-fg);
+    background: color-mix(in srgb, var(--koi-fg) 7%, transparent);
+  }
+
+  &.primary {
+    color: var(--koi-on-accent);
+    background: var(--koi-accent);
+  }
+
+  &.secondary {
+    color: var(--koi-accent);
+    border-color: color-mix(in srgb, var(--koi-accent) 55%, transparent);
+    background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+  }
+}
+
+.deck-chip {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: inherit;
+  padding: 6px 11px;
+  border-radius: var(--koi-radius-pill);
+
+  svg.ci {
+    width: 14px;
+    height: 14px;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+}
+
+/* "Open beside" — revealed on chip-wrap hover, collapsed otherwise (width + opacity, no layout thrash). */
+.deck-cmp {
+  all: unset;
+  cursor: pointer;
+  width: 0;
+  height: 18px;
+  margin-right: 0;
+  border-radius: 4px;
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  color: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.22s var(--ease),
+    width 0.22s var(--ease),
+    margin 0.22s var(--ease),
+    background 0.18s var(--ease);
+
+  .cmp-ico {
+    width: 13px;
+    height: 13px;
+  }
+
+  &:hover {
+    background: color-mix(in srgb, currentColor 22%, transparent);
+    opacity: 1;
+  }
+}
+
+.deck-chip-wrap:hover .deck-cmp,
+.deck-cmp:focus-visible {
+  width: 18px;
+  opacity: 0.9;
+  margin-right: 5px;
+  pointer-events: auto;
+}
+
+.deck-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--koi-muted);
+
+  kbd {
+    font-family: var(--koi-font-mono);
+    font-size: 10px;
+    background: var(--koi-paper);
+    border: 1px solid var(--koi-line);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+}
+
+/* ---- Stage -------------------------------------------------------------- */
+
+.deck-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--koi-muted) 15%, transparent) 1px, transparent 0);
+  background-size: 26px 26px;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    box-shadow: inset 0 0 120px rgba(3, 7, 14, 0.18);
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    z-index: 1;
+  }
+
+  &.is-focus::after {
+    opacity: 1;
+  }
+}
+
+/* ---- Card --------------------------------------------------------------- */
+
+.deck-card {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: var(--koi-paper);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-lg);
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(3, 7, 14, 0.26);
+  transform-origin: top left;
+  will-change: transform;
+  z-index: 2;
+
+  &.ghost {
+    opacity: 0;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  &.is-primary {
+    box-shadow:
+      0 12px 32px rgba(3, 7, 14, 0.32),
+      0 0 0 2px var(--koi-accent);
+  }
+
+  &.is-secondary {
+    box-shadow:
+      0 12px 32px rgba(3, 7, 14, 0.32),
+      0 0 0 2px color-mix(in srgb, var(--koi-accent) 55%, transparent);
+  }
+}
+
+.deck-stage.overview .deck-card {
+  cursor: zoom-in;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--card-c, var(--koi-accent)) 60%, var(--koi-line));
+    box-shadow: 0 20px 44px rgba(3, 7, 14, 0.42);
+  }
+}
+
+.deck-head {
+  flex: 0 0 auto;
+  height: 31px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 6px 0 11px;
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--koi-line);
+  background: var(--koi-paper-2);
+  transition:
+    background 0.2s var(--ease),
+    box-shadow 0.2s var(--ease);
+
+  .ci {
+    color: var(--card-c, var(--koi-accent));
+    display: inline-flex;
+
+    svg {
+      width: 15px;
+      height: 15px;
+    }
+  }
+
+  .hlabel {
+    white-space: nowrap;
+  }
+
+  .grow {
+    flex: 1 1 auto;
+    min-width: 4px;
+  }
+
+  .tag {
+    color: var(--koi-muted);
+    font-weight: 400;
+    font-size: 10.5px;
+    white-space: nowrap;
+  }
+
+  .hbtn {
+    all: unset;
+    cursor: pointer;
+    width: 0;
+    height: 22px;
+    border-radius: 5px;
+    display: inline-grid;
+    place-items: center;
+    overflow: hidden;
+    color: var(--koi-muted);
+    opacity: 0;
+    pointer-events: none;
+    margin-left: 0;
+    transition:
+      opacity 0.2s var(--ease),
+      width 0.2s var(--ease),
+      margin 0.2s var(--ease),
+      background 0.18s var(--ease),
+      color 0.18s var(--ease);
+
+    svg {
+      width: 13px;
+      height: 13px;
+    }
+
+    &:hover {
+      color: var(--koi-fg);
+      background: var(--koi-line);
+    }
+  }
+}
+
+/* Selected pane in a 2-up: accent-tinted header + a 2px accent cap. */
+.deck-card.in-pair.is-selected .deck-head {
+  background: color-mix(in srgb, var(--koi-accent) 11%, var(--koi-paper-2));
+  box-shadow: inset 0 2px 0 var(--koi-accent);
+}
+
+.deck-card.in-pair:not(.is-selected) {
+  cursor: pointer;
+
+  .deck-head:hover {
+    background: color-mix(in srgb, var(--koi-fg) 6%, var(--koi-paper-2));
+  }
+}
+
+/* The tag hides in a pair (the close button takes its place); the close button reveals in a pair. */
+.deck-card.in-pair .deck-head .tag {
+  display: none;
+}
+
+.deck-card.in-pair .deck-head .hbtn.close {
+  width: 22px;
+  opacity: 1;
+  pointer-events: auto;
+  margin-left: 4px;
+}
+
+/* ---- Facet sub-strip ---------------------------------------------------- */
+
+.deck-subs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  overflow: hidden;
+}
+
+.deck-sub {
+  all: unset;
+  cursor: pointer;
+  font-size: 10.5px;
+  // Blended a step toward --koi-fg from --koi-muted: plain --koi-muted clears 4.5:1 on the flat header
+  // but drops to ~3.9:1 on the accent-tinted SELECTED-pane header — this lift keeps the inactive facet
+  // WCAG-AA legible in both header states while staying clearly quieter than the active (.on) accent.
+  color: color-mix(in srgb, var(--koi-fg) 22%, var(--koi-muted));
+  padding: 3px 8px;
+  border-radius: var(--koi-radius-pill);
+  white-space: nowrap;
+  transition:
+    color 0.22s var(--ease),
+    background 0.22s var(--ease);
+
+  &:hover {
+    color: var(--koi-fg);
+  }
+
+  &.on {
+    color: var(--koi-accent);
+    background: color-mix(in srgb, var(--koi-accent) 13%, transparent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+}
+
+.deck-stage.overview .deck-subs {
+  display: none;
+}
+
+/* ---- Body --------------------------------------------------------------- */
+
+.deck-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ---- Divider + swap ----------------------------------------------------- */
+
+.deck-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 6;
+  width: 16px;
+  transform: translateX(-50%);
+  cursor: col-resize;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+
+  &.show {
+    display: flex;
+  }
+
+  .bar {
+    position: absolute;
+    top: 8%;
+    bottom: 8%;
+    width: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--koi-line);
+    border-radius: 2px;
+    transition: background 0.14s ease;
+  }
+
+  &:hover .bar {
+    background: var(--koi-accent);
+  }
+}
+
+.deck-swap {
+  all: unset;
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  color: var(--koi-muted);
+  box-shadow: 0 4px 12px rgba(3, 7, 14, 0.3);
+  transition:
+    color 0.22s var(--ease),
+    border-color 0.22s var(--ease),
+    transform 0.22s var(--ease);
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  &:active {
+    transform: scale(0.9) rotate(180deg);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+}
+
+.deck-divider:hover .deck-swap {
+  color: var(--koi-accent);
+  border-color: var(--koi-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deck-card {
+    transition: none !important;
+  }
+}

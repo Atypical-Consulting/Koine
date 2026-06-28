@@ -4,10 +4,10 @@ import { createAppStore } from '@/store/index';
 import {
   createUiChromeSlice,
   DEFAULT_CENTER,
-  DEFAULT_CENTER_LAYOUT,
+  DEFAULT_DECK_STATE,
   DEFAULT_MOBILE_ZONE,
   isValidCenter,
-  isValidCenterLayout,
+  isValidDeckState,
   isValidMobileZone,
   type UiChromeSlice,
 } from '@/store/slices/uiChrome';
@@ -92,189 +92,149 @@ describe('uiChrome mobileZone', () => {
   });
 });
 
-describe('center layout', () => {
-  test('default layout is a single visual pane equal to DEFAULT_CENTER_LAYOUT', () => {
+describe('deck', () => {
+  test('default deck is a 1-up on Visual equal to DEFAULT_DECK_STATE', () => {
     const s = make();
-    expect(s.getState().centerLayout).toEqual(DEFAULT_CENTER_LAYOUT);
-    expect(s.getState().centerLayout.panes).toHaveLength(1);
-    expect(s.getState().centerLayout.panes[0].view).toBe('visual');
-    expect(s.getState().centerLayout.sizes).toEqual([1]);
+    expect(s.getState().deck).toEqual(DEFAULT_DECK_STATE);
+    expect(s.getState().deck.primary).toBe('visual');
+    expect(s.getState().deck.secondary).toBeNull();
+    expect(s.getState().center).toBe('visual');
   });
 
-  test('splitCenter("row") yields 2 panes with normalized sizes (each 0.5)', () => {
+  test('focusPrimary focuses a surface 1-up and mirrors `center`', () => {
     const s = make();
-    s.getState().splitCenter('row');
-    expect(s.getState().centerLayout.panes).toHaveLength(2);
-    expect(s.getState().centerLayout.orientation).toBe('row');
-    for (const size of s.getState().centerLayout.sizes) {
-      expect(size).toBeCloseTo(0.5);
-    }
-  });
-
-  test('setCenterPreset(["technical","visual"],"row") yields the Code ⟷ Canvas layout', () => {
-    const s = make();
-    s.getState().setCenterPreset(['technical', 'visual'], 'row');
-    const { centerLayout } = s.getState();
-    expect(centerLayout.panes.map((p) => p.view)).toEqual(['technical', 'visual']);
-    expect(centerLayout.orientation).toBe('row');
-    expect(centerLayout.sizes).toEqual([0.5, 0.5]);
-    // The first pane takes focus, and the legacy `center` mirror follows it.
-    expect(centerLayout.focusedPaneId).toBe(centerLayout.panes[0].id);
-    expect(s.getState().center).toBe('technical');
-  });
-
-  test('setCenterPreset dedupes repeated views (two panes can\'t share one center host)', () => {
-    const s = make();
-    s.getState().setCenterPreset(['visual', 'visual', 'docs'], 'row');
-    expect(s.getState().centerLayout.panes.map((p) => p.view)).toEqual(['visual', 'docs']);
-  });
-
-  test('setCenterPreset with a single view collapses to one pane (like Reset)', () => {
-    const s = make();
-    s.getState().splitCenter('row'); // go to 2 panes first
-    s.getState().setCenterPreset(['visual'], 'row');
-    expect(s.getState().centerLayout.panes).toHaveLength(1);
-    expect(s.getState().centerLayout.sizes).toEqual([1]);
-  });
-
-  test('setPaneView changes only the targeted pane view', () => {
-    const s = make();
-    s.getState().splitCenter('row');
-    const panes = s.getState().centerLayout.panes;
-    const firstId = panes[0].id;
-    const secondId = panes[1].id;
-    s.getState().setPaneView(secondId, 'docs');
-    const updated = s.getState().centerLayout.panes;
-    expect(updated.find((p) => p.id === firstId)!.view).toBe('visual');
-    expect(updated.find((p) => p.id === secondId)!.view).toBe('docs');
-  });
-
-  test('selectPaneView sets focus AND the pane view in ONE transition (no per-mutation re-layout)', () => {
-    const s = make();
-    s.getState().splitCenter('row'); // panes: [visual (focused), technical]
-    const [first, second] = s.getState().centerLayout.panes;
-    let notifications = 0;
-    const unsub = s.subscribe(() => notifications++);
-
-    s.getState().selectPaneView(second.id, 'docs');
-
-    // Exactly one store notification — focus + view changed atomically (the bug-1 churn fix).
-    expect(notifications).toBe(1);
-    const { centerLayout, center } = s.getState();
-    expect(centerLayout.focusedPaneId).toBe(second.id);
-    expect(centerLayout.panes.find((p) => p.id === second.id)!.view).toBe('docs');
-    expect(centerLayout.panes.find((p) => p.id === first.id)!.view).toBe('visual'); // other pane untouched
+    s.getState().openBeside('technical'); // go to a 2-up first
+    s.getState().focusPrimary('docs');
+    const { deck, center } = s.getState();
+    expect(deck.primary).toBe('docs');
+    expect(deck.secondary).toBeNull();
+    expect(deck.flipped).toBe(false);
+    expect(deck.mode).toBe('focus');
     expect(center).toBe('docs');
-    unsub();
   });
 
-  test('resizeCenter updates sizes', () => {
+  test('openBeside opens a 2-up; opening the same surface again closes it; opening the primary is a no-op', () => {
     const s = make();
-    s.getState().splitCenter('row');
-    s.getState().resizeCenter([0.3, 0.7]);
-    const { sizes } = s.getState().centerLayout;
-    expect(sizes[0]).toBeCloseTo(0.3);
-    expect(sizes[1]).toBeCloseTo(0.7);
+    s.getState().openBeside('technical'); // Visual primary, Technical secondary
+    expect(s.getState().deck.secondary).toBe('technical');
+    s.getState().openBeside('technical'); // toggles it off
+    expect(s.getState().deck.secondary).toBeNull();
+    s.getState().openBeside('visual'); // the primary — no-op
+    expect(s.getState().deck.secondary).toBeNull();
   });
 
-  test('resizeCenter normalizes when sizes array is too long (extra size is dropped)', () => {
+  test('closeSurface drops the secondary, or promotes the secondary when closing the primary', () => {
     const s = make();
-    s.getState().splitCenter('row');
-    // pass 3 sizes for 2 panes — extra should be dropped, remainder normalized
-    s.getState().resizeCenter([0.4, 0.4, 0.2]);
-    const { sizes } = s.getState().centerLayout;
-    expect(sizes).toHaveLength(2);
-    const total = sizes.reduce((a, b) => a + b, 0);
-    expect(total).toBeCloseTo(1);
+    s.getState().focusPrimary('technical');
+    s.getState().openBeside('visual'); // primary=technical, secondary=visual
+    s.getState().closeSurface('visual'); // drop the secondary
+    expect(s.getState().deck.secondary).toBeNull();
+    expect(s.getState().deck.primary).toBe('technical');
+
+    s.getState().openBeside('visual'); // back to 2-up
+    s.getState().closeSurface('technical'); // close the primary → secondary promoted
+    expect(s.getState().deck.primary).toBe('visual');
+    expect(s.getState().deck.secondary).toBeNull();
   });
 
-  test('resizeCenter normalizes when sizes array is too short (missing size filled in)', () => {
+  test('swapSides flips left/right but keeps the selection; no-op in a 1-up', () => {
     const s = make();
-    s.getState().splitCenter('row');
-    // pass 1 size for 2 panes — missing slot filled with 0.5, then normalized
-    s.getState().resizeCenter([0.6]);
-    const { sizes } = s.getState().centerLayout;
-    expect(sizes).toHaveLength(2);
-    const total = sizes.reduce((a, b) => a + b, 0);
-    expect(total).toBeCloseTo(1);
+    s.getState().focusPrimary('technical');
+    s.getState().swapSides(); // 1-up — no-op
+    expect(s.getState().deck.flipped).toBe(false);
+    s.getState().openBeside('visual');
+    s.getState().swapSides();
+    expect(s.getState().deck.flipped).toBe(true);
+    expect(s.getState().deck.primary).toBe('technical'); // selection unchanged
   });
 
-  test('closePane collapses back to single pane when there are 2 panes', () => {
+  test('selectPane promotes the OTHER pane to primary, compensating flipped so neither moves', () => {
     const s = make();
-    s.getState().splitCenter('row');
-    const panes = s.getState().centerLayout.panes;
-    s.getState().closePane(panes[1].id);
-    expect(s.getState().centerLayout.panes).toHaveLength(1);
-    expect(s.getState().centerLayout.sizes).toEqual([1]);
+    s.getState().focusPrimary('technical');
+    s.getState().openBeside('visual'); // primary=technical (left), secondary=visual (right)
+    s.getState().selectPane('visual'); // select the right pane
+    const { deck, center } = s.getState();
+    expect(deck.primary).toBe('visual');
+    expect(deck.secondary).toBe('technical');
+    expect(deck.flipped).toBe(true); // compensated so the panes don't move
+    expect(center).toBe('visual');
   });
 
-  test('focusPane updates focusedPaneId', () => {
+  test('selectPane is a no-op for the primary, a 1-up, or a surface not in the pair', () => {
     const s = make();
-    s.getState().splitCenter('row');
-    const panes = s.getState().centerLayout.panes;
-    const secondId = panes[1].id;
-    s.getState().focusPane(secondId);
-    expect(s.getState().centerLayout.focusedPaneId).toBe(secondId);
+    s.getState().focusPrimary('technical');
+    s.getState().selectPane('technical'); // 1-up — no-op
+    expect(s.getState().deck.secondary).toBeNull();
+    s.getState().openBeside('visual');
+    s.getState().selectPane('technical'); // already primary — no-op
+    expect(s.getState().deck.primary).toBe('technical');
+    s.getState().selectPane('docs'); // not in the pair — no-op
+    expect(s.getState().deck.primary).toBe('technical');
   });
 
-  test('isValidCenterLayout rejects null, missing panes, empty panes array, unknown view value', () => {
-    expect(isValidCenterLayout(null)).toBe(false);
-    expect(isValidCenterLayout({})).toBe(false);
-    expect(isValidCenterLayout({ orientation: 'row', panes: [], sizes: [], focusedPaneId: 'x' })).toBe(false);
-    expect(
-      isValidCenterLayout({
-        orientation: 'row',
-        panes: [{ id: 'p', view: 'unknown-view' }],
-        sizes: [1],
-        focusedPaneId: 'p',
-      }),
-    ).toBe(false);
-    expect(isValidCenterLayout(DEFAULT_CENTER_LAYOUT)).toBe(true);
-  });
-
-  test('isValidCenterLayout rejects a stale focusedPaneId that references no pane', () => {
-    // A persisted layout where the focused pane was removed (e.g. after a code change that renamed
-    // IDs) should fail validation so the consumer falls back to DEFAULT_CENTER_LAYOUT.
-    expect(
-      isValidCenterLayout({
-        orientation: 'row',
-        panes: [{ id: 'pane-1', view: 'visual' }],
-        sizes: [1],
-        focusedPaneId: 'stale-id-not-in-panes',
-      }),
-    ).toBe(false);
-  });
-
-  test('splitCenter gives the new pane a view distinct from the existing pane', () => {
+  test('setRatio clamps to the [0.2, 0.8] band', () => {
     const s = make();
-    // The initial single pane is 'visual'; the new pane must not also be 'visual'.
-    s.getState().splitCenter('row');
-    const panes = s.getState().centerLayout.panes;
-    expect(panes).toHaveLength(2);
-    expect(panes[0].view).toBe('visual');
-    expect(panes[1].view).not.toBe('visual');
+    s.getState().setRatio(0.05);
+    expect(s.getState().deck.ratio).toBeCloseTo(0.2);
+    s.getState().setRatio(0.95);
+    expect(s.getState().deck.ratio).toBeCloseTo(0.8);
+    s.getState().setRatio(0.42);
+    expect(s.getState().deck.ratio).toBeCloseTo(0.42);
   });
 
-  test('legacy setCenter sets the focused pane view', () => {
+  test('toggleOverview / setDeckMode switch the bird\'s-eye mode', () => {
+    const s = make();
+    s.getState().toggleOverview();
+    expect(s.getState().deck.mode).toBe('overview');
+    s.getState().toggleOverview();
+    expect(s.getState().deck.mode).toBe('focus');
+    s.getState().setDeckMode('overview');
+    expect(s.getState().deck.mode).toBe('overview');
+  });
+
+  test('isValidDeckState validates shape and rejects bad values', () => {
+    expect(isValidDeckState(null)).toBe(false);
+    expect(isValidDeckState({})).toBe(false);
+    expect(isValidDeckState(DEFAULT_DECK_STATE)).toBe(true);
+    expect(isValidDeckState({ mode: 'focus', primary: 'technical', secondary: 'visual', ratio: 0.5, flipped: false })).toBe(true);
+    // a surface can't be both panes
+    expect(isValidDeckState({ mode: 'focus', primary: 'visual', secondary: 'visual', ratio: 0.5, flipped: false })).toBe(false);
+    // unknown view
+    expect(isValidDeckState({ mode: 'focus', primary: 'nope', secondary: null, ratio: 0.5, flipped: false })).toBe(false);
+    // out-of-range ratio
+    expect(isValidDeckState({ mode: 'focus', primary: 'visual', secondary: null, ratio: 1.5, flipped: false })).toBe(false);
+  });
+
+  test('legacy setCenter focuses the surface 1-up and mirrors `center`', () => {
     const s = make();
     s.getState().setCenter('technical');
     expect(s.getState().center).toBe('technical');
-    expect(s.getState().centerLayout.panes[0].view).toBe('technical');
+    expect(s.getState().deck.primary).toBe('technical');
   });
 
-  test('setTech sets tech sub-view AND focused pane view to "technical"', () => {
+  test('setTech sets the facet AND brings Code up when it is not shown', () => {
     const s = make();
     s.getState().setTech('scenarios');
     expect(s.getState().tech).toBe('scenarios');
+    expect(s.getState().deck.primary).toBe('technical');
     expect(s.getState().center).toBe('technical');
-    expect(s.getState().centerLayout.panes[0].view).toBe('technical');
   });
 
-  test('setOutput sets the output sub-view AND focused pane view to "output"', () => {
+  test('setTech only changes the facet when Code is already shown (no layout change)', () => {
+    const s = make();
+    s.getState().focusPrimary('visual');
+    s.getState().openBeside('technical'); // Code is the secondary now
+    const before = s.getState().deck;
+    s.getState().setTech('scenarios');
+    expect(s.getState().tech).toBe('scenarios');
+    expect(s.getState().deck).toEqual(before); // layout untouched — selection not stolen
+  });
+
+  test('setOutput brings Output up when it is not shown', () => {
     const s = make();
     s.getState().setOutput('compatibility');
     expect(s.getState().output).toBe('compatibility');
+    expect(s.getState().deck.primary).toBe('output');
     expect(s.getState().center).toBe('output');
-    expect(s.getState().centerLayout.panes[0].view).toBe('output');
   });
 });
