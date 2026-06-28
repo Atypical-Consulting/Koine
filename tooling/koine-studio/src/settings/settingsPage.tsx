@@ -29,9 +29,10 @@ export interface SettingsPageHandle {
    * Re-sync the active representation from the live settings — call on every (re)open, since settings can
    * change from OTHER surfaces (the toolbar theme toggle, the command palette) while the page sits built
    * but hidden. The Visual pane repaints; the JSON editor re-seeds (only when it diverges, so an in-flight
-   * valid edit isn't disturbed) and any stale diagnostics clear.
+   * valid edit isn't disturbed) and any stale diagnostics clear. Pass a category id (#731) to land the
+   * Visual pane on that tab (the About deep-link); ignored in JSON mode, which has no category tabs.
    */
-  refresh(): void;
+  refresh(category?: string): void;
   /** Tear down the active pane/editor, clear the header toggle, and cancel any pending debounce. */
   destroy(): void;
 }
@@ -228,10 +229,11 @@ export function createSettingsPage(
   }
 
   // Re-sync the active representation from the live settings (see SettingsPageHandle.refresh). Called by
-  // the host on every (re)open so a change made elsewhere while the page sat hidden is reflected.
-  function refresh(): void {
+  // the host on every (re)open so a change made elsewhere while the page sat hidden is reflected. An
+  // optional category (#731) lands the Visual pane on that tab; embedded, so never steal focus onto it.
+  function refresh(category?: string): void {
     if (mode === 'visual') {
-      pane?.refresh(undefined, false); // repaint from live settings; embedded, so don't steal focus
+      pane?.refresh(category, false); // repaint from live settings; land on `category` when given
     } else if (editor) {
       // Re-seed only when the persisted document actually differs, so a re-open doesn't clobber an
       // in-flight valid edit. A programmatic re-seed is not a user edit, so drop the onChange-scheduled
