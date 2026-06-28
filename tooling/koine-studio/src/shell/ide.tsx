@@ -537,11 +537,8 @@ export function init(): () => void {
 
   // Since #453 the rail's AXIS (Domain vs Files) is the single source of truth for the file tree's
   // visibility — `controller.setAxis` owns + persists it (RAIL_AXIS_KEY) and `applyAxis` toggles the
-  // Files pane. So opening a folder/workspace surfaces the Files axis (matching the "Reveal in Files"
-  // path), rather than poking `dataset.open` on a pane the default Domain axis keeps hidden.
-  function showFileTreeChrome(): void {
-    controller.setAxis('files');
-  }
+  // Files pane. The rail DEFAULTS to Domain (the DDD navigator) and opening a workspace no longer forces
+  // the Files axis; the file tree is reached deliberately via ⌘B / the Files button / "Reveal in Files".
   function toggleFileTree(): void {
     // ⌘B shows/hides "the file tree", which since #453 lives on the rail's Files axis — so this toggles
     // the Domain↔Files axis (the controller owns + persists the axis, and re-expands the Files section
@@ -1216,7 +1213,6 @@ export function init(): () => void {
     setFolderTitle: (name) => {
       treeTitleEl.textContent = name;
     },
-    showFileTreeChrome,
     hideWelcome: () => welcome.hide(),
   });
   // Arm idle auto-save from the persisted setting so it's live at boot (the prefs onChange re-applies
