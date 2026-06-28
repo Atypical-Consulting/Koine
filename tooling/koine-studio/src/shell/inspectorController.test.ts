@@ -384,7 +384,8 @@ describe('createInspectorController — lazy view loading (load exactly once)', 
     expect(assistant.syncWorkspace).toHaveBeenCalledTimes(1);
     expect(assistant.focusInput).toHaveBeenCalledTimes(1);
     expect(el('view-assistant').hidden).toBe(false);
-    expect(el('rtab-assistant').getAttribute('aria-selected')).toBe('true');
+    // The stripe is the sole right-view switcher (#726): the title header names the active tool window.
+    expect(el('right-title').textContent).toBe('AI Chat');
   });
 });
 
