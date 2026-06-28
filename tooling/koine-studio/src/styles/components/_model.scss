@@ -778,7 +778,7 @@ $koi-inspector-constructs: (
   display: flex;
   flex-direction: column;
   gap: var(--koi-space-0-5);
-  border-top: 1px solid var(--koi-border);
+  border-top: 1px solid var(--koi-line);
 
   &:first-child {
     border-top: 0;
