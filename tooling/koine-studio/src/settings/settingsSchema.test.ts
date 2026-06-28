@@ -70,6 +70,15 @@ describe('settingsSchema', () => {
     expect(res.errors?.[0]?.message).toMatch(/previewTarget/i);
   });
 
+  it('rejects an empty-string previewTarget with a diagnostic (the spec edge case)', () => {
+    const res = jsonDocToSettings(
+      JSON.stringify({ ...DEFAULT_SETTINGS, aiApiKey: undefined, previewTarget: '' }),
+      withKey,
+    );
+    expect(res.settings).toBeUndefined();
+    expect(res.errors?.[0]?.message).toMatch(/previewTarget/i);
+  });
+
   it('accepts a built-in previewTarget and round-trips it to settings', () => {
     const res = jsonDocToSettings(
       JSON.stringify({ ...DEFAULT_SETTINGS, aiApiKey: undefined, previewTarget: 'typescript' }),
@@ -79,10 +88,14 @@ describe('settingsSchema', () => {
     expect(res.settings?.previewTarget).toBe('typescript');
   });
 
-  it('coerces an empty aiBaseUrl to the default, matching loadSettings', () => {
+  it('coerces an empty aiBaseUrl to the DEFAULT (not the current value), matching loadSettings', () => {
+    // current.aiBaseUrl is deliberately non-default so this proves the coercion targets the DEFAULT,
+    // exactly as loadSettings() does on read — not "preserve the current value", which would diverge
+    // from a reload whenever the user's saved URL is non-default.
+    const current: Settings = { ...withKey, aiBaseUrl: 'http://localhost:1234/v1' };
     const res = jsonDocToSettings(
       JSON.stringify({ ...DEFAULT_SETTINGS, aiApiKey: undefined, aiBaseUrl: '' }),
-      withKey,
+      current,
     );
     expect(res.errors).toBeUndefined();
     expect(res.settings?.aiBaseUrl).toBe(DEFAULT_SETTINGS.aiBaseUrl);
