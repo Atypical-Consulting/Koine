@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
+import { expect, waitFor } from 'storybook/test';
 import type { StoreApi } from 'zustand/vanilla';
 import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import type { Buffer } from '@/shell/workspaceController';
@@ -77,5 +78,16 @@ export const Unsaved: Story = {
       c: buf('file:///shipping.koi', false),
     });
     return mount(store);
+  },
+  // The indicator returns null and drives the host button's text + aria-label from a deferred effect, so
+  // the button is momentarily empty after first commit. Await the effect's paint here — `play` runs before
+  // the a11y `afterEach` — so axe never races the empty button into a spurious `button-name` violation.
+  play: async ({ canvasElement }) => {
+    await waitFor(() => {
+      const host = canvasElement.querySelector<HTMLButtonElement>('.unsaved-indicator');
+      expect(host).not.toBeNull();
+      expect(host!.textContent).toBe('2 unsaved');
+      expect(host!.getAttribute('aria-label')).toBe('Save 2 unsaved files');
+    });
   },
 };
