@@ -105,12 +105,7 @@ const APP_HTML = `
         </footer>
       </section>
       <aside id="right" class="pane">
-        <div id="right-tabs" role="tablist">
-          <button type="button" class="rtab" id="rtab-props" role="tab" data-rview="props" aria-selected="true">Properties</button>
-          <button type="button" class="rtab" id="rtab-rules" role="tab" data-rview="rules" aria-selected="false">Rules</button>
-          <button type="button" class="rtab" id="rtab-notes" role="tab" data-rview="notes" aria-selected="false">Notes</button>
-          <button type="button" class="rtab" id="rtab-source-control" role="tab" data-rview="source-control" aria-selected="false">Source Control</button>
-        </div>
+        <header id="right-header"><h2 id="right-title">Properties</h2></header>
         <div id="right-body">
           <div id="inspector-host" class="rview" role="tabpanel"></div>
           <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden></div>
@@ -130,6 +125,11 @@ function seedDom(): void {
 function el<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
 }
+
+// The right-view switcher is the icon stripe (#right-strip), one button per RightView (#500). Tests drive
+// view changes by clicking these, the way a user does.
+const stripBtn = (view: string) =>
+  document.querySelector<HTMLButtonElement>(`#right-strip [data-rview="${view}"]`)!;
 
 // --- fixtures ----------------------------------------------------------------
 // A two-element glossary model (one aggregate + one value) under one context, so loadModel renders a
@@ -743,7 +743,7 @@ describe('createInspectorController — selecting an element focuses the Propert
   // element selection used to leave the rail on that tab — the user had to click Properties to see the
   // element they just selected. Selecting now auto-activates the Properties tab (desktop mirror of the
   // existing mobile inspector-sheet raise on the same selection path).
-  test('a new selection while on Source Control activates the Properties right tab', async () => {
+  test('a new selection while on Source Control activates the Properties right view', async () => {
     const lsp = makeLsp();
     const deps = makeDeps(lsp);
     const ctl = createInspectorController(deps);
@@ -751,21 +751,23 @@ describe('createInspectorController — selecting an element focuses the Propert
     ctl.refreshActiveSurfaces();
     await flush();
 
-    // Put the right rail on a non-Properties tab, exactly as a user clicking Source Control would.
-    el('rtab-source-control').click();
+    // Put the right rail on a non-Properties view, exactly as a user clicking the Source Control stripe icon would.
+    stripBtn('source-control').click();
     expect(deps.store.getState().right).toBe('source-control');
-    expect(el('rtab-source-control').getAttribute('aria-selected')).toBe('true');
-    expect(el('rtab-props').getAttribute('aria-selected')).toBe('false');
+    expect(stripBtn('source-control').getAttribute('aria-pressed')).toBe('true');
+    expect(stripBtn('props').getAttribute('aria-pressed')).toBe('false');
+    expect(el('right-title').textContent).toBe('Source Control');
 
     // Selecting an element (canvas / Domain navigator) must bring the user back to Properties.
     ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
 
     expect(deps.store.getState().right).toBe('props');
-    expect(el('rtab-props').getAttribute('aria-selected')).toBe('true');
-    expect(el('rtab-source-control').getAttribute('aria-selected')).toBe('false');
+    expect(stripBtn('props').getAttribute('aria-pressed')).toBe('true');
+    expect(stripBtn('source-control').getAttribute('aria-pressed')).toBe('false');
+    expect(el('right-title').textContent).toBe('Properties');
   });
 
-  test('clearing the selection leaves the current right tab untouched (no auto-switch on deselect)', async () => {
+  test('clearing the selection leaves the current right view untouched (no auto-switch on deselect)', async () => {
     const lsp = makeLsp();
     const deps = makeDeps(lsp);
     const ctl = createInspectorController(deps);
@@ -775,14 +777,14 @@ describe('createInspectorController — selecting an element focuses the Propert
 
     // Select something (which focuses Properties), then deliberately switch back to Source Control.
     ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
-    el('rtab-source-control').click();
+    stripBtn('source-control').click();
     expect(deps.store.getState().right).toBe('source-control');
 
     // A deselect must NOT yank the user onto the (now-empty) Properties pane.
     ctl.selection.set(null);
 
     expect(deps.store.getState().right).toBe('source-control');
-    expect(el('rtab-source-control').getAttribute('aria-selected')).toBe('true');
+    expect(stripBtn('source-control').getAttribute('aria-pressed')).toBe('true');
   });
 });
 
@@ -876,17 +878,17 @@ describe('createInspectorController — Source Control live refresh-on-save (#47
     const ctl = createInspectorController(makeDeps(makeLsp(), { platform }));
     ctl.init();
 
-    // Open the Source Control right view (the rtab click → selectRightView → loadSourceControl → mount).
-    el('rtab-source-control').click();
+    // Open the Source Control right view (stripe click → selectRightView → loadSourceControl → mount).
+    stripBtn('source-control').click();
     await waitFor(() => expect(gitStatus.mock.calls.length).toBeGreaterThanOrEqual(1));
     const afterOpen = gitStatus.mock.calls.length;
 
-    // A save fires refreshSourceControl(): the tab is open, so it re-fetches git status in place.
+    // A save fires refreshSourceControl(): the view is open, so it re-fetches git status in place.
     ctl.refreshSourceControl();
     await waitFor(() => expect(gitStatus.mock.calls.length).toBeGreaterThan(afterOpen));
 
-    // Switch to another right view: refreshSourceControl() is now a no-op (the tab isn't the active view).
-    el('rtab-props').click();
+    // Switch to another right view: refreshSourceControl() is now a no-op (Source Control isn't active).
+    stripBtn('props').click();
     const beforeNoop = gitStatus.mock.calls.length;
     ctl.refreshSourceControl();
     await new Promise((r) => setTimeout(r, 60)); // give any (erroneous) re-fetch time to fire
@@ -1015,8 +1017,6 @@ describe('createInspectorController — narrow-viewport bottom-strip default (#4
 
 describe('createInspectorController — right-edge tool-window stripe (#500)', () => {
   const LAYOUT_KEY = 'koine.studio.layout';
-  const stripBtn = (view: string) =>
-    document.querySelector<HTMLButtonElement>(`#right-strip [data-rview="${view}"]`)!;
   const splitEl = () => el('split');
 
   beforeEach(() => localStorage.removeItem(LAYOUT_KEY));

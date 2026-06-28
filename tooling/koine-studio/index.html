@@ -257,13 +257,13 @@
              read-only informational views until the invariants-on-the-wire follow-up lets them edit
              per-element rules/notes (tracked separately). Their panels carry an honest empty state
              pointing at where each capability lives today, rather than a bare "Coming soon". -->
-        <aside id="right" class="pane" aria-label="Properties">
-          <div id="right-tabs" role="tablist" aria-label="Properties">
-            <button type="button" class="rtab" id="rtab-props" role="tab" data-rview="props" aria-selected="true">Properties</button>
-            <button type="button" class="rtab" id="rtab-rules" role="tab" data-rview="rules" aria-selected="false">Rules</button>
-            <button type="button" class="rtab" id="rtab-notes" role="tab" data-rview="notes" aria-selected="false">Notes</button>
-            <button type="button" class="rtab" id="rtab-source-control" role="tab" data-rview="source-control" aria-selected="false">Source Control</button>
-          </div>
+        <aside id="right" class="pane" aria-labelledby="right-title">
+          <!-- Tool-window title header: the right-edge icon stripe (#right-strip) is the sole view
+               switcher, so the panel needs only a title naming the active tool window — not a second,
+               redundant tab row. inspectorController keeps #right-title in sync with the active RightView. -->
+          <header id="right-header">
+            <h2 id="right-title">Properties</h2>
+          </header>
           <div id="right-body">
             <div id="inspector-host" class="rview" role="tabpanel"></div>
             <!-- Filled by inspectorController.renderSelectedRules() with the selected element's
