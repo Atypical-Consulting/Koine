@@ -141,6 +141,86 @@ interface MountedPrefsPane extends PrefsPaneHandle {
 }
 
 /**
+ * A segmented radio group (e.g. Dark / Light): a row of role=radio buttons under a role=radiogroup, with
+ * exactly one option checked at a time. Keyboard-navigable per the WAI-ARIA radiogroup pattern — a roving
+ * tabindex (only the checked option is in the tab order) plus Arrow/Home/End navigation where focus
+ * follows selection (single-select semantics, matching a click). Arrow nav skips disabled options, so a
+ * scope toggle whose every option is disabled (no workspace open) stays inert. `set(value)` drives both
+ * `aria-checked` and the roving tabindex; the group is seeded with one tabbable option at construction so
+ * it is reachable by Tab even before the first `set()`.
+ *
+ * Module-level + exported (it was a closure inside {@link mountPreferencesPane}) so it can be the single
+ * shared control behind every Studio segmented: the Theme toggle and the four User/Workspace scope
+ * toggles here, and the Settings page's Visual/JSON representation toggle (settingsPage.tsx).
+ */
+export function segmented<T extends string>(
+  ariaLabel: string,
+  options: readonly { value: T; label: string }[],
+  onSelect: (value: T) => void,
+): { el: HTMLElement; set(value: T): void } {
+  const group = document.createElement('div');
+  group.className = 'koi-segmented';
+  group.setAttribute('role', 'radiogroup');
+  group.setAttribute('aria-label', ariaLabel);
+
+  const buttons = options.map(({ value, label }) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'koi-seg';
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', 'false');
+    b.tabIndex = -1;
+    b.dataset.value = value;
+    b.textContent = label;
+    b.addEventListener('click', () => selectButton(b));
+    b.addEventListener('keydown', onArrow);
+    group.appendChild(b);
+    return b;
+  });
+
+  // set() drives aria-checked AND the roving tabindex: only the checked option is tabbable (0), every
+  // other is taken out of the tab order (-1) so Tab enters the group once and the arrows move within it.
+  const set = (value: T): void => {
+    for (const b of buttons) {
+      const checked = b.dataset.value === value;
+      b.setAttribute('aria-checked', String(checked));
+      b.tabIndex = checked ? 0 : -1;
+    }
+  };
+
+  // Move selection (and focus) to `target` and commit it — the shared path for both a click and an arrow
+  // key, so focus-follows-selection holds for the keyboard exactly as it already did for the pointer.
+  function selectButton(target: HTMLButtonElement): void {
+    const value = target.dataset.value as T;
+    set(value);
+    onSelect(value);
+    target.focus();
+  }
+
+  // Arrow / Home / End navigation across the ENABLED options (a no-workspace scope toggle has none, so
+  // this is a no-op there). Right/Down → next, Left/Up → previous (both wrap), Home → first, End → last.
+  function onArrow(e: KeyboardEvent): void {
+    const enabled = buttons.filter((b) => !b.disabled);
+    const i = enabled.indexOf(e.target as HTMLButtonElement);
+    if (i < 0) return; // the focused option isn't navigable (e.g. all disabled) — leave the group be
+    let next: HTMLButtonElement;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = enabled[(i + 1) % enabled.length];
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = enabled[(i - 1 + enabled.length) % enabled.length];
+    else if (e.key === 'Home') next = enabled[0];
+    else if (e.key === 'End') next = enabled[enabled.length - 1];
+    else return;
+    e.preventDefault();
+    selectButton(next);
+  }
+
+  // Seed one tabbable option so the group is keyboard-reachable before the first set() (callers set the
+  // real selection during populate); the first option carries the roving tabindex until then.
+  if (buttons.length > 0) buttons[0].tabIndex = 0;
+
+  return { el: group, set };
+}
+
+/**
  * Build the two-pane preference form (category rail + control pane) and append it into `container` — no
  * modal chrome. The DOM is created once and populated from the current Settings on mount; each control
  * commits a single-field patch through patchSettings() and reports the merged Settings back via cb.onChange.
@@ -233,36 +313,8 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     return { el: btn, set, setDisabled };
   }
 
-  // A segmented radio group (e.g. Dark / Light). Each option is a button; one is checked at a time.
-  function segmented<T extends string>(
-    ariaLabel: string,
-    options: readonly { value: T; label: string }[],
-    onSelect: (value: T) => void,
-  ): { el: HTMLElement; set(value: T): void } {
-    const group = document.createElement('div');
-    group.className = 'koi-segmented';
-    group.setAttribute('role', 'radiogroup');
-    group.setAttribute('aria-label', ariaLabel);
-    const buttons = options.map(({ value, label }) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'koi-seg';
-      b.setAttribute('role', 'radio');
-      b.setAttribute('aria-checked', 'false');
-      b.dataset.value = value;
-      b.textContent = label;
-      b.addEventListener('click', () => {
-        set(value);
-        onSelect(value);
-      });
-      group.appendChild(b);
-      return b;
-    });
-    const set = (value: T) => {
-      for (const b of buttons) b.setAttribute('aria-checked', String(b.dataset.value === value));
-    };
-    return { el: group, set };
-  }
+  // The segmented radio group (Theme, the User/Workspace scope toggles) is the shared, keyboard-navigable
+  // `segmented()` helper hoisted to module scope (below), so settingsPage.tsx can reuse it too.
 
   // --- per-workspace scope control ------------------------------------------
   // The four scoped fields (previewTarget, formatOnSave, wordWrap, lspTrace) can be overridden per
