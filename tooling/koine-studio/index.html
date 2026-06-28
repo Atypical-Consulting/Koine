@@ -144,7 +144,6 @@
             </svg>
           </button>
           <div id="status" data-kind="connecting" role="status" aria-live="polite">connecting…</div>
-          <button type="button" id="unsaved-indicator" class="unsaved-indicator" hidden></button>
         </div>
       </header>
 
@@ -287,6 +286,11 @@
         <!-- Workspace-wide problems rollup (every file, not just the active one). Empty when clean;
              the <WorkspaceProblemsBadge> Preact panel renders its sb-item span in here. -->
         <span id="sb-problems-host"></span>
+        <!-- Global unsaved-work indicator (#193): the clickable "N unsaved" pill that triggers Save-all.
+             Lives in the status bar beside validity/problems so every passive model-state signal shares
+             one home (it formerly sat top-right in the toolbar). Still the <UnsavedIndicator> Preact
+             panel's element — the `el('unsaved-indicator')` mount and its tests are unchanged by the move. -->
+        <button type="button" id="unsaved-indicator" class="unsaved-indicator" hidden></button>
         <span class="sb-spacer"></span>
         <!-- Transient "compiling…" indicator (#516): the <CompilingIndicator> Preact panel renders its
              aria-live sb-item span in here while a compile is in flight (debounced), hidden when idle. -->
