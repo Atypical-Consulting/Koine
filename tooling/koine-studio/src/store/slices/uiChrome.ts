@@ -1,6 +1,6 @@
 import type { StoreApi } from 'zustand/vanilla';
 
-export type CenterView = 'visual' | 'technical' | 'docs' | 'assistant';
+export type CenterView = 'visual' | 'technical' | 'docs' | 'assistant' | 'settings';
 export type TechView = 'editor' | 'preview' | 'check' | 'scenarios';
 export type DocsView = 'glossary' | 'adr' | 'notes';
 export type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap' | 'terminal' | 'review';
@@ -17,7 +17,10 @@ export const DEFAULT_CENTER: CenterView = 'visual';
 /** The zone the mobile shell opens on — Code, so a phone lands on the editor (the primary review surface). */
 export const DEFAULT_MOBILE_ZONE: MobileZone = 'code';
 
-/** True when `v` names a real center pane — validates a restored value before trusting it. */
+/** True when `v` names a real center pane — validates a restored value before trusting it.
+ *  Note: `'settings'` is INTENTIONALLY excluded. The Settings page is a transient, gear-launched
+ *  center view (#center-panel-settings); it must never be restored from the persisted workspace
+ *  center on reload, so this guard rejects it and the consumer falls back to {@link DEFAULT_CENTER}. */
 export function isValidCenter(v: string): v is CenterView {
   return v === 'visual' || v === 'technical' || v === 'docs' || v === 'assistant';
 }

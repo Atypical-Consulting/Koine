@@ -2225,7 +2225,10 @@ export function init(): () => void {
   saveProjectBtn.addEventListener('click', () => void saveProjectToDisk());
   if (!platform.canSaveProjects) saveProjectBtn.hidden = true;
   el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
-  el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => prefs.open());
+  // The toolbar gear now routes into the transient Settings center page (a peer of Visual/Code/Docs)
+  // instead of the prefs modal (#center-panel-settings; later tasks fill the page + retire `prefs`). The
+  // remaining `prefs.open()` call sites (command palette, About, onOpenPrefs) keep `prefs` alive for now.
+  el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => controller.selectCenter('settings'));
 
   // Mobile overflow "More" (⋮) menu (#528): at ≤ $bp-narrow the toolbar hides its secondary actions
   // (Save/Check/Install/⌘K/theme/Settings) and reveals this kebab, which collects them into a floating

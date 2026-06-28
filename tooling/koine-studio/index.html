@@ -225,6 +225,17 @@
                  (ide.tsx); the bottom diagnostics strip stays visible here (it's global), collapse it from
                  its chevron to give the conversation the center's full height. -->
             <section id="view-assistant" class="center-host" role="tabpanel" aria-label="Assistant" hidden></section>
+            <!-- Settings: a transient, gear-launched center page (no #center-tabs button). Reached from the
+                 toolbar gear (#btn-prefs) → selectCenter('settings'); it is intentionally NOT a restorable
+                 center (isValidCenter rejects it) so a reload never lands here. The header's mode toggle and
+                 the page body are populated by the settings page host (later tasks). -->
+            <section id="center-panel-settings" class="center-host" role="tabpanel" aria-label="Settings" hidden>
+              <header id="settings-page-header" class="settings-page-header">
+                <h2 class="settings-page-title">Settings</h2>
+                <div id="settings-mode-toggle" class="settings-mode-toggle"></div>
+              </header>
+              <div id="settings-page-body" class="settings-page-body"></div>
+            </section>
           </div>
 
           <footer id="diagnostics" aria-label="Problems, events, relationships and the context map">

@@ -31,8 +31,11 @@ const VIEW_LABELS: Record<CenterView, string> = {
   technical: 'Code',
   docs: 'Docs',
   assistant: 'AI',
+  settings: 'Settings',
 };
 
+// The views a pane's selector offers. 'settings' is intentionally omitted: the Settings page is a
+// transient, gear-launched center peer, not a per-pane split option.
 const ALL_VIEWS: CenterView[] = ['visual', 'technical', 'docs', 'assistant'];
 
 function PaneSelector({
@@ -76,6 +79,7 @@ const CENTER_VIEW_IDS: Record<CenterView, string> = {
   technical: 'center-technical',
   docs: 'center-docs',
   assistant: 'view-assistant',
+  settings: 'center-panel-settings',
 };
 
 // --- applySplitPaneLayout ----------------------------------------------------

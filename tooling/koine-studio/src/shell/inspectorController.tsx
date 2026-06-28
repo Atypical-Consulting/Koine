@@ -97,7 +97,7 @@ const SYMBOL_KIND_NAMESPACE = 3;
 // The center column's top-level views and the Code/Documentation sub-tabs (kept local — they're a UI
 // concern, not part of the target-agnostic model). They mirror the uiChrome slice's CenterView /
 // TechView / DocsView literals, which the chrome now drives through.
-type CenterView = 'visual' | 'technical' | 'docs' | 'assistant';
+type CenterView = 'visual' | 'technical' | 'docs' | 'assistant' | 'settings';
 type TechView = 'editor' | 'preview' | 'check' | 'scenarios';
 type DocsView = 'glossary' | 'adr' | 'notes';
 type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap' | 'terminal' | 'review';
@@ -410,6 +410,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const assistantView = el('view-assistant');
   const checkView = el('view-check');
   const scenariosView = el('view-scenarios');
+  // The transient Settings page (gear-launched, no center tab). OPTIONAL like the bottom-sheet host: it's
+  // absent from the desktop-only test fixtures, so look it up defensively — without it the controller's
+  // center toggling is untouched. The page body is populated by the settings page host (later tasks).
+  const settingsView = document.getElementById('center-panel-settings');
   // Right-rail host: the element inspector (Properties). Fixed — never torn down on a model reload.
   const inspectorHost = el('inspector-host');
   // Below $bp-narrow the inspector lives in a bottom sheet instead of the fixed #right rail (#221). The
@@ -1369,6 +1373,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       // reachable in one click from any view, not a Code sub-tab. Its host (#view-assistant) is the
       // center-host itself, so it's shown/hidden purely by the active center.
       assistantView.hidden = center !== 'assistant';
+      // The Settings page is a transient gear-launched center peer (no center tab). Its host is optional
+      // (absent from the desktop-only test fixtures), so guard the toggle.
+      if (settingsView) settingsView.hidden = center !== 'settings';
     }
 
     // The bottom strip (Problems/Events/Relationships/Context Map/Terminal) is GLOBAL: it serves every
