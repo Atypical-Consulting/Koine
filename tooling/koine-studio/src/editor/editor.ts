@@ -174,6 +174,13 @@ const koineHighlight = HighlightStyle.define([
   { tag: t.propertyName, color: 'var(--koi-hl-type)' },
   { tag: t.variableName, color: 'var(--koi-fg)' },
   { tag: t.definitionKeyword, color: 'var(--koi-hl-keyword)', fontWeight: '600' },
+  // Literal atoms — true/false/null. Chiefly the JSON views (the settings.json editor + the read-only
+  // MCP recipe snippet) which share this style: without these, those tokens fall through to CodeMirror's
+  // light-oriented defaultHighlightStyle, whose near-navy renders at ~1.4:1 on the dark editor (fails AA).
+  // A theme-aware keyword colour keeps them legible in both themes.
+  { tag: t.bool, color: 'var(--koi-hl-keyword)' },
+  { tag: t.null, color: 'var(--koi-hl-keyword)' },
+  { tag: t.atom, color: 'var(--koi-hl-keyword)' },
 ]);
 
 // Keyword/type autocomplete for the editor — the offline fallback used when no LSP

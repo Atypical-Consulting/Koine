@@ -217,7 +217,10 @@
   border: none;
   border-radius: var(--koi-radius-sm);
   background: transparent;
-  color: var(--koi-muted);
+  // Inactive label. `--koi-muted` reads at only ~4.3:1 on `--koi-surface` (fails WCAG AA for this
+  // interactive control); `--koi-ink-soft` is the soft-but-legible ink token (≥4.5:1 in both themes).
+  // The checked option stays distinct via `--koi-fg` + the raised pill + bold below.
+  color: var(--koi-ink-soft);
   padding: var(--koi-space-1-25) var(--koi-space-3-5);
   font-family: inherit;
   font-size: var(--koi-text-base);
