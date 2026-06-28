@@ -231,13 +231,24 @@ const APP_HTML = `
           </section>
           <section id="center-technical" class="center-host" role="tabpanel" hidden>
             <div id="tech-tabs" role="tablist">
-              <button type="button" class="tech-tab" id="tech-tab-preview" role="tab" data-tech="preview" aria-selected="false">Generated</button>
+              <button type="button" class="tech-tab" id="tech-tab-editor" role="tab" data-tech="editor" aria-selected="true">Editor</button>
+              <button type="button" class="tech-tab" id="tech-tab-scenarios" role="tab" data-tech="scenarios" aria-selected="false">Scenarios</button>
             </div>
             <div id="tech-body">
               <section id="editor-pane" class="tech-view"></section>
-              <div id="view-preview" class="tech-view" role="tabpanel" hidden></div>
-              <div id="view-check" class="tech-view doc-view" role="tabpanel" hidden></div>
               <div id="view-scenarios" class="tech-view" role="tabpanel" hidden></div>
+            </div>
+          </section>
+          <section id="center-output" class="center-host" role="tabpanel" hidden>
+            <div id="output-tabs" role="tablist">
+              <button type="button" class="output-tab" id="output-tab-generated" role="tab" data-output="generated" aria-selected="true">Generated</button>
+              <button type="button" class="output-tab" id="output-tab-compatibility" role="tab" data-output="compatibility" aria-selected="false">Compatibility</button>
+              <button type="button" class="output-tab" id="output-tab-contextmap" role="tab" data-output="contextmap" aria-selected="false">Context Map</button>
+            </div>
+            <div id="output-body">
+              <div id="view-preview" class="tech-view" role="tabpanel"></div>
+              <div id="view-check" class="tech-view doc-view" role="tabpanel" hidden></div>
+              <div id="panel-contextmap" class="tech-view doc-view" role="tabpanel" hidden></div>
             </div>
           </section>
           <section id="center-docs" class="center-host" role="tabpanel" hidden>
@@ -260,7 +271,6 @@ const APP_HTML = `
           <div id="diag-body" class="diag-panel" role="tabpanel"></div>
           <div id="panel-events" class="diag-panel" role="tabpanel" hidden></div>
           <div id="panel-relationships" class="diag-panel" role="tabpanel" hidden></div>
-          <div id="panel-contextmap" class="diag-panel doc-view" role="tabpanel" hidden></div>
           <div id="panel-terminal" class="diag-panel diag-panel-terminal" role="tabpanel" hidden></div>
           <div id="panel-review" class="diag-panel" role="tabpanel" hidden></div>
         </footer>

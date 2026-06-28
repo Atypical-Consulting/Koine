@@ -1,9 +1,14 @@
 import type { StoreApi } from 'zustand/vanilla';
 
-export type CenterView = 'visual' | 'technical' | 'docs';
-export type TechView = 'editor' | 'preview' | 'check' | 'scenarios';
+export type CenterView = 'visual' | 'technical' | 'output' | 'docs';
+// Code is authoring-only now: the editor + the scenario runner. The compiler-PRODUCED artifacts
+// (emitted code, compatibility, the context map) moved to their own 'output' center view below.
+export type TechView = 'editor' | 'scenarios';
+// Output groups what the compiler produces from the model: the emitted source ('generated'), the
+// model-versioning check ('compatibility'), and the context map (relocated from the bottom panel).
+export type OutputTab = 'generated' | 'compatibility' | 'contextmap';
 export type DocsView = 'glossary' | 'adr' | 'notes';
-export type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap' | 'terminal' | 'review';
+export type BottomTab = 'problems' | 'events' | 'relationships' | 'terminal' | 'review';
 // The AI assistant docks in the right rail (a RightView), not the center — it can stay open beside
 // Code/Canvas while you work, rather than competing for the main stage as a center tab.
 export type RightView = 'props' | 'assistant' | 'rules' | 'notes' | 'source-control';
@@ -16,6 +21,9 @@ export type MobileZone = 'files' | 'code' | 'diagram' | 'props';
 /** The center pane shown on first run and whenever a persisted/restored value is absent or invalid. */
 export const DEFAULT_CENTER: CenterView = 'visual';
 
+/** The Output sub-view shown first — the emitted source, the most-used compiler artifact. */
+export const DEFAULT_OUTPUT: OutputTab = 'generated';
+
 /** The zone the mobile shell opens on — Code, so a phone lands on the editor (the primary review surface). */
 export const DEFAULT_MOBILE_ZONE: MobileZone = 'code';
 
@@ -23,7 +31,7 @@ export const DEFAULT_MOBILE_ZONE: MobileZone = 'code';
  *  (A persisted `'assistant'` from before the AI moved to the right rail fails this and falls back
  *  to the default, which is the intended graceful migration.) */
 export function isValidCenter(v: string): v is CenterView {
-  return v === 'visual' || v === 'technical' || v === 'docs';
+  return v === 'visual' || v === 'technical' || v === 'output' || v === 'docs';
 }
 
 /** True when `v` names a real mobile zone — validates a restored/external value before trusting it. */
@@ -78,6 +86,7 @@ export function isValidCenterLayout(v: unknown): v is CenterLayout {
 export interface UiChromeSlice {
   center: CenterView;
   tech: TechView;
+  output: OutputTab;
   docs: DocsView;
   bottom: BottomTab;
   right: RightView;
@@ -96,6 +105,7 @@ export interface UiChromeSlice {
   centerLayout: CenterLayout;
   setCenter(v: CenterView): void;
   setTech(v: TechView): void;
+  setOutput(v: OutputTab): void;
   setDocs(v: DocsView): void;
   setBottom(t: BottomTab): void;
   setRight(v: RightView): void;
@@ -129,6 +139,7 @@ export function createUiChromeSlice(
   return {
     center: DEFAULT_CENTER,
     tech: 'editor',
+    output: DEFAULT_OUTPUT,
     docs: 'glossary',
     bottom: 'problems',
     right: 'props',
@@ -151,6 +162,13 @@ export function createUiChromeSlice(
         p.id === centerLayout.focusedPaneId ? { ...p, view: 'technical' as CenterView } : p,
       );
       set({ tech: v, center: 'technical', centerLayout: { ...centerLayout, panes } });
+    },
+    setOutput: (v) => {
+      const { centerLayout } = get();
+      const panes = centerLayout.panes.map((p) =>
+        p.id === centerLayout.focusedPaneId ? { ...p, view: 'output' as CenterView } : p,
+      );
+      set({ output: v, center: 'output', centerLayout: { ...centerLayout, panes } });
     },
     setDocs: (v) => {
       const { centerLayout } = get();

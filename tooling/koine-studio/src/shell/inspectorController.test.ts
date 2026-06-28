@@ -45,9 +45,10 @@ const APP_HTML = `
       <aside id="leftrail" class="pane">${leftRailMarkup()}</aside>
       <section id="center" class="pane">
         <div id="center-tabs" role="tablist">
-          <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Visual</button>
+          <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Canvas</button>
           <button type="button" class="center-tab" id="center-tab-technical" role="tab" data-center="technical" aria-selected="false">Code</button>
-          <button type="button" class="center-tab" id="center-tab-docs" role="tab" data-center="docs" aria-selected="false">Documentation</button>
+          <button type="button" class="center-tab" id="center-tab-output" role="tab" data-center="output" aria-selected="false">Output</button>
+          <button type="button" class="center-tab" id="center-tab-docs" role="tab" data-center="docs" aria-selected="false">Docs</button>
         </div>
         <div id="center-body">
           <section id="center-visual" class="center-host" role="tabpanel">
@@ -57,15 +58,23 @@ const APP_HTML = `
           <section id="center-technical" class="center-host" role="tabpanel" hidden>
             <div id="tech-tabs" role="tablist">
               <button type="button" class="tech-tab" id="tech-tab-editor" role="tab" data-tech="editor" aria-selected="true">Editor</button>
-              <button type="button" class="tech-tab" id="tech-tab-preview" role="tab" data-tech="preview" aria-selected="false">Generated</button>
-              <button type="button" class="tech-tab" id="tech-tab-check" role="tab" data-tech="check" aria-selected="false">Compatibility</button>
               <button type="button" class="tech-tab" id="tech-tab-scenarios" role="tab" data-tech="scenarios" aria-selected="false">Scenarios</button>
             </div>
             <div id="tech-body">
               <section id="editor-pane" class="tech-view"></section>
-              <div id="view-preview" class="tech-view" role="tabpanel" hidden></div>
-              <div id="view-check" class="tech-view doc-view" role="tabpanel" hidden></div>
               <div id="view-scenarios" class="tech-view" role="tabpanel" hidden></div>
+            </div>
+          </section>
+          <section id="center-output" class="center-host" role="tabpanel" hidden>
+            <div id="output-tabs" role="tablist">
+              <button type="button" class="output-tab" id="output-tab-generated" role="tab" data-output="generated" aria-selected="true">Generated</button>
+              <button type="button" class="output-tab" id="output-tab-compatibility" role="tab" data-output="compatibility" aria-selected="false">Compatibility</button>
+              <button type="button" class="output-tab" id="output-tab-contextmap" role="tab" data-output="contextmap" aria-selected="false">Context Map</button>
+            </div>
+            <div id="output-body">
+              <div id="view-preview" class="tech-view" role="tabpanel"></div>
+              <div id="view-check" class="tech-view doc-view" role="tabpanel" hidden></div>
+              <div id="panel-contextmap" class="tech-view doc-view" role="tabpanel" hidden></div>
             </div>
           </section>
           <section id="center-docs" class="center-host" role="tabpanel" hidden>
@@ -89,7 +98,6 @@ const APP_HTML = `
               <button type="button" class="diag-tab" id="tab-problems" role="tab" data-panel="problems" aria-selected="true">Problems</button>
               <button type="button" class="diag-tab" id="tab-events" role="tab" data-panel="events" aria-selected="false">Events</button>
               <button type="button" class="diag-tab" id="tab-relationships" role="tab" data-panel="relationships" aria-selected="false">Relationships</button>
-              <button type="button" class="diag-tab" id="tab-contextmap" role="tab" data-panel="contextmap" aria-selected="false">Context Map</button>
               <button type="button" class="diag-tab" id="tab-terminal" role="tab" data-panel="terminal" aria-selected="false">Terminal</button>
             </div>
             <span id="diag-count" class="diag-count"></span>
@@ -97,7 +105,6 @@ const APP_HTML = `
           <div id="diag-body" class="diag-panel" role="tabpanel"></div>
           <div id="panel-events" class="diag-panel" role="tabpanel" hidden></div>
           <div id="panel-relationships" class="diag-panel" role="tabpanel" hidden></div>
-          <div id="panel-contextmap" class="diag-panel doc-view" role="tabpanel" hidden></div>
           <div id="panel-terminal" class="diag-panel diag-panel-terminal" role="tabpanel" hidden></div>
           <div id="panel-review" class="diag-panel" role="tabpanel" hidden></div>
         </footer>
@@ -339,13 +346,13 @@ describe('createInspectorController — lazy view loading (load exactly once)', 
     const ctl = createInspectorController(makeDeps(lsp));
     ctl.init();
 
-    ctl.selectTech('preview');
+    ctl.selectOutput('generated');
     await flush();
     expect(lsp.emitPreview).toHaveBeenCalledTimes(1);
 
     // Switch away and back — the cached preview is still fresh, so no refetch.
     ctl.selectTech('editor');
-    ctl.selectTech('preview');
+    ctl.selectOutput('generated');
     await flush();
     expect(lsp.emitPreview).toHaveBeenCalledTimes(1);
   });
@@ -387,13 +394,13 @@ describe('createInspectorController — invalidation forces a refetch', () => {
     const ctl = createInspectorController(makeDeps(lsp));
     ctl.init();
 
-    ctl.selectTech('preview');
+    ctl.selectOutput('generated');
     await flush();
     expect(lsp.emitPreview).toHaveBeenCalledTimes(1);
 
     ctl.invalidateDocViews(); // an edit happened (model-derived views are stale)
     ctl.selectTech('editor');
-    ctl.selectTech('preview'); // re-show → must refetch
+    ctl.selectOutput('generated'); // re-show → must refetch
     await flush();
     expect(lsp.emitPreview).toHaveBeenCalledTimes(2);
   });
@@ -469,7 +476,7 @@ describe('createInspectorController — bottom strip lazy loading', () => {
     const ctl = createInspectorController(makeDeps(lsp));
     ctl.init();
 
-    ctl.selectBottomTab('contextmap');
+    ctl.selectOutput('contextmap');
     await flush();
 
     expect(lsp.contextMap).toHaveBeenCalledTimes(1);
@@ -488,7 +495,7 @@ describe('createInspectorController — bottom strip lazy loading', () => {
     const ctl = createInspectorController(makeDeps(lsp));
     ctl.init();
 
-    ctl.selectBottomTab('contextmap');
+    ctl.selectOutput('contextmap');
     await flush();
     const panel = el('panel-contextmap');
 
@@ -522,7 +529,7 @@ describe('createInspectorController — bottom strip lazy loading', () => {
       return { dispose: () => {} };
     });
 
-    ctl.selectBottomTab('contextmap');
+    ctl.selectOutput('contextmap');
     await flush();
     expect(hooks).toBeDefined();
 
@@ -575,27 +582,25 @@ describe('createInspectorController — rail axis switch (#453)', () => {
 });
 
 describe('createInspectorController — Domain navigator doorways + cross-axis glue (#453)', () => {
-  test('the strategic Context Map doorway opens the Context Map in the now-global bottom strip, in place (#451/#453)', async () => {
+  test('the strategic Context Map doorway opens the Context Map in the Output center pane', async () => {
     const ctl = createInspectorController(makeDeps(makeLsp()));
     ctl.init();
     ctl.refreshActiveSurfaces(); // mounts the Domain navigator, which self-fetches + paints the doorways
     await flush();
 
-    // Land on Documentation — the bottom strip is global (#451), so it stays visible here.
+    // Land on Documentation first, so we can prove the doorway navigates AWAY to Output.
     ctl.selectDocsTab('adr');
     expect(el('center-docs').hidden).toBe(false);
-    expect(el('diagnostics').hidden).toBe(false);
 
     // Drive the REAL strategic Context Map doorway → modelOutlineHandlers.onOpenContextMap →
-    // focusContextMap() → selectBottomTab('contextmap'): with the global strip (#451) it opens the
-    // Context Map tab IN PLACE, without leaving the current center. (Drives the #453 doorway, not the
-    // removed footer doclink.)
+    // focusContextMap() → selectOutput('contextmap'): the Context Map is the contextmap sub-view of the
+    // Output center pane now, so the doorway switches the center to Output and shows the map.
     const doorway = el('rail-domain-pane').querySelector<HTMLButtonElement>('[data-door="contextmap"]')!;
     doorway.click();
     await flush();
 
-    expect(el('center-docs').hidden).toBe(false); // still on Documentation…
-    expect(el('diagnostics').hidden).toBe(false); // …strip visible…
+    expect(el('center-output').hidden).toBe(false); // switched to the Output pane…
+    expect(el('center-docs').hidden).toBe(true); // …left Documentation…
     expect(el('panel-contextmap').hidden).toBe(false); // …showing the Context Map.
   });
 
@@ -1093,7 +1098,7 @@ describe('createInspectorController — split center layout', () => {
     // Each header should have view selector tabs
     for (const header of Array.from(headers)) {
       const tabs = header.querySelectorAll('.center-pane-tab');
-      expect(tabs.length).toBe(3); // visual, technical, docs (AI moved to the right rail)
+      expect(tabs.length).toBe(4); // visual, technical, output, docs (AI is in the right rail)
     }
 
     ctl.dispose();

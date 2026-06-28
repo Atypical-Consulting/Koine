@@ -29,10 +29,11 @@ import { CenterSplitter } from '@/shell/CenterSplitter';
 const VIEW_LABELS: Record<CenterView, string> = {
   visual: 'Visual',
   technical: 'Code',
+  output: 'Output',
   docs: 'Docs',
 };
 
-const ALL_VIEWS: CenterView[] = ['visual', 'technical', 'docs'];
+const ALL_VIEWS: CenterView[] = ['visual', 'technical', 'output', 'docs'];
 
 function PaneSelector({
   layout,
@@ -73,6 +74,7 @@ function PaneSelector({
 const CENTER_VIEW_IDS: Record<CenterView, string> = {
   visual: 'center-visual',
   technical: 'center-technical',
+  output: 'center-output',
   docs: 'center-docs',
 };
 

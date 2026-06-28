@@ -97,10 +97,11 @@ const SYMBOL_KIND_NAMESPACE = 3;
 // The center column's top-level views and the Code/Documentation sub-tabs (kept local — they're a UI
 // concern, not part of the target-agnostic model). They mirror the uiChrome slice's CenterView /
 // TechView / DocsView literals, which the chrome now drives through.
-type CenterView = 'visual' | 'technical' | 'docs';
-type TechView = 'editor' | 'preview' | 'check' | 'scenarios';
+type CenterView = 'visual' | 'technical' | 'output' | 'docs';
+type TechView = 'editor' | 'scenarios';
+type OutputTab = 'generated' | 'compatibility' | 'contextmap';
 type DocsView = 'glossary' | 'adr' | 'notes';
-type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap' | 'terminal' | 'review';
+type BottomTab = 'problems' | 'events' | 'relationships' | 'terminal' | 'review';
 
 /**
  * The slice of {@link import('@/lsp/lsp').KoineLsp} the loaders call (content requests only). A
@@ -254,6 +255,7 @@ export interface InspectorController {
    */
   setAxis(axis: 'domain' | 'files'): void;
   selectTech(view: TechView): void;
+  selectOutput(view: OutputTab): void;
   selectDocsTab(view: DocsView): void;
   selectBottomTab(tab: BottomTab): void;
   /** Reveal a right-rail view (Properties / AI Chat / Rules / Notes / Source Control), expanding the rail
@@ -495,6 +497,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   appStore.setState({
     center: initialCenter,
     tech: 'editor',
+    output: 'generated',
     docs: 'glossary',
     bottom: 'problems',
     right: 'props',
@@ -1327,6 +1330,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const activeCenter = (): CenterView => appStore.getState().center as CenterView;
   const activeTech = (): TechView => appStore.getState().tech as TechView;
   const activeDocs = (): DocsView => appStore.getState().docs as DocsView;
+  const activeOutput = (): OutputTab => appStore.getState().output as OutputTab;
 
   const centerVisualEl = el('center-visual');
 
@@ -1354,11 +1358,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
 
   const centerBodyEl = el('center-body');
   const centerTechnicalEl = el('center-technical');
+  const centerOutputEl = el('center-output');
   const centerDocsEl = el('center-docs');
   const editorPaneEl = el('editor-pane');
   const previewEl = el('view-preview');
   const centerTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.center-tab'));
   const techTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.tech-tab'));
+  const outputTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.output-tab'));
   const docsTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.docs-tab'));
 
   // Pure chrome: surface the active center panel + its technical sub-view and mark the tabs, all read
@@ -1370,31 +1376,30 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     const isSplit = centerLayout.panes.length >= 2;
     const center = activeCenter();
     const tech = activeTech();
+    const output = activeOutput();
     const docs = activeDocs();
 
     if (isSplit) {
       // In split mode the visibility of center-host elements is driven by which pane they live in;
       // hide/show is NOT controlled here — updateCenterSplitLayout handles the DOM move + each pane's
       // .center-pane-content is the new containing block. We still need to hide/show the sub-views
-      // within the technical and docs panes though.
+      // within the technical/output/docs panes though.
       updateCenterSplitLayout();
     } else {
       // Single-pane: the classic hide/show path.
       centerVisualEl.hidden = center !== 'visual';
       centerTechnicalEl.hidden = center !== 'technical';
+      centerOutputEl.hidden = center !== 'output';
       centerDocsEl.hidden = center !== 'docs';
       // The AI assistant is no longer a center pane — it lives in the right rail (selectRightView).
     }
 
-    // The bottom strip (Problems/Events/Relationships/Context Map/Terminal) is GLOBAL: it serves every
-    // center view and is hidden only by its own collapse toggle (#diag-collapse), never by the active
-    // view. (Previously hidden on Documentation + Assistant for full-height reading/chat; the collapse
-    // control reclaims that height on demand instead.)
+    // The bottom strip (Problems/Events/Relationships/Terminal/Review) is GLOBAL: it serves every center
+    // view and is hidden only by its own collapse toggle (#diag-collapse), never by the active view.
     diagEl.hidden = false;
-    // …but on a NARROW viewport the two reading-heavy views (Documentation, Assistant) DEFAULT the strip
-    // collapsed so the reading/chat pane keeps full height on a phone (#475). Re-evaluated on every center
-    // switch and gated so an explicit user collapse preference always wins; desktop + Visual/Code keep the
-    // expanded default. Only the strip's *default collapse* changes here — its global visibility (above) does not.
+    // …but on a NARROW viewport the reading-heavy Documentation view DEFAULTS the strip collapsed so the
+    // reading pane keeps full height on a phone (#475). Re-evaluated on every center switch and gated so an
+    // explicit user collapse preference always wins; desktop + the working views keep the expanded default.
     applyDefaultDiagCollapsed();
     for (const t of centerTabs) t.setAttribute('aria-selected', String(t.dataset.center === center));
     // In split mode, a sub-view must be visible when ANY pane shows its parent center panel —
@@ -1404,10 +1409,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       ? centerLayout.panes.some((p) => p.view === 'technical')
       : center === 'technical';
     editorPaneEl.hidden = !(techVisible && tech === 'editor');
-    previewEl.hidden = !(techVisible && tech === 'preview');
-    checkView.hidden = !(techVisible && tech === 'check');
     scenariosView.hidden = !(techVisible && tech === 'scenarios');
     for (const t of techTabs) t.setAttribute('aria-selected', String(t.dataset.tech === tech));
+    // Output sub-views: Generated (emitted source), Compatibility (the version check) and the Context Map.
+    const outputVisible = isSplit
+      ? centerLayout.panes.some((p) => p.view === 'output')
+      : center === 'output';
+    previewEl.hidden = !(outputVisible && output === 'generated');
+    checkView.hidden = !(outputVisible && output === 'compatibility');
+    contextMapView.hidden = !(outputVisible && output === 'contextmap');
+    for (const t of outputTabs) t.setAttribute('aria-selected', String(t.dataset.output === output));
     // Documentation sub-views: Glossary (the ubiquitous language), Decisions (the ADR list) and Notes.
     const docsVisible = isSplit
       ? centerLayout.panes.some((p) => p.view === 'docs')
@@ -1436,6 +1447,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         // Trigger any lazy loaders for the newly visible view (now always the focused pane).
         if (view === 'visual' && appStore.getState().isStale('diagrams')) void loadDiagrams();
         else if (view === 'technical') ensureTechLoaded();
+        else if (view === 'output') ensureOutputLoaded();
         else if (view === 'docs') ensureDocsLoaded();
       },
       onPaneFocus: (paneId: string) => {
@@ -1459,6 +1471,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     applyCenterChrome();
     if (view === 'visual' && appStore.getState().isStale('diagrams')) void loadDiagrams();
     else if (view === 'technical') ensureTechLoaded();
+    else if (view === 'output') ensureOutputLoaded();
     else if (view === 'docs') ensureDocsLoaded();
   }
 
@@ -1498,14 +1511,30 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     ensureTechLoaded();
   }
 
-  // Lazy-load the active technical sub-view: the emitted preview is the only model-derived one; the
-  // editor is live and the check is on-demand. (The assistant is its own center pane now — see
-  // ensureAssistantShown.)
+  // Lazy-load the active Code sub-view. The editor is live (group-A CodeMirror, always mounted); only the
+  // scenario runner needs a refresh on show. The compiler-produced surfaces (Generated / Compatibility /
+  // Context Map) moved to the Output view — see ensureOutputLoaded.
   function ensureTechLoaded(): void {
     if (activeCenter() !== 'technical') return;
-    if (activeTech() === 'preview' && appStore.getState().isStale('preview')) void loadPreview();
-    else if (activeTech() === 'scenarios') deps.ensureScenarios?.().refresh();
-    else if (activeTech() === 'check') renderCheckIdleIfEmpty();
+    if (activeTech() === 'scenarios') deps.ensureScenarios?.().refresh();
+  }
+
+  function selectOutput(view: OutputTab): void {
+    // setOutput sets output AND forces center='output' in one transition, so the tab + pane never disagree.
+    appStore.getState().setOutput(view);
+    applyCenterChrome();
+    ensureOutputLoaded();
+  }
+
+  // Lazy-load the active Output sub-view: the emitted preview is model-derived (stale-gated), the
+  // compatibility check is on-demand (idle state until a baseline is picked), and the context map is the
+  // model-derived graph/table (stale-gated) relocated here from the bottom panel.
+  function ensureOutputLoaded(): void {
+    if (activeCenter() !== 'output') return;
+    const output = activeOutput();
+    if (output === 'generated' && appStore.getState().isStale('preview')) void loadPreview();
+    else if (output === 'compatibility') renderCheckIdleIfEmpty();
+    else if (output === 'contextmap' && appStore.getState().isStale('contextmap')) void loadContextMapPanel();
   }
 
   // Surface the Documentation center tab (the "Docs" mode focus and the rail's "Ubiquitous Language"
@@ -1514,11 +1543,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     selectDocsTab('glossary');
   }
 
-  // The Context Map lives in the bottom strip, which is now visible in every center view, so opening it
-  // is just a bottom-tab switch from wherever the user is — selectBottomTab expands the strip if it's
-  // collapsed. (It used to leave Documentation first, because the strip was hidden there.)
+  // The Context Map is the contextmap sub-view of the Output center pane now — opening it is a center
+  // switch (selectOutput forces center='output' and lazy-loads the graph if stale).
   function focusContextMap(): void {
-    selectBottomTab('contextmap');
+    selectOutput('contextmap');
   }
 
   // Repaint the always-visible left rail (Explorer + Overview + the right-rail Properties inspector) +
@@ -1566,6 +1594,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
   for (const t of techTabs) {
     t.addEventListener('click', () => selectTech(t.dataset.tech as TechView));
+  }
+  for (const t of outputTabs) {
+    t.addEventListener('click', () => selectOutput(t.dataset.output as OutputTab));
   }
   for (const t of docsTabs) {
     t.addEventListener('click', () => selectDocsTab(t.dataset.docs as DocsView));
@@ -1775,7 +1806,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   async function runCheck(): Promise<void> {
     if (!platform.canOpenFolders) {
       docMessage(checkView, 'Selecting a baseline folder needs a Chromium-based browser.', 'error');
-      selectTech('check');
+      selectOutput('compatibility');
       return;
     }
     let folder: string | null;
@@ -1783,11 +1814,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       folder = await platform.pickFolder('Select baseline model folder');
     } catch (e) {
       docMessage(checkView, 'Could not open the folder picker: ' + String(e), 'error');
-      selectTech('check');
+      selectOutput('compatibility');
       return;
     }
     if (!folder) return; // cancelled — abort silently
-    selectTech('check');
+    selectOutput('compatibility');
     docMessage(checkView, 'Checking against baseline…');
     try {
       // The browser has no server-side filesystem: read the baseline sources here and pass them to the
@@ -1806,7 +1837,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
 
   // --- emitted-code preview --------------------------------------------------
   let currentTarget: PreviewTarget = deps.initialTarget;
-  const previewTabEl = el<HTMLButtonElement>('tech-tab-preview');
+  const previewTabEl = el<HTMLButtonElement>('output-tab-generated');
 
   function setTarget(target: PreviewTarget): void {
     currentTarget = target;
@@ -1866,7 +1897,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // A destination-language switch re-emits ONLY the preview (not a model edit), so mark just the
     // 'preview' key stale — a single-key invalidate that leaves every other surface fresh.
     appStore.getState().invalidate('preview');
-    if (activeCenter() === 'technical' && activeTech() === 'preview') void loadPreview();
+    if (activeCenter() === 'output' && activeOutput() === 'generated') void loadPreview();
   }
 
   // --- bottom panel (Problems / Events / Relationships / Context Map, #144) --
@@ -1943,7 +1974,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     diagBodyEl.hidden = tab !== 'problems';
     eventsPanel.hidden = tab !== 'events';
     relationshipsPanel.hidden = tab !== 'relationships';
-    contextMapView.hidden = tab !== 'contextmap';
     terminalPanel.hidden = tab !== 'terminal';
     reviewPanel.hidden = tab !== 'review';
     diagCountEl.hidden = tab !== 'problems';
@@ -1994,7 +2024,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function ensureBottomLoaded(tab: BottomTab): void {
     if (tab === 'events' && appStore.getState().isStale('events')) void loadEventsPanel();
     if (tab === 'relationships' && appStore.getState().isStale('relationships')) void loadRelationshipsPanel();
-    if (tab === 'contextmap' && appStore.getState().isStale('contextmap')) void loadContextMapPanel();
     // The terminal panel is created lazily by ide.ts the first time its tab is shown (mirrors the
     // assistant/scenarios panels); fit() reflows xterm now that the panel has layout. Desktop-only —
     // the browser host omits ensureTerminal and the panel shows its placeholder.
@@ -2294,6 +2323,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     selectCenter,
     setAxis,
     selectTech,
+    selectOutput,
     selectDocsTab,
     selectBottomTab,
     selectRight,

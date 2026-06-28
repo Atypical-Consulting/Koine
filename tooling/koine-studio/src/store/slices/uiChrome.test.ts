@@ -245,9 +245,17 @@ describe('center layout', () => {
 
   test('setTech sets tech sub-view AND focused pane view to "technical"', () => {
     const s = make();
-    s.getState().setTech('preview');
-    expect(s.getState().tech).toBe('preview');
+    s.getState().setTech('scenarios');
+    expect(s.getState().tech).toBe('scenarios');
     expect(s.getState().center).toBe('technical');
     expect(s.getState().centerLayout.panes[0].view).toBe('technical');
+  });
+
+  test('setOutput sets the output sub-view AND focused pane view to "output"', () => {
+    const s = make();
+    s.getState().setOutput('compatibility');
+    expect(s.getState().output).toBe('compatibility');
+    expect(s.getState().center).toBe('output');
+    expect(s.getState().centerLayout.panes[0].view).toBe('output');
   });
 });

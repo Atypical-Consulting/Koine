@@ -14,6 +14,7 @@
 
 #center-tabs,
 #tech-tabs,
+#output-tabs,
 #docs-tabs {
   flex: 0 0 auto;
   display: flex;
@@ -28,6 +29,7 @@
 
 .center-tab,
 .tech-tab,
+.output-tab,
 .docs-tab {
   position: relative;
   flex: 0 0 auto;
@@ -67,6 +69,7 @@
 }
 
 .tech-tab,
+.output-tab,
 .docs-tab {
   font-size: var(--koi-text-sm);
   padding: var(--koi-space-2) var(--koi-space-2-5) var(--koi-space-2-25);
@@ -123,8 +126,9 @@
   }
 }
 
-/* The technical + documentation panes stack a sub-tab strip above their sub-views. */
+/* The technical / output / documentation panes stack a sub-tab strip above their sub-views. */
 #center-technical,
+#center-output,
 #center-docs {
   display: flex;
   flex-direction: column;
@@ -157,6 +161,7 @@
 }
 
 #tech-body,
+#output-body,
 #docs-body {
   flex: 1 1 auto;
   min-height: 0;
