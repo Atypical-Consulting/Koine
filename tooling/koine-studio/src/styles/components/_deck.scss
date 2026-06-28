@@ -182,6 +182,13 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+  // Contain the cards' z-indexes (cards z-2, divider z-6, focus ring z-4) inside the stage's OWN
+  // stacking context. Without this, no ancestor up to <html> forms a stacking context, so a card's
+  // positive z-index leaks into the ROOT layer and paints OVER the routed Home overlay (#home-root is
+  // position:fixed; z-index:auto). The old .center-host had no z-index, so Home covered it for free;
+  // isolating the stage restores that — it now sits at the auto level and #home-root (later in the DOM)
+  // paints above it.
+  isolation: isolate;
   background: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--koi-muted) 15%, transparent) 1px, transparent 0);
   background-size: 26px 26px;
 
