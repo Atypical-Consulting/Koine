@@ -22,6 +22,13 @@ may include breaking changes.
   never ship silently again.
 
 ### Added
+- **Koine Studio — Settings is now a gear-launched center page (Visual/JSON).** The toolbar gear opens
+  Settings as a transient center view (a peer of Visual/Code/Documentation) rather than a modal, with a
+  **Visual/JSON** segmented toggle in the page header. The Visual side is the same two-pane preference form
+  as before; the new **JSON** side is a schema-validated, editable `settings.json` whose valid edits
+  live-apply through the very same `onChange` hook the Visual controls commit through (an invalid document
+  surfaces a diagnostics strip and is never saved). The encrypted AI API key stays encrypted and never
+  appears in the JSON — it is stripped from the serialized document and re-injected on save.
 - **Playground — graceful boot degradation (watchdog + main-thread fallback).** The marketing-site
   Playground now survives a worker boot that goes wrong for any reason (a future runtime regression, an
   exotic browser, a corrupted cached bundle), not just the #492 channel-clobber. The wasm worker carries
