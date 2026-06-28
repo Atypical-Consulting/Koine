@@ -107,6 +107,11 @@ export interface UiChromeSlice {
   setCenterLayout(layout: CenterLayout): void;
   /** Add a second pane (clone of the focused pane) with the given orientation. */
   splitCenter(orientation: 'row' | 'column'): void;
+  /** Replace the layout with one pane per view, in order — the engine behind the blessed presets
+   *  (e.g. Code ⟷ Canvas = ['technical','visual']). Each view appears once (the center hosts are
+   *  single DOM elements), sizes are evenly split, and the first pane takes focus. A single-view list
+   *  collapses to one pane (equivalent to Reset). */
+  setCenterPreset(views: CenterView[], orientation: 'row' | 'column'): void;
   /** Change the view shown in a specific pane. */
   setPaneView(paneId: string, view: CenterView): void;
   /** Update fractional sizes; normalises the array length to match the current pane count. */
@@ -178,6 +183,18 @@ export function createUiChromeSlice(
       const panes = [...centerLayout.panes, { id: newId, view: newView }];
       const sizes = panes.map(() => 1 / panes.length);
       set({ centerLayout: { orientation, panes, sizes, focusedPaneId: centerLayout.focusedPaneId } });
+    },
+    setCenterPreset: (views, orientation) => {
+      // Dedupe while preserving order — two panes can't share a center host (single DOM element each).
+      const seen = new Set<CenterView>();
+      const uniqueViews = views.filter((v) => (seen.has(v) ? false : (seen.add(v), true)));
+      const ordered = uniqueViews.length ? uniqueViews : ['visual' as CenterView];
+      const panes = ordered.map((view) => ({ id: newPaneId(), view }));
+      const sizes = panes.map(() => 1 / panes.length);
+      set({
+        centerLayout: { orientation, panes, sizes, focusedPaneId: panes[0].id },
+        center: panes[0].view,
+      });
     },
     setPaneView: (paneId, view) => {
       const { centerLayout } = get();

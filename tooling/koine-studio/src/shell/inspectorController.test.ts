@@ -1289,6 +1289,39 @@ describe('createInspectorController — split center layout', () => {
     ctl.dispose();
   });
 
+  test('"Code ⟷ Canvas" preset button lays out a 2-pane Code|Canvas row', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    const btn = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Split center into Code and Canvas side by side"]',
+    );
+    expect(btn).not.toBeNull();
+
+    btn!.click();
+    await waitFor(() => {
+      const { centerLayout } = deps.store.getState();
+      expect(centerLayout.panes.map((p) => p.view)).toEqual(['technical', 'visual']);
+      expect(centerLayout.orientation).toBe('row');
+    });
+
+    ctl.dispose();
+  });
+
+  test('controller.splitCodeCanvas() applies the same preset (palette entry point)', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    ctl.splitCodeCanvas();
+    await waitFor(() => {
+      expect(deps.store.getState().centerLayout.panes.map((p) => p.view)).toEqual(['technical', 'visual']);
+    });
+
+    ctl.dispose();
+  });
+
   test('"Split →" button has aria-label "Split center pane right" and clicking it calls splitCenter("row")', async () => {
     const deps = makeDeps(makeLsp());
     const ctl = createInspectorController(deps);

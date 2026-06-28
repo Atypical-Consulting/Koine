@@ -278,7 +278,21 @@
   }
 
   &--reset {
-    color: var(--koi-accent, #1d76db);
+    color: var(--koi-accent);
+  }
+
+  // The blessed Code ⟷ Canvas preset — accent-tinted so it reads as the primary, recommended split
+  // among the generic Split →/↓ controls. Quiet by default (a tinted border), filled on hover.
+  &--preset {
+    color: var(--koi-accent);
+    border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
+    font-weight: 600;
+
+    &:hover {
+      background: var(--koi-accent);
+      color: var(--koi-on-accent, #fff);
+      border-color: var(--koi-accent);
+    }
   }
 }
 

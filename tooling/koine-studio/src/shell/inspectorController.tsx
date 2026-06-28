@@ -259,6 +259,8 @@ export interface InspectorController {
   /** Reveal a right-rail view (Properties / AI Chat / Rules / Notes / Source Control), expanding the rail
    *  if collapsed. Palette commands (Show AI Chat, Explain this construct) route through here. */
   selectRight(view: RightView): void;
+  /** Apply the blessed Code ⟷ Canvas split preset (the .koi text and the live diagram side by side). */
+  splitCodeCanvas(): void;
 
   // Loaders + lifecycle ide.ts still triggers (theme flip, prefs target change, boot, server restart).
   loadPreview(): Promise<void>;
@@ -323,17 +325,30 @@ function el<T extends HTMLElement>(id: string): T {
 
 function SplitControls({
   hasSplit,
+  onCodeCanvas,
   onSplitRow,
   onSplitColumn,
   onReset,
 }: {
   hasSplit: boolean;
+  onCodeCanvas(): void;
   onSplitRow(): void;
   onSplitColumn(): void;
   onReset(): void;
 }) {
   return (
     <div class="center-split-btns" aria-label="Center layout controls">
+      {/* The blessed preset: the .koi text and the live domain diagram side by side — the one layout
+          that shows Koine's round-trip. One click, so the modeller doesn't assemble it by hand. */}
+      <button
+        type="button"
+        class="center-split-btn center-split-btn--preset"
+        title="Show the code and the diagram side by side"
+        aria-label="Split center into Code and Canvas side by side"
+        onClick={onCodeCanvas}
+      >
+        Code ⟷ Canvas
+      </button>
       <button
         type="button"
         class="center-split-btn"
@@ -1678,12 +1693,23 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // changes (via the centerLayout subscription below) so the Reset button appears/disappears correctly.
   let splitControlsHost: HTMLElement | null = null;
 
+  // The blessed preset: Code and Canvas side by side — the one layout that shows Koine's round-trip
+  // (clicking a node reveals its `.koi` in the adjacent pane + highlights it). Shared by the tab-bar
+  // button and the palette command so they can't drift.
+  function splitCodeCanvas(): void {
+    appStore.getState().setCenterPreset(['technical', 'visual'], 'row');
+    // The subscription already applied the chrome (synchronous on set); make sure the canvas pane has
+    // rendered nodes (the editor pane is the always-live group-A CodeMirror).
+    if (appStore.getState().isStale('diagrams')) void loadDiagrams();
+  }
+
   function renderSplitControls(): void {
     if (!splitControlsHost) return;
     const { centerLayout } = appStore.getState();
     render(
       <SplitControls
         hasSplit={centerLayout.panes.length >= 2}
+        onCodeCanvas={splitCodeCanvas}
         onSplitRow={() => { appStore.getState().splitCenter('row'); }}
         onSplitColumn={() => { appStore.getState().splitCenter('column'); }}
         onReset={() => { appStore.getState().setCenterLayout(DEFAULT_CENTER_LAYOUT); }}
@@ -2271,6 +2297,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     selectDocsTab,
     selectBottomTab,
     selectRight,
+    splitCodeCanvas,
     loadPreview,
     loadDiagrams,
     setTarget,

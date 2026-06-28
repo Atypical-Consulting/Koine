@@ -111,6 +111,32 @@ describe('center layout', () => {
     }
   });
 
+  test('setCenterPreset(["technical","visual"],"row") yields the Code ⟷ Canvas layout', () => {
+    const s = make();
+    s.getState().setCenterPreset(['technical', 'visual'], 'row');
+    const { centerLayout } = s.getState();
+    expect(centerLayout.panes.map((p) => p.view)).toEqual(['technical', 'visual']);
+    expect(centerLayout.orientation).toBe('row');
+    expect(centerLayout.sizes).toEqual([0.5, 0.5]);
+    // The first pane takes focus, and the legacy `center` mirror follows it.
+    expect(centerLayout.focusedPaneId).toBe(centerLayout.panes[0].id);
+    expect(s.getState().center).toBe('technical');
+  });
+
+  test('setCenterPreset dedupes repeated views (two panes can\'t share one center host)', () => {
+    const s = make();
+    s.getState().setCenterPreset(['visual', 'visual', 'docs'], 'row');
+    expect(s.getState().centerLayout.panes.map((p) => p.view)).toEqual(['visual', 'docs']);
+  });
+
+  test('setCenterPreset with a single view collapses to one pane (like Reset)', () => {
+    const s = make();
+    s.getState().splitCenter('row'); // go to 2 panes first
+    s.getState().setCenterPreset(['visual'], 'row');
+    expect(s.getState().centerLayout.panes).toHaveLength(1);
+    expect(s.getState().centerLayout.sizes).toEqual([1]);
+  });
+
   test('setPaneView changes only the targeted pane view', () => {
     const s = make();
     s.getState().splitCenter('row');

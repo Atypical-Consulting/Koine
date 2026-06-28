@@ -2291,6 +2291,7 @@ export function init(): () => void {
       { id: 'view-decisions', title: 'Show Decisions (ADRs)', group: 'Workspace', run: () => controller.selectDocsTab('adr') },
       { id: 'view-notes', title: 'Show Notes', group: 'Workspace', run: () => controller.selectDocsTab('notes') },
       { id: 'view-diagrams', title: 'Show Visual Editor', group: 'Workspace', run: () => controller.selectCenter('visual') },
+      { id: 'split-code-canvas', title: 'Split: Code ⟷ Canvas', group: 'Workspace', run: () => controller.splitCodeCanvas() },
       { id: 'view-contextmap', title: 'Show Context Map', group: 'Workspace', run: () => controller.selectBottomTab('contextmap') },
       { id: 'view-check', title: 'Show Compatibility Check', group: 'Workspace', run: () => controller.selectTech('check') },
       { id: 'view-scenarios', title: 'Show Scenario Runner', group: 'Workspace', run: () => controller.selectTech('scenarios') },
