@@ -149,6 +149,25 @@ describe('center layout', () => {
     expect(updated.find((p) => p.id === secondId)!.view).toBe('docs');
   });
 
+  test('selectPaneView sets focus AND the pane view in ONE transition (no per-mutation re-layout)', () => {
+    const s = make();
+    s.getState().splitCenter('row'); // panes: [visual (focused), technical]
+    const [first, second] = s.getState().centerLayout.panes;
+    let notifications = 0;
+    const unsub = s.subscribe(() => notifications++);
+
+    s.getState().selectPaneView(second.id, 'docs');
+
+    // Exactly one store notification — focus + view changed atomically (the bug-1 churn fix).
+    expect(notifications).toBe(1);
+    const { centerLayout, center } = s.getState();
+    expect(centerLayout.focusedPaneId).toBe(second.id);
+    expect(centerLayout.panes.find((p) => p.id === second.id)!.view).toBe('docs');
+    expect(centerLayout.panes.find((p) => p.id === first.id)!.view).toBe('visual'); // other pane untouched
+    expect(center).toBe('docs');
+    unsub();
+  });
+
   test('resizeCenter updates sizes', () => {
     const s = make();
     s.getState().splitCenter('row');

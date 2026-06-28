@@ -349,7 +349,9 @@ function SplitControls({
         aria-label="Split center into Code and Canvas side by side"
         onClick={onCodeCanvas}
       >
-        Code ⟷ Canvas
+        <span>Code</span>
+        <span class="center-split-btn-arrow" aria-hidden="true">⟷</span>
+        <span>Canvas</span>
       </button>
       <button
         type="button"
@@ -1439,11 +1441,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       centerBodyEl,
       getLayout: () => appStore.getState().centerLayout,
       onPaneViewSelect: (paneId: string, view: CenterView) => {
-        // Focus the pane first so lazy-loader guards (which check focusedPaneId) always fire,
-        // even when the user clicks a tab in a non-focused pane (Bug 5 fix).
-        appStore.getState().focusPane(paneId);
-        appStore.getState().setPaneView(paneId, view);
-        applyCenterChrome();
+        // Focus + set-view in ONE store transition so the centerLayout subscription re-applies the split
+        // DOM exactly once. (focusPane() + setPaneView() were two sets → two full re-layouts → the OTHER
+        // panes visibly churned/refreshed.) The subscription runs applyCenterChrome synchronously here,
+        // before the lazy loaders below.
+        appStore.getState().selectPaneView(paneId, view);
         // Trigger any lazy loaders for the newly visible view (now always the focused pane).
         if (view === 'visual' && appStore.getState().isStale('diagrams')) void loadDiagrams();
         else if (view === 'technical') ensureTechLoaded();
@@ -1451,8 +1453,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         else if (view === 'docs') ensureDocsLoaded();
       },
       onPaneFocus: (paneId: string) => {
+        // focusPane() changes centerLayout, so the subscription re-applies the chrome — no explicit
+        // applyCenterChrome() needed (a second call just re-ran the whole split layout).
         appStore.getState().focusPane(paneId);
-        applyCenterChrome();
       },
       onResize: (sizes: number[]) => {
         appStore.getState().resizeCenter(sizes);

@@ -1127,6 +1127,34 @@ describe('createInspectorController — split center layout', () => {
     ctl.dispose();
   });
 
+  test('a per-pane tab is disabled when that view is already shown in another pane (no blank pane)', async () => {
+    // splitCenter from Visual yields [visual, technical]. Each view is a single DOM element, so a pane
+    // must not be able to switch to a view the other pane already shows (it would blank one of them).
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => expect(document.querySelectorAll('.center-split-pane').length).toBe(2));
+
+    const tabBy = (pane: Element, label: string) =>
+      [...pane.querySelectorAll<HTMLButtonElement>('.center-pane-tab')].find((b) => b.textContent === label)!;
+    const [paneA, paneB] = document.querySelectorAll('.center-split-pane'); // A=visual, B=technical
+
+    // In pane A (visual), the "Code" (technical) tab is disabled because pane B shows it — and vice versa.
+    expect(tabBy(paneA, 'Code').disabled).toBe(true);
+    expect(tabBy(paneB, 'Visual').disabled).toBe(true);
+    // Each pane's OWN view + the genuinely free views stay enabled.
+    expect(tabBy(paneA, 'Visual').disabled).toBe(false);
+    expect(tabBy(paneA, 'Docs').disabled).toBe(false);
+
+    // Clicking the disabled tab is a no-op — pane B stays on technical.
+    tabBy(paneA, 'Code').click();
+    expect(deps.store.getState().centerLayout.panes.map((p) => p.view)).toEqual(['visual', 'technical']);
+
+    ctl.dispose();
+  });
+
   test('clicking a view-selector button in pane B calls setPaneView (check via store state)', async () => {
     const deps = makeDeps(makeLsp());
     const ctl = createInspectorController(deps);

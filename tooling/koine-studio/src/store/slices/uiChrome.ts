@@ -124,6 +124,10 @@ export interface UiChromeSlice {
   setCenterPreset(views: CenterView[], orientation: 'row' | 'column'): void;
   /** Change the view shown in a specific pane. */
   setPaneView(paneId: string, view: CenterView): void;
+  /** Focus a pane AND set its view in ONE state transition — the per-pane tab-click path. Doing both in
+   *  a single `set` means the shell re-applies the split DOM once, not once per mutation, so changing one
+   *  pane's view never churns (and visibly refreshes) the other panes. */
+  selectPaneView(paneId: string, view: CenterView): void;
   /** Update fractional sizes; normalises the array length to match the current pane count. */
   resizeCenter(sizes: number[]): void;
   /** Remove a pane. No-op when only one pane remains. */
@@ -219,6 +223,14 @@ export function createUiChromeSlice(
       const panes = centerLayout.panes.map((p) => (p.id === paneId ? { ...p, view } : p));
       const focused = panes.find((p) => p.id === centerLayout.focusedPaneId) ?? panes[0];
       set({ centerLayout: { ...centerLayout, panes }, center: focused.view });
+    },
+    selectPaneView: (paneId, view) => {
+      // Focus + set-view in ONE transition, so the shell re-applies the split DOM exactly once. Doing
+      // focusPane() then setPaneView() (two sets) made the centerLayout subscription fire twice, each
+      // re-running applySplitPaneLayout + applyCenterChrome — which visibly churned the OTHER panes.
+      const { centerLayout } = get();
+      const panes = centerLayout.panes.map((p) => (p.id === paneId ? { ...p, view } : p));
+      set({ centerLayout: { ...centerLayout, panes, focusedPaneId: paneId }, center: view });
     },
     resizeCenter: (sizes) => {
       const { centerLayout } = get();

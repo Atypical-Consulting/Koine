@@ -48,23 +48,32 @@ function PaneSelector({
   if (!pane) return null;
   return (
     <div class="center-pane-header" role="tablist" aria-label="Pane view">
-      {ALL_VIEWS.map((v) => (
-        <button
-          key={v}
-          type="button"
-          role="tab"
-          aria-selected={String(pane.view === v) as 'true' | 'false'}
-          class="center-pane-tab"
-          onClick={(e) => {
-            // Prevent the click from bubbling to the pane's own click handler,
-            // which would focus the pane (already done by onSelect) + applyCenterChrome.
-            e.stopPropagation();
-            onSelect(paneId, v);
-          }}
-        >
-          {VIEW_LABELS[v]}
-        </button>
-      ))}
+      {ALL_VIEWS.map((v) => {
+        // Each center view is a single DOM element (one #center-visual / #center-technical / …), so two
+        // panes can't show the same view — the element can only live in one pane, leaving the other blank.
+        // Disable a view that another pane already shows (this pane's own view stays selectable).
+        const shownElsewhere = pane.view !== v && layout.panes.some((p) => p.id !== paneId && p.view === v);
+        return (
+          <button
+            key={v}
+            type="button"
+            role="tab"
+            aria-selected={String(pane.view === v) as 'true' | 'false'}
+            class="center-pane-tab"
+            disabled={shownElsewhere}
+            title={shownElsewhere ? `${VIEW_LABELS[v]} is open in the other pane` : undefined}
+            onClick={(e) => {
+              // Prevent the click from bubbling to the pane's own click handler,
+              // which would focus the pane (already done by onSelect) + applyCenterChrome.
+              e.stopPropagation();
+              if (shownElsewhere) return;
+              onSelect(paneId, v);
+            }}
+          >
+            {VIEW_LABELS[v]}
+          </button>
+        );
+      })}
     </div>
   );
 }
