@@ -18,6 +18,14 @@ vi.mock('@/settings/persistence', async (orig) => ({
   loadSettings,
 }));
 
+// Theme has its own live-apply path (dataset + listeners) outside cb.onChange/applyAppearance; spy on it
+// so the JSON apply path's explicit setTheme() call is observable. Everything else in the module stays real.
+const { setTheme } = vi.hoisted(() => ({ setTheme: vi.fn() }));
+vi.mock('@/settings/theme', async (orig) => ({
+  ...(await orig<typeof import('@/settings/theme')>()),
+  setTheme,
+}));
+
 import { createSettingsPage, type SettingsPageHandle } from './settingsPage';
 
 const MODE_KEY = 'koine.studio.settingsEditorMode';
@@ -63,6 +71,10 @@ describe('createSettingsPage', () => {
     vi.useFakeTimers();
     saveSettings.mockClear();
     cb.onChange.mockClear();
+    setTheme.mockClear();
+    // Re-establish the default loaded settings each test (a test may override loadSettings to simulate a
+    // change from another surface).
+    loadSettings.mockImplementation(() => ({ ...DEFAULT_SETTINGS, aiApiKey: 'sk-LIVE' }));
     document.body.innerHTML = '';
     header = makeHeader();
     body = document.createElement('div');
@@ -120,6 +132,31 @@ describe('createSettingsPage', () => {
     expect(saved.aiApiKey).toBe('sk-LIVE'); // secret re-injected from loadSettings()
     // Live-applied through the same cb.onChange hook the Visual form uses.
     expect(cb.onChange).toHaveBeenCalledWith(saved);
+  });
+
+  it('a JSON theme edit applies the theme live via setTheme (cb.onChange does not cover theme)', () => {
+    handle = createSettingsPage({ header, body }, cb);
+    jsonRadio(header).click();
+    typeJson(body, '{ "theme": "light" }');
+    vi.advanceTimersByTime(500);
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+    // Theme is applied through its own path, not just cb.onChange — without this the studio wouldn't re-skin.
+    expect(setTheme).toHaveBeenCalledWith('light');
+  });
+
+  it('refresh() re-seeds the JSON editor when settings changed from another surface', () => {
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cb);
+    const read = (): string =>
+      EditorView.findFromDOM(body.querySelector('.cm-editor') as HTMLElement)!.state.doc.toString();
+    expect(read()).toContain(`"fontSize": ${DEFAULT_SETTINGS.fontSize}`);
+    // A setting changes elsewhere (toolbar/palette) while the page sits built but hidden.
+    loadSettings.mockImplementation(() => ({ ...DEFAULT_SETTINGS, aiApiKey: 'sk-LIVE', fontSize: 19 }));
+    handle.refresh();
+    expect(read()).toContain('"fontSize": 19');
+    // A programmatic re-seed is not a user edit: it must NOT schedule a persist.
+    vi.advanceTimersByTime(500);
+    expect(saveSettings).not.toHaveBeenCalled();
   });
 
   it('an invalid JSON edit shows a diagnostic and never persists', () => {

@@ -132,8 +132,10 @@ export interface PrefsPaneHandle {
  *  recorder/conflict state on close ({@link suspend}). Callers that only need teardown see the narrower
  *  {@link PrefsPaneHandle}. */
 interface MountedPrefsPane extends PrefsPaneHandle {
-  /** Repaint every control from the current Settings, optionally landing on a category id first. */
-  refresh(categoryId?: string): void;
+  /** Repaint every control from the current Settings and (re)start the MCP sidecar; optionally land on a
+   *  category id first. `focusTab` (default true) focuses the active category tab — the modal wants that on
+   *  open; the embedded center page passes false so re-showing it never steals focus from the page. */
+  refresh(categoryId?: string, focusTab?: boolean): void;
   /** Cancel any armed keybinding recorder + open conflict prompt (the modal's close-path cleanup). */
   suspend(): void;
 }
@@ -1483,10 +1485,14 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
   }
 
   // The pane's "open" state: repaint every control from the current Settings, refresh the About card,
-  // back-fill the workspace-root + secret fields, (re)start the MCP sidecar when enabled, and reveal the
-  // active category. `focusTab` moves focus onto the active tab — wanted when a MODAL opens, but not when
-  // the pane is embedded in a page (it would steal focus on mount). Lifted out of the old modal onOpen.
-  function applyOpenState(focusTab: boolean): void {
+  // back-fill the workspace-root + secret fields, (re)start the MCP sidecar when shown, and reveal the
+  // active category. Two independent flags:
+  //   • `shown`    — the surface is actually being presented to the user (modal open, or page show), so
+  //                  it's safe to (re)start the opt-in MCP sidecar. False at the bare mount/embed, so a
+  //                  never-shown Settings surface never spawns a background process.
+  //   • `focusTab` — move focus onto the active category tab. Wanted when a MODAL opens (focus into the
+  //                  dialog), but NOT for the embedded center page (it would steal focus from the page).
+  function applyOpenState({ shown, focusTab }: { shown: boolean; focusTab: boolean }): void {
     disarmReset();
     const s = loadSettings();
     populate(s);
@@ -1497,12 +1503,11 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     void whenSecretsReady().then(() => {
       if (aiKeyInput.value === '') aiKeyInput.value = loadSettings().aiApiKey;
     });
-    // Only the desktop, only when the user has enabled MCP, AND only when the surface is actually being
-    // shown (`focusTab`) does this (re)start the sidecar — the server is opt-in, so a never-shown Settings
-    // surface must never spawn a background process. The modal builds this pane at init (long before its
-    // first open) via the mount-time applyOpenState(false), so probing/launching there would break that
-    // invariant; the real open path (refresh → applyOpenState(true)) is what brings the sidecar up.
-    if (focusTab && s.mcpEnabled && cb.mcpHostable !== false) {
+    // Only the desktop, only when the user has enabled MCP, AND only when the surface is actually shown
+    // does this (re)start the sidecar — the server is opt-in, so a never-shown Settings surface must never
+    // spawn a background process. The modal builds this pane at init (long before its first open) via the
+    // mount-time applyOpenState({ shown: false }), so probing/launching there would break that invariant.
+    if (shown && s.mcpEnabled && cb.mcpHostable !== false) {
       const gen = ++mcpGen;
       void resolveMcpEndpoint().then((url) => {
         if (gen === mcpGen) showMcpStarted(url);
@@ -1515,15 +1520,17 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     selectCategory(activeIndex, focusTab); // keep the last-open category across opens
   }
 
-  // Repaint from the current Settings, optionally landing on a named category first. The reusing modal
-  // calls this on every open (mirroring the old onOpen): an 'about'-style id lands on that tab, a no-arg
-  // call keeps the last-active one. Focuses the active tab, matching the modal's open-focus behavior.
-  function refresh(categoryId?: string): void {
+  // Repaint from the current Settings, optionally landing on a named category first, and (since the surface
+  // is now shown) (re)start the MCP sidecar. The reusing modal calls this on every open (mirroring the old
+  // onOpen): an 'about'-style id lands on that tab, a no-arg call keeps the last-active one. `focusTab`
+  // defaults true (the modal focuses the tab on open); the embedded center page passes false so re-showing
+  // it never steals focus from the page.
+  function refresh(categoryId?: string, focusTab = true): void {
     if (categoryId) {
       const i = categories.findIndex((c) => c.id === categoryId);
       if (i >= 0) activeIndex = i;
     }
-    applyOpenState(true);
+    applyOpenState({ shown: true, focusTab });
   }
 
   // Cancel any in-flight transient state: an armed keybinding recorder (whose document-level capture
@@ -1548,8 +1555,9 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
   }
 
   // Populate immediately from the current Settings so an embedded pane shows live values without the
-  // caller wiring anything; focus is NOT moved (that would steal it from the surrounding page).
-  applyOpenState(false);
+  // caller wiring anything; the surface is NOT yet shown (so no sidecar spawns) and focus is NOT moved
+  // (that would steal it from the surrounding page).
+  applyOpenState({ shown: false, focusTab: false });
 
   return { destroy, refresh, suspend };
 }

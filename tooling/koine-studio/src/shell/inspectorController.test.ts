@@ -328,6 +328,34 @@ describe('createInspectorController — center switching', () => {
     expect(saveWorkspaceCenter).not.toHaveBeenCalled();
   });
 
+  test('selecting the transient Settings view never persists it (would clobber the real last view)', () => {
+    const saveWorkspaceCenter = vi.fn();
+    const ctl = createInspectorController(makeDeps(makeLsp(), { saveWorkspaceCenter }));
+    ctl.init();
+
+    ctl.selectCenter('technical'); // a real view IS persisted
+    expect(saveWorkspaceCenter).toHaveBeenLastCalledWith('technical');
+    saveWorkspaceCenter.mockClear();
+    // Gear-launched Settings is transient: it must NOT overwrite the persisted 'technical', so a reload
+    // restores Code, not Visual. isValidCenter rejects 'settings', so the write is skipped.
+    ctl.selectCenter('settings');
+    expect(saveWorkspaceCenter).not.toHaveBeenCalled();
+  });
+
+  test('selecting Settings does not persist a centerLayout containing the transient view', () => {
+    const saveWorkspaceCenterLayout = vi.fn();
+    const ctl = createInspectorController(makeDeps(makeLsp(), { saveWorkspaceCenterLayout }));
+    ctl.init();
+
+    ctl.selectCenter('technical'); // a valid layout (focused pane = technical) IS persisted
+    expect(saveWorkspaceCenterLayout).toHaveBeenCalled();
+    saveWorkspaceCenterLayout.mockClear();
+    // selectCenter('settings') writes 'settings' into the focused pane (setCenter); that layout fails
+    // isValidCenterLayout and would be rejected WHOLESALE on restore, so it must not be persisted.
+    ctl.selectCenter('settings');
+    expect(saveWorkspaceCenterLayout).not.toHaveBeenCalled();
+  });
+
   test('a persisted center restores it on boot (technical)', () => {
     const ctl = createInspectorController(makeDeps(makeLsp(), { loadWorkspaceCenter: () => 'technical' }));
     ctl.init();

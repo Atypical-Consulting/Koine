@@ -1758,7 +1758,13 @@ export function init(): () => void {
   // page live-applies through the identical onChange hook.
   let settingsPage: SettingsPageHandle | null = null;
   function ensureSettingsPage(): void {
-    if (settingsPage) return;
+    if (settingsPage) {
+      // Already built — re-sync from the live settings on re-open (the modal it replaced repainted on
+      // every open), so a theme/setting changed from the toolbar or palette while Settings sat hidden
+      // shows correctly when the gear brings it back.
+      settingsPage.refresh();
+      return;
+    }
     settingsPage = createSettingsPage(
       { header: el('settings-page-header'), body: el('settings-page-body') },
       prefsCallbacks,

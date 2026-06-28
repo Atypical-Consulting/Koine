@@ -12,6 +12,7 @@ import { mountPreferencesPane, type PrefsCallbacks } from '@/settings/prefs';
 import { createJsonSettingsEditor, type JsonSettingsEditor } from '@/editor/editor';
 import { settingsToJsonDoc, jsonDocToSettings } from '@/settings/settingsSchema';
 import { loadSettings, saveSettings } from '@/settings/persistence';
+import { setTheme } from '@/settings/theme';
 import { el } from '@/shared/el';
 
 /** Which representation the page is showing. Persisted so the last-used one is restored on reopen. */
@@ -24,6 +25,13 @@ const MODE_KEY = 'koine.studio.settingsEditorMode';
 const DEBOUNCE_MS = 350;
 
 export interface SettingsPageHandle {
+  /**
+   * Re-sync the active representation from the live settings — call on every (re)open, since settings can
+   * change from OTHER surfaces (the toolbar theme toggle, the command palette) while the page sits built
+   * but hidden. The Visual pane repaints; the JSON editor re-seeds (only when it diverges, so an in-flight
+   * valid edit isn't disturbed) and any stale diagnostics clear.
+   */
+  refresh(): void;
   /** Tear down the active pane/editor, clear the header toggle, and cancel any pending debounce. */
   destroy(): void;
 }
@@ -158,6 +166,10 @@ export function createSettingsPage(
     if (res.settings) {
       clearDiagnostics();
       saveSettings(res.settings);
+      // Theme has its OWN live-apply path (dataset + listeners) that cb.onChange/applyAppearance do not
+      // cover — mirror the Visual form's Theme control, which commits via setTheme. Without this a JSON
+      // theme edit would persist but never re-skin the studio.
+      setTheme(res.settings.theme);
       cb.onChange(res.settings); // the single live-apply hook the Visual form also commits through
     } else if (res.errors) {
       renderDiagnostics(res.errors); // surface the messages; do NOT persist
@@ -167,7 +179,9 @@ export function createSettingsPage(
   function buildBody(): void {
     if (mode === 'visual') {
       pane = mountPreferencesPane(hosts.body, cb);
-      pane.refresh(); // repaint from live settings + back-fill the secret
+      // Show the pane (repaint + start the MCP sidecar when enabled) but DON'T focus the category tab —
+      // this is an embedded center page, not a modal, so stealing focus onto a tab would be jarring.
+      pane.refresh(undefined, false);
     } else {
       // Seed from loadSettings() (the secret is already omitted by settingsToJsonDoc).
       editor = createJsonSettingsEditor(hosts.body, {
@@ -213,11 +227,33 @@ export function createSettingsPage(
     buildBody();
   }
 
+  // Re-sync the active representation from the live settings (see SettingsPageHandle.refresh). Called by
+  // the host on every (re)open so a change made elsewhere while the page sat hidden is reflected.
+  function refresh(): void {
+    if (mode === 'visual') {
+      pane?.refresh(undefined, false); // repaint from live settings; embedded, so don't steal focus
+    } else if (editor) {
+      // Re-seed only when the persisted document actually differs, so a re-open doesn't clobber an
+      // in-flight valid edit. A programmatic re-seed is not a user edit, so drop the onChange-scheduled
+      // re-apply it would otherwise trigger. Either way, clear any stale diagnostics.
+      const fresh = settingsToJsonDoc(loadSettings());
+      if (editor.getText() !== fresh) {
+        editor.setContent(fresh);
+        if (debounceTimer !== null) {
+          clearTimeout(debounceTimer);
+          debounceTimer = null;
+        }
+      }
+      clearDiagnostics();
+    }
+  }
+
   // Initial paint.
   paintToggle();
   buildBody();
 
   return {
+    refresh,
     destroy(): void {
       teardownBody();
       group.remove(); // clear the header toggle

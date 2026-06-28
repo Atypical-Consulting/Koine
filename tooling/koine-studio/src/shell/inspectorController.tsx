@@ -83,7 +83,7 @@ import { guardedLoad } from '@/shell/guardedLoad';
 import { createInspectorSheet, type InspectorSheet } from '@/shell/inspectorSheet';
 import { isNarrowViewport } from '@/shared/breakpoint';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
-import { DEFAULT_CENTER, DEFAULT_CENTER_LAYOUT, isValidCenter, type CenterLayout, type RightView } from '@/store/slices/uiChrome';
+import { DEFAULT_CENTER, DEFAULT_CENTER_LAYOUT, isValidCenter, isValidCenterLayout, type CenterLayout, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
 import { escapeHtml, fileUriToPath, formatAclMapping, renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
@@ -506,6 +506,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   let persistedCenter: CenterView = initialCenter;
   appStore.subscribe((s, prev) => {
     if (s.center === prev.center) return;
+    // Never persist a TRANSIENT view (e.g. the gear-launched Settings page): a reload must not restore it
+    // (isValidCenter rejects it), and writing it would clobber the user's real last view — so opening
+    // Settings then reloading would forget where they actually were. Leave the persisted value as-is.
+    if (!isValidCenter(s.center)) return;
     if (s.center !== persistedCenter) {
       persistedCenter = s.center;
       deps.saveWorkspaceCenter(s.center);
@@ -1700,8 +1704,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         updateCenterSplitLayout();
         applyCenterChrome();
         renderSplitControls();
-        // Persist the new layout so a reload restores the split state (Bug 3 fix).
-        deps.saveWorkspaceCenterLayout?.(s.centerLayout);
+        // Persist the new layout so a reload restores the split state (Bug 3 fix) — but only when it's
+        // restorable. Selecting the transient Settings view writes 'settings' into the focused pane
+        // (setCenter), making the layout fail isValidCenterLayout; persisting it would later be rejected
+        // WHOLESALE on restore, discarding the user's real split. Skip it; the last good layout stays.
+        if (isValidCenterLayout(s.centerLayout)) deps.saveWorkspaceCenterLayout?.(s.centerLayout);
       }
     },
   );
