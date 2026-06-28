@@ -9,57 +9,30 @@
   background: var(--koi-paper-2);
 }
 
-#right-tabs {
+/* The tool-window title header: a single line naming the active right view (Properties / Rules / Notes /
+   Source Control). The #right-strip icons are the switcher, so this is a static title, not a tab row — it
+   wears the studio's uppercase section-label idiom (matching the left rail's section heads). */
+#right-header {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: var(--koi-space-0-5);
-  padding: 0 var(--koi-space-2-5);
+  min-height: 2.25rem;
+  padding: 0 var(--koi-space-3);
   background: var(--koi-paper-2);
   border-bottom: 1px solid var(--koi-line);
-  overflow-x: auto;
-  overflow-y: hidden;
+}
 
-  .rtab {
-    position: relative;
-    flex: 0 0 auto;
-    background: transparent;
-    color: var(--koi-muted);
-    border: none;
-    padding: var(--koi-space-2-75) var(--koi-space-3) var(--koi-space-3);
-    font-family: var(--koi-font-body);
-    font-size: var(--koi-text-sm-plus);
-    font-weight: 500;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: color var(--koi-dur-base) ease;
-
-    /* The active tab is marked by a gradient underline that grows from the center. */
-    &::after {
-      content: '';
-      position: absolute;
-      left: 10px;
-      right: 10px;
-      bottom: -1px;
-      height: 2px;
-      border-radius: var(--koi-radius-2xs);
-      background: var(--koi-accent-grad);
-      transform: scaleX(0);
-      transition: transform var(--koi-dur-slow) ease;
-    }
-
-    &:hover {
-      color: var(--koi-fg);
-    }
-
-    &[aria-selected='true'] {
-      color: var(--koi-fg);
-
-      &::after {
-        transform: scaleX(1);
-      }
-    }
-  }
+#right-title {
+  margin: 0;
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--koi-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #right-body {
@@ -109,6 +82,41 @@
   &:focus-visible {
     outline: 2px solid var(--koi-accent);
     outline-offset: 1px;
+  }
+
+  /* Left-pointing label tooltip. The stripe hugs the viewport's right edge, so the bubble opens INWARD
+     (over #right) on hover/focus rather than off-screen to the right. aria-label still carries the
+     accessible name — this is a purely visual aid. The bubble escapes the stripe via #right-strip's
+     overflow: visible (set in _split.scss). The pressed-state accent bar owns ::before, so this is ::after. */
+  &[data-tooltip]::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    right: calc(100% + var(--koi-space-2));
+    top: 50%;
+    transform: translateY(-50%) translateX(var(--koi-space-1));
+    z-index: var(--koi-z-tooltip);
+    padding: var(--koi-space-1) var(--koi-space-2);
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius-xs);
+    box-shadow: 0 6px 18px -6px rgba(0, 0, 0, 0.35);
+    font-family: var(--koi-font-body);
+    font-size: var(--koi-text-2xs);
+    line-height: 1.2;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity var(--koi-dur-fast) ease, transform var(--koi-dur-fast) ease,
+      visibility var(--koi-dur-fast);
+  }
+
+  &:hover[data-tooltip]::after,
+  &:focus-visible[data-tooltip]::after {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(-50%) translateX(0);
   }
 
   &[aria-pressed='true'] {

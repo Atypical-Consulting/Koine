@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept 2 — Orbit</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* ---- Orbit: a keyboard-first focus rail. One surface fills the stage; a slim
+         icon rail on the center's edge switches it. Alt+1–4. Drag an icon onto
+         the stage to split. Live status dots ride the icons. ---- */
+  .orbit { flex: 1 1 auto; display: flex; min-height: 0; }
+  .orbit-rail {
+    flex: 0 0 56px;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 6px; padding: 10px 0;
+    background: var(--koi-paper-2);
+    border-right: 1px solid var(--koi-line);
+  }
+  .orbit-ic {
+    position: relative;
+    all: unset; cursor: pointer;
+    width: 44px; height: 44px; border-radius: var(--koi-radius);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    color: var(--koi-muted);
+    transition: color .14s ease, background .14s ease;
+  }
+  .orbit-ic svg { width: 20px; height: 20px; }
+  .orbit-ic .lbl { font-size: 8.5px; letter-spacing: .02em; }
+  .orbit-ic .kbd { position: absolute; top: 3px; right: 5px; font-size: 8px; color: var(--koi-muted); opacity: .5; }
+  .orbit-ic:hover { color: var(--koi-fg); background: color-mix(in srgb, var(--koi-fg) 7%, transparent); }
+  .orbit-ic.active { color: var(--koi-accent); background: color-mix(in srgb, var(--koi-accent) 13%, transparent); }
+  .orbit-ic.active::before {
+    content: ''; position: absolute; left: -10px; top: 9px; bottom: 9px; width: 3px;
+    border-radius: 0 3px 3px 0; background: var(--koi-accent);
+  }
+  .orbit-ic .sd { position: absolute; top: 7px; right: 9px; width: 7px; height: 7px; border-radius: 50%; background: var(--koi-error); box-shadow: 0 0 0 2px var(--koi-paper-2); }
+  .orbit-ic[draggable] { -webkit-user-drag: element; }
+  .orbit-rail .grow { flex: 1; }
+  .orbit-split {
+    all: unset; cursor: pointer;
+    width: 44px; height: 38px; border-radius: var(--koi-radius);
+    display: grid; place-items: center; color: var(--koi-muted);
+    border: 1px dashed var(--koi-line);
+  }
+  .orbit-split.on { color: var(--koi-accent); border-color: var(--koi-accent); border-style: solid; }
+  .orbit-split:hover { color: var(--koi-fg); }
+  .orbit-split svg { width: 17px; height: 17px; }
+
+  .orbit-stage { position: relative; flex: 1 1 auto; min-width: 0; display: flex; }
+  .orbit-pane { position: relative; flex: 1 1 0; min-width: 0; overflow: hidden; }
+  .orbit-pane + .orbit-pane { border-left: 1px solid var(--koi-line); }
+  .orbit-pane .pane-cap {
+    position: absolute; top: 8px; left: 10px; z-index: 6;
+    font-size: 10px; letter-spacing: .03em; text-transform: uppercase;
+    color: var(--koi-muted);
+    display: flex; align-items: center; gap: 5px;
+  }
+  .orbit-pane .pane-cap b { color: var(--koi-fg); font-weight: 600; }
+  .orbit-pane.focused .pane-cap b { color: var(--koi-accent); }
+  /* drop hint while dragging an icon over the stage */
+  .orbit-stage.dragging::after {
+    content: 'Drop to split'; position: absolute; z-index: 8; inset: 0 0 0 50%;
+    display: grid; place-items: center;
+    background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+    border-left: 2px dashed var(--koi-accent);
+    font-size: 13px; color: var(--koi-accent); pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="mock.js"></script>
+<script>
+  const M = window.KoineMock;
+  const center = M.shell(document.getElementById('root'), { concept: 'Concept 2 · Orbit' });
+  center.innerHTML =
+    '<div class="concept-note"><b>Orbit.</b> One surface in focus, switched from the edge rail — '
+    + '<kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>4</kbd>. Drag a rail icon onto the stage to split. '
+    + 'Status rides the icons (Output is showing an error).</div>'
+    + '<div class="orbit"><div class="orbit-rail" id="rail"></div><div class="orbit-stage" id="stage"></div></div>';
+
+  const pool = {};
+  function host(id) {
+    if (!pool[id]) { const d = document.createElement('div'); d.className = 'surface'; M.fill(d, id, {}); pool[id] = d; }
+    return pool[id];
+  }
+
+  let focus = 'canvas';
+  let split = null;     // secondary surface id when split, else null
+  const order = M.SURFACES.map((s) => s.id);
+
+  const rail = center.querySelector('#rail');
+  const stage = center.querySelector('#stage');
+
+  function buildRail() {
+    rail.innerHTML = '';
+    M.SURFACES.forEach((s, i) => {
+      const b = document.createElement('button');
+      b.className = 'orbit-ic' + ((s.id === focus || s.id === split) ? ' active' : '');
+      b.draggable = true;
+      b.innerHTML = '<span class="kbd">' + (i + 1) + '</span>' + s.icon + '<span class="lbl">' + s.label + '</span>'
+        + (s.dot ? '<span class="sd"></span>' : '');
+      b.addEventListener('click', () => setFocus(s.id));
+      b.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', s.id); stage.classList.add('dragging'); });
+      b.addEventListener('dragend', () => stage.classList.remove('dragging'));
+      rail.appendChild(b);
+    });
+    const grow = document.createElement('div'); grow.className = 'grow'; rail.appendChild(grow);
+    const sp = document.createElement('button');
+    sp.className = 'orbit-split' + (split ? ' on' : '');
+    sp.title = 'Toggle split (focus + previous)';
+    sp.innerHTML = M.ICONS.split;
+    sp.addEventListener('click', () => { split = split ? null : prevFocus; if (split === focus) split = null; render(); });
+    rail.appendChild(sp);
+  }
+
+  let prevFocus = 'code';
+  function setFocus(id) { if (id !== focus) { prevFocus = focus; } if (id === split) split = null; focus = id; render(); }
+
+  function paneEl(id, focused) {
+    const p = document.createElement('div'); p.className = 'orbit-pane' + (focused ? ' focused' : '');
+    const cap = document.createElement('div'); cap.className = 'pane-cap';
+    const s = M.surface(id);
+    cap.innerHTML = s.icon.replace('width="20"', '') + '<b>' + s.label + '</b>';
+    p.appendChild(host(id)); p.appendChild(cap);
+    p.addEventListener('mousedown', () => { if (id !== focus) { prevFocus = focus; focus = id; render(); } });
+    return p;
+  }
+
+  function render() {
+    buildRail();
+    stage.innerHTML = '';
+    stage.appendChild(paneEl(focus, true));
+    if (split) stage.appendChild(paneEl(split, false));
+    requestAnimationFrame(() => stage.querySelectorAll('[data-canvas]').forEach((c) => M.drawEdges(c)));
+  }
+
+  // drag-to-split
+  stage.addEventListener('dragover', (e) => { e.preventDefault(); });
+  stage.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const id = e.dataTransfer.getData('text/plain');
+    stage.classList.remove('dragging');
+    if (!id) return;
+    if (id === focus) return;
+    split = id; render();
+  });
+
+  // keyboard Alt+1..4
+  window.addEventListener('keydown', (e) => {
+    if (!e.altKey) return;
+    const n = parseInt(e.key, 10);
+    if (n >= 1 && n <= order.length) { e.preventDefault(); setFocus(order[n - 1]); }
+  });
+
+  render();
+</script>
+</body>
+</html>

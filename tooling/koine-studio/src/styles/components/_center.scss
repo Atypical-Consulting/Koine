@@ -1,10 +1,9 @@
-/* --- center: Visual (diagram canvas) / Code / Documentation / Assistant ---
-   The center column's top-level tabs (#center-tabs). "Visual" hosts the domain diagram
-   (#center-visual); "Code" hosts the editor plus the emitted preview and the compatibility check as
-   sub-tabs (#tech-tabs); "Documentation" hosts the glossary/ADR/notes; "Assistant" hosts the AI
-   copilot (#view-assistant) — a first-class pane, one click from any view (#235). Mutually exclusive
-   panels are toggled via the `hidden` attribute — and because the flex/positioning rules below
-   outrank the UA `[hidden]` rule, each toggleable container restores `display: none` for `[hidden]`. */
+/* --- center: the surfaces hosted by the Deck (Canvas / Code / Output / Docs) ---
+   The center column's chrome is the Deck v2 bar (#deck-bar) + stage (rendered into #center-body); see
+   _deck.scss. The four #center-* host sections below live permanently inside their deck cards (the
+   DeckStage re-parents them at boot). Each host fills its card body (position:absolute) and stacks its
+   body sub-views; the deck's `.ghost` class — not the `hidden` attribute — is the visibility unit, so
+   the per-host `[hidden]` rules here only matter before the stage mounts / in test fixtures. */
 #center {
   display: flex;
   flex-direction: column;
@@ -12,104 +11,16 @@
   background: var(--koi-paper);
 }
 
-#center-tabs,
-#tech-tabs,
-#docs-tabs {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: var(--koi-space-0-5);
-  padding: 0 var(--koi-space-2-5);
-  background: var(--koi-paper-2);
-  border-bottom: 1px solid var(--koi-line);
-  overflow-x: auto;
-  overflow-y: hidden;
-}
-
-.center-tab,
-.tech-tab,
-.docs-tab {
-  position: relative;
-  flex: 0 0 auto;
-  background: transparent;
-  color: var(--koi-muted);
-  border: none;
-  padding: var(--koi-space-2-75) var(--koi-space-3) var(--koi-space-3);
-  font-family: var(--koi-font-body);
-  font-size: var(--koi-text-sm-plus);
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: color var(--koi-dur-base) ease;
-
-  /* Active tab: a gradient underline that grows from the center (matches the inspector tabs). */
-  &::after {
-    content: '';
-    position: absolute;
-    left: 10px;
-    right: 10px;
-    bottom: -1px;
-    height: 2px;
-    border-radius: var(--koi-radius-2xs);
-    background: var(--koi-accent-grad);
-    transform: scaleX(0);
-    transition: transform var(--koi-dur-slow) ease;
-  }
-  &:hover {
-    color: var(--koi-fg);
-  }
-  &[aria-selected='true'] {
-    color: var(--koi-fg);
-    &::after {
-      transform: scaleX(1);
-    }
-  }
-}
-
-.tech-tab,
-.docs-tab {
-  font-size: var(--koi-text-sm);
-  padding: var(--koi-space-2) var(--koi-space-2-5) var(--koi-space-2-25);
-}
-
-/* The Assistant is the one "intelligent" tab among the structural three, so it alone carries a mark:
-   a spark glyph. The label still follows the muted→fg tab states, but the spark stays in the brand
-   accent at all times — the same hue that signals "this generates" (Generate / Send / active underline)
-   — a quiet, persistent cue that the AI lives here. */
-.center-tab-ai {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--koi-space-1-5);
-}
-.center-tab-spark {
-  width: 13px;
-  height: 13px;
-  flex: 0 0 auto;
-  fill: var(--koi-accent);
-  stroke: none;
-  /* Settle in on first paint rather than appearing inert — a one-shot shimmer, reduced-motion safe. */
-  animation: koi-spark-in var(--koi-dur-slow) ease both;
-}
-@keyframes koi-spark-in {
-  from {
-    opacity: 0;
-    transform: scale(0.6) rotate(-12deg);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .center-tab-spark {
-    animation: none;
-  }
-}
-
 #center-body {
   flex: 1 1 auto;
   min-height: 0;
   position: relative;
+  // The DeckStage fills this with `.deck-stage { flex: 1 }`, so #center-body must be a flex column
+  // container — otherwise the stage (and its absolutely-positioned, %-height cards) collapse to zero
+  // height and the surfaces render invisible. (In Storybook the stage sits in its own flex column, so
+  // this only bites the real app.)
+  display: flex;
+  flex-direction: column;
 }
 
 .center-host {
@@ -122,8 +33,9 @@
   }
 }
 
-/* The technical + documentation panes stack a sub-tab strip above their sub-views. */
+/* The technical / output / documentation panes stack a sub-tab strip above their sub-views. */
 #center-technical,
+#center-output,
 #center-docs {
   display: flex;
   flex-direction: column;
@@ -156,6 +68,7 @@
 }
 
 #tech-body,
+#output-body,
 #docs-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -176,207 +89,4 @@
 /* CodeMirror fills its host (the editor pane and the emitted-preview output view both live here). */
 .cm-editor {
   height: 100%;
-}
-
-/* --- editor split (two groups, issue #265) ---
-   #editor-pane is both group A's host (CodeMirror mounts directly into it) AND the split container:
-   the group divider (#group-resizer) and group B's host (#editor-pane-b) are its siblings, hidden until
-   the user splits. When #split[data-split='true'] the pane becomes a grid laid out by data-orientation
-   — side-by-side (horizontal) or stacked (vertical) — with the divider sized via --koi-group-w/-h
-   (anchored to the group-B side, matching initGroupResizer). */
-#group-resizer,
-#editor-pane-b {
-  display: none;
-}
-
-#editor-pane-b {
-  position: relative;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-/* Side-by-side: group A (1fr) | divider (6px) | group B (--koi-group-w). The :not([hidden]) keeps the
-   pane's display:none when the Code pane shows a non-editor sub-tab (Generated / Compatibility / …) —
-   without it the high-specificity grid rule would beat the UA [hidden] and leak the editor through. */
-#split[data-split='true'][data-orientation='horizontal'] #editor-pane:not([hidden]) {
-  display: grid;
-  grid-template-columns: 1fr 6px var(--koi-group-w, 40%);
-  grid-template-rows: 100%;
-}
-#split[data-split='true'][data-orientation='horizontal'] #editor-pane > .cm-editor {
-  grid-column: 1;
-}
-#split[data-split='true'][data-orientation='horizontal'] #group-resizer {
-  display: block;
-  grid-column: 2;
-  width: 6px;
-  height: auto;
-  cursor: col-resize;
-}
-#split[data-split='true'][data-orientation='horizontal'] #editor-pane-b {
-  display: block;
-  grid-column: 3;
-}
-
-/* Stacked: group A (1fr) / divider (6px) / group B (--koi-group-h). */
-#split[data-split='true'][data-orientation='vertical'] #editor-pane:not([hidden]) {
-  display: grid;
-  grid-template-columns: 100%;
-  grid-template-rows: 1fr 6px var(--koi-group-h, 40%);
-}
-#split[data-split='true'][data-orientation='vertical'] #editor-pane > .cm-editor {
-  grid-row: 1;
-}
-#split[data-split='true'][data-orientation='vertical'] #group-resizer {
-  display: block;
-  grid-row: 2;
-  width: auto;
-  height: 6px;
-  cursor: row-resize;
-}
-#split[data-split='true'][data-orientation='vertical'] #editor-pane-b {
-  display: block;
-  grid-row: 3;
-}
-
-// --- Split/reset controls in the center tab bar (#720 Task 5) ----------------
-
-#center-split-controls {
-  // Pushed to the right end of the flex #center-tabs row via margin-left: auto on the inner widget.
-  display: contents;
-}
-
-.center-split-btns {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding-right: 4px;
-}
-
-.center-split-btn {
-  all: unset;
-  cursor: pointer;
-  padding: 2px 6px;
-  font-size: 11px;
-  border-radius: 3px;
-  border: 1px solid var(--koi-border, #d0d0d0);
-  color: var(--koi-muted, #666);
-  white-space: nowrap;
-  line-height: 1.4;
-
-  &:hover {
-    background: var(--koi-paper-2, #e8e8e8);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--koi-accent, #1d76db);
-    outline-offset: 1px;
-  }
-
-  &--reset {
-    color: var(--koi-accent, #1d76db);
-  }
-}
-
-// --- Split-pane layout -------------------------------------------------------
-
-#center-body[data-split='row'],
-#center-body[data-split='column'] {
-  position: relative;
-  display: flex;
-  min-height: 0;
-}
-
-#center-body[data-split='row'] {
-  flex-direction: row;
-}
-
-#center-body[data-split='column'] {
-  flex-direction: column;
-}
-
-.center-split-pane {
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  overflow: hidden;
-  min-width: 0;
-  min-height: 0;
-
-  &.is-focused {
-    outline: 2px solid var(--koi-accent, #1d76db);
-    outline-offset: -2px;
-  }
-}
-
-.center-pane-header {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 0 4px;
-  height: 28px;
-  border-bottom: 1px solid var(--koi-border, #e0e0e0);
-  background: var(--koi-surface-subtle, #f5f5f5);
-}
-
-.center-pane-tab {
-  all: unset;
-  cursor: pointer;
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 3px;
-
-  &[aria-selected='true'] {
-    background: var(--koi-accent, #1d76db);
-    color: #fff;
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--koi-accent, #1d76db);
-  }
-}
-
-.center-pane-content {
-  flex: 1 1 auto;
-  position: relative;
-  overflow: hidden;
-  min-height: 0;
-}
-
-// --- Center splitter (between adjacent pane slots) ---------------------------
-
-.center-splitter-host {
-  // The host is a zero-size flex child that the Preact component fills.
-  display: contents;
-}
-
-.center-splitter {
-  flex: 0 0 6px;
-  cursor: col-resize;
-  background: var(--koi-border, #e0e0e0);
-  position: relative;
-  outline: none;
-
-  &:focus-visible {
-    outline: 2px solid var(--koi-accent, #1d76db);
-    outline-offset: 0;
-  }
-
-  // Extend the grab area 4px on each side without changing visual width.
-  &::after {
-    content: '';
-    position: absolute;
-    inset: 0 -4px;
-  }
-
-  &--column {
-    cursor: row-resize;
-
-    &::after {
-      inset: -4px 0;
-    }
-  }
 }

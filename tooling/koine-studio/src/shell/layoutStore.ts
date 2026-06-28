@@ -6,27 +6,18 @@
 // --- model -------------------------------------------------------------------
 
 export interface LayoutState {
-  /** Whether the editor area is split into two groups (A + B). */
-  splitOpen: boolean;
-  /** How the two editor groups are divided when split is open. */
-  orientation: 'horizontal' | 'vertical';
   /** Which edge the bottom/auxiliary panel docks to. */
   panelSide: 'bottom' | 'right';
   /** Which side the collapsible file-explorer rail lives on. */
   sideRail: 'left' | 'right';
-  /** Active file URIs for group A (always present) and group B (only meaningful when split is open). */
-  groupActiveUris: [string, string?];
   /** Whether the desktop right Properties rail is collapsed (reclaiming its column). The right-edge
    *  tool-window stripe stays docked; re-expanding restores the last active `RightView`. Desktop-only. */
   rightCollapsed: boolean;
 }
 
 export const DEFAULT_LAYOUT: LayoutState = {
-  splitOpen: false,
-  orientation: 'horizontal',
   panelSide: 'bottom',
   sideRail: 'right',
-  groupActiveUris: ['', undefined],
   rightCollapsed: false,
 };
 
@@ -56,27 +47,12 @@ function writeRaw(key: string, value: string): void {
 
 // --- per-field coercions -----------------------------------------------------
 
-function coerceSplitOpen(v: unknown): boolean {
-  return typeof v === 'boolean' ? v : DEFAULT_LAYOUT.splitOpen;
-}
-
-function coerceOrientation(v: unknown): LayoutState['orientation'] {
-  return v === 'horizontal' || v === 'vertical' ? v : DEFAULT_LAYOUT.orientation;
-}
-
 function coercePanelSide(v: unknown): LayoutState['panelSide'] {
   return v === 'bottom' || v === 'right' ? v : DEFAULT_LAYOUT.panelSide;
 }
 
 function coerceSideRail(v: unknown): LayoutState['sideRail'] {
   return v === 'left' || v === 'right' ? v : DEFAULT_LAYOUT.sideRail;
-}
-
-function coerceGroupActiveUris(v: unknown): LayoutState['groupActiveUris'] {
-  if (!Array.isArray(v)) return [...DEFAULT_LAYOUT.groupActiveUris];
-  const a = typeof v[0] === 'string' ? v[0] : '';
-  const b = typeof v[1] === 'string' ? v[1] : undefined;
-  return [a, b];
 }
 
 function coerceRightCollapsed(v: unknown): boolean {
@@ -99,11 +75,8 @@ export function loadLayout(): LayoutState {
       return { ...DEFAULT_LAYOUT };
     }
     return {
-      splitOpen: coerceSplitOpen(parsed.splitOpen),
-      orientation: coerceOrientation(parsed.orientation),
       panelSide: coercePanelSide(parsed.panelSide),
       sideRail: coerceSideRail(parsed.sideRail),
-      groupActiveUris: coerceGroupActiveUris(parsed.groupActiveUris),
       rightCollapsed: coerceRightCollapsed(parsed.rightCollapsed),
     };
   } catch {

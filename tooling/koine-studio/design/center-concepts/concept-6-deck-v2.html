@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept 6 — Deck v2</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* ===========================================================================
+     Deck v2 — the bird's-eye, refined.
+       · Focus 1-up OR 2-up (two live surfaces side by side, resizable + swappable)
+       · FLIP transitions: cards are laid out at final size instantly; only
+         `transform` animates (compositor-only) → buttery zoom, and the canvas
+         draws its edges ONCE at final size instead of restuttering every frame.
+     ======================================================================== */
+
+  .deck2-bar {
+    flex: 0 0 auto;
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px;
+    background: var(--koi-paper-2); border-bottom: 1px solid var(--koi-line);
+  }
+  .deck2-over {
+    all: unset; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 12px; font-weight: 600; color: var(--koi-muted);
+    padding: 6px 13px; border-radius: var(--koi-radius-sm);
+    border: 1px solid var(--koi-line);
+    transition: color .24s var(--ease), background .24s var(--ease), border-color .24s var(--ease);
+  }
+  .deck2-over svg { width: 15px; height: 15px; }
+  .deck2-over:hover { color: var(--koi-fg); border-color: var(--koi-accent); }
+  .deck2-over.on { color: var(--koi-on-accent); background: var(--koi-accent); border-color: var(--koi-accent); }
+
+  /* filmstrip — the single control surface. Click = focus (primary). ⊞ = open beside (secondary). */
+  .deck2-strip { display: flex; align-items: center; gap: 4px; }
+  /* a single fluid easing/duration for all interactive chrome */
+  .deck2-chip, .deck2-over, .deck2-swap, .deck2-sub, .deck2-head .hbtn {
+    --ease: cubic-bezier(.33, 1, .68, 1);
+  }
+  .deck2-chip {
+    position: relative;
+    all: unset; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 12px; color: var(--koi-muted);
+    padding: 6px 11px; border-radius: var(--koi-radius-pill);
+    border: 1px solid transparent;
+    transition: color .24s var(--ease), background .24s var(--ease), border-color .24s var(--ease);
+  }
+  .deck2-chip svg.ci { width: 14px; height: 14px; transition: opacity .24s var(--ease); }
+  .deck2-chip .sd { width: 6px; height: 6px; border-radius: 50%; background: var(--koi-error); }
+  .deck2-chip:hover { color: var(--koi-fg); background: color-mix(in srgb, var(--koi-fg) 7%, transparent); }
+  .deck2-chip.primary { color: var(--koi-on-accent); background: var(--koi-accent); }
+  .deck2-chip.secondary { color: var(--koi-accent); border-color: color-mix(in srgb, var(--koi-accent) 55%, transparent); background: color-mix(in srgb, var(--koi-accent) 12%, transparent); }
+  /* ⊞ "open beside" — fades + grows in (opacity + width, not display) on hover /
+     when this chip is the secondary, so the chip resizes smoothly. */
+  .deck2-cmp {
+    all: unset; cursor: pointer;
+    width: 0; height: 18px; border-radius: 4px;
+    display: inline-grid; place-items: center; overflow: hidden;
+    margin-left: 0; opacity: 0; pointer-events: none;
+    transition: opacity .22s var(--ease), width .22s var(--ease), margin .22s var(--ease), background .18s var(--ease);
+  }
+  .deck2-chip:hover .deck2-cmp { width: 18px; opacity: .9; margin-left: 1px; pointer-events: auto; }
+  .deck2-cmp:hover { background: color-mix(in srgb, currentColor 22%, transparent); opacity: 1; }
+  .deck2-cmp svg { width: 13px; height: 13px; }
+
+  /* per-surface sub-view strip in the card header (Editor·Scenarios, Generated·
+     Compatibility·Context Map, Glossary·ADRs·Notes). Hidden in the bird's-eye. */
+  .deck2-subs { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; overflow: hidden; }
+  .deck2-sub {
+    all: unset; cursor: pointer;
+    font-size: 10.5px; color: var(--koi-muted);
+    padding: 3px 8px; border-radius: var(--koi-radius-pill); white-space: nowrap;
+    transition: color .22s var(--ease), background .22s var(--ease);
+  }
+  .deck2-sub:hover { color: var(--koi-fg); }
+  .deck2-sub.on { color: var(--koi-accent); background: color-mix(in srgb, var(--koi-accent) 13%, transparent); }
+  .deck2-stage.overview .deck2-subs { display: none; }
+
+  .deck2-hint { margin-left: auto; font-size: 11px; color: var(--koi-muted); }
+  .deck2-hint kbd { font-family: var(--koi-font-mono); font-size: 10px; background: var(--koi-paper); border: 1px solid var(--koi-line); border-bottom-width: 2px; border-radius: 4px; padding: 1px 5px; }
+
+  /* the plane */
+  .deck2-stage {
+    position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden;
+    background:
+      radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--koi-muted) 15%, transparent) 1px, transparent 0);
+    background-size: 26px 26px;
+  }
+  /* a soft focus vignette that lifts the active card(s) off the plane */
+  .deck2-stage::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    box-shadow: inset 0 0 120px rgba(3,7,14,.18);
+    opacity: 0; transition: opacity .4s ease; z-index: 1;
+  }
+  .deck2-stage.is-focus::after { opacity: 1; }
+
+  .deck2-card {
+    position: absolute;
+    display: flex; flex-direction: column;
+    background: var(--koi-paper);
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius-lg);
+    overflow: hidden;
+    box-shadow: 0 10px 30px rgba(3,7,14,.26);
+    transform-origin: top left;
+    will-change: transform;
+    z-index: 2;
+  }
+  .deck2-card.ghost { opacity: 0; pointer-events: none; z-index: 1; }
+  .deck2-stage.overview .deck2-card { cursor: zoom-in; }
+  .deck2-stage.overview .deck2-card:hover { border-color: color-mix(in srgb, var(--card-c) 60%, var(--koi-line)); box-shadow: 0 20px 44px rgba(3,7,14,.42); }
+  /* selection rings carried into the bird's-eye so you know where you'll return */
+  .deck2-card.is-primary { box-shadow: 0 12px 32px rgba(3,7,14,.32), 0 0 0 2px var(--koi-accent); }
+  .deck2-card.is-secondary { box-shadow: 0 12px 32px rgba(3,7,14,.32), 0 0 0 2px color-mix(in srgb, var(--koi-accent) 55%, transparent); }
+
+  .deck2-head {
+    flex: 0 0 auto; height: 31px;
+    display: flex; align-items: center; gap: 7px;
+    padding: 0 6px 0 11px;
+    font-size: 12px; font-weight: 600;
+    border-bottom: 1px solid var(--koi-line);
+    background: var(--koi-paper-2);
+    transition: background .2s var(--ease), box-shadow .2s var(--ease);
+  }
+  /* the SELECTED pane in a 2-up: accent-tinted header with a 2px accent cap, so it's
+     clear which pane is active. Clicking the other pane moves the selection here. */
+  .deck2-card.in-pair.is-selected .deck2-head {
+    background: color-mix(in srgb, var(--koi-accent) 11%, var(--koi-paper-2));
+    box-shadow: inset 0 2px 0 var(--koi-accent);
+  }
+  .deck2-card.in-pair:not(.is-selected) { cursor: pointer; }
+  .deck2-card.in-pair:not(.is-selected) .deck2-head:hover { background: color-mix(in srgb, var(--koi-fg) 6%, var(--koi-paper-2)); }
+  .deck2-head .ci { color: var(--card-c, var(--koi-accent)); display: inline-flex; }
+  .deck2-head .ci svg { width: 15px; height: 15px; }
+  .deck2-head .hlabel { white-space: nowrap; }
+  .deck2-head .sd { width: 6px; height: 6px; border-radius: 50%; background: var(--koi-error); }
+  .deck2-head .grow { flex: 1 1 auto; min-width: 4px; }
+  .deck2-head .tag { color: var(--koi-muted); font-weight: 400; font-size: 10.5px; white-space: nowrap; }
+  /* close/beside buttons: always present, collapsed (width 0 + transparent), and
+     revealed contextually via opacity + width so the header resizes smoothly. */
+  .deck2-head .hbtn {
+    all: unset; cursor: pointer; width: 0; height: 22px; border-radius: 5px;
+    display: inline-grid; place-items: center; overflow: hidden;
+    color: var(--koi-muted); opacity: 0; pointer-events: none; margin-left: 0;
+    transition: opacity .2s var(--ease), width .2s var(--ease), margin .2s var(--ease), background .18s var(--ease), color .18s var(--ease);
+  }
+  .deck2-head .hbtn svg { width: 13px; height: 13px; }
+  .deck2-head .hbtn:hover { color: var(--koi-fg); background: var(--koi-line); }
+  .deck2-card.in-pair .deck2-head .tag { display: none; }
+  .deck2-card.in-pair .deck2-head .hbtn.close { width: 22px; opacity: 1; pointer-events: auto; margin-left: 4px; }
+  .deck2-body { position: relative; flex: 1 1 auto; min-height: 0; }
+
+  /* divider between the two focused surfaces */
+  .deck2-divider {
+    position: absolute; top: 0; bottom: 0; z-index: 6;
+    width: 16px; transform: translateX(-50%);
+    cursor: col-resize;
+    display: none; align-items: center; justify-content: center;
+  }
+  .deck2-divider.show { display: flex; }
+  .deck2-divider .bar { position: absolute; top: 8%; bottom: 8%; width: 2px; left: 50%; transform: translateX(-50%); background: var(--koi-line); border-radius: 2px; transition: background .14s ease; }
+  .deck2-divider:hover .bar { background: var(--koi-accent); }
+  .deck2-swap {
+    position: relative; z-index: 1;
+    width: 26px; height: 26px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--koi-paper-2); border: 1px solid var(--koi-line);
+    color: var(--koi-muted); box-shadow: 0 4px 12px rgba(3,7,14,.3);
+    transition: color .22s var(--ease), border-color .22s var(--ease), transform .22s var(--ease);
+  }
+  .deck2-divider:hover .deck2-swap { color: var(--koi-accent); border-color: var(--koi-accent); }
+  .deck2-swap:active { transform: scale(.9) rotate(180deg); }
+  .deck2-swap svg { width: 14px; height: 14px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .deck2-card { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="mock.js"></script>
+<script>
+  const M = window.KoineMock;
+  const center = M.shell(document.getElementById('root'), { concept: 'Concept 6 · Deck v2' });
+  const SWAP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4 3 8l4 4M3 8h13M17 20l4-4-4-4M21 16H8"/></svg>';
+
+  center.innerHTML =
+    '<div class="concept-note"><b>Deck v2.</b> Focus one surface — or <b>two, live, side by side</b> '
+    + '(drag the seam, swap with ⇄). Filmstrip ⊞ (or <kbd>⇧</kbd>+<kbd>1</kbd>–<kbd>4</kbd>) opens a surface <i>beside</i> the current one; '
+    + '<kbd>Esc</kbd> for the 2×2 bird’s-eye. Each surface’s <b>facets</b> — Scenarios, Compatibility, Context Map, ADRs, Notes — ride a sub-strip in its header.</div>'
+    + '<div class="deck2-bar"><button class="deck2-over" id="overBtn">' + M.ICONS.overview + 'Overview</button>'
+    + '<div class="deck2-strip" id="strip"></div>'
+    + '<div class="deck2-hint"><kbd>Esc</kbd> overview · <kbd>1</kbd>–<kbd>4</kbd> focus · <kbd>⇧</kbd>+<kbd>1</kbd>–<kbd>4</kbd> open beside</div></div>'
+    + '<div class="deck2-stage" id="stage"><div class="deck2-divider" id="divider"><div class="bar"></div><div class="deck2-swap" id="swap" title="Swap sides">' + SWAP + '</div></div></div>';
+
+  const stage = center.querySelector('#stage');
+  const strip = center.querySelector('#strip');
+  const overBtn = center.querySelector('#overBtn');
+  const divider = center.querySelector('#divider');
+
+  // --- geometry (percentages of the stage) ---------------------------------
+  const FULL = { l: 0.8, t: 1, w: 98.4, h: 98 };
+  const U = { x: 0.8, w: 98.4 };       // usable strip for the 2-up split
+  const GAP = 1.4;
+  const QUAD = {
+    canvas: { l: 1.6, t: 2, w: 47.6, h: 46 },
+    code:   { l: 50.8, t: 2, w: 47.6, h: 46 },
+    output: { l: 1.6, t: 50, w: 47.6, h: 46 },
+    docs:   { l: 50.8, t: 50, w: 47.6, h: 46 }
+  };
+
+  // --- state ---------------------------------------------------------------
+  let mode = 'focus';            // 'focus' | 'overview'
+  let primary = 'code';          // the SELECTED view (stays selected across a swap)
+  let secondary = 'canvas';      // null = 1-up; open in the signature pair to show 2-up
+  let ratio = 0.5;               // left-pane width fraction (positional, not per-surface)
+  let flipped = false;           // swap exchanges left/right POSITIONS, not the selection
+
+  function rectFor(id) {
+    if (mode === 'overview') return { ...QUAD[id], ghost: false };
+    if (!secondary) return id === primary ? { ...FULL, ghost: false } : { ...QUAD[id], ghost: true };
+    // 2-up: left/right are positions; which surface sits where depends on `flipped`.
+    const leftRect = { l: U.x, t: 1, w: ratio * U.w - GAP / 2, h: 98, ghost: false };
+    const sx = U.x + ratio * U.w;
+    const rightRect = { l: sx + GAP / 2, t: 1, w: (1 - ratio) * U.w - GAP / 2, h: 98, ghost: false };
+    const primaryLeft = !flipped;
+    if (id === primary) return primaryLeft ? leftRect : rightRect;
+    if (id === secondary) return primaryLeft ? rightRect : leftRect;
+    return { ...QUAD[id], ghost: true };
+  }
+
+  // each surface remembers which facet (sub-view) it is showing
+  const subSel = {};
+  M.SURFACES.forEach((s) => { subSel[s.id] = s.subs[0]; });
+
+  // --- build the four fixed cards once (each permanently owns one surface) --
+  const cards = {};
+  M.SURFACES.forEach((s) => {
+    const card = document.createElement('div');
+    card.className = 'deck2-card';
+    card.style.setProperty('--card-c', s.accent);
+    const head = document.createElement('div'); head.className = 'deck2-head';
+    head.innerHTML = '<span class="ci">' + s.icon + '</span><span class="hlabel">' + s.label + '</span>'
+      + (s.dot ? '<span class="sd"></span>' : '')
+      + '<span class="deck2-subs"></span><span class="grow"></span>'
+      + '<span class="tag">' + s.tag + '</span>'
+      + '<button class="hbtn close" title="Close">' + M.ICONS.close + '</button>';
+    const body = document.createElement('div'); body.className = 'deck2-body';
+    M.fill(body, s.id, { sub: subSel[s.id] });
+    card.appendChild(head); card.appendChild(body);
+    head.querySelector('.close').addEventListener('click', (e) => { e.stopPropagation(); closeSurface(s.id); });
+    card.addEventListener('click', () => {
+      if (mode === 'overview') { focusPrimary(s.id); return; }
+      selectPane(s.id);   // clicking a pane in a 2-up makes it the selected view
+    });
+    stage.appendChild(card);
+    cards[s.id] = card;
+    buildSubStrip(s.id);
+  });
+
+  // --- sub-view strip (facet switcher inside each card header) -------------
+  function buildSubStrip(id) {
+    const wrap = cards[id].querySelector('.deck2-subs');
+    const s = M.surface(id);
+    wrap.innerHTML = '';
+    if (s.subs.length <= 1) return;
+    s.subs.forEach((sub) => {
+      const b = document.createElement('button');
+      b.className = 'deck2-sub' + (subSel[id] === sub ? ' on' : '');
+      b.textContent = sub;
+      b.addEventListener('click', (e) => { e.stopPropagation(); setSub(id, sub); });
+      wrap.appendChild(b);
+    });
+  }
+  function setSub(id, sub) {
+    if (subSel[id] === sub) return;
+    subSel[id] = sub;
+    M.fill(cards[id].querySelector('.deck2-body'), id, { sub });
+    buildSubStrip(id);
+    redrawCanvas();
+  }
+
+  // --- FLIP apply ----------------------------------------------------------
+  function apply(animate) {
+    // FIRST: capture current rects
+    const first = animate ? new Map(M.SURFACES.map((s) => [s.id, cards[s.id].getBoundingClientRect()])) : null;
+
+    // LAST: write target geometry + state classes instantly
+    M.SURFACES.forEach((s) => {
+      const r = rectFor(s.id);
+      const c = cards[s.id];
+      c.style.left = r.l + '%'; c.style.top = r.t + '%'; c.style.width = r.w + '%'; c.style.height = r.h + '%';
+      c.classList.toggle('ghost', !!r.ghost);
+      c.classList.toggle('is-primary', mode === 'overview' && s.id === primary);
+      c.classList.toggle('is-secondary', mode === 'overview' && s.id === secondary);
+      c.classList.toggle('in-pair', mode === 'focus' && !!secondary && (s.id === primary || s.id === secondary));
+      c.classList.toggle('is-selected', mode === 'focus' && s.id === primary);
+      c.style.transition = 'none';
+    });
+    stage.classList.toggle('overview', mode === 'overview');
+    stage.classList.toggle('is-focus', mode === 'focus');
+
+    // INVERT + PLAY
+    if (animate) {
+      M.SURFACES.forEach((s) => {
+        const c = cards[s.id];
+        const f = first.get(s.id), l = c.getBoundingClientRect();
+        if (!f || !f.width || !l.width) return;
+        const dx = f.left - l.left, dy = f.top - l.top;
+        const sx = f.width / l.width, sy = f.height / l.height;
+        c.style.transform = `translate(${dx}px,${dy}px) scale(${sx},${sy})`;
+      });
+      stage.offsetHeight; // force reflow so the inverted transform is committed
+      M.SURFACES.forEach((s, i) => {
+        const c = cards[s.id];
+        c.style.transition = 'transform .44s cubic-bezier(.22,1,.36,1), opacity .32s ease, box-shadow .3s ease';
+        c.style.transitionDelay = (mode === 'overview' ? i * 22 : 0) + 'ms';
+        c.style.transform = '';
+      });
+    } else {
+      M.SURFACES.forEach((s) => { cards[s.id].style.transform = ''; });
+    }
+
+    // divider + linked badge (2-up only)
+    const isPair = mode === 'focus' && !!secondary;
+    divider.classList.toggle('show', isPair);
+    if (isPair) divider.style.left = (U.x + ratio * U.w) + '%';
+
+    buildStrip();
+    redrawCanvas();
+  }
+
+  function redrawCanvas() {
+    [80, 250, 480].forEach((t) => setTimeout(() => stage.querySelectorAll('[data-canvas]').forEach((c) => M.drawEdges(c)), t));
+  }
+
+  // --- filmstrip -----------------------------------------------------------
+  function buildStrip() {
+    strip.innerHTML = '';
+    M.SURFACES.forEach((s) => {
+      const b = document.createElement('button');
+      const isP = mode === 'focus' && s.id === primary;
+      const isS = mode === 'focus' && s.id === secondary;
+      b.className = 'deck2-chip' + (isP ? ' primary' : '') + (isS ? ' secondary' : '');
+      // ⊞ "open beside" only makes sense for a view that ISN'T already shown — so not on
+      // the selected/secondary chips, and not at all in the bird's-eye (nothing is "current").
+      // NB: it's a <span role="button">, NOT a nested <button> (invalid inside the chip button).
+      const showCmp = mode === 'focus' && !isP && !isS;
+      const cmp = showCmp
+        ? '<span class="deck2-cmp" role="button" tabindex="-1" aria-label="Open beside" title="Open beside">' + M.ICONS.split + '</span>'
+        : '';
+      b.innerHTML = '<span class="ci-wrap">' + s.icon.replace('<svg', '<svg class="ci"') + '</span>' + s.label
+        + (s.dot ? '<span class="sd"></span>' : '') + cmp;
+      b.addEventListener('click', (e) => {
+        if (e.target.closest('.deck2-cmp')) { openBeside(s.id); return; }
+        focusPrimary(s.id);
+      });
+      strip.appendChild(b);
+    });
+  }
+
+  // --- transitions (state mutators wrapped in FLIP) ------------------------
+  function focusPrimary(id) {
+    // plain click = "go to this surface, full" → always collapse to 1-up.
+    // (Use ⊞ / Shift+digit to explicitly open a second surface beside it.)
+    primary = id; secondary = null; flipped = false; mode = 'focus'; apply(true);
+  }
+  function openBeside(id) {
+    if (id === primary) return;
+    secondary = (secondary === id) ? null : id;  // toggle the compare pane
+    flipped = false;                              // a fresh second pane opens on the right
+    mode = 'focus'; apply(true);
+  }
+  function closeSurface(id) {
+    if (id === secondary) { secondary = null; }
+    else if (id === primary) { if (secondary) { primary = secondary; secondary = null; } }
+    flipped = false; apply(true);
+  }
+  function overview() { mode = 'overview'; apply(true); }
+  // "invert" swaps the two PANES left↔right; the selected (primary) view stays selected.
+  function swapSides() { flipped = !flipped; apply(true); }
+  // click a pane in a 2-up → it becomes the selected view, staying exactly where it is
+  // (swap the primary/secondary roles, compensate `flipped` so neither pane moves).
+  function selectPane(id) {
+    if (mode !== 'focus' || !secondary || id === primary || id !== secondary) return;
+    const t = primary; primary = secondary; secondary = t;
+    flipped = !flipped;
+    apply(false);   // geometry is unchanged; only the active-pane chrome updates
+  }
+
+  overBtn.addEventListener('click', () => { mode === 'overview' ? (mode = 'focus', apply(true)) : overview(); });
+  center.querySelector('#swap').addEventListener('click', swapSides);
+
+  // divider drag → live resize (no FLIP; direct geometry)
+  divider.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.deck2-swap')) return;
+    e.preventDefault();
+    divider.setPointerCapture(e.pointerId);
+    const rect = stage.getBoundingClientRect();
+    const move = (ev) => {
+      ratio = Math.min(0.8, Math.max(0.2, (ev.clientX - rect.left) / rect.width));
+      // re-place primary, secondary, divider directly
+      [primary, secondary].forEach((id) => {
+        const r = rectFor(id); const c = cards[id];
+        c.style.transition = 'none';
+        c.style.left = r.l + '%'; c.style.width = r.w + '%';
+      });
+      divider.style.left = (U.x + ratio * U.w) + '%';
+      stage.querySelectorAll('[data-canvas]').forEach((c) => M.drawEdges(c));
+    };
+    const up = () => { divider.removeEventListener('pointermove', move); divider.removeEventListener('pointerup', up); };
+    divider.addEventListener('pointermove', move);
+    divider.addEventListener('pointerup', up);
+  });
+
+  // keyboard. Read e.code, not e.key: with Shift held, e.key for a number row key
+  // is the shifted symbol (!@#$), so parseInt(e.key) is NaN and ⇧+1–4 silently fails.
+  // e.code is "Digit1"…"Digit4" regardless of Shift / keyboard layout.
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { mode === 'overview' ? (mode = 'focus', apply(true)) : overview(); return; }
+    const m = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+    if (!m) return;
+    const n = parseInt(m[1], 10);
+    if (n < 1 || n > M.SURFACES.length) return;
+    e.preventDefault();
+    const id = M.SURFACES[n - 1].id;
+    e.shiftKey ? openBeside(id) : focusPrimary(id);
+  });
+
+  apply(false);
+  window.addEventListener('resize', () => { stage.querySelectorAll('[data-canvas]').forEach((c) => M.drawEdges(c)); });
+</script>
+</body>
+</html>

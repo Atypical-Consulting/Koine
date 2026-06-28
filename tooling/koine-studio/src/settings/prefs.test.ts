@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createPreferences, type PrefsCallbacks } from '@/settings/prefs';
+import { createPreferences, mountPreferencesPane, type PrefsCallbacks, type PrefsPaneHandle } from '@/settings/prefs';
 import {
   DEFAULT_SETTINGS,
   loadSettings,
@@ -386,6 +386,91 @@ describe('Settings → User/Workspace scope toggle', () => {
   });
 });
 
+// Task 1 (#732): the shared segmented() control gained roving tabindex + arrow/Home/End keyboard
+// navigation (focus follows selection). Exercised here through the Theme toggle (a plain segmented) and
+// a disabled scope toggle (no workspace open) so the skip-disabled edge case is pinned.
+describe('Settings → segmented() keyboard navigation (#732)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+    saveSettings({ ...DEFAULT_SETTINGS });
+  });
+
+  const themeGroup = () => document.querySelector<HTMLElement>('.koi-segmented[aria-label="Theme"]')!;
+  const themeBtn = (value: 'dark' | 'light') =>
+    themeGroup().querySelector<HTMLButtonElement>(`.koi-seg[data-value="${value}"]`)!;
+  const press = (el: HTMLElement, key: string): void => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+  };
+
+  it('seeds exactly one tabbable option: the checked button is tabindex=0, the other -1', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, theme: 'dark' });
+    openPrefs();
+    expect(themeBtn('dark').getAttribute('aria-checked')).toBe('true');
+    expect(themeBtn('dark').getAttribute('tabindex')).toBe('0');
+    expect(themeBtn('light').getAttribute('tabindex')).toBe('-1');
+  });
+
+  it('ArrowRight selects + focuses the next option, moving the roving tabindex and firing onSelect', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, theme: 'dark' });
+    const onChange = vi.fn();
+    openPrefs({ onChange });
+    press(themeBtn('dark'), 'ArrowRight');
+    expect(themeBtn('light').getAttribute('aria-checked')).toBe('true');
+    expect(themeBtn('light').getAttribute('tabindex')).toBe('0');
+    expect(themeBtn('dark').getAttribute('aria-checked')).toBe('false');
+    expect(themeBtn('dark').getAttribute('tabindex')).toBe('-1');
+    expect(document.activeElement).toBe(themeBtn('light'));
+    expect(loadSettings().theme).toBe('light'); // onSelect committed via setTheme
+    expect(onChange).toHaveBeenCalled();
+  });
+
+  it('ArrowDown also moves to the next option', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, theme: 'dark' });
+    openPrefs();
+    press(themeBtn('dark'), 'ArrowDown');
+    expect(themeBtn('light').getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('ArrowLeft / ArrowUp select the previous option, wrapping around the ends', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, theme: 'dark' });
+    openPrefs();
+    // From the first option, ArrowLeft wraps to the last.
+    press(themeBtn('dark'), 'ArrowLeft');
+    expect(themeBtn('light').getAttribute('aria-checked')).toBe('true');
+    // ArrowUp from the last wraps back to the first.
+    press(themeBtn('light'), 'ArrowUp');
+    expect(themeBtn('dark').getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('Home selects the first option, End the last (each moving focus + tabindex)', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, theme: 'light' });
+    openPrefs();
+    press(themeBtn('light'), 'Home');
+    expect(themeBtn('dark').getAttribute('aria-checked')).toBe('true');
+    expect(themeBtn('dark').getAttribute('tabindex')).toBe('0');
+    expect(document.activeElement).toBe(themeBtn('dark'));
+    press(themeBtn('dark'), 'End');
+    expect(themeBtn('light').getAttribute('aria-checked')).toBe('true');
+    expect(document.activeElement).toBe(themeBtn('light'));
+  });
+
+  it('arrow navigation skips disabled options: a no-workspace scope toggle stays inert', () => {
+    const onChange = vi.fn();
+    openPrefs({ workspaceKey: () => null, onChange });
+    const group = document.querySelector<HTMLElement>('.koi-segmented[aria-label="Word wrap scope"]')!;
+    const workspace = group.querySelector<HTMLButtonElement>('.koi-seg[data-value="workspace"]')!;
+    const user = group.querySelector<HTMLButtonElement>('.koi-seg[data-value="user"]')!;
+    onChange.mockClear();
+    press(user, 'ArrowRight');
+    // Every option is disabled (no workspace), so arrow nav finds no target: nothing selects, nothing
+    // gains tabindex=0, nothing commits.
+    expect(workspace.getAttribute('aria-checked')).toBe('false');
+    expect(workspace.getAttribute('tabindex')).toBe('-1');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
 // chordFromEvent + prettyChord moved to shared/platform.ts (beside formatChord) and are unit-tested
 // there in platform.test.ts. The keyboard-settings tests below still exercise their behavior through
 // the dialog (e.g. the 'Ctrl+S' / 'Unbound' chord-display assertions, which run prettyChord).
@@ -649,5 +734,55 @@ describe('Settings → Display name (#479)', () => {
     input.value = '   Alan Turing   ';
     input.dispatchEvent(new Event('change'));
     expect(loadSettings().displayName).toBe('Alan Turing');
+  });
+});
+
+// Task 4: the prefs FORM extracted from the modal so it can mount into an arbitrary container (the
+// transient 'settings' center view in Task 5). mountPreferencesPane builds the same two-pane category
+// rail + control pane that createPreferences hands to the modal, but appends it straight into the given
+// container — no modal chrome / backdrop (createModal is what produces the `.koi-modal-backdrop`) — and
+// returns a destroy() that tears the form (and its child CodeMirror editors) back down.
+describe('mountPreferencesPane', () => {
+  let host: HTMLElement;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+    saveSettings({ ...DEFAULT_SETTINGS });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+  });
+
+  // onChange is the only required PrefsCallbacks member; the rest are optional host capabilities a bare
+  // mount can omit (no MCP sidecar, no workspace scoping). A no-op cb exercises the pure-form path.
+  const noopCb: PrefsCallbacks = { onChange: () => {} };
+
+  it('renders the two-pane form into the provided container (no modal/backdrop)', () => {
+    const handle: PrefsPaneHandle = mountPreferencesPane(host, noopCb);
+    // Every category rail label renders straight into the container...
+    expect(host.textContent).toContain('Appearance');
+    expect(host.textContent).toContain('Editor');
+    expect(host.textContent).toContain('About');
+    // ...as the two-pane layout, mounted in-container rather than as a global modal overlay.
+    expect(host.querySelector('.koi-settings-layout')).not.toBeNull();
+    expect(document.querySelector('.koi-modal-backdrop')).toBeNull();
+    handle.destroy();
+  });
+
+  it('populates controls from the current Settings on mount', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, displayName: 'Ada Lovelace' });
+    const handle = mountPreferencesPane(host, noopCb);
+    const input = host.querySelector<HTMLInputElement>('#koi-set-display-name')!;
+    expect(input.value).toBe('Ada Lovelace');
+    handle.destroy();
+  });
+
+  it('destroy clears the container and tears down the MCP code view', () => {
+    const handle = mountPreferencesPane(host, noopCb);
+    // The MCP recipe is a read-only CodeMirror view (createJsonView) mounted inside the pane.
+    expect(host.querySelector('.koi-mcp-snippet .cm-editor')).not.toBeNull();
+    handle.destroy();
+    expect(host.children.length).toBe(0);
+    expect(document.querySelector('.koi-mcp-snippet .cm-editor')).toBeNull();
   });
 });

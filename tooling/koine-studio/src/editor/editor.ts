@@ -50,6 +50,10 @@ import { rust } from '@codemirror/legacy-modes/mode/rust';
 import { php } from '@codemirror/lang-php';
 import { tags as t } from '@lezer/highlight';
 import { lintGutter, setDiagnostics } from '@codemirror/lint';
+// Schema-aware JSON support for the editable settings.json editor (createJsonSettingsEditor). `jsonSchema()`
+// already bundles `@codemirror/lang-json`'s `json()` (the JSON language) plus the schema linter, hover and
+// autocomplete, so it is the single extension that lights up the whole editing surface.
+import { jsonSchema } from 'codemirror-json-schema';
 import type {
   CallHierarchyIncomingCall,
   CallHierarchyItem,
@@ -74,6 +78,8 @@ import { createInlineState } from '@/editor/inlineCompletionState';
 import { inlineCompletionExtension, type EditorInlineContext } from '@/editor/inlineCompletion';
 import { requestInline } from '@/ai/inlineCompletionClient';
 import { loadSettings, resolveKeybindings } from '@/settings/persistence';
+// The Draft 2020-12 schema for the settings.json document — drives the editable editor's lint/hover/completion.
+import { SETTINGS_JSON_SCHEMA } from '@/settings/settingsSchema';
 import { buildExtraKeys, type BindingId } from '@/editor/keybindings';
 // Review-comment rendering (#259): the StateField+gutter that paint review threads over the buffer, plus
 // the helper that repaints them after a store change. A Studio-only view concern — never touches the model.
@@ -168,6 +174,13 @@ const koineHighlight = HighlightStyle.define([
   { tag: t.propertyName, color: 'var(--koi-hl-type)' },
   { tag: t.variableName, color: 'var(--koi-fg)' },
   { tag: t.definitionKeyword, color: 'var(--koi-hl-keyword)', fontWeight: '600' },
+  // Literal atoms — true/false/null. Chiefly the JSON views (the settings.json editor + the read-only
+  // MCP recipe snippet) which share this style: without these, those tokens fall through to CodeMirror's
+  // light-oriented defaultHighlightStyle, whose near-navy renders at ~1.4:1 on the dark editor (fails AA).
+  // A theme-aware keyword colour keeps them legible in both themes.
+  { tag: t.bool, color: 'var(--koi-hl-keyword)' },
+  { tag: t.null, color: 'var(--koi-hl-keyword)' },
+  { tag: t.atom, color: 'var(--koi-hl-keyword)' },
 ]);
 
 // Keyword/type autocomplete for the editor — the offline fallback used when no LSP
@@ -1489,6 +1502,76 @@ export function createJsonView(parent: HTMLElement): ConfigView {
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
     },
     getText: () => view.state.doc.toString(),
+    destroy: () => view.destroy(),
+  };
+}
+
+export interface JsonSettingsEditor {
+  setContent(text: string): void;
+  getText(): string;
+  /**
+   * Drive the field-level WCAG AA invalid/error relationship on the editor content. With a non-null
+   * `diagnosticsId` the content gains `aria-invalid="true"` + `aria-errormessage=<id>` (alongside its
+   * aria-label); with `null` both are cleared, leaving just the aria-label. The host (settingsPage) calls
+   * this from its validate path so a screen-reader user re-entering an invalid document is told it is
+   * invalid and pointed at the diagnostics strip — unlike the one-shot `role="alert"` announcement.
+   */
+  setInvalid(diagnosticsId: string | null): void;
+  destroy(): void;
+}
+
+/**
+ * An EDITABLE settings.json editor: the JSON language plus schema-driven lint/completion/hover from
+ * SETTINGS_JSON_SCHEMA (via codemirror-json-schema's `jsonSchema()`, which bundles `@codemirror/lang-json`),
+ * reporting every document change through `onChange`. It reuses the same `koineHighlight` + `sharedTheme`
+ * setup as the other editors so it looks native. The host (settingsPage) owns parse/validate/persist;
+ * this factory is just the editing surface.
+ */
+export function createJsonSettingsEditor(
+  parent: HTMLElement,
+  opts: { onChange: (text: string) => void; initial?: string },
+): JsonSettingsEditor {
+  // The content's ARIA name. Kept aside so both the initial config and every setInvalid reconfigure
+  // re-apply it (a reconfigure REPLACES the compartment's contents, so the name must be re-listed).
+  const ariaLabel = { 'aria-label': 'Settings JSON document' };
+  // The content attributes live in their own compartment so setInvalid can toggle the field-level
+  // invalid/error relationship without rebuilding the editor (same pattern as the .koi editor's
+  // lineWrap/minimap compartments). Initially: just the aria-label, no invalid state.
+  const contentAttributes = new Compartment();
+  const view = new EditorView({
+    parent,
+    state: EditorState.create({
+      doc: opts.initial ?? '',
+      extensions: [
+        contentAttributes.of(EditorView.contentAttributes.of({ ...ariaLabel })),
+        lineNumbers(),
+        // `jsonSchema()` already wires the JSON language, the JSON-parse + schema linters, schema-aware
+        // autocomplete and hover — the whole schema-aware editing surface in one extension.
+        jsonSchema(SETTINGS_JSON_SCHEMA as unknown as Parameters<typeof jsonSchema>[0]),
+        syntaxHighlighting(koineHighlight),
+        syntaxHighlighting(defaultHighlightStyle),
+        sharedTheme,
+        EditorView.updateListener.of((u) => {
+          if (u.docChanged) opts.onChange(u.state.doc.toString());
+        }),
+      ],
+    }),
+  });
+
+  return {
+    setContent(text) {
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+    },
+    getText: () => view.state.doc.toString(),
+    setInvalid(diagnosticsId) {
+      // Fully replace the compartment's contents each call so toggling leaves no attribute residue:
+      // invalid → aria-label + aria-invalid + aria-errormessage; valid → aria-label only.
+      const attrs =
+        diagnosticsId != null
+          ? { ...ariaLabel, 'aria-invalid': 'true', 'aria-errormessage': diagnosticsId }
+          : { ...ariaLabel };
+      view.dispatch({ effects: contentAttributes.reconfigure(EditorView.contentAttributes.of(attrs)) });
+    },
     destroy: () => view.destroy(),
   };
 }

@@ -164,80 +164,65 @@
              or editor, so it serves both Visual and Code (and is hidden on Documentation); Properties and
              the left sidebar therefore span full height. -->
         <section id="center" class="pane" aria-label="Editor">
-          <div id="center-tabs" role="tablist" aria-label="Editor view">
-            <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Visual</button>
-            <button type="button" class="center-tab" id="center-tab-technical" role="tab" data-center="technical" aria-selected="false">Code</button>
-            <button type="button" class="center-tab" id="center-tab-docs" role="tab" data-center="docs" aria-selected="false">Documentation</button>
-            <!-- The AI copilot is a first-class surface, always one click away from any view (not a Code
-                 sub-tab). It's the one "intelligent" tab among the structural three, so it alone wears a
-                 mark: a spark in the brand's accent, the same hue that signals "this generates". -->
-            <button type="button" class="center-tab center-tab-ai" id="center-tab-assistant" role="tab" data-center="assistant" aria-selected="false">
-              <svg class="center-tab-spark" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M7 1.6c.5 2.7 1.7 3.9 4.4 4.4-2.7.5-3.9 1.7-4.4 4.4-.5-2.7-1.7-3.9-4.4-4.4 2.7-.5 3.9-1.7 4.4-4.4Z" />
-                <path d="M12.3 9c.2 1.2.7 1.7 1.9 1.9-1.2.2-1.7.7-1.9 1.9-.2-1.2-.7-1.7-1.9-1.9 1.2-.2 1.7-.7 1.9-1.9Z" />
-              </svg>
-              Assistant
-            </button>
-          </div>
+          <!-- Deck v2 bar (Overview toggle + Canvas·Code·Output·Docs filmstrip + keyboard hint). The
+               DeckBar Preact component renders here; the DeckStage renders into #center-body and hosts
+               each center surface in its card body. -->
+          <div id="deck-bar"></div>
           <div id="center-body">
-            <section id="center-visual" class="center-host" role="tabpanel" aria-label="Visual">
+            <!-- The four center surfaces. The DeckStage re-parents each into its deck card at boot; the
+                 facet sub-strips (Editor/Scenarios, Generated/Compatibility/Context Map, Glossary/…) moved
+                 into the card headers, so the in-host tab rows are gone — only the body sub-views remain. -->
+            <section id="center-visual" class="center-host" aria-label="Canvas">
               <div id="canvas-palette-host"></div>
               <div id="diagram-host"></div>
             </section>
-            <section id="center-technical" class="center-host" role="tabpanel" aria-label="Code" hidden>
-              <div id="tech-tabs" role="tablist" aria-label="Code view">
-                <button type="button" class="tech-tab" id="tech-tab-editor" role="tab" data-tech="editor" aria-selected="true">Editor</button>
-                <button type="button" class="tech-tab" id="tech-tab-preview" role="tab" data-tech="preview" aria-selected="false">Generated</button>
-                <button type="button" class="tech-tab" id="tech-tab-check" role="tab" data-tech="check" aria-selected="false">Compatibility</button>
-                <button type="button" class="tech-tab" id="tech-tab-scenarios" role="tab" data-tech="scenarios" aria-selected="false">Scenarios</button>
-              </div>
+            <!-- Code = where you author: the .koi editor + the scenario runner. -->
+            <section id="center-technical" class="center-host" aria-label="Code" hidden>
               <div id="tech-body">
-                <!-- The editor pane is also the editor-split container: group A's CodeMirror mounts
-                     directly here, with the (hidden-until-split) group divider and group-B host as its
-                     siblings. When #split[data-split='true'], _split.scss turns #editor-pane into a
-                     grid laid out by data-orientation (side-by-side or stacked). -->
-                <section id="editor-pane" class="tech-view" aria-label="Editor">
-                  <div class="koi-resizer" id="group-resizer" aria-hidden="true"></div>
-                  <section id="editor-pane-b" aria-label="Editor (second group)"></section>
-                </section>
-                <div id="view-preview" class="tech-view" role="tabpanel" hidden></div>
-                <div id="view-check" class="tech-view doc-view" role="tabpanel" hidden></div>
-                <div id="view-scenarios" class="tech-view" role="tabpanel" hidden></div>
+                <section id="editor-pane" class="tech-view" aria-label="Editor"></section>
+                <div id="view-scenarios" class="tech-view" hidden></div>
               </div>
             </section>
-            <!-- Documentation = Glossary (the ubiquitous language) + Decisions (ADRs) + Notes — three
-                 sibling pages, split from the former combined "Decisions & Notes" surface (#174). Sub-tabs
-                 mirror the Code pane so each master-detail page gets the center's full width. -->
-            <section id="center-docs" class="center-host" role="tabpanel" aria-label="Documentation" hidden>
-              <div id="docs-tabs" role="tablist" aria-label="Documentation view">
-                <button type="button" class="docs-tab" id="docs-tab-glossary" role="tab" data-docs="glossary" aria-selected="true">Glossary</button>
-                <button type="button" class="docs-tab" id="docs-tab-adr" role="tab" data-docs="adr" aria-selected="false">Decisions</button>
-                <button type="button" class="docs-tab" id="docs-tab-notes" role="tab" data-docs="notes" aria-selected="false">Notes</button>
+            <!-- Output = what the compiler produces: Generated source, the Compatibility check, the Context Map. -->
+            <section id="center-output" class="center-host" aria-label="Output" hidden>
+              <div id="output-body">
+                <div id="view-preview" class="tech-view"></div>
+                <div id="view-check" class="tech-view doc-view" hidden></div>
+                <div id="panel-contextmap" class="tech-view doc-view" hidden></div>
               </div>
+            </section>
+            <!-- Documentation = Glossary (the ubiquitous language) + Decisions (ADRs) + Notes. -->
+            <section id="center-docs" class="center-host" aria-label="Documentation" hidden>
               <div id="docs-body">
-                <div id="view-glossary" class="tech-view doc-view" role="tabpanel"></div>
-                <div id="view-docs" class="tech-view doc-view" role="tabpanel" hidden></div>
-                <div id="view-notes" class="tech-view doc-view" role="tabpanel" hidden></div>
+                <div id="view-glossary" class="tech-view doc-view"></div>
+                <div id="view-docs" class="tech-view doc-view" hidden></div>
+                <div id="view-notes" class="tech-view doc-view" hidden></div>
               </div>
             </section>
-            <!-- The AI copilot — a top-level center pane (peer of Visual / Code / Documentation), so it's
-                 one click from any view. The AssistantPanel is mounted into this host lazily on first show
-                 (ide.tsx); the bottom diagnostics strip stays visible here (it's global), collapse it from
-                 its chevron to give the conversation the center's full height. -->
-            <section id="view-assistant" class="center-host" role="tabpanel" aria-label="Assistant" hidden></section>
           </div>
 
-          <footer id="diagnostics" aria-label="Problems, events, relationships and the context map">
+          <!-- Settings (#482): a transient, gear-launched overlay over the deck — NOT a deck surface and
+               not restorable. A SIBLING of #center-body (which the DeckStage renders into and owns), so it
+               survives the stage render. The toolbar gear shows it via the store's `settingsOpen`; the
+               chrome hides #center-body while it's up, leaving the deck-bar as the way back. -->
+          <section id="center-panel-settings" class="settings-page" aria-label="Settings" hidden>
+            <header id="settings-page-header" class="settings-page-header">
+              <h2 class="settings-page-title">Settings</h2>
+              <div id="settings-mode-toggle" class="settings-mode-toggle"></div>
+            </header>
+            <div id="settings-page-body" class="settings-page-body"></div>
+          </section>
+
+          <footer id="diagnostics" aria-label="Problems, events and relationships">
             <div class="koi-resizer koi-resizer-y" id="diag-resizer" aria-hidden="true"></div>
             <div id="diag-header">
-              <button type="button" id="diag-collapse" class="diag-collapse" aria-expanded="true" aria-controls="diag-body panel-events panel-relationships panel-contextmap panel-terminal panel-review" aria-label="Collapse panel">
+              <button type="button" id="diag-collapse" class="diag-collapse" aria-expanded="true" aria-controls="diag-body panel-events panel-relationships panel-terminal panel-review" aria-label="Collapse panel">
                 <svg class="diag-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5 8 10 12 6.5" /></svg>
               </button>
               <div class="diag-tabs" role="tablist" aria-label="Bottom panel">
                 <button type="button" class="diag-tab" id="tab-problems" role="tab" data-panel="problems" aria-selected="true" aria-controls="diag-body">Problems</button>
                 <button type="button" class="diag-tab" id="tab-events" role="tab" data-panel="events" aria-selected="false" aria-controls="panel-events">Events</button>
                 <button type="button" class="diag-tab" id="tab-relationships" role="tab" data-panel="relationships" aria-selected="false" aria-controls="panel-relationships">Relationships</button>
-                <button type="button" class="diag-tab" id="tab-contextmap" role="tab" data-panel="contextmap" aria-selected="false" aria-controls="panel-contextmap">Context Map</button>
                 <button type="button" class="diag-tab" id="tab-terminal" role="tab" data-panel="terminal" aria-selected="false" aria-controls="panel-terminal">Terminal</button>
                 <button type="button" class="diag-tab" id="tab-review" role="tab" data-panel="review" aria-selected="false" aria-controls="panel-review">Review</button>
               </div>
@@ -246,7 +231,6 @@
             <div id="diag-body" class="diag-panel" role="tabpanel" aria-labelledby="tab-problems"></div>
             <div id="panel-events" class="diag-panel" role="tabpanel" aria-labelledby="tab-events" hidden></div>
             <div id="panel-relationships" class="diag-panel" role="tabpanel" aria-labelledby="tab-relationships" hidden></div>
-            <div id="panel-contextmap" class="diag-panel doc-view" role="tabpanel" aria-labelledby="tab-contextmap" hidden></div>
             <div id="panel-terminal" class="diag-panel diag-panel-terminal" role="tabpanel" aria-labelledby="tab-terminal" hidden></div>
             <div id="panel-review" class="diag-panel" role="tabpanel" aria-labelledby="tab-review" hidden></div>
           </footer>
@@ -257,15 +241,18 @@
              read-only informational views until the invariants-on-the-wire follow-up lets them edit
              per-element rules/notes (tracked separately). Their panels carry an honest empty state
              pointing at where each capability lives today, rather than a bare "Coming soon". -->
-        <aside id="right" class="pane" aria-label="Properties">
-          <div id="right-tabs" role="tablist" aria-label="Properties">
-            <button type="button" class="rtab" id="rtab-props" role="tab" data-rview="props" aria-selected="true">Properties</button>
-            <button type="button" class="rtab" id="rtab-rules" role="tab" data-rview="rules" aria-selected="false">Rules</button>
-            <button type="button" class="rtab" id="rtab-notes" role="tab" data-rview="notes" aria-selected="false">Notes</button>
-            <button type="button" class="rtab" id="rtab-source-control" role="tab" data-rview="source-control" aria-selected="false">Source Control</button>
-          </div>
+        <aside id="right" class="pane" aria-labelledby="right-title">
+          <!-- Tool-window title header: the right-edge icon stripe (#right-strip) is the sole view
+               switcher, so the panel needs only a title naming the active tool window — not a second,
+               redundant tab row. inspectorController keeps #right-title in sync with the active RightView. -->
+          <header id="right-header">
+            <h2 id="right-title">Properties</h2>
+          </header>
           <div id="right-body">
             <div id="inspector-host" class="rview" role="tabpanel"></div>
+            <!-- The AI copilot — docked here in the right rail so it stays open beside Code/Canvas. The
+                 AssistantPanel is mounted into this host lazily on first show (ide.tsx → ensureAssistant). -->
+            <section id="view-assistant" class="rview" role="tabpanel" aria-label="AI Chat" hidden></section>
             <!-- Filled by inspectorController.renderSelectedRules() with the selected element's
                  invariants (or an empty state). The static content below is a pre-hydration fallback. -->
             <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden>

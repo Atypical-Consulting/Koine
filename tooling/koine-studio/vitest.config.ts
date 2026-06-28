@@ -89,9 +89,13 @@ export default defineConfig({
         // Inline zustand so its React entry (`import React from 'react'`) is transformed through the alias
         // above instead of being externalized and resolved by Node (which has no `react` package). Without
         // this the panel tests fail with "Cannot find package 'react'".
+        // codemirror-json-schema is inlined for a different reason: its published ESM emits extensionless
+        // relative imports (e.g. `from './features/completion'`) that Node's native ESM resolver rejects
+        // when the dep is externalized. Inlining routes it through Vite's resolver (which adds the `.js`),
+        // so the settings-JSON editor tests can import it. Vite's prod build already resolves it fine.
         server: {
           deps: {
-            inline: ['zustand']
+            inline: ['zustand', 'codemirror-json-schema']
           }
         },
         include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'scripts/**/*.test.mjs'],

@@ -120,14 +120,114 @@ const ICON = {
 // chordFromEvent (keydown → CodeMirror key) and prettyChord (CodeMirror key → display string) live in
 // shared/platform.ts beside formatChord — they're platform-string helpers, not Settings-dialog logic.
 
-/**
- * Build the Settings dialog and return an imperative handle. The DOM is created once; each open()
- * repopulates every control from the freshly loaded Settings so the dialog never shows stale values
- * (e.g. after a theme toggle from the toolbar or command palette).
- */
-export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
-  const modal = createModal({ title: 'Settings', ariaLabel: 'Koine Studio settings', variant: 'koi-modal--settings' });
+/** A mounted preferences pane. The public contract is just teardown; the modal drives the richer
+ *  {@link MountedPrefsPane} returned by {@link mountPreferencesPane}. */
+export interface PrefsPaneHandle {
+  /** Remove the form from its container, destroy its child editors (the MCP CodeMirror view), and drop
+   *  any transient recorder listener / pending timers. After this the pane is dead — re-mount to reuse. */
+  destroy(): void;
+}
 
+/** The richer handle the reusing modal drives: repaint on open ({@link refresh}) and cancel transient
+ *  recorder/conflict state on close ({@link suspend}). Callers that only need teardown see the narrower
+ *  {@link PrefsPaneHandle}. */
+interface MountedPrefsPane extends PrefsPaneHandle {
+  /** Repaint every control from the current Settings and (re)start the MCP sidecar; optionally land on a
+   *  category id first. `focusTab` (default true) focuses the active category tab — the modal wants that on
+   *  open; the embedded center page passes false so re-showing it never steals focus from the page. */
+  refresh(categoryId?: string, focusTab?: boolean): void;
+  /** Cancel any armed keybinding recorder + open conflict prompt (the modal's close-path cleanup). */
+  suspend(): void;
+}
+
+/**
+ * A segmented radio group (e.g. Dark / Light): a row of role=radio buttons under a role=radiogroup, with
+ * exactly one option checked at a time. Keyboard-navigable per the WAI-ARIA radiogroup pattern — a roving
+ * tabindex (only the checked option is in the tab order) plus Arrow/Home/End navigation where focus
+ * follows selection (single-select semantics, matching a click). Arrow nav skips disabled options, so a
+ * scope toggle whose every option is disabled (no workspace open) stays inert. `set(value)` drives both
+ * `aria-checked` and the roving tabindex; the group is seeded with one tabbable option at construction so
+ * it is reachable by Tab even before the first `set()`.
+ *
+ * Module-level + exported (it was a closure inside {@link mountPreferencesPane}) so it can be the single
+ * shared control behind every Studio segmented: the Theme toggle and the four User/Workspace scope
+ * toggles here, and the Settings page's Visual/JSON representation toggle (settingsPage.tsx).
+ */
+export function segmented<T extends string>(
+  ariaLabel: string,
+  options: readonly { value: T; label: string }[],
+  onSelect: (value: T) => void,
+): { el: HTMLElement; set(value: T): void } {
+  const group = document.createElement('div');
+  group.className = 'koi-segmented';
+  group.setAttribute('role', 'radiogroup');
+  group.setAttribute('aria-label', ariaLabel);
+
+  const buttons = options.map(({ value, label }) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'koi-seg';
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', 'false');
+    b.tabIndex = -1;
+    b.dataset.value = value;
+    b.textContent = label;
+    b.addEventListener('click', () => selectButton(b));
+    b.addEventListener('keydown', onArrow);
+    group.appendChild(b);
+    return b;
+  });
+
+  // set() drives aria-checked AND the roving tabindex: only the checked option is tabbable (0), every
+  // other is taken out of the tab order (-1) so Tab enters the group once and the arrows move within it.
+  const set = (value: T): void => {
+    for (const b of buttons) {
+      const checked = b.dataset.value === value;
+      b.setAttribute('aria-checked', String(checked));
+      b.tabIndex = checked ? 0 : -1;
+    }
+  };
+
+  // Move selection (and focus) to `target` and commit it — the shared path for both a click and an arrow
+  // key, so focus-follows-selection holds for the keyboard exactly as it already did for the pointer.
+  function selectButton(target: HTMLButtonElement): void {
+    const value = target.dataset.value as T;
+    set(value);
+    onSelect(value);
+    target.focus();
+  }
+
+  // Arrow / Home / End navigation across the ENABLED options (a no-workspace scope toggle has none, so
+  // this is a no-op there). Right/Down → next, Left/Up → previous (both wrap), Home → first, End → last.
+  function onArrow(e: KeyboardEvent): void {
+    const enabled = buttons.filter((b) => !b.disabled);
+    const i = enabled.indexOf(e.target as HTMLButtonElement);
+    if (i < 0) return; // the focused option isn't navigable (e.g. all disabled) — leave the group be
+    let next: HTMLButtonElement;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = enabled[(i + 1) % enabled.length];
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = enabled[(i - 1 + enabled.length) % enabled.length];
+    else if (e.key === 'Home') next = enabled[0];
+    else if (e.key === 'End') next = enabled[enabled.length - 1];
+    else return;
+    e.preventDefault();
+    selectButton(next);
+  }
+
+  // Seed one tabbable option so the group is keyboard-reachable before the first set() (callers set the
+  // real selection during populate); the first option carries the roving tabindex until then.
+  if (buttons.length > 0) buttons[0].tabIndex = 0;
+
+  return { el: group, set };
+}
+
+/**
+ * Build the two-pane preference form (category rail + control pane) and append it into `container` — no
+ * modal chrome. The DOM is created once and populated from the current Settings on mount; each control
+ * commits a single-field patch through patchSettings() and reports the merged Settings back via cb.onChange.
+ * Returns a handle to repaint/tear-down the pane. {@link createPreferences} mounts this inside a modal; the
+ * transient Settings center view mounts the very same pane inside a page.
+ */
+export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks): MountedPrefsPane {
   // Every control commits a single-field patch, then reports the merged Settings to the app.
   function commit(patch: Partial<Settings>): void {
     cb.onChange(patchSettings(patch));
@@ -213,36 +313,8 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     return { el: btn, set, setDisabled };
   }
 
-  // A segmented radio group (e.g. Dark / Light). Each option is a button; one is checked at a time.
-  function segmented<T extends string>(
-    ariaLabel: string,
-    options: readonly { value: T; label: string }[],
-    onSelect: (value: T) => void,
-  ): { el: HTMLElement; set(value: T): void } {
-    const group = document.createElement('div');
-    group.className = 'koi-segmented';
-    group.setAttribute('role', 'radiogroup');
-    group.setAttribute('aria-label', ariaLabel);
-    const buttons = options.map(({ value, label }) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'koi-seg';
-      b.setAttribute('role', 'radio');
-      b.setAttribute('aria-checked', 'false');
-      b.dataset.value = value;
-      b.textContent = label;
-      b.addEventListener('click', () => {
-        set(value);
-        onSelect(value);
-      });
-      group.appendChild(b);
-      return b;
-    });
-    const set = (value: T) => {
-      for (const b of buttons) b.setAttribute('aria-checked', String(b.dataset.value === value));
-    };
-    return { el: group, set };
-  }
+  // The segmented radio group (Theme, the User/Workspace scope toggles) is the shared, keyboard-navigable
+  // `segmented()` helper hoisted to module scope (below), so settingsPage.tsx can reuse it too.
 
   // --- per-workspace scope control ------------------------------------------
   // The four scoped fields (previewTarget, formatOnSave, wordWrap, lspTrace) can be overridden per
@@ -1419,7 +1491,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   const layout = document.createElement('div');
   layout.className = 'koi-settings-layout';
   layout.append(nav, panels);
-  modal.body.appendChild(layout);
+  container.appendChild(layout);
 
   // --- populate every control from the current Settings ---------------------
 
@@ -1464,20 +1536,30 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     refreshKeyboard();
   }
 
-  modal.onOpen(() => {
+  // The pane's "open" state: repaint every control from the current Settings, refresh the About card,
+  // back-fill the workspace-root + secret fields, (re)start the MCP sidecar when shown, and reveal the
+  // active category. Two independent flags:
+  //   • `shown`    — the surface is actually being presented to the user (modal open, or page show), so
+  //                  it's safe to (re)start the opt-in MCP sidecar. False at the bare mount/embed, so a
+  //                  never-shown Settings surface never spawns a background process.
+  //   • `focusTab` — move focus onto the active category tab. Wanted when a MODAL opens (focus into the
+  //                  dialog), but NOT for the embedded center page (it would steal focus from the page).
+  function applyOpenState({ shown, focusTab }: { shown: boolean; focusTab: boolean }): void {
     disarmReset();
     const s = loadSettings();
     populate(s);
     about.refresh();
     void refreshWsRootValue();
-    // On a very fast first open the secret may still be decrypting; back-fill the key once it lands,
+    // On a very fast first paint the secret may still be decrypting; back-fill the key once it lands,
     // but never clobber a value the user has already started typing.
     void whenSecretsReady().then(() => {
       if (aiKeyInput.value === '') aiKeyInput.value = loadSettings().aiApiKey;
     });
-    // Only the desktop, and only when the user has enabled MCP, (re)starts the sidecar on open — the
-    // server is opt-in, so an unopened Settings dialog never spawns a background process.
-    if (s.mcpEnabled && cb.mcpHostable !== false) {
+    // Only the desktop, only when the user has enabled MCP, AND only when the surface is actually shown
+    // does this (re)start the sidecar — the server is opt-in, so a never-shown Settings surface must never
+    // spawn a background process. The modal builds this pane at init (long before its first open) via the
+    // mount-time applyOpenState({ shown: false }), so probing/launching there would break that invariant.
+    if (shown && s.mcpEnabled && cb.mcpHostable !== false) {
       const gen = ++mcpGen;
       void resolveMcpEndpoint().then((url) => {
         if (gen === mcpGen) showMcpStarted(url);
@@ -1487,25 +1569,77 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
       showMcpOff();
     }
     syncMcpUi(s.mcpEnabled);
-    selectCategory(activeIndex); // keep the last-open category across opens
-    tabs[activeIndex].focus();
-  });
+    selectCategory(activeIndex, focusTab); // keep the last-open category across opens
+  }
 
-  // Closing the dialog by ANY path (✕, backdrop, Esc) cancels an armed keybinding recorder and clears
-  // conflicts — so a left-armed document-level keydown listener can't outlive the dialog and hijack the
-  // next keystroke (e.g. swallow Mod-S and silently rebind a hidden Keyboard row).
-  modal.onClose(() => {
-    disarmRecording();
-    for (const id of kbdRows.keys()) hideKbdConflict(id);
-  });
-
-  // Open on a specific category when asked (e.g. the palette's "About" → 'about'); onOpen's trailing
-  // selectCategory(activeIndex) then lands on it. A no-arg open keeps the last-active tab.
-  function open(categoryId?: string): void {
+  // Repaint from the current Settings, optionally landing on a named category first, and (since the surface
+  // is now shown) (re)start the MCP sidecar. The reusing modal calls this on every open (mirroring the old
+  // onOpen): an 'about'-style id lands on that tab, a no-arg call keeps the last-active one. `focusTab`
+  // defaults true (the modal focuses the tab on open); the embedded center page passes false so re-showing
+  // it never steals focus from the page.
+  function refresh(categoryId?: string, focusTab = true): void {
     if (categoryId) {
       const i = categories.findIndex((c) => c.id === categoryId);
       if (i >= 0) activeIndex = i;
     }
+    applyOpenState({ shown: true, focusTab });
+  }
+
+  // Cancel any in-flight transient state: an armed keybinding recorder (whose document-level capture
+  // listener would otherwise outlive a close and hijack the next keystroke — e.g. swallow Mod-S and
+  // silently rebind a hidden row) and any open conflict prompt. The modal calls this on close by ANY path.
+  function suspend(): void {
+    disarmRecording();
+    for (const id of kbdRows.keys()) hideKbdConflict(id);
+  }
+
+  // Fully tear the pane down: drop transient state, supersede any in-flight async (so a late sidecar /
+  // probe result can't repaint a removed pane), clear pending timers, destroy the MCP CodeMirror view,
+  // and remove the form root from its container.
+  function destroy(): void {
+    suspend();
+    ++mcpGen;
+    clearTimeout(mcpCopyTimer);
+    clearTimeout(mcpRecipeTimer);
+    clearTimeout(disarmTimer);
+    mcpSnippetView.destroy();
+    layout.remove();
+  }
+
+  // Populate immediately from the current Settings so an embedded pane shows live values without the
+  // caller wiring anything; the surface is NOT yet shown (so no sidecar spawns) and focus is NOT moved
+  // (that would steal it from the surrounding page).
+  applyOpenState({ shown: false, focusTab: false });
+
+  return { destroy, refresh, suspend };
+}
+
+/**
+ * Build the Settings dialog — the shared createModal() chrome around the two-pane preference pane — and
+ * return an imperative handle. The pane is mounted once into the modal body and reused across opens: each
+ * open repaints every control from the freshly loaded Settings (so the dialog never shows stale values,
+ * e.g. after a theme toggle from the toolbar or command palette) and each close cancels any armed
+ * keybinding recorder. The form itself lives in {@link mountPreferencesPane}, so the same pane can also be
+ * embedded directly in a page.
+ */
+export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
+  const modal = createModal({ title: 'Settings', ariaLabel: 'Koine Studio settings', variant: 'koi-modal--settings' });
+  const pane = mountPreferencesPane(modal.body, cb);
+
+  // The category to land on for the NEXT open (set by open(categoryId)); cleared after each open so a
+  // plain open() keeps the last-active category.
+  let pendingCategory: string | undefined;
+
+  modal.onOpen(() => {
+    pane.refresh(pendingCategory);
+    pendingCategory = undefined;
+  });
+  modal.onClose(() => pane.suspend());
+
+  // Open on a specific category when asked (e.g. the palette's "About" → 'about'); a no-arg open keeps
+  // the last-active tab.
+  function open(categoryId?: string): void {
+    pendingCategory = categoryId;
     modal.open();
   }
 
