@@ -107,6 +107,10 @@ export interface UiChromeSlice {
   outlineFilter: string;
   /** The Deck v2 center layout. The legacy `center` field mirrors `deck.primary`. */
   deck: DeckState;
+  /** Whether the transient, gear-launched Settings overlay (#482) is showing OVER the deck. Orthogonal
+   *  to the deck (Settings is not a surface): never persisted/restored, and cleared by focusing any deck
+   *  surface, so it can't leak into the saved center/deck. */
+  settingsOpen: boolean;
   setCenter(v: CenterView): void;
   setTech(v: TechView): void;
   setOutput(v: OutputTab): void;
@@ -138,6 +142,10 @@ export interface UiChromeSlice {
   setDeckMode(mode: DeckMode): void;
   /** Toggle the bird's-eye overview on/off. */
   toggleOverview(): void;
+  /** Show the transient Settings overlay over the deck (#482). The deck state is left untouched. */
+  showSettings(): void;
+  /** Hide the Settings overlay, returning to the deck as it was. */
+  closeSettings(): void;
 }
 
 export function createUiChromeSlice(
@@ -155,6 +163,7 @@ export function createUiChromeSlice(
     outlineFilter: '',
     mobileZone: DEFAULT_MOBILE_ZONE,
     deck: DEFAULT_DECK_STATE,
+    settingsOpen: false,
 
     // `setCenter` = "go to this surface, full" — the legacy single-view semantics map to a 1-up focus.
     setCenter: (v) => get().focusPrimary(v),
@@ -197,7 +206,9 @@ export function createUiChromeSlice(
     // --- Deck actions (ported from the Deck v2 POC interaction model) ---
     setDeck: (deck) => set({ deck, center: deck.primary }),
     focusPrimary: (view) => {
-      set({ deck: { ...get().deck, mode: 'focus', primary: view, secondary: null, flipped: false }, center: view });
+      // Focusing a deck surface is the natural way to LEAVE the Settings overlay, so clear it here — this
+      // is what the deck-bar / palette / selectCenter all route through.
+      set({ deck: { ...get().deck, mode: 'focus', primary: view, secondary: null, flipped: false }, center: view, settingsOpen: false });
     },
     openBeside: (view) => {
       const { deck } = get();
@@ -241,5 +252,9 @@ export function createUiChromeSlice(
       const { deck } = get();
       set({ deck: { ...deck, mode: deck.mode === 'overview' ? 'focus' : 'overview' } });
     },
+
+    // --- Settings overlay (#482), orthogonal to the deck ---
+    showSettings: () => set({ settingsOpen: true }),
+    closeSettings: () => set({ settingsOpen: false }),
   };
 }

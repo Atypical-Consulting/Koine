@@ -11,6 +11,67 @@
   padding: 0;
 }
 
+/* --- Settings as a center overlay (#482) ----------------------------------------------------
+   The gear-launched Settings page sits as a sibling of #center-body inside #center (a flex column),
+   so it fills the same slot the deck body would; the chrome hides #center-body and reveals this while
+   `settingsOpen`. A title bar (with the Visual/JSON segmented toggle) over a scrolling body that hosts
+   either the two-pane form or the JSON editor. */
+#center-panel-settings.settings-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--koi-paper);
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.settings-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--koi-space-3);
+  padding: var(--koi-space-2) var(--koi-space-4);
+  border-bottom: 1px solid var(--koi-line);
+}
+
+.settings-page-title {
+  margin: 0;
+  font-size: var(--koi-text-md);
+  font-weight: 600;
+}
+
+.settings-page-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* The JSON editor's inline diagnostics strip (invalid settings.json — not saved). */
+.settings-json-diagnostics {
+  padding: var(--koi-space-1-5) var(--koi-space-4);
+  border-top: 1px solid var(--koi-line);
+  background: color-mix(in srgb, var(--koi-danger, #d9534f) 12%, transparent);
+  color: var(--koi-fg);
+  font-size: var(--koi-text-sm);
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.settings-json-diagnostics-title {
+  margin: 0 0 var(--koi-space-1) 0;
+  font-weight: 600;
+}
+
+.settings-json-diagnostics-list {
+  margin: 0;
+  padding-left: var(--koi-space-4);
+}
+
 .koi-settings-layout {
   display: flex;
   align-items: stretch;
@@ -217,7 +278,10 @@
   border: none;
   border-radius: var(--koi-radius-sm);
   background: transparent;
-  color: var(--koi-muted);
+  // Inactive label. `--koi-muted` reads at only ~4.3:1 on `--koi-surface` (fails WCAG AA for this
+  // interactive control); `--koi-ink-soft` is the soft-but-legible ink token (≥4.5:1 in both themes).
+  // The checked option stays distinct via `--koi-fg` + the raised pill + bold below.
+  color: var(--koi-ink-soft);
   padding: var(--koi-space-1-25) var(--koi-space-3-5);
   font-family: inherit;
   font-size: var(--koi-text-base);

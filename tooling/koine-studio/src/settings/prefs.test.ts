@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createPreferences, type PrefsCallbacks } from '@/settings/prefs';
+import { createPreferences, mountPreferencesPane, type PrefsCallbacks, type PrefsPaneHandle } from '@/settings/prefs';
 import {
   DEFAULT_SETTINGS,
   loadSettings,
@@ -649,5 +649,55 @@ describe('Settings → Display name (#479)', () => {
     input.value = '   Alan Turing   ';
     input.dispatchEvent(new Event('change'));
     expect(loadSettings().displayName).toBe('Alan Turing');
+  });
+});
+
+// Task 4: the prefs FORM extracted from the modal so it can mount into an arbitrary container (the
+// transient 'settings' center view in Task 5). mountPreferencesPane builds the same two-pane category
+// rail + control pane that createPreferences hands to the modal, but appends it straight into the given
+// container — no modal chrome / backdrop (createModal is what produces the `.koi-modal-backdrop`) — and
+// returns a destroy() that tears the form (and its child CodeMirror editors) back down.
+describe('mountPreferencesPane', () => {
+  let host: HTMLElement;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+    saveSettings({ ...DEFAULT_SETTINGS });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+  });
+
+  // onChange is the only required PrefsCallbacks member; the rest are optional host capabilities a bare
+  // mount can omit (no MCP sidecar, no workspace scoping). A no-op cb exercises the pure-form path.
+  const noopCb: PrefsCallbacks = { onChange: () => {} };
+
+  it('renders the two-pane form into the provided container (no modal/backdrop)', () => {
+    const handle: PrefsPaneHandle = mountPreferencesPane(host, noopCb);
+    // Every category rail label renders straight into the container...
+    expect(host.textContent).toContain('Appearance');
+    expect(host.textContent).toContain('Editor');
+    expect(host.textContent).toContain('About');
+    // ...as the two-pane layout, mounted in-container rather than as a global modal overlay.
+    expect(host.querySelector('.koi-settings-layout')).not.toBeNull();
+    expect(document.querySelector('.koi-modal-backdrop')).toBeNull();
+    handle.destroy();
+  });
+
+  it('populates controls from the current Settings on mount', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, displayName: 'Ada Lovelace' });
+    const handle = mountPreferencesPane(host, noopCb);
+    const input = host.querySelector<HTMLInputElement>('#koi-set-display-name')!;
+    expect(input.value).toBe('Ada Lovelace');
+    handle.destroy();
+  });
+
+  it('destroy clears the container and tears down the MCP code view', () => {
+    const handle = mountPreferencesPane(host, noopCb);
+    // The MCP recipe is a read-only CodeMirror view (createJsonView) mounted inside the pane.
+    expect(host.querySelector('.koi-mcp-snippet .cm-editor')).not.toBeNull();
+    handle.destroy();
+    expect(host.children.length).toBe(0);
+    expect(document.querySelector('.koi-mcp-snippet .cm-editor')).toBeNull();
   });
 });

@@ -53,7 +53,8 @@ import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
 import { loadLayout, saveLayout, type LayoutState } from '@/shell/layoutStore';
 import { devCommands } from '@/shell/devCommands';
 import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
-import { createPreferences } from '@/settings/prefs';
+import { createPreferences, type PrefsCallbacks } from '@/settings/prefs';
+import { createSettingsPage, type SettingsPageHandle } from '@/settings/settingsPage';
 import { applyAppearance } from '@/settings/appearance';
 import { initEdgeResizer } from '@/shell/resize';
 import { createHelpOverlay } from '@/shared/help';
@@ -1681,7 +1682,10 @@ export function init(): () => void {
     },
   });
 
-  const prefs = createPreferences({
+  // The single PrefsCallbacks object, shared by BOTH the (legacy) Settings modal and the gear-launched
+  // Settings center page (createSettingsPage), so a change applied from either surface runs the exact
+  // same live-apply path.
+  const prefsCallbacks: PrefsCallbacks = {
     onChange: (s) => {
       // `s` is the USER/global settings (prefs keeps the global value untouched when a row is scoped to
       // Workspace), so it stays the user-level source of truth here.
@@ -1716,7 +1720,29 @@ export function init(): () => void {
     onKeybindingsChanged: () => {
       editor.reconfigureKeybindings();
     },
-  });
+  };
+  const prefs = createPreferences(prefsCallbacks);
+
+  // The gear-launched Settings center page (#center-panel-settings). Built LAZILY on the first route into
+  // Settings, not at init: mounting its Visual pane runs mountPreferencesPane's open path, which (re)starts
+  // the MCP sidecar when enabled — so an eager mount would spawn that background process before the user
+  // ever opens Settings. It reuses the SAME prefsCallbacks as the modal, so a JSON or Visual edit on the
+  // page live-applies through the identical onChange hook.
+  let settingsPage: SettingsPageHandle | null = null;
+  function ensureSettingsPage(): void {
+    if (settingsPage) {
+      // Already built — re-sync from the live settings on re-open (the modal it replaced repainted on
+      // every open), so a theme/setting changed from the toolbar or palette while Settings sat hidden
+      // shows correctly when the gear brings it back.
+      settingsPage.refresh();
+      return;
+    }
+    settingsPage = createSettingsPage(
+      { header: el('settings-page-header'), body: el('settings-page-body') },
+      prefsCallbacks,
+    );
+  }
+
   const help = createHelpOverlay(helpRows());
   // Guards the user-initiated New command against silently discarding unsaved work.
   const confirmDialog = createConfirmDialog();
@@ -2127,7 +2153,15 @@ export function init(): () => void {
   saveProjectBtn.addEventListener('click', () => void saveProjectToDisk());
   if (!platform.canSaveProjects) saveProjectBtn.hidden = true;
   el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
-  el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => prefs.open());
+  // The toolbar gear opens the transient Settings overlay over the deck (#center-panel-settings), instead
+  // of the prefs modal. The page is built on first open (ensureSettingsPage), then the overlay is shown via
+  // the store's `settingsOpen` (controller.showSettings) — it's NOT a deck surface, so the deck/persistence
+  // are untouched and focusing any surface leaves it. The remaining `prefs.open()` call sites (command
+  // palette, About, onOpenPrefs) keep the modal `prefs` alive for now (a tracked follow-up unifies them).
+  el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => {
+    ensureSettingsPage();
+    controller.showSettings();
+  });
 
   // Mobile overflow "More" (⋮) menu (#528): at ≤ $bp-narrow the toolbar hides its secondary actions
   // (Save/Check/Install/⌘K/theme/Settings) and reveals this kebab, which collects them into a floating
@@ -2369,6 +2403,7 @@ export function init(): () => void {
     editorSession.destroy();
     window.removeEventListener('resize', onDiagramViewportResize);
     terminal?.dispose(); // stop the brokered shell + dispose xterm (#256)
+    settingsPage?.destroy(); // tear down the Settings center page (pane/editor + header toggle) if it was opened
     review?.dispose(); // unmount the Review panel + release its store subscription (#259)
     unsubReviewStore(); // release the editor-repaint subscription (the editorSession is destroyed above)
     workspace.setAutoSave(false);

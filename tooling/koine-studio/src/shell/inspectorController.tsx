@@ -248,6 +248,8 @@ export interface InspectorController {
 
   // View selection (palette commands + toolbar/tab clicks route here).
   selectCenter(view: CenterView): void;
+  /** Show the transient, gear-launched Settings overlay (#482) over the deck (not a deck surface). */
+  showSettings(): void;
   /**
    * Switch the left rail's active navigator axis (#453): show the Domain pane (the strategic/tactical DDD
    * navigator) or the Files pane (the workspace `.koi` tree), hiding the other, and persist the choice.
@@ -361,6 +363,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const assistantView = el('view-assistant');
   const checkView = el('view-check');
   const scenariosView = el('view-scenarios');
+  // The transient Settings overlay (#482): a gear-launched page that covers the deck body while
+  // `settingsOpen`, NOT a deck surface. OPTIONAL like the bottom-sheet host — absent from the desktop-only
+  // test fixtures — so look it up defensively; without it applyCenterChrome simply skips the overlay
+  // toggle. The page body is populated by the settings page host (ide.tsx).
+  const settingsPanelEl = document.getElementById('center-panel-settings');
   // Right-rail host: the element inspector (Properties). Fixed — never torn down on a model reload.
   const inspectorHost = el('inspector-host');
   // Below $bp-narrow the inspector lives in a bottom sheet instead of the fixed #right rail (#221). The
@@ -460,6 +467,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   let persistedCenter: CenterView = initialCenter;
   appStore.subscribe((s, prev) => {
     if (s.center === prev.center) return;
+    // Never persist a TRANSIENT view (e.g. the gear-launched Settings page): a reload must not restore it
+    // (isValidCenter rejects it), and writing it would clobber the user's real last view — so opening
+    // Settings then reloading would forget where they actually were. Leave the persisted value as-is.
+    if (!isValidCenter(s.center)) return;
     if (s.center !== persistedCenter) {
       persistedCenter = s.center;
       deps.saveWorkspaceCenter(s.center);
@@ -1328,6 +1339,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     const docs = activeDocs();
     const vis = visibleCenters();
 
+    // Settings (#482) is a transient overlay, NOT a deck surface: when `settingsOpen`, it covers the deck
+    // body and the deck-bar stays as the way back. The host is optional (absent from the desktop-only test
+    // fixtures), so guard the toggle.
+    const settingsOpen = appStore.getState().settingsOpen;
+    if (settingsPanelEl) settingsPanelEl.hidden = !settingsOpen;
+    centerBodyEl.hidden = settingsOpen;
+
     // The bottom strip (Problems/Events/Relationships/Terminal/Review) is GLOBAL: it serves every center
     // view and is hidden only by its own collapse toggle (#diag-collapse), never by the active view.
     diagEl.hidden = false;
@@ -1376,6 +1394,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function selectCenter(view: CenterView): void {
     // Plain "show this surface" = focus it 1-up; the deck subscription applies the chrome + lazy-loads.
     appStore.getState().focusPrimary(view);
+  }
+
+  // Show the transient Settings overlay (#482) over the deck. It's NOT a deck surface, so this flips the
+  // orthogonal `settingsOpen` flag rather than routing through focusPrimary — the deck state (and its
+  // persistence) is left untouched. Focusing any deck surface (the deck-bar) clears it.
+  function showSettings(): void {
+    appStore.getState().showSettings();
   }
 
   // The assistant is interactive (not a cached, model-derived surface): every show re-points it at the
@@ -1624,7 +1649,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const unsubscribeDeck = appStore.subscribe(
     (s: import('@/store/index').AppState, prev: import('@/store/index').AppState) => {
       const centerChanged =
-        s.deck !== prev.deck || s.tech !== prev.tech || s.output !== prev.output || s.docs !== prev.docs;
+        s.deck !== prev.deck ||
+        s.tech !== prev.tech ||
+        s.output !== prev.output ||
+        s.docs !== prev.docs ||
+        // The Settings overlay (#482) isn't a deck surface, so a settingsOpen flip wouldn't otherwise
+        // re-run the chrome; include it here so entering/leaving Settings covers/reveals the deck body.
+        s.settingsOpen !== prev.settingsOpen;
       if (!centerChanged) return;
       syncCenterChrome();
       if (s.deck !== prev.deck) deps.saveWorkspaceDeck?.(s.deck);
@@ -2199,6 +2230,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     selection,
     activeContext,
     selectCenter,
+    showSettings,
     setAxis,
     selectTech,
     selectOutput,

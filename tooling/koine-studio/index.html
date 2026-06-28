@@ -201,6 +201,18 @@
             </section>
           </div>
 
+          <!-- Settings (#482): a transient, gear-launched overlay over the deck — NOT a deck surface and
+               not restorable. A SIBLING of #center-body (which the DeckStage renders into and owns), so it
+               survives the stage render. The toolbar gear shows it via the store's `settingsOpen`; the
+               chrome hides #center-body while it's up, leaving the deck-bar as the way back. -->
+          <section id="center-panel-settings" class="settings-page" aria-label="Settings" hidden>
+            <header id="settings-page-header" class="settings-page-header">
+              <h2 class="settings-page-title">Settings</h2>
+              <div id="settings-mode-toggle" class="settings-mode-toggle"></div>
+            </header>
+            <div id="settings-page-body" class="settings-page-body"></div>
+          </section>
+
           <footer id="diagnostics" aria-label="Problems, events and relationships">
             <div class="koi-resizer koi-resizer-y" id="diag-resizer" aria-hidden="true"></div>
             <div id="diag-header">
