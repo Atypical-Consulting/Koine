@@ -15,6 +15,12 @@
   flex: 1 1 auto;
   min-height: 0;
   position: relative;
+  // The DeckStage fills this with `.deck-stage { flex: 1 }`, so #center-body must be a flex column
+  // container — otherwise the stage (and its absolutely-positioned, %-height cards) collapse to zero
+  // height and the surfaces render invisible. (In Storybook the stage sits in its own flex column, so
+  // this only bites the real app.)
+  display: flex;
+  flex-direction: column;
 }
 
 .center-host {
