@@ -11,14 +11,16 @@ export interface LayoutState {
   /** Which side the collapsible file-explorer rail lives on. */
   sideRail: 'left' | 'right';
   /** Whether the desktop right Properties rail is collapsed (reclaiming its column). The right-edge
-   *  tool-window stripe stays docked; re-expanding restores the last active `RightView`. Desktop-only. */
+   *  tool-window stripe stays docked; re-expanding restores the last active `RightView`. Desktop-only.
+   *  Defaults to collapsed (#730): inspection is contextual, so a fresh workspace starts with the rail
+   *  tucked and reveal-on-select brings Properties out the moment an element is selected. */
   rightCollapsed: boolean;
 }
 
 export const DEFAULT_LAYOUT: LayoutState = {
   panelSide: 'bottom',
   sideRail: 'right',
-  rightCollapsed: false,
+  rightCollapsed: true,
 };
 
 // --- storage key -------------------------------------------------------------

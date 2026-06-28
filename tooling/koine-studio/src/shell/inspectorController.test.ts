@@ -1035,6 +1035,9 @@ describe('createInspectorController — right-edge tool-window stripe (#500)', (
   });
 
   test("clicking the active view's icon again collapses and persists the flag", () => {
+    // Start expanded explicitly (the persisted default is now collapsed, #730) so this exercises the
+    // open → click-active → collapse transition.
+    saveLayout({ rightCollapsed: false });
     const deps = makeDeps(makeLsp());
     const ctl = createInspectorController(deps);
     ctl.init();
@@ -1048,6 +1051,9 @@ describe('createInspectorController — right-edge tool-window stripe (#500)', (
   });
 
   test('clicking a different view while open switches the view without collapsing', () => {
+    // Start expanded explicitly (the persisted default is now collapsed, #730) so this exercises a
+    // view-to-view switch on an already-open rail rather than an expand-from-collapsed.
+    saveLayout({ rightCollapsed: false });
     const deps = makeDeps(makeLsp());
     const ctl = createInspectorController(deps);
     ctl.init();
