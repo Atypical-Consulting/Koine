@@ -13,13 +13,14 @@ import type { RightView } from '@/store/slices/uiChrome';
  *  (the toolbar's stroked 16×16 idiom, reusing the prefs/notes/git glyphs already in the shell). */
 interface StripeButton {
   view: RightView;
-  /** Accessible name + hover tooltip (Rider shows the tool-window name on its stripe icons). */
+  /** Accessible name (aria-label) + the text of the custom left-pointing hover/focus tooltip
+   *  (`data-tooltip`, styled in _inspector.scss). Rider shows the tool-window name on its stripe icons. */
   label: string;
   /** Inner SVG path/shape markup for the 16×16 line icon. */
   icon: string;
 }
 
-/** The four toggles, top-to-bottom, matching the #right rail's `.rtab` order (Properties first). */
+/** The four toggles, top-to-bottom, in right-view order (Properties first). */
 const STRIPE_BUTTONS: readonly StripeButton[] = [
   {
     view: 'props',
@@ -47,13 +48,14 @@ const STRIPE_BUTTONS: readonly StripeButton[] = [
   },
 ];
 
-/** The stripe's inner markup: one tooltipped icon toggle button per RightView. Injected at boot into
- *  the #right-strip toolbar aside; the controller flips each button's aria-pressed as the panel opens,
- *  closes, or switches view. */
+/** The stripe's inner markup: one icon toggle button per RightView, each carrying a `data-tooltip` that
+ *  CSS reveals as a left-pointing label on hover/focus (the stripe hugs the viewport's right edge, so the
+ *  tooltip opens inward). Injected at boot into the #right-strip toolbar aside; the controller flips each
+ *  button's aria-pressed as the panel opens, closes, or switches view. */
 export function rightStripMarkup(): string {
   return STRIPE_BUTTONS.map(
     ({ view, label, icon }) => `
-    <button type="button" class="rstrip-btn" data-rview="${view}" title="${label}" aria-label="${label}" aria-controls="right" aria-pressed="false">
+    <button type="button" class="rstrip-btn" data-rview="${view}" data-tooltip="${label}" aria-label="${label}" aria-controls="right" aria-pressed="false">
       <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true">${icon}</svg>
     </button>`,
   ).join('');

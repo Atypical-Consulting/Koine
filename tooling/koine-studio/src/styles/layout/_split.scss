@@ -70,6 +70,9 @@
   padding: var(--koi-space-2) var(--koi-space-1);
   background: var(--koi-paper-2);
   border-left: 1px solid var(--koi-line);
+  /* Override .pane's overflow:hidden so the buttons' left-pointing tooltips (_inspector.scss) can spill
+     out of the narrow stripe track and over #right, instead of being clipped at the stripe's edge. */
+  overflow: visible;
 }
 
 /* --- collapsed: reclaim the inspector column ---
