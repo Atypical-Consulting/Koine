@@ -111,6 +111,11 @@ export interface UiChromeSlice {
    *  to the deck (Settings is not a surface): never persisted/restored, and cleared by focusing any deck
    *  surface, so it can't leak into the saved center/deck. */
   settingsOpen: boolean;
+  /** The category the Settings overlay should land on when opened (#731) — a prefs.ts category id
+   *  (`appearance | editor | keyboard | output | assistant | mcp | advanced | about`), or `null` to open
+   *  on the pane's last-used / default tab. Set by `showSettings(category?)`; read by the host that mounts
+   *  the preferences pane. Like `settingsOpen`, it's transient and never persisted. */
+  settingsCategory: string | null;
   setCenter(v: CenterView): void;
   setTech(v: TechView): void;
   setOutput(v: OutputTab): void;
@@ -142,8 +147,10 @@ export interface UiChromeSlice {
   setDeckMode(mode: DeckMode): void;
   /** Toggle the bird's-eye overview on/off. */
   toggleOverview(): void;
-  /** Show the transient Settings overlay over the deck (#482). The deck state is left untouched. */
-  showSettings(): void;
+  /** Show the transient Settings overlay over the deck (#482). The deck state is left untouched. Pass a
+   *  category id (#731) to land the overlay on that tab; omit it to open on the last-used / default tab
+   *  (which clears any previously forced category). */
+  showSettings(category?: string): void;
   /** Hide the Settings overlay, returning to the deck as it was. */
   closeSettings(): void;
 }
@@ -164,6 +171,7 @@ export function createUiChromeSlice(
     mobileZone: DEFAULT_MOBILE_ZONE,
     deck: DEFAULT_DECK_STATE,
     settingsOpen: false,
+    settingsCategory: null,
 
     // `setCenter` = "go to this surface, full" — the legacy single-view semantics map to a 1-up focus.
     setCenter: (v) => get().focusPrimary(v),
@@ -254,7 +262,9 @@ export function createUiChromeSlice(
     },
 
     // --- Settings overlay (#482), orthogonal to the deck ---
-    showSettings: () => set({ settingsOpen: true }),
+    // A category lands the overlay on that tab (#731); a plain open clears any forced category (null) so
+    // the pane opens on its last-used / default tab rather than re-forcing the previous deep-link.
+    showSettings: (category) => set({ settingsOpen: true, settingsCategory: category ?? null }),
     closeSettings: () => set({ settingsOpen: false }),
   };
 }

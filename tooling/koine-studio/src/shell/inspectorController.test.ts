@@ -378,6 +378,44 @@ describe('createInspectorController — center switching', () => {
     expect(deps.store.getState().settingsOpen).toBe(true);
   });
 
+  test('showSettings(category) opens the overlay AND records the landing category (#731)', () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    // A deep-linked open (e.g. the About command) lands the overlay on a specific category: the overlay
+    // opens AND the requested category is recorded on the store so the pane (mountPreferencesPane) opens
+    // on that tab.
+    ctl.showSettings('about');
+    expect(deps.store.getState().settingsOpen).toBe(true);
+    expect(deps.store.getState().settingsCategory).toBe('about');
+  });
+
+  test('showSettings() opens the overlay with no forced category (uses the last-used tab) (#731)', () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    // First deep-link to a tab, then a plain open: a no-arg open must NOT keep forcing the prior category —
+    // it clears the forced category (null) so the pane falls back to its last-used / default tab.
+    ctl.showSettings('about');
+    ctl.showSettings();
+    expect(deps.store.getState().settingsOpen).toBe(true);
+    expect(deps.store.getState().settingsCategory).toBeNull();
+  });
+
+  test('showSettings(unknown-id) still opens the overlay without throwing (#731)', () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    // The controller/store don't validate the id — an unknown category is recorded verbatim and the
+    // overlay opens; the pane (prefs.ts refresh) ignores an unmatched id and stays on the default tab, so
+    // an unknown deep-link can never throw or wedge the open.
+    expect(() => ctl.showSettings('does-not-exist')).not.toThrow();
+    expect(deps.store.getState().settingsOpen).toBe(true);
+  });
+
   test('a persisted center restores it on boot (technical)', async () => {
     const deps = makeDeps(makeLsp(), { loadWorkspaceCenter: () => 'technical' });
     const ctl = createInspectorController(deps);

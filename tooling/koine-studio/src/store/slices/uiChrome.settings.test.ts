@@ -34,4 +34,25 @@ describe('uiChrome settings overlay (#482)', () => {
     store.getState().closeSettings();
     expect(store.getState().settingsOpen).toBe(false);
   });
+
+  // #731: a category lands the overlay on a specific tab (the About deep-link); a plain open clears it so
+  // the pane falls back to its last-used / default tab rather than re-forcing the previous deep-link.
+  it('defaults to no forced category', () => {
+    expect(make().getState().settingsCategory).toBeNull();
+  });
+
+  it('showSettings(category) records the landing category alongside opening the overlay', () => {
+    const store = make();
+    store.getState().showSettings('about');
+    expect(store.getState().settingsOpen).toBe(true);
+    expect(store.getState().settingsCategory).toBe('about');
+  });
+
+  it('showSettings() with no category clears any previously forced category', () => {
+    const store = make();
+    store.getState().showSettings('about');
+    store.getState().showSettings();
+    expect(store.getState().settingsOpen).toBe(true);
+    expect(store.getState().settingsCategory).toBeNull();
+  });
 });
