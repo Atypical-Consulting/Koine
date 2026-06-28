@@ -107,6 +107,26 @@ describe('createSettingsPage', () => {
     expect(body.textContent).toContain('Appearance');
   });
 
+  it('arrow keys move the representation toggle (focus follows selection) and switch the body', () => {
+    // The toggle is a single-select radiogroup, so an arrow both moves focus AND activates. This pins the
+    // keyboard behavior across the swap from the bespoke radiogroup to the shared segmented() control.
+    handle = createSettingsPage({ header, body }, cb);
+    const press = (el: HTMLElement, key: string): void => {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    };
+    // ArrowRight on Visual selects JSON: roving tabindex moves, focus follows, the body becomes the editor.
+    press(visualRadio(header), 'ArrowRight');
+    expect(jsonRadio(header).getAttribute('aria-checked')).toBe('true');
+    expect(jsonRadio(header).getAttribute('tabindex')).toBe('0');
+    expect(visualRadio(header).getAttribute('tabindex')).toBe('-1');
+    expect(document.activeElement).toBe(jsonRadio(header));
+    expect(jsonEditor(body)).not.toBeNull();
+    // ArrowLeft brings it back to Visual (the two-pane form returns).
+    press(jsonRadio(header), 'ArrowLeft');
+    expect(visualRadio(header).getAttribute('aria-checked')).toBe('true');
+    expect(body.textContent).toContain('Appearance');
+  });
+
   it('switching to JSON serializes current settings without the secret', () => {
     handle = createSettingsPage({ header, body }, cb);
     jsonRadio(header).click();
@@ -167,6 +187,36 @@ describe('createSettingsPage', () => {
     expect(saveSettings).not.toHaveBeenCalled();
     expect(body.querySelector('.settings-json-diagnostics')).not.toBeNull();
     expect(body.textContent?.toLowerCase()).toMatch(/invalid|error|json/);
+  });
+
+  it('an invalid JSON edit marks the editor aria-invalid then a valid edit clears it', () => {
+    handle = createSettingsPage({ header, body }, cb);
+    jsonRadio(header).click();
+    // Invalid document → the field carries the persistent invalid/error relationship.
+    typeJson(body, '{ "theme": ');
+    vi.advanceTimersByTime(500);
+    const field = jsonEditor(body)!;
+    expect(field.getAttribute('aria-invalid')).toBe('true');
+    expect(field.getAttribute('aria-errormessage')).toBeTruthy();
+    // Fix it → a valid document drops both attributes and the field reads clean.
+    typeJson(body, '{ "fontSize": 15 }');
+    vi.advanceTimersByTime(500);
+    expect(field.hasAttribute('aria-invalid')).toBe(false);
+    expect(field.hasAttribute('aria-errormessage')).toBe(false);
+  });
+
+  it('aria-errormessage resolves to the diagnostics strip (a real element by id)', () => {
+    handle = createSettingsPage({ header, body }, cb);
+    jsonRadio(header).click();
+    typeJson(body, '{ "theme": ');
+    vi.advanceTimersByTime(500);
+    const field = jsonEditor(body)!;
+    const strip = body.querySelector<HTMLElement>('.settings-json-diagnostics')!;
+    expect(strip.id).toBeTruthy();
+    // The field points at the strip's id, so a screen reader can follow the relationship to the
+    // (now-visible) error text.
+    expect(field.getAttribute('aria-errormessage')).toBe(strip.id);
+    expect(document.getElementById(strip.id)).toBe(strip);
   });
 
   it('an out-of-range value is rejected (schema invalid) and not persisted', () => {
