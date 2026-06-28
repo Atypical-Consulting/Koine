@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept 5 — Deck</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* ---- Deck: zoom out to see everything. The four surfaces are cards on one
+         plane. Focus one to fill the stage; hit Overview (or Esc) to zoom out to
+         a 2×2 bird's-eye and pick the next — a shared-element zoom between them. ---- */
+  .deck-bar {
+    flex: 0 0 auto;
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 12px;
+    background: var(--koi-paper-2); border-bottom: 1px solid var(--koi-line);
+  }
+  .deck-over {
+    all: unset; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 12px; font-weight: 600; color: var(--koi-muted);
+    padding: 5px 12px; border-radius: var(--koi-radius-sm);
+    border: 1px solid var(--koi-line);
+  }
+  .deck-over svg { width: 15px; height: 15px; }
+  .deck-over:hover { color: var(--koi-fg); border-color: var(--koi-accent); }
+  .deck-over.on { color: var(--koi-on-accent); background: var(--koi-accent); border-color: var(--koi-accent); }
+  .deck-strip { display: flex; gap: 3px; margin-left: 4px; }
+  .deck-chip {
+    all: unset; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--koi-muted);
+    padding: 5px 12px; border-radius: var(--koi-radius-pill);
+  }
+  .deck-chip svg { width: 14px; height: 14px; }
+  .deck-chip .sd { width: 6px; height: 6px; border-radius: 50%; background: var(--koi-error); }
+  .deck-chip:hover { color: var(--koi-fg); }
+  .deck-chip.on { color: var(--koi-accent); background: color-mix(in srgb, var(--koi-accent) 12%, transparent); font-weight: 600; }
+  .deck-hint { margin-left: auto; font-size: 11px; color: var(--koi-muted); }
+  .deck-hint kbd { font-family: var(--koi-font-mono); font-size: 10px; background: var(--koi-paper); border: 1px solid var(--koi-line); border-bottom-width: 2px; border-radius: 4px; padding: 1px 5px; }
+
+  .deck-stage {
+    position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden;
+    background:
+      radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--koi-muted) 16%, transparent) 1px, transparent 0);
+    background-size: 26px 26px;
+  }
+  .deck-card {
+    position: absolute;
+    display: flex; flex-direction: column;
+    background: var(--koi-paper);
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius-lg);
+    overflow: hidden;
+    box-shadow: 0 10px 30px rgba(3,7,14,.28);
+    transition:
+      top .42s cubic-bezier(.2,.8,.2,1), left .42s cubic-bezier(.2,.8,.2,1),
+      width .42s cubic-bezier(.2,.8,.2,1), height .42s cubic-bezier(.2,.8,.2,1),
+      opacity .3s ease, box-shadow .2s ease, transform .3s ease;
+  }
+  .deck-stage.overview .deck-card { cursor: zoom-in; }
+  .deck-stage.overview .deck-card:hover { transform: translateY(-3px); box-shadow: 0 18px 40px rgba(3,7,14,.4); border-color: color-mix(in srgb, var(--card-c) 55%, var(--koi-line)); }
+  .deck-card-head {
+    flex: 0 0 auto; height: 30px;
+    display: flex; align-items: center; gap: 7px;
+    padding: 0 10px;
+    font-size: 12px; font-weight: 600;
+    border-bottom: 1px solid var(--koi-line);
+    background: var(--koi-paper-2);
+  }
+  .deck-card-head .ci { color: var(--card-c, var(--koi-accent)); display: inline-flex; }
+  .deck-card-head .ci svg { width: 15px; height: 15px; }
+  .deck-card-head .tag { color: var(--koi-muted); font-weight: 400; font-size: 10.5px; margin-left: auto; }
+  .deck-card-head .sd { width: 6px; height: 6px; border-radius: 50%; background: var(--koi-error); }
+  .deck-card-body { position: relative; flex: 1 1 auto; min-height: 0; }
+  .deck-card[data-stereo='aggregate'] { --card-c: var(--st-aggregate); }
+  /* dim non-focused cards in focus mode */
+  .deck-stage.focus .deck-card.ghost { opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="mock.js"></script>
+<script>
+  const M = window.KoineMock;
+  const center = M.shell(document.getElementById('root'), { concept: 'Concept 5 · Deck' });
+  center.innerHTML =
+    '<div class="concept-note"><b>Deck.</b> Every surface is a card on one plane. '
+    + 'Hit <b>Overview</b> (or <kbd>Esc</kbd>) to zoom out to a 2×2 bird’s-eye, then click a card to '
+    + 'zoom back in — <kbd>1</kbd>…<kbd>4</kbd> jump straight there.</div>'
+    + '<div class="deck-bar"><button class="deck-over" id="overBtn">' + M.ICONS.overview + 'Overview</button>'
+    + '<div class="deck-strip" id="strip"></div>'
+    + '<div class="deck-hint">Esc = overview · 1–4 = focus</div></div>'
+    + '<div class="deck-stage" id="stage"></div>';
+
+  const stage = center.querySelector('#stage');
+  const strip = center.querySelector('#strip');
+  const overBtn = center.querySelector('#overBtn');
+
+  // quadrant geometry for overview
+  const QUAD = {
+    canvas: { top: '2.5%', left: '2%', width: '47%', height: '46%' },
+    code:   { top: '2.5%', left: '51%', width: '47%', height: '46%' },
+    output: { top: '51.5%', left: '2%', width: '47%', height: '46%' },
+    docs:   { top: '51.5%', left: '51%', width: '47%', height: '46%' }
+  };
+  const FULL = { top: '0%', left: '0%', width: '100%', height: '100%' };
+
+  // build the four cards once (hosts mounted once → no refresh between zooms)
+  const cards = {};
+  M.SURFACES.forEach((s) => {
+    const card = document.createElement('div');
+    card.className = 'deck-card';
+    if (s.id === 'canvas') card.dataset.stereo = 'aggregate';
+    card.style.setProperty('--card-c', s.accent);
+    const head = document.createElement('div'); head.className = 'deck-card-head';
+    head.innerHTML = '<span class="ci">' + s.icon + '</span>' + s.label
+      + (s.dot ? '<span class="sd"></span>' : '') + '<span class="tag">' + s.tag + '</span>';
+    const bodyEl = document.createElement('div'); bodyEl.className = 'deck-card-body';
+    M.fill(bodyEl, s.id, {});
+    card.appendChild(head); card.appendChild(bodyEl);
+    card.addEventListener('click', () => { if (mode === 'overview') focusOn(s.id); });
+    stage.appendChild(card);
+    cards[s.id] = card;
+  });
+
+  let mode = 'focus';
+  let focused = 'canvas';
+
+  function buildStrip() {
+    strip.innerHTML = '';
+    M.SURFACES.forEach((s) => {
+      const b = document.createElement('button');
+      b.className = 'deck-chip' + (mode === 'focus' && s.id === focused ? ' on' : '');
+      b.innerHTML = s.icon + s.label + (s.dot ? '<span class="sd"></span>' : '');
+      b.addEventListener('click', () => focusOn(s.id));
+      strip.appendChild(b);
+    });
+  }
+
+  function apply() {
+    overBtn.classList.toggle('on', mode === 'overview');
+    stage.classList.toggle('overview', mode === 'overview');
+    stage.classList.toggle('focus', mode === 'focus');
+    M.SURFACES.forEach((s) => {
+      const card = cards[s.id];
+      const pos = mode === 'overview' ? QUAD[s.id] : (s.id === focused ? FULL : QUAD[s.id]);
+      Object.assign(card.style, pos);
+      card.classList.toggle('ghost', mode === 'focus' && s.id !== focused);
+      card.style.zIndex = (mode === 'focus' && s.id === focused) ? 2 : 1;
+    });
+    buildStrip();
+    redraw();
+  }
+  function redraw() { setTimeout(() => stage.querySelectorAll('[data-canvas]').forEach((c) => M.drawEdges(c)), 60); setTimeout(() => stage.querySelectorAll('[data-canvas]').forEach((c) => M.drawEdges(c)), 460); }
+
+  function focusOn(id) { focused = id; mode = 'focus'; apply(); }
+  function overview() { mode = 'overview'; apply(); }
+
+  overBtn.addEventListener('click', () => { mode === 'overview' ? focusOn(focused) : overview(); });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { overview(); return; }
+    const n = parseInt(e.key, 10);
+    if (n >= 1 && n <= 4) focusOn(M.SURFACES[n - 1].id);
+  });
+
+  apply();
+</script>
+</body>
+</html>
