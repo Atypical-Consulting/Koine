@@ -264,7 +264,8 @@
   opacity: 0.4;
 }
 
-/* segmented radio group (Theme) */
+/* segmented radio group (shared: Theme, the User/Workspace scope toggles, and the Settings
+   Visual/JSON representation toggle) */
 .koi-segmented {
   display: inline-flex;
   gap: var(--koi-space-0-5);
