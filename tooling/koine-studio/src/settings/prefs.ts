@@ -120,14 +120,34 @@ const ICON = {
 // chordFromEvent (keydown → CodeMirror key) and prettyChord (CodeMirror key → display string) live in
 // shared/platform.ts beside formatChord — they're platform-string helpers, not Settings-dialog logic.
 
-/**
- * Build the Settings dialog and return an imperative handle. The DOM is created once; each open()
- * repopulates every control from the freshly loaded Settings so the dialog never shows stale values
- * (e.g. after a theme toggle from the toolbar or command palette).
- */
-export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
-  const modal = createModal({ title: 'Settings', ariaLabel: 'Koine Studio settings', variant: 'koi-modal--settings' });
+/** A mounted preferences pane. The public contract is just teardown; the modal drives the richer
+ *  {@link MountedPrefsPane} returned by {@link mountPreferencesPane}. */
+export interface PrefsPaneHandle {
+  /** Remove the form from its container, destroy its child editors (the MCP CodeMirror view), and drop
+   *  any transient recorder listener / pending timers. After this the pane is dead — re-mount to reuse. */
+  destroy(): void;
+}
 
+/** The richer handle the reusing modal drives: repaint on open ({@link refresh}) and cancel transient
+ *  recorder/conflict state on close ({@link suspend}). Callers that only need teardown see the narrower
+ *  {@link PrefsPaneHandle}. */
+interface MountedPrefsPane extends PrefsPaneHandle {
+  /** Repaint every control from the current Settings and (re)start the MCP sidecar; optionally land on a
+   *  category id first. `focusTab` (default true) focuses the active category tab — the modal wants that on
+   *  open; the embedded center page passes false so re-showing it never steals focus from the page. */
+  refresh(categoryId?: string, focusTab?: boolean): void;
+  /** Cancel any armed keybinding recorder + open conflict prompt (the modal's close-path cleanup). */
+  suspend(): void;
+}
+
+/**
+ * Build the two-pane preference form (category rail + control pane) and append it into `container` — no
+ * modal chrome. The DOM is created once and populated from the current Settings on mount; each control
+ * commits a single-field patch through patchSettings() and reports the merged Settings back via cb.onChange.
+ * Returns a handle to repaint/tear-down the pane. {@link createPreferences} mounts this inside a modal; the
+ * transient Settings center view mounts the very same pane inside a page.
+ */
+export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks): MountedPrefsPane {
   // Every control commits a single-field patch, then reports the merged Settings to the app.
   function commit(patch: Partial<Settings>): void {
     cb.onChange(patchSettings(patch));
@@ -1419,7 +1439,7 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
   const layout = document.createElement('div');
   layout.className = 'koi-settings-layout';
   layout.append(nav, panels);
-  modal.body.appendChild(layout);
+  container.appendChild(layout);
 
   // --- populate every control from the current Settings ---------------------
 
@@ -1464,20 +1484,30 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
     refreshKeyboard();
   }
 
-  modal.onOpen(() => {
+  // The pane's "open" state: repaint every control from the current Settings, refresh the About card,
+  // back-fill the workspace-root + secret fields, (re)start the MCP sidecar when shown, and reveal the
+  // active category. Two independent flags:
+  //   • `shown`    — the surface is actually being presented to the user (modal open, or page show), so
+  //                  it's safe to (re)start the opt-in MCP sidecar. False at the bare mount/embed, so a
+  //                  never-shown Settings surface never spawns a background process.
+  //   • `focusTab` — move focus onto the active category tab. Wanted when a MODAL opens (focus into the
+  //                  dialog), but NOT for the embedded center page (it would steal focus from the page).
+  function applyOpenState({ shown, focusTab }: { shown: boolean; focusTab: boolean }): void {
     disarmReset();
     const s = loadSettings();
     populate(s);
     about.refresh();
     void refreshWsRootValue();
-    // On a very fast first open the secret may still be decrypting; back-fill the key once it lands,
+    // On a very fast first paint the secret may still be decrypting; back-fill the key once it lands,
     // but never clobber a value the user has already started typing.
     void whenSecretsReady().then(() => {
       if (aiKeyInput.value === '') aiKeyInput.value = loadSettings().aiApiKey;
     });
-    // Only the desktop, and only when the user has enabled MCP, (re)starts the sidecar on open — the
-    // server is opt-in, so an unopened Settings dialog never spawns a background process.
-    if (s.mcpEnabled && cb.mcpHostable !== false) {
+    // Only the desktop, only when the user has enabled MCP, AND only when the surface is actually shown
+    // does this (re)start the sidecar — the server is opt-in, so a never-shown Settings surface must never
+    // spawn a background process. The modal builds this pane at init (long before its first open) via the
+    // mount-time applyOpenState({ shown: false }), so probing/launching there would break that invariant.
+    if (shown && s.mcpEnabled && cb.mcpHostable !== false) {
       const gen = ++mcpGen;
       void resolveMcpEndpoint().then((url) => {
         if (gen === mcpGen) showMcpStarted(url);
@@ -1487,25 +1517,77 @@ export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
       showMcpOff();
     }
     syncMcpUi(s.mcpEnabled);
-    selectCategory(activeIndex); // keep the last-open category across opens
-    tabs[activeIndex].focus();
-  });
+    selectCategory(activeIndex, focusTab); // keep the last-open category across opens
+  }
 
-  // Closing the dialog by ANY path (✕, backdrop, Esc) cancels an armed keybinding recorder and clears
-  // conflicts — so a left-armed document-level keydown listener can't outlive the dialog and hijack the
-  // next keystroke (e.g. swallow Mod-S and silently rebind a hidden Keyboard row).
-  modal.onClose(() => {
-    disarmRecording();
-    for (const id of kbdRows.keys()) hideKbdConflict(id);
-  });
-
-  // Open on a specific category when asked (e.g. the palette's "About" → 'about'); onOpen's trailing
-  // selectCategory(activeIndex) then lands on it. A no-arg open keeps the last-active tab.
-  function open(categoryId?: string): void {
+  // Repaint from the current Settings, optionally landing on a named category first, and (since the surface
+  // is now shown) (re)start the MCP sidecar. The reusing modal calls this on every open (mirroring the old
+  // onOpen): an 'about'-style id lands on that tab, a no-arg call keeps the last-active one. `focusTab`
+  // defaults true (the modal focuses the tab on open); the embedded center page passes false so re-showing
+  // it never steals focus from the page.
+  function refresh(categoryId?: string, focusTab = true): void {
     if (categoryId) {
       const i = categories.findIndex((c) => c.id === categoryId);
       if (i >= 0) activeIndex = i;
     }
+    applyOpenState({ shown: true, focusTab });
+  }
+
+  // Cancel any in-flight transient state: an armed keybinding recorder (whose document-level capture
+  // listener would otherwise outlive a close and hijack the next keystroke — e.g. swallow Mod-S and
+  // silently rebind a hidden row) and any open conflict prompt. The modal calls this on close by ANY path.
+  function suspend(): void {
+    disarmRecording();
+    for (const id of kbdRows.keys()) hideKbdConflict(id);
+  }
+
+  // Fully tear the pane down: drop transient state, supersede any in-flight async (so a late sidecar /
+  // probe result can't repaint a removed pane), clear pending timers, destroy the MCP CodeMirror view,
+  // and remove the form root from its container.
+  function destroy(): void {
+    suspend();
+    ++mcpGen;
+    clearTimeout(mcpCopyTimer);
+    clearTimeout(mcpRecipeTimer);
+    clearTimeout(disarmTimer);
+    mcpSnippetView.destroy();
+    layout.remove();
+  }
+
+  // Populate immediately from the current Settings so an embedded pane shows live values without the
+  // caller wiring anything; the surface is NOT yet shown (so no sidecar spawns) and focus is NOT moved
+  // (that would steal it from the surrounding page).
+  applyOpenState({ shown: false, focusTab: false });
+
+  return { destroy, refresh, suspend };
+}
+
+/**
+ * Build the Settings dialog — the shared createModal() chrome around the two-pane preference pane — and
+ * return an imperative handle. The pane is mounted once into the modal body and reused across opens: each
+ * open repaints every control from the freshly loaded Settings (so the dialog never shows stale values,
+ * e.g. after a theme toggle from the toolbar or command palette) and each close cancels any armed
+ * keybinding recorder. The form itself lives in {@link mountPreferencesPane}, so the same pane can also be
+ * embedded directly in a page.
+ */
+export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
+  const modal = createModal({ title: 'Settings', ariaLabel: 'Koine Studio settings', variant: 'koi-modal--settings' });
+  const pane = mountPreferencesPane(modal.body, cb);
+
+  // The category to land on for the NEXT open (set by open(categoryId)); cleared after each open so a
+  // plain open() keeps the last-active category.
+  let pendingCategory: string | undefined;
+
+  modal.onOpen(() => {
+    pane.refresh(pendingCategory);
+    pendingCategory = undefined;
+  });
+  modal.onClose(() => pane.suspend());
+
+  // Open on a specific category when asked (e.g. the palette's "About" → 'about'); a no-arg open keeps
+  // the last-active tab.
+  function open(categoryId?: string): void {
+    pendingCategory = categoryId;
     modal.open();
   }
 

@@ -4,7 +4,7 @@
     "paths": { "@/*": ["./src/*"] },
     "useDefineForClassFields": true,
     "module": "ESNext",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": ["ES2020", "ES2022.Array", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
 
     /* Preact JSX */

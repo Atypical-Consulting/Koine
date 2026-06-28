@@ -70,6 +70,10 @@ const APP_HTML = `
             </div>
           </section>
         </div>
+        <section id="center-panel-settings" class="settings-page" aria-label="Settings" hidden>
+          <header id="settings-page-header"><h2 class="settings-page-title">Settings</h2><div id="settings-mode-toggle"></div></header>
+          <div id="settings-page-body"></div>
+        </section>
         <footer id="diagnostics">
           <div class="koi-resizer koi-resizer-y" id="diag-resizer"></div>
           <div id="diag-header">
@@ -323,6 +327,55 @@ describe('createInspectorController — center switching', () => {
     ctl.selectCenter('technical'); // same center — no churn
     expect(saveWorkspaceCenter).not.toHaveBeenCalled();
     ctl.dispose();
+  });
+
+  test('opening the transient Settings overlay never persists center (it is not a deck surface) (#482)', () => {
+    const saveWorkspaceCenter = vi.fn();
+    const ctl = createInspectorController(makeDeps(makeLsp(), { saveWorkspaceCenter }));
+    ctl.init();
+
+    ctl.selectCenter('technical'); // a real surface IS persisted as the center
+    expect(saveWorkspaceCenter).toHaveBeenLastCalledWith('technical');
+    saveWorkspaceCenter.mockClear();
+    // The gear-launched Settings overlay rides the orthogonal `settingsOpen` flag, NOT `center` — so it
+    // must not overwrite the persisted 'technical'; a reload restores Code, not the default.
+    ctl.showSettings();
+    expect(saveWorkspaceCenter).not.toHaveBeenCalled();
+  });
+
+  test('the Settings overlay covers the deck body and reveals the panel; focusing a surface restores it (#482)', () => {
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    const body = el('center-body');
+    const panel = el('center-panel-settings');
+    // Resting: deck body shown, Settings overlay hidden.
+    expect(panel.hidden).toBe(true);
+    expect(body.hidden).toBe(false);
+    // Gear → showSettings: the overlay covers the deck body.
+    ctl.showSettings();
+    expect(panel.hidden).toBe(false);
+    expect(body.hidden).toBe(true);
+    // Focusing any deck surface (the deck-bar) leaves Settings and restores the deck.
+    ctl.selectCenter('docs');
+    expect(panel.hidden).toBe(true);
+    expect(body.hidden).toBe(false);
+  });
+
+  test('opening Settings does not touch the persisted deck (Settings is orthogonal to the deck) (#482)', () => {
+    const saveWorkspaceDeck = vi.fn();
+    const deps = makeDeps(makeLsp(), { saveWorkspaceDeck });
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    ctl.selectCenter('technical'); // a real deck change IS persisted
+    expect(saveWorkspaceDeck).toHaveBeenCalled();
+    saveWorkspaceDeck.mockClear();
+    // The overlay leaves the deck untouched, so nothing new is persisted and the deck keeps its surface —
+    // the transient view can never leak into the saved deck (no wholesale-rejection-on-restore landmine).
+    ctl.showSettings();
+    expect(saveWorkspaceDeck).not.toHaveBeenCalled();
+    expect(deps.store.getState().deck.primary).toBe('technical');
+    expect(deps.store.getState().settingsOpen).toBe(true);
   });
 
   test('a persisted center restores it on boot (technical)', async () => {
