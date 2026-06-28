@@ -1497,9 +1497,12 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     void whenSecretsReady().then(() => {
       if (aiKeyInput.value === '') aiKeyInput.value = loadSettings().aiApiKey;
     });
-    // Only the desktop, and only when the user has enabled MCP, (re)starts the sidecar — the server is
-    // opt-in, so a never-shown Settings surface never spawns a background process.
-    if (s.mcpEnabled && cb.mcpHostable !== false) {
+    // Only the desktop, only when the user has enabled MCP, AND only when the surface is actually being
+    // shown (`focusTab`) does this (re)start the sidecar — the server is opt-in, so a never-shown Settings
+    // surface must never spawn a background process. The modal builds this pane at init (long before its
+    // first open) via the mount-time applyOpenState(false), so probing/launching there would break that
+    // invariant; the real open path (refresh → applyOpenState(true)) is what brings the sidecar up.
+    if (focusTab && s.mcpEnabled && cb.mcpHostable !== false) {
       const gen = ++mcpGen;
       void resolveMcpEndpoint().then((url) => {
         if (gen === mcpGen) showMcpStarted(url);
