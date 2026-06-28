@@ -1,6 +1,12 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createPreferences, mountPreferencesPane, type PrefsCallbacks, type PrefsPaneHandle } from '@/settings/prefs';
+import {
+  createPreferences,
+  mountPreferencesPane,
+  startMcpSidecarIfEnabled,
+  type PrefsCallbacks,
+  type PrefsPaneHandle,
+} from '@/settings/prefs';
 import {
   DEFAULT_SETTINGS,
   loadSettings,
@@ -85,6 +91,17 @@ describe('Settings → MCP panel', () => {
     expect(mcpEndpoint).toHaveBeenCalled();
     expect(endpointUrl().value).toBe(URL);
     expect(snippet().textContent).toContain(URL);
+  });
+
+  it('opening the modal with MCP already enabled (re)starts the sidecar and shows the live URL (#735)', async () => {
+    // The modal's open path is the original "open Settings to revive the sidecar" affordance — it must
+    // survive the start being lifted out of applyOpenState into an explicit on-show call.
+    saveSettings({ ...DEFAULT_SETTINGS, mcpEnabled: true });
+    const mcpEndpoint = vi.fn(async () => URL);
+    openPrefs({ mcpEndpoint });
+    await settle();
+    expect(mcpEndpoint).toHaveBeenCalled();
+    expect(endpointUrl().value).toBe(URL);
   });
 
   it('disabling stops the sidecar', async () => {
@@ -177,6 +194,54 @@ describe('Settings → MCP panel', () => {
     await settle();
 
     expect(writeText).toHaveBeenCalledWith(expected);
+  });
+});
+
+// The representation-independent (re)start concern extracted in #735: a DOM-free helper the Settings
+// page calls on show for BOTH the Visual and JSON representations (the JSON one mounts no preferences
+// pane, so it can't rely on the pane's open path). It only asks the host to (lazily) (re)spawn the
+// sidecar; reflecting the endpoint in the MCP panel stays the Visual pane's job.
+describe('startMcpSidecarIfEnabled (#735)', () => {
+  const ENABLED = { ...DEFAULT_SETTINGS, mcpEnabled: true };
+  const DISABLED = { ...DEFAULT_SETTINGS, mcpEnabled: false };
+
+  beforeEach(() => {
+    localStorage.clear();
+    saveSettings({ ...DEFAULT_SETTINGS });
+  });
+
+  it('(re)starts the sidecar on a hostable desktop host when MCP is enabled', async () => {
+    const mcpEndpoint = vi.fn(async () => URL);
+    const url = await startMcpSidecarIfEnabled({ onChange: () => {}, mcpEndpoint, mcpHostable: true }, ENABLED);
+    expect(mcpEndpoint).toHaveBeenCalledTimes(1);
+    expect(url).toBe(URL);
+  });
+
+  it('does nothing when MCP is disabled', async () => {
+    const mcpEndpoint = vi.fn(async () => URL);
+    const url = await startMcpSidecarIfEnabled({ onChange: () => {}, mcpEndpoint, mcpHostable: true }, DISABLED);
+    expect(mcpEndpoint).not.toHaveBeenCalled();
+    expect(url).toBe('');
+  });
+
+  it('does nothing on a non-hostable (browser) host even when enabled', async () => {
+    const mcpEndpoint = vi.fn(async () => URL);
+    const url = await startMcpSidecarIfEnabled({ onChange: () => {}, mcpEndpoint, mcpHostable: false }, ENABLED);
+    expect(mcpEndpoint).not.toHaveBeenCalled();
+    expect(url).toBe('');
+  });
+
+  it('reads loadSettings() when no snapshot is passed', async () => {
+    saveSettings({ ...DEFAULT_SETTINGS, mcpEnabled: true });
+    const mcpEndpoint = vi.fn(async () => URL);
+    await startMcpSidecarIfEnabled({ onChange: () => {}, mcpEndpoint, mcpHostable: true });
+    expect(mcpEndpoint).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats an omitted mcpHostable as hostable (desktop default)', async () => {
+    const mcpEndpoint = vi.fn(async () => URL);
+    await startMcpSidecarIfEnabled({ onChange: () => {}, mcpEndpoint }, ENABLED);
+    expect(mcpEndpoint).toHaveBeenCalledTimes(1);
   });
 });
 
