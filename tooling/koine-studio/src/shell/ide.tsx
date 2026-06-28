@@ -1724,10 +1724,11 @@ export function init(): () => void {
   const prefs = createPreferences(prefsCallbacks);
 
   // The gear-launched Settings center page (#center-panel-settings). Built LAZILY on the first route into
-  // Settings, not at init: mounting its Visual pane runs mountPreferencesPane's open path, which (re)starts
-  // the MCP sidecar when enabled — so an eager mount would spawn that background process before the user
-  // ever opens Settings. It reuses the SAME prefsCallbacks as the modal, so a JSON or Visual edit on the
-  // page live-applies through the identical onChange hook.
+  // Settings, not at init: createSettingsPage runs buildBody (its first "show"), which fires the on-show MCP
+  // sidecar (re)start when enabled (issue #735) — so constructing it IS showing it, and an eager build would
+  // spawn that background process before the user ever opens Settings. (The pane mount itself no longer
+  // starts the sidecar; the explicit startMcpOnShow does.) It reuses the SAME prefsCallbacks as the modal,
+  // so a JSON or Visual edit on the page live-applies through the identical onChange hook.
   let settingsPage: SettingsPageHandle | null = null;
   function ensureSettingsPage(): void {
     if (settingsPage) {

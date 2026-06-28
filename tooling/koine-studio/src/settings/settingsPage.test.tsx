@@ -252,6 +252,20 @@ describe('createSettingsPage', () => {
     expect(c.mcpEndpoint).toHaveBeenCalledTimes(1);
   });
 
+  it('a Visual↔JSON flip fires the (re)start once per representation build, never twice (#735)', () => {
+    // Default mode is Visual. The flip re-invokes the (idempotent) on-show concern exactly once per build
+    // — so flipping to Visual reflects the live endpoint, and the host reuses the running sidecar rather
+    // than spawning a second one. The Studio-side guarantee under test is "one mcpEndpoint call per build".
+    enabledMcp();
+    const c = desktopCb();
+    handle = createSettingsPage({ header, body }, c);
+    expect(c.mcpEndpoint).toHaveBeenCalledTimes(1); // initial Visual show
+    jsonRadio(header).click(); // flip to JSON
+    expect(c.mcpEndpoint).toHaveBeenCalledTimes(2);
+    visualRadio(header).click(); // flip back to Visual
+    expect(c.mcpEndpoint).toHaveBeenCalledTimes(3);
+  });
+
   it('re-showing the page in JSON mode (refresh) (re)starts the sidecar again', () => {
     localStorage.setItem(MODE_KEY, 'json');
     enabledMcp();

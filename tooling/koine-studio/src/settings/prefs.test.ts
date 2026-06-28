@@ -104,6 +104,24 @@ describe('Settings → MCP panel', () => {
     expect(endpointUrl().value).toBe(URL);
   });
 
+  it('a disable during the on-open (re)start drops the stale resolve (mcpGen guard) (#735)', async () => {
+    // Open with MCP enabled so startMcpSidecar launches; before its endpoint resolves, the user disables
+    // MCP. The mcpGen staleness guard must discard the in-flight resolve so it can't repaint a live URL
+    // over the just-disabled "Server off" state. A manually-controlled promise makes the race deterministic.
+    saveSettings({ ...DEFAULT_SETTINGS, mcpEnabled: true });
+    let resolveEndpoint!: (u: string) => void;
+    const mcpEndpoint = vi.fn(() => new Promise<string>((res) => (resolveEndpoint = res)));
+    openPrefs({ mcpEndpoint });
+    // The on-open start is in flight (endpoint promise still pending). Disable MCP now.
+    mcpToggle().click();
+    await settle();
+    // The stale on-open endpoint resolves AFTER the disable — the guard must drop it.
+    resolveEndpoint(URL);
+    await settle();
+    expect(status().dataset.state).toBe('off');
+    expect(endpointUrl().value).toBe('');
+  });
+
   it('disabling stops the sidecar', async () => {
     const mcpStop = vi.fn(async () => {});
     openPrefs({ mcpStop });
@@ -754,6 +772,20 @@ describe('mountPreferencesPane', () => {
     const handle = mountPreferencesPane(host, noopCb);
     const input = host.querySelector<HTMLInputElement>('#koi-set-display-name')!;
     expect(input.value).toBe('Ada Lovelace');
+    handle.destroy();
+  });
+
+  it('a bare mount never spawns the sidecar; startMcpSidecar is what (re)starts it on show (#735)', async () => {
+    // The modal mounts this pane at app init (long before its first open), so the opt-in server must NOT
+    // spawn until the surface is actually shown. The (re)start moved to the explicit startMcpSidecar call.
+    saveSettings({ ...DEFAULT_SETTINGS, mcpEnabled: true });
+    const mcpEndpoint = vi.fn(async () => URL);
+    const handle = mountPreferencesPane(host, { onChange: () => {}, mcpEndpoint, mcpHostable: true });
+    await settle();
+    expect(mcpEndpoint).not.toHaveBeenCalled(); // mounted but never shown → no spawn
+    handle.startMcpSidecar(); // the on-show hook
+    await settle();
+    expect(mcpEndpoint).toHaveBeenCalledTimes(1);
     handle.destroy();
   });
 
