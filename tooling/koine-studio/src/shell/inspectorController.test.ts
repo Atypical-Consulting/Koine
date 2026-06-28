@@ -1141,16 +1141,57 @@ describe('createInspectorController — split center layout', () => {
       [...pane.querySelectorAll<HTMLButtonElement>('.center-pane-tab')].find((b) => b.textContent === label)!;
     const [paneA, paneB] = document.querySelectorAll('.center-split-pane'); // A=visual, B=technical
 
-    // In pane A (visual), the "Code" (technical) tab is disabled because pane B shows it — and vice versa.
+    // In pane A (canvas), the "Code" (technical) tab is disabled because pane B shows it — and vice versa.
+    // ('visual' is labelled "Canvas" in the per-pane tabs, matching the top-level center tab.)
     expect(tabBy(paneA, 'Code').disabled).toBe(true);
-    expect(tabBy(paneB, 'Visual').disabled).toBe(true);
+    expect(tabBy(paneB, 'Canvas').disabled).toBe(true);
     // Each pane's OWN view + the genuinely free views stay enabled.
-    expect(tabBy(paneA, 'Visual').disabled).toBe(false);
+    expect(tabBy(paneA, 'Canvas').disabled).toBe(false);
     expect(tabBy(paneA, 'Docs').disabled).toBe(false);
 
     // Clicking the disabled tab is a no-op — pane B stays on technical.
     tabBy(paneA, 'Code').click();
     expect(deps.store.getState().centerLayout.panes.map((p) => p.view)).toEqual(['visual', 'technical']);
+
+    ctl.dispose();
+  });
+
+  test('split hides the top-level center view tabs (the per-pane headers are the switchers)', async () => {
+    // In split mode each pane carries its own view tab bar, so the top center tabs would be a redundant
+    // second row — #center-tabs gets `is-split` (CSS hides .center-tab). Reset removes it.
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    expect(el('center-tabs').classList.contains('is-split')).toBe(false);
+
+    deps.store.getState().splitCenter('row');
+    await waitFor(() => expect(el('center-tabs').classList.contains('is-split')).toBe(true));
+
+    // Collapse back to a single pane → the top tabs return.
+    const second = deps.store.getState().centerLayout.panes[1].id;
+    deps.store.getState().closePane(second);
+    await waitFor(() => expect(el('center-tabs').classList.contains('is-split')).toBe(false));
+
+    ctl.dispose();
+  });
+
+  test('a pane’s close (✕) button closes that pane (2 panes → single)', async () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    deps.store.getState().splitCenter('row'); // [visual, technical]
+    await waitFor(() => expect(document.querySelectorAll('.center-split-pane').length).toBe(2));
+
+    // Close the SECOND pane (technical) — only the first (visual) remains, collapsing to single-pane mode.
+    const closeBtns = document.querySelectorAll<HTMLButtonElement>('.center-pane-close');
+    expect(closeBtns.length).toBe(2);
+    closeBtns[1].click();
+
+    await waitFor(() => {
+      expect(deps.store.getState().centerLayout.panes.map((p) => p.view)).toEqual(['visual']);
+      expect(document.querySelectorAll('.center-split-pane').length).toBe(0); // back to single (no slots)
+    });
 
     ctl.dispose();
   });

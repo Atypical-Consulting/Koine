@@ -1359,6 +1359,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   renderCanvasPalette();
 
   const centerBodyEl = el('center-body');
+  const centerTabsEl = el('center-tabs');
   const centerTechnicalEl = el('center-technical');
   const centerOutputEl = el('center-output');
   const centerDocsEl = el('center-docs');
@@ -1380,6 +1381,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     const tech = activeTech();
     const output = activeOutput();
     const docs = activeDocs();
+
+    // In split mode each pane carries its OWN view tab bar (the pane header), so the top-level center
+    // tabs would be a redundant second row — hide them, leaving the top strip as a slim layout bar (the
+    // split/Reset controls). Re-shown when we collapse back to a single pane.
+    centerTabsEl.classList.toggle('is-split', isSplit);
 
     if (isSplit) {
       // In split mode the visibility of center-host elements is driven by which pane they live in;
@@ -1456,6 +1462,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         // focusPane() changes centerLayout, so the subscription re-applies the chrome — no explicit
         // applyCenterChrome() needed (a second call just re-ran the whole split layout).
         appStore.getState().focusPane(paneId);
+      },
+      onPaneClose: (paneId: string) => {
+        // Close this pane (back toward a single pane). closePane() no-ops on the last pane; the subscription
+        // re-applies the chrome — including reshowing the top-level tabs once we're back to one pane.
+        appStore.getState().closePane(paneId);
       },
       onResize: (sizes: number[]) => {
         appStore.getState().resizeCenter(sizes);

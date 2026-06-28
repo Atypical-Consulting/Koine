@@ -26,8 +26,10 @@ import { CenterSplitter } from '@/shell/CenterSplitter';
 
 // --- PaneSelector component --------------------------------------------------
 
+// Labels match the top-level center tabs exactly — `visual` is "Canvas" in both places, so a split pane
+// never disagrees with the main tab bar on what a view is called.
 const VIEW_LABELS: Record<CenterView, string> = {
-  visual: 'Visual',
+  visual: 'Canvas',
   technical: 'Code',
   output: 'Output',
   docs: 'Docs',
@@ -35,45 +37,66 @@ const VIEW_LABELS: Record<CenterView, string> = {
 
 const ALL_VIEWS: CenterView[] = ['visual', 'technical', 'output', 'docs'];
 
+// Each split pane is a self-contained "editor group" (VS Code idiom): its own view tab bar + a close
+// affordance. In split mode this is the ONLY view switcher — the top-level center tabs are hidden (they'd
+// be a redundant second row), so the pane header carries the full Canvas/Code/Output/Docs choice.
 function PaneSelector({
   layout,
   paneId,
   onSelect,
+  onClose,
 }: {
   layout: CenterLayout;
   paneId: string;
   onSelect: (paneId: string, view: CenterView) => void;
+  onClose: (paneId: string) => void;
 }) {
   const pane = layout.panes.find((p) => p.id === paneId);
   if (!pane) return null;
   return (
-    <div class="center-pane-header" role="tablist" aria-label="Pane view">
-      {ALL_VIEWS.map((v) => {
-        // Each center view is a single DOM element (one #center-visual / #center-technical / …), so two
-        // panes can't show the same view — the element can only live in one pane, leaving the other blank.
-        // Disable a view that another pane already shows (this pane's own view stays selectable).
-        const shownElsewhere = pane.view !== v && layout.panes.some((p) => p.id !== paneId && p.view === v);
-        return (
-          <button
-            key={v}
-            type="button"
-            role="tab"
-            aria-selected={String(pane.view === v) as 'true' | 'false'}
-            class="center-pane-tab"
-            disabled={shownElsewhere}
-            title={shownElsewhere ? `${VIEW_LABELS[v]} is open in the other pane` : undefined}
-            onClick={(e) => {
-              // Prevent the click from bubbling to the pane's own click handler,
-              // which would focus the pane (already done by onSelect) + applyCenterChrome.
-              e.stopPropagation();
-              if (shownElsewhere) return;
-              onSelect(paneId, v);
-            }}
-          >
-            {VIEW_LABELS[v]}
-          </button>
-        );
-      })}
+    <div class="center-pane-header">
+      <div class="center-pane-tabs" role="tablist" aria-label="Pane view">
+        {ALL_VIEWS.map((v) => {
+          // Each center view is a single DOM element (one #center-visual / #center-technical / …), so two
+          // panes can't show the same view — the element can only live in one pane, blanking the other.
+          // Disable a view that another pane already shows (this pane's own view stays selectable).
+          const shownElsewhere = pane.view !== v && layout.panes.some((p) => p.id !== paneId && p.view === v);
+          return (
+            <button
+              key={v}
+              type="button"
+              role="tab"
+              aria-selected={String(pane.view === v) as 'true' | 'false'}
+              class="center-pane-tab"
+              disabled={shownElsewhere}
+              title={shownElsewhere ? `${VIEW_LABELS[v]} is open in the other pane` : undefined}
+              onClick={(e) => {
+                // Prevent the click from bubbling to the pane's own click handler,
+                // which would focus the pane (already done by onSelect) + applyCenterChrome.
+                e.stopPropagation();
+                if (shownElsewhere) return;
+                onSelect(paneId, v);
+              }}
+            >
+              {VIEW_LABELS[v]}
+            </button>
+          );
+        })}
+      </div>
+      <button
+        type="button"
+        class="center-pane-close"
+        aria-label="Close pane"
+        title="Close pane"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose(paneId);
+        }}
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
+        </svg>
+      </button>
     </div>
   );
 }
@@ -98,6 +121,8 @@ export interface SplitPaneLayoutDeps {
   onPaneViewSelect(paneId: string, view: CenterView): void;
   /** Called when user clicks the pane itself to focus it. */
   onPaneFocus(paneId: string): void;
+  /** Called when user clicks a pane's close (✕) affordance. */
+  onPaneClose(paneId: string): void;
   /** Called by the splitter to update fractional sizes. */
   onResize(sizes: number[]): void;
 }
@@ -110,7 +135,7 @@ export interface SplitPaneLayoutDeps {
  *    element into the matching pane's .center-pane-content area, size by flex.
  */
 export function applySplitPaneLayout(deps: SplitPaneLayoutDeps): void {
-  const { centerBodyEl, getLayout, onPaneViewSelect, onPaneFocus, onResize } = deps;
+  const { centerBodyEl, getLayout, onPaneViewSelect, onPaneFocus, onPaneClose, onResize } = deps;
   const layout = getLayout();
 
   if (layout.panes.length <= 1) {
@@ -178,7 +203,7 @@ export function applySplitPaneLayout(deps: SplitPaneLayoutDeps): void {
     // Re-render the pane selector (Preact reconciles efficiently on re-renders).
     const selectorDiv = slot.querySelector<HTMLElement>('.center-pane-selector')!;
     render(
-      <PaneSelector layout={layout} paneId={pane.id} onSelect={onPaneViewSelect} />,
+      <PaneSelector layout={layout} paneId={pane.id} onSelect={onPaneViewSelect} onClose={onPaneClose} />,
       selectorDiv,
     );
 
