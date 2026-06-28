@@ -591,7 +591,18 @@ public sealed class ModelIndex
     public IEnumerable<SpecDecl> AllSpecs() => _specsByTarget.Values.SelectMany(m => m.Values);
 
     /// <summary>True when <paramref name="name"/> is a spec on any target type.</summary>
-    public bool IsAnySpec(string name) => _specsByTarget.Values.Any(m => m.ContainsKey(name));
+    public bool IsAnySpec(string name)
+    {
+        foreach (Dictionary<string, SpecDecl> map in _specsByTarget.Values)
+        {
+            if (map.ContainsKey(name))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private void IndexType(TypeDecl t)
     {
@@ -783,9 +794,19 @@ public sealed class ModelIndex
         _relations.Any(r => (r.Upstream == a && r.Downstream == b) || (r.Upstream == b && r.Downstream == a));
 
     /// <summary>True when an anti-corruption-layer relation is declared with this exact direction (upstream -&gt; downstream).</summary>
-    public bool HasAclRelation(string upstream, string downstream) =>
-        _relations.Any(r => r.Kind == ContextRelationKind.AntiCorruptionLayer
-                            && r.Upstream == upstream && r.Downstream == downstream);
+    public bool HasAclRelation(string upstream, string downstream)
+    {
+        foreach (ContextRelation r in _relations)
+        {
+            if (r.Kind == ContextRelationKind.AntiCorruptionLayer
+                && r.Upstream == upstream && r.Downstream == downstream)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>The context(s) a type name is imported from into <paramref name="fromContext"/> (R13.2).</summary>
     public IReadOnlyList<string> ImportOwnersOf(string fromContext, string name) =>
@@ -1106,14 +1127,27 @@ public sealed class ModelIndex
             return owners.Count == 1 ? Ok : new RefResolution(RefKind.Ambiguous, owners);
         }
 
-        var declaring = DeclaringContextsOf(name).Where(c => c != fromContext).ToList();
-        if (declaring.Count > 0)
+        // Build the declaring-contexts-other-than-this list directly (preserving order) so a
+        // genuinely-unknown name — by far the common case here — costs no Where iterator / list.
+        List<string>? declaring = null;
+        foreach (var c in DeclaringContextsOf(name))
+        {
+            if (c != fromContext)
+            {
+                (declaring ??= new List<string>()).Add(c);
+            }
+        }
+
+        if (declaring is not null)
         {
             // The context map may PERMIT an un-imported upstream reference (conformist, shared-kernel,
             // open-host, published-language, partnership). ACL & customer-supplier are not permitted (R14.1).
-            if (declaring.Any(up => MapPermitsReference(fromContext, up)))
+            foreach (var up in declaring)
             {
-                return Ok;
+                if (MapPermitsReference(fromContext, up))
+                {
+                    return Ok;
+                }
             }
 
             return new RefResolution(RefKind.UnimportedCrossContext, declaring);

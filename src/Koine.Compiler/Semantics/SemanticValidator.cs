@@ -186,7 +186,12 @@ public sealed class SemanticValidator
         // 2. A module name must not collide with a type name in the same context.
         if (ctx.ModuleNames.Count > 0)
         {
-            var typeNames = new HashSet<string>(ctx.AllTypeDecls().Select(t => t.Name), StringComparer.Ordinal);
+            var typeNames = new HashSet<string>(StringComparer.Ordinal);
+            foreach (TypeDecl t in ctx.AllTypeDecls())
+            {
+                typeNames.Add(t.Name);
+            }
+
             foreach (var module in ctx.ModuleNames)
             {
                 if (typeNames.Contains(module))
@@ -240,29 +245,51 @@ public sealed class SemanticValidator
             && !index.IsKernelVisibleFrom(fromContext, tr.Name))
         {
             IReadOnlyList<string> importOwners = index.ImportOwnersOf(fromContext, tr.Name);
-            var owners = index.DeclaringContextsOf(tr.Name).Where(c => c != fromContext).ToList();
-            // If a NON-ACL permit relation (open-host/conformist/…) makes a same-named type visible,
-            // the reference binds there, not to the ACL upstream — no direct-reference warning.
-            var permittedElsewhere = owners.Any(o => !index.HasAclRelation(o, fromContext) && index.MapPermitsReference(fromContext, o));
-            foreach (var up in owners)
+            // Owners of this name other than the referencing context. Built directly (no Where iterator
+            // / list) so a genuinely-unknown name — the common case reaching here — allocates nothing.
+            List<string>? owners = null;
+            foreach (var c in index.DeclaringContextsOf(tr.Name))
             {
-                // If the name is imported from a single owner that is not this upstream, it binds there.
-                if (importOwners.Count == 1 && importOwners[0] != up)
+                if (c != fromContext)
                 {
-                    continue;
+                    (owners ??= new List<string>()).Add(c);
+                }
+            }
+
+            if (owners is not null)
+            {
+                // If a NON-ACL permit relation (open-host/conformist/…) makes a same-named type visible,
+                // the reference binds there, not to the ACL upstream — no direct-reference warning.
+                var permittedElsewhere = false;
+                foreach (var o in owners)
+                {
+                    if (!index.HasAclRelation(o, fromContext) && index.MapPermitsReference(fromContext, o))
+                    {
+                        permittedElsewhere = true;
+                        break;
+                    }
                 }
 
-                if (permittedElsewhere)
+                foreach (var up in owners)
                 {
-                    continue;
-                }
+                    // If the name is imported from a single owner that is not this upstream, it binds there.
+                    if (importOwners.Count == 1 && importOwners[0] != up)
+                    {
+                        continue;
+                    }
 
-                if (index.HasAclRelation(up, fromContext))
-                {
-                    diagnostics.Add(Diagnostic.Warning(DiagnosticCodes.AclDirectUpstreamReference,
-                        $"'{tr.Name}' is an upstream type of anti-corruption-layer '{up}' -> '{fromContext}'; translate it via the generated I{up}To{fromContext}Translator instead of referencing it directly",
-                        tr.Span));
-                    break;
+                    if (permittedElsewhere)
+                    {
+                        continue;
+                    }
+
+                    if (index.HasAclRelation(up, fromContext))
+                    {
+                        diagnostics.Add(Diagnostic.Warning(DiagnosticCodes.AclDirectUpstreamReference,
+                            $"'{tr.Name}' is an upstream type of anti-corruption-layer '{up}' -> '{fromContext}'; translate it via the generated I{up}To{fromContext}Translator instead of referencing it directly",
+                            tr.Span));
+                        break;
+                    }
                 }
             }
         }
@@ -685,6 +712,22 @@ public sealed class SemanticValidator
         }
     }
 
+    /// <summary>
+    /// An ordinal name set over a member list, presized to the member count and populated by a direct
+    /// loop (no <c>Select</c> iterator / delegate, and no rehashing). Used by the duplicate/derived
+    /// checks that only need membership tests.
+    /// </summary>
+    internal static HashSet<string> MemberNameSet(IReadOnlyList<Member> members)
+    {
+        var set = new HashSet<string>(members.Count, StringComparer.Ordinal);
+        foreach (Member m in members)
+        {
+            set.Add(m.Name);
+        }
+
+        return set;
+    }
+
     /// <summary>The C# property identifier a member name maps to (first char upper-cased), for collision checks.</summary>
     internal static string PropertyKey(string name) =>
         name.Length == 0 ? name : char.ToUpperInvariant(name[0]) + name[1..];
@@ -728,7 +771,9 @@ public sealed class SemanticValidator
         List<Diagnostic> diagnostics,
         IReadOnlySet<string>? specNames = null)
     {
-        var memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
+        // Built lazily: only a stored (non-derived) default initializer — uncommon — needs the
+        // sibling-name set, so most member lists never allocate it.
+        HashSet<string>? memberNames = null;
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var scope = TypeScope.FromMembers(members, index);
         var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics, specNames);
@@ -776,7 +821,7 @@ public sealed class SemanticValidator
 
                     // A nullary builtin like `now` is non-deterministic, so it cannot be a
                     // STORED default (a derived/computed field re-evaluating it is fine).
-                    if (!MemberAnalysis.IsDerived(m, memberNames))
+                    if (!MemberAnalysis.IsDerived(m, memberNames ??= MemberNameSet(members)))
                     {
                         var referenced = new HashSet<string>(
                             MemberAnalysis.ReferencedIdentifiers(m.Initializer), StringComparer.Ordinal);
@@ -863,7 +908,11 @@ public sealed class SemanticValidator
         {
             var target = group.Key;
             var specList = group.ToList();
-            var specNames = new HashSet<string>(specList.Select(s => s.Name), StringComparer.Ordinal);
+            var specNames = new HashSet<string>(specList.Count, StringComparer.Ordinal);
+            foreach (SpecDecl s in specList)
+            {
+                specNames.Add(s.Name);
+            }
 
             // Resolve the spec's target in its own context first (R13.2).
             TypeDecl? decl = index.TryGetDeclIn(ctx.Name, target, out TypeDecl localDecl) ? localDecl
@@ -871,28 +920,38 @@ public sealed class SemanticValidator
             IReadOnlyList<Member>? members =
                 decl switch { ValueObjectDecl v => v.Members, EntityDecl e => e.Members, _ => null };
 
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            HashSet<string> memberNames = members is null
-                ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                : new HashSet<string>(members.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
-
-            foreach (SpecDecl spec in specList)
+            if (members is null)
             {
-                if (members is null)
+                foreach (SpecDecl spec in specList)
                 {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SpecUnknownTarget,
                         $"spec '{spec.Name}' targets '{target}', which is not a declared value or entity type", spec.Span));
-                    continue;
                 }
 
+                continue;
+            }
+
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var memberNames = new HashSet<string>(members.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (Member m in members)
+            {
+                memberNames.Add(m.Name);
+            }
+
+            // The scope and checker depend only on the group's shared target members and sibling spec
+            // names, so build them once and reuse across the group's specs (matching how
+            // ValidateMembersAndInvariants drives a single checker over many expressions).
+            var scope = TypeScope.FromMembers(members, index);
+            var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics, specNames);
+
+            foreach (SpecDecl spec in specList)
+            {
                 if (!seen.Add(spec.Name) || memberNames.Contains(spec.Name))
                 {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateSpec,
                         $"spec '{spec.Name}' duplicates another spec or a member of '{target}'", spec.Span));
                 }
 
-                var scope = TypeScope.FromMembers(members, index);
-                var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics, specNames);
                 checker.Check(spec.Condition, scope);
 
                 TypeRef? inferred = resolver.Infer(spec.Condition, scope);
@@ -903,10 +962,7 @@ public sealed class SemanticValidator
                 }
             }
 
-            if (members is not null)
-            {
-                DetectSpecCycles(specList, specNames, diagnostics);
-            }
+            DetectSpecCycles(specList, specNames, diagnostics);
         }
     }
 
@@ -1171,7 +1227,7 @@ public sealed class SemanticValidator
     /// </summary>
     private static void ValidateQuantity(ValueObjectDecl q, ModelIndex index, List<Diagnostic> diagnostics)
     {
-        var memberNames = new HashSet<string>(q.Members.Select(m => m.Name), StringComparer.Ordinal);
+        var memberNames = MemberNameSet(q.Members);
 
         // The amount is a non-optional Decimal: this keeps scalar */÷ exact (an Int amount
         // would silently integer-divide / truncate when scaled by a fraction).
@@ -1180,8 +1236,21 @@ public sealed class SemanticValidator
         bool IsUnit(Member m) => index.Classify(m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional
             && !MemberAnalysis.IsDerived(m, memberNames);
 
-        var amountCount = q.Members.Count(IsAmount);
-        var unitCount = q.Members.Count(IsUnit);
+        // One pass, calling the local predicates directly (no Count(delegate) closures).
+        var amountCount = 0;
+        var unitCount = 0;
+        foreach (Member m in q.Members)
+        {
+            if (IsAmount(m))
+            {
+                amountCount++;
+            }
+
+            if (IsUnit(m))
+            {
+                unitCount++;
+            }
+        }
 
         if (unitCount != 1)
         {
@@ -1325,9 +1394,12 @@ public sealed class SemanticValidator
             return;
         }
 
+        // Classify once: the unknown-type, arity, and Range-orderable checks below all consult it.
+        TypeKind kind = index.Classify(type.Name);
+
         // A qualified `Context.T` is validated by the context-scoping pass (UnknownContext /
         // NotExported); skip the global unknown-type check here to avoid a double report.
-        if (type.Qualifier is null && !index.IsKnownType(type.Name))
+        if (type.Qualifier is null && kind == TypeKind.Unknown)
         {
             // Keep the message prose EXACTLY as-is (snapshots depend on it); additionally surface the
             // bare candidate as the structured Suggestion the code-fix providers read (no prose scraping).
@@ -1339,7 +1411,7 @@ public sealed class SemanticValidator
         }
 
         // Generic arity: List/Set/Range take one type argument; Map takes two.
-        switch (index.Classify(type.Name))
+        switch (kind)
         {
             case TypeKind.List or TypeKind.Set or TypeKind.Range:
                 if (type.Element is null)
@@ -1364,7 +1436,7 @@ public sealed class SemanticValidator
 
         // A Range is ordered, so its element must be an orderable type (Int/Decimal/Instant).
         // Only flag a KNOWN non-orderable element; an unknown element is already KOI0101.
-        if (index.Classify(type.Name) == TypeKind.Range && type.Element is not null
+        if (kind == TypeKind.Range && type.Element is not null
             && index.IsKnownType(type.Element.Name) && !BuiltinOps.IsOrderable(type.Element.Name))
         {
             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.RangeNotOrderable,
