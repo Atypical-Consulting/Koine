@@ -67,7 +67,7 @@ import {
 import type { SelectedElement } from '@/model/selection';
 import { type ModelOutlineHandlers } from '@/model/modelOutline';
 import { mountDomainNavigator, type DomainNavigatorHandle, type TacticalHandlers } from '@/model/domainNavigator';
-import { buildInspectorElement, renderRules, type InspectorElement, type InspectorHandlers } from '@/model/inspector';
+import { type InspectorElement, type InspectorHandlers } from '@/model/inspector';
 import { buildModelIndex, lookupElement, resolveInspectableQn, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
 import { SourceControlPanel } from '@/model/SourceControlPanel';
@@ -1111,19 +1111,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       <PropertiesPanel store={appStore} index={modelIndex} handlers={inspectorHandlers} />,
       host,
     );
-    renderSelectedRules();
-  }
-
-  // The right-rail "Rules" tab: the selected element's invariants (business rules), resolved through the
-  // same selection → model-index → InspectorElement path as the Properties inspector, so the two tabs
-  // track selection in lockstep. Rendered imperatively into its host (it's a read-only projection).
-  function renderSelectedRules(): void {
-    const sel = appStore.getState().selection;
-    const hit = sel && modelIndex ? lookupElement(modelIndex, sel.qualifiedName) : null;
-    const element: InspectorElement | null = hit
-      ? buildInspectorElement(hit.element.entry, hit.element.node, hit.element.modelMembers)
-      : null;
-    el('rview-rules').replaceChildren(renderRules(element));
   }
 
   // Repaint the Domain axis's strategic/tactical navigator (#453) and the model-index-derived chrome
@@ -1492,27 +1479,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // and the deck/facet subscription applies the chrome — so there are no imperative tab click handlers
   // to wire here anymore.
 
-  // The left rail's documentation footer: shortcuts into the model's prose surfaces. ADR + Notes each
-  // open their own Documentation page; the contextmap/glossary actions are retained (the footer no
-  // longer renders those buttons — they moved into the Domain axis, #453 — so they simply bind to
-  // nothing, and a later task can re-wire them from the strategic view). querySelectorAll keeps this
-  // resilient to fixtures that omit the rail, and selectBottomTab (declared below) is hoisted, so
-  // referencing it here is fine.
-  const docLinkActions: Record<string, () => void> = {
-    contextmap: () => focusContextMap(),
-    glossary: () => focusDocs(),
-    adr: () => selectDocsTab('adr'),
-    notes: () => selectDocsTab('notes'),
-  };
-  for (const link of Array.from(document.querySelectorAll<HTMLButtonElement>('.koi-doclink'))) {
-    const action = docLinkActions[link.dataset.doclink ?? ''];
-    if (action) link.addEventListener('click', action);
-  }
-
-  // Right rail: Properties (the inspector) / Rules / Notes. Rules/Notes are placeholder panels for now —
-  // the tab chrome matches the mockup while the inspector stays read-only. The active right view lives in
+  // Right rail: Properties (the inspector) / AI Chat / Source Control. The active right view lives in
   // the uiChrome slice (#193), like center/tech/docs: selectRightView writes it via setRight, so the slice
-  // owns that state rather than it being implicit in the DOM.
+  // owns that state rather than it being implicit in the DOM. (ADR + Notes shortcuts left the left rail
+  // in #730 — those prose surfaces are reached through the center Deck's Docs surface.)
   // The right-edge icon stripe (#right-strip) is the sole right-view switcher (#500 follow-up); the panel
   // carries only a title header naming the active tool window. selectRightView keeps #right-title in sync
   // and shows the matching view — there's no tab row to mark. (Guarded lookup so DOM fixtures that omit
@@ -1521,15 +1491,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const rightViewLabels: Record<RightView, string> = {
     props: 'Properties',
     assistant: 'AI Chat',
-    rules: 'Rules',
-    notes: 'Notes',
     'source-control': 'Source Control',
   };
   const rightViews: Record<RightView, HTMLElement> = {
     props: inspectorHost,
     assistant: assistantView,
-    rules: el('rview-rules'),
-    notes: el('rview-notes'),
     'source-control': sourceControlRightView,
   };
   function selectRightView(view: RightView): void {

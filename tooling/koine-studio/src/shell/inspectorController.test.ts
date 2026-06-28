@@ -94,8 +94,6 @@ const APP_HTML = `
         <div id="right-body">
           <div id="inspector-host" class="rview" role="tabpanel"></div>
           <section id="view-assistant" class="rview" role="tabpanel" hidden></section>
-          <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden></div>
-          <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden></div>
           <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
         </div>
       </aside>
@@ -1015,7 +1013,7 @@ describe('createInspectorController — right-edge tool-window stripe (#500)', (
     const ctl = createInspectorController(makeDeps(makeLsp()));
     ctl.init();
     expect(splitEl().classList.contains('right-collapsed')).toBe(true);
-    for (const v of ['props', 'rules', 'notes', 'source-control']) {
+    for (const v of ['props', 'assistant', 'source-control']) {
       expect(stripBtn(v).getAttribute('aria-pressed')).toBe('false');
     }
     ctl.dispose();
@@ -1055,10 +1053,10 @@ describe('createInspectorController — right-edge tool-window stripe (#500)', (
     ctl.init();
     expect(deps.store.getState().right).toBe('props');
 
-    stripBtn('notes').click();
+    stripBtn('source-control').click();
     expect(splitEl().classList.contains('right-collapsed')).toBe(false);
-    expect(deps.store.getState().right).toBe('notes');
-    expect(stripBtn('notes').getAttribute('aria-pressed')).toBe('true');
+    expect(deps.store.getState().right).toBe('source-control');
+    expect(stripBtn('source-control').getAttribute('aria-pressed')).toBe('true');
     expect(stripBtn('props').getAttribute('aria-pressed')).toBe('false');
     ctl.dispose();
   });

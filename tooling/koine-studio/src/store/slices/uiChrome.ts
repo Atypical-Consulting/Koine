@@ -10,8 +10,9 @@ export type OutputTab = 'generated' | 'compatibility' | 'contextmap';
 export type DocsView = 'glossary' | 'adr' | 'notes';
 export type BottomTab = 'problems' | 'events' | 'relationships' | 'terminal' | 'review';
 // The AI assistant docks in the right rail (a RightView), not the center — it can stay open beside
-// Code/Canvas while you work, rather than competing for the main stage as a center tab.
-export type RightView = 'props' | 'assistant' | 'rules' | 'notes' | 'source-control';
+// Code/Canvas while you work, rather than competing for the main stage as a center tab. (Rules + Notes
+// were retired in #730: invariants show in Properties, Notes lives in the Deck's Docs surface.)
+export type RightView = 'props' | 'assistant' | 'source-control';
 
 /** The four zones the narrow-viewport (mobile) shell shows one at a time, switched by the bottom
  *  MobileZoneBar. Code → #center + selectCenter('technical'); Diagram → #center + selectCenter('visual');

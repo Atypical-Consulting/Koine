@@ -3,16 +3,17 @@
 // and the rail can never drift from the ids the controller queries.
 //
 // The rail is a DDD "Domain" navigator, not a section stack: a labelled Domain·Files axis switch over
-// one navigator host, plus a slim documentation footer. The Domain axis is the default; the Files axis
-// holds the workspace .koi tree (#filetree-body — the file explorer's mount). The axis show/hide wiring
-// and the strategic/tactical Domain renderers land in later tasks; this establishes the markup only —
-// Domain visible, Files hidden — so #filetree-body stays present and functional.
+// one navigator host. The Domain axis is the default; the Files axis holds the workspace .koi tree
+// (#filetree-body — the file explorer's mount). The axis show/hide wiring and the strategic/tactical
+// Domain renderers land in later tasks; this establishes the markup only — Domain visible, Files hidden —
+// so #filetree-body stays present and functional.
 //
 // What moved: the former Explorer + Overview sections are gone (Overview deleted outright; the construct
-// tree now mounts into #rail-domain-pane). Context Map + Ubiquitous Language left the docs footer for the
-// strategic Domain view (a later task); only ADR + Notes remain here.
+// tree now mounts into #rail-domain-pane). The documentation footer (Context Map, Ubiquitous Language,
+// ADR, Notes) is gone too (#730): Context Map + Glossary live in the Domain axis, and ADR + Notes are
+// reached through the center Deck's Docs surface — so the rail no longer doubles as a docs doorway.
 
-/** The rail's inner markup: the axis switch, the navigator host (Domain pane + Files pane) and the docs footer. */
+/** The rail's inner markup: the axis switch over the navigator host (Domain pane + Files pane). */
 export function leftRailMarkup(): string {
   return `
     <!-- Domain·Files axis: a segmented control choosing which navigator the rail shows. Domain is the
@@ -37,29 +38,5 @@ export function leftRailMarkup(): string {
         </div>
         <div class="rail-sect-body" id="filetree-body"></div>
       </section>
-    </div>
-    <!-- Documentation footer: shortcuts into the model's prose surfaces. Context Map + Ubiquitous Language
-         moved into the Domain axis (a later task rebuilds them in the strategic view); ADR + Notes stay
-         here. These are navigation, so they wear the toolbar's stroked line-icon idiom. Wired in
-         inspectorController via [data-doclink]. -->
-    <nav id="rail-docs-body" class="rail-docs-foot" aria-label="Documentation">
-      <ul class="koi-doclinks">
-        <li>
-          <button type="button" class="koi-doclink" data-doclink="adr" title="Architecture Decision Records">
-            <svg class="tb-ico koi-doclink-ico" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M4 2.5h4.6L12 5.9V13.5H4Z" /><path d="M8.4 2.5v3.2h3.2" /><path d="M5.8 9.6 7.2 11 10 7.9" />
-            </svg>
-            <span class="koi-doclink-label">ADR</span>
-          </button>
-        </li>
-        <li>
-          <button type="button" class="koi-doclink" data-doclink="notes" title="Free-form notes on the model">
-            <svg class="tb-ico koi-doclink-ico" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M10.4 3.1 12.9 5.6 6.1 12.4 3 13 3.6 9.9Z" /><path d="M9.2 4.3 11.7 6.8" />
-            </svg>
-            <span class="koi-doclink-label">Notes</span>
-          </button>
-        </li>
-      </ul>
-    </nav>`;
+    </div>`;
 }

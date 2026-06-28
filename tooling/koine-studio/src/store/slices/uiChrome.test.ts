@@ -34,9 +34,9 @@ describe('uiChrome slice', () => {
   test('tab setters are independent', () => {
     const s = make();
     s.getState().setBottom('events');
-    s.getState().setRight('notes');
+    s.getState().setRight('source-control');
     expect(s.getState().bottom).toBe('events');
-    expect(s.getState().right).toBe('notes');
+    expect(s.getState().right).toBe('source-control');
   });
 
   test('outlineFilter defaults to empty and is set independently (it survives panel remounts)', () => {
