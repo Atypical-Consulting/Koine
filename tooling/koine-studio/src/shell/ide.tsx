@@ -53,7 +53,7 @@ import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
 import { loadLayout, saveLayout, type LayoutState } from '@/shell/layoutStore';
 import { devCommands } from '@/shell/devCommands';
 import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
-import { createPreferences, type PrefsCallbacks } from '@/settings/prefs';
+import { type PrefsCallbacks } from '@/settings/prefs';
 import { createSettingsPage, type SettingsPageHandle } from '@/settings/settingsPage';
 import { applyAppearance } from '@/settings/appearance';
 import { initEdgeResizer } from '@/shell/resize';
@@ -1383,8 +1383,9 @@ export function init(): () => void {
     document.getElementById('app')?.prepend(bar);
   }
 
-  // True when the command palette or a modal dialog (prefs/help/about) is open, so global
-  // shortcuts don't fire 'through' an overlay at the editor underneath. The welcome screen is
+  // True when the command palette or a modal dialog (help, confirm/prompt, generate) is open, so global
+  // shortcuts don't fire 'through' an overlay at the editor underneath. The gear-launched Settings overlay
+  // is a center panel, not a modal backdrop, so it's intentionally not counted. The welcome screen is
   // deliberately excluded — its own actions own that surface.
   function overlayOpen(): boolean {
     return document.querySelector('.koi-palette-backdrop:not([hidden]), .koi-modal-backdrop:not([hidden])') !== null;
@@ -1721,26 +1722,42 @@ export function init(): () => void {
       editor.reconfigureKeybindings();
     },
   };
-  const prefs = createPreferences(prefsCallbacks);
 
-  // The gear-launched Settings center page (#center-panel-settings). Built LAZILY on the first route into
-  // Settings, not at init: mounting its Visual pane runs mountPreferencesPane's open path, which (re)starts
-  // the MCP sidecar when enabled — so an eager mount would spawn that background process before the user
-  // ever opens Settings. It reuses the SAME prefsCallbacks as the modal, so a JSON or Visual edit on the
-  // page live-applies through the identical onChange hook.
+  // The gear-launched Settings center page (#center-panel-settings) is the SINGLE Settings surface (#731 —
+  // the legacy createPreferences modal is retired). Built LAZILY on the first route into Settings, not at
+  // init: mounting its Visual pane runs mountPreferencesPane's open path, which (re)starts the MCP sidecar
+  // when enabled — so an eager mount would spawn that background process before the user ever opens Settings.
+  // An optional category (#731) lands the pane on that tab (the About deep-link).
   let settingsPage: SettingsPageHandle | null = null;
   function ensureSettingsPage(): void {
+    // The landing category is the store's `settingsCategory` (set by controller.showSettings) — the single
+    // source of truth, so this host reads it back rather than threading a parallel argument. Null ⇒ keep
+    // the pane's last-used tab.
+    const category = appStore.getState().settingsCategory ?? undefined;
     if (settingsPage) {
-      // Already built — re-sync from the live settings on re-open (the modal it replaced repainted on
-      // every open), so a theme/setting changed from the toolbar or palette while Settings sat hidden
-      // shows correctly when the gear brings it back.
-      settingsPage.refresh();
+      // Already built — re-sync from the live settings on re-open, so a theme/setting changed from the
+      // toolbar or palette while Settings sat hidden shows correctly when it's brought back; land on
+      // `category` when one was requested.
+      settingsPage.refresh(category);
       return;
     }
     settingsPage = createSettingsPage(
       { header: el('settings-page-header'), body: el('settings-page-body') },
       prefsCallbacks,
     );
+    // A first build already paints from the live settings; only a deep-link needs the extra repaint to
+    // land on its tab (a plain open keeps the pane's last-used category).
+    if (category) settingsPage.refresh(category);
+  }
+
+  // The ONE entry every Settings affordance routes through (#731): the toolbar gear, the command palette's
+  // "Settings…" / "About", the mod+, chord, and the Assistant's "Open Settings". Record the intent in the
+  // store FIRST (settingsOpen + the landing category — the single source of truth, which also reveals the
+  // overlay via the deck subscription: it's NOT a deck surface, so the deck/persistence are untouched and
+  // focusing any surface leaves it), then build/refresh the center page from that store state.
+  function openSettings(category?: string): void {
+    controller.showSettings(category);
+    ensureSettingsPage();
   }
 
   const help = createHelpOverlay(helpRows());
@@ -1812,7 +1829,7 @@ export function init(): () => void {
         return line.text.trim() ? { text: line.text } : null;
       },
       onApplyModel: (source) => replaceActiveDoc(source),
-      onOpenPrefs: () => prefs.open(),
+      onOpenPrefs: () => openSettings(),
       // Per-workspace conversation key: each opened folder keeps its own transcript; scratch mode
       // (no host folder behind it) uses the literal 'scratch'. selectView calls syncWorkspace on tab
       // show so re-opening the Assistant after a folder switch loads that folder's history.
@@ -2153,15 +2170,9 @@ export function init(): () => void {
   saveProjectBtn.addEventListener('click', () => void saveProjectToDisk());
   if (!platform.canSaveProjects) saveProjectBtn.hidden = true;
   el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
-  // The toolbar gear opens the transient Settings overlay over the deck (#center-panel-settings), instead
-  // of the prefs modal. The page is built on first open (ensureSettingsPage), then the overlay is shown via
-  // the store's `settingsOpen` (controller.showSettings) — it's NOT a deck surface, so the deck/persistence
-  // are untouched and focusing any surface leaves it. The remaining `prefs.open()` call sites (command
-  // palette, About, onOpenPrefs) keep the modal `prefs` alive for now (a tracked follow-up unifies them).
-  el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => {
-    ensureSettingsPage();
-    controller.showSettings();
-  });
+  // The toolbar gear opens the transient Settings overlay over the deck (#center-panel-settings) — now the
+  // single Settings surface every entry point shares (#731), via the openSettings helper.
+  el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => openSettings());
 
   // Mobile overflow "More" (⋮) menu (#528): at ≤ $bp-narrow the toolbar hides its secondary actions
   // (Save/Check/Install/⌘K/theme/Settings) and reveals this kebab, which collects them into a floating
@@ -2218,9 +2229,9 @@ export function init(): () => void {
       // The editor-split + panel-reposition commands (issue #265). Built from the pure layoutCommands
       // module so the list is unit-tested; each run() drives the layoutActions wired at boot above.
       ...layoutCommands(layoutActions),
-      { id: 'prefs', title: 'Settings…', hint: 'mod+,', group: 'View', run: () => prefs.open() },
+      { id: 'prefs', title: 'Settings…', hint: 'mod+,', group: 'View', run: () => openSettings() },
       { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },
-      { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => prefs.open('about') },
+      { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => openSettings('about') },
       ...devCommands(() => void toggleStoreInspector()),
       { id: 'view-preview', title: 'Show Emitted Preview', group: 'Workspace', run: () => controller.selectOutput('generated') },
       { id: 'view-glossary', title: 'Show Glossary', group: 'Workspace', run: () => controller.selectDocsTab('glossary') },
@@ -2287,7 +2298,7 @@ export function init(): () => void {
       void requestNewModel();
     } else if (mod && e.key === ',') {
       e.preventDefault();
-      prefs.open();
+      openSettings();
     } else if (e.key === 'F1') {
       e.preventDefault();
       help.toggle();

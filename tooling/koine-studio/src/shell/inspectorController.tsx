@@ -248,8 +248,10 @@ export interface InspectorController {
 
   // View selection (palette commands + toolbar/tab clicks route here).
   selectCenter(view: CenterView): void;
-  /** Show the transient, gear-launched Settings overlay (#482) over the deck (not a deck surface). */
-  showSettings(): void;
+  /** Show the transient, gear-launched Settings overlay (#482) over the deck (not a deck surface). Pass a
+   *  category id (#731) to land the overlay on that tab (the About command deep-links to `about`); omit it
+   *  to open on the last-used / default tab. */
+  showSettings(category?: string): void;
   /**
    * Switch the left rail's active navigator axis (#453): show the Domain pane (the strategic/tactical DDD
    * navigator) or the Files pane (the workspace `.koi` tree), hiding the other, and persist the choice.
@@ -1398,9 +1400,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
 
   // Show the transient Settings overlay (#482) over the deck. It's NOT a deck surface, so this flips the
   // orthogonal `settingsOpen` flag rather than routing through focusPrimary — the deck state (and its
-  // persistence) is left untouched. Focusing any deck surface (the deck-bar) clears it.
-  function showSettings(): void {
-    appStore.getState().showSettings();
+  // persistence) is left untouched. Focusing any deck surface (the deck-bar) clears it. An optional
+  // category id (#731) is recorded on the store so the host that mounts the preferences pane can land it on
+  // that tab (the About command passes `about`); a plain open clears any forced category.
+  function showSettings(category?: string): void {
+    appStore.getState().showSettings(category);
   }
 
   // The assistant is interactive (not a cached, model-derived surface): every show re-points it at the
