@@ -1729,7 +1729,11 @@ export function init(): () => void {
   // when enabled — so an eager mount would spawn that background process before the user ever opens Settings.
   // An optional category (#731) lands the pane on that tab (the About deep-link).
   let settingsPage: SettingsPageHandle | null = null;
-  function ensureSettingsPage(category?: string): void {
+  function ensureSettingsPage(): void {
+    // The landing category is the store's `settingsCategory` (set by controller.showSettings) — the single
+    // source of truth, so this host reads it back rather than threading a parallel argument. Null ⇒ keep
+    // the pane's last-used tab.
+    const category = appStore.getState().settingsCategory ?? undefined;
     if (settingsPage) {
       // Already built — re-sync from the live settings on re-open, so a theme/setting changed from the
       // toolbar or palette while Settings sat hidden shows correctly when it's brought back; land on
@@ -1747,12 +1751,13 @@ export function init(): () => void {
   }
 
   // The ONE entry every Settings affordance routes through (#731): the toolbar gear, the command palette's
-  // "Settings…" / "About", the mod+, chord, and the Assistant's "Open Settings". Build/refresh the center
-  // page on the requested category, then reveal the overlay via the store's `settingsOpen` flag (it's NOT a
-  // deck surface, so the deck/persistence are untouched and focusing any surface leaves it).
+  // "Settings…" / "About", the mod+, chord, and the Assistant's "Open Settings". Record the intent in the
+  // store FIRST (settingsOpen + the landing category — the single source of truth, which also reveals the
+  // overlay via the deck subscription: it's NOT a deck surface, so the deck/persistence are untouched and
+  // focusing any surface leaves it), then build/refresh the center page from that store state.
   function openSettings(category?: string): void {
-    ensureSettingsPage(category);
     controller.showSettings(category);
+    ensureSettingsPage();
   }
 
   const help = createHelpOverlay(helpRows());

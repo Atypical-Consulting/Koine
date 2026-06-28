@@ -232,6 +232,10 @@ export function createSettingsPage(
   // the host on every (re)open so a change made elsewhere while the page sat hidden is reflected. An
   // optional category (#731) lands the Visual pane on that tab; embedded, so never steal focus onto it.
   function refresh(category?: string): void {
+    // A category deep-link (e.g. the About command) targets a Visual category tab; the JSON
+    // representation has no tabs, so switch to Visual first — otherwise the requested category is silently
+    // dropped and the page just shows the settings.json editor (#731).
+    if (category && mode === 'json') setMode('visual');
     if (mode === 'visual') {
       pane?.refresh(category, false); // repaint from live settings; land on `category` when given
     } else if (editor) {

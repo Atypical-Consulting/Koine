@@ -129,7 +129,8 @@ interface MountedPrefsPane extends PrefsPaneHandle {
    *  category id first. `focusTab` (default true) focuses the active category tab; the embedded center page
    *  passes false so re-showing it never steals focus from the page. */
   refresh(categoryId?: string, focusTab?: boolean): void;
-  /** Cancel any armed keybinding recorder + open conflict prompt (the page's teardown cleanup). */
+  /** Cancel any armed keybinding recorder + open conflict prompt — the disarm {@link destroy} also runs,
+   *  exposed for a caller that wants to pause transient state without tearing the pane down. */
   suspend(): void;
 }
 
