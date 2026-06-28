@@ -48,7 +48,6 @@ const APP_HTML = `
           <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Visual</button>
           <button type="button" class="center-tab" id="center-tab-technical" role="tab" data-center="technical" aria-selected="false">Code</button>
           <button type="button" class="center-tab" id="center-tab-docs" role="tab" data-center="docs" aria-selected="false">Documentation</button>
-          <button type="button" class="center-tab center-tab-ai" id="center-tab-assistant" role="tab" data-center="assistant" aria-selected="false">Assistant</button>
         </div>
         <div id="center-body">
           <section id="center-visual" class="center-host" role="tabpanel">
@@ -81,7 +80,6 @@ const APP_HTML = `
               <div id="view-notes" class="tech-view doc-view" role="tabpanel" hidden></div>
             </div>
           </section>
-          <section id="view-assistant" class="center-host" role="tabpanel" hidden></section>
         </div>
         <footer id="diagnostics">
           <div class="koi-resizer koi-resizer-y" id="diag-resizer"></div>
@@ -108,6 +106,7 @@ const APP_HTML = `
         <header id="right-header"><h2 id="right-title">Properties</h2></header>
         <div id="right-body">
           <div id="inspector-host" class="rview" role="tabpanel"></div>
+          <section id="view-assistant" class="rview" role="tabpanel" hidden></section>
           <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden></div>
           <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden></div>
           <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
@@ -287,8 +286,6 @@ describe('createInspectorController — center switching', () => {
     expect(el('diagnostics').hidden).toBe(false); // Code
     ctl.selectDocsTab('glossary'); // forces center = docs
     expect(el('diagnostics').hidden).toBe(false); // Documentation
-    ctl.selectCenter('assistant');
-    expect(el('diagnostics').hidden).toBe(false); // Assistant
   });
 
   test('selectCenter("technical") surfaces the technical center + editor sub-view and marks the Code tab', () => {
@@ -370,15 +367,17 @@ describe('createInspectorController — lazy view loading (load exactly once)', 
     expect(lsp.glossaryModel.mock.calls.length).toBe(afterFirst);
   });
 
-  test('the Assistant center tab nudges ensureAssistant().syncWorkspace + focusInput, every show', () => {
+  test('opening the AI Chat right view nudges ensureAssistant().syncWorkspace + focusInput, every show', () => {
     const assistant = makeAssistant();
     const ensureAssistant = vi.fn(() => assistant);
     const ctl = createInspectorController(makeDeps(makeLsp(), { ensureAssistant }));
     ctl.init();
 
-    ctl.selectCenter('assistant');
+    ctl.selectRight('assistant');
     expect(assistant.syncWorkspace).toHaveBeenCalledTimes(1);
     expect(assistant.focusInput).toHaveBeenCalledTimes(1);
+    expect(el('view-assistant').hidden).toBe(false);
+    expect(el('rtab-assistant').getAttribute('aria-selected')).toBe('true');
   });
 });
 
@@ -948,16 +947,6 @@ describe('createInspectorController — narrow-viewport bottom-strip default (#4
     ctl.dispose();
   });
 
-  test('narrow + Assistant ⇒ strip collapsed by default', () => {
-    setWidth(500);
-    localStorage.removeItem(DIAG_KEY);
-    const ctl = createInspectorController(makeDeps(makeLsp()));
-    ctl.init();
-    ctl.selectCenter('assistant');
-    expect(collapsed()).toBe(true);
-    ctl.dispose();
-  });
-
   test('narrow + Visual/Code (the working views) ⇒ strip stays expanded', () => {
     setWidth(500);
     localStorage.removeItem(DIAG_KEY);
@@ -988,14 +977,12 @@ describe('createInspectorController — narrow-viewport bottom-strip default (#4
     ctl.dispose();
   });
 
-  test('desktop + Documentation/Assistant ⇒ strip keeps the expanded default (unchanged)', () => {
+  test('desktop + Documentation ⇒ strip keeps the expanded default (unchanged)', () => {
     setWidth(1280);
     localStorage.removeItem(DIAG_KEY);
     const ctl = createInspectorController(makeDeps(makeLsp()));
     ctl.init();
     ctl.selectDocsTab('glossary');
-    expect(collapsed()).toBe(false);
-    ctl.selectCenter('assistant');
     expect(collapsed()).toBe(false);
     ctl.dispose();
   });
@@ -1106,7 +1093,7 @@ describe('createInspectorController — split center layout', () => {
     // Each header should have view selector tabs
     for (const header of Array.from(headers)) {
       const tabs = header.querySelectorAll('.center-pane-tab');
-      expect(tabs.length).toBe(4); // visual, technical, docs, assistant
+      expect(tabs.length).toBe(3); // visual, technical, docs (AI moved to the right rail)
     }
 
     ctl.dispose();

@@ -1,10 +1,12 @@
 import type { StoreApi } from 'zustand/vanilla';
 
-export type CenterView = 'visual' | 'technical' | 'docs' | 'assistant';
+export type CenterView = 'visual' | 'technical' | 'docs';
 export type TechView = 'editor' | 'preview' | 'check' | 'scenarios';
 export type DocsView = 'glossary' | 'adr' | 'notes';
 export type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap' | 'terminal' | 'review';
-export type RightView = 'props' | 'rules' | 'notes' | 'source-control';
+// The AI assistant docks in the right rail (a RightView), not the center — it can stay open beside
+// Code/Canvas while you work, rather than competing for the main stage as a center tab.
+export type RightView = 'props' | 'assistant' | 'rules' | 'notes' | 'source-control';
 
 /** The four zones the narrow-viewport (mobile) shell shows one at a time, switched by the bottom
  *  MobileZoneBar. Code → #center + selectCenter('technical'); Diagram → #center + selectCenter('visual');
@@ -17,9 +19,11 @@ export const DEFAULT_CENTER: CenterView = 'visual';
 /** The zone the mobile shell opens on — Code, so a phone lands on the editor (the primary review surface). */
 export const DEFAULT_MOBILE_ZONE: MobileZone = 'code';
 
-/** True when `v` names a real center pane — validates a restored value before trusting it. */
+/** True when `v` names a real center pane — validates a restored value before trusting it.
+ *  (A persisted `'assistant'` from before the AI moved to the right rail fails this and falls back
+ *  to the default, which is the intended graceful migration.) */
 export function isValidCenter(v: string): v is CenterView {
-  return v === 'visual' || v === 'technical' || v === 'docs' || v === 'assistant';
+  return v === 'visual' || v === 'technical' || v === 'docs';
 }
 
 /** True when `v` names a real mobile zone — validates a restored/external value before trusting it. */
@@ -168,7 +172,7 @@ export function createUiChromeSlice(
       // Pick the first view not already used by any pane so each pane gets its
       // own DOM element (there is only one #center-visual / #center-technical /
       // etc. in the document — two panes claiming the same one leaves pane A blank).
-      const CYCLE_VIEWS: CenterView[] = ['technical', 'docs', 'assistant', 'visual'];
+      const CYCLE_VIEWS: CenterView[] = ['technical', 'docs', 'visual'];
       const newView = CYCLE_VIEWS.find((v) => !centerLayout.panes.some((p) => p.view === v)) ?? 'technical';
       const newId = newPaneId();
       const panes = [...centerLayout.panes, { id: newId, view: newView }];

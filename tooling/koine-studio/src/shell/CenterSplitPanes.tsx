@@ -30,10 +30,9 @@ const VIEW_LABELS: Record<CenterView, string> = {
   visual: 'Visual',
   technical: 'Code',
   docs: 'Docs',
-  assistant: 'AI',
 };
 
-const ALL_VIEWS: CenterView[] = ['visual', 'technical', 'docs', 'assistant'];
+const ALL_VIEWS: CenterView[] = ['visual', 'technical', 'docs'];
 
 function PaneSelector({
   layout,
@@ -75,7 +74,6 @@ const CENTER_VIEW_IDS: Record<CenterView, string> = {
   visual: 'center-visual',
   technical: 'center-technical',
   docs: 'center-docs',
-  assistant: 'view-assistant',
 };
 
 // --- applySplitPaneLayout ----------------------------------------------------

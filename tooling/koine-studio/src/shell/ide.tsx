@@ -2294,8 +2294,8 @@ export function init(): () => void {
       { id: 'view-contextmap', title: 'Show Context Map', group: 'Workspace', run: () => controller.selectBottomTab('contextmap') },
       { id: 'view-check', title: 'Show Compatibility Check', group: 'Workspace', run: () => controller.selectTech('check') },
       { id: 'view-scenarios', title: 'Show Scenario Runner', group: 'Workspace', run: () => controller.selectTech('scenarios') },
-      { id: 'view-assistant', title: 'Show Assistant', group: 'Workspace', run: () => controller.selectCenter('assistant') },
-      { id: 'assistant-explain', title: 'Explain this construct', group: 'Workspace', run: () => { controller.selectCenter('assistant'); ensureAssistant().explainSelection(); } },
+      { id: 'view-assistant', title: 'Show AI Chat', group: 'Workspace', run: () => controller.selectRight('assistant') },
+      { id: 'assistant-explain', title: 'Explain this construct', group: 'Workspace', run: () => { controller.selectRight('assistant'); ensureAssistant().explainSelection(); } },
       { id: 'add-comment', title: 'Add review comment', group: 'Review', run: () => editor.addCommentAtSelection() },
       { id: 'view-review', title: 'Show Review', group: 'Workspace', run: () => controller.selectBottomTab('review') },
     ];

@@ -168,16 +168,8 @@
             <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Visual</button>
             <button type="button" class="center-tab" id="center-tab-technical" role="tab" data-center="technical" aria-selected="false">Code</button>
             <button type="button" class="center-tab" id="center-tab-docs" role="tab" data-center="docs" aria-selected="false">Documentation</button>
-            <!-- The AI copilot is a first-class surface, always one click away from any view (not a Code
-                 sub-tab). It's the one "intelligent" tab among the structural three, so it alone wears a
-                 mark: a spark in the brand's accent, the same hue that signals "this generates". -->
-            <button type="button" class="center-tab center-tab-ai" id="center-tab-assistant" role="tab" data-center="assistant" aria-selected="false">
-              <svg class="center-tab-spark" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M7 1.6c.5 2.7 1.7 3.9 4.4 4.4-2.7.5-3.9 1.7-4.4 4.4-.5-2.7-1.7-3.9-4.4-4.4 2.7-.5 3.9-1.7 4.4-4.4Z" />
-                <path d="M12.3 9c.2 1.2.7 1.7 1.9 1.9-1.2.2-1.7.7-1.9 1.9-.2-1.2-.7-1.7-1.9-1.9 1.2-.2 1.7-.7 1.9-1.9Z" />
-              </svg>
-              Assistant
-            </button>
+            <!-- The AI copilot is NOT a center tab — it docks in the right rail (#rtab-assistant /
+                 #view-assistant) so it can stay open beside Code/Canvas while you work. -->
           </div>
           <div id="center-body">
             <section id="center-visual" class="center-host" role="tabpanel" aria-label="Visual">
@@ -220,11 +212,6 @@
                 <div id="view-notes" class="tech-view doc-view" role="tabpanel" hidden></div>
               </div>
             </section>
-            <!-- The AI copilot — a top-level center pane (peer of Visual / Code / Documentation), so it's
-                 one click from any view. The AssistantPanel is mounted into this host lazily on first show
-                 (ide.tsx); the bottom diagnostics strip stays visible here (it's global), collapse it from
-                 its chevron to give the conversation the center's full height. -->
-            <section id="view-assistant" class="center-host" role="tabpanel" aria-label="Assistant" hidden></section>
           </div>
 
           <footer id="diagnostics" aria-label="Problems, events, relationships and the context map">
@@ -266,6 +253,9 @@
           </header>
           <div id="right-body">
             <div id="inspector-host" class="rview" role="tabpanel"></div>
+            <!-- The AI copilot — docked here in the right rail so it stays open beside Code/Canvas. The
+                 AssistantPanel is mounted into this host lazily on first show (ide.tsx → ensureAssistant). -->
+            <section id="view-assistant" class="rview" role="tabpanel" aria-label="AI Chat" hidden></section>
             <!-- Filled by inspectorController.renderSelectedRules() with the selected element's
                  invariants (or an empty state). The static content below is a pre-hydration fallback. -->
             <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden>

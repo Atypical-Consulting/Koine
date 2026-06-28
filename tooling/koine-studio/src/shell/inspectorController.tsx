@@ -97,7 +97,7 @@ const SYMBOL_KIND_NAMESPACE = 3;
 // The center column's top-level views and the Code/Documentation sub-tabs (kept local — they're a UI
 // concern, not part of the target-agnostic model). They mirror the uiChrome slice's CenterView /
 // TechView / DocsView literals, which the chrome now drives through.
-type CenterView = 'visual' | 'technical' | 'docs' | 'assistant';
+type CenterView = 'visual' | 'technical' | 'docs';
 type TechView = 'editor' | 'preview' | 'check' | 'scenarios';
 type DocsView = 'glossary' | 'adr' | 'notes';
 type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap' | 'terminal' | 'review';
@@ -256,6 +256,9 @@ export interface InspectorController {
   selectTech(view: TechView): void;
   selectDocsTab(view: DocsView): void;
   selectBottomTab(tab: BottomTab): void;
+  /** Reveal a right-rail view (Properties / AI Chat / Rules / Notes / Source Control), expanding the rail
+   *  if collapsed. Palette commands (Show AI Chat, Explain this construct) route through here. */
+  selectRight(view: RightView): void;
 
   // Loaders + lifecycle ide.ts still triggers (theme flip, prefs target change, boot, server restart).
   loadPreview(): Promise<void>;
@@ -1365,10 +1368,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       centerVisualEl.hidden = center !== 'visual';
       centerTechnicalEl.hidden = center !== 'technical';
       centerDocsEl.hidden = center !== 'docs';
-      // The assistant is its own top-level center pane now (#235) — a peer of Visual/Code/Documentation,
-      // reachable in one click from any view, not a Code sub-tab. Its host (#view-assistant) is the
-      // center-host itself, so it's shown/hidden purely by the active center.
-      assistantView.hidden = center !== 'assistant';
+      // The AI assistant is no longer a center pane — it lives in the right rail (selectRightView).
     }
 
     // The bottom strip (Problems/Events/Relationships/Context Map/Terminal) is GLOBAL: it serves every
@@ -1422,7 +1422,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         if (view === 'visual' && appStore.getState().isStale('diagrams')) void loadDiagrams();
         else if (view === 'technical') ensureTechLoaded();
         else if (view === 'docs') ensureDocsLoaded();
-        else if (view === 'assistant') ensureAssistantShown();
       },
       onPaneFocus: (paneId: string) => {
         appStore.getState().focusPane(paneId);
@@ -1446,14 +1445,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (view === 'visual' && appStore.getState().isStale('diagrams')) void loadDiagrams();
     else if (view === 'technical') ensureTechLoaded();
     else if (view === 'docs') ensureDocsLoaded();
-    else if (view === 'assistant') ensureAssistantShown();
   }
 
   // The assistant is interactive (not a cached, model-derived surface): every show re-points it at the
   // current folder's conversation and focuses the input — the single choke point for that swap. Created
-  // lazily by ide.ts the first time this runs (the Anthropic SDK only loads on send).
+  // lazily by ide.ts the first time this runs (the Anthropic SDK only loads on send). It now lives in the
+  // right rail, so the guard checks the active RightView rather than the center.
   function ensureAssistantShown(): void {
-    if (activeCenter() !== 'assistant') return;
+    if (appStore.getState().right !== 'assistant') return;
     const a = deps.ensureAssistant();
     a.syncWorkspace();
     a.focusInput();
@@ -1585,12 +1584,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const rightTitleEl = document.getElementById('right-title');
   const rightViewLabels: Record<RightView, string> = {
     props: 'Properties',
+    assistant: 'AI Chat',
     rules: 'Rules',
     notes: 'Notes',
     'source-control': 'Source Control',
   };
   const rightViews: Record<RightView, HTMLElement> = {
     props: inspectorHost,
+    assistant: assistantView,
     rules: el('rview-rules'),
     notes: el('rview-notes'),
     'source-control': sourceControlRightView,
@@ -1603,6 +1604,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // status on every re-open (so a save / external `git` since the last view is reflected — the panel
     // itself owns the in-place refresh). The canUseGit gate + the non-repo empty state live in the panel.
     if (view === 'source-control') loadSourceControl();
+    // The AI assistant is lazily created + interactive (#235): mount it on first open and re-sync the
+    // conversation to the current folder + focus the input on every re-open.
+    else if (view === 'assistant') ensureAssistantShown();
+  }
+  // Reveal a right-rail view, expanding the rail first if it was collapsed — the entry point palette
+  // commands (Show AI Chat, Explain this construct) route through so the panel is always actually visible.
+  function selectRight(view: RightView): void {
+    if (appStore.getState().rightCollapsed) appStore.getState().setRightCollapsed(false);
+    selectRightView(view);
   }
 
   // Right-edge tool-window stripe (#500): Rider-style toggles that open/close (and switch) the #right
@@ -1875,18 +1885,18 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       return false;
     }
   }
-  // The bottom strip's *default* collapsed state is viewport-aware (#475): below BP_NARROW the two
-  // reading-heavy center views (Documentation, Assistant) default the strip COLLAPSED so the reading/chat
-  // pane gets full height on a phone; Visual/Code and every desktop width keep the expanded default. This
-  // sets only a DEFAULT — an explicit user preference always wins, so it's gated on the absence of one.
+  // The bottom strip's *default* collapsed state is viewport-aware (#475): below BP_NARROW the
+  // reading-heavy Documentation center view defaults the strip COLLAPSED so the reading pane gets full
+  // height on a phone; Visual/Code and every desktop width keep the expanded default. This sets only a
+  // DEFAULT — an explicit user preference always wins, so it's gated on the absence of one.
   // Re-evaluated whenever the center chrome is applied (a center switch / boot) and on a narrow↔wide cross.
   function applyDefaultDiagCollapsed(): void {
     if (hasExplicitDiagCollapsePref()) return; // the user's persisted choice wins
     const center = activeCenter();
-    applyDiagCollapsed(isNarrowViewport() && (center === 'docs' || center === 'assistant'));
+    applyDiagCollapsed(isNarrowViewport() && center === 'docs');
   }
   applyDiagCollapsed((localStorage.getItem(DIAG_COLLAPSED_KEY) ?? '0') === '1');
-  applyDefaultDiagCollapsed(); // override the expanded default with the narrow Docs/Assistant default (#475)
+  applyDefaultDiagCollapsed(); // override the expanded default with the narrow Docs default (#475)
   diagCollapse.addEventListener('click', () => {
     const collapsed = !diagEl.classList.contains('collapsed');
     applyDiagCollapsed(collapsed);
@@ -2260,6 +2270,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     selectTech,
     selectDocsTab,
     selectBottomTab,
+    selectRight,
     loadPreview,
     loadDiagrams,
     setTarget,

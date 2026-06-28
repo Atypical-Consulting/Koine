@@ -303,7 +303,6 @@ const APP_HTML = `
             <button type="button" class="center-tab" id="center-tab-visual" role="tab" data-center="visual" aria-selected="true">Visual</button>
             <button type="button" class="center-tab" id="center-tab-technical" role="tab" data-center="technical" aria-selected="false">Code</button>
             <button type="button" class="center-tab" id="center-tab-docs" role="tab" data-center="docs" aria-selected="false">Documentation</button>
-            <button type="button" class="center-tab center-tab-ai" id="center-tab-assistant" role="tab" data-center="assistant" aria-selected="false">Assistant</button>
           </div>
           <div id="center-body">
             <section id="center-visual" class="center-host" role="tabpanel">
@@ -339,7 +338,6 @@ const APP_HTML = `
                 <div id="view-notes" class="tech-view doc-view" role="tabpanel" hidden></div>
               </div>
             </section>
-            <section id="view-assistant" class="center-host" role="tabpanel" hidden></section>
           </div>
           <footer id="diagnostics">
             <div class="koi-resizer koi-resizer-y" id="diag-resizer"></div>
@@ -368,6 +366,7 @@ const APP_HTML = `
           <header id="right-header"><h2 id="right-title">Properties</h2></header>
           <div id="right-body">
             <div id="inspector-host" class="rview" role="tabpanel"></div>
+            <section id="view-assistant" class="rview" role="tabpanel" hidden></section>
             <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden><p class="muted">Coming soon.</p></div>
             <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden><p class="muted">Coming soon.</p></div>
             <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
