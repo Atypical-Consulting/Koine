@@ -112,8 +112,6 @@ export interface WorkspaceControllerDeps {
   rememberLastWorkspace?(folder: string): void;
   /** Folder display name written into the tree title (ide.ts's #filetree-title). */
   setFolderTitle?(name: string): void;
-  /** Reveal the file-tree chrome after a folder opens (ide.ts's showFileTreeChrome). */
-  showFileTreeChrome?(): void;
   /** Hide the welcome overlay (ide.ts's welcome.hide) — folder opens dismiss it. */
   hideWelcome?(): void;
 }
@@ -557,14 +555,16 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     }
 
     roots = [folder];
-    // Activate the first file (sorted by relPath) and show the tree.
+    // Activate the first file (sorted by relPath).
     const first = Array.from(buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath))[0];
     activeUriValue = first.uri;
     lsp.setActive(first.uri);
     editor.setDoc(first.text);
     deps.hideWelcome?.(); // dismiss the start screen only now that the open has succeeded
     deps.setFolderTitle?.(platform.folderName(folder));
-    deps.showFileTreeChrome?.();
+    // NB: opening a workspace no longer auto-switches the rail to the Files axis — the rail defaults to
+    // (and stays on) Domain, the DDD navigator. The file tree is one click away (the Files axis button /
+    // ⌘B), and the Domain navigator's "Reveal in Files" still switches deliberately.
     if (opts.recent ?? true) {
       deps.pushRecentFolder?.(folder);
       // Remember this as the last-opened workspace so a reload restores it (#535). Gated on the same

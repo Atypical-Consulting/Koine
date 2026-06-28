@@ -71,19 +71,6 @@ export interface EditorSessionLsp {
 export interface EditorSessionDeps {
   /** Where the CodeMirror editor mounts (ide.ts's #editor-pane). */
   parent: HTMLElement;
-  /**
-   * Where the SECOND editor group (group B) mounts when split (ide.ts's #editor-pane-b). Group B is
-   * built lazily on the first {@link EditorSession.openGroupB}; if this is absent, openGroupB is a
-   * graceful no-op (single-group host). The brief's openGroupB(uri?) carries no parent, so it rides
-   * here as an injected dep alongside `parent`.
-   */
-  groupBParent?: HTMLElement;
-  /**
-   * Read a uri's current text from the shared buffer set (workspaceController owns it). Used to fill a
-   * group when {@link EditorSession.openGroupB} / {@link EditorSession.openFocusedGroup} loads a uri.
-   * Optional so callers/tests that never split need not wire it; defaults to '' when absent.
-   */
-  docFor?(uri: string): string;
   /** The editor's initial document text. */
   doc: string;
   /** Soft-wrap long lines on first paint. */
@@ -159,16 +146,12 @@ export interface EditorSession {
 
   /**
    * Register the downstream onChange callback ide.ts uses for buffer/dirty/tree side effects. The
-   * callback receives the new full text AND the uri of the editing group (group A's active uri, or
-   * group B's current uri) so ide.ts syncs the edit into the RIGHT buffer — a group-B edit must never
-   * write group A's buffer (#265).
+   * callback receives the new full text AND the active uri so ide.ts syncs the edit into the right buffer.
    */
   onChange(cb: (doc: string, uri: string) => void): void;
 
-  /**
-   * Repaint the review-thread decorations in every live editor group (A, and B when open) after the
-   * review store changed — ide.ts calls this from the store subscription + after add/load.
-   */
+  /** Repaint the editor's review-thread decorations after the review store changed — ide.ts calls this
+   *  from the store subscription + after add/load. */
   refreshReviewDecorations(): void;
 
   // The editor's LSP forwarders, exposed so callers (and tests) can reach the wall directly.
@@ -176,42 +159,11 @@ export interface EditorSession {
   completion(line: number, character: number): Promise<CompletionItem[]>;
   codeActions(range: Range): Promise<CodeAction[]>;
 
-  // --- second editor group (group B) ----------------------------------------
-  // A second editing surface over the SAME shared buffer set, so two files (or two views of one) sit
-  // side by side. Group B is deliberately minimal: it is a plain second `createKoineEditor` with the
-  // editor↔LSP callback wall, but the diagnostics/status/strip/connection pipeline stays keyed to the
-  // PRIMARY (group A) — it is not duplicated for B. ide.ts (Task 4) renders B's container, persists the
-  // split via layoutStore, and routes file opens through `openFocusedGroup`.
-
-  /**
-   * Lazily build group B (mounted into deps.groupBParent) on first call, reuse it after, then load
-   * `uri`'s buffer text into it (or group A's active uri when omitted) and focus group B. A graceful
-   * no-op when no groupBParent was provided (single-group host).
-   */
-  openGroupB(uri?: string): void;
-  /** Tear down group B's editor, empty its pane, and return focus to group A. Leaves A untouched. */
-  closeGroupB(): void;
-  /** The live group-B editor handle, or null when B is not open. */
-  groupBEditor(): KoineEditor | null;
-  /** The uri group B currently shows ('' when B is closed). ide.ts persists this so reload restores B. */
-  groupBUri(): string;
-  /** Which editor group currently has focus (the routing target for {@link openFocusedGroup}). */
-  focusedGroup(): 'a' | 'b';
-  /** Set the focused group (the routing target). Does not move DOM focus; ide.ts owns that. */
-  focusGroup(group: 'a' | 'b'): void;
-  /**
-   * Load `uri`'s buffer text into whichever group is focused — group A's editor, or group B's when B
-   * is focused and open (else falls back to A). This is the "route open-file to the focused group" seam
-   * ide.ts drives when the user opens a file while a split is active.
-   */
-  openFocusedGroup(uri: string): void;
-
   /**
    * Release everything the session owns: the mobile symbol-row accessory (its DOM + CM listeners), the
-   * focusin/focusout/resize listeners it registered, group B (if open), and the primary editor — whose
-   * own destroy() removes its visualViewport listener and trips its torn-down guard. ide.ts calls this
-   * from its init() teardown so a session never outlives its host (the listeners would otherwise leak and
-   * fire into a torn-down DOM).
+   * focusin/focusout/resize listeners it registered, and the editor — whose own destroy() removes its
+   * visualViewport listener and trips its torn-down guard. ide.ts calls this from its init() teardown so
+   * a session never outlives its host (the listeners would otherwise leak and fire into a torn-down DOM).
    */
   destroy(): void;
 }
@@ -325,107 +277,6 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   deps.parent.addEventListener('focusout', onSymbolRowFocusOut);
   // A rotate/resize that crosses the breakpoint while focused must re-evaluate visibility.
   window.addEventListener('resize', syncSymbolRow);
-
-  // --- second editor group (group B) -----------------------------------------
-  // Group B is a second editing surface over the SAME shared buffer set (deps.docFor reads it). It is
-  // built lazily on the first openGroupB and reused after; the diagnostics/status pipeline above stays
-  // keyed to group A only (YAGNI — B is just an editing surface). `focused` is the routing target for
-  // openFocusedGroup, NOT DOM focus (ide.ts owns moving the caret/focus ring). See the EditorSession
-  // interface for the per-method contract.
-  let groupB: KoineEditor | null = null;
-  // Group B's own active uri — distinct from deps.activeUri() (group A's) — so B's edits sync the LSP
-  // for the file B actually shows, even after it is re-pointed at another buffer.
-  let groupBUri = '';
-  let focused: 'a' | 'b' = 'a';
-
-  // Resolve a uri's text from the shared buffer set; '' when no reader was wired or the uri is unknown.
-  const docFor = (uri: string): string => deps.docFor?.(uri) ?? '';
-
-  function focusedGroup(): 'a' | 'b' {
-    return focused;
-  }
-
-  function focusGroup(group: 'a' | 'b'): void {
-    focused = group;
-  }
-
-  function groupBEditor(): KoineEditor | null {
-    return groupB;
-  }
-
-  function groupBUriValue(): string {
-    return groupBUri;
-  }
-
-  function openGroupB(uri?: string): void {
-    // No mount point → single-group host; nothing to open.
-    if (!deps.groupBParent) return;
-    const target = uri ?? deps.activeUri();
-    groupBUri = target;
-    if (!groupB) {
-      // A plain second editor: same editor↔LSP callback wall as group A (so hover/completion/definition/
-      // rename/etc. work in B too), but it does NOT drive the diagnostics strip/status — that stays
-      // keyed to group A. onChange keeps the language service's snapshot for B's CURRENT uri current and
-      // reports the edit downstream (ide.ts owns the buffer/dirty side effects), mirroring group A's split.
-      groupB = createKoineEditor({
-        parent: deps.groupBParent,
-        doc: docFor(target),
-        lineWrap: deps.lineWrap,
-        minimap: deps.minimap,
-        onChange: (doc) => {
-          // B syncs the LSP + reports downstream for B's CURRENT uri (groupBUri), NOT group A's active
-          // uri — so a B edit dirties/saves B's own buffer and never corrupts group A's buffer (#265).
-          lsp.changeDoc(groupBUri, doc);
-          downstreamOnChange?.(doc, groupBUri);
-        },
-        onHover: hover,
-        onCompletion: completion,
-        onDefinition: (line, character) => lsp.definition(line, character),
-        onNavigate: (loc) => deps.onNavigate(loc),
-        onPrepareRename: (line, character) => lsp.prepareRename(line, character),
-        onRename: (line, character, newName) => lsp.rename(line, character, newName),
-        onReferences: (line, character) => lsp.references(line, character),
-        onNavigateLocation: (loc) => deps.onNavigate(loc),
-        uriLabel: (u) => deps.uriLabel(u),
-        onCodeActions: (range) => codeActions(range),
-        onApplyWorkspaceEdit: (edit) => deps.onApplyWorkspaceEdit(edit),
-        onInlayHints: (sl, sc, el, ec) => lsp.inlayHints(sl, sc, el, ec),
-        onSemanticTokens: () => lsp.semanticTokens(),
-        onPrepareCallHierarchy: (line, character) => lsp.prepareCallHierarchy(line, character),
-        onIncomingCalls: (item) => lsp.incomingCalls(item),
-        onOutgoingCalls: (item) => lsp.outgoingCalls(item),
-        // Review threads in group B too, over the SAME store but file-scoped to B's OWN uri (#259), so a
-        // split showing two different files keeps each pane's marks/edits to its own file.
-        ...reviewOptionsFor(() => groupBUri),
-      });
-    } else {
-      // groupBUri is already the new target (set above), and editor.setDoc dispatches a doc change that
-      // FIRES this editor's onChange — which runs lsp.changeDoc(groupBUri, doc). So re-pointing B already
-      // notifies the language service of B's new uri/doc; no separate changeDoc needed here (#265). (The
-      // onChange also reports downstream(doc, groupBUri), a no-op resync of B's own buffer.)
-      groupB.setDoc(docFor(target));
-    }
-    focused = 'b';
-  }
-
-  function closeGroupB(): void {
-    groupB?.destroy();
-    groupB = null;
-    groupBUri = '';
-    focused = 'a';
-  }
-
-  // Route a buffer load to the focused group: group B when it is focused AND open, else group A.
-  function openFocusedGroup(uri: string): void {
-    if (focused === 'b' && groupB) {
-      groupBUri = uri; // set BEFORE setDoc so the resulting onChange targets the new uri
-      // editor.setDoc dispatches a doc change that fires B's onChange → lsp.changeDoc(groupBUri, doc),
-      // so re-pointing B notifies the language service of B's new uri/doc; no separate changeDoc needed.
-      groupB.setDoc(docFor(uri));
-    } else {
-      editor.setDoc(docFor(uri));
-    }
-  }
 
   // --- status + strip --------------------------------------------------------
 
@@ -568,26 +419,16 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     },
     refreshReviewDecorations() {
       editor.refreshReviewDecorations();
-      groupB?.refreshReviewDecorations();
     },
     hover,
     completion,
     codeActions,
-    openGroupB,
-    closeGroupB,
-    groupBEditor,
-    groupBUri: groupBUriValue,
-    focusedGroup,
-    focusGroup,
-    openFocusedGroup,
     destroy(): void {
       deps.parent.removeEventListener('focusin', syncSymbolRow);
       deps.parent.removeEventListener('focusout', onSymbolRowFocusOut);
       window.removeEventListener('resize', syncSymbolRow);
       symbolRow.destroy();
       symbolRowHost.remove();
-      groupB?.destroy();
-      groupB = null;
       editor.destroy();
     },
   };

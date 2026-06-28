@@ -13,7 +13,7 @@ import type { ChatMessage } from '@/ai/ai';
 import { sanitizeGroups, sanitizeNotes, type DiagramGroup, type DiagramNote } from '@/diagrams/diagramContract';
 import { isEmitTarget } from '@/shared/emitTargets';
 import { DEFAULT_BINDINGS, type BindingId } from '@/editor/keybindings';
-import { DEFAULT_CENTER_LAYOUT, isValidCenter, isValidCenterLayout, type CenterLayout } from '@/store/slices/uiChrome';
+import { DEFAULT_DECK_STATE, isValidCenter, isValidDeckState, type CenterView, type DeckState } from '@/store/slices/uiChrome';
 
 // --- settings model ----------------------------------------------------------
 
@@ -112,7 +112,10 @@ const SETTINGS_KEY = 'koine.studio.settings';
 const RECENT_KEY = 'koine.studio.recentFolders';
 const SCRATCH_KEY = 'koine.studio.scratch';
 const WORKSPACE_CENTER_KEY = 'koine.studio.workspaceCenter';
+// The pre-Deck split-pane layout key, still read once for a one-time migration into the deck shape.
 const WORKSPACE_CENTER_LAYOUT_KEY = 'koine.studio.workspaceCenterLayout';
+// The Deck v2 center-layout key (mode / primary / secondary / ratio / flipped).
+const WORKSPACE_DECK_KEY = 'koine.studio.workspaceDeck';
 // The most-recently opened workspace token (#535), so a reload can restore it instead of silently
 // reverting to the empty default. Only OPFS-internal tokens are auto-restored at boot (see ide.ts).
 const LAST_WORKSPACE_KEY = 'koine.studio.lastWorkspace';
@@ -524,30 +527,58 @@ export function saveWorkspaceCenter(id: string): void {
   writeRaw(WORKSPACE_CENTER_KEY, id);
 }
 
-/** Load the persisted CenterLayout. Falls back to DEFAULT_CENTER_LAYOUT on absent/malformed data;
- *  migrates a legacy koine.studio.workspaceCenter single-view value to a one-pane layout. */
-export function loadWorkspaceCenterLayout(): CenterLayout {
-  const raw = readRaw(WORKSPACE_CENTER_LAYOUT_KEY);
+/** Best-effort migration of a persisted pre-Deck split-pane layout (orientation/panes/sizes) into the
+ *  deck shape: the focused pane's view becomes `primary`, the other pane (if any) becomes `secondary`,
+ *  and `sizes[0]` becomes `ratio`. Returns null when the value isn't a recognisable layout. */
+function deckFromLegacyLayout(raw: string): DeckState | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const layout = parsed as { panes?: { id?: string; view?: string }[]; sizes?: number[]; focusedPaneId?: string };
+  if (!Array.isArray(layout.panes) || layout.panes.length === 0) return null;
+  const views = layout.panes.map((p) => p.view).filter((v): v is CenterView => typeof v === 'string' && isValidCenter(v));
+  if (views.length === 0) return null;
+  const focused = layout.panes.find((p) => p.id === layout.focusedPaneId);
+  const primary = focused && isValidCenter(focused.view as string) ? (focused.view as CenterView) : views[0];
+  const secondary = views.find((v) => v !== primary) ?? null;
+  const ratio = Array.isArray(layout.sizes) && typeof layout.sizes[0] === 'number' ? layout.sizes[0] : 0.5;
+  return { mode: 'focus', primary, secondary, ratio: Math.min(0.8, Math.max(0.2, ratio)), flipped: false };
+}
+
+/** Load the persisted DeckState. Falls back to DEFAULT_DECK_STATE on absent/malformed data; migrates a
+ *  pre-Deck split-pane layout, then a legacy single-view `workspaceCenter` value, in that order. */
+export function loadWorkspaceDeck(): DeckState {
+  const raw = readRaw(WORKSPACE_DECK_KEY);
   if (raw !== null) {
     try {
       const parsed: unknown = JSON.parse(raw);
-      if (isValidCenterLayout(parsed)) return parsed;
+      if (isValidDeckState(parsed)) return parsed;
     } catch {
       // malformed JSON — fall through to migration / default
     }
   }
-  // Migrate legacy single-view string
-  const legacy = readRaw(WORKSPACE_CENTER_KEY);
-  if (legacy !== null && isValidCenter(legacy)) {
-    return { ...DEFAULT_CENTER_LAYOUT, panes: [{ id: 'pane-0', view: legacy }] };
+  // Migrate a pre-Deck split-pane layout.
+  const legacyLayout = readRaw(WORKSPACE_CENTER_LAYOUT_KEY);
+  if (legacyLayout !== null) {
+    const migrated = deckFromLegacyLayout(legacyLayout);
+    if (migrated) return migrated;
   }
-  return DEFAULT_CENTER_LAYOUT;
+  // Migrate a legacy single-view string.
+  const legacyCenter = readRaw(WORKSPACE_CENTER_KEY);
+  if (legacyCenter !== null && isValidCenter(legacyCenter)) {
+    return { ...DEFAULT_DECK_STATE, primary: legacyCenter };
+  }
+  return DEFAULT_DECK_STATE;
 }
 
-/** Persist the CenterLayout (best-effort). */
-export function saveWorkspaceCenterLayout(layout: CenterLayout): void {
+/** Persist the DeckState (best-effort). */
+export function saveWorkspaceDeck(deck: DeckState): void {
   try {
-    writeRaw(WORKSPACE_CENTER_LAYOUT_KEY, JSON.stringify(layout));
+    writeRaw(WORKSPACE_DECK_KEY, JSON.stringify(deck));
   } catch {
     // serialization error — best effort
   }

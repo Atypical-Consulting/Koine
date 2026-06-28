@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept 4 — Panes</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* ---- Panes: composable editor groups, no tab row anywhere. The center is a
+         resizable grid of panes; each pane picks its view from a breadcrumb
+         dropdown. Add a pane with +, close with ✕, drag the seams to resize. ---- */
+  .panes { flex: 1 1 auto; display: flex; min-height: 0; min-width: 0; }
+  .pane { position: relative; display: flex; flex-direction: column; min-width: 0; flex: 1 1 0; overflow: hidden; }
+  .pane.focused .pane-head { background: color-mix(in srgb, var(--koi-accent) 9%, var(--koi-paper-2)); }
+  .pane.focused::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 5;
+    border-top: 2px solid var(--koi-accent);
+  }
+  .pane-head {
+    flex: 0 0 auto; height: 32px;
+    display: flex; align-items: center; gap: 4px;
+    padding: 0 6px 0 8px;
+    background: var(--koi-paper-2);
+    border-bottom: 1px solid var(--koi-line);
+  }
+  /* breadcrumb switcher — THIS replaces the tab row */
+  .pane-crumb {
+    all: unset; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 4px 8px; border-radius: var(--koi-radius-sm);
+    font-size: 12.5px; font-weight: 600; color: var(--koi-fg);
+  }
+  .pane-crumb:hover { background: color-mix(in srgb, var(--koi-fg) 8%, transparent); }
+  .pane-crumb .ci { width: 15px; height: 15px; color: var(--crumb-c, var(--koi-accent)); display: inline-flex; }
+  .pane-crumb .ci svg { width: 15px; height: 15px; }
+  .pane-crumb .chev { width: 13px; height: 13px; color: var(--koi-muted); transition: transform .14s ease; }
+  .pane-crumb[aria-expanded='true'] .chev { transform: rotate(180deg); }
+  .pane-crumb .sub { color: var(--koi-muted); font-weight: 400; font-size: 11px; }
+  .pane-head .grow { flex: 1; }
+  .pane-act {
+    all: unset; cursor: pointer; width: 24px; height: 24px; border-radius: 5px;
+    display: grid; place-items: center; color: var(--koi-muted);
+  }
+  .pane-act:hover { color: var(--koi-fg); background: var(--koi-line); }
+  .pane-act svg { width: 13px; height: 13px; }
+  .pane-act.add:hover { color: var(--koi-accent); }
+
+  .pane-menu {
+    position: absolute; z-index: 30; top: 30px; left: 6px;
+    min-width: 196px;
+    background: var(--koi-paper); border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius); box-shadow: var(--koi-shadow);
+    padding: 5px; overflow: hidden;
+  }
+  .pane-menu .mi {
+    all: unset; cursor: pointer; display: flex; align-items: center; gap: 9px;
+    padding: 8px 10px; border-radius: var(--koi-radius-sm); font-size: 12.5px; color: var(--koi-fg);
+  }
+  .pane-menu .mi svg { width: 15px; height: 15px; color: var(--mi-c, var(--koi-accent)); }
+  .pane-menu .mi .desc { color: var(--koi-muted); font-size: 10.5px; margin-left: auto; }
+  .pane-menu .mi:hover { background: color-mix(in srgb, var(--koi-accent) 12%, transparent); }
+  .pane-menu .mi.on { color: var(--koi-accent); }
+  .pane-menu .mi.disabled { color: var(--koi-muted); opacity: .45; cursor: not-allowed; }
+  .pane-menu .mi.disabled:hover { background: none; }
+
+  .pane-body { position: relative; flex: 1 1 auto; min-height: 0; }
+
+  .pane-seam { flex: 0 0 5px; cursor: col-resize; background: var(--koi-line); transition: background .14s ease; position: relative; }
+  .pane-seam:hover { background: var(--koi-accent); }
+  .pane-seam::after { content: ''; position: absolute; inset: 0 -5px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="mock.js"></script>
+<script>
+  const M = window.KoineMock;
+  const center = M.shell(document.getElementById('root'), { concept: 'Concept 4 · Panes' });
+  center.innerHTML =
+    '<div class="concept-note"><b>Panes.</b> No tabs — anywhere. The center is a resizable grid of '
+    + 'editor groups; each pane chooses its view from the <b>breadcrumb ▾</b>. '
+    + 'Add a pane with +, close with ✕, drag the seams.</div>'
+    + '<div class="panes" id="panes"></div>';
+
+  const pool = {};
+  function host(id) {
+    if (!pool[id]) { const d = document.createElement('div'); d.className = 'surface'; M.fill(d, id, {}); pool[id] = d; }
+    return pool[id];
+  }
+
+  const panesEl = center.querySelector('#panes');
+  let panes = [{ view: 'canvas', grow: 1 }, { view: 'code', grow: 1.1 }];
+  let focused = 1;
+  let openMenu = null;   // index whose menu is open
+
+  const subSel = { code: 'Editor', output: 'Generated', docs: 'Glossary' };
+  function usedElsewhere(view, self) { return panes.some((p, i) => i !== self && p.view === view); }
+
+  function render() {
+    panesEl.innerHTML = '';
+    panes.forEach((p, i) => {
+      if (i > 0) {
+        const seam = document.createElement('div'); seam.className = 'pane-seam';
+        attachSeam(seam, i - 1, i);
+        panesEl.appendChild(seam);
+      }
+      const s = M.surface(p.view);
+      const pane = document.createElement('div');
+      pane.className = 'pane' + (i === focused ? ' focused' : '');
+      pane.style.flexGrow = p.grow;
+      pane.style.setProperty('--crumb-c', s.accent);
+
+      const head = document.createElement('div'); head.className = 'pane-head';
+      const crumb = document.createElement('button'); crumb.className = 'pane-crumb';
+      crumb.setAttribute('aria-expanded', openMenu === i ? 'true' : 'false');
+      const subLabel = s.subs.length > 1 ? '<span class="sub">' + subSel[p.view] + '</span>' : '';
+      crumb.innerHTML = '<span class="ci">' + s.icon + '</span>' + s.label + subLabel + '<span class="chev">' + M.ICONS.chevron + '</span>';
+      crumb.addEventListener('click', (e) => { e.stopPropagation(); openMenu = openMenu === i ? null : i; render(); });
+      head.appendChild(crumb);
+
+      const grow = document.createElement('div'); grow.className = 'grow'; head.appendChild(grow);
+
+      if (panes.length < 3) {
+        const add = document.createElement('button'); add.className = 'pane-act add'; add.title = 'Split — add a pane'; add.innerHTML = M.ICONS.plus;
+        add.addEventListener('click', () => addPane(i));
+        head.appendChild(add);
+      }
+      if (panes.length > 1) {
+        const close = document.createElement('button'); close.className = 'pane-act'; close.title = 'Close pane'; close.innerHTML = M.ICONS.close;
+        close.addEventListener('click', () => closePane(i));
+        head.appendChild(close);
+      }
+      pane.appendChild(head);
+
+      if (openMenu === i) pane.appendChild(buildMenu(i));
+
+      const bodyEl = document.createElement('div'); bodyEl.className = 'pane-body';
+      bodyEl.appendChild(host(p.view));
+      pane.appendChild(bodyEl);
+      pane.addEventListener('mousedown', () => { if (focused !== i) { focused = i; render(); } });
+      panesEl.appendChild(pane);
+    });
+    requestAnimationFrame(() => panesEl.querySelectorAll('[data-canvas]').forEach((c) => M.drawEdges(c)));
+  }
+
+  function buildMenu(i) {
+    const menu = document.createElement('div'); menu.className = 'pane-menu';
+    M.SURFACES.forEach((s) => {
+      const cur = panes[i].view === s.id;
+      const taken = usedElsewhere(s.id, i);
+      const mi = document.createElement('button');
+      mi.className = 'mi' + (cur ? ' on' : '') + (taken && !cur ? ' disabled' : '');
+      mi.style.setProperty('--mi-c', s.accent);
+      mi.innerHTML = s.icon + s.label + '<span class="desc">' + (taken && !cur ? 'in another pane' : s.tag) + '</span>';
+      if (!taken || cur) mi.addEventListener('click', () => { panes[i].view = s.id; openMenu = null; render(); });
+      menu.appendChild(mi);
+    });
+    return menu;
+  }
+
+  function addPane(after) {
+    const taken = new Set(panes.map((p) => p.view));
+    const next = M.SURFACES.map((s) => s.id).find((id) => !taken.has(id)) || 'output';
+    panes.splice(after + 1, 0, { view: next, grow: 1 });
+    focused = after + 1; openMenu = null; render();
+  }
+  function closePane(i) {
+    panes.splice(i, 1);
+    focused = Math.min(focused, panes.length - 1); openMenu = null; render();
+  }
+
+  function attachSeam(seam, leftIdx, rightIdx) {
+    seam.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      const rect = panesEl.getBoundingClientRect();
+      const startX = e.clientX;
+      const gL = panes[leftIdx].grow, gR = panes[rightIdx].grow;
+      const sum = gL + gR;
+      seam.setPointerCapture(e.pointerId);
+      const move = (ev) => {
+        const dx = (ev.clientX - startX) / rect.width;
+        let nL = gL + dx * (panes.length); let nR = gR - dx * (panes.length);
+        nL = Math.max(0.25, nL); nR = Math.max(0.25, nR);
+        const k = sum / (nL + nR); panes[leftIdx].grow = nL * k; panes[rightIdx].grow = nR * k;
+        const leftPane = panesEl.querySelectorAll('.pane')[leftIdx];
+        const rightPane = panesEl.querySelectorAll('.pane')[rightIdx];
+        leftPane.style.flexGrow = panes[leftIdx].grow; rightPane.style.flexGrow = panes[rightIdx].grow;
+        panesEl.querySelectorAll('[data-canvas]').forEach((c) => M.drawEdges(c));
+      };
+      const up = () => { seam.removeEventListener('pointermove', move); seam.removeEventListener('pointerup', up); };
+      seam.addEventListener('pointermove', move);
+      seam.addEventListener('pointerup', up);
+    });
+  }
+
+  document.addEventListener('click', (e) => { if (openMenu !== null && !e.target.closest('.pane-menu') && !e.target.closest('.pane-crumb')) { openMenu = null; render(); } });
+  render();
+</script>
+</body>
+</html>

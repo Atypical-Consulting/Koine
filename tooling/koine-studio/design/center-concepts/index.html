@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Koine Studio — Center-View Concepts</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  body { overflow: hidden; }
+  .gallery { display: grid; grid-template-columns: 296px 1fr; height: 100vh; }
+
+  .g-side {
+    display: flex; flex-direction: column; min-height: 0;
+    background: var(--koi-paper-2);
+    border-right: 1px solid var(--koi-line);
+  }
+  .g-head { padding: 20px 22px 16px; border-bottom: 1px solid var(--koi-line); }
+  .g-kicker { font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--koi-accent); font-weight: 700; }
+  .g-title { font-family: var(--koi-font-display); font-size: 21px; font-weight: 800; line-height: 1.15; margin: 6px 0 6px; letter-spacing: -.01em; }
+  .g-sub { font-size: 12px; color: var(--koi-muted); line-height: 1.5; }
+
+  .g-list { flex: 1 1 auto; overflow: auto; padding: 10px; }
+  .g-item {
+    all: unset; cursor: pointer; display: block; width: 100%;
+    padding: 13px 14px; margin-bottom: 8px;
+    border: 1px solid var(--koi-line); border-radius: var(--koi-radius);
+    background: var(--koi-paper);
+    transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease;
+  }
+  .g-item:hover { transform: translateX(2px); border-color: color-mix(in srgb, var(--koi-accent) 50%, var(--koi-line)); }
+  .g-item.on { border-color: var(--koi-accent); box-shadow: inset 3px 0 0 var(--koi-accent); }
+  .g-item .g-num { font-family: var(--koi-font-mono); font-size: 11px; color: var(--koi-muted); }
+  .g-item.on .g-num { color: var(--koi-accent); }
+  .g-item .g-name { font-size: 14.5px; font-weight: 700; margin: 2px 0 3px; display: flex; align-items: center; gap: 8px; }
+  .g-item .g-name .ic { width: 16px; height: 16px; color: var(--g-c, var(--koi-accent)); display: inline-flex; }
+  .g-item .g-name .ic svg { width: 16px; height: 16px; }
+  .g-item .g-name .g-badge {
+    font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--koi-accent); background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--koi-accent) 40%, transparent);
+    border-radius: var(--koi-radius-pill); padding: 1px 7px; margin-left: 2px;
+  }
+  .g-item .g-thesis { font-size: 11.5px; color: var(--koi-muted); line-height: 1.45; }
+
+  .g-foot { padding: 12px 16px; border-top: 1px solid var(--koi-line); display: flex; align-items: center; gap: 8px; }
+  .g-foot .theme-toggle { flex: 0 0 auto; }
+  .g-foot .hint { font-size: 10.5px; color: var(--koi-muted); line-height: 1.4; }
+
+  .g-stage { position: relative; min-width: 0; background: var(--koi-paper); }
+  .g-stage iframe { width: 100%; height: 100%; border: 0; display: block; }
+</style>
+</head>
+<body>
+<div class="gallery">
+  <aside class="g-side">
+    <div class="g-head">
+      <div class="g-kicker">Koine Studio</div>
+      <div class="g-title">Center-view<br>concepts</div>
+      <div class="g-sub">Five ways to manage Canvas · Code · Output · Docs. Same shell, same domain — only the center’s interaction model changes. Click through, then we decide.</div>
+    </div>
+    <div class="g-list" id="list"></div>
+    <div class="g-foot">
+      <button class="theme-toggle" id="theme"></button>
+      <span class="hint">Theme drives the embedded concept too. Each concept is also a standalone file.</span>
+    </div>
+  </aside>
+  <main class="g-stage">
+    <iframe id="frame" title="concept preview"></iframe>
+  </main>
+</div>
+<script src="mock.js"></script>
+<script>
+  const M = window.KoineMock;
+  const CONCEPTS = [
+    { file: 'concept-1-lens.html',     name: 'Lens',    icon: M.ICONS.canvas, c: 'var(--st-aggregate)',
+      thesis: 'One model, four lenses. A centered segmented switcher; hover a lens to open it beside the current one. Conservative, instantly familiar.' },
+    { file: 'concept-2-orbit.html',    name: 'Orbit',   icon: M.ICONS.code, c: 'var(--koi-hl-keyword)',
+      thesis: 'Keyboard-first focus rail on the center’s edge. One big surface, Alt+1–4, drag an icon to split. Minimal chrome, live status dots.' },
+    { file: 'concept-3-atelier.html',  name: 'Atelier', icon: M.ICONS.overview, c: 'var(--st-entity)',
+      thesis: 'The model is the map. Canvas is always home; Code/Output/Docs slide over it as a drawer. Click a node to peek its code.' },
+    { file: 'concept-4-panes.html',    name: 'Panes',   icon: M.ICONS.split, c: 'var(--st-event)',
+      thesis: 'Composable editor groups, no tab row anywhere. Each pane picks its view from a breadcrumb ▾; add/close/resize freely.' },
+    { file: 'concept-5-deck.html',     name: 'Deck',    icon: M.ICONS.output, c: 'var(--koi-cyan)',
+      thesis: 'Zoom out to see everything. Surfaces are cards on a plane; Overview / Esc reveals a 2×2 bird’s-eye, click to zoom back in.' },
+    { file: 'concept-6-deck-v2.html',  name: 'Deck v2', icon: M.ICONS.overview, c: 'var(--koi-accent)', badge: 'refined',
+      thesis: 'Deck, refined: focus one surface OR two live side-by-side (resizable + swap), filmstrip ⊞ to open beside, and a true FLIP zoom that no longer restutters the canvas.' }
+  ];
+
+  const root = document.documentElement;
+  let active = 0;
+  const frame = document.getElementById('frame');
+  const list = document.getElementById('list');
+
+  function load(i) {
+    active = i;
+    frame.src = CONCEPTS[i].file + '#theme=' + (root.dataset.theme || 'dark');
+    [...list.children].forEach((el, k) => el.classList.toggle('on', k === i));
+  }
+
+  CONCEPTS.forEach((c, i) => {
+    const b = document.createElement('button');
+    b.className = 'g-item';
+    b.style.setProperty('--g-c', c.c);
+    b.innerHTML = '<div class="g-num">0' + (i + 1) + '</div>'
+      + '<div class="g-name"><span class="ic">' + c.icon + '</span>' + c.name
+      + (c.badge ? '<span class="g-badge">' + c.badge + '</span>' : '') + '</div>'
+      + '<div class="g-thesis">' + c.thesis + '</div>';
+    b.addEventListener('click', () => load(i));
+    list.appendChild(b);
+  });
+
+  // theme: drive both the launcher chrome and the embedded concept.
+  const themeBtn = document.getElementById('theme');
+  M.initTheme(themeBtn);
+  const pushTheme = () => frame.contentWindow && frame.contentWindow.postMessage({ type: 'koi-theme', theme: root.dataset.theme }, '*');
+  // live toggle (iframe already loaded) + every fresh iframe load (closes the
+  // load-vs-postMessage race when switching concepts and theme together).
+  themeBtn.addEventListener('click', pushTheme);
+  frame.addEventListener('load', pushTheme);
+
+  load(0);
+</script>
+</body>
+</html>
