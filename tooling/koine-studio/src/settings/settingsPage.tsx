@@ -24,6 +24,11 @@ const MODE_KEY = 'koine.studio.settingsEditorMode';
 /** Debounce before a JSON edit is validated + applied — long enough to coalesce a burst of keystrokes. */
 const DEBOUNCE_MS = 350;
 
+// Stable id on the diagnostics strip so the editor content's `aria-errormessage` can target it. The page
+// builds exactly one Settings instance at a time and tears the strip down on teardown/representation swap,
+// so a constant id never collides. See createJsonSettingsEditor.setInvalid (editor.ts) for the field side.
+const DIAGNOSTICS_ID = 'settings-json-diagnostics';
+
 export interface SettingsPageHandle {
   /**
    * Re-sync the active representation from the live settings — call on every (re)open, since settings can
@@ -102,12 +107,18 @@ export function createSettingsPage(
         errors.map((e) => el('li', { text: e.line != null ? `Line ${e.line}: ${e.message}` : e.message })),
       ),
     );
+    // Persistent field↔error relationship: point the editor content at the now-visible strip so a
+    // screen-reader user re-entering the field is told it is invalid (the role=alert announcement is
+    // one-shot). No-op when the JSON editor isn't mounted.
+    editor?.setInvalid(DIAGNOSTICS_ID);
   }
 
   function clearDiagnostics(): void {
     if (!diagnostics) return;
     diagnostics.hidden = true;
     diagnostics.replaceChildren();
+    // Valid document → drop aria-invalid / aria-errormessage so the field reads clean.
+    editor?.setInvalid(null);
   }
 
   // The JSON editor's onChange (fires on every doc change). Debounced so a burst of keystrokes validates
@@ -149,8 +160,12 @@ export function createSettingsPage(
         onChange: (text) => scheduleApply(text),
         initial: settingsToJsonDoc(loadSettings()),
       });
-      // The diagnostics strip lives below the editor; role=alert so a fresh error is announced.
-      diagnostics = el('div', { class: 'settings-json-diagnostics', attrs: { role: 'alert', hidden: true } });
+      // The diagnostics strip lives below the editor; role=alert so a fresh error is announced. The id lets
+      // the editor content's aria-errormessage point at it while the document is invalid (setInvalid).
+      diagnostics = el('div', {
+        class: 'settings-json-diagnostics',
+        attrs: { id: DIAGNOSTICS_ID, role: 'alert', hidden: true },
+      });
       hosts.body.append(diagnostics);
     }
   }
