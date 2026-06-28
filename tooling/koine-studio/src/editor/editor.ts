@@ -1509,6 +1509,14 @@ export function createJsonView(parent: HTMLElement): ConfigView {
 export interface JsonSettingsEditor {
   setContent(text: string): void;
   getText(): string;
+  /**
+   * Drive the field-level WCAG AA invalid/error relationship on the editor content. With a non-null
+   * `diagnosticsId` the content gains `aria-invalid="true"` + `aria-errormessage=<id>` (alongside its
+   * aria-label); with `null` both are cleared, leaving just the aria-label. The host (settingsPage) calls
+   * this from its validate path so a screen-reader user re-entering an invalid document is told it is
+   * invalid and pointed at the diagnostics strip — unlike the one-shot `role="alert"` announcement.
+   */
+  setInvalid(diagnosticsId: string | null): void;
   destroy(): void;
 }
 
@@ -1523,12 +1531,19 @@ export function createJsonSettingsEditor(
   parent: HTMLElement,
   opts: { onChange: (text: string) => void; initial?: string },
 ): JsonSettingsEditor {
+  // The content's ARIA name. Kept aside so both the initial config and every setInvalid reconfigure
+  // re-apply it (a reconfigure REPLACES the compartment's contents, so the name must be re-listed).
+  const ariaLabel = { 'aria-label': 'Settings JSON document' };
+  // The content attributes live in their own compartment so setInvalid can toggle the field-level
+  // invalid/error relationship without rebuilding the editor (same pattern as the .koi editor's
+  // lineWrap/minimap compartments). Initially: just the aria-label, no invalid state.
+  const contentAttributes = new Compartment();
   const view = new EditorView({
     parent,
     state: EditorState.create({
       doc: opts.initial ?? '',
       extensions: [
-        EditorView.contentAttributes.of({ 'aria-label': 'Settings JSON document' }),
+        contentAttributes.of(EditorView.contentAttributes.of({ ...ariaLabel })),
         lineNumbers(),
         // `jsonSchema()` already wires the JSON language, the JSON-parse + schema linters, schema-aware
         // autocomplete and hover — the whole schema-aware editing surface in one extension.
@@ -1548,6 +1563,15 @@ export function createJsonSettingsEditor(
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
     },
     getText: () => view.state.doc.toString(),
+    setInvalid(diagnosticsId) {
+      // Fully replace the compartment's contents each call so toggling leaves no attribute residue:
+      // invalid → aria-label + aria-invalid + aria-errormessage; valid → aria-label only.
+      const attrs =
+        diagnosticsId != null
+          ? { ...ariaLabel, 'aria-invalid': 'true', 'aria-errormessage': diagnosticsId }
+          : { ...ariaLabel };
+      view.dispatch({ effects: contentAttributes.reconfigure(EditorView.contentAttributes.of(attrs)) });
+    },
     destroy: () => view.destroy(),
   };
 }

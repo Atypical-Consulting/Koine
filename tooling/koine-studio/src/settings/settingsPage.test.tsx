@@ -169,6 +169,36 @@ describe('createSettingsPage', () => {
     expect(body.textContent?.toLowerCase()).toMatch(/invalid|error|json/);
   });
 
+  it('an invalid JSON edit marks the editor aria-invalid then a valid edit clears it', () => {
+    handle = createSettingsPage({ header, body }, cb);
+    jsonRadio(header).click();
+    // Invalid document → the field carries the persistent invalid/error relationship.
+    typeJson(body, '{ "theme": ');
+    vi.advanceTimersByTime(500);
+    const field = jsonEditor(body)!;
+    expect(field.getAttribute('aria-invalid')).toBe('true');
+    expect(field.getAttribute('aria-errormessage')).toBeTruthy();
+    // Fix it → a valid document drops both attributes and the field reads clean.
+    typeJson(body, '{ "fontSize": 15 }');
+    vi.advanceTimersByTime(500);
+    expect(field.hasAttribute('aria-invalid')).toBe(false);
+    expect(field.hasAttribute('aria-errormessage')).toBe(false);
+  });
+
+  it('aria-errormessage resolves to the diagnostics strip (a real element by id)', () => {
+    handle = createSettingsPage({ header, body }, cb);
+    jsonRadio(header).click();
+    typeJson(body, '{ "theme": ');
+    vi.advanceTimersByTime(500);
+    const field = jsonEditor(body)!;
+    const strip = body.querySelector<HTMLElement>('.settings-json-diagnostics')!;
+    expect(strip.id).toBeTruthy();
+    // The field points at the strip's id, so a screen reader can follow the relationship to the
+    // (now-visible) error text.
+    expect(field.getAttribute('aria-errormessage')).toBe(strip.id);
+    expect(document.getElementById(strip.id)).toBe(strip);
+  });
+
   it('an out-of-range value is rejected (schema invalid) and not persisted', () => {
     handle = createSettingsPage({ header, body }, cb);
     jsonRadio(header).click();
