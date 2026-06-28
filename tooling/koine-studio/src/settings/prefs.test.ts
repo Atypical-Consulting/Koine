@@ -469,6 +469,91 @@ describe('Settings → User/Workspace scope toggle', () => {
   });
 });
 
+// Task 1 (#732): the shared segmented() control gained roving tabindex + arrow/Home/End keyboard
+// navigation (focus follows selection). Exercised here through the Theme toggle (a plain segmented) and
+// a disabled scope toggle (no workspace open) so the skip-disabled edge case is pinned.
+describe('Settings → segmented() keyboard navigation (#732)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+    saveSettings({ ...DEFAULT_SETTINGS });
+  });
+
+  const themeGroup = () => document.querySelector<HTMLElement>('.koi-segmented[aria-label="Theme"]')!;
+  const themeBtn = (value: 'dark' | 'light') =>
+    themeGroup().querySelector<HTMLButtonElement>(`.koi-seg[data-value="${value}"]`)!;
+  const press = (el: HTMLElement, key: string): void => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+  };
+
+  it('seeds exactly one tabbable option: the checked button is tabindex=0, the other -1', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, theme: 'dark' });
+    openPrefs();
+    expect(themeBtn('dark').getAttribute('aria-checked')).toBe('true');
+    expect(themeBtn('dark').getAttribute('tabindex')).toBe('0');
+    expect(themeBtn('light').getAttribute('tabindex')).toBe('-1');
+  });
+
+  it('ArrowRight selects + focuses the next option, moving the roving tabindex and firing onSelect', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, theme: 'dark' });
+    const onChange = vi.fn();
+    openPrefs({ onChange });
+    press(themeBtn('dark'), 'ArrowRight');
+    expect(themeBtn('light').getAttribute('aria-checked')).toBe('true');
+    expect(themeBtn('light').getAttribute('tabindex')).toBe('0');
+    expect(themeBtn('dark').getAttribute('aria-checked')).toBe('false');
+    expect(themeBtn('dark').getAttribute('tabindex')).toBe('-1');
+    expect(document.activeElement).toBe(themeBtn('light'));
+    expect(loadSettings().theme).toBe('light'); // onSelect committed via setTheme
+    expect(onChange).toHaveBeenCalled();
+  });
+
+  it('ArrowDown also moves to the next option', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, theme: 'dark' });
+    openPrefs();
+    press(themeBtn('dark'), 'ArrowDown');
+    expect(themeBtn('light').getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('ArrowLeft / ArrowUp select the previous option, wrapping around the ends', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, theme: 'dark' });
+    openPrefs();
+    // From the first option, ArrowLeft wraps to the last.
+    press(themeBtn('dark'), 'ArrowLeft');
+    expect(themeBtn('light').getAttribute('aria-checked')).toBe('true');
+    // ArrowUp from the last wraps back to the first.
+    press(themeBtn('light'), 'ArrowUp');
+    expect(themeBtn('dark').getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('Home selects the first option, End the last (each moving focus + tabindex)', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, theme: 'light' });
+    openPrefs();
+    press(themeBtn('light'), 'Home');
+    expect(themeBtn('dark').getAttribute('aria-checked')).toBe('true');
+    expect(themeBtn('dark').getAttribute('tabindex')).toBe('0');
+    expect(document.activeElement).toBe(themeBtn('dark'));
+    press(themeBtn('dark'), 'End');
+    expect(themeBtn('light').getAttribute('aria-checked')).toBe('true');
+    expect(document.activeElement).toBe(themeBtn('light'));
+  });
+
+  it('arrow navigation skips disabled options: a no-workspace scope toggle stays inert', () => {
+    const onChange = vi.fn();
+    openPrefs({ workspaceKey: () => null, onChange });
+    const group = document.querySelector<HTMLElement>('.koi-segmented[aria-label="Word wrap scope"]')!;
+    const workspace = group.querySelector<HTMLButtonElement>('.koi-seg[data-value="workspace"]')!;
+    const user = group.querySelector<HTMLButtonElement>('.koi-seg[data-value="user"]')!;
+    onChange.mockClear();
+    press(user, 'ArrowRight');
+    // Every option is disabled (no workspace), so arrow nav finds no target: nothing selects, nothing
+    // gains tabindex=0, nothing commits.
+    expect(workspace.getAttribute('aria-checked')).toBe('false');
+    expect(workspace.getAttribute('tabindex')).toBe('-1');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
 // chordFromEvent + prettyChord moved to shared/platform.ts (beside formatChord) and are unit-tested
 // there in platform.test.ts. The keyboard-settings tests below still exercise their behavior through
 // the dialog (e.g. the 'Ctrl+S' / 'Unbound' chord-display assertions, which run prettyChord).

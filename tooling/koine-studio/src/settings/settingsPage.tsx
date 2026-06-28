@@ -8,7 +8,7 @@
 // SECRET INVARIANT: the aiApiKey is never serialized into the JSON. settingsToJsonDoc() strips it from
 // the seed and jsonDocToSettings() re-injects the live in-memory key on parse, so the JSON surface can
 // neither display nor clear the encrypted key.
-import { mountPreferencesPane, startMcpSidecarIfEnabled, type PrefsCallbacks } from '@/settings/prefs';
+import { mountPreferencesPane, segmented, startMcpSidecarIfEnabled, type PrefsCallbacks } from '@/settings/prefs';
 import { createJsonSettingsEditor, type JsonSettingsEditor } from '@/editor/editor';
 import { settingsToJsonDoc, jsonDocToSettings } from '@/settings/settingsSchema';
 import { loadSettings, saveSettings } from '@/settings/persistence';
@@ -23,6 +23,11 @@ const MODE_KEY = 'koine.studio.settingsEditorMode';
 
 /** Debounce before a JSON edit is validated + applied — long enough to coalesce a burst of keystrokes. */
 const DEBOUNCE_MS = 350;
+
+// Stable id on the diagnostics strip so the editor content's `aria-errormessage` can target it. The page
+// builds exactly one Settings instance at a time and tears the strip down on teardown/representation swap,
+// so a constant id never collides. See createJsonSettingsEditor.setInvalid (editor.ts) for the field side.
+const DIAGNOSTICS_ID = 'settings-json-diagnostics';
 
 export interface SettingsPageHandle {
   /**
@@ -73,57 +78,18 @@ export function createSettingsPage(
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   // --- header: the Visual/JSON segmented control ----------------------------
-  // An accessible radiogroup: two role=radio buttons, roving tabindex (checked → 0, other → -1), and
-  // Left/Right/Up/Down/Home/End arrow navigation that both moves focus AND activates (a single-select
-  // group, so focus follows selection).
-  const radios: HTMLButtonElement[] = [];
-  const group = el('div', {
-    class: 'settings-mode-toggle-group',
-    attrs: { role: 'radiogroup', 'aria-label': 'Settings representation' },
-  });
-
-  for (const { value, label } of MODES) {
-    const radio = el('button', {
-      class: 'settings-mode-radio',
-      text: label,
-      attrs: { type: 'button', role: 'radio', 'data-mode': value },
-      on: {
-        click: () => setMode(value),
-        keydown: (e: KeyboardEvent) => onRadioKeydown(e),
-      },
-    });
-    radios.push(radio);
-    group.append(radio);
-  }
-
-  function paintToggle(): void {
-    for (const r of radios) {
-      const on = r.dataset.mode === mode;
-      r.setAttribute('aria-checked', String(on));
-      r.setAttribute('tabindex', on ? '0' : '-1');
-      r.classList.toggle('is-active', on);
-    }
-  }
-
-  function onRadioKeydown(e: KeyboardEvent): void {
-    const idx = radios.findIndex((r) => r === e.target);
-    if (idx < 0) return;
-    let next = idx;
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (idx + 1) % radios.length;
-    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (idx - 1 + radios.length) % radios.length;
-    else if (e.key === 'Home') next = 0;
-    else if (e.key === 'End') next = radios.length - 1;
-    else return;
-    e.preventDefault();
-    setMode(radios[next].dataset.mode as SettingsEditorMode);
-    radios[next].focus();
-  }
+  // The shared, keyboard-navigable segmented() control (prefs.ts): a role=radiogroup of role=radio
+  // buttons with roving tabindex (checked → 0, other → -1) and arrow/Home/End navigation where focus
+  // follows selection. Selecting an option switches the page's representation via setMode. This reuses
+  // the same control the Theme + scope toggles use, replacing a hand-rolled radiogroup that duplicated
+  // the identical ARIA + key handling.
+  const modeToggle = segmented<SettingsEditorMode>('Settings representation', MODES, setMode);
 
   // The header already carries an <h2> + an empty #settings-mode-toggle slot (index.html); mount into
   // that slot when present, else append to the header directly (keeps tests/callers that pass a bare
   // header working).
   const toggleHost = hosts.header.querySelector('#settings-mode-toggle') ?? hosts.header;
-  toggleHost.append(group);
+  toggleHost.append(modeToggle.el);
 
   // --- body: the active representation ---------------------------------------
 
@@ -141,12 +107,18 @@ export function createSettingsPage(
         errors.map((e) => el('li', { text: e.line != null ? `Line ${e.line}: ${e.message}` : e.message })),
       ),
     );
+    // Persistent field↔error relationship: point the editor content at the now-visible strip so a
+    // screen-reader user re-entering the field is told it is invalid (the role=alert announcement is
+    // one-shot). No-op when the JSON editor isn't mounted.
+    editor?.setInvalid(DIAGNOSTICS_ID);
   }
 
   function clearDiagnostics(): void {
     if (!diagnostics) return;
     diagnostics.hidden = true;
     diagnostics.replaceChildren();
+    // Valid document → drop aria-invalid / aria-errormessage so the field reads clean.
+    editor?.setInvalid(null);
   }
 
   // The JSON editor's onChange (fires on every doc change). Debounced so a burst of keystrokes validates
@@ -199,8 +171,12 @@ export function createSettingsPage(
         onChange: (text) => scheduleApply(text),
         initial: settingsToJsonDoc(loadSettings()),
       });
-      // The diagnostics strip lives below the editor; role=alert so a fresh error is announced.
-      diagnostics = el('div', { class: 'settings-json-diagnostics', attrs: { role: 'alert', hidden: true } });
+      // The diagnostics strip lives below the editor; role=alert so a fresh error is announced. The id lets
+      // the editor content's aria-errormessage point at it while the document is invalid (setInvalid).
+      diagnostics = el('div', {
+        class: 'settings-json-diagnostics',
+        attrs: { id: DIAGNOSTICS_ID, role: 'alert', hidden: true },
+      });
       hosts.body.append(diagnostics);
     }
     startMcpOnShow(); // (re)start the sidecar on show, for whichever representation just mounted
@@ -235,7 +211,7 @@ export function createSettingsPage(
     teardownBody();
     mode = next;
     saveMode(mode);
-    paintToggle();
+    modeToggle.set(mode);
     buildBody();
   }
 
@@ -262,14 +238,14 @@ export function createSettingsPage(
   }
 
   // Initial paint.
-  paintToggle();
+  modeToggle.set(mode);
   buildBody();
 
   return {
     refresh,
     destroy(): void {
       teardownBody();
-      group.remove(); // clear the header toggle
+      modeToggle.el.remove(); // clear the header toggle
     },
   };
 }
