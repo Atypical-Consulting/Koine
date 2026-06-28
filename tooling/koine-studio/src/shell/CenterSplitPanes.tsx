@@ -154,11 +154,16 @@ export function applySplitPaneLayout(deps: SplitPaneLayoutDeps): void {
     slot.classList.toggle('is-focused', pane.id === layout.focusedPaneId);
     slot.dataset.focused = String(pane.id === layout.focusedPaneId);
 
-    // Move the matching center-host element into this pane's content div.
+    // Move the matching center-host element into this pane's content div, and UNHIDE it: in single-pane
+    // mode applyCenterChrome leaves every non-active host `hidden`, so a host whose view wasn't the active
+    // one when the split was created arrives here still `[hidden]` (display:none) and the pane renders
+    // empty. In split mode each pane always shows its own host, so clear it. (Hosts not used by any pane
+    // are re-hidden after this loop, and single-pane applyCenterChrome restores per-host hidden on reset.)
     const contentDiv = slot.querySelector<HTMLElement>('.center-pane-content')!;
     const viewEl = document.getElementById(CENTER_VIEW_IDS[pane.view]);
-    if (viewEl && viewEl.parentElement !== contentDiv) {
-      contentDiv.appendChild(viewEl);
+    if (viewEl) {
+      if (viewEl.parentElement !== contentDiv) contentDiv.appendChild(viewEl);
+      viewEl.hidden = false;
     }
 
     // Re-render the pane selector (Preact reconciles efficiently on re-renders).
@@ -169,6 +174,18 @@ export function applySplitPaneLayout(deps: SplitPaneLayoutDeps): void {
     );
 
     orderedSlots.push(slot);
+  }
+
+  // Hide any center-host whose view is NOT shown by a pane. Such a host stays a direct child of
+  // #center-body; without this, a host that was the active (visible) view before the split — e.g.
+  // #center-output when splitting away from Output — would keep `hidden=false` and overlay the panes
+  // (the hosts are position:absolute, inset:0). Re-hiding it leaves the panes' own hosts the only visible ones.
+  const shownViews = new Set<CenterView>(layout.panes.map((p) => p.view));
+  for (const [view, id] of Object.entries(CENTER_VIEW_IDS) as [CenterView, string][]) {
+    if (!shownViews.has(view)) {
+      const hostEl = document.getElementById(id);
+      if (hostEl) hostEl.hidden = true;
+    }
   }
 
   // Remove pane slots that are no longer in the layout.

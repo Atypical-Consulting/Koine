@@ -1082,6 +1082,28 @@ describe('createInspectorController — split center layout', () => {
     ctl.dispose();
   });
 
+  test('split unhides every host shown in a pane and hides the rest (empty-pane bug)', async () => {
+    // Regression: in single-pane mode applyCenterChrome leaves non-active hosts `hidden`. A pane whose
+    // view was NOT the active one when the split was created arrived still [hidden] (display:none) and
+    // rendered empty. Splitting must clear `hidden` on every host placed in a pane, and re-hide hosts not
+    // in any pane (so a previously-active host doesn't overlay the panes — they are position:absolute).
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init(); // boots on Visual — so #center-technical starts hidden
+
+    deps.store.getState().setCenterPreset(['technical', 'visual'], 'row');
+    await waitFor(() => {
+      // Both panes' hosts are visible…
+      expect(el('center-technical').hidden).toBe(false);
+      expect(el('center-visual').hidden).toBe(false);
+      // …and the views NOT in any pane stay hidden (no overlay).
+      expect(el('center-output').hidden).toBe(true);
+      expect(el('center-docs').hidden).toBe(true);
+    });
+
+    ctl.dispose();
+  });
+
   test('each pane has a .center-pane-header with view selector buttons', async () => {
     const deps = makeDeps(makeLsp());
     const ctl = createInspectorController(deps);
