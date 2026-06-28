@@ -59,6 +59,22 @@ vi.mock('@/settings/persistence', async () => {
 });
 const { peekLegacyScratch, clearLegacyScratch } = storeSeam;
 
+// #731: capture the `onOpenPrefs` callback ide.ts wires into the (lazily-created) Assistant panel, so a
+// test can invoke it and assert it routes to the Settings overlay. A partial mock: every other aiPanel
+// export is preserved, and createAssistantPanel returns a minimal stub (the panel is created lazily on
+// "Show AI Chat", and no test exercises its other methods) instead of the real DOM-heavy panel.
+const assistantSeam = vi.hoisted(() => ({ onOpenPrefs: null as null | (() => void) }));
+vi.mock('@/ai/aiPanel', async () => {
+  const actual = await vi.importActual<typeof import('@/ai/aiPanel')>('@/ai/aiPanel');
+  return {
+    ...actual,
+    createAssistantPanel: (opts: { onOpenPrefs: () => void }) => {
+      assistantSeam.onOpenPrefs = opts.onOpenPrefs;
+      return { syncWorkspace() {}, focusInput() {}, explainSelection() {} };
+    },
+  };
+});
+
 // --- in-memory LspTransport --------------------------------------------------
 // Records every framed message the client sends and lets the test drive server→client messages. The
 // only server reply boot needs is the `initialize` response (KoineLsp.handshake awaits it before the
@@ -326,6 +342,15 @@ const APP_HTML = `
               </div>
             </section>
           </div>
+          <!-- The gear-launched Settings overlay (#482/#731): a sibling of #center-body, populated by
+               createSettingsPage on first route into Settings. -->
+          <section id="center-panel-settings" class="settings-page" aria-label="Settings" hidden>
+            <header id="settings-page-header" class="settings-page-header">
+              <h2 class="settings-page-title">Settings</h2>
+              <div id="settings-mode-toggle" class="settings-mode-toggle"></div>
+            </header>
+            <div id="settings-page-body" class="settings-page-body"></div>
+          </section>
           <footer id="diagnostics">
             <div class="koi-resizer koi-resizer-y" id="diag-resizer"></div>
             <div id="diag-header">
@@ -981,5 +1006,77 @@ describe('ide init() — last-workspace restore on reload (#535)', () => {
     expect(editorDoc()).toContain('context Billing');
     expect(opened).not.toContain('(default)'); // never attempted a doomed openFolderPath('(default)')
     expect(document.getElementById('status')!.dataset.kind).not.toBe('error');
+  });
+});
+
+// #731: every Settings entry point — the toolbar gear, the command palette ("Settings…" / "About"), the
+// mod+, chord, and the Assistant's "Open Settings" — routes to the ONE gear-launched center overlay; the
+// legacy createPreferences modal is retired (never instantiated). Observed purely through the DOM: the
+// overlay reveals #center-panel-settings (hiding #center-body) and mounts the preferences pane into
+// #settings-page-body; the modal would instead mount a .koi-modal--settings backdrop on document.body.
+describe('ide init() — Settings entry points unify on the center overlay (#731)', () => {
+  beforeEach(() => {
+    // createSettingsPage restores the last-used representation; pin Visual so the category tabs render.
+    localStorage.removeItem('koine.studio.settingsEditorMode');
+  });
+
+  const overlayShown = () =>
+    document.getElementById('center-panel-settings')!.hidden === false &&
+    document.getElementById('center-body')!.hidden === true;
+  const paneMounted = () => document.querySelector('#settings-page-body .koi-settings-layout') !== null;
+  const aboutTabSelected = () =>
+    document.querySelector('#settings-page-body #koi-settings-tab-about')?.getAttribute('aria-selected') ===
+    'true';
+  const settingsModalExists = () => document.querySelector('.koi-modal--settings') !== null;
+
+  /** Open the command palette (mod+K), click the row whose title matches — which runs it then closes. */
+  function runPaletteCommand(title: string): void {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+    const row = Array.from(document.querySelectorAll<HTMLElement>('.koi-palette-item')).find(
+      (r) => r.querySelector('.koi-palette-item-title')?.textContent === title,
+    );
+    if (!row) throw new Error(`palette command not found: ${title}`);
+    row.click();
+  }
+
+  test('the toolbar gear opens the overlay and mounts the preferences pane (regression)', async () => {
+    await boot();
+    document.getElementById('btn-prefs')!.click();
+    expect(overlayShown()).toBe(true);
+    expect(paneMounted()).toBe(true);
+  });
+
+  test('the "Settings…" palette command opens the overlay, not a modal', async () => {
+    await boot();
+    runPaletteCommand('Settings…');
+    expect(overlayShown()).toBe(true);
+    expect(paneMounted()).toBe(true);
+  });
+
+  test('the "About Koine Studio" palette command opens the overlay on the About tab', async () => {
+    await boot();
+    runPaletteCommand('About Koine Studio');
+    expect(overlayShown()).toBe(true);
+    expect(aboutTabSelected()).toBe(true);
+  });
+
+  test('the mod+, chord opens the overlay', async () => {
+    await boot();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', ctrlKey: true, bubbles: true }));
+    expect(overlayShown()).toBe(true);
+  });
+
+  test("the Assistant's onOpenPrefs opens the overlay", async () => {
+    await boot();
+    // Showing the AI Chat right view lazily creates the assistant panel, capturing its onOpenPrefs.
+    runPaletteCommand('Show AI Chat');
+    expect(typeof assistantSeam.onOpenPrefs).toBe('function');
+    assistantSeam.onOpenPrefs!();
+    expect(overlayShown()).toBe(true);
+  });
+
+  test('the legacy createPreferences modal is never instantiated', async () => {
+    await boot();
+    expect(settingsModalExists()).toBe(false);
   });
 });

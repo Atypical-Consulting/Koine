@@ -240,6 +240,23 @@ describe('createSettingsPage', () => {
     expect(localStorage.getItem(MODE_KEY)).toBe('visual');
   });
 
+  it('refresh(category) on a JSON-mode page switches to Visual and lands on that tab (#731)', () => {
+    // A category deep-link (the About command) targets a Visual tab; JSON has no tabs, so the page must
+    // switch to Visual rather than silently drop the category and keep showing the JSON editor.
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cb);
+    expect(jsonEditor(body)).not.toBeNull(); // started on JSON
+
+    handle.refresh('about');
+
+    expect(jsonEditor(body)).toBeNull(); // switched to Visual
+    expect(visualRadio(header).getAttribute('aria-checked')).toBe('true');
+    expect(localStorage.getItem(MODE_KEY)).toBe('visual');
+    const aboutTab = body.querySelector<HTMLElement>('#koi-settings-tab-about');
+    expect(aboutTab?.getAttribute('aria-selected')).toBe('true');
+    expect(body.querySelector<HTMLElement>('#koi-settings-panel-about')?.hidden).toBe(false);
+  });
+
   it('restores the last-used representation from localStorage', () => {
     localStorage.setItem(MODE_KEY, 'json');
     handle = createSettingsPage({ header, body }, cb);
