@@ -12,24 +12,59 @@ public sealed class TypeScope
     {
         // Tolerate duplicate names (e.g. an invalid model with a repeated member):
         // last writer wins, and the duplicate is reported elsewhere.
-        _names = new Dictionary<string, KoineType>(StringComparer.Ordinal);
+        _names = names is ICollection<KeyValuePair<string, KoineType>> coll
+            ? new Dictionary<string, KoineType>(coll.Count, StringComparer.Ordinal)
+            : new Dictionary<string, KoineType>(StringComparer.Ordinal);
         foreach (KeyValuePair<string, KoineType> pair in names)
         {
             _names[pair.Key] = pair.Value;
         }
     }
 
+    /// <summary>Takes ownership of an already-built name→type map (no defensive copy).</summary>
+    private TypeScope(Dictionary<string, KoineType> names) => _names = names;
+
     /// <summary>A scope over a type's members, resolved against <paramref name="index"/>.</summary>
-    public static TypeScope FromMembers(IEnumerable<Member> members, ModelIndex index) =>
-        new(members.Select(m => new KeyValuePair<string, KoineType>(m.Name, KoineType.From(m.Type, index))));
+    public static TypeScope FromMembers(IEnumerable<Member> members, ModelIndex index)
+    {
+        var names = members is ICollection<Member> c
+            ? new Dictionary<string, KoineType>(c.Count, StringComparer.Ordinal)
+            : new Dictionary<string, KoineType>(StringComparer.Ordinal);
+        foreach (Member m in members)
+        {
+            names[m.Name] = KoineType.From(m.Type, index); // last writer wins on a duplicate
+        }
+
+        return new TypeScope(names);
+    }
 
     /// <summary>A scope over operation/command parameters, resolved against <paramref name="index"/>.</summary>
-    public static TypeScope FromParams(IEnumerable<Param> parameters, ModelIndex index) =>
-        new(parameters.Select(p => new KeyValuePair<string, KoineType>(p.Name, KoineType.From(p.Type, index))));
+    public static TypeScope FromParams(IEnumerable<Param> parameters, ModelIndex index)
+    {
+        var names = parameters is ICollection<Param> c
+            ? new Dictionary<string, KoineType>(c.Count, StringComparer.Ordinal)
+            : new Dictionary<string, KoineType>(StringComparer.Ordinal);
+        foreach (Param p in parameters)
+        {
+            names[p.Name] = KoineType.From(p.Type, index); // last writer wins on a duplicate
+        }
+
+        return new TypeScope(names);
+    }
 
     /// <summary>A scope over name→syntactic-type pairs, each resolved against <paramref name="index"/>.</summary>
-    public static TypeScope FromRefPairs(IEnumerable<KeyValuePair<string, TypeRef>> pairs, ModelIndex index) =>
-        new(pairs.Select(kv => new KeyValuePair<string, KoineType>(kv.Key, KoineType.From(kv.Value, index))));
+    public static TypeScope FromRefPairs(IEnumerable<KeyValuePair<string, TypeRef>> pairs, ModelIndex index)
+    {
+        var names = pairs is ICollection<KeyValuePair<string, TypeRef>> c
+            ? new Dictionary<string, KoineType>(c.Count, StringComparer.Ordinal)
+            : new Dictionary<string, KoineType>(StringComparer.Ordinal);
+        foreach (KeyValuePair<string, TypeRef> kv in pairs)
+        {
+            names[kv.Key] = KoineType.From(kv.Value, index); // last writer wins on a duplicate
+        }
+
+        return new TypeScope(names);
+    }
 
     public bool TryGet(string name, out KoineType type) => _names.TryGetValue(name, out type!);
 
