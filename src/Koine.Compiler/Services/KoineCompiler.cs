@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Security.Cryptography;
 using System.Text;
 using Koine.Compiler.Ast;
@@ -241,19 +242,73 @@ public sealed class KoineCompiler
     /// <see cref="IEmitter.CacheDiscriminator"/> followed by each source's path and text (with
     /// explicit length-prefixed separators so distinct file boundaries can never collide). Uses a
     /// stable cryptographic hash, never <c>string.GetHashCode</c> (which is not stable across runs).
+    /// Hashes incrementally via <see cref="IncrementalHash"/>, feeding the bytes in chunks (the
+    /// fixed separators inline, the variable path/discriminator/source text through a pooled UTF-8
+    /// buffer) so no intermediate giant string or byte array is ever materialized. The hashed byte
+    /// sequence — and therefore the key — is byte-identical to the prior StringBuilder version.
     /// </summary>
     private static string ComputeCacheKey(IReadOnlyList<SourceFile> files, IEmitter emitter)
     {
-        var sb = new StringBuilder();
-        sb.Append("emitter:").Append(emitter.CacheDiscriminator).Append(' ');
+        // The original StringBuilder key separated fields with the NUL char (U+0000 → UTF-8 0x00),
+        // not a space; reproduce that exact byte so the key stays identical to the prior version.
+        const string sep = "\0";
+
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+
+        AppendAscii(hash, "emitter:");
+        AppendUtf8(hash, emitter.CacheDiscriminator);
+        AppendAscii(hash, sep);
         foreach (var file in files)
         {
-            sb.Append("path:").Append(file.Path.Length).Append(':').Append(file.Path).Append(' ');
-            sb.Append("src:").Append(file.Source.Length).Append(':').Append(file.Source).Append(' ');
+            AppendAscii(hash, "path:");
+            AppendInt(hash, file.Path.Length);
+            AppendAscii(hash, ":");
+            AppendUtf8(hash, file.Path);
+            AppendAscii(hash, sep);
+            AppendAscii(hash, "src:");
+            AppendInt(hash, file.Source.Length);
+            AppendAscii(hash, ":");
+            AppendUtf8(hash, file.Source);
+            AppendAscii(hash, sep);
         }
 
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString()));
-        return Convert.ToHexStringLower(hash);
+        return Convert.ToHexStringLower(hash.GetHashAndReset());
+
+        // Fixed ASCII fragment ("emitter:", "path:", "src:", ":", sep): one byte per char, tiny.
+        static void AppendAscii(IncrementalHash hash, ReadOnlySpan<char> ascii)
+        {
+            Span<byte> buffer = stackalloc byte[ascii.Length];
+            for (var i = 0; i < ascii.Length; i++)
+            {
+                buffer[i] = (byte)ascii[i];
+            }
+
+            hash.AppendData(buffer);
+        }
+
+        // Decimal digits of a (non-negative) length — same text StringBuilder.Append(int) produced.
+        static void AppendInt(IncrementalHash hash, int value)
+        {
+            Span<char> chars = stackalloc char[16];
+            value.TryFormat(chars, out var written);
+            AppendAscii(hash, chars[..written]);
+        }
+
+        // Variable-length text (path/discriminator/source): encode straight into a pooled buffer so
+        // each call reuses scratch space instead of allocating a fresh per-file byte array.
+        static void AppendUtf8(IncrementalHash hash, string value)
+        {
+            var buffer = ArrayPool<byte>.Shared.Rent(Encoding.UTF8.GetMaxByteCount(value.Length));
+            try
+            {
+                var count = Encoding.UTF8.GetBytes(value.AsSpan(), buffer);
+                hash.AppendData(buffer, 0, count);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
+        }
     }
 
     /// <summary>

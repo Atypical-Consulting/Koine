@@ -27,8 +27,8 @@ internal static class EntityBehaviorValidator
         bool emitAllowed,
         IReadOnlySet<string>? specNames = null)
     {
-        var memberNames = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.Ordinal);
-        var memberByName = new Dictionary<string, Member>(StringComparer.Ordinal);
+        var memberNames = SemanticValidator.MemberNameSet(entity.Members);
+        var memberByName = new Dictionary<string, Member>(entity.Members.Count, StringComparer.Ordinal);
         foreach (var m in entity.Members)
         {
             memberByName[m.Name] = m;
@@ -41,10 +41,14 @@ internal static class EntityBehaviorValidator
         // members (properties) emit Pascal/camel-cased C# identifiers; a clash there
         // produces uncompilable output (CS0102/CS0111).
         var seenCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var propertyNames = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.OrdinalIgnoreCase)
+        var propertyNames = new HashSet<string>(entity.Members.Count + 3, StringComparer.OrdinalIgnoreCase)
         {
             "Id", "Equals", "GetHashCode"
         };
+        foreach (var m in entity.Members)
+        {
+            propertyNames.Add(m.Name);
+        }
 
         foreach (var cmd in entity.Commands)
         {
@@ -137,7 +141,15 @@ internal static class EntityBehaviorValidator
             if (cmd.ReturnType is { } returnType)
             {
                 SemanticValidator.ValidateTypeRef(returnType, index, diagnostics);
-                var resultCount = cmd.Body.OfType<ResultClause>().Count();
+                var resultCount = 0;
+                foreach (var stmt in cmd.Body)
+                {
+                    if (stmt is ResultClause)
+                    {
+                        resultCount++;
+                    }
+                }
+
                 if (resultCount != 1)
                 {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.MissingCommandResult,
@@ -170,8 +182,8 @@ internal static class EntityBehaviorValidator
             return;
         }
 
-        var memberNames = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.Ordinal);
-        var memberByName = new Dictionary<string, Member>(StringComparer.Ordinal);
+        var memberNames = SemanticValidator.MemberNameSet(entity.Members);
+        var memberByName = new Dictionary<string, Member>(entity.Members.Count, StringComparer.Ordinal);
         foreach (var m in entity.Members)
         {
             memberByName[m.Name] = m;
@@ -183,10 +195,15 @@ internal static class EntityBehaviorValidator
         // insensitively) with a property, a command (instance method), another factory,
         // or an always-generated member (Id, the domain-event API, the value-equality
         // members) — any of which would yield uncompilable C# (CS0102/CS0111).
-        var reserved = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.OrdinalIgnoreCase)
+        var reserved = new HashSet<string>(entity.Members.Count + 5, StringComparer.OrdinalIgnoreCase)
         {
             "Id", "DomainEvents", "ClearDomainEvents", "Equals", "GetHashCode"
         };
+        foreach (var m in entity.Members)
+        {
+            reserved.Add(m.Name);
+        }
+
         foreach (var cmd in entity.Commands)
         {
             reserved.Add(cmd.Name);
@@ -318,7 +335,7 @@ internal static class EntityBehaviorValidator
                 if (!MemberAnalysis.IsDerived(m, memberNames)
                     && m.Initializer is null && !m.Type.IsOptional
                     && !initialized.Contains(m.Name)
-                    && !factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
+                    && !AnyParamAutoBinds(factory.Parameters, m))
                 {
                     diagnostics.Add(Diagnostic.Warning(DiagnosticCodes.UninitializedFactoryField,
                         $"factory '{factory.Name}' leaves required field '{m.Name}' uninitialized and it has no default",
@@ -326,6 +343,20 @@ internal static class EntityBehaviorValidator
                 }
             }
         }
+    }
+
+    /// <summary>True when any parameter auto-binds to <paramref name="m"/> (a per-loop closure-free <c>Any</c>).</summary>
+    private static bool AnyParamAutoBinds(IReadOnlyList<Param> parameters, Member m)
+    {
+        foreach (Param p in parameters)
+        {
+            if (MemberAnalysis.AutoBinds(p, m))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>The synthetic <c>id</c> binding (an entity's identity) for factory scope.</summary>
@@ -393,6 +424,20 @@ internal static class EntityBehaviorValidator
     private static readonly IReadOnlySet<string> ValidRepositoryOps =
         new HashSet<string>(StringComparer.Ordinal) { "getById", "add", "update", "remove" };
 
+    /// <summary>Case-insensitive membership test against <see cref="ValidRepositoryOps"/> (closure-free).</summary>
+    private static bool IsBuiltInRepositoryOp(string name)
+    {
+        foreach (string op in ValidRepositoryOps)
+        {
+            if (string.Equals(op, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Validates an aggregate's repository declaration (R11.3): every listed
     /// operation keyword is known; finder names are unique; finder parameters are
@@ -430,7 +475,7 @@ internal static class EntityBehaviorValidator
             }
             // A finder emits `<Name>Async`; a name that resolves to a built-in operation
             // method would declare a duplicate (or confusingly-overloaded) member.
-            else if (ValidRepositoryOps.Any(op => string.Equals(op, finder.Name, StringComparison.OrdinalIgnoreCase)))
+            else if (IsBuiltInRepositoryOp(finder.Name))
             {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.FinderNameCollision,
                     $"finder '{finder.Name}' collides with the built-in repository operation of the same name",
@@ -483,7 +528,16 @@ internal static class EntityBehaviorValidator
     private static void CheckTransitionReachable(
         EntityDecl entity, Transition tr, Member target, ModelIndex index, List<Diagnostic> diagnostics)
     {
-        var states = entity.States.FirstOrDefault(s => s.Field == tr.Field);
+        StatesDecl? states = null;
+        foreach (StatesDecl s in entity.States)
+        {
+            if (s.Field == tr.Field)
+            {
+                states = s;
+                break;
+            }
+        }
+
         if (states is null || states.Rules.Count == 0)
         {
             return;
@@ -500,7 +554,17 @@ internal static class EntityBehaviorValidator
             return; // not a literal state of the bound enum (other errors cover it)
         }
 
-        if (!states.Rules.Any(r => r.To.Contains(stateRef.Name)))
+        var reachable = false;
+        foreach (StateRule r in states.Rules)
+        {
+            if (r.To.Contains(stateRef.Name))
+            {
+                reachable = true;
+                break;
+            }
+        }
+
+        if (!reachable)
         {
             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnreachableTransition,
                 $"no state rule allows transitioning '{tr.Field}' to '{stateRef.Name}'", tr.Span));
@@ -522,7 +586,7 @@ internal static class EntityBehaviorValidator
         // A duplicate field name is reported as KOI0103 yet kept in entity.Members, so build the lookup
         // defensively (last-wins) rather than ToDictionary — a collision here would otherwise throw and
         // abort the whole validate pass, swallowing that very diagnostic. Mirrors ValidateCommands.
-        var memberByName = new Dictionary<string, Member>(StringComparer.Ordinal);
+        var memberByName = new Dictionary<string, Member>(entity.Members.Count, StringComparer.Ordinal);
         foreach (var m in entity.Members)
         {
             memberByName[m.Name] = m;
@@ -564,13 +628,12 @@ internal static class EntityBehaviorValidator
 
             foreach (var rule in states.Rules)
             {
-                foreach (var state in new[] { rule.From }.Concat(rule.To))
+                // The `from` state, then each `to` state — same order the old `{from}.Concat(to)`
+                // produced, but without the per-rule array + Concat iterator.
+                CheckState(rule.From, rule, validStates, enumName, diagnostics);
+                foreach (var to in rule.To)
                 {
-                    if (!validStates.Contains(state))
-                    {
-                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownState,
-                            $"'{state}' is not a member of enum '{enumName}'", rule.Span));
-                    }
+                    CheckState(to, rule, validStates, enumName, diagnostics);
                 }
 
                 if (rule.Guard is not null)
@@ -578,6 +641,17 @@ internal static class EntityBehaviorValidator
                     checker.Check(rule.Guard, scope);
                 }
             }
+        }
+    }
+
+    /// <summary>Reports a state literal that is not a member of the bound enum (KOI: unknown state).</summary>
+    private static void CheckState(
+        string state, StateRule rule, HashSet<string> validStates, string enumName, List<Diagnostic> diagnostics)
+    {
+        if (!validStates.Contains(state))
+        {
+            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownState,
+                $"'{state}' is not a member of enum '{enumName}'", rule.Span));
         }
     }
 
@@ -608,7 +682,7 @@ internal static class EntityBehaviorValidator
         // A duplicate event field name is reported as KOI0103 yet both members are kept, so build the
         // lookup defensively (last-wins) rather than ToDictionary — a collision here would otherwise throw
         // and abort the whole validate pass, swallowing that very diagnostic. Mirrors ValidateStates.
-        var eventFields = new Dictionary<string, TypeRef>(StringComparer.Ordinal);
+        var eventFields = new Dictionary<string, TypeRef>(ev.Members.Count, StringComparer.Ordinal);
         foreach (var m in ev.Members)
         {
             eventFields[m.Name] = m.Type;
