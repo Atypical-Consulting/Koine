@@ -2092,6 +2092,12 @@ export function init(): () => void {
       // just flips the slice. The stripe icons and this command therefore stay in lock-step.
       appStore.getState().toggleRightCollapsed();
     },
+    toggleNavigator() {
+      // Symmetric to toggleProperties (#730): the left navigator rail's collapse flag is owned by the
+      // uiChrome slice and reconciled by inspectorController's morph-collapse wiring, so the command just
+      // flips the slice — the head's collapse button, the spine, and this command stay in lock-step.
+      appStore.getState().toggleLeftCollapsed();
+    },
   };
 
   // Left-sidebar section disclosure: clicking a header collapses/expands its body (routed through

@@ -99,6 +99,10 @@ export interface UiChromeSlice {
    *  `layoutStore` for persistence (#193: the slice owns chrome state, not the DOM). Independent of
    *  `right` — collapsing remembers the last active view, so re-expanding restores it. */
   rightCollapsed: boolean;
+  /** Whether the left navigator rail is collapsed to its icon spine (reclaiming most of its column).
+   *  Mirrored to `layoutStore` for persistence, like `rightCollapsed`. Navigation is persistent, so this
+   *  defaults open — the spine is an on-demand way to reclaim the rail's width, not a calm-default tuck. */
+  leftCollapsed: boolean;
   /** The active mobile zone (single source of truth for the narrow-viewport shell). ide.tsx mirrors it
    *  to #split[data-mobile-zone] so the @media rules show/hide zones; the MobileZoneBar reads + writes it. */
   mobileZone: MobileZone;
@@ -116,6 +120,8 @@ export interface UiChromeSlice {
   setRight(v: RightView): void;
   setRightCollapsed(v: boolean): void;
   toggleRightCollapsed(): void;
+  setLeftCollapsed(v: boolean): void;
+  toggleLeftCollapsed(): void;
   setOutlineFilter(q: string): void;
   setMobileZone(z: MobileZone): void;
   /** Replace the whole deck state (used by restore/persistence). Keeps `center` in sync. */
@@ -153,6 +159,7 @@ export function createUiChromeSlice(
     bottom: 'problems',
     right: 'props',
     rightCollapsed: false,
+    leftCollapsed: false,
     outlineFilter: '',
     mobileZone: DEFAULT_MOBILE_ZONE,
     deck: DEFAULT_DECK_STATE,
@@ -192,6 +199,8 @@ export function createUiChromeSlice(
     setRight: (v) => set({ right: v }),
     setRightCollapsed: (v) => set({ rightCollapsed: v }),
     toggleRightCollapsed: () => set({ rightCollapsed: !get().rightCollapsed }),
+    setLeftCollapsed: (v) => set({ leftCollapsed: v }),
+    toggleLeftCollapsed: () => set({ leftCollapsed: !get().leftCollapsed }),
     setOutlineFilter: (q) => set({ outlineFilter: q }),
     setMobileZone: (z) => set({ mobileZone: z }),
 

@@ -73,6 +73,25 @@ describe('uiChrome slice', () => {
     expect(s.getState().rightCollapsed).toBe(true);
     expect(s.getState().right).toBe('source-control');
   });
+
+  test('leftCollapsed defaults to false and setLeftCollapsed switches it (#730)', () => {
+    const s = make();
+    expect(s.getState().leftCollapsed).toBe(false);
+    s.getState().setLeftCollapsed(true);
+    expect(s.getState().leftCollapsed).toBe(true);
+    s.getState().setLeftCollapsed(false);
+    expect(s.getState().leftCollapsed).toBe(false);
+  });
+
+  test('toggleLeftCollapsed flips the flag independently of rightCollapsed', () => {
+    const s = make();
+    expect(s.getState().leftCollapsed).toBe(false);
+    s.getState().toggleLeftCollapsed();
+    expect(s.getState().leftCollapsed).toBe(true);
+    expect(s.getState().rightCollapsed).toBe(false);
+    s.getState().toggleLeftCollapsed();
+    expect(s.getState().leftCollapsed).toBe(false);
+  });
 });
 
 describe('uiChrome mobileZone', () => {

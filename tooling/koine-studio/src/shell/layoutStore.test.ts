@@ -18,6 +18,11 @@ describe('layoutStore defaults', () => {
     expect(DEFAULT_LAYOUT.rightCollapsed).toBe(true);
     expect(loadLayout().rightCollapsed).toBe(true);
   });
+
+  test('left navigator rail is open by default (#730: navigation is persistent)', () => {
+    expect(DEFAULT_LAYOUT.leftCollapsed).toBe(false);
+    expect(loadLayout().leftCollapsed).toBe(false);
+  });
 });
 
 describe('layoutStore round-trip', () => {
@@ -46,6 +51,11 @@ describe('layoutStore round-trip', () => {
   test('rightCollapsed round-trips', () => {
     saveLayout({ rightCollapsed: true });
     expect(loadLayout().rightCollapsed).toBe(true);
+  });
+
+  test('leftCollapsed round-trips', () => {
+    saveLayout({ leftCollapsed: true });
+    expect(loadLayout().leftCollapsed).toBe(true);
   });
 
   test('saveLayout returns the full merged state', () => {

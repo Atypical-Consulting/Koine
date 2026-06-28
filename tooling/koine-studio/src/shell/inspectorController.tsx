@@ -947,6 +947,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   type RailAxis = 'domain' | 'files';
   const filesPane = document.getElementById('rail-files');
   const axisButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('#rail-axis-switch [data-axis]'));
+  // The collapsed-rail spine (#left-strip, #730) carries the same Domain/Files toggles; keep their pressed
+  // state in lockstep with the expanded segmented control so the active axis reads the same in both states.
+  const lstripAxisButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('#left-strip [data-laxis]'));
 
   // Paint the active axis: surface its pane, hide the other, and reflect the segmented control. Showing
   // Files also force-expands its section (its own collapse is ide.ts's #rail-sect chrome) so a reveal
@@ -961,6 +964,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       }
     }
     for (const b of axisButtons) b.setAttribute('aria-selected', String(b.dataset.axis === axis));
+    for (const b of lstripAxisButtons) b.setAttribute('aria-pressed', String(b.dataset.laxis === axis));
   }
 
   function setAxis(axis: RailAxis): void {
@@ -1575,6 +1579,41 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     }
   });
 
+  // Left navigator-rail morph-collapse (#730): the mirror of the right stripe on the opposite edge. The
+  // rail tucks to its #left-strip icon spine; the flag is owned by uiChrome (runtime) and mirrored to
+  // layoutStore (persistence), like rightCollapsed. The head's collapse button tucks it; the spine's expand
+  // control re-opens it, and its Domain/Files toggles re-open straight to that axis (setLeftCollapsed(false)
+  // + setAxis). Navigation is persistent, so this defaults OPEN — the collapse is an on-demand reclaim.
+  const railCollapseBtn = document.getElementById('rail-collapse');
+  const leftStripEl = document.getElementById('left-strip');
+  function applyLeftCollapsed(collapsed: boolean): void {
+    // DOM/ARIA only; the collapsed grid (shrink the leftrail track, hide its resizer, #center reclaims the
+    // width) is CSS keyed off this class on #split — the morph that swaps the head/navigator for #left-strip
+    // lives in _leftrail.scss. Persistence happens once per transition in the subscription below.
+    rstripSplitEl.classList.toggle('left-collapsed', collapsed);
+    railCollapseBtn?.setAttribute('aria-expanded', String(!collapsed));
+  }
+  // Seed the runtime flag from persistence before the subscription is wired (so the seed doesn't echo),
+  // then paint the DOM/ARIA once for the restored state — mirroring the right-collapse seed above.
+  appStore.getState().setLeftCollapsed(loadLayout().leftCollapsed);
+  applyLeftCollapsed(appStore.getState().leftCollapsed);
+  railCollapseBtn?.addEventListener('click', () => appStore.getState().setLeftCollapsed(true));
+  // Every spine button re-opens the rail; the Domain/Files toggles additionally set that axis so you land
+  // on the navigator you clicked (the plain expand control carries no data-laxis, so it just re-opens).
+  for (const b of Array.from(leftStripEl?.querySelectorAll<HTMLButtonElement>('button') ?? [])) {
+    b.addEventListener('click', () => {
+      const axis = b.dataset.laxis as RailAxis | undefined;
+      appStore.getState().setLeftCollapsed(false);
+      if (axis) setAxis(axis);
+    });
+  }
+  const unsubscribeLeftCollapsed = appStore.subscribe((s, prev) => {
+    if (s.leftCollapsed !== prev.leftCollapsed) {
+      applyLeftCollapsed(s.leftCollapsed);
+      saveLayout({ leftCollapsed: s.leftCollapsed });
+    }
+  });
+
   // The blessed Code ⟷ Canvas preset: the .koi text beside the live domain diagram — the one layout that
   // shows Koine's round-trip. In the deck this is a 2-up with Code selected on the left and Canvas on the
   // right. Shared by the palette command (it's exposed on the controller).
@@ -2150,6 +2189,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Drop the right-strip collapse subscription (#500) — its callback mutates the captured #split /
     // .rstrip-btn nodes and persists, which must not fire into a torn-down host after dispose.
     unsubscribeRightCollapsed();
+    // Drop the left-rail morph-collapse subscription (#730) for the same reason — it mutates the captured
+    // #split / #rail-collapse nodes and persists.
+    unsubscribeLeftCollapsed();
     // Drop the deck/facet subscription — its callback re-applies the center chrome + lazy-loads, which
     // must not fire into a torn-down host after dispose. Unmount the deck Preact trees too so their
     // window listeners (the DeckStage keyboard handler) detach.

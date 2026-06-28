@@ -15,4 +15,18 @@ describe('leftRailMarkup', () => {
     // center Deck's Docs surface, so the rail no longer doubles as a docs doorway.
     expect(document.querySelector('#rail-docs-body')).toBeNull();
   });
+
+  it('has a collapse control and an icon spine with expand + Domain/Files toggles (#730)', () => {
+    document.body.innerHTML = leftRailMarkup();
+    // The head pairs the axis switch with a collapse button that tucks the rail to its spine.
+    expect(document.querySelector('#rail-collapse')).not.toBeNull();
+    // The collapsed-state spine carries an expand control plus one toggle per axis.
+    const spine = document.querySelector('#left-strip')!;
+    expect(spine).not.toBeNull();
+    expect(spine.querySelector('[data-lexpand]')).not.toBeNull();
+    expect([...spine.querySelectorAll('[data-laxis]')].map((b) => (b as HTMLElement).dataset.laxis)).toEqual([
+      'domain',
+      'files',
+    ]);
+  });
 });
