@@ -107,6 +107,26 @@ describe('createSettingsPage', () => {
     expect(body.textContent).toContain('Appearance');
   });
 
+  it('arrow keys move the representation toggle (focus follows selection) and switch the body', () => {
+    // The toggle is a single-select radiogroup, so an arrow both moves focus AND activates. This pins the
+    // keyboard behavior across the swap from the bespoke radiogroup to the shared segmented() control.
+    handle = createSettingsPage({ header, body }, cb);
+    const press = (el: HTMLElement, key: string): void => {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    };
+    // ArrowRight on Visual selects JSON: roving tabindex moves, focus follows, the body becomes the editor.
+    press(visualRadio(header), 'ArrowRight');
+    expect(jsonRadio(header).getAttribute('aria-checked')).toBe('true');
+    expect(jsonRadio(header).getAttribute('tabindex')).toBe('0');
+    expect(visualRadio(header).getAttribute('tabindex')).toBe('-1');
+    expect(document.activeElement).toBe(jsonRadio(header));
+    expect(jsonEditor(body)).not.toBeNull();
+    // ArrowLeft brings it back to Visual (the two-pane form returns).
+    press(jsonRadio(header), 'ArrowLeft');
+    expect(visualRadio(header).getAttribute('aria-checked')).toBe('true');
+    expect(body.textContent).toContain('Appearance');
+  });
+
   it('switching to JSON serializes current settings without the secret', () => {
     handle = createSettingsPage({ header, body }, cb);
     jsonRadio(header).click();

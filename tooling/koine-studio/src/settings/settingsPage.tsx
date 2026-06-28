@@ -8,7 +8,7 @@
 // SECRET INVARIANT: the aiApiKey is never serialized into the JSON. settingsToJsonDoc() strips it from
 // the seed and jsonDocToSettings() re-injects the live in-memory key on parse, so the JSON surface can
 // neither display nor clear the encrypted key.
-import { mountPreferencesPane, type PrefsCallbacks } from '@/settings/prefs';
+import { mountPreferencesPane, segmented, type PrefsCallbacks } from '@/settings/prefs';
 import { createJsonSettingsEditor, type JsonSettingsEditor } from '@/editor/editor';
 import { settingsToJsonDoc, jsonDocToSettings } from '@/settings/settingsSchema';
 import { loadSettings, saveSettings } from '@/settings/persistence';
@@ -73,57 +73,18 @@ export function createSettingsPage(
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   // --- header: the Visual/JSON segmented control ----------------------------
-  // An accessible radiogroup: two role=radio buttons, roving tabindex (checked → 0, other → -1), and
-  // Left/Right/Up/Down/Home/End arrow navigation that both moves focus AND activates (a single-select
-  // group, so focus follows selection).
-  const radios: HTMLButtonElement[] = [];
-  const group = el('div', {
-    class: 'settings-mode-toggle-group',
-    attrs: { role: 'radiogroup', 'aria-label': 'Settings representation' },
-  });
-
-  for (const { value, label } of MODES) {
-    const radio = el('button', {
-      class: 'settings-mode-radio',
-      text: label,
-      attrs: { type: 'button', role: 'radio', 'data-mode': value },
-      on: {
-        click: () => setMode(value),
-        keydown: (e: KeyboardEvent) => onRadioKeydown(e),
-      },
-    });
-    radios.push(radio);
-    group.append(radio);
-  }
-
-  function paintToggle(): void {
-    for (const r of radios) {
-      const on = r.dataset.mode === mode;
-      r.setAttribute('aria-checked', String(on));
-      r.setAttribute('tabindex', on ? '0' : '-1');
-      r.classList.toggle('is-active', on);
-    }
-  }
-
-  function onRadioKeydown(e: KeyboardEvent): void {
-    const idx = radios.findIndex((r) => r === e.target);
-    if (idx < 0) return;
-    let next = idx;
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (idx + 1) % radios.length;
-    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (idx - 1 + radios.length) % radios.length;
-    else if (e.key === 'Home') next = 0;
-    else if (e.key === 'End') next = radios.length - 1;
-    else return;
-    e.preventDefault();
-    setMode(radios[next].dataset.mode as SettingsEditorMode);
-    radios[next].focus();
-  }
+  // The shared, keyboard-navigable segmented() control (prefs.ts): a role=radiogroup of role=radio
+  // buttons with roving tabindex (checked → 0, other → -1) and arrow/Home/End navigation where focus
+  // follows selection. Selecting an option switches the page's representation via setMode. This reuses
+  // the same control the Theme + scope toggles use, replacing a hand-rolled radiogroup that duplicated
+  // the identical ARIA + key handling.
+  const modeToggle = segmented<SettingsEditorMode>('Settings representation', MODES, setMode);
 
   // The header already carries an <h2> + an empty #settings-mode-toggle slot (index.html); mount into
   // that slot when present, else append to the header directly (keeps tests/callers that pass a bare
   // header working).
   const toggleHost = hosts.header.querySelector('#settings-mode-toggle') ?? hosts.header;
-  toggleHost.append(group);
+  toggleHost.append(modeToggle.el);
 
   // --- body: the active representation ---------------------------------------
 
@@ -223,7 +184,7 @@ export function createSettingsPage(
     teardownBody();
     mode = next;
     saveMode(mode);
-    paintToggle();
+    modeToggle.set(mode);
     buildBody();
   }
 
@@ -249,14 +210,14 @@ export function createSettingsPage(
   }
 
   // Initial paint.
-  paintToggle();
+  modeToggle.set(mode);
   buildBody();
 
   return {
     refresh,
     destroy(): void {
       teardownBody();
-      group.remove(); // clear the header toggle
+      modeToggle.el.remove(); // clear the header toggle
     },
   };
 }
