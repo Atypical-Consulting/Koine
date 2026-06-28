@@ -70,6 +70,10 @@ const APP_HTML = `
             </div>
           </section>
         </div>
+        <section id="center-panel-settings" class="settings-page" aria-label="Settings" hidden>
+          <header id="settings-page-header"><h2 class="settings-page-title">Settings</h2><div id="settings-mode-toggle"></div></header>
+          <div id="settings-page-body"></div>
+        </section>
         <footer id="diagnostics">
           <div class="koi-resizer koi-resizer-y" id="diag-resizer"></div>
           <div id="diag-header">
@@ -337,6 +341,24 @@ describe('createInspectorController — center switching', () => {
     // must not overwrite the persisted 'technical'; a reload restores Code, not the default.
     ctl.showSettings();
     expect(saveWorkspaceCenter).not.toHaveBeenCalled();
+  });
+
+  test('the Settings overlay covers the deck body and reveals the panel; focusing a surface restores it (#482)', () => {
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    const body = el('center-body');
+    const panel = el('center-panel-settings');
+    // Resting: deck body shown, Settings overlay hidden.
+    expect(panel.hidden).toBe(true);
+    expect(body.hidden).toBe(false);
+    // Gear → showSettings: the overlay covers the deck body.
+    ctl.showSettings();
+    expect(panel.hidden).toBe(false);
+    expect(body.hidden).toBe(true);
+    // Focusing any deck surface (the deck-bar) leaves Settings and restores the deck.
+    ctl.selectCenter('docs');
+    expect(panel.hidden).toBe(true);
+    expect(body.hidden).toBe(false);
   });
 
   test('opening Settings does not touch the persisted deck (Settings is orthogonal to the deck) (#482)', () => {
