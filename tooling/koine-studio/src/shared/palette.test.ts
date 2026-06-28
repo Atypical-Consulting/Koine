@@ -443,34 +443,29 @@ describe('overlay-stack integration (Esc)', () => {
   });
 });
 
-// The layout command builder is a pure module (src/shell/layoutCommands.ts) so the six view-layout
-// commands the shell spreads into its palette provider can be unit-tested without ide.tsx's giant
-// closure. Each command's run() must call exactly the matching injected action.
+// The layout command builder is a pure module (src/shell/layoutCommands.ts) so the view-layout commands
+// the shell spreads into its palette provider can be unit-tested without ide.tsx's giant closure. Each
+// command's run() must call exactly the matching injected action. (The editor A/B split commands were
+// retired — the center split-pane system (#720) is the one splitting primitive now.)
 describe('layoutCommands — the view-layout palette commands', () => {
   // Spy actions: one vi.fn() per LayoutActions method.
   function spyActions(): LayoutActions {
     return {
-      split: vi.fn(),
-      toggleOrientation: vi.fn(),
-      closeGroup: vi.fn(),
       togglePanelSide: vi.fn(),
       toggleSideRail: vi.fn(),
       toggleProperties: vi.fn(),
     };
   }
 
-  // The exact ids the shell + the brief pin (so the palette/help/anything keyed on them stay stable),
-  // paired with the action each command must invoke.
+  // The exact ids the shell pins (so the palette/help/anything keyed on them stay stable), paired with
+  // the action each command must invoke.
   const wiring: { id: string; action: keyof LayoutActions }[] = [
-    { id: 'editor.split', action: 'split' },
-    { id: 'editor.toggleOrientation', action: 'toggleOrientation' },
-    { id: 'editor.closeGroup', action: 'closeGroup' },
     { id: 'layout.panelSide', action: 'togglePanelSide' },
     { id: 'layout.sideRail', action: 'toggleSideRail' },
     { id: 'layout.toggleProperties', action: 'toggleProperties' },
   ];
 
-  test('returns exactly the six layout commands, by id', () => {
+  test('returns exactly the layout commands, by id', () => {
     const cmds = layoutCommands(spyActions());
     expect(cmds.map((c) => c.id)).toEqual(wiring.map((w) => w.id));
   });

@@ -243,7 +243,7 @@ body.resizing #diag-resizer {
   grid-template-columns: 1fr var(--koi-panel-w, 340px);
   grid-template-rows: auto 1fr;
 }
-#split[data-panel-side='right'] #center-tabs {
+#split[data-panel-side='right'] #deck-bar {
   grid-column: 1 / -1;
   grid-row: 1;
 }

@@ -15,8 +15,8 @@ import {
   clearLegacyScratch,
   loadWorkspaceCenter,
   saveWorkspaceCenter,
-  loadWorkspaceCenterLayout,
-  saveWorkspaceCenterLayout,
+  loadWorkspaceDeck,
+  saveWorkspaceDeck,
   getLastWorkspace,
   setLastWorkspace,
   clearLastWorkspace,
@@ -42,8 +42,8 @@ import {
   resolveKeybindings,
   clearKeybindingOverrides,
 } from '@/settings/persistence';
-import { DEFAULT_CENTER_LAYOUT, isValidCenterLayout } from '@/store/slices/uiChrome';
-import type { CenterLayout } from '@/store/slices/uiChrome';
+import { DEFAULT_DECK_STATE, isValidDeckState } from '@/store/slices/uiChrome';
+import type { DeckState } from '@/store/slices/uiChrome';
 import { BUILTIN_EMIT_TARGETS, setEmitTargets } from '@/shared/emitTargets';
 import { DEFAULT_BINDINGS } from '@/editor/keybindings';
 import type { ChatMessage } from '@/ai/ai';
@@ -395,43 +395,55 @@ describe('workspace center-pane persistence', () => {
   });
 });
 
-describe('center layout persistence', () => {
+describe('deck layout persistence', () => {
   beforeEach(() => localStorage.clear());
 
-  test('returns DEFAULT_CENTER_LAYOUT when nothing is stored', () => {
-    expect(loadWorkspaceCenterLayout()).toEqual(DEFAULT_CENTER_LAYOUT);
+  test('returns DEFAULT_DECK_STATE when nothing is stored', () => {
+    expect(loadWorkspaceDeck()).toEqual(DEFAULT_DECK_STATE);
   });
 
-  test('round-trips a 2-pane layout', () => {
-    const layout: CenterLayout = {
-      orientation: 'row',
-      panes: [
-        { id: 'pane-0', view: 'visual' },
-        { id: 'pane-1', view: 'docs' },
-      ],
-      sizes: [0.5, 0.5],
-      focusedPaneId: 'pane-0',
-    };
-    saveWorkspaceCenterLayout(layout);
-    expect(loadWorkspaceCenterLayout()).toEqual(layout);
+  test('round-trips a 2-up deck state', () => {
+    const deck: DeckState = { mode: 'focus', primary: 'technical', secondary: 'visual', ratio: 0.4, flipped: true };
+    saveWorkspaceDeck(deck);
+    expect(loadWorkspaceDeck()).toEqual(deck);
   });
 
-  test('returns DEFAULT_CENTER_LAYOUT when stored JSON is malformed', () => {
-    localStorage.setItem('koine.studio.workspaceCenterLayout', '{not valid json');
-    expect(loadWorkspaceCenterLayout()).toEqual(DEFAULT_CENTER_LAYOUT);
+  test('returns DEFAULT_DECK_STATE when stored JSON is malformed', () => {
+    localStorage.setItem('koine.studio.workspaceDeck', '{not valid json');
+    expect(loadWorkspaceDeck()).toEqual(DEFAULT_DECK_STATE);
   });
 
-  test('migrates a legacy workspaceCenter = "docs" to a one-pane layout with view: "docs"', () => {
+  test('migrates a pre-Deck split layout: focused pane → primary, the other → secondary, sizes[0] → ratio', () => {
+    localStorage.setItem(
+      'koine.studio.workspaceCenterLayout',
+      JSON.stringify({
+        orientation: 'row',
+        panes: [
+          { id: 'pane-0', view: 'visual' },
+          { id: 'pane-1', view: 'docs' },
+        ],
+        sizes: [0.6, 0.4],
+        focusedPaneId: 'pane-1',
+      }),
+    );
+    const result = loadWorkspaceDeck();
+    expect(isValidDeckState(result)).toBe(true);
+    expect(result.primary).toBe('docs'); // the focused pane
+    expect(result.secondary).toBe('visual');
+    expect(result.ratio).toBe(0.6);
+  });
+
+  test('migrates a legacy workspaceCenter = "docs" to a 1-up deck on Docs', () => {
     localStorage.setItem('koine.studio.workspaceCenter', 'docs');
-    const result = loadWorkspaceCenterLayout();
-    expect(isValidCenterLayout(result)).toBe(true);
-    expect(result.panes).toHaveLength(1);
-    expect(result.panes[0].view).toBe('docs');
+    const result = loadWorkspaceDeck();
+    expect(isValidDeckState(result)).toBe(true);
+    expect(result.primary).toBe('docs');
+    expect(result.secondary).toBeNull();
   });
 
   test('ignores a legacy workspaceCenter with an unknown view and returns default', () => {
     localStorage.setItem('koine.studio.workspaceCenter', 'unknown-view');
-    expect(loadWorkspaceCenterLayout()).toEqual(DEFAULT_CENTER_LAYOUT);
+    expect(loadWorkspaceDeck()).toEqual(DEFAULT_DECK_STATE);
   });
 });
 
