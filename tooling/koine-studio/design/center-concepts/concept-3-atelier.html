@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept 3 — Atelier</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* ---- Atelier: the model is the map. The domain Canvas is always the home/
+         backdrop; Code, Output and Docs are summoned as a drawer that slides
+         over it. Click a node on the canvas to peek its code. ---- */
+  .atelier { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  .atelier-canvas { position: absolute; inset: 0; }
+
+  /* floating dock — summon a derived surface; Canvas (home) returns to the map.
+     Anchored top-left over the canvas (the "home"), so it never collides with the
+     right-docked drawer's own header. Hidden when the drawer is maximized. */
+  .atelier-dock {
+    position: absolute; top: 12px; left: 14px; z-index: 10;
+    display: flex; align-items: center; gap: 2px;
+    transition: opacity .2s ease;
+    background: color-mix(in srgb, var(--koi-paper-2) 88%, transparent);
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius-pill);
+    padding: 4px; box-shadow: var(--koi-shadow);
+    backdrop-filter: blur(8px);
+  }
+  .atelier-dock .dk {
+    all: unset; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600; color: var(--koi-muted);
+    padding: 6px 14px; border-radius: var(--koi-radius-pill);
+    transition: color .14s ease, background .14s ease;
+  }
+  .atelier-dock .dk svg { width: 15px; height: 15px; }
+  .atelier-dock .dk:hover { color: var(--koi-fg); }
+  .atelier-dock .dk.home { color: var(--koi-accent); }
+  .atelier-dock .dk.on { color: var(--koi-on-accent); background: var(--koi-accent); }
+  .atelier-dock .dk .sd { width: 6px; height: 6px; border-radius: 50%; background: var(--koi-error); }
+  .atelier-dock .sep { width: 1px; height: 20px; background: var(--koi-line); margin: 0 4px; }
+
+  /* the drawer */
+  .atelier-drawer {
+    position: absolute; top: 0; right: 0; bottom: 0;
+    width: 46%; min-width: 360px; z-index: 8;
+    display: flex; flex-direction: column;
+    background: var(--koi-paper);
+    border-left: 1px solid var(--koi-line);
+    box-shadow: -24px 0 50px rgba(3,7,14,.32);
+    transform: translateX(100%);
+    transition: transform .26s cubic-bezier(.2,.7,.2,1), width .2s ease;
+  }
+  .atelier-drawer.open { transform: none; }
+  .atelier-drawer.max { width: calc(100% - 8px); }
+  .atelier-dhead {
+    flex: 0 0 auto; height: 38px;
+    display: flex; align-items: center; gap: 9px;
+    padding: 0 8px 0 14px;
+    border-bottom: 1px solid var(--koi-line);
+    background: var(--koi-paper-2);
+  }
+  .atelier-dhead .ttl { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
+  .atelier-dhead .ttl svg { width: 15px; height: 15px; color: var(--koi-accent); }
+  .atelier-dhead .ttl .tag { font-weight: 400; color: var(--koi-muted); font-size: 11px; }
+  .atelier-dhead .grow { flex: 1; }
+  .atelier-dhead .dbtn {
+    all: unset; cursor: pointer; width: 26px; height: 26px; border-radius: 6px;
+    display: grid; place-items: center; color: var(--koi-muted);
+  }
+  .atelier-dhead .dbtn:hover { color: var(--koi-fg); background: var(--koi-line); }
+  .atelier-dhead .dbtn svg { width: 14px; height: 14px; }
+  .atelier-dsubs { display: flex; gap: 3px; padding: 0 8px; }
+  .atelier-dsub { all: unset; cursor: pointer; font-size: 11px; color: var(--koi-muted); padding: 3px 9px; border-radius: var(--koi-radius-pill); }
+  .atelier-dsub.on { color: var(--koi-accent); background: color-mix(in srgb, var(--koi-accent) 12%, transparent); }
+  .atelier-dbody { position: relative; flex: 1 1 auto; min-height: 0; }
+
+  /* a hint that floats over the canvas when nothing is summoned */
+  .atelier-hint {
+    position: absolute; bottom: 16px; left: 16px; z-index: 7;
+    font-size: 11px; color: var(--koi-muted);
+    background: color-mix(in srgb, var(--koi-paper-2) 80%, transparent);
+    border: 1px solid var(--koi-line); border-radius: var(--koi-radius);
+    padding: 7px 11px; max-width: 230px; line-height: 1.5;
+    transition: opacity .2s ease;
+  }
+  .atelier.drawer-open .atelier-hint { opacity: 0; }
+  .atelier.drawer-max .atelier-dock { opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="mock.js"></script>
+<script>
+  const M = window.KoineMock;
+  const center = M.shell(document.getElementById('root'), { concept: 'Concept 3 · Atelier' });
+  center.innerHTML =
+    '<div class="concept-note"><b>Atelier.</b> The domain map is home. Code, Output and Docs '
+    + 'slide over it on demand — you stay anchored in the model. '
+    + 'Click any node to peek its code.</div>'
+    + '<div class="atelier" id="atelier">'
+    + '<div class="atelier-canvas" id="canvasHost"></div>'
+    + '<div class="atelier-hint">Tip: this <b>canvas is the workspace</b>. Click <b>Order</b> to open its code in a drawer →</div>'
+    + '<div class="atelier-dock" id="dock"></div>'
+    + '<div class="atelier-drawer" id="drawer">'
+    + '  <div class="atelier-dhead"><div class="ttl" id="dttl"></div>'
+    + '    <div class="atelier-dsubs" id="dsubs"></div><div class="grow"></div>'
+    + '    <button class="dbtn" id="maxBtn" title="Maximize">' + M.ICONS.split + '</button>'
+    + '    <button class="dbtn" id="closeBtn" title="Back to map">' + M.ICONS.close + '</button></div>'
+    + '  <div class="atelier-dbody" id="dbody"></div>'
+    + '</div></div>';
+
+  const pool = {};
+  function host(id) {
+    if (!pool[id]) { const d = document.createElement('div'); d.className = 'surface'; M.fill(d, id, {}); pool[id] = d; }
+    return pool[id];
+  }
+
+  const atelier = center.querySelector('#atelier');
+  const dock = center.querySelector('#dock');
+  const drawer = center.querySelector('#drawer');
+  const dbody = center.querySelector('#dbody');
+  const dttl = center.querySelector('#dttl');
+  const dsubs = center.querySelector('#dsubs');
+
+  // canvas lives permanently in the backdrop
+  center.querySelector('#canvasHost').appendChild(host('canvas'));
+  requestAnimationFrame(() => atelier.querySelectorAll('[data-canvas]').forEach((c) => M.drawEdges(c)));
+
+  let current = null;     // null = pure canvas; else 'code'|'output'|'docs'
+  const subSel = { code: 'Editor', output: 'Generated', docs: 'Glossary' };
+
+  function buildDock() {
+    dock.innerHTML = '';
+    const home = document.createElement('button');
+    home.className = 'dk home' + (current ? '' : ' on');
+    home.innerHTML = M.ICONS.canvas + 'Canvas';
+    home.addEventListener('click', () => close());
+    dock.appendChild(home);
+    const sep = document.createElement('div'); sep.className = 'sep'; dock.appendChild(sep);
+    ['code', 'output', 'docs'].forEach((id) => {
+      const s = M.surface(id);
+      const b = document.createElement('button');
+      b.className = 'dk' + (current === id ? ' on' : '');
+      b.innerHTML = s.icon + s.label + (s.dot ? '<span class="sd"></span>' : '');
+      b.addEventListener('click', () => open(id));
+      dock.appendChild(b);
+    });
+  }
+
+  function buildSubs(id) {
+    dsubs.innerHTML = '';
+    const s = M.surface(id);
+    if (s.subs.length <= 1) return;
+    s.subs.forEach((name) => {
+      const b = document.createElement('button');
+      b.className = 'atelier-dsub' + (subSel[id] === name ? ' on' : '');
+      b.textContent = name;
+      b.addEventListener('click', () => { subSel[id] = name; buildSubs(id); });
+      dsubs.appendChild(b);
+    });
+  }
+
+  function open(id) {
+    current = id;
+    const s = M.surface(id);
+    dttl.innerHTML = s.icon + s.label + '<span class="tag">' + s.tag + '</span>';
+    buildSubs(id);
+    dbody.innerHTML = ''; dbody.appendChild(host(id));
+    drawer.classList.add('open');
+    atelier.classList.add('drawer-open');
+    requestAnimationFrame(() => dbody.querySelectorAll('[data-canvas]').forEach((c) => M.drawEdges(c)));
+    buildDock();
+  }
+  function close() {
+    current = null;
+    drawer.classList.remove('open', 'max');
+    atelier.classList.remove('drawer-open', 'drawer-max');
+    buildDock();
+  }
+
+  center.querySelector('#maxBtn').addEventListener('click', () => {
+    const max = drawer.classList.toggle('max');
+    atelier.classList.toggle('drawer-max', max);
+    requestAnimationFrame(() => dbody.querySelectorAll('[data-canvas]').forEach((c) => M.drawEdges(c)));
+  });
+  center.querySelector('#closeBtn').addEventListener('click', close);
+
+  // click a node → peek its code
+  atelier.querySelectorAll('.kc-node').forEach((node) => {
+    node.addEventListener('click', () => {
+      atelier.querySelectorAll('.kc-node').forEach((n) => n.classList.remove('sel'));
+      node.classList.add('sel');
+      open('code');
+    });
+  });
+
+  buildDock();
+</script>
+</body>
+</html>

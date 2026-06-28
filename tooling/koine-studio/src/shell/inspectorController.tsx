@@ -83,12 +83,12 @@ import { guardedLoad } from '@/shell/guardedLoad';
 import { createInspectorSheet, type InspectorSheet } from '@/shell/inspectorSheet';
 import { isNarrowViewport } from '@/shared/breakpoint';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
-import { DEFAULT_CENTER, DEFAULT_CENTER_LAYOUT, isValidCenter, type CenterLayout, type RightView } from '@/store/slices/uiChrome';
+import { DEFAULT_CENTER, DEFAULT_DECK_STATE, isValidCenter, type DeckState, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
 import { escapeHtml, fileUriToPath, formatAclMapping, renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
-import { EMIT_TARGETS } from '@/shared/emitTargets';
-import { applySplitPaneLayout } from '@/shell/CenterSplitPanes';
+import { DeckBarConnected } from '@/shell/deck/DeckBar';
+import { DeckStage } from '@/shell/deck/DeckStage';
 
 // LSP SymbolKind for a namespace — the kind the language service tags each top-level `context`
 // document symbol with. Used by followActiveFileContext to read a file's bounded context(s).
@@ -97,10 +97,11 @@ const SYMBOL_KIND_NAMESPACE = 3;
 // The center column's top-level views and the Code/Documentation sub-tabs (kept local — they're a UI
 // concern, not part of the target-agnostic model). They mirror the uiChrome slice's CenterView /
 // TechView / DocsView literals, which the chrome now drives through.
-type CenterView = 'visual' | 'technical' | 'docs' | 'assistant';
-type TechView = 'editor' | 'preview' | 'check' | 'scenarios';
+type CenterView = 'visual' | 'technical' | 'output' | 'docs';
+type TechView = 'editor' | 'scenarios';
+type OutputTab = 'generated' | 'compatibility' | 'contextmap';
 type DocsView = 'glossary' | 'adr' | 'notes';
-type BottomTab = 'problems' | 'events' | 'relationships' | 'contextmap' | 'terminal' | 'review';
+type BottomTab = 'problems' | 'events' | 'relationships' | 'terminal' | 'review';
 
 /**
  * The slice of {@link import('@/lsp/lsp').KoineLsp} the loaders call (content requests only). A
@@ -150,10 +151,10 @@ export interface InspectorControllerDeps {
   // --- store seams (persist/restore the per-workspace center pane + scope) ---
   saveWorkspaceCenter(id: string): void;
   loadWorkspaceCenter(): string | null;
-  /** Persist/restore the full multi-pane center layout (Task 2 of #720). Optional so existing
-   *  callers that only wire the legacy center-pane pair don't need to be updated. */
-  saveWorkspaceCenterLayout?: (layout: CenterLayout) => void;
-  loadWorkspaceCenterLayout?: () => CenterLayout;
+  /** Persist/restore the Deck v2 center layout. Optional so callers that only wire the legacy
+   *  center-pane pair don't need to be updated. */
+  saveWorkspaceDeck?: (deck: DeckState) => void;
+  loadWorkspaceDeck?: () => DeckState;
   saveActiveContext(workspaceKey: string, scope: string): void;
   loadActiveContext(workspaceKey: string): string | null;
 
@@ -254,8 +255,14 @@ export interface InspectorController {
    */
   setAxis(axis: 'domain' | 'files'): void;
   selectTech(view: TechView): void;
+  selectOutput(view: OutputTab): void;
   selectDocsTab(view: DocsView): void;
   selectBottomTab(tab: BottomTab): void;
+  /** Reveal a right-rail view (Properties / AI Chat / Rules / Notes / Source Control), expanding the rail
+   *  if collapsed. Palette commands (Show AI Chat, Explain this construct) route through here. */
+  selectRight(view: RightView): void;
+  /** Apply the blessed Code ⟷ Canvas split preset (the .koi text and the live diagram side by side). */
+  splitCodeCanvas(): void;
 
   // Loaders + lifecycle ide.ts still triggers (theme flip, prefs target change, boot, server restart).
   loadPreview(): Promise<void>;
@@ -306,62 +313,6 @@ function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
   if (!node) throw new Error(`missing #${id}`);
   return node as T;
-}
-
-// --- SplitControls component --------------------------------------------------
-// Three compact buttons rendered into the right side of #center-tabs so the user
-// can trigger a split-right, split-down, or reset-to-single-pane without a
-// keyboard shortcut. Dynamically shown/hidden: the Reset button appears only
-// when 2+ panes are open; the two Split buttons are always present.
-//
-// Rendered via Preact into a #center-split-controls host that init() creates and
-// appends to #center-tabs. The host is re-rendered whenever centerLayout changes
-// (the same subscription that drives updateCenterSplitLayout / applyCenterChrome).
-
-function SplitControls({
-  hasSplit,
-  onSplitRow,
-  onSplitColumn,
-  onReset,
-}: {
-  hasSplit: boolean;
-  onSplitRow(): void;
-  onSplitColumn(): void;
-  onReset(): void;
-}) {
-  return (
-    <div class="center-split-btns" aria-label="Center layout controls">
-      <button
-        type="button"
-        class="center-split-btn"
-        title="Split right"
-        aria-label="Split center pane right"
-        onClick={onSplitRow}
-      >
-        Split →
-      </button>
-      <button
-        type="button"
-        class="center-split-btn"
-        title="Split down"
-        aria-label="Split center pane down"
-        onClick={onSplitColumn}
-      >
-        Split ↓
-      </button>
-      {hasSplit && (
-        <button
-          type="button"
-          class="center-split-btn center-split-btn--reset"
-          title="Reset to single pane"
-          aria-label="Reset center to single pane"
-          onClick={onReset}
-        >
-          Reset
-        </button>
-      )}
-    </div>
-  );
 }
 
 export function createInspectorController(deps: InspectorControllerDeps): InspectorController {
@@ -464,6 +415,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const restoredCenter = deps.loadWorkspaceCenter();
   const initialCenter: CenterView =
     restoredCenter && isValidCenter(restoredCenter) ? restoredCenter : DEFAULT_CENTER;
+  // The Deck v2 layout (mode / primary / secondary / ratio / flipped) is restored if a dep wires it
+  // (it migrates a pre-Deck split layout + the legacy single-view value); otherwise derive a 1-up on the
+  // restored center. `center` mirrors the deck's primary.
+  const restoredDeck = deps.loadWorkspaceDeck?.();
+  const initialDeck: DeckState = restoredDeck ?? { ...DEFAULT_DECK_STATE, primary: initialCenter };
   // The chrome (center / tech / docs tab states) is owned by the uiChrome slice — the ONE source of
   // truth for both the highlighted tab AND the shown view, so they can never diverge (#193). Reset it to
   // this controller's defaults: the restored center, with the tech/docs sub-views back at their landing
@@ -475,8 +431,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // controller, for which this is a harmless no-op. This restores the per-instance defaults the old
   // module-local `activeBottomTab = 'problems'` / right-rail `'props'` start gave for free.
   appStore.setState({
-    center: initialCenter,
+    deck: initialDeck,
+    center: initialDeck.primary,
     tech: 'editor',
+    output: 'generated',
     docs: 'glossary',
     bottom: 'problems',
     right: 'props',
@@ -1309,6 +1267,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const activeCenter = (): CenterView => appStore.getState().center as CenterView;
   const activeTech = (): TechView => appStore.getState().tech as TechView;
   const activeDocs = (): DocsView => appStore.getState().docs as DocsView;
+  const activeOutput = (): OutputTab => appStore.getState().output as OutputTab;
 
   const centerVisualEl = el('center-visual');
 
@@ -1335,134 +1294,106 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   renderCanvasPalette();
 
   const centerBodyEl = el('center-body');
+  const deckBarEl = el('deck-bar');
   const centerTechnicalEl = el('center-technical');
+  const centerOutputEl = el('center-output');
   const centerDocsEl = el('center-docs');
   const editorPaneEl = el('editor-pane');
   const previewEl = el('view-preview');
-  const centerTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.center-tab'));
-  const techTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.tech-tab'));
-  const docsTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.docs-tab'));
+  // The four center surfaces, handed to the DeckStage which hosts each in its card body (the deck owns
+  // their layout now — no per-pane re-parenting; the FLIP positions the cards instead).
+  const centerHosts: Record<CenterView, HTMLElement> = {
+    visual: centerVisualEl,
+    technical: centerTechnicalEl,
+    output: centerOutputEl,
+    docs: centerDocsEl,
+  };
+
+  // The center surfaces visible under the current deck state: all four in overview, else the primary
+  // (plus the secondary in a 2-up). Lazy-loaders + sub-view chrome key off this, not just `center`, so
+  // the SECONDARY pane of a 2-up loads and shows correctly.
+  function visibleCenters(): CenterView[] {
+    const { deck } = appStore.getState();
+    if (deck.mode === 'overview') return ['visual', 'technical', 'output', 'docs'];
+    return deck.secondary ? [deck.primary, deck.secondary] : [deck.primary];
+  }
 
   // Pure chrome: surface the active center panel + its technical sub-view and mark the tabs, all read
   // from the uiChrome slice (#193) — the single source of truth the mode buttons and tab clicks write,
   // so the highlighted tab and the shown view can never diverge. No data fetch, so the boot frame can
   // land before the workspace document is open.
   function applyCenterChrome(): void {
-    const { centerLayout } = appStore.getState();
-    const isSplit = centerLayout.panes.length >= 2;
-    const center = activeCenter();
     const tech = activeTech();
+    const output = activeOutput();
     const docs = activeDocs();
+    const vis = visibleCenters();
 
-    if (isSplit) {
-      // In split mode the visibility of center-host elements is driven by which pane they live in;
-      // hide/show is NOT controlled here — updateCenterSplitLayout handles the DOM move + each pane's
-      // .center-pane-content is the new containing block. We still need to hide/show the sub-views
-      // within the technical and docs panes though.
-      updateCenterSplitLayout();
-    } else {
-      // Single-pane: the classic hide/show path.
-      centerVisualEl.hidden = center !== 'visual';
-      centerTechnicalEl.hidden = center !== 'technical';
-      centerDocsEl.hidden = center !== 'docs';
-      // The assistant is its own top-level center pane now (#235) — a peer of Visual/Code/Documentation,
-      // reachable in one click from any view, not a Code sub-tab. Its host (#view-assistant) is the
-      // center-host itself, so it's shown/hidden purely by the active center.
-      assistantView.hidden = center !== 'assistant';
-    }
-
-    // The bottom strip (Problems/Events/Relationships/Context Map/Terminal) is GLOBAL: it serves every
-    // center view and is hidden only by its own collapse toggle (#diag-collapse), never by the active
-    // view. (Previously hidden on Documentation + Assistant for full-height reading/chat; the collapse
-    // control reclaims that height on demand instead.)
+    // The bottom strip (Problems/Events/Relationships/Terminal/Review) is GLOBAL: it serves every center
+    // view and is hidden only by its own collapse toggle (#diag-collapse), never by the active view.
     diagEl.hidden = false;
-    // …but on a NARROW viewport the two reading-heavy views (Documentation, Assistant) DEFAULT the strip
-    // collapsed so the reading/chat pane keeps full height on a phone (#475). Re-evaluated on every center
-    // switch and gated so an explicit user collapse preference always wins; desktop + Visual/Code keep the
-    // expanded default. Only the strip's *default collapse* changes here — its global visibility (above) does not.
+    // …but on a NARROW viewport the reading-heavy Documentation view DEFAULTS the strip collapsed so the
+    // reading pane keeps full height on a phone (#475). Re-evaluated on every center switch and gated so an
+    // explicit user collapse preference always wins; desktop + the working views keep the expanded default.
     applyDefaultDiagCollapsed();
-    for (const t of centerTabs) t.setAttribute('aria-selected', String(t.dataset.center === center));
-    // In split mode, a sub-view must be visible when ANY pane shows its parent center panel —
-    // not just the focused pane. Using only `center` (= focused pane's view) would hide, e.g.,
-    // the editor in pane B whenever pane A (focused) is on 'visual'.
-    const techVisible = isSplit
-      ? centerLayout.panes.some((p) => p.view === 'technical')
-      : center === 'technical';
+
+    // Each surface keeps its body sub-views; a sub-view is shown when its surface is visible (primary,
+    // secondary, or any in overview) AND it is that surface's active facet. The facet sub-strip itself
+    // now lives in the DeckCard header (the in-host tab rows were removed), so there are no tab buttons
+    // to mark here — the header reflects the active facet via Preact.
+    const techVisible = vis.includes('technical');
     editorPaneEl.hidden = !(techVisible && tech === 'editor');
-    previewEl.hidden = !(techVisible && tech === 'preview');
-    checkView.hidden = !(techVisible && tech === 'check');
     scenariosView.hidden = !(techVisible && tech === 'scenarios');
-    for (const t of techTabs) t.setAttribute('aria-selected', String(t.dataset.tech === tech));
-    // Documentation sub-views: Glossary (the ubiquitous language), Decisions (the ADR list) and Notes.
-    const docsVisible = isSplit
-      ? centerLayout.panes.some((p) => p.view === 'docs')
-      : center === 'docs';
+    const outputVisible = vis.includes('output');
+    previewEl.hidden = !(outputVisible && output === 'generated');
+    checkView.hidden = !(outputVisible && output === 'compatibility');
+    contextMapView.hidden = !(outputVisible && output === 'contextmap');
+    const docsVisible = vis.includes('docs');
     glossaryView.hidden = !(docsVisible && docs === 'glossary');
     adrView.hidden = !(docsVisible && docs === 'adr');
     notesView.hidden = !(docsVisible && docs === 'notes');
-    for (const t of docsTabs) t.setAttribute('aria-selected', String(t.dataset.docs === docs));
     // CodeMirror measures lazily; revealing it from display:none leaves stale geometry until the next
     // layout tick, so force a re-measure whenever the editor becomes visible.
     if (!editorPaneEl.hidden) editor.view.requestMeasure();
   }
 
-  // Sync the split pane DOM with the current centerLayout. Called from applyCenterChrome in multi-pane
-  // mode, and from the centerLayout subscription in init() so layout changes trigger a re-render.
-  function updateCenterSplitLayout(): void {
-    applySplitPaneLayout({
-      centerBodyEl,
-      getLayout: () => appStore.getState().centerLayout,
-      onPaneViewSelect: (paneId: string, view: CenterView) => {
-        // Focus the pane first so lazy-loader guards (which check focusedPaneId) always fire,
-        // even when the user clicks a tab in a non-focused pane (Bug 5 fix).
-        appStore.getState().focusPane(paneId);
-        appStore.getState().setPaneView(paneId, view);
-        applyCenterChrome();
-        // Trigger any lazy loaders for the newly visible view (now always the focused pane).
-        if (view === 'visual' && appStore.getState().isStale('diagrams')) void loadDiagrams();
-        else if (view === 'technical') ensureTechLoaded();
-        else if (view === 'docs') ensureDocsLoaded();
-        else if (view === 'assistant') ensureAssistantShown();
-      },
-      onPaneFocus: (paneId: string) => {
-        appStore.getState().focusPane(paneId);
-        applyCenterChrome();
-      },
-      onResize: (sizes: number[]) => {
-        appStore.getState().resizeCenter(sizes);
-      },
-    });
+  // Lazy-load every surface currently visible under the deck state (covers the secondary pane of a 2-up
+  // and all four in overview), plus the model-derived facet of each. Self-gating loaders make repeat
+  // calls cheap. Triggered by the deck/facet subscription on any center change.
+  function ensureVisibleLoaded(): void {
+    if (visibleCenters().includes('visual') && appStore.getState().isStale('diagrams')) void loadDiagrams();
+    ensureTechLoaded();
+    ensureOutputLoaded();
+    ensureDocsLoaded();
+  }
+
+  // Apply the center chrome AND load whatever is now visible — the single sync point the deck/facet
+  // subscription drives.
+  function syncCenterChrome(): void {
+    applyCenterChrome();
+    ensureVisibleLoaded();
   }
 
   function selectCenter(view: CenterView): void {
-    const { centerLayout } = appStore.getState();
-    if (centerLayout.panes.length >= 2) {
-      // In split mode: change the view of the focused pane.
-      appStore.getState().setPaneView(centerLayout.focusedPaneId, view);
-    } else {
-      appStore.getState().setCenter(view);
-    }
-    applyCenterChrome();
-    if (view === 'visual' && appStore.getState().isStale('diagrams')) void loadDiagrams();
-    else if (view === 'technical') ensureTechLoaded();
-    else if (view === 'docs') ensureDocsLoaded();
-    else if (view === 'assistant') ensureAssistantShown();
+    // Plain "show this surface" = focus it 1-up; the deck subscription applies the chrome + lazy-loads.
+    appStore.getState().focusPrimary(view);
   }
 
   // The assistant is interactive (not a cached, model-derived surface): every show re-points it at the
   // current folder's conversation and focuses the input — the single choke point for that swap. Created
-  // lazily by ide.ts the first time this runs (the Anthropic SDK only loads on send).
+  // lazily by ide.ts the first time this runs (the Anthropic SDK only loads on send). It now lives in the
+  // right rail, so the guard checks the active RightView rather than the center.
   function ensureAssistantShown(): void {
-    if (activeCenter() !== 'assistant') return;
+    if (appStore.getState().right !== 'assistant') return;
     const a = deps.ensureAssistant();
     a.syncWorkspace();
     a.focusInput();
   }
 
-  // Lazy-load the active Documentation sub-view: the glossary is model-derived; the Decisions and Notes
-  // pages are folder-derived and load independently on their first open.
+  // Lazy-load the visible Documentation sub-view: the glossary is model-derived; the Decisions and Notes
+  // pages are folder-derived and load independently on their first open. Gated on visibility (primary,
+  // secondary, or overview) so the Docs surface loads even as the SECONDARY pane of a 2-up.
   function ensureDocsLoaded(): void {
-    if (activeCenter() !== 'docs') return;
+    if (!visibleCenters().includes('docs')) return;
     const docs = activeDocs();
     if (docs === 'glossary' && appStore.getState().isStale('glossary')) void loadGlossary();
     else if (docs === 'adr' && !adrLoaded) void loadAdr();
@@ -1470,28 +1401,36 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   function selectDocsTab(view: DocsView): void {
-    // setDocs sets docs AND forces center='docs' in one transition, so the docs tab + the center pane
-    // never disagree.
+    // setDocs sets the facet and brings Docs up if it isn't shown; the deck subscription applies the
+    // chrome + lazy-loads.
     appStore.getState().setDocs(view);
-    applyCenterChrome();
-    ensureDocsLoaded();
   }
 
   function selectTech(view: TechView): void {
-    // setTech sets tech AND forces center='technical' in one transition.
     appStore.getState().setTech(view);
-    applyCenterChrome();
-    ensureTechLoaded();
   }
 
-  // Lazy-load the active technical sub-view: the emitted preview is the only model-derived one; the
-  // editor is live and the check is on-demand. (The assistant is its own center pane now — see
-  // ensureAssistantShown.)
+  // Lazy-load the visible Code sub-view. The editor is live (CodeMirror, always mounted); only the
+  // scenario runner needs a refresh on show. The compiler-produced surfaces (Generated / Compatibility /
+  // Context Map) moved to the Output view — see ensureOutputLoaded.
   function ensureTechLoaded(): void {
-    if (activeCenter() !== 'technical') return;
-    if (activeTech() === 'preview' && appStore.getState().isStale('preview')) void loadPreview();
-    else if (activeTech() === 'scenarios') deps.ensureScenarios?.().refresh();
-    else if (activeTech() === 'check') renderCheckIdleIfEmpty();
+    if (!visibleCenters().includes('technical')) return;
+    if (activeTech() === 'scenarios') deps.ensureScenarios?.().refresh();
+  }
+
+  function selectOutput(view: OutputTab): void {
+    appStore.getState().setOutput(view);
+  }
+
+  // Lazy-load the visible Output sub-view: the emitted preview is model-derived (stale-gated), the
+  // compatibility check is on-demand (idle state until a baseline is picked), and the context map is the
+  // model-derived graph/table (stale-gated) relocated here from the bottom panel.
+  function ensureOutputLoaded(): void {
+    if (!visibleCenters().includes('output')) return;
+    const output = activeOutput();
+    if (output === 'generated' && appStore.getState().isStale('preview')) void loadPreview();
+    else if (output === 'compatibility') renderCheckIdleIfEmpty();
+    else if (output === 'contextmap' && appStore.getState().isStale('contextmap')) void loadContextMapPanel();
   }
 
   // Surface the Documentation center tab (the "Docs" mode focus and the rail's "Ubiquitous Language"
@@ -1500,22 +1439,23 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     selectDocsTab('glossary');
   }
 
-  // The Context Map lives in the bottom strip, which is now visible in every center view, so opening it
-  // is just a bottom-tab switch from wherever the user is — selectBottomTab expands the strip if it's
-  // collapsed. (It used to leave Documentation first, because the strip was hidden there.)
+  // The Context Map is the contextmap sub-view of the Output center pane now — opening it is a center
+  // switch (selectOutput forces center='output' and lazy-loads the graph if stale).
   function focusContextMap(): void {
-    selectBottomTab('contextmap');
+    selectOutput('contextmap');
   }
 
   // Repaint the always-visible left rail (Explorer + Overview + the right-rail Properties inspector) +
-  // whatever the center is currently showing.
+  // every center surface currently showing (both panes of a 2-up, all four in overview).
   function refreshActiveSurfaces(): void {
     void loadModel();
-    if (activeCenter() === 'visual') void loadDiagrams();
+    const vis = visibleCenters();
+    if (vis.includes('visual')) void loadDiagrams();
     // The glossary is model-derived (refresh on edit); the ADR/Notes Docs panel is folder-derived, so an
     // edit never invalidates it — it reloads on folder change / its own create/save.
-    else if (activeCenter() === 'docs' && activeDocs() === 'glossary') void loadGlossary();
-    else if (activeCenter() === 'technical') ensureTechLoaded();
+    if (vis.includes('docs') && activeDocs() === 'glossary') void loadGlossary();
+    if (vis.includes('technical')) ensureTechLoaded();
+    if (vis.includes('output')) ensureOutputLoaded();
   }
 
   // Mark the cached, model-derived surfaces stale (e.g. after an edit or a file switch). A model edit
@@ -1547,15 +1487,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     }, 350);
   }
 
-  for (const t of centerTabs) {
-    t.addEventListener('click', () => selectCenter(t.dataset.center as CenterView));
-  }
-  for (const t of techTabs) {
-    t.addEventListener('click', () => selectTech(t.dataset.tech as TechView));
-  }
-  for (const t of docsTabs) {
-    t.addEventListener('click', () => selectDocsTab(t.dataset.docs as DocsView));
-  }
+  // The center surface switcher + facet sub-strips are now the DeckBar / DeckCard Preact components
+  // (mounted in init()); they call focusPrimary / openBeside / setTech|Output|Docs on the store directly,
+  // and the deck/facet subscription applies the chrome — so there are no imperative tab click handlers
+  // to wire here anymore.
 
   // The left rail's documentation footer: shortcuts into the model's prose surfaces. ADR + Notes each
   // open their own Documentation page; the contextmap/glossary actions are retained (the footer no
@@ -1585,12 +1520,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const rightTitleEl = document.getElementById('right-title');
   const rightViewLabels: Record<RightView, string> = {
     props: 'Properties',
+    assistant: 'AI Chat',
     rules: 'Rules',
     notes: 'Notes',
     'source-control': 'Source Control',
   };
   const rightViews: Record<RightView, HTMLElement> = {
     props: inspectorHost,
+    assistant: assistantView,
     rules: el('rview-rules'),
     notes: el('rview-notes'),
     'source-control': sourceControlRightView,
@@ -1603,6 +1540,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // status on every re-open (so a save / external `git` since the last view is reflected — the panel
     // itself owns the in-place refresh). The canUseGit gate + the non-repo empty state live in the panel.
     if (view === 'source-control') loadSourceControl();
+    // The AI assistant is lazily created + interactive (#235): mount it on first open and re-sync the
+    // conversation to the current folder + focus the input on every re-open.
+    else if (view === 'assistant') ensureAssistantShown();
+  }
+  // Reveal a right-rail view, expanding the rail first if it was collapsed — the entry point palette
+  // commands (Show AI Chat, Explain this construct) route through so the panel is always actually visible.
+  function selectRight(view: RightView): void {
+    if (appStore.getState().rightCollapsed) appStore.getState().setRightCollapsed(false);
+    selectRightView(view);
   }
 
   // Right-edge tool-window stripe (#500): Rider-style toggles that open/close (and switch) the #right
@@ -1661,41 +1607,27 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     }
   });
 
-  // --- split/reset controls in the center tab bar (#720 Task 5) ---------------
-  // A small cluster of buttons in the right side of #center-tabs lets the user trigger a split-right,
-  // split-down, or reset-to-single-pane without a keyboard shortcut. The host is created dynamically so
-  // the HTML doesn't need to pre-declare it; the Preact component is re-rendered whenever the layout
-  // changes (via the centerLayout subscription below) so the Reset button appears/disappears correctly.
-  let splitControlsHost: HTMLElement | null = null;
-
-  function renderSplitControls(): void {
-    if (!splitControlsHost) return;
-    const { centerLayout } = appStore.getState();
-    render(
-      <SplitControls
-        hasSplit={centerLayout.panes.length >= 2}
-        onSplitRow={() => { appStore.getState().splitCenter('row'); }}
-        onSplitColumn={() => { appStore.getState().splitCenter('column'); }}
-        onReset={() => { appStore.getState().setCenterLayout(DEFAULT_CENTER_LAYOUT); }}
-      />,
-      splitControlsHost,
-    );
+  // The blessed Code ⟷ Canvas preset: the .koi text beside the live domain diagram — the one layout that
+  // shows Koine's round-trip. In the deck this is a 2-up with Code selected on the left and Canvas on the
+  // right. Shared by the palette command (it's exposed on the controller).
+  function splitCodeCanvas(): void {
+    appStore.getState().focusPrimary('technical');
+    appStore.getState().openBeside('visual');
+    // The subscription applied the chrome (synchronous on set); make sure the canvas pane has rendered
+    // nodes (the editor pane is the always-live CodeMirror).
+    if (appStore.getState().isStale('diagrams')) void loadDiagrams();
   }
 
-  // Subscribe to centerLayout changes so any external mutation (e.g. splitCenter(), setCenterLayout(),
-  // focusPane()) immediately re-renders the split DOM and re-applies the chrome — mirrors the
-  // unsubscribeRightCollapsed pattern above. Also re-renders the split controls so the Reset button
-  // tracks the pane count. Disposed in dispose() to prevent callbacks firing into a torn-down DOM after
-  // the controller is destroyed.
-  const unsubscribeCenterLayout = appStore.subscribe(
+  // Subscribe to deck + facet changes so any mutation — from the DeckBar / DeckCard, a palette command,
+  // or a keyboard shortcut — re-applies the center chrome, lazy-loads the now-visible surfaces, and
+  // persists the deck. Disposed in dispose() so a deferred callback can't fire into a torn-down DOM.
+  const unsubscribeDeck = appStore.subscribe(
     (s: import('@/store/index').AppState, prev: import('@/store/index').AppState) => {
-      if (s.centerLayout !== prev.centerLayout) {
-        updateCenterSplitLayout();
-        applyCenterChrome();
-        renderSplitControls();
-        // Persist the new layout so a reload restores the split state (Bug 3 fix).
-        deps.saveWorkspaceCenterLayout?.(s.centerLayout);
-      }
+      const centerChanged =
+        s.deck !== prev.deck || s.tech !== prev.tech || s.output !== prev.output || s.docs !== prev.docs;
+      if (!centerChanged) return;
+      syncCenterChrome();
+      if (s.deck !== prev.deck) deps.saveWorkspaceDeck?.(s.deck);
     },
   );
 
@@ -1739,7 +1671,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   async function runCheck(): Promise<void> {
     if (!platform.canOpenFolders) {
       docMessage(checkView, 'Selecting a baseline folder needs a Chromium-based browser.', 'error');
-      selectTech('check');
+      selectOutput('compatibility');
       return;
     }
     let folder: string | null;
@@ -1747,11 +1679,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       folder = await platform.pickFolder('Select baseline model folder');
     } catch (e) {
       docMessage(checkView, 'Could not open the folder picker: ' + String(e), 'error');
-      selectTech('check');
+      selectOutput('compatibility');
       return;
     }
     if (!folder) return; // cancelled — abort silently
-    selectTech('check');
+    selectOutput('compatibility');
     docMessage(checkView, 'Checking against baseline…');
     try {
       // The browser has no server-side filesystem: read the baseline sources here and pass them to the
@@ -1770,15 +1702,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
 
   // --- emitted-code preview --------------------------------------------------
   let currentTarget: PreviewTarget = deps.initialTarget;
-  const previewTabEl = el<HTMLButtonElement>('tech-tab-preview');
 
   function setTarget(target: PreviewTarget): void {
+    // The Output surface's "Generated" facet now lives in the DeckCard header (a static label); the
+    // active emit target is owned by the preview loader below rather than surfaced as a tab caption.
     currentTarget = target;
-    // Label the Generated tab from the LIVE EMIT_TARGETS (seeded from the backend at boot, issue
-    // #282) so a registry target labels correctly with no edit here; fall back to the raw id for a
-    // target with no display name.
-    const displayName = EMIT_TARGETS.find((t) => t.id === target)?.displayName ?? target;
-    previewTabEl.textContent = `Generated · ${displayName}`;
   }
 
   // Emit the current target into the preview pane. Folded into the doc-view lifecycle (like the
@@ -1830,7 +1758,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // A destination-language switch re-emits ONLY the preview (not a model edit), so mark just the
     // 'preview' key stale — a single-key invalidate that leaves every other surface fresh.
     appStore.getState().invalidate('preview');
-    if (activeCenter() === 'technical' && activeTech() === 'preview') void loadPreview();
+    if (activeCenter() === 'output' && activeOutput() === 'generated') void loadPreview();
   }
 
   // --- bottom panel (Problems / Events / Relationships / Context Map, #144) --
@@ -1875,18 +1803,18 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       return false;
     }
   }
-  // The bottom strip's *default* collapsed state is viewport-aware (#475): below BP_NARROW the two
-  // reading-heavy center views (Documentation, Assistant) default the strip COLLAPSED so the reading/chat
-  // pane gets full height on a phone; Visual/Code and every desktop width keep the expanded default. This
-  // sets only a DEFAULT — an explicit user preference always wins, so it's gated on the absence of one.
+  // The bottom strip's *default* collapsed state is viewport-aware (#475): below BP_NARROW the
+  // reading-heavy Documentation center view defaults the strip COLLAPSED so the reading pane gets full
+  // height on a phone; Visual/Code and every desktop width keep the expanded default. This sets only a
+  // DEFAULT — an explicit user preference always wins, so it's gated on the absence of one.
   // Re-evaluated whenever the center chrome is applied (a center switch / boot) and on a narrow↔wide cross.
   function applyDefaultDiagCollapsed(): void {
     if (hasExplicitDiagCollapsePref()) return; // the user's persisted choice wins
     const center = activeCenter();
-    applyDiagCollapsed(isNarrowViewport() && (center === 'docs' || center === 'assistant'));
+    applyDiagCollapsed(isNarrowViewport() && center === 'docs');
   }
   applyDiagCollapsed((localStorage.getItem(DIAG_COLLAPSED_KEY) ?? '0') === '1');
-  applyDefaultDiagCollapsed(); // override the expanded default with the narrow Docs/Assistant default (#475)
+  applyDefaultDiagCollapsed(); // override the expanded default with the narrow Docs default (#475)
   diagCollapse.addEventListener('click', () => {
     const collapsed = !diagEl.classList.contains('collapsed');
     applyDiagCollapsed(collapsed);
@@ -1907,7 +1835,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     diagBodyEl.hidden = tab !== 'problems';
     eventsPanel.hidden = tab !== 'events';
     relationshipsPanel.hidden = tab !== 'relationships';
-    contextMapView.hidden = tab !== 'contextmap';
     terminalPanel.hidden = tab !== 'terminal';
     reviewPanel.hidden = tab !== 'review';
     diagCountEl.hidden = tab !== 'problems';
@@ -1958,7 +1885,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function ensureBottomLoaded(tab: BottomTab): void {
     if (tab === 'events' && appStore.getState().isStale('events')) void loadEventsPanel();
     if (tab === 'relationships' && appStore.getState().isStale('relationships')) void loadRelationshipsPanel();
-    if (tab === 'contextmap' && appStore.getState().isStale('contextmap')) void loadContextMapPanel();
     // The terminal panel is created lazily by ide.ts the first time its tab is shown (mirrors the
     // assistant/scenarios panels); fit() reflows xterm now that the panel has layout. Desktop-only —
     // the browser host omits ensureTerminal and the panel shows its placeholder.
@@ -2214,13 +2140,27 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // tracks scope/selection via the store thereafter; setContextOptions + loadModel re-render it when
     // the contexts list or model index changes.
     renderBreadcrumb();
-    // Create the split-controls host dynamically and append it to the right end of #center-tabs, then
-    // do the initial render. The centerLayout subscription above keeps it in sync thereafter.
-    const centerTabsEl = el('center-tabs');
-    splitControlsHost = document.createElement('div');
-    splitControlsHost.id = 'center-split-controls';
-    centerTabsEl.appendChild(splitControlsHost);
-    renderSplitControls();
+    // Mount the Deck: detach the four center-host sections first so rendering the stage into #center-body
+    // doesn't destroy them, then let the DeckStage re-parent each into its card body (via a ref). The
+    // DeckBar (Overview + filmstrip) renders into #deck-bar. Both are store-bound — the deck/facet
+    // subscription above applies the chrome thereafter.
+    for (const h of Object.values(centerHosts)) h.remove();
+    render(
+      <DeckStage
+        store={appStore}
+        surfaces={centerHosts}
+        onVisibleSurfacesChange={(views) => {
+          // The FLIP resized the cards; re-measure the editor once its final geometry is set.
+          if (views.includes('technical')) editor.view.requestMeasure();
+        }}
+      />,
+      centerBodyEl,
+    );
+    render(<DeckBarConnected store={appStore} />, deckBarEl);
+    // Paint the initial chrome from the restored deck (no fetch at boot — ide.ts's boot ladder runs
+    // refreshActiveSurfaces once the workspace document is open; the deck/facet subscription lazy-loads on
+    // every subsequent change).
+    applyCenterChrome();
   }
 
   // Cancel any pending debounce/reset timers. The IDE runs for the page lifetime in production (so this
@@ -2242,9 +2182,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Drop the right-strip collapse subscription (#500) — its callback mutates the captured #split /
     // .rstrip-btn nodes and persists, which must not fire into a torn-down host after dispose.
     unsubscribeRightCollapsed();
-    // Drop the center-layout split-pane subscription (#720) — its callback re-renders the split pane DOM,
-    // which must not fire into a torn-down host after dispose.
-    unsubscribeCenterLayout();
+    // Drop the deck/facet subscription — its callback re-applies the center chrome + lazy-loads, which
+    // must not fire into a torn-down host after dispose. Unmount the deck Preact trees too so their
+    // window listeners (the DeckStage keyboard handler) detach.
+    unsubscribeDeck();
+    render(null, centerBodyEl);
+    render(null, deckBarEl);
     // The viewport-resize listener is registered unconditionally now (#475 re-evaluates the strip default
     // on a narrow↔wide cross even without the inspector sheet), so always detach it; the sheet teardown is
     // still sheet-gated.
@@ -2258,8 +2201,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     selectCenter,
     setAxis,
     selectTech,
+    selectOutput,
     selectDocsTab,
     selectBottomTab,
+    selectRight,
+    splitCodeCanvas,
     loadPreview,
     loadDiagrams,
     setTarget,

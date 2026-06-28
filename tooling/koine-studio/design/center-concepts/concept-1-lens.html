@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept 1 — Lens</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* ---- Lens: one model, four lenses. A centered segmented switcher; any lens
+         can be summoned beside the current one to compare. No tab row. ---- */
+  .lens-bar {
+    flex: 0 0 auto;
+    display: flex; align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--koi-line);
+    background: var(--koi-paper-2);
+  }
+  .lens-seg {
+    display: inline-flex;
+    background: var(--koi-paper);
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius-pill);
+    padding: 3px;
+    margin: 0 auto;
+  }
+  .lens {
+    position: relative;
+    all: unset;
+    cursor: pointer;
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 6px 16px;
+    border-radius: var(--koi-radius-pill);
+    font-size: 12.5px; font-weight: 600;
+    color: var(--koi-muted);
+    transition: color .14s ease, background .14s ease;
+  }
+  .lens svg { width: 15px; height: 15px; }
+  .lens:hover { color: var(--koi-fg); }
+  .lens.active { color: var(--koi-on-accent); background: var(--koi-accent); }
+  .lens .lens-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--koi-error); }
+  /* compare affordance — a ⊞ that appears on hover to open this lens beside the current one */
+  .lens .cmp {
+    all: unset; cursor: pointer;
+    width: 17px; height: 17px; border-radius: 4px;
+    display: none; place-items: center;
+    margin-left: 2px; margin-right: -6px;
+    opacity: .8;
+  }
+  .lens:hover .cmp, .lens.active .cmp { display: inline-grid; }
+  .lens .cmp:hover { background: color-mix(in srgb, var(--koi-fg) 18%, transparent); opacity: 1; }
+  .lens .cmp svg { width: 13px; height: 13px; }
+
+  .lens-subs { display: flex; align-items: center; gap: 4px; min-width: 150px; justify-content: flex-end; }
+  .lens-sub {
+    all: unset; cursor: pointer;
+    font-size: 11px; color: var(--koi-muted);
+    padding: 3px 9px; border-radius: var(--koi-radius-pill);
+  }
+  .lens-sub:hover { color: var(--koi-fg); }
+  .lens-sub.on { color: var(--koi-accent); background: color-mix(in srgb, var(--koi-accent) 12%, transparent); }
+  .lens-side-tag { font-size: 10px; color: var(--koi-muted); min-width: 150px; }
+
+  .lens-body { flex: 1 1 auto; position: relative; display: flex; min-height: 0; }
+  .lens-pane { position: relative; flex: 1 1 0; min-width: 0; overflow: hidden; }
+  .lens-split-rule { flex: 0 0 1px; background: var(--koi-line); }
+  /* linked-pair ribbon: when Code + Canvas are shown together, they are the SAME model */
+  .lens-linked {
+    position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 6;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10.5px; color: var(--koi-accent);
+    background: color-mix(in srgb, var(--koi-paper) 82%, transparent);
+    border: 1px solid color-mix(in srgb, var(--koi-accent) 40%, var(--koi-line));
+    border-radius: var(--koi-radius-pill); padding: 3px 11px;
+    backdrop-filter: blur(3px);
+  }
+  .lens-linked svg { width: 12px; height: 12px; }
+  .lens-pane-close {
+    all: unset; cursor: pointer;
+    position: absolute; top: 7px; right: 8px; z-index: 6;
+    width: 20px; height: 20px; border-radius: 5px;
+    display: grid; place-items: center; color: var(--koi-muted);
+    background: color-mix(in srgb, var(--koi-paper) 70%, transparent);
+  }
+  .lens-pane-close:hover { color: var(--koi-fg); background: var(--koi-line); }
+  .lens-pane-close svg { width: 12px; height: 12px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="mock.js"></script>
+<script>
+  const M = window.KoineMock;
+  const center = M.shell(document.getElementById('root'), { concept: 'Concept 1 · Lens' });
+  center.innerHTML =
+    '<div class="concept-note"><b>Lens.</b> Four lenses on one model — not four documents. '
+    + 'Click a lens to switch; hover and hit the ⊞ to open it <i>beside</i> the current one. '
+    + 'Switching one side never disturbs the other.</div>'
+    + '<div class="lens-bar"><div class="lens-side-tag" id="sideTag"></div>'
+    + '<div class="lens-seg" id="seg"></div>'
+    + '<div class="lens-subs" id="subs"></div></div>'
+    + '<div class="lens-body" id="body"></div>';
+
+  // cached surface hosts — moved between panes, never re-created (no refresh)
+  const pool = {};
+  function host(id) {
+    if (!pool[id]) { const d = document.createElement('div'); d.className = 'surface'; M.fill(d, id, { tag: true }); pool[id] = d; }
+    return pool[id];
+  }
+
+  let primary = 'code';
+  let secondary = 'canvas';   // start in the signature Code ⟷ Canvas pairing
+  const subSel = { output: 'Generated', code: 'Editor', docs: 'Glossary' };
+
+  const seg = center.querySelector('#seg');
+  const subs = center.querySelector('#subs');
+  const body = center.querySelector('#body');
+  const sideTag = center.querySelector('#sideTag');
+
+  function buildSeg() {
+    seg.innerHTML = '';
+    for (const s of M.SURFACES) {
+      const b = document.createElement('button');
+      b.className = 'lens' + ((s.id === primary || s.id === secondary) ? ' active' : '');
+      // the ⊞ is a <span role="button">, not a nested <button> (invalid HTML — the
+      // click would resolve to the outer lens button instead of the compare action)
+      b.innerHTML = s.icon + '<span>' + s.label + '</span>'
+        + (s.dot ? '<span class="lens-dot"></span>' : '')
+        + '<span class="cmp" role="button" tabindex="-1" title="Open beside">' + M.ICONS.split + '</span>';
+      b.addEventListener('click', (e) => {
+        if (e.target.closest('.cmp')) { secondary = (secondary === s.id) ? null : s.id; if (secondary === primary) secondary = null; render(); return; }
+        primary = s.id; if (secondary === primary) secondary = null; render();
+      });
+      seg.appendChild(b);
+    }
+  }
+
+  function buildSubs() {
+    const active = M.surface(primary);
+    subs.innerHTML = '';
+    sideTag.textContent = secondary ? 'comparing ' + M.surface(secondary).label : '';
+    if (active.subs.length <= 1) return;
+    for (const name of active.subs) {
+      const b = document.createElement('button');
+      b.className = 'lens-sub' + (subSel[primary] === name ? ' on' : '');
+      b.textContent = name;
+      b.addEventListener('click', () => { subSel[primary] = name; buildSubs(); });
+      subs.appendChild(b);
+    }
+  }
+
+  function render() {
+    buildSeg(); buildSubs();
+    body.innerHTML = '';
+    const paneA = document.createElement('div'); paneA.className = 'lens-pane';
+    paneA.appendChild(host(primary));
+    body.appendChild(paneA);
+    if (secondary) {
+      const rule = document.createElement('div'); rule.className = 'lens-split-rule';
+      const paneB = document.createElement('div'); paneB.className = 'lens-pane';
+      paneB.appendChild(host(secondary));
+      const close = document.createElement('button'); close.className = 'lens-pane-close'; close.innerHTML = M.ICONS.close;
+      close.addEventListener('click', () => { secondary = null; render(); });
+      paneB.appendChild(close);
+      body.appendChild(rule); body.appendChild(paneB);
+      const pair = new Set([primary, secondary]);
+      if (pair.has('code') && pair.has('canvas')) {
+        const link = document.createElement('div'); link.className = 'lens-linked';
+        link.innerHTML = M.ICONS.spark + 'Linked — same model, two lenses';
+        body.appendChild(link);
+      }
+    }
+    // canvas edges may need a redraw after re-parenting
+    requestAnimationFrame(() => body.querySelectorAll('[data-canvas]').forEach((c) => M.drawEdges(c)));
+  }
+  render();
+</script>
+</body>
+</html>

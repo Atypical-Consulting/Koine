@@ -223,32 +223,33 @@ const APP_HTML = `
     <main id="split">
       <aside id="leftrail" class="pane">${leftRailMarkup()}</aside>
       <section id="center" class="pane">
-        <div id="center-tabs" role="tablist"></div>
+        <div id="deck-bar"></div>
         <div id="center-body">
-          <section id="center-visual" class="center-host" role="tabpanel">
+          <section id="center-visual" class="center-host">
             <div id="canvas-palette-host"></div>
             <div id="diagram-host"></div>
           </section>
-          <section id="center-technical" class="center-host" role="tabpanel" hidden>
-            <div id="tech-tabs" role="tablist">
-              <button type="button" class="tech-tab" id="tech-tab-preview" role="tab" data-tech="preview" aria-selected="false">Generated</button>
-            </div>
+          <section id="center-technical" class="center-host" hidden>
             <div id="tech-body">
               <section id="editor-pane" class="tech-view"></section>
-              <div id="view-preview" class="tech-view" role="tabpanel" hidden></div>
-              <div id="view-check" class="tech-view doc-view" role="tabpanel" hidden></div>
-              <div id="view-scenarios" class="tech-view" role="tabpanel" hidden></div>
+              <div id="view-scenarios" class="tech-view" hidden></div>
             </div>
           </section>
-          <section id="center-docs" class="center-host" role="tabpanel" hidden>
-            <div id="docs-tabs" role="tablist"></div>
+          <section id="center-output" class="center-host" hidden>
+            <div id="output-body">
+              <div id="view-preview" class="tech-view"></div>
+              <div id="view-check" class="tech-view doc-view" hidden></div>
+              <div id="panel-contextmap" class="tech-view doc-view" hidden></div>
+            </div>
+          </section>
+          <section id="center-docs" class="center-host" hidden>
             <div id="docs-body">
-              <div id="view-glossary" class="tech-view doc-view" role="tabpanel"></div>
-              <div id="view-docs" class="tech-view doc-view" role="tabpanel" hidden></div>
-              <div id="view-notes" class="tech-view doc-view" role="tabpanel" hidden></div>
+              <div id="view-glossary" class="tech-view doc-view"></div>
+              <div id="view-docs" class="tech-view doc-view" hidden></div>
+              <div id="view-notes" class="tech-view doc-view" hidden></div>
             </div>
           </section>
-          <section id="view-assistant" class="center-host" role="tabpanel" hidden></section>
+          <section id="view-assistant" class="center-host" hidden></section>
         </div>
         <footer id="diagnostics">
           <div class="koi-resizer koi-resizer-y" id="diag-resizer"></div>
@@ -260,7 +261,6 @@ const APP_HTML = `
           <div id="diag-body" class="diag-panel" role="tabpanel"></div>
           <div id="panel-events" class="diag-panel" role="tabpanel" hidden></div>
           <div id="panel-relationships" class="diag-panel" role="tabpanel" hidden></div>
-          <div id="panel-contextmap" class="diag-panel doc-view" role="tabpanel" hidden></div>
           <div id="panel-terminal" class="diag-panel diag-panel-terminal" role="tabpanel" hidden></div>
           <div id="panel-review" class="diag-panel" role="tabpanel" hidden></div>
         </footer>
