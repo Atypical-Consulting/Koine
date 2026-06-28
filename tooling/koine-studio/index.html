@@ -187,14 +187,9 @@
                 <button type="button" class="tech-tab" id="tech-tab-scenarios" role="tab" data-tech="scenarios" aria-selected="false">Scenarios</button>
               </div>
               <div id="tech-body">
-                <!-- The editor pane is also the editor-split container: group A's CodeMirror mounts
-                     directly here, with the (hidden-until-split) group divider and group-B host as its
-                     siblings. When #split[data-split='true'], _split.scss turns #editor-pane into a
-                     grid laid out by data-orientation (side-by-side or stacked). -->
-                <section id="editor-pane" class="tech-view" aria-label="Editor">
-                  <div class="koi-resizer" id="group-resizer" aria-hidden="true"></div>
-                  <section id="editor-pane-b" aria-label="Editor (second group)"></section>
-                </section>
+                <!-- The .koi editor: group A's CodeMirror mounts directly here. (The old editor A/B split
+                     was retired — the center split-pane system (#720) is the one splitting primitive now.) -->
+                <section id="editor-pane" class="tech-view" aria-label="Editor"></section>
                 <div id="view-scenarios" class="tech-view" role="tabpanel" hidden></div>
               </div>
             </section>

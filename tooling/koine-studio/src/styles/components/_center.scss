@@ -184,68 +184,6 @@
   height: 100%;
 }
 
-/* --- editor split (two groups, issue #265) ---
-   #editor-pane is both group A's host (CodeMirror mounts directly into it) AND the split container:
-   the group divider (#group-resizer) and group B's host (#editor-pane-b) are its siblings, hidden until
-   the user splits. When #split[data-split='true'] the pane becomes a grid laid out by data-orientation
-   — side-by-side (horizontal) or stacked (vertical) — with the divider sized via --koi-group-w/-h
-   (anchored to the group-B side, matching initGroupResizer). */
-#group-resizer,
-#editor-pane-b {
-  display: none;
-}
-
-#editor-pane-b {
-  position: relative;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-/* Side-by-side: group A (1fr) | divider (6px) | group B (--koi-group-w). The :not([hidden]) keeps the
-   pane's display:none when the Code pane shows a non-editor sub-tab (Generated / Compatibility / …) —
-   without it the high-specificity grid rule would beat the UA [hidden] and leak the editor through. */
-#split[data-split='true'][data-orientation='horizontal'] #editor-pane:not([hidden]) {
-  display: grid;
-  grid-template-columns: 1fr 6px var(--koi-group-w, 40%);
-  grid-template-rows: 100%;
-}
-#split[data-split='true'][data-orientation='horizontal'] #editor-pane > .cm-editor {
-  grid-column: 1;
-}
-#split[data-split='true'][data-orientation='horizontal'] #group-resizer {
-  display: block;
-  grid-column: 2;
-  width: 6px;
-  height: auto;
-  cursor: col-resize;
-}
-#split[data-split='true'][data-orientation='horizontal'] #editor-pane-b {
-  display: block;
-  grid-column: 3;
-}
-
-/* Stacked: group A (1fr) / divider (6px) / group B (--koi-group-h). */
-#split[data-split='true'][data-orientation='vertical'] #editor-pane:not([hidden]) {
-  display: grid;
-  grid-template-columns: 100%;
-  grid-template-rows: 1fr 6px var(--koi-group-h, 40%);
-}
-#split[data-split='true'][data-orientation='vertical'] #editor-pane > .cm-editor {
-  grid-row: 1;
-}
-#split[data-split='true'][data-orientation='vertical'] #group-resizer {
-  display: block;
-  grid-row: 2;
-  width: auto;
-  height: 6px;
-  cursor: row-resize;
-}
-#split[data-split='true'][data-orientation='vertical'] #editor-pane-b {
-  display: block;
-  grid-row: 3;
-}
-
 // --- Split/reset controls in the center tab bar (#720 Task 5) ----------------
 
 #center-split-controls {

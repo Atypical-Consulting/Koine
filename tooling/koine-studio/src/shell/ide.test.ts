@@ -316,10 +316,7 @@ const APP_HTML = `
                 <button type="button" class="tech-tab" id="tech-tab-scenarios" role="tab" data-tech="scenarios" aria-selected="false">Scenarios</button>
               </div>
               <div id="tech-body">
-                <section id="editor-pane" class="tech-view">
-                  <div class="koi-resizer" id="group-resizer" aria-hidden="true"></div>
-                  <section id="editor-pane-b" aria-label="Editor (second group)"></section>
-                </section>
+                <section id="editor-pane" class="tech-view"></section>
                 <div id="view-scenarios" class="tech-view" role="tabpanel" hidden></div>
               </div>
             </section>
@@ -466,51 +463,11 @@ function editorDoc(): string {
 
 /** The live EditorView init() created in #editor-pane (reached from its DOM, no private handle). */
 function editorView(): EditorView {
-  // The group-B editor is nested INSIDE #editor-pane (#editor-pane-b is its child), so scope group A's
-  // lookup to the .cm-editor that is NOT inside #editor-pane-b.
-  const dom = Array.from(document.querySelectorAll<HTMLElement>('#editor-pane .cm-editor')).find(
-    (cm) => !document.getElementById('editor-pane-b')!.contains(cm),
-  );
+  const dom = document.querySelector<HTMLElement>('#editor-pane .cm-editor');
   if (!dom) throw new Error('no EditorView mounted in #editor-pane');
   const view = EditorView.findFromDOM(dom);
   if (!view) throw new Error('no EditorView mounted in #editor-pane');
   return view;
-}
-
-/** Group A's doc text (the primary editor's, scoped past the nested group-B pane). */
-function groupADoc(): string {
-  return editorView().state.doc.toString();
-}
-
-/** Group B's doc text, or null when the split is closed (no editor mounted in #editor-pane-b). */
-function groupBDoc(): string | null {
-  const dom = document.querySelector<HTMLElement>('#editor-pane-b .cm-editor');
-  if (!dom) return null;
-  return EditorView.findFromDOM(dom)?.state.doc.toString() ?? null;
-}
-
-/** The live group-B EditorView, reached from its DOM. Throws when the split is closed. */
-function groupBView(): EditorView {
-  const dom = document.querySelector<HTMLElement>('#editor-pane-b .cm-editor');
-  const view = dom ? EditorView.findFromDOM(dom) : null;
-  if (!view) throw new Error('no EditorView mounted in #editor-pane-b');
-  return view;
-}
-
-/** Simulate a user edit IN GROUP B — the same docChanged → onChange path a keystroke drives, but on B. */
-function typeIntoGroupB(text: string): void {
-  const view = groupBView();
-  view.dispatch({ changes: { from: view.state.doc.length, insert: text } });
-}
-
-/** Open the command palette and click the (first) command row whose title matches `title` exactly. */
-function runPaletteCommand(title: string): void {
-  const hint = document.querySelector<HTMLElement>('.palette-hint');
-  hint!.click(); // ide.ts wires the toolbar hint to palette.toggle()
-  const rows = Array.from(document.querySelectorAll<HTMLElement>('.koi-palette-item'));
-  const row = rows.find((r) => r.querySelector('.koi-palette-item-title')?.textContent === title);
-  if (!row) throw new Error(`no palette command titled "${title}" (have: ${rows.length} rows)`);
-  row.click(); // click runs the command and closes the palette
 }
 
 /**
@@ -663,139 +620,6 @@ describe('ide init() — #-hash multi-file shared workspace', () => {
     expect(platform.files.has('model.koi')).toBe(false);
     // The #model= fragment is cleared after import so a reload returns home (clearModelHash).
     expect(window.location.hash).toBe('');
-  });
-});
-
-describe('ide init() — editor split routes file-open to the focused group (#265)', () => {
-  // The headline use case: split the editor, then open a DIFFERENT file in group B. The open must land
-  // in B and leave group A's file AND the workspace active uri untouched (group A is primary; B is a
-  // secondary view). This exercises the focus-routing branch ide.tsx wires into the user-initiated
-  // open affordances (the Go-to-File palette here) on top of the editorSession openFocusedGroup seam.
-  const FILES = [
-    { relPath: 'orders.koi', text: 'context Orders {\n  value Sku { raw: String }\n}\n' },
-    { relPath: 'billing.koi', text: 'context Billing {\n  value Money { amount: Decimal }\n}\n' },
-  ];
-
-  test('split then Go-to-File a different file shows it in group B; group A + active uri stay put', async () => {
-    // Layout state persists in localStorage; clear it so this test starts from a fresh (unsplit) shell
-    // and doesn't bleed splitOpen into later boots.
-    localStorage.clear();
-    try {
-      setWorkspaceShareHash(FILES, 'orders.koi');
-      await boot();
-
-      // Boot lands on orders.koi in the single (group-A) editor; no split yet.
-      expect(groupADoc()).toContain('context Orders');
-      expect(groupBDoc()).toBeNull();
-
-      // Split the editor. The fresh split focuses the NEW group B (so the next open lands there) and
-      // seeds B with group A's current file.
-      runPaletteCommand('Split editor');
-      expect(groupBDoc()).toContain('context Orders'); // B mirrors A on the initial split
-
-      // With B focused, Go-to-File billing.koi → it loads into group B…
-      runPaletteCommand('billing.koi');
-      expect(groupBDoc()).toContain('context Billing');
-      // …while group A still shows orders.koi (the secondary view never touched the primary)…
-      expect(groupADoc()).toContain('context Orders');
-      expect(groupADoc()).not.toContain('context Billing');
-      // …and the workspace active uri is unchanged: the status-bar context / tree still follow orders.
-      // (A read-through proxy: the group-A editor doc is the active buffer's text, asserted above.)
-    } finally {
-      localStorage.clear();
-    }
-  });
-
-  test('after the split, clicking the group-A pane returns focus so the next open lands in A', async () => {
-    localStorage.clear();
-    try {
-      setWorkspaceShareHash(FILES, 'orders.koi');
-      await boot();
-      runPaletteCommand('Split editor'); // focuses B
-
-      // A pointerdown on the group-A pane retargets routing to A (the focus-switch listener ide.tsx
-      // mounts on #editor-pane). #editor-pane-b is nested inside #editor-pane, so dispatch on the
-      // group-A editor surface itself, which is not inside #editor-pane-b.
-      editorView().dom.dispatchEvent(
-        new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 1 }),
-      );
-
-      // Now a Go-to-File lands in group A (the primary), changing the active file, and B is untouched.
-      runPaletteCommand('billing.koi');
-      expect(groupADoc()).toContain('context Billing');
-      expect(groupBDoc()).toContain('context Orders'); // B still shows what the split seeded
-    } finally {
-      localStorage.clear();
-    }
-  });
-
-  test('typing in group B (showing a DIFFERENT file) edits B’s buffer, NOT group A’s — #265 data-loss guard', async () => {
-    localStorage.clear();
-    try {
-      setWorkspaceShareHash(FILES, 'orders.koi');
-      const { platform } = await boot();
-
-      // Split, then open billing.koi into the focused group B (group A stays on orders.koi).
-      runPaletteCommand('Split editor');
-      runPaletteCommand('billing.koi');
-      expect(groupBDoc()).toContain('context Billing');
-      expect(groupADoc()).toContain('context Orders');
-
-      // Type a unique marker into group B. The OLD bug routed this through syncActiveBuffer → it wrote
-      // B's text into group A's (active) buffer + marked A dirty + autosaved A → orders.koi got billing's
-      // content. With the fix, the edit syncs into B's OWN buffer.
-      typeIntoGroupB('\n// EDIT_IN_B_MARKER\n');
-
-      // Group A's editor doc is untouched — it never received B's keystrokes.
-      expect(groupADoc()).not.toContain('EDIT_IN_B_MARKER');
-      expect(groupADoc()).toContain('context Orders');
-
-      // Persist all open buffers to disk (Save to disk maps each buffer's text by relPath); this is the
-      // observable proof the right BUFFER was edited. orders.koi (group A) must NOT carry B's marker;
-      // billing.koi (group B) must.
-      (document.getElementById('btn-save-project') as HTMLButtonElement).click();
-      await settleBoot();
-      const input = document.querySelector('.koi-prompt-input') as HTMLInputElement;
-      input.value = 'split-save';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      (document.querySelector('.koi-confirm-btn-primary') as HTMLButtonElement).click();
-      await settleBoot();
-
-      const saveSpy = platform.saveProjectToRoot;
-      expect(saveSpy).toHaveBeenCalledTimes(1);
-      const [, files] = saveSpy.mock.calls[0] as [string, { relPath: string; contents: string }[]];
-      const orders = files.find((f) => f.relPath === 'orders.koi')!;
-      const billing = files.find((f) => f.relPath === 'billing.koi')!;
-      // The data-loss assertion: group A's file is uncorrupted, group B's file holds B's edit.
-      expect(orders.contents).not.toContain('EDIT_IN_B_MARKER');
-      expect(orders.contents).toContain('context Orders');
-      expect(billing.contents).toContain('EDIT_IN_B_MARKER');
-    } finally {
-      localStorage.clear();
-    }
-  });
-
-  test('routing a file into group B persists B’s uri so reload restores the right file — #265', async () => {
-    localStorage.clear();
-    try {
-      setWorkspaceShareHash(FILES, 'orders.koi');
-      await boot();
-
-      runPaletteCommand('Split editor'); // splitOpen + B seeded with A's orders.koi
-      runPaletteCommand('billing.koi'); // re-point B at billing.koi (the focused group)
-
-      // The persisted layout's group-B slot now tracks billing.koi (not the stale split-open orders.koi),
-      // so a reload would restore B to billing.koi. A's slot stays on the active orders.koi.
-      const persisted = JSON.parse(localStorage.getItem('koine.studio.layout')!) as {
-        splitOpen: boolean;
-        groupActiveUris: [string, string?];
-      };
-      expect(persisted.splitOpen).toBe(true);
-      expect(persisted.groupActiveUris[0]).toMatch(/orders\.koi$/);
-      expect(persisted.groupActiveUris[1]).toMatch(/billing\.koi$/);
-    } finally {
-      localStorage.clear();
-    }
   });
 });
 
