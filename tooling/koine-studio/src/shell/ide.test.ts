@@ -365,12 +365,7 @@ const APP_HTML = `
         </section>
         <div class="koi-resizer" id="split-resizer"></div>
         <aside id="right" class="pane">
-          <div id="right-tabs" role="tablist">
-            <button type="button" class="rtab" id="rtab-props" role="tab" data-rview="props" aria-selected="true">Properties</button>
-            <button type="button" class="rtab" id="rtab-rules" role="tab" data-rview="rules" aria-selected="false">Rules</button>
-            <button type="button" class="rtab" id="rtab-notes" role="tab" data-rview="notes" aria-selected="false">Notes</button>
-            <button type="button" class="rtab" id="rtab-source-control" role="tab" data-rview="source-control" aria-selected="false">Source Control</button>
-          </div>
+          <header id="right-header"><h2 id="right-title">Properties</h2></header>
           <div id="right-body">
             <div id="inspector-host" class="rview" role="tabpanel"></div>
             <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden><p class="muted">Coming soon.</p></div>

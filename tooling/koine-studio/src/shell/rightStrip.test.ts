@@ -29,7 +29,10 @@ describe('rightStripMarkup', () => {
     const buttons = [...document.querySelectorAll<HTMLButtonElement>('#right-strip .rstrip-btn')];
     expect(buttons).toHaveLength(4);
     for (const b of buttons) {
-      expect(b.getAttribute('title')).toBeTruthy();
+      // The visible hover/focus label is a custom left-pointing tooltip driven by data-tooltip (CSS in
+      // _inspector.scss), NOT the native `title` — so AT gets one name (aria-label) without a double tip.
+      expect(b.getAttribute('data-tooltip')).toBeTruthy();
+      expect(b.hasAttribute('title')).toBe(false);
       expect(b.getAttribute('aria-label')).toBeTruthy();
       expect(b.getAttribute('aria-controls')).toBe('right');
       expect(b.getAttribute('aria-pressed')).toBe('false');

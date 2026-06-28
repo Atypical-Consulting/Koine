@@ -1578,7 +1578,17 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // the tab chrome matches the mockup while the inspector stays read-only. The active right view lives in
   // the uiChrome slice (#193), like center/tech/docs: selectRightView writes it via setRight, so the slice
   // owns that state rather than it being implicit in the DOM.
-  const rightTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.rtab'));
+  // The right-edge icon stripe (#right-strip) is the sole right-view switcher (#500 follow-up); the panel
+  // carries only a title header naming the active tool window. selectRightView keeps #right-title in sync
+  // and shows the matching view — there's no tab row to mark. (Guarded lookup so DOM fixtures that omit
+  // the header don't crash the controller.)
+  const rightTitleEl = document.getElementById('right-title');
+  const rightViewLabels: Record<RightView, string> = {
+    props: 'Properties',
+    rules: 'Rules',
+    notes: 'Notes',
+    'source-control': 'Source Control',
+  };
   const rightViews: Record<RightView, HTMLElement> = {
     props: inspectorHost,
     rules: el('rview-rules'),
@@ -1587,15 +1597,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   };
   function selectRightView(view: RightView): void {
     appStore.getState().setRight(view);
-    for (const t of rightTabs) t.setAttribute('aria-selected', String(t.dataset.rview === view));
+    if (rightTitleEl) rightTitleEl.textContent = rightViewLabels[view];
     for (const [key, node] of Object.entries(rightViews)) node.hidden = key !== view;
     // Source Control is lazily mounted + folder-derived (#272): paint it on first open and re-fetch git
     // status on every re-open (so a save / external `git` since the last view is reflected — the panel
     // itself owns the in-place refresh). The canUseGit gate + the non-repo empty state live in the panel.
     if (view === 'source-control') loadSourceControl();
-  }
-  for (const t of rightTabs) {
-    t.addEventListener('click', () => selectRightView(t.dataset.rview as RightView));
   }
 
   // Right-edge tool-window stripe (#500): Rider-style toggles that open/close (and switch) the #right
@@ -1640,7 +1647,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     });
   }
   // Keep the stripe's pressed state + the collapsed grid in sync however the state changes — a stripe
-  // click, an .rtab click, the palette command, or a selection auto-activating Properties all route
+  // click, the palette command, or a selection auto-activating Properties all route
   // through the slice, so re-running applyRightCollapsed here is the single reconciliation point. Persist
   // only on an actual collapse transition (not on every view switch that also repaints). Captured +
   // disposed (like unsubscribeActiveContext / unsubscribeDirtyCount) so a deferred slice change can't
