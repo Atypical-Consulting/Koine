@@ -57,4 +57,47 @@ describe('settingsSchema', () => {
     const res = jsonDocToSettings(JSON.stringify({ ...DEFAULT_SETTINGS, aiApiKey: undefined, fontSize: 99 }), withKey);
     expect(res.settings).toBeUndefined();
   });
+
+  // The two open-string fields (previewTarget, aiBaseUrl) are validated/coerced here to the SAME
+  // accept-set loadSettings() uses, so what live-applies is exactly what survives a reload (#734).
+
+  it('rejects a schema-valid but out-of-registry previewTarget with a diagnostic and no settings', () => {
+    const res = jsonDocToSettings(
+      JSON.stringify({ ...DEFAULT_SETTINGS, aiApiKey: undefined, previewTarget: 'god' }),
+      withKey,
+    );
+    expect(res.settings).toBeUndefined();
+    expect(res.errors?.[0]?.message).toMatch(/previewTarget/i);
+  });
+
+  it('accepts a built-in previewTarget and round-trips it to settings', () => {
+    const res = jsonDocToSettings(
+      JSON.stringify({ ...DEFAULT_SETTINGS, aiApiKey: undefined, previewTarget: 'typescript' }),
+      withKey,
+    );
+    expect(res.errors).toBeUndefined();
+    expect(res.settings?.previewTarget).toBe('typescript');
+  });
+
+  it('coerces an empty aiBaseUrl to the default, matching loadSettings', () => {
+    const res = jsonDocToSettings(
+      JSON.stringify({ ...DEFAULT_SETTINGS, aiApiKey: undefined, aiBaseUrl: '' }),
+      withKey,
+    );
+    expect(res.errors).toBeUndefined();
+    expect(res.settings?.aiBaseUrl).toBe(DEFAULT_SETTINGS.aiBaseUrl);
+  });
+
+  it('preserves the current previewTarget/aiBaseUrl when the doc omits them', () => {
+    const current: Settings = {
+      ...withKey,
+      previewTarget: 'rust',
+      aiBaseUrl: 'http://localhost:1234/v1',
+    };
+    const res = jsonDocToSettings(JSON.stringify({ theme: 'light' }), current);
+    expect(res.errors).toBeUndefined();
+    expect(res.settings?.theme).toBe('light');
+    expect(res.settings?.previewTarget).toBe('rust');
+    expect(res.settings?.aiBaseUrl).toBe('http://localhost:1234/v1');
+  });
 });

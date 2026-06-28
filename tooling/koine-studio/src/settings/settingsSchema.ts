@@ -2,6 +2,7 @@
 // serialization helpers. The secret aiApiKey is NEVER declared, serialized, or accepted here:
 // the schema is additionalProperties:false and the parser re-injects the live in-memory key.
 import Ajv2020, { type ErrorObject } from 'ajv/dist/2020';
+import { isEmitTarget } from '@/shared/emitTargets';
 import { DEFAULT_SETTINGS, type Settings } from './persistence';
 
 // Mirror the editor input bounds in persistence.ts (FONT_MIN/MAX, LINE_HEIGHT_MIN/MAX) and the
@@ -79,6 +80,23 @@ export function jsonDocToSettings(
     );
     return { errors: ordered.map((e) => ({ message: formatError(e) })) };
   }
+  const doc = parsed as Partial<Settings>;
+  // previewTarget and aiBaseUrl are deliberately open `string`s in the schema (a dynamic, backend-seeded
+  // target must validate), so the schema gate alone lets through values loadSettings() would later drop —
+  // the live↔reload divergence (#734). Re-apply the load path's accept-set here so what applies == what survives.
+  //
+  // previewTarget: VALIDATE against the LIVE EMIT_TARGETS (the same predicate coercePreviewTarget uses).
+  // An out-of-registry target is a typo or a removed target; reject it with a diagnostic rather than
+  // applying a value that the next reload silently snaps back to csharp.
+  if ('previewTarget' in doc && !isEmitTarget(doc.previewTarget)) {
+    return { errors: [{ message: `previewTarget: unknown emit target "${String(doc.previewTarget)}"` }] };
+  }
   // Re-inject the live secret so a JSON edit can never clear or overwrite the encrypted key.
-  return { settings: { ...current, ...(parsed as Partial<Settings>), aiApiKey: current.aiApiKey } };
+  const next: Settings = { ...current, ...doc, aiApiKey: current.aiApiKey };
+  // aiBaseUrl: COERCE empty → default, exactly as loadSettings() does on read (`.length > 0`, no trim),
+  // so a blank URL applies live as the same default a reload would restore.
+  if (typeof next.aiBaseUrl !== 'string' || next.aiBaseUrl.length === 0) {
+    next.aiBaseUrl = DEFAULT_SETTINGS.aiBaseUrl;
+  }
+  return { settings: next };
 }
