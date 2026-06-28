@@ -50,6 +50,10 @@ import { rust } from '@codemirror/legacy-modes/mode/rust';
 import { php } from '@codemirror/lang-php';
 import { tags as t } from '@lezer/highlight';
 import { lintGutter, setDiagnostics } from '@codemirror/lint';
+// Schema-aware JSON support for the editable settings.json editor (createJsonSettingsEditor). `jsonSchema()`
+// already bundles `@codemirror/lang-json`'s `json()` (the JSON language) plus the schema linter, hover and
+// autocomplete, so it is the single extension that lights up the whole editing surface.
+import { jsonSchema } from 'codemirror-json-schema';
 import type {
   CallHierarchyIncomingCall,
   CallHierarchyItem,
@@ -74,6 +78,8 @@ import { createInlineState } from '@/editor/inlineCompletionState';
 import { inlineCompletionExtension, type EditorInlineContext } from '@/editor/inlineCompletion';
 import { requestInline } from '@/ai/inlineCompletionClient';
 import { loadSettings, resolveKeybindings } from '@/settings/persistence';
+// The Draft 2020-12 schema for the settings.json document — drives the editable editor's lint/hover/completion.
+import { SETTINGS_JSON_SCHEMA } from '@/settings/settingsSchema';
 import { buildExtraKeys, type BindingId } from '@/editor/keybindings';
 // Review-comment rendering (#259): the StateField+gutter that paint review threads over the buffer, plus
 // the helper that repaints them after a store change. A Studio-only view concern — never touches the model.
@@ -1480,6 +1486,52 @@ export function createJsonView(parent: HTMLElement): ConfigView {
         syntaxHighlighting(koineHighlight),
         syntaxHighlighting(defaultHighlightStyle),
         sharedTheme,
+      ],
+    }),
+  });
+
+  return {
+    setContent(text) {
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+    },
+    getText: () => view.state.doc.toString(),
+    destroy: () => view.destroy(),
+  };
+}
+
+export interface JsonSettingsEditor {
+  setContent(text: string): void;
+  getText(): string;
+  destroy(): void;
+}
+
+/**
+ * An EDITABLE settings.json editor: the JSON language plus schema-driven lint/completion/hover from
+ * SETTINGS_JSON_SCHEMA (via codemirror-json-schema's `jsonSchema()`, which bundles `@codemirror/lang-json`),
+ * reporting every document change through `onChange`. It reuses the same `koineHighlight` + `sharedTheme`
+ * setup as the other editors so it looks native. The host (settingsPage) owns parse/validate/persist;
+ * this factory is just the editing surface.
+ */
+export function createJsonSettingsEditor(
+  parent: HTMLElement,
+  opts: { onChange: (text: string) => void; initial?: string },
+): JsonSettingsEditor {
+  const view = new EditorView({
+    parent,
+    state: EditorState.create({
+      doc: opts.initial ?? '',
+      extensions: [
+        EditorView.contentAttributes.of({ 'aria-label': 'Settings JSON document' }),
+        lineNumbers(),
+        // `jsonSchema()` already wires the JSON language, the JSON-parse + schema linters, schema-aware
+        // autocomplete and hover — the whole schema-aware editing surface in one extension.
+        jsonSchema(SETTINGS_JSON_SCHEMA as unknown as Parameters<typeof jsonSchema>[0]),
+        syntaxHighlighting(koineHighlight),
+        syntaxHighlighting(defaultHighlightStyle),
+        sharedTheme,
+        EditorView.updateListener.of((u) => {
+          if (u.docChanged) opts.onChange(u.state.doc.toString());
+        }),
       ],
     }),
   });
