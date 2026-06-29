@@ -18,17 +18,20 @@ export interface LayoutActions {
   toggleSideRail(): void;
   /** Open/close the right Properties panel — the tool-window stripe's collapse toggle (#500). */
   toggleProperties(): void;
+  /** Collapse/expand the left navigator rail — the morph-collapse to/from its icon spine (#730). */
+  toggleNavigator(): void;
 }
 
 /**
  * Build the layout palette commands. Ids are pinned (`layout.panelSide`, `layout.sideRail`,
- * `layout.toggleProperties`) so anything keyed on them stays stable; each command's run() invokes
- * exactly the matching action.
+ * `layout.toggleProperties`, `layout.toggleNavigator`) so anything keyed on them stays stable; each
+ * command's run() invokes exactly the matching action.
  */
 export function layoutCommands(actions: LayoutActions): Command[] {
   return [
     { id: 'layout.panelSide', title: 'Move panel (bottom / right)', group: 'View', run: () => actions.togglePanelSide() },
     { id: 'layout.sideRail', title: 'Move side rail (left / right)', group: 'View', run: () => actions.toggleSideRail() },
     { id: 'layout.toggleProperties', title: 'Toggle Properties panel', group: 'View', run: () => actions.toggleProperties() },
+    { id: 'layout.toggleNavigator', title: 'Toggle navigator rail', group: 'View', run: () => actions.toggleNavigator() },
   ];
 }

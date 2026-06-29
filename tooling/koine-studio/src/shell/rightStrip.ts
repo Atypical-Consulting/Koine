@@ -20,7 +20,9 @@ interface StripeButton {
   icon: string;
 }
 
-/** The toggles, top-to-bottom, in right-view order (Properties first; AI Chat second). */
+/** The toggles, top-to-bottom, in right-view order (Properties first; AI Chat second). Rules and Notes
+ *  were retired (#730): a selected element's invariants now surface in the Properties panel's Invariants
+ *  section, and model Notes live in the center Deck's Docs surface — so neither needs its own stripe. */
 const STRIPE_BUTTONS: readonly StripeButton[] = [
   {
     view: 'props',
@@ -33,18 +35,6 @@ const STRIPE_BUTTONS: readonly StripeButton[] = [
     label: 'AI Chat',
     // Spark — the brand's "this generates" glyph, the same mark the AI tab wore in the center.
     icon: '<path d="M6.5 1.8c.5 2.6 1.6 3.7 4.2 4.2-2.6.5-3.7 1.6-4.2 4.2-.5-2.6-1.6-3.7-4.2-4.2 2.6-.5 3.7-1.6 4.2-4.2Z" /><path d="M12 9.4c.2 1.1.6 1.5 1.7 1.7-1.1.2-1.5.6-1.7 1.7-.2-1.1-.6-1.5-1.7-1.7 1.1-.2 1.5-.6 1.7-1.7Z" />',
-  },
-  {
-    view: 'rules',
-    label: 'Rules',
-    // Checklist — two checked items (business rules / invariants).
-    icon: '<path d="M2.5 4.5 3.6 5.6 5.6 3.6M7.5 4.6h6M2.5 10.5 3.6 11.6 5.6 9.6M7.5 10.6h6" />',
-  },
-  {
-    view: 'notes',
-    label: 'Notes',
-    // Pencil — reuses the rail docs-footer Notes glyph.
-    icon: '<path d="M10.4 3.1 12.9 5.6 6.1 12.4 3 13 3.6 9.9Z" /><path d="M9.2 4.3 11.7 6.8" />',
   },
   {
     view: 'source-control',

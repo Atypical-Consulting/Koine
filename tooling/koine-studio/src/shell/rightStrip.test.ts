@@ -16,18 +16,18 @@ function mountStrip(): HTMLElement {
 }
 
 describe('rightStripMarkup', () => {
-  it('emits one toggle button per RightView, in Properties·AI Chat·Rules·Notes·Source Control order', () => {
+  it('emits one toggle button per RightView, in Properties·AI Chat·Source Control order', () => {
     mountStrip();
     const views = [...document.querySelectorAll('#right-strip [data-rview]')].map(
       (b) => (b as HTMLElement).dataset.rview,
     );
-    expect(views).toEqual(['props', 'assistant', 'rules', 'notes', 'source-control']);
+    expect(views).toEqual(['props', 'assistant', 'source-control']);
   });
 
   it('every stripe button is an accessible toggle controlling #right', () => {
     mountStrip();
     const buttons = [...document.querySelectorAll<HTMLButtonElement>('#right-strip .rstrip-btn')];
-    expect(buttons).toHaveLength(5);
+    expect(buttons).toHaveLength(3);
     for (const b of buttons) {
       // The visible hover/focus label is a custom left-pointing tooltip driven by data-tooltip (CSS in
       // _inspector.scss), NOT the native `title` — so AT gets one name (aria-label) without a double tip.

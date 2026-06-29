@@ -93,6 +93,25 @@
   display: none;
 }
 
+/* --- collapsed: the left navigator rail morphs to its icon spine (#730) ---
+   #split.left-collapsed shrinks the leftrail track to the stripe width (the rail's inner content swaps to
+   #left-strip — see _leftrail.scss) and zeros its resizer, so #center reclaims the freed width. Mirrors the
+   right-collapsed reclaim on the opposite edge and composes with it — both rails can be collapsed at once
+   (the `.left-collapsed.right-collapsed` template, higher-specificity, wins when both are set). */
+#split.left-collapsed {
+  grid-template-columns:
+    var(--koi-rstrip-w, 2.25rem) 0
+    1fr 6px var(--koi-inspector-w, 320px) var(--koi-rstrip-w, 2.25rem);
+}
+#split.left-collapsed.right-collapsed {
+  grid-template-columns:
+    var(--koi-rstrip-w, 2.25rem) 0
+    1fr 0 0 var(--koi-rstrip-w, 2.25rem);
+}
+#split.left-collapsed #leftrail-resizer {
+  display: none;
+}
+
 /* --- side-rail on the left (issue #265) ---
    By default the element inspector (#right) is the right rail and the file rail (#leftrail) the left.
    data-siderail-side='left' swaps them: the inspector + its resizer take the two leftmost tracks and
@@ -119,6 +138,20 @@
   grid-column: 5;
   /* The file rail is now the rightmost pane — drop its right border, the center keeps the divider. */
   border-right: none;
+}
+
+/* The morph-collapse on the siderail-left layout (#730): the file rail + its resizer are the two
+   RIGHTMOST tracks (5 + 4) here, so left-collapsed shrinks track 5 to the spine width and zeros track 4 —
+   the mirror of the default-side rules above. Composes with right-collapsed (which zeros the two leftmost
+   tracks under siderail-left); the combined template, higher-specificity, wins when both are set. */
+#split[data-siderail-side='left'].left-collapsed {
+  grid-template-columns:
+    var(--koi-inspector-w, 320px) 6px
+    1fr 0 var(--koi-rstrip-w, 2.25rem) var(--koi-rstrip-w, 2.25rem);
+}
+#split[data-siderail-side='left'].left-collapsed.right-collapsed {
+  grid-template-columns:
+    0 0 1fr 0 var(--koi-rstrip-w, 2.25rem) var(--koi-rstrip-w, 2.25rem);
 }
 
 #leftrail {
@@ -179,8 +212,12 @@ body.resizing-y {
      them, keeping the active zone full-width regardless of the persisted desktop layout. */
   #split,
   #split.right-collapsed,
+  #split.left-collapsed,
+  #split.left-collapsed.right-collapsed,
   #split[data-siderail-side='left'],
-  #split[data-siderail-side='left'].right-collapsed {
+  #split[data-siderail-side='left'].right-collapsed,
+  #split[data-siderail-side='left'].left-collapsed,
+  #split[data-siderail-side='left'].left-collapsed.right-collapsed {
     grid-template-columns: 1fr;
   }
 

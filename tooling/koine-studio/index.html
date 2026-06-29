@@ -144,7 +144,6 @@
             </svg>
           </button>
           <div id="status" data-kind="connecting" role="status" aria-live="polite">connecting…</div>
-          <button type="button" id="unsaved-indicator" class="unsaved-indicator" hidden></button>
         </div>
       </header>
 
@@ -253,24 +252,6 @@
             <!-- The AI copilot — docked here in the right rail so it stays open beside Code/Canvas. The
                  AssistantPanel is mounted into this host lazily on first show (ide.tsx → ensureAssistant). -->
             <section id="view-assistant" class="rview" role="tabpanel" aria-label="AI Chat" hidden></section>
-            <!-- Filled by inspectorController.renderSelectedRules() with the selected element's
-                 invariants (or an empty state). The static content below is a pre-hydration fallback. -->
-            <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden>
-              <div class="koi-rview-empty">
-                <h3 class="koi-rview-empty-title">Business rules</h3>
-                <p class="muted">Select an element to see its invariants.</p>
-              </div>
-            </div>
-            <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden>
-              <div class="koi-rview-empty">
-                <h3 class="koi-rview-empty-title">Notes</h3>
-                <p class="muted">
-                  Document this element with its <strong>Description</strong> in the Properties tab, or
-                  keep model-wide notes in <strong>Documentation → Notes</strong>. Per-element notes are
-                  planned for a future update.
-                </p>
-              </div>
-            </div>
             <!-- The Source Control panel (#272) is painted by inspectorController on the first tab open
                  (SourceControlPanel mounts the git surface). The static content below is a pre-hydration
                  fallback, replaced once the controller hydrates. -->
@@ -299,6 +280,11 @@
         <!-- Workspace-wide problems rollup (every file, not just the active one). Empty when clean;
              the <WorkspaceProblemsBadge> Preact panel renders its sb-item span in here. -->
         <span id="sb-problems-host"></span>
+        <!-- Global unsaved-work indicator (#193): the clickable "N unsaved" pill that triggers Save-all.
+             Lives in the status bar beside validity/problems so every passive model-state signal shares
+             one home (it formerly sat top-right in the toolbar). Still the <UnsavedIndicator> Preact
+             panel's element — the `el('unsaved-indicator')` mount and its tests are unchanged by the move. -->
+        <button type="button" id="unsaved-indicator" class="unsaved-indicator" hidden></button>
         <span class="sb-spacer"></span>
         <!-- Transient "compiling…" indicator (#516): the <CompilingIndicator> Preact panel renders its
              aria-live sb-item span in here while a compile is in flight (debounced), hidden when idle. -->
