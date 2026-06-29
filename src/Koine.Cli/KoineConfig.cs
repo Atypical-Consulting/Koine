@@ -5,7 +5,9 @@ namespace Koine.Cli;
 /// <c>koine.config</c>. <see cref="OutDir"/> overrides the flat <c>out</c> for that target;
 /// <see cref="NamespaceMap"/> remaps a context name to an emitted namespace (e.g.
 /// <c>Catalog → Acme.Catalog</c>); <see cref="InstantMode"/>/<see cref="Layout"/> are forward
-/// keys the emitters consume as they gain support. Absent keys are <c>null</c>/empty so a
+/// keys the emitters consume as they gain support. <see cref="RegexMatchTimeoutMs"/> overrides the
+/// C# <c>matches</c>-invariant ReDoS-guard match timeout (milliseconds, issue #794/#641); <c>null</c>
+/// keeps the emitter's <c>1000</c> ms default. Absent keys are <c>null</c>/empty so a
 /// target with no block behaves exactly as before.
 /// </summary>
 internal sealed record TargetOptions(
@@ -15,7 +17,8 @@ internal sealed record TargetOptions(
     string? Layout,
     IReadOnlyList<string>? Layers = null,
     bool ApplicationMediatr = false,
-    string? ApplicationMapping = null)
+    string? ApplicationMapping = null,
+    int? RegexMatchTimeoutMs = null)
 {
     public static readonly TargetOptions Empty =
         new(null, new Dictionary<string, string>(StringComparer.Ordinal), null, null);
@@ -159,7 +162,8 @@ internal sealed record KoineConfig(
 
     /// <summary>
     /// Applies one <c>targets.&lt;name&gt;.&lt;rest&gt;</c> key. Recognized <c>rest</c>: <c>out</c>,
-    /// <c>instantMode</c>, <c>layout</c>, and <c>namespaces.&lt;Context&gt;</c>. Malformed/partial
+    /// <c>instantMode</c>, <c>layout</c>, <c>layers</c>, <c>application.{mediatr,mapping}</c>,
+    /// <c>regexMatchTimeoutMs</c>, and <c>namespaces.&lt;Context&gt;</c>. Malformed/partial
     /// keys are ignored (forward-compatible).
     /// </summary>
     private static void ApplyTargetKey(Dictionary<string, TargetBuilder> targets, string key, string value)
@@ -203,6 +207,12 @@ internal sealed record KoineConfig(
                 break;
             case "application" when parts.Length == 4 && parts[3] == "mapping":
                 builder.ApplicationMapping = value;
+                break;
+            case "regexMatchTimeoutMs" when parts.Length == 3:
+                // The C# matches-invariant ReDoS-guard match timeout (issue #794/#641): a raw value,
+                // parsed to int? at Build(); a non-integer is left unset (forward-compatible like other
+                // malformed keys), while a parsed non-positive value is rejected later in BuildSettings.
+                builder.RegexMatchTimeoutMs = value;
                 break;
             case "namespaces" when parts.Length == 4 && parts[3].Length > 0:
                 builder.NamespaceMap[parts[3]] = value;
@@ -254,14 +264,26 @@ internal sealed record KoineConfig(
         public string? Layers;
         public string? ApplicationMediatr;
         public string? ApplicationMapping;
+        public string? RegexMatchTimeoutMs;
         public readonly Dictionary<string, string> NamespaceMap = new(StringComparer.Ordinal);
 
         public TargetOptions Build() => new(
             OutDir, NamespaceMap, InstantMode, Layout,
             ParseLayers(Layers),
             string.Equals(ApplicationMediatr, "true", StringComparison.OrdinalIgnoreCase),
-            ApplicationMapping);
+            ApplicationMapping,
+            ParseTimeout(RegexMatchTimeoutMs));
     }
+
+    /// <summary>
+    /// Parses the raw <c>regexMatchTimeoutMs</c> value to an <c>int?</c> (issue #794). A non-integer
+    /// is left unset (<c>null</c>) — forward-compatible like other malformed keys; an out-of-range
+    /// (non-positive) value still parses here and is rejected up front by <c>BuildSettings.TryResolve</c>.
+    /// </summary>
+    internal static int? ParseTimeout(string? value) =>
+        int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var ms)
+            ? ms
+            : null;
 
     /// <summary>
     /// Splits a comma-separated <c>layers</c> value into a normalized list (trimmed, lower-cased,

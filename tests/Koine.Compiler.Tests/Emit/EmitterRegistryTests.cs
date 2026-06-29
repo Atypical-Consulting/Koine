@@ -147,6 +147,18 @@ public class EmitterRegistryTests
             .ShouldContain("TimeSpan.FromMilliseconds(1000)");
     }
 
+    [Fact]
+    public void Cli_registry_threads_a_config_only_timeout_into_the_emitted_guard()
+    {
+        // End-to-end through the CLI seam: a koine.config that sets ONLY the timeout must reach the
+        // emitted matches-invariant guard — proving KoineConfig → TargetOptions → EmitterOptions →
+        // CSharpEmitterOptions all carry the value and no empty-bag guard short-circuits it (issue #794).
+        var opts = Cli.KoineConfig.Parse("targets.csharp.regexMatchTimeoutMs = 250\n").OptionsFor("csharp");
+        Cli.Infrastructure.EmitterRegistry.TryCreate("csharp", opts, out var emitter).ShouldBeTrue();
+
+        EmitEmailGuard(emitter).ShouldContain("TimeSpan.FromMilliseconds(250)");
+    }
+
     /// <summary>
     /// Emits the one-value-object matches-invariant fixture with <paramref name="emitter"/> and returns
     /// the generated Email source, where the timeout-bounded <c>Regex.IsMatch(…)</c> guard lives.
