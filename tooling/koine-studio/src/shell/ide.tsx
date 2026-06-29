@@ -7,7 +7,6 @@ import {
   type GlossaryEntry,
   type Location,
   type SourceSpan,
-  type StructuredEdit,
   type TextEdit,
 } from '@/lsp/lsp';
 import {
@@ -18,7 +17,7 @@ import { createEditorSession } from '@/shell/editorSession';
 import { createInspectorController } from '@/shell/inspectorController';
 import { leftRailMarkup } from '@/shell/leftRail';
 import { rightStripMarkup } from '@/shell/rightStrip';
-import { openInspectorSheet } from '@/shell/inspectorSheet';
+import { createCanvasWrite } from '@/shell/canvasWrite';
 import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
 import { koineMark } from '@/shared/logo';
@@ -54,47 +53,19 @@ import { createPanelHost } from '@/shell/panelHost';
 import { applyAppearance } from '@/settings/appearance';
 import { initEdgeResizer } from '@/shell/resize';
 import { formatChord } from '@/shared/platform';
-import {
-  DIAGRAM_ANNOTATION_CREATE_EVENT,
-  DIAGRAM_CONNECT_EVENT,
-  DIAGRAM_DISCONNECT_EVENT,
-  DIAGRAM_REFIT_EVENT,
-  DIAGRAM_RELAYOUT_EVENT,
-  EMPTY_STATE_PICK_EVENT,
-  NODE_EDIT_EVENT,
-  NODE_NAVIGATE_EVENT,
-  setDefaultCanvasZoom,
-  setDiagramEditing,
-  setDiagramTouchMode,
-  type AddNodeKind,
-  type AggregateMemberKind,
-  type CanvasAnnotationKind,
-  type DiagramAnnotationCreateDetail,
-  type DiagramConnectDetail,
-  type DiagramDisconnectDetail,
-  type DiagramNodeEditDetail,
-  type DiagramNodeNavigateDetail,
-  type EmptyConceptKind,
-  type EmptyStatePickDetail,
-} from '@/diagrams/diagramContract';
-import { isAllContexts } from '@/model/activeContext';
+import { setDefaultCanvasZoom } from '@/diagrams/diagramContract';
 import { appStore } from '@/store/index';
 import { badgeCounts, createDiagCountGate } from '@/diagnostics/diagCountGate';
 import { reanchorSelectionAfterRename, type SelectedElement } from '@/model/selection';
-import { resolveInspectableQn } from '@/model/modelIndex';
 import { renameStatusMessage, type InspectorElement } from '@/model/inspector';
 import { createReviewStore } from '@/review/reviewStore';
 import { resolveReviewAuthor } from '@/review/ReviewPanel';
-import { createCommentComposer, type CommentComposer } from '@/review/CommentComposer';
 import { clearModelHash, readModelFromHash } from '@/export/share';
 import { handleBeforeUnload } from '@/shell/dirty';
 import { render } from 'preact';
 import { createHistoryController } from '@/shell/historyController';
 import { installExportMenuDismiss } from '@/shell/exportMenuDismiss';
 import { HistoryControls } from '@/shell/HistoryControls';
-import { MobileZoneBar } from '@/shell/MobileZoneBar';
-import { type MobileZone } from '@/store/slices/uiChrome';
-import { isNarrowViewport } from '@/shared/breakpoint';
 import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { CompilingIndicator } from '@/shell/CompilingIndicator';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
@@ -174,75 +145,6 @@ const DEFAULT_WS_TOKEN = '(default)';
 function isOpfsInternalToken(token: string): boolean {
   return token === DEFAULT_WS_TOKEN || token.startsWith('example-');
 }
-
-// Starter shapes the empty-canvas doorways seed (the EMPTY_STATE_PICK_EVENT contract). Each is a strict
-// subset of a validated template (templates/starters/{ordering,contextmap}) so it always compiles green;
-// seeding one into a fresh model lights up the canvas immediately. A trailing comment points at the next
-// edit so the modeller knows the starter is theirs to grow.
-const CONCEPT_STARTER: Record<EmptyConceptKind, string> = {
-  aggregate: `context Ordering {
-
-  aggregate Sales root Order {
-
-    value OrderLine {
-      product:   ProductId
-      quantity:  Int
-      unitPrice: Decimal
-      subtotal:  Decimal = unitPrice * quantity
-    }
-
-    entity Order identified by OrderId {
-      lines: List<OrderLine>
-      // Add the fields, invariants, and behaviours your Order needs.
-    }
-  }
-}
-`,
-  stateMachine: `context Ordering {
-
-  aggregate Sales root Order {
-
-    enum OrderStatus { Draft, Placed, Shipped, Cancelled }
-
-    entity Order identified by OrderId {
-      status: OrderStatus = Draft
-
-      states status {
-        Draft  -> Placed
-        Placed -> Shipped
-        Placed -> Cancelled
-        // Add the transitions your lifecycle allows.
-      }
-    }
-  }
-}
-`,
-  contextMap: `context Catalog {
-  entity Product identified by ProductId {
-    sku:  String
-    name: String
-  }
-}
-
-context Sales {
-  value OrderRef {
-    value: String
-  }
-}
-
-contextmap {
-  Catalog -> Sales : conformist
-  // Map each upstream context onto the downstream ones that depend on it.
-}
-`,
-};
-
-/** Status-bar confirmation shown after a doorway seeds its starter. */
-const CONCEPT_SEEDED_MSG: Record<EmptyConceptKind, string> = {
-  aggregate: 'Added a starter aggregate — edit it in Code or on the canvas',
-  stateMachine: 'Added a starter state machine — edit it in Code or on the canvas',
-  contextMap: 'Added a starter context map — edit it in Code or on the canvas',
-};
 
 function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -469,7 +371,7 @@ export function init(): () => void {
     // per group), opening a comment routes through addReviewComment, and each edit re-anchors only the
     // edited file's pinned spans (editorSession supplies the file).
     getReviewThreads: () => reviewStore.list(),
-    onAddComment: (span) => addReviewComment(span),
+    onAddComment: (span) => canvasWrite.addReviewComment(span),
     onDocChange: (change, doc, file) => reviewStore.remap(file, change, doc),
   });
   const editor = editorSession.editor;
@@ -613,10 +515,10 @@ export function init(): () => void {
     onRenameElement: (element, newName) => void renameElement(element, newName),
     onSaveElementDescription: (element, text) => void saveInspectorDescription(element, text),
     onSaveGlossaryDescription: (entry, text) => saveDescription(entry, text),
-    onApplyStructuredEdit: (edit, successMsg) => void applyStructuredEdit(edit, successMsg),
-    onAddConstruct: (kind) => void applyDiagramAddType({ kind }),
-    onAddAnnotation: (kind) => createCanvasAnnotation(kind),
-    onAddAggregateMember: (kind, aggregateQn) => void applyDiagramAddAggregateMember(kind, aggregateQn),
+    onApplyStructuredEdit: (edit, successMsg) => void canvasWrite.applyStructuredEdit(edit, successMsg),
+    onAddConstruct: (kind) => void canvasWrite.applyDiagramAddType({ kind }),
+    onAddAnnotation: (kind) => canvasWrite.createCanvasAnnotation(kind),
+    onAddAggregateMember: (kind, aggregateQn) => void canvasWrite.applyDiagramAddAggregateMember(kind, aggregateQn),
     onExportDiagram: (format) => void exportShare.exportActiveDiagram(format),
     onCopyDiagramMermaid: () => void exportShare.copyActiveDiagramMermaid(),
     gotoSourceSpan: (span) => void gotoSourceSpan(span),
@@ -629,22 +531,17 @@ export function init(): () => void {
     ensureReview: () => panelHost.ensureReview(),
     initEdgeResizer,
   });
-  // Thin shims over the app store (the single source of truth) for the two state reads ide.ts needs:
-  // the diagram write-path sets the selection, and the add-type path reads the active scope.
+  // A thin shim over the app store (the single source of truth): the inspector rename write-path
+  // re-anchors the selection after a rename. (The diagram write-path + canvas gesture listeners moved
+  // to the canvasWrite controller (#757), constructed below.)
   const selection = {
     set: (element: SelectedElement | null) => appStore.getState().setSelection(element),
   };
-  const activeContext = {
-    get: () => appStore.getState().activeContext,
-  };
-  // The diagram canvas host — the controller renders into it, but ide.ts owns the authoring gesture
-  // listeners (the diagram write-path stays here), which are bound to this node below.
-  const diagramsView = el('center-visual');
 
-  // --- diagram-authoring + inspector write path (the #91 round-trip) --------
-  // These perform the actual `.koi` mutations (rename / structured edit / set-description) and span
-  // navigation. They stay in ide.ts because they reach the buffers / workspace edit path; the
-  // controller triggers them via the injected callbacks above and re-renders in step on success.
+  // --- inspector write path (the #91 round-trip) ----------------------------
+  // These perform the actual `.koi` mutations (rename / set-description) and span navigation. They stay
+  // in ide.ts because they reach the buffers / workspace edit path; the controller triggers them via the
+  // injected callbacks above and re-renders in step on success.
 
   /**
    * Persists a description by asking the server for the doc-comment edit and applying it to the
@@ -742,333 +639,6 @@ export function init(): () => void {
   // (#479), resolved through resolveReviewAuthor so a blank/unset name falls back to the shared 'You'.
   function reviewAuthorName(): string {
     return resolveReviewAuthor(loadSettings().displayName);
-  }
-
-  // The currently-open comment composer (#479), if any — only one at a time. Dismissing it (Add, Cancel,
-  // Escape, or opening another) tears down its host element via the closure captured at mount.
-  let commentComposerClose: (() => void) | null = null;
-
-  // Anchor the composer's host near the editor's live text selection (CodeMirror keeps a real DOM
-  // selection), clamped on-screen; fall back to a fixed spot near the top when there is no usable rect
-  // (e.g. opened from the command palette). Mirrors the editor action-widget placement (actions.ts).
-  function placeComposerNearSelection(host: HTMLElement): void {
-    const WIDTH = 320;
-    let left = window.innerWidth / 2 - WIDTH / 2;
-    let top = 120;
-    const sel = window.getSelection();
-    if (sel && sel.rangeCount > 0) {
-      const rect = sel.getRangeAt(0).getBoundingClientRect();
-      if (rect && (rect.width || rect.height || rect.top || rect.left)) {
-        left = rect.left;
-        top = rect.bottom + 6;
-      }
-    }
-    host.style.position = 'fixed';
-    host.style.left = Math.max(8, Math.min(left, window.innerWidth - WIDTH - 8)) + 'px';
-    host.style.top = Math.min(top, window.innerHeight - 180) + 'px';
-  }
-
-  // Open a review thread on the editor's current selection (#259). editorSession already pinned `span.file`
-  // to the INVOKING group's uri (so a split view comments on the right file, not just group A's active
-  // one). Instead of the Phase-1 window.prompt, mount a compact, non-blocking inline composer (#479) near
-  // the selection: it is multi-line, theme-matched, and Escape-cancellable, and keeps the reviewed code
-  // visible. Submitting empty/whitespace or cancelling adds no thread; on submit we add the thread,
-  // reveal the Review tab, and repaint the editor marks.
-  function addReviewComment(span: SourceSpan): void {
-    const file = span.file ?? workspace.activeUri();
-    if (!file) return;
-    commentComposerClose?.(); // only one composer open at a time
-
-    const host = document.createElement('div');
-    host.className = 'koi-comment-composer-host';
-    document.body.appendChild(host);
-    placeComposerNearSelection(host);
-
-    let composer: CommentComposer | null = null;
-    // Attached on the next frame so the click/keystroke that opened the composer doesn't dismiss it.
-    let onDocMouseDown: ((e: MouseEvent) => void) | null = null;
-    const armId = window.setTimeout(() => {
-      onDocMouseDown = (e: MouseEvent): void => {
-        if (!host.contains(e.target as Node)) close();
-      };
-      document.addEventListener('mousedown', onDocMouseDown, true);
-    }, 0);
-
-    const close = (): void => {
-      window.clearTimeout(armId);
-      if (onDocMouseDown) document.removeEventListener('mousedown', onDocMouseDown, true);
-      composer?.dispose();
-      composer = null;
-      host.remove();
-      if (commentComposerClose === close) commentComposerClose = null;
-    };
-    commentComposerClose = close;
-
-    composer = createCommentComposer({
-      parent: host,
-      onSubmit: (text) => {
-        close();
-        reviewStore.add(file, { ...span, file }, text, reviewAuthorName());
-        controller.selectBottomTab('review');
-        editorSession.refreshReviewDecorations();
-      },
-      onCancel: close,
-    });
-  }
-
-  // Jump-to-source from a diagram node: the SVG renderer draws each navigable node as a `<g>` that
-  // dispatches a bubbling NODE_NAVIGATE_EVENT carrying its RAW 1-based source span; one delegated
-  // listener on the diagrams container (below) routes it here.
-  async function navigateToDiagramNode(detail: DiagramNodeNavigateDetail): Promise<void> {
-    await gotoSourceSpan(detail);
-  }
-
-  diagramsView.addEventListener(NODE_NAVIGATE_EVENT, (e) => {
-    const detail = (e as CustomEvent<DiagramNodeNavigateDetail>).detail;
-    if (!detail) return;
-    void selectFromDiagram(detail);
-    // On a phone the Properties rail is a bottom sheet (#221, Task 2): a node TAP raises it to half, so
-    // tapping a node doubles as "open this node's editor". Gated on $bp-narrow — desktop keeps its fixed
-    // rail (and openInspectorSheet would otherwise pop the hidden sheet over the page).
-    if (isNarrowViewport()) openInspectorSheet('half');
-  });
-
-  // Drag-to-edit (issue #93, Task 5): a diagram node gesture (double-click = rename, right-click =
-  // delete) round-trips through the model→.koi seam (#91). Enabled now that the seam exists; the
-  // renderer keeps the gestures inert until this flips the switch, so the read-only tab is unchanged.
-  setDiagramEditing(true);
-  // Touch (tap-to-edit) presentation for the canvas (#221, Task 3): below $bp-narrow, freehand gestures
-  // (drag-move/connect, double-click-rename, right-click-delete) are swapped for tap-to-navigate + drag-to-
-  // pan so a phone drives the canvas by tapping. INDEPENDENT of the editing flag above — the mobile shell
-  // stays editing-capable (the palette + auto-arrange still author). Set from the initial viewport, then
-  // re-evaluated only when the breakpoint is actually crossed, re-rendering the canvas so the renderer
-  // re-wires its gestures for the new mode.
-  setDiagramTouchMode(isNarrowViewport());
-  // The default zoom a freshly-opened domain canvas uses when nothing per-diagram is saved (#762).
-  // Seeded from the loaded settings here, then kept in sync from prefsCallbacks.onChange below.
-  setDefaultCanvasZoom(settings.defaultCanvasZoom);
-  let diagramWasNarrow = isNarrowViewport();
-  // Named so the init() teardown can removeEventListener it — otherwise this listener (and its closed-over
-  // controller) outlives the IDE and a breakpoint cross would call loadDiagrams() on a torn-down controller.
-  const onDiagramViewportResize = (): void => {
-    const narrow = isNarrowViewport();
-    if (narrow === diagramWasNarrow) return; // act on a CROSS only — not on every resize tick
-    diagramWasNarrow = narrow;
-    setDiagramTouchMode(narrow);
-    void controller.loadDiagrams(); // rebuild the canvas with the now-correct gesture wiring
-  };
-  window.addEventListener('resize', onDiagramViewportResize);
-  diagramsView.addEventListener(NODE_EDIT_EVENT, (e) => {
-    const detail = (e as CustomEvent<DiagramNodeEditDetail>).detail;
-    if (detail) void applyDiagramEdit(detail);
-  });
-
-  // Auto-arrange (authoring): the canvas cleared its saved positions; re-render so ELK lays it out fresh.
-  diagramsView.addEventListener(DIAGRAM_RELAYOUT_EVENT, () => {
-    void controller.loadDiagrams();
-  });
-
-  // Connect / disconnect (authoring): drawing or removing a relationship round-trips into `.koi`.
-  diagramsView.addEventListener(DIAGRAM_CONNECT_EVENT, (e) => {
-    const detail = (e as CustomEvent<DiagramConnectDetail>).detail;
-    if (detail) void applyDiagramConnect(detail);
-  });
-  diagramsView.addEventListener(DIAGRAM_DISCONNECT_EVENT, (e) => {
-    const detail = (e as CustomEvent<DiagramDisconnectDetail>).detail;
-    if (detail) void applyDiagramDisconnect(detail);
-  });
-  // Empty-canvas doorway: seed a validated starter for the picked concept. Non-destructive — an untouched
-  // BLANK seed is replaced outright (the common first-run case), otherwise the starter is appended so no
-  // existing work is lost. The buffer edit fires onDocEdited → the canvas re-renders with real nodes.
-  diagramsView.addEventListener(EMPTY_STATE_PICK_EVENT, (e) => {
-    const detail = (e as CustomEvent<EmptyStatePickDetail>).detail;
-    if (detail) seedConcept(detail.kind);
-  });
-
-  function seedConcept(kind: EmptyConceptKind): void {
-    const starter = CONCEPT_STARTER[kind];
-    const current = editor.getDoc();
-    const pristine = current.trim() === '' || current.trim() === BLANK.trim();
-    editor.setDoc(pristine ? starter : `${current.replace(/\s+$/, '')}\n\n${starter}`);
-    setStatus(CONCEPT_SEEDED_MSG[kind], 'green');
-  }
-
-  // Map a node gesture to a StructuredEdit, apply it through #91's round-trip, and patch the buffer.
-  // An edit that would break the model comes back as a KOIxxxx diagnostic (and no edits): surface it
-  // and roll back (nothing is applied), exactly as the spec requires.
-  async function applyDiagramEdit(detail: DiagramNodeEditDetail): Promise<void> {
-    if (detail.action === 'delete') {
-      // Deleting a node removes the whole type declaration (round-trips through removeType).
-      await applyStructuredEdit({ kind: 'removeType', target: detail.qualifiedName }, `Deleted ${detail.label}`);
-      return;
-    }
-    // Renaming a TYPE is a workspace-wide rename (every reference moves), so it uses the editor's
-    // cross-file rename at the declaration's name position rather than a span-local member edit.
-    if (detail.newName && detail.line != null && detail.column != null) {
-      await renameTypeAt(detail.line - 1, detail.column - 1, detail.newName, detail.label);
-    }
-  }
-
-  // Cross-file rename of the symbol at a 0-based position (the diagram-node rename gesture).
-  async function renameTypeAt(line: number, character: number, newName: string, label: string): Promise<void> {
-    let edit;
-    try {
-      edit = await lsp.rename(line, character, newName);
-    } catch {
-      setStatus('Rename failed', 'error');
-      return;
-    }
-    if (!edit?.changes || Object.keys(edit.changes).length === 0) {
-      setStatus('Rename rejected', 'error');
-      return;
-    }
-    workspace.applyWorkspaceEdit(edit);
-    setStatus(`Renamed ${label} → ${newName}`, 'green');
-  }
-
-  // The shared write path for every canvas authoring gesture: apply a StructuredEdit through #91's
-  // round-trip, patch the buffer on success (which fires onDocEdited → the diagram AND the inspector
-  // re-render in step), or surface the rejecting KOIxxxx and roll back. Returns whether it applied.
-  async function applyStructuredEdit(edit: StructuredEdit, successMsg: string): Promise<boolean> {
-    let result;
-    try {
-      result = await lsp.applyModelEdit(edit);
-    } catch {
-      setStatus('Diagram edit failed', 'error');
-      return false;
-    }
-    if (result.diagnostics.length > 0 || result.uri == null || result.edits.length === 0) {
-      const reason = result.diagnostics[0];
-      setStatus(reason ? `${reason.code}: ${reason.message}` : 'Edit rejected', 'error');
-      return false; // rolled back — nothing is patched
-    }
-    workspace.applyWorkspaceEdit({ changes: { [result.uri]: result.edits } });
-    setStatus(successMsg, 'green');
-    return true;
-  }
-
-  // Drawing a relationship on the canvas = adding a field on the source typed as the target. The default
-  // field name is the target's lower-cased simple name; the user can refine it (or cancel).
-  async function applyDiagramConnect(detail: DiagramConnectDetail): Promise<void> {
-    const targetSimple = detail.targetQualifiedName.slice(detail.targetQualifiedName.lastIndexOf('.') + 1);
-    const suggested = targetSimple.charAt(0).toLowerCase() + targetSimple.slice(1);
-    const fieldName = await overlays.prompt.ask({
-      title: 'Add field',
-      message: `On ${detail.sourceLabel}, referencing ${detail.targetLabel}.`,
-      label: 'Field name',
-      initialValue: suggested,
-      mono: true,
-      confirmLabel: 'Add field',
-    });
-    if (!fieldName) return;
-    await applyStructuredEdit(
-      { kind: 'addField', target: detail.sourceQualifiedName, name: fieldName, type: targetSimple },
-      `Added ${fieldName}: ${targetSimple} to ${detail.sourceLabel}`,
-    );
-  }
-
-  // Removing a relationship = removing the field that backs it.
-  async function applyDiagramDisconnect(detail: DiagramDisconnectDetail): Promise<void> {
-    const ok = await overlays.confirm.ask({
-      title: `Remove ${detail.label}?`,
-      message: 'This rewrites the .koi source.',
-      confirmLabel: 'Remove',
-      danger: true,
-    });
-    if (!ok) return;
-    await applyStructuredEdit({ kind: 'removeMember', target: detail.backingMember }, `Removed ${detail.label}`);
-  }
-
-  // Adding a node = inserting a new construct skeleton into the active context (addType). The canvas
-  // doesn't know the contexts, so the target is the active scope; the kind comes from the palette button
-  // (defaulting to value) and the user names the type.
-  const ADD_DEFAULT_NAME: Record<AddNodeKind, string> = {
-    value: 'NewValue',
-    entity: 'NewEntity',
-    aggregate: 'NewAggregate',
-    event: 'NewEvent',
-    enum: 'NewEnum',
-    service: 'NewService',
-  };
-
-  // Canvas-only annotations (#255): a note/group is a VIEW concern (persisted in koine.layout.json, never
-  // `.koi`), so creation is delegated to the renderer — the holder of the live graph + current selection —
-  // via a document event. The renderer prompts for the text/label, places the cell behind the nodes, and
-  // persists it. No model edit and no LSP round-trip, unlike applyDiagramAddType below.
-  function createCanvasAnnotation(kind: CanvasAnnotationKind): void {
-    document.dispatchEvent(
-      new CustomEvent<DiagramAnnotationCreateDetail>(DIAGRAM_ANNOTATION_CREATE_EVENT, { detail: { kind } }),
-    );
-  }
-
-  async function applyDiagramAddType(detail?: { kind: AddNodeKind }): Promise<void> {
-    let scope = activeContext.get();
-    if (isAllContexts(scope)) {
-      // "All contexts" has no unambiguous home — except when the model has exactly one context, which is
-      // then the only possible target (the palette enables its buttons to match). 2+ contexts still need
-      // a deliberate pick.
-      const all = appStore.getState().contexts;
-      if (all.length !== 1) {
-        setStatus('Pick a bounded context (top-left) before adding a type', 'error');
-        return;
-      }
-      scope = all[0];
-    }
-    const kind = detail?.kind ?? 'value';
-    const name = await overlays.prompt.ask({
-      title: `New ${kind}`,
-      message: `In ${scope}.`,
-      label: 'Name',
-      initialValue: ADD_DEFAULT_NAME[kind],
-      mono: true,
-      confirmLabel: 'Create',
-    });
-    if (!name) return;
-    // The AddNodeKind string IS the construct keyword the server's TryAddType switches on (StructuredEdit.Type).
-    await applyStructuredEdit({ kind: 'addType', target: scope, name, type: kind }, `Added ${name} to ${scope}`);
-  }
-
-  // Insert a construct that lives INSIDE an aggregate (#254). Unlike applyDiagramAddType, the target is the
-  // SELECTED aggregate's qualified name (the palette gates these buttons on an aggregate selection), and the
-  // edit is `addAggregateMember`. A rule (an aggregate-scoped `spec`) is named; a repository is anonymous,
-  // so it inserts directly. The Type string IS the member keyword the server's TryAddAggregateMember switches on.
-  async function applyDiagramAddAggregateMember(kind: AggregateMemberKind, aggregateQn: string): Promise<void> {
-    const aggregateName = aggregateQn.split('.').pop() ?? aggregateQn;
-    if (kind === 'rule') {
-      const name = await overlays.prompt.ask({
-        title: 'New rule',
-        message: `An aggregate-scoped specification over ${aggregateName}.`,
-        label: 'Name',
-        initialValue: 'NewRule',
-        mono: true,
-        confirmLabel: 'Create',
-      });
-      if (!name) return;
-      await applyStructuredEdit(
-        { kind: 'addAggregateMember', target: aggregateQn, name, type: 'rule' },
-        `Added rule ${name} to ${aggregateName}`,
-      );
-      return;
-    }
-    await applyStructuredEdit(
-      { kind: 'addAggregateMember', target: aggregateQn, type: 'repository' },
-      `Added a repository to ${aggregateName}`,
-    );
-  }
-
-  // Clicking a diagram node both jumps to its declaration AND selects it, so the element inspector
-  // (#142) populates from the same gesture. A diagram node is named `context.simpleName`; map it back
-  // to the canonical glossary qualified name (the selection key) through the index when it's reachable.
-  async function selectFromDiagram(detail: DiagramNodeNavigateDetail): Promise<void> {
-    const index = await controller.ensureModelIndex().catch(() => null);
-    // Resolve the clicked node to the nearest INSPECTABLE element so the Properties panel actually
-    // populates: aggregate/value-object/event nodes resolve directly; a state box (Context.Aggregate.State)
-    // walks up to its owning aggregate; a bare context node resolves to nothing. Previously this set the
-    // selection to the node's raw qualified name, which the inspector couldn't resolve for state/context
-    // nodes — so clicking them left the panel blank. Without an index yet, fall back to the raw qn.
-    const qualifiedName = index ? resolveInspectableQn(index, detail.qualifiedName) : detail.qualifiedName;
-    if (qualifiedName) selection.set({ qualifiedName, context: qualifiedName.split('.')[0] });
-    await navigateToDiagramNode(detail);
   }
 
   // Check… — pick a baseline folder and diff the current buffer against it. Owned by the controller
@@ -1226,50 +796,6 @@ export function init(): () => void {
     el('history-controls-host'),
   );
 
-  // The bottom mobile zone switcher (#220): a tablist shown only below $bp-narrow that picks which of
-  // the four zones (Files / Code / Diagram / Props) fills the single-column phone shell. Selecting a
-  // zone writes the store; Code/Diagram additionally flip the center tab (both live in #center, so the
-  // center tab decides which surface shows). The active zone is mirrored onto #split[data-mobile-zone]
-  // so the @media rules can show/hide zones without remounting any DOM.
-  function selectMobileZone(zone: MobileZone): void {
-    // Props is a single inspector surface: the bottom SHEET (#221), an overlay — not a swapped-in #right
-    // rail. Write the slice for EVERY zone (including 'props') so the tablist's aria-selected + roving
-    // tabIndex reflect the active tab (the bug: returning before the write left Props un-selectable, and
-    // arrow-key nav onto it opened the sheet without updating the tab). For 'props' we additionally raise
-    // the sheet OVER the current zone; the data-mobile-zone MIRROR (below) keeps the underlying real zone
-    // visible for 'props', so the single-column shell never switches to the empty #right rail. The other
-    // three are real zones: writing the slice (plus, for code/diagram, the center tab) surfaces them.
-    appStore.getState().setMobileZone(zone);
-    if (zone === 'props') openInspectorSheet('half');
-    else if (zone === 'diagram') {
-      controller.selectCenter('visual');
-      // The Diagram zone was hidden (display:none) until this reveal, so the canvas mounted at zero size:
-      // `fit()` no-op'd and the Outline minimap read no geometry (#529). Ask the live canvas to re-fit and
-      // rebuild its minimap on the NEXT frame, once the zone's CSS reveal has applied and the surface is
-      // measurable. Dispatched on `document` (the renderer listens there) so it reaches whichever canvas is
-      // mounted, without ide.tsx holding a handle to it.
-      requestAnimationFrame(() => document.dispatchEvent(new Event(DIAGRAM_REFIT_EVENT)));
-    } else if (zone === 'code') controller.selectCenter('technical');
-  }
-  render(<MobileZoneBar store={appStore} onSelect={selectMobileZone} />, el('mobile-zone-bar-host'));
-  // Mirror the active zone onto #split[data-mobile-zone] so the @media rules show/hide the single-column
-  // zone. 'props' is the exception: the inspector is a bottom-sheet OVERLAY, so selecting it must KEEP the
-  // underlying real zone (Files/Code/Diagram) visible rather than reveal the empty #right rail — we only
-  // mirror REAL zones, leaving the attribute on the last real zone beneath the sheet.
-  function mirrorMobileZone(zone: MobileZone): void {
-    if (zone !== 'props') splitEl.dataset.mobileZone = zone;
-  }
-  mirrorMobileZone(appStore.getState().mobileZone);
-  // Mirror only when mobileZone actually changes — the listener fires on every store write, so guard
-  // on prevState (the inspectorController idiom) to avoid rewriting the attribute on unrelated updates.
-  appStore.subscribe((s, prev) => {
-    if (s.mobileZone !== prev.mobileZone) mirrorMobileZone(s.mobileZone);
-  });
-  // On a narrow (phone) first paint, land on the default mobile zone's surface so the bottom bar's
-  // active tab and the visible #center surface agree from the start — otherwise the bar highlights the
-  // default 'code' zone while #center still shows the desktop-restored Visual surface until the first
-  // tap. Gated on the narrow breakpoint (the JS mirror of $bp-narrow) so the desktop shell keeps its restored center.
-  if (isNarrowViewport()) selectMobileZone(appStore.getState().mobileZone);
   // Switching files: repaint the active file's diagnostics, invalidate the doc views so they re-fetch,
   // and follow the new file's bounded context. Preserves the exact effect order of the old activateFile.
   workspace.onActiveChanged((uri) => {
@@ -1664,6 +1190,28 @@ export function init(): () => void {
     reviewAuthorName: () => reviewAuthorName(),
   });
 
+  // The diagram-authoring + canvas write-path — the #91 model→.koi round-trip (node rename/delete,
+  // connect/disconnect, add type/member), the empty-canvas concept seeder, canvas annotations, the
+  // in-editor review-comment composer, and the mobile-zone switcher — lives in the canvasWrite controller
+  // now (#757). It binds the DIAGRAM_* gesture listeners on #center-visual and renders the mobile zone bar;
+  // ide.tsx reaches its add-construct / annotate / review-comment entry points through the handle below.
+  const canvasWrite = createCanvasWrite({
+    editor,
+    workspace,
+    lsp,
+    controller,
+    setStatus,
+    prompt: overlays.prompt,
+    confirm: overlays.confirm,
+    reviewStore,
+    refreshReviewDecorations: () => editorSession.refreshReviewDecorations(),
+    reviewAuthorName: () => reviewAuthorName(),
+    gotoSourceSpan: (span) => void gotoSourceSpan(span),
+    splitEl,
+    defaultCanvasZoom: settings.defaultCanvasZoom,
+    blank: BLANK,
+  });
+
   // Diagrams are rendered with a theme-matched Mermaid palette; re-render on a theme flip (covers
   // the toolbar toggle, the command palette, and Preferences — all route through setTheme). The
   // controller owns the diagram cache + center state, so it decides whether to re-render now. The
@@ -1851,7 +1399,7 @@ export function init(): () => void {
     commandWiring.dispose(); // release the global command-shortcut keydown listener (#757)
     layoutController.dispose(); // release the edge resizers + section-disclosure listeners (#757)
     overlays.dispose(); // (#757) overlays are page-lifetime; dispose is a no-op, kept for symmetry
-    window.removeEventListener('resize', onDiagramViewportResize);
+    canvasWrite.dispose(); // release the canvas resize listener + mobile-zone subscription (#757)
     panelHost.dispose(); // dispose the terminal + Settings page + Review panel if they were built (#757)
     unsubReviewStore(); // release the editor-repaint subscription (the editorSession is destroyed above)
     workspace.setAutoSave(false);
