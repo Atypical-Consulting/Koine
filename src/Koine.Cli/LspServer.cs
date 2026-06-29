@@ -1728,7 +1728,23 @@ internal sealed class LspServer
         // 4. Create the emitter via the SAME registry the CLI uses, with the SAME per-target
         //    options the build resolves from koine.config (namespace map, instant mode), so the
         //    preview is byte-identical to `koine build` even for a configured workspace.
-        if (!Infrastructure.EmitterRegistry.TryCreate(target, ResolveTargetOptions(root, target), out var emitter))
+        var targetOptions = ResolveTargetOptions(root, target);
+
+        // Validate per-target options the same way `build` does (issue #794): surface a bad
+        // regexMatchTimeoutMs as a structured preview error rather than letting the C# emitter's
+        // last-resort guard throw (which the dispatch loop would swallow, leaving the pane blank).
+        if (!targetOptions.TryValidate(out var optionsError))
+        {
+            return new Dictionary<string, object?>
+            {
+                ["target"] = target,
+                ["files"] = Array.Empty<object>(),
+                ["diagnostics"] = Array.Empty<object>(),
+                ["error"] = optionsError,
+            };
+        }
+
+        if (!Infrastructure.EmitterRegistry.TryCreate(target, targetOptions, out var emitter))
         {
             return new Dictionary<string, object?>
             {

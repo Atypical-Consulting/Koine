@@ -17,7 +17,11 @@ namespace Koine.Compiler.Emit;
 /// comma-separated layer selector (e.g. <c>domain,application,infrastructure</c>) consumed by the C#
 /// emitter; <c>null</c> means the historical Domain-only output. <see cref="ApplicationMediatr"/> and
 /// <see cref="ApplicationMapping"/> are the C# Application-layer sub-options (issue #129: MediatR
-/// request shape; <c>plain</c>|<c>mapperly</c> mapping). <see cref="Empty"/> applies no
+/// request shape; <c>plain</c>|<c>mapperly</c> mapping). <see cref="RegexMatchTimeoutMs"/> is the
+/// per-call match-timeout budget (milliseconds) for the <c>matches</c>-invariant ReDoS guard (#641);
+/// <c>null</c> ⇒ the emitter's historical <c>1000</c> ms default. It is spiritually target-agnostic
+/// (a generic "regex match timeout"); targets with no per-call timeout (TypeScript/Python/PHP/Rust
+/// today) simply ignore it. <see cref="Empty"/> applies no
 /// configuration, so a provider given it produces output byte-identical to a parameterless emitter.</para>
 /// </summary>
 public sealed record EmitterOptions(
@@ -28,7 +32,8 @@ public sealed record EmitterOptions(
     bool ReferenceOnly = false,
     string? Layers = null,
     bool ApplicationMediatr = false,
-    string? ApplicationMapping = null)
+    string? ApplicationMapping = null,
+    int? RegexMatchTimeoutMs = null)
 {
     /// <summary>An options bag with no remapping and all defaults — the parameterless path.</summary>
     public static readonly EmitterOptions Empty =

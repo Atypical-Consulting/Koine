@@ -57,6 +57,14 @@ internal sealed class CoverageCommand : Command<CoverageSettings>
         var resolvedTarget = settings.Target ?? config.Target ?? "csharp";
         var targetOptions = config.OptionsFor(resolvedTarget);
 
+        // Validate the per-target options the same way `build` does (issue #794), so a bad
+        // regexMatchTimeoutMs gives the same friendly diagnostic here instead of letting the C# emitter's
+        // last-resort guard throw an unhandled exception.
+        if (!targetOptions.TryValidate(out var optionsError))
+        {
+            return CliError.Runtime(optionsError!);
+        }
+
         if (!EmitterRegistry.TryCreate(resolvedTarget, targetOptions, config.Emitters, out var emitter))
         {
             return CliError.Runtime($"unsupported target '{resolvedTarget}' (supported: {EmitterRegistry.SupportedList})");

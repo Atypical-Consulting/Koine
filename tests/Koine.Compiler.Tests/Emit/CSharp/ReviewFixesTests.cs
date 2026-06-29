@@ -105,6 +105,22 @@ public class ReviewFixesTests
         a.CacheDiscriminator.ShouldNotBe(c.CacheDiscriminator);
     }
 
+    [Fact]
+    public void Csharp_cache_discriminator_reflects_the_regex_match_timeout()
+    {
+        // Issue #794: the configurable match timeout now changes emitted bytes (the
+        // `TimeSpan.FromMilliseconds(N)` literal), so it MUST participate in the emit-cache fingerprint —
+        // otherwise two emits of the same model differing only in timeout collide and the second returns
+        // the first's stale bytes.
+        IEmitter a = new CSharpEmitter(CSharpEmitterOptions.Empty with { RegexMatchTimeoutMs = 250 });
+        IEmitter b = new CSharpEmitter(CSharpEmitterOptions.Empty with { RegexMatchTimeoutMs = 500 });
+        IEmitter c = new CSharpEmitter(CSharpEmitterOptions.Empty); // the default 1000 ms
+
+        a.CacheDiscriminator.ShouldNotBe(b.CacheDiscriminator); // different timeout → different key
+        a.CacheDiscriminator.ShouldNotBe(c.CacheDiscriminator);
+        b.CacheDiscriminator.ShouldNotBe(c.CacheDiscriminator);
+    }
+
     /// <summary>A context with an <c>Is…</c>-named spec and a plain one, to exercise the predicate de-doubling.</summary>
     private const string SpecPrefixFixture = """
         context Loans {

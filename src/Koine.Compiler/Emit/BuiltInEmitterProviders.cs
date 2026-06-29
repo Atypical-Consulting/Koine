@@ -55,7 +55,8 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
     {
         if (options.NamespaceMap.Count == 0 && options.InstantMode is null && !options.EmitSourceMaps
             && !options.ReferenceOnly && options.Layers is null
-            && !options.ApplicationMediatr && options.ApplicationMapping is null)
+            && !options.ApplicationMediatr && options.ApplicationMapping is null
+            && options.RegexMatchTimeoutMs is null)
         {
             return CSharpEmitterOptions.Empty;
         }
@@ -68,7 +69,8 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
             : CSharpMappingMode.Plain;
         return new CSharpEmitterOptions(
             options.NamespaceMap, instant, options.EmitSourceMaps, options.ReferenceOnly,
-            ParseLayers(options.Layers), options.ApplicationMediatr, mapping);
+            ParseLayers(options.Layers), options.ApplicationMediatr, mapping,
+            options.RegexMatchTimeoutMs ?? 1000);
     }
 
     /// <summary>

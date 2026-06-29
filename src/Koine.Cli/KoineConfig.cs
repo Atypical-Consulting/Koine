@@ -5,7 +5,10 @@ namespace Koine.Cli;
 /// <c>koine.config</c>. <see cref="OutDir"/> overrides the flat <c>out</c> for that target;
 /// <see cref="NamespaceMap"/> remaps a context name to an emitted namespace (e.g.
 /// <c>Catalog → Acme.Catalog</c>); <see cref="InstantMode"/>/<see cref="Layout"/> are forward
-/// keys the emitters consume as they gain support. Absent keys are <c>null</c>/empty so a
+/// keys the emitters consume as they gain support. <see cref="RegexMatchTimeoutMsText"/> is the raw
+/// <c>regexMatchTimeoutMs</c> value (issue #794/#641); <see cref="RegexMatchTimeoutMs"/> parses it to
+/// the C# <c>matches</c>-invariant ReDoS-guard match timeout in milliseconds (<c>null</c> ⇒ unset or
+/// non-integer ⇒ the emitter's <c>1000</c> ms default). Absent keys are <c>null</c>/empty so a
 /// target with no block behaves exactly as before.
 /// </summary>
 internal sealed record TargetOptions(
@@ -15,10 +18,41 @@ internal sealed record TargetOptions(
     string? Layout,
     IReadOnlyList<string>? Layers = null,
     bool ApplicationMediatr = false,
-    string? ApplicationMapping = null)
+    string? ApplicationMapping = null,
+    string? RegexMatchTimeoutMsText = null)
 {
     public static readonly TargetOptions Empty =
         new(null, new Dictionary<string, string>(StringComparer.Ordinal), null, null);
+
+    /// <summary>
+    /// The parsed C# match-timeout budget in milliseconds (issue #794/#641), or <c>null</c> when the
+    /// <c>regexMatchTimeoutMs</c> key is unset <em>or</em> not a valid integer. The raw text is kept on
+    /// <see cref="RegexMatchTimeoutMsText"/> so <see cref="TryValidate"/> can tell a present-but-invalid
+    /// value (a hard error) apart from an absent one (which keeps the emitter's default).
+    /// </summary>
+    public int? RegexMatchTimeoutMs => KoineConfig.ParseTimeout(RegexMatchTimeoutMsText);
+
+    /// <summary>
+    /// Validates the user-supplied per-target options the emitter cannot recover from (issue #794): a
+    /// present <c>regexMatchTimeoutMs</c> must parse to a <em>positive</em> integer — a non-integer would
+    /// silently disarm the ReDoS guard (falling back to 1000 ms), and a non-positive value would flow
+    /// into the generated <c>TimeSpan.FromMilliseconds(N)</c> and throw at the generated code's own
+    /// runtime. Returns <c>false</c> with a friendly <paramref name="error"/>. Every config-driven
+    /// emitter entry point (<c>build</c>, <c>coverage</c>, the LSP <c>emitPreview</c>) runs this before
+    /// constructing the C# emitter, so they all reject the same bad config identically rather than
+    /// letting the emitter's last-resort guard throw.
+    /// </summary>
+    public bool TryValidate(out string? error)
+    {
+        error = null;
+        if (RegexMatchTimeoutMsText is { } raw && (RegexMatchTimeoutMs is not { } ms || ms <= 0))
+        {
+            error = $"regexMatchTimeoutMs must be a positive integer (milliseconds); got '{raw}'";
+            return false;
+        }
+
+        return true;
+    }
 }
 
 /// <summary>
@@ -159,7 +193,8 @@ internal sealed record KoineConfig(
 
     /// <summary>
     /// Applies one <c>targets.&lt;name&gt;.&lt;rest&gt;</c> key. Recognized <c>rest</c>: <c>out</c>,
-    /// <c>instantMode</c>, <c>layout</c>, and <c>namespaces.&lt;Context&gt;</c>. Malformed/partial
+    /// <c>instantMode</c>, <c>layout</c>, <c>layers</c>, <c>application.{mediatr,mapping}</c>,
+    /// <c>regexMatchTimeoutMs</c>, and <c>namespaces.&lt;Context&gt;</c>. Malformed/partial
     /// keys are ignored (forward-compatible).
     /// </summary>
     private static void ApplyTargetKey(Dictionary<string, TargetBuilder> targets, string key, string value)
@@ -203,6 +238,14 @@ internal sealed record KoineConfig(
                 break;
             case "application" when parts.Length == 4 && parts[3] == "mapping":
                 builder.ApplicationMapping = value;
+                break;
+            case "regexMatchTimeoutMs" when parts.Length == 3:
+                // The C# matches-invariant ReDoS-guard match timeout (issue #794/#641): stored raw and
+                // parsed lazily by TargetOptions.RegexMatchTimeoutMs. Unlike other malformed keys this is
+                // NOT silently ignored — a present-but-invalid value (non-integer or non-positive) is a
+                // hard error via TargetOptions.TryValidate, since silently keeping 1000 ms would disarm a
+                // hardening knob the user explicitly set.
+                builder.RegexMatchTimeoutMs = value;
                 break;
             case "namespaces" when parts.Length == 4 && parts[3].Length > 0:
                 builder.NamespaceMap[parts[3]] = value;
@@ -254,14 +297,24 @@ internal sealed record KoineConfig(
         public string? Layers;
         public string? ApplicationMediatr;
         public string? ApplicationMapping;
+        public string? RegexMatchTimeoutMs;
         public readonly Dictionary<string, string> NamespaceMap = new(StringComparer.Ordinal);
 
         public TargetOptions Build() => new(
             OutDir, NamespaceMap, InstantMode, Layout,
             ParseLayers(Layers),
             string.Equals(ApplicationMediatr, "true", StringComparison.OrdinalIgnoreCase),
-            ApplicationMapping);
+            ApplicationMapping,
+            RegexMatchTimeoutMs);
     }
+
+    /// <summary>
+    /// Parses the raw <c>regexMatchTimeoutMs</c> value to an <c>int?</c> (issue #794). A non-integer
+    /// parses to <c>null</c>; the caller (<see cref="TargetOptions.TryValidate"/>) distinguishes a
+    /// present-but-unparseable value from an absent one by also inspecting the raw text.
+    /// </summary>
+    internal static int? ParseTimeout(string? value) =>
+        int.TryParse(value, out var ms) ? ms : null;
 
     /// <summary>
     /// Splits a comma-separated <c>layers</c> value into a normalized list (trimmed, lower-cased,
