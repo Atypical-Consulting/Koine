@@ -21,11 +21,10 @@ import { createCanvasWrite } from '@/shell/canvasWrite';
 import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
 import { koineMark } from '@/shared/logo';
-import { setEmitTargets } from '@/shared/emitTargets';
+import { createLifecycleBoot } from '@/shell/lifecycleBoot';
 import { initTheme, onThemeChange } from '@/settings/theme';
 import {
   peekLegacyScratch,
-  clearLegacyScratch,
   effectiveSettings,
   initSecrets,
   loadActiveContext,
@@ -38,12 +37,10 @@ import {
   saveWorkspaceCenter,
   saveWorkspaceDeck,
   setLastWorkspace,
-  getLastWorkspace,
   workspaceKeyOf,
   type Settings,
 } from '@/settings/persistence';
 import { createWelcome } from '@/welcome/welcome';
-import { takeStartIntent, type StartIntent } from '@/shell/bootIntent';
 import { type Template } from '@/welcome/templates';
 import { createCommandWiring } from '@/shell/commandWiring';
 import { createLayoutController } from '@/shell/layout';
@@ -60,7 +57,7 @@ import { reanchorSelectionAfterRename, type SelectedElement } from '@/model/sele
 import { renameStatusMessage, type InspectorElement } from '@/model/inspector';
 import { createReviewStore } from '@/review/reviewStore';
 import { resolveReviewAuthor } from '@/review/ReviewPanel';
-import { clearModelHash, readModelFromHash } from '@/export/share';
+import { readModelFromHash } from '@/export/share';
 import { handleBeforeUnload } from '@/shell/dirty';
 import { render } from 'preact';
 import { createHistoryController } from '@/shell/historyController';
@@ -132,19 +129,6 @@ const BLANK = `context NewModel {
 
 }
 `;
-
-// The host's reserved default-workspace token (mirrors host/browser/fs.ts DEFAULT_WS_TOKEN). Parentheses
-// can't appear in a real picked-folder name, so it never collides. Used as the lastWorkspace pointer
-// after "New" / a default-workspace open (#535).
-const DEFAULT_WS_TOKEN = '(default)';
-
-// Which workspace tokens the cold-boot ladder is allowed to silently re-open (#535). OPFS-backed dirs —
-// the default workspace and every materialized `example-*` dir — re-acquire from IndexedDB with NO
-// permission prompt, so boot can restore them. A *picked* folder handle needs a `requestPermission`
-// re-grant that requires a user gesture boot can't supply, so it must stay a manual Recents click.
-function isOpfsInternalToken(token: string): boolean {
-  return token === DEFAULT_WS_TOKEN || token.startsWith('example-');
-}
 
 function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -816,54 +800,6 @@ export function init(): () => void {
   // Control panel when its tab is open (#470). A no-op otherwise — the next SC open re-fetches anyway.
   workspace.onSaved(() => controller.refreshSourceControl());
 
-  // Boot/empty-state: open the host's persistent default workspace. The clearLegacyScratch + the
-  // OPFS-error output line are ide-specific, so they wrap workspace.openDefaultWorkspaceFlow here.
-  // NOTE: this no longer surfaces the welcome screen. Home is now a distinct route (#368) mounted by
-  // the boot switch (main.ts) — the IDE only runs on the editor route, so a pristine boot lands on the
-  // Home route and never paints the editor first. Showing the welcome overlay here is exactly the
-  // async-gated, post-paint reveal that caused the IDE→Home flash, so it's gone.
-  async function openDefaultWorkspaceFlow(seed: string): Promise<void> {
-    const { opened } = await workspace.openDefaultWorkspaceFlow(seed);
-    if (!opened) {
-      // The browser now falls back to an in-memory workspace, so this only fires if even that failed
-      // (or a host that genuinely can't back one). An honest message beats a blank editor.
-      output.setContent('// Koine Studio could not open a workspace in this browser.', 'plain');
-      return;
-    }
-    // The default workspace is now the open one, so point lastWorkspace at it (#535): a later reload
-    // returns here rather than reopening a stale example the user has since left via "New". '(default)'
-    // is OPFS-internal, so the boot ladder may auto-restore it.
-    setLastWorkspace(DEFAULT_WS_TOKEN);
-    // Token confirmed — the workspace is open. Clear the legacy scratch key now so the migration is
-    // non-destructive: content was never lost even if OPFS was unavailable on a prior load.
-    clearLegacyScratch();
-    // No-OPFS browsers (Safari / Firefox Private) run on the in-memory fallback: the editor + compiler
-    // work, but a reload loses everything. Warn once so the user exports their work rather than losing it.
-    if (!platform.persistsWorkspace) overlays.showMemoryOnlyBanner();
-  }
-
-  // Perform the action the user chose on the Home route (#368), handed across via the start-intent.
-  // These reuse the same action functions the in-editor start console wires, so a Home "Open folder"
-  // behaves exactly like the editor's own — there's no second code path to keep in sync. No unsaved
-  // work can exist at a fresh boot, so these skip the confirm-and-replace guard the in-editor versions
-  // apply (newModel directly, not requestNewModel).
-  async function runStartIntent(intent: StartIntent): Promise<void> {
-    switch (intent.kind) {
-      case 'new':
-        await newModel();
-        break;
-      case 'open-folder':
-        await openFolder();
-        break;
-      case 'open-recent':
-        await openRecentFolder(intent.path);
-        break;
-      case 'open-example':
-        await openExample(intent.template);
-        break;
-    }
-  }
-
   // Dismiss the diagram Export ▾ disclosure on an outside-click or when any overlay opens, so the
   // native <details> menu can't linger above a modal scrim (#534). Teardown runs on IDE unmount.
   const teardownExportMenuDismiss = installExportMenuDismiss();
@@ -1299,111 +1235,48 @@ export function init(): () => void {
     toggleFileTree: () => layoutController.toggleFileTree(),
   });
 
-  // Boot: attach listeners (inside start) before messages flow, then open the doc. The #status pill
-  // stays empty (the action-feedback toast has nothing to report yet); connection state is shown by
-  // #sb-connection, which boots "Connecting…" and flips to "Local" on the first server push (#756).
-  lsp.onServerRestart(() => {
-    // Fresh sidecar is back in sync; refresh whatever doc view is showing.
-    controller.invalidateDocViews();
-    controller.refreshActiveSurfaces();
-  });
-  lsp
-    .start()
-    .then(async () => {
-      // Seed the emit-target list from the backend capability query once the server is up (issue
-      // #282). Fire-and-forget: a slow or unresponsive query must NOT block the rest of boot, so we
-      // don't await it. The built-in list (the default) keeps every target surface rendering until it
-      // resolves, and the picker / wizard / Generated-tab / preview read the list LIVE, so they pick
-      // up the seeded set on their next render. A failed query falls back to the built-ins.
-      void lsp.emitTargets().then(setEmitTargets, (e) => {
-        console.error('fetching emit targets failed; using the built-in list:', e);
-        setEmitTargets(null);
-      });
-
-      // The workspace opens once the server is up so each file's didOpen resolves cross-file refs.
-      // Isolated try/finally per branch: an open failure must not masquerade as a connection failure,
-      // and any model hash is cleared so a reload doesn't re-trigger a failing import.
-      if (shared?.kind === 'workspace') {
-        try {
-          await exportShare.importSharedWorkspace(shared.files, shared.active);
-        } catch (e) {
-          console.error('importing shared workspace failed:', e);
-          setStatus('could not open shared workspace', 'error');
-        } finally {
-          clearModelHash();
-        }
-      } else if (shared?.kind === 'single') {
-        try {
-          await workspace.openWorkspaceWith1File(shared.text);
-        } catch (e) {
-          console.error('opening shared model failed:', e);
-          setStatus('could not open shared model', 'error');
-        } finally {
-          clearModelHash();
-        }
-      } else {
-        // A start action chosen on the Home route (#368) is queued as a one-shot intent and performed
-        // here, once, instead of opening the default workspace. A plain editor boot (cold `#/editor`
-        // deep link, or a returning user) has no intent: restore the workspace it was last on (#535) —
-        // an opened example otherwise reverted to the empty default on reload (silent data loss).
-        //
-        // Only an `example-*` dir is re-opened through openFolderPath here: it persists a handle in
-        // IndexedDB that re-acquires with NO permission prompt. A *picked* folder is not OPFS-internal
-        // (needs a user gesture) → never auto-restored, by design. The default workspace IS OPFS-internal
-        // but its '(default)' handle is registered lazily (never put in IndexedDB), so openFolderPath
-        // can't re-open it at cold boot — it flows through openDefaultWorkspaceFlow below instead, which
-        // is its proper path (seeds the model, migrates legacy scratch, shows the memory-only banner).
-        // On any restore failure (example dir evicted / IndexedDB cleared) we also fall through to the
-        // default, so the user is never stranded on a blank editor.
-        const intent = takeStartIntent();
-        if (intent) {
-          await runStartIntent(intent);
-        } else {
-          const last = getLastWorkspace();
-          const restoredExample =
-            !!last && last !== DEFAULT_WS_TOKEN && isOpfsInternalToken(last)
-              ? (await workspace.openFolderPath(last, { recent: false })).ok
-              : false;
-          // Legacy-scratch migration is deliberately NOT done on the example-restore path: the scratch
-          // content is only ever preserved by being seeded into the default workspace, so clearing it
-          // here (without seeding) would lose it. It stays untouched until a default-workspace open.
-          if (!restoredExample) await openDefaultWorkspaceFlow(legacyScratch ?? SEED);
-        }
-      }
-    })
-    .catch((e) => {
-      setStatus('connection failed', 'error');
-      output.setContent('// failed to start language server\n' + String(e), 'plain');
-    });
-
-  // The IDE shell boots once and stays alive across Home↔Editor route swaps (main.ts toggles
-  // visibility, it doesn't re-init). The boot ladder above consumes a start-intent only on that first
-  // boot — so a start action taken on a *return* visit to Home (which navigates back here without
-  // re-initing) would otherwise be dropped. Consume any queued intent on every later transition INTO
-  // the editor route. The first transition already happened before this listener exists (init() runs
-  // synchronously from the navigate that flipped the route), so it never double-fires with the ladder.
-  const unsubRouteIntent = appStore.subscribe((s, prev) => {
-    if (s.route === 'editor' && prev.route !== 'editor') {
-      const intent = takeStartIntent();
-      if (intent) void runStartIntent(intent);
-    }
+  // The boot sequence (the lsp.start ladder + emit-target seed + the shared/single/restored/default
+  // workspace open), the route-intent subscription, and the aggregate teardown live in the lifecycleBoot
+  // controller now (#757). Newing it up RUNS the boot ladder; init() returns its teardown — so init() is
+  // now a thin composition root: construct deps → new up controllers → return the aggregate teardown.
+  const lifecycleBoot = createLifecycleBoot({
+    lsp: {
+      onServerRestart: (cb) => lsp.onServerRestart(cb),
+      start: () => lsp.start(),
+      emitTargets: () => lsp.emitTargets(),
+    },
+    shared,
+    legacyScratch,
+    seed: SEED,
+    importSharedWorkspace: (files, active) => exportShare.importSharedWorkspace(files, active),
+    openWorkspaceWith1File: (text) => workspace.openWorkspaceWith1File(text),
+    openFolderPath: (folder, opts) => workspace.openFolderPath(folder, opts),
+    openHostDefaultWorkspaceFlow: (seed) => workspace.openDefaultWorkspaceFlow(seed),
+    setStatus,
+    setOutput: (content, lang) => output.setContent(content, lang),
+    invalidateDocViews: () => controller.invalidateDocViews(),
+    refreshActiveSurfaces: () => controller.refreshActiveSurfaces(),
+    persistsWorkspace: platform.persistsWorkspace,
+    showMemoryOnlyBanner: () => overlays.showMemoryOnlyBanner(),
+    newModel: () => newModel(),
+    openFolder: () => openFolder(),
+    openRecentFolder: (path) => openRecentFolder(path),
+    openExample: (template) => openExample(template),
+    disposers: {
+      controller: () => controller.dispose(),
+      editorSession: () => editorSession.destroy(),
+      commandWiring: () => commandWiring.dispose(),
+      layout: () => layoutController.dispose(),
+      overlays: () => overlays.dispose(),
+      canvasWrite: () => canvasWrite.dispose(),
+      panels: () => panelHost.dispose(),
+      reviewStoreSub: () => unsubReviewStore(),
+      autoSave: () => workspace.setAutoSave(false),
+      exportMenuDismiss: () => teardownExportMenuDismiss(),
+    },
   });
 
-  // A teardown the host can call to release the IDE's deferred work. Production (main.ts) runs for the
-  // page lifetime and ignores it; the test suite calls it between boots so the controller's pending
-  // debounce timers can't fire into a torn-down happy-dom (where `render` throws "document is not defined").
-  // setAutoSave(false) cancels the workspace's idle auto-save timer for the same reason.
-  return () => {
-    controller.dispose();
-    editorSession.destroy();
-    commandWiring.dispose(); // release the global command-shortcut keydown listener (#757)
-    layoutController.dispose(); // release the edge resizers + section-disclosure listeners (#757)
-    overlays.dispose(); // (#757) overlays are page-lifetime; dispose is a no-op, kept for symmetry
-    canvasWrite.dispose(); // release the canvas resize listener + mobile-zone subscription (#757)
-    panelHost.dispose(); // dispose the terminal + Settings page + Review panel if they were built (#757)
-    unsubReviewStore(); // release the editor-repaint subscription (the editorSession is destroyed above)
-    workspace.setAutoSave(false);
-    unsubRouteIntent();
-    teardownExportMenuDismiss(); // drop the global Export-menu dismissal listeners (#534)
-  };
+  // The host's teardown: production (main.ts) runs for the page lifetime and ignores it; the test suite
+  // calls it between boots so pending debounce timers can't fire into a torn-down happy-dom.
+  return () => lifecycleBoot.teardown();
 }
