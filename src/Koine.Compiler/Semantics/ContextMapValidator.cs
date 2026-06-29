@@ -26,14 +26,17 @@ internal static class ContextMapValidator
 
         foreach (var r in map.Relations)
         {
-            // 1. Endpoints declared.
-            foreach (var endpoint in new[] { r.Upstream, r.Downstream })
+            // 1. Endpoints declared (upstream then downstream — no per-relation array allocation).
+            if (!index.IsContext(r.Upstream))
             {
-                if (!index.IsContext(endpoint))
-                {
-                    diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ContextMapUnknownContext,
-                        $"context-map relation names unknown context '{endpoint}'", r.Span));
-                }
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ContextMapUnknownContext,
+                    $"context-map relation names unknown context '{r.Upstream}'", r.Span));
+            }
+
+            if (!index.IsContext(r.Downstream))
+            {
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ContextMapUnknownContext,
+                    $"context-map relation names unknown context '{r.Downstream}'", r.Span));
             }
 
             // 2. No self-relation.

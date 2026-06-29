@@ -32,13 +32,14 @@ internal static class CqrsValidator
 
         // Build defensively (last-wins): a source value object with duplicate members
         // (reported elsewhere as KOI0103) must not crash this loop.
-        var memberByName = new Dictionary<string, Member>(StringComparer.Ordinal);
+        var memberByName = new Dictionary<string, Member>(sourceMembers.Count, StringComparer.Ordinal);
         foreach (var m in sourceMembers)
         {
             memberByName[m.Name] = m;
         }
 
-        var sourceMemberNames = memberByName.Keys.ToArray();
+        // Materialized lazily: only the unknown-field suggestion path (uncommon) needs it.
+        string[]? sourceMemberNames = null;
         var scope = TypeScope.FromMembers(sourceMembers, index);
         var checker = new ExpressionChecker(index, resolver, enumMembers, diagnostics);
         // The record property a field emits to (R12.3): a positional record property is
@@ -64,6 +65,7 @@ internal static class CqrsValidator
                 // A direct field must name a member (or the synthetic `id`) of the source.
                 if (!memberByName.ContainsKey(field.Name))
                 {
+                    sourceMemberNames ??= memberByName.Keys.ToArray();
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReadModelUnknownField,
                         $"read model '{rm.Name}' field '{field.Name}' is not a member of '{rm.SourceType}'{Suggestions.For(field.Name, sourceMemberNames)}",
                         field.Span) with
@@ -155,8 +157,19 @@ internal static class CqrsValidator
     /// An entity's members plus the synthetic <c>id</c> — added only when the entity does
     /// not already declare its own <c>id</c> member (which would otherwise duplicate it).
     /// </summary>
-    private static IReadOnlyList<Member> EntityProjectionMembers(EntityDecl e) =>
-        e.Members.Any(m => string.Equals(m.Name, "id", StringComparison.OrdinalIgnoreCase))
-            ? e.Members
-            : e.Members.Append(new Member("id", new TypeRef(e.IdentityName), null)).ToList();
+    private static IReadOnlyList<Member> EntityProjectionMembers(EntityDecl e)
+    {
+        foreach (Member m in e.Members)
+        {
+            if (string.Equals(m.Name, "id", StringComparison.OrdinalIgnoreCase))
+            {
+                return e.Members;
+            }
+        }
+
+        var withId = new List<Member>(e.Members.Count + 1);
+        withId.AddRange(e.Members);
+        withId.Add(new Member("id", new TypeRef(e.IdentityName), null));
+        return withId;
+    }
 }

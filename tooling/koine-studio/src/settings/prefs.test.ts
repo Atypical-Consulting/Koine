@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
-  createPreferences,
   mountPreferencesPane,
   startMcpSidecarIfEnabled,
   type PrefsCallbacks,
@@ -28,18 +27,28 @@ async function settle(): Promise<void> {
 }
 
 const URL = 'http://127.0.0.1:51000/mcp';
-// Mirrors the placeholder used by createPreferences when no live endpoint has resolved (prefs.ts).
+// Mirrors the placeholder used by mountPreferencesPane when no live endpoint has resolved (prefs.ts).
 const MCP_URL_PLACEHOLDER = 'http://127.0.0.1:PORT/mcp';
 
-function openPrefs(over: Partial<PrefsCallbacks> = {}): void {
-  const prefs = createPreferences({
+// Mount the preferences pane (the same two-pane form the gear-launched Settings page embeds) into a fresh
+// host appended to the body, then open it. The legacy createPreferences modal was retired (#731), so these
+// tests drive the pane the overlay actually mounts. "Open" reproduces the center page's on-show path: a
+// repaint (refresh) followed by the explicit MCP sidecar (re)start (startMcpSidecar) — refresh is
+// repaint-only since #735 lifted the start out of it. Returns the pane handle for the few tests that drive
+// refresh/suspend.
+function openPrefs(over: Partial<PrefsCallbacks> = {}): ReturnType<typeof mountPreferencesPane> {
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const pane = mountPreferencesPane(host, {
     onChange: () => {},
     mcpEndpoint: async () => URL,
     mcpStop: async () => {},
     mcpHostable: true,
     ...over,
   });
-  prefs.open();
+  pane.refresh(); // open: repaint from the live Settings, focus the active tab
+  pane.startMcpSidecar(); // ...then (re)start the sidecar on show (issue #735), as the center page does
+  return pane;
 }
 
 const mcpToggle = () =>
@@ -93,9 +102,9 @@ describe('Settings → MCP panel', () => {
     expect(snippet().textContent).toContain(URL);
   });
 
-  it('opening the modal with MCP already enabled (re)starts the sidecar and shows the live URL (#735)', async () => {
-    // The modal's open path is the original "open Settings to revive the sidecar" affordance — it must
-    // survive the start being lifted out of applyOpenState into an explicit on-show call.
+  it('opening Settings with MCP already enabled (re)starts the sidecar and shows the live URL (#735)', async () => {
+    // The on-show path is the "open Settings to revive the sidecar" affordance — it must survive the start
+    // being lifted out of applyOpenState into an explicit on-show call.
     saveSettings({ ...DEFAULT_SETTINGS, mcpEnabled: true });
     const mcpEndpoint = vi.fn(async () => URL);
     openPrefs({ mcpEndpoint });
@@ -318,14 +327,17 @@ describe('Settings → About panel', () => {
     expect(labels).toEqual(['GitHub', 'Home', 'Docs', 'Blog']);
   });
 
-  it('open("about") opens directly on the About tab', () => {
-    const prefs = createPreferences({
+  it('refresh("about") lands directly on the About tab', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const pane = mountPreferencesPane(host, {
       onChange: () => {},
       mcpEndpoint: async () => URL,
       mcpStop: async () => {},
       mcpHostable: true,
     });
-    prefs.open('about');
+    // The deep-link path the Settings overlay uses for the About command (#731): refresh with a category id.
+    pane.refresh('about');
     const tab = document.querySelector<HTMLButtonElement>('#koi-settings-tab-about')!;
     expect(tab.getAttribute('aria-selected')).toBe('true');
     expect(document.querySelector<HTMLElement>('#koi-settings-panel-about')!.hidden).toBe(false);
@@ -454,15 +466,13 @@ describe('Settings → User/Workspace scope toggle', () => {
   it('on reopen, a row with an existing override shows Workspace scope and the override value', () => {
     // Seed an override directly, then open with the workspace key.
     saveSettings({ ...DEFAULT_SETTINGS, wordWrap: false });
-    const prefs = createPreferences({ onChange: () => {}, workspaceKey: () => KEY });
-    prefs.open();
+    const pane = openPrefs({ workspaceKey: () => KEY });
     // No override yet → User.
     expect(scopeBtn(WORD_WRAP_SCOPE, 'user').getAttribute('aria-checked')).toBe('true');
-    // Create the override, reopen.
+    // Create the override, then reopen the pane (refresh re-syncs every control from the live state).
     scopeBtn(WORD_WRAP_SCOPE, 'workspace').click();
     wordWrapToggle().click(); // override = true
-    prefs.close();
-    prefs.open();
+    pane.refresh();
     expect(scopeBtn(WORD_WRAP_SCOPE, 'workspace').getAttribute('aria-checked')).toBe('true');
     // The value control shows the EFFECTIVE (override) value, not the user value.
     expect(wordWrapToggle().getAttribute('aria-checked')).toBe('true');
@@ -695,13 +705,12 @@ describe('keyboard settings', () => {
     expect(resolveKeybindings().format).toBe('Mod-s');
   });
 
-  it('disarms the recorder when the dialog closes, so no leaked listener rebinds a hidden row', () => {
+  it('suspend disarms the recorder, so no leaked listener rebinds a hidden row', () => {
     const onKeybindingsChanged = vi.fn();
-    const prefs = createPreferences({ onChange: () => {}, onKeybindingsChanged });
-    prefs.open();
+    const pane = openPrefs({ onKeybindingsChanged });
     recordBtn('format').click(); // arm, but never deliver a key
-    prefs.close();
-    // The post-close keystroke must be ignored — the document listener was torn down on close.
+    pane.suspend(); // the page's close-path cleanup
+    // The post-suspend keystroke must be ignored — the document listener was torn down on suspend.
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
     expect(loadKeybindingOverrides().format).toBeUndefined();
     expect(onKeybindingsChanged).not.toHaveBeenCalled();
@@ -820,11 +829,11 @@ describe('Settings → Display name (#479)', () => {
   });
 });
 
-// Task 4: the prefs FORM extracted from the modal so it can mount into an arbitrary container (the
-// transient 'settings' center view in Task 5). mountPreferencesPane builds the same two-pane category
-// rail + control pane that createPreferences hands to the modal, but appends it straight into the given
-// container — no modal chrome / backdrop (createModal is what produces the `.koi-modal-backdrop`) — and
-// returns a destroy() that tears the form (and its child CodeMirror editors) back down.
+// mountPreferencesPane is the prefs FORM mounted into an arbitrary container — the gear-launched Settings
+// center page (#center-panel-settings) is its only consumer now that the legacy modal is retired (#731).
+// It builds the two-pane category rail + control pane and appends it straight into the given container —
+// no modal chrome / backdrop — and returns a destroy() that tears the form (and its child CodeMirror
+// editors) back down.
 describe('mountPreferencesPane', () => {
   let host: HTMLElement;
 

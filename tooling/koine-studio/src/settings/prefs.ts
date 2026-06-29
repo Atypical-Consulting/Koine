@@ -1,6 +1,7 @@
-// Settings dialog for Koine Studio. Built on the shared createModal() chrome, but laid out as a
-// two-pane preference center: a vertical category rail (Appearance / Editor / Assistant / Advanced)
-// on the left, the active category's controls on the right. The set of persisted Settings is the
+// Settings form for Koine Studio: the two-pane preference center the gear-launched Settings page embeds
+// (the legacy modal was retired, #731). Laid out as a vertical category rail (Appearance / Editor /
+// Assistant / Advanced) on the left, the active category's controls on the right. The set of persisted
+// Settings is the
 // source of truth (./persistence); each control writes a single-field patch through patchSettings() and
 // reports the merged Settings back via onChange. The app's onChange handler is the single place that
 // re-skins the studio (applyAppearance + editor soft-wrap), so flipping a control applies live there;
@@ -28,7 +29,6 @@ import { setTheme } from '@/settings/theme';
 import { ACCENTS, ACCENT_ORDER } from '@/settings/appearance';
 import { createAboutPanel } from '@/settings/about';
 import { createJsonView } from '@/editor/editor';
-import { createModal } from '@/shared/overlay';
 import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from '@/mcp/mcp';
 import { EMIT_TARGETS } from '@/shared/emitTargets';
 import { KEYBINDINGS, DEFAULT_BINDINGS, type BindingId } from '@/editor/keybindings';
@@ -83,12 +83,6 @@ export interface PrefsCallbacks {
   onKeybindingsChanged?(): void;
 }
 
-export interface PrefsHandle {
-  /** Open the dialog; pass a category id (e.g. 'about') to land on that tab. */
-  open(categoryId?: string): void;
-  close(): void;
-}
-
 const FONT_MIN = 10;
 const FONT_MAX = 22;
 const FONT_STEP = 0.5;
@@ -120,28 +114,29 @@ const ICON = {
 // chordFromEvent (keydown → CodeMirror key) and prettyChord (CodeMirror key → display string) live in
 // shared/platform.ts beside formatChord — they're platform-string helpers, not Settings-dialog logic.
 
-/** A mounted preferences pane. The public contract is just teardown; the modal drives the richer
- *  {@link MountedPrefsPane} returned by {@link mountPreferencesPane}. */
+/** A mounted preferences pane. The public contract is just teardown; the embedded Settings page drives the
+ *  richer {@link MountedPrefsPane} returned by {@link mountPreferencesPane}. */
 export interface PrefsPaneHandle {
   /** Remove the form from its container, destroy its child editors (the MCP CodeMirror view), and drop
    *  any transient recorder listener / pending timers. After this the pane is dead — re-mount to reuse. */
   destroy(): void;
 }
 
-/** The richer handle the reusing modal drives: repaint on open ({@link refresh}) and cancel transient
- *  recorder/conflict state on close ({@link suspend}). Callers that only need teardown see the narrower
+/** The richer handle the embedded Settings page drives: repaint on (re)open ({@link refresh}) and cancel
+ *  transient recorder/conflict state ({@link suspend}). Callers that only need teardown see the narrower
  *  {@link PrefsPaneHandle}. */
 interface MountedPrefsPane extends PrefsPaneHandle {
   /** Repaint every control from the current Settings; optionally land on a category id first. `focusTab`
-   *  (default true) focuses the active category tab — the modal wants that on open; the embedded center
-   *  page passes false so re-showing it never steals focus from the page. Repaint only: the MCP sidecar
-   *  (re)start is the separate on-show {@link startMcpSidecar} call (issue #735). */
+   *  (default true) focuses the active category tab; the embedded center page passes false so re-showing it
+   *  never steals focus from the page. Repaint only: the MCP sidecar (re)start is the separate on-show
+   *  {@link startMcpSidecar} call (issue #735). */
   refresh(categoryId?: string, focusTab?: boolean): void;
   /** The Settings "on show" hook: (re)start the desktop MCP sidecar when enabled and reflect it in this
-   *  pane's MCP panel. The modal calls it on open and the center page on (re)show; a bare mount never
-   *  does, so the opt-in server is never spawned before Settings is actually presented. */
+   *  pane's MCP panel. The center page calls it on show / (re)show; a bare mount never does, so the opt-in
+   *  server is never spawned before Settings is actually presented. */
   startMcpSidecar(): void;
-  /** Cancel any armed keybinding recorder + open conflict prompt (the modal's close-path cleanup). */
+  /** Cancel any armed keybinding recorder + open conflict prompt — the disarm {@link destroy} also runs,
+   *  exposed for a caller that wants to pause transient state without tearing the pane down. */
   suspend(): void;
 }
 
@@ -251,8 +246,8 @@ export function segmented<T extends string>(
  * Build the two-pane preference form (category rail + control pane) and append it into `container` — no
  * modal chrome. The DOM is created once and populated from the current Settings on mount; each control
  * commits a single-field patch through patchSettings() and reports the merged Settings back via cb.onChange.
- * Returns a handle to repaint/tear-down the pane. {@link createPreferences} mounts this inside a modal; the
- * transient Settings center view mounts the very same pane inside a page.
+ * Returns a handle to repaint/tear-down the pane. The gear-launched Settings center page
+ * ({@link import('@/settings/settingsPage').createSettingsPage}) mounts this pane inside its Visual tab.
  */
 export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks): MountedPrefsPane {
   // Every control commits a single-field patch, then reports the merged Settings to the app.
@@ -1646,37 +1641,4 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
   showMcpOff();
 
   return { destroy, refresh, startMcpSidecar, suspend };
-}
-
-/**
- * Build the Settings dialog — the shared createModal() chrome around the two-pane preference pane — and
- * return an imperative handle. The pane is mounted once into the modal body and reused across opens: each
- * open repaints every control from the freshly loaded Settings (so the dialog never shows stale values,
- * e.g. after a theme toggle from the toolbar or command palette) and each close cancels any armed
- * keybinding recorder. The form itself lives in {@link mountPreferencesPane}, so the same pane can also be
- * embedded directly in a page.
- */
-export function createPreferences(cb: PrefsCallbacks): PrefsHandle {
-  const modal = createModal({ title: 'Settings', ariaLabel: 'Koine Studio settings', variant: 'koi-modal--settings' });
-  const pane = mountPreferencesPane(modal.body, cb);
-
-  // The category to land on for the NEXT open (set by open(categoryId)); cleared after each open so a
-  // plain open() keeps the last-active category.
-  let pendingCategory: string | undefined;
-
-  modal.onOpen(() => {
-    pane.refresh(pendingCategory);
-    pane.startMcpSidecar(); // repaint no longer (re)starts the sidecar — fire the on-open revive (issue #735)
-    pendingCategory = undefined;
-  });
-  modal.onClose(() => pane.suspend());
-
-  // Open on a specific category when asked (e.g. the palette's "About" → 'about'); a no-arg open keeps
-  // the last-active tab.
-  function open(categoryId?: string): void {
-    pendingCategory = categoryId;
-    modal.open();
-  }
-
-  return { open, close: modal.close };
 }

@@ -12,12 +12,13 @@ using Koine.Compiler.Parsing;
 namespace Koine.Compiler.Services;
 
 /// <summary>
-/// One parsed-and-hashed unit of a <see cref="KoineCompilation"/> snapshot.
+/// One parsed unit of a <see cref="KoineCompilation"/> snapshot.
 /// Stored by reference so <see cref="KoineCompilation.WithDocument"/> can re-use
-/// untouched units without copying.
+/// untouched units without copying. The content hash is NOT stored here — it is
+/// derived on demand from the snapshot's source text only when <see cref="KoineCompilation.Fingerprint"/>
+/// is requested, so the common parse/validate/emit path never pays for an unread SHA-256.
 /// </summary>
 internal sealed record ParsedUnit(
-    string ContentHash,
     IReadOnlyList<ContextNode> Contexts,
     IReadOnlyList<ContextRelation> Relations,
     IReadOnlyList<Diagnostic> Diagnostics);
@@ -61,6 +62,7 @@ public sealed class KoineCompilation
     private readonly Lazy<KoineModel> _model;
     private readonly Lazy<SemanticModel> _semanticModel;
     private readonly Lazy<IReadOnlyList<Diagnostic>> _syntaxDiagnostics;
+    private readonly Lazy<string> _fingerprint;
 
     /// <summary>
     /// Per-file memoized <see cref="SemanticModel"/>s: keyed by uri, each wrapping only that
@@ -95,6 +97,7 @@ public sealed class KoineCompilation
         _model = new Lazy<KoineModel>(BuildModel, LazyThreadSafetyMode.ExecutionAndPublication);
         _semanticModel = new Lazy<SemanticModel>(() => new SemanticModel(Model), LazyThreadSafetyMode.ExecutionAndPublication);
         _syntaxDiagnostics = new Lazy<IReadOnlyList<Diagnostic>>(BuildDiagnostics, LazyThreadSafetyMode.ExecutionAndPublication);
+        _fingerprint = new Lazy<string>(BuildFingerprint, LazyThreadSafetyMode.ExecutionAndPublication);
 
         // Build the per-file Lazy<SemanticModel> map eagerly (only the Lazy wrappers, not the
         // SemanticModels themselves — those are built on demand, without calling the parser).
@@ -349,19 +352,24 @@ public sealed class KoineCompilation
     /// Two snapshots with identical file content produce equal <see cref="Fingerprint"/> values
     /// regardless of file insertion order.
     /// </summary>
-    public string Fingerprint
-    {
-        get
-        {
-            // Sort (uri + "\0" + hash) strings ordinally, join with '\n', SHA256 → hex.
-            var parts = _order
-                .Select(uri => uri + "\0" + _units[uri].ContentHash)
-                .OrderBy(s => s, StringComparer.Ordinal)
-                .ToList();
+    public string Fingerprint => _fingerprint.Value;
 
-            var joined = string.Join('\n', parts);
-            return ComputeHash(joined);
-        }
+    /// <summary>
+    /// Computes the order-independent content fingerprint. The per-file content hash is derived here,
+    /// on demand, from the snapshot's source text (<see cref="_texts"/>) rather than eagerly at parse
+    /// time, so the common parse/validate/emit path never pays for a hash it does not read. Memoised
+    /// via <see cref="_fingerprint"/> because the snapshot is immutable — repeated access is free.
+    /// </summary>
+    private string BuildFingerprint()
+    {
+        // Sort (uri + "\0" + hash) strings ordinally, join with '\n', SHA256 → hex.
+        var parts = _order
+            .Select(uri => uri + "\0" + ComputeHash(_texts[uri]))
+            .OrderBy(s => s, StringComparer.Ordinal)
+            .ToList();
+
+        var joined = string.Join('\n', parts);
+        return ComputeHash(joined);
     }
 
     // -------------------------------------------------------------------------
@@ -384,9 +392,8 @@ public sealed class KoineCompilation
     /// </summary>
     internal static ParsedUnit ParseUnit(string source, string? file)
     {
-        var hash = ComputeHash(source);
         var (contexts, relations, diagnostics) = ParseSource(source, file);
-        return new ParsedUnit(hash, contexts, relations, diagnostics);
+        return new ParsedUnit(contexts, relations, diagnostics);
     }
 
     /// <summary>
