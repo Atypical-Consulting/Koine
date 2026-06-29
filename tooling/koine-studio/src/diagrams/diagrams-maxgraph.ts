@@ -24,6 +24,7 @@ import {
   NODE_NAVIGATE_EVENT,
   diagramLayoutStore,
   diagramPersistScope,
+  getDefaultCanvasZoom,
   isDiagramEditing,
   isDiagramTouchMode,
   isEditableKind,
@@ -1052,7 +1053,7 @@ const ZOOM_PERSIST_KEY = 'koi-domain-diagram';
  * Ctrl/⌘+wheel zoom, and the Outline minimap. Returns a teardown that detaches them. Kept out of
  * buildCanvas so the model stays unit-testable; the visual chrome is verified in the running studio.
  */
-function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly = false): { dispose: () => void; fit: () => void; refit: () => void } {
+function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly = false): { dispose: () => void; fit: () => void; refit: () => void; applyInitialZoom: () => void } {
   const { Outline } = mx;
   const graph = handle.graph;
   // `readOnly` (the context-map canvas) is never an authoring surface regardless of the global editing
@@ -1095,7 +1096,12 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
     }
   };
 
-  // Restore the saved zoom level (best-effort).
+  // Capture the saved per-diagram zoom ONCE, here at construction — BEFORE `syncPct()` (below) can
+  // auto-save the current scale over the key and erase the "nothing saved yet" signal. `applyInitialZoom`
+  // reads this captured value so a freshly-opened diagram falls back to the configurable default (#762),
+  // not to whatever scale the readout happened to save first. Restore it now too (best-effort) so the
+  // read-only context-map / event-flow canvases — which call `fit()` rather than `applyInitialZoom()` —
+  // keep painting their initial readout from a consistent scale, exactly as before.
   const saved = loadDiagramZoom(ZOOM_PERSIST_KEY);
   if (saved != null) graph.zoomTo(saved / 100, false);
 
@@ -1112,6 +1118,24 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
     const p = Math.round(graph.getView().scale * 100);
     pct.textContent = `${p}%`;
     saveDiagramZoom(ZOOM_PERSIST_KEY, p);
+  };
+
+  // Open the domain canvas at a PREDICTABLE zoom (#762): the per-diagram saved zoom if there is one, else
+  // the configurable default (100% out of the box). Centers BOTH axes (without rescaling) so a layout at
+  // negative/large coordinates is still framed — the part `fit()` does that we keep — while dropping the
+  // rescale-to-fit that made the canvas open at an arbitrary scale (e.g. 114% for the six-context
+  // pizzeria). `syncPct()` runs LAST so the `%` readout always equals the resulting `graph.getView().scale`,
+  // making `+`/`−`/wheel monotonic from a known starting point. Guarded like `fit()` against a
+  // not-yet-measurable DOM. `render()` calls this where it used to call `chrome.fit()`.
+  const applyInitialZoom = (): void => {
+    const target = saved ?? getDefaultCanvasZoom();
+    try {
+      graph.zoomTo(target / 100, false);
+      (graph as unknown as { center?: (h?: boolean, v?: boolean) => void }).center?.(true, true);
+    } catch {
+      /* container not measurable yet — ignore; the readout still syncs to the real scale below */
+    }
+    syncPct();
   };
 
   const button = (glyph: string, label: string, onClick: () => void): HTMLButtonElement => {
@@ -1252,6 +1276,7 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
     },
     fit,
     refit,
+    applyInitialZoom,
   };
 }
 
@@ -1331,7 +1356,9 @@ export function createMaxGraphRenderer(): DiagramRenderer {
         activeDomainExport = { diagram: synthDomainExportDiagram(selectDomainDiagrams(files), merged), handle };
         container.replaceChildren(root);
         handle.graph.getView().revalidate(); // re-render now that the surface is in the live DOM
-        chrome.fit(); // frame the laid-out content (it can sit at negative coords) into the viewport
+        // Open at the saved-or-default zoom, centered — NOT auto-fitted (#762). `fit()` stays the explicit
+        // ⤢ "Fit to screen" action and the mobile reveal-refit (#529); only the initial open changes.
+        chrome.applyInitialZoom();
       } else {
         // Superseded: never reached the page — dispose so its listeners/observers don't leak.
         dispose();
