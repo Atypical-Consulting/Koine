@@ -49,6 +49,40 @@ kill it. `getWasmBootMode()` reports which path won. The `npm run test:browser` 
 (`scripts/smoke-boot.mjs`) boots the built studio in headless Chromium and gates the deploy on the
 worker actually reaching `ready` and a compiler call round-tripping.
 
+## Host abstraction (the `Platform` port)
+
+Studio supports two host environments — the native Tauri desktop shell and the pure-WASM browser
+build — behind a single **`Platform` port** defined in `src/host/types.ts`. The two adapters are
+`TauriPlatform` (`src/host/tauri.ts`) and `BrowserPlatform` (`src/host/browser/`); `getPlatform()`
+(`src/host/index.ts`) selects one at startup based on the runtime environment. The import boundary
+is deliberately hard: **no `@tauri-apps` or WASM imports exist outside `src/host/`** — the rest of
+the UI speaks only to the port, so a third host (e.g. the mobile-WASM build,
+[#219](https://github.com/Atypical-Consulting/Koine/issues/219)/[#220](https://github.com/Atypical-Consulting/Koine/issues/220))
+is a new adapter, not a rewrite of every call-site.
+
+**Capability-over-identity rule** ([#749](https://github.com/Atypical-Consulting/Koine/issues/749)).
+The UI asks *what the host can do*, never *who the host is*. All branching goes through `readonly`
+capability flags — `canHostMcp`, `compatNeedsInProcessSources`, `usesServiceWorker`, alongside the
+pre-existing `canUseGit`, `canSaveProjects`, and so on — and never through `platform.kind` or
+`isTauri()`. The `kind` field remains on the port but is reserved for diagnostics and telemetry
+only. This rule is enforced automatically by `src/host/seamGuard.test.ts`, a vitest guard that
+fails CI if any platform-identity branch — an `isTauri()` call, an `=== 'tauri'`/`=== 'browser'`
+comparison (either quote style), or a `switch`/`case` on a host kind — appears outside `src/host/`.
+Keeping the seam leak-free means adding a host or renaming a capability never forces a grep-and-fix
+across the whole codebase.
+
+Two **deliberate-duplication exceptions** exist where a forced unified port method would be the
+wrong abstraction:
+
+- `src/shared/platform.ts` (`isMac` / `MOD`) handles the ⌘-vs-Ctrl modifier label shown in
+  keyboard hints. This is pure presentation — which modifier key the user's OS uses — not a host
+  capability, so it lives outside `src/host/` by design.
+- The **unsaved-work close guard** uses two adapter-local mechanisms (Tauri's `onCloseRequested`
+  window-close hook vs the browser's `beforeunload` event) surfaced behind the thin
+  `onCloseRequested?` optional capability rather than a forced unified `confirmClose()`. The
+  mechanisms are different enough that collapsing them would hide meaningful platform divergence
+  rather than abstract it.
+
 ## How it works
 
 - The Rust host (`src-tauri/src/lib.rs`) spawns the Koine LSP lazily on the `lsp_start`

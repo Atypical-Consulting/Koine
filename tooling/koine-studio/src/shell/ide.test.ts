@@ -127,6 +127,9 @@ const ROOT = 'mem://workspace';
 
 class FakePlatform implements Platform {
   readonly kind = 'browser' as const;
+  readonly canHostMcp = false;
+  readonly compatNeedsInProcessSources = true;
+  readonly usesServiceWorker = true;
   readonly canOpenFolders = true;
   readonly canSaveProjects = true;
   readonly canRunShell = false;

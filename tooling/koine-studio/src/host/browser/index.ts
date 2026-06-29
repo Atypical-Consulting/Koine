@@ -18,6 +18,9 @@ declare const __APP_VERSION__: string;
 
 export class BrowserPlatform implements Platform {
   readonly kind = 'browser' as const;
+  readonly canHostMcp = false;
+  readonly compatNeedsInProcessSources = true;
+  readonly usesServiceWorker = true;
   readonly canOpenFolders = fs.supported();
   readonly canSaveProjects = fs.supported();
   readonly persistsWorkspace = fs.persistsWorkspace();
