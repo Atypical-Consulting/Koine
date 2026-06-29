@@ -326,4 +326,63 @@ public class GeneratedCodeTests
         var ex = Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(type, "not-an-email"));
         ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
     }
+
+    [Fact]
+    public void Source_generated_matches_form_has_identical_semantics_to_the_inline_form()
+    {
+        // Issue #795: the source-generated form is a pure optimization — it must accept/reject EXACTLY what
+        // the inline form does AND keep the same ReDoS timeout. Compile the SAME model both ways and assert
+        // parity across a normal input matrix plus a catastrophic-backtracking input that must time out under
+        // both forms (surfacing RegexMatchTimeoutException, not hanging).
+        const string src =
+            "context C {\n  value Token {\n    raw: String\n" +
+            "    invariant raw matches /^(a+)+$/  \"must be all a's\"\n  }\n}\n";
+        // A small (but non-trivial) timeout: normal inputs match/fail in microseconds, while the catastrophic
+        // input below backtracks far past the budget under either evaluation strategy.
+        var baseOptions = CSharpEmitterOptions.Empty with { RegexMatchTimeoutMs = 100 };
+
+        var inline = CompileMatchType(src, baseOptions with { RegexMode = RegexMode.Inline }, "C.Token", runRegexGenerator: false);
+        var sourceGen = CompileMatchType(src, baseOptions with { RegexMode = RegexMode.SourceGenerated }, "C.Token", runRegexGenerator: true);
+
+        foreach ((var value, var valid) in new[] { ("a", true), ("aaaa", true), ("aaab", false), ("b", false), ("", false) })
+        {
+            Accepts(inline, value).ShouldBe(valid, $"inline rejected/accepted '{value}' unexpectedly");
+            Accepts(sourceGen, value).ShouldBe(valid, $"source-generated diverged from inline on '{value}'");
+        }
+
+        var evil = new string('a', 48) + "!"; // exponential backtracking on `(a+)+`
+        AssertTimesOut(inline, evil);
+        AssertTimesOut(sourceGen, evil);
+    }
+
+    /// <summary>Emits <paramref name="src"/> with <paramref name="options"/>, Roslyn-compiles it (optionally running the regex source generator), and returns the named type.</summary>
+    private static Type CompileMatchType(string src, CSharpEmitterOptions options, string typeName, bool runRegexGenerator)
+    {
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter(options));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var (asm, errors) = TestSupport.Compile(result.Files, runRegexGenerator);
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+        return asm.GetType(typeName)!;
+    }
+
+    /// <summary>True when constructing <paramref name="type"/> with <paramref name="raw"/> succeeds; false when it throws the domain invariant violation (any other exception propagates).</summary>
+    private static bool Accepts(Type type, string raw)
+    {
+        try
+        {
+            Activator.CreateInstance(type, raw);
+            return true;
+        }
+        catch (TargetInvocationException e) when (e.InnerException?.GetType().Name == "DomainInvariantViolationException")
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Asserts that constructing <paramref name="type"/> with <paramref name="raw"/> surfaces a contained <c>RegexMatchTimeoutException</c> (the ReDoS budget tripped), not a hang.</summary>
+    private static void AssertTimesOut(Type type, string raw)
+    {
+        var ex = Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(type, raw));
+        ex.InnerException!.GetType().Name.ShouldBe("RegexMatchTimeoutException");
+    }
 }
