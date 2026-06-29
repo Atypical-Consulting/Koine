@@ -23,6 +23,9 @@ export interface TerminalPanelOptions {
 export interface TerminalPanel {
   /** Re-fit the terminal to its container — call when the panel is shown or the pane is resized. */
   fit(): void;
+  /** Re-resolve the app surface tokens into the xterm theme — call on a dark/light flip so the
+   *  running terminal re-themes live. A no-op on the browser placeholder branch (no terminal). */
+  applyTheme(): void;
   /** Tear down: stop the shell, disconnect observers, and dispose the xterm instance. */
   dispose(): void;
 }
@@ -60,6 +63,9 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
     return {
       fit() {
         /* nothing to reflow */
+      },
+      applyTheme() {
+        /* no terminal to re-theme on the placeholder branch */
       },
       dispose() {
         placeholder.remove();
@@ -154,6 +160,10 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
     fit() {
       fit();
       term.focus();
+    },
+    applyTheme() {
+      // Re-read the (now-flipped) app surface tokens and push them into xterm's live theme.
+      term.options.theme = resolveTerminalTheme(host);
     },
     dispose() {
       resizeObserver?.disconnect();
