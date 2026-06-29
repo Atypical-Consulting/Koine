@@ -19,4 +19,12 @@ describe('prefixedId', () => {
     expect(b).toMatch(/^note-/);
     expect(a).not.toBe(b);
   });
+
+  test('fallback carries a per-session timestamp segment so persisted ids survive a counter reset', () => {
+    // The counter resets to 0 every page load; without the timestamp a reloaded `review-1` would
+    // collide with a freshly-minted one (review ids are persisted to .koine/reviews.json and reloaded).
+    vi.stubGlobal('crypto', undefined);
+    // `${prefix}-${base36 timestamp}-${counter}` — two segments after the prefix, not just a counter.
+    expect(prefixedId('review')).toMatch(/^review-[0-9a-z]+-\d+$/);
+  });
 });

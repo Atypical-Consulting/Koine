@@ -18,9 +18,7 @@ import type { SourceSpan } from '@/lsp/lsp';
 import { prefixedId } from '@/shared/ids';
 import { byId } from '@/shared/sort';
 
-/** The committable reviews sidecar, written under the opened folder's `.koine/` directory. */
-export const REVIEWS_DIR = '.koine';
-/** The reviews file's relative path under the opened folder. */
+/** The committable reviews sidecar's path, under the opened folder's `.koine/` directory. */
 export const REVIEWS_FILE = '.koine/reviews.json';
 /** Envelope version; readers tolerate older/empty/garbage files by loading an empty set. */
 const REVIEWS_VERSION = 1;

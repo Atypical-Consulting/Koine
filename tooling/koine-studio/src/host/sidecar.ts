@@ -45,10 +45,13 @@ export function createFolderSidecar(
   let cachedRoot: string | null = null; // the root the token below was discovered under
   let fileToken: string | null = null; // cached once discovered or created (valid under cachedRoot)
 
-  /** Find (and register, so writeTextFile resolves) the file's token under `dir`, if it exists. */
-  async function locate(): Promise<string | null> {
-    const r = root();
-    if (!r) return null; // no-folder/scratch mode: nothing to discover
+  /**
+   * Find (and register, so writeTextFile resolves) the file's token under `dir` of an EXPLICIT root `r`,
+   * if it exists. Callers snapshot `root()` ONCE and pass it in, so a single read/write stays internally
+   * consistent against one folder even if `root()` flips mid-operation (a folder switch during an await).
+   * The token is cached and keyed by `r`, so a different root re-discovers (and the same root reuses).
+   */
+  async function locateUnder(r: string): Promise<string | null> {
     if (r !== cachedRoot) {
       // The folder changed since the last discovery — drop the stale token and re-discover under `r`.
       cachedRoot = r;
@@ -66,9 +69,15 @@ export function createFolderSidecar(
   }
 
   return {
-    locate,
+    async locate() {
+      const r = root();
+      if (!r) return null; // no-folder/scratch mode: nothing to discover
+      return locateUnder(r);
+    },
     async read() {
-      const t = await locate();
+      const r = root();
+      if (!r) return null; // no-folder/scratch mode: nothing on disk
+      const t = await locateUnder(r);
       if (!t) return null;
       try {
         return await platform.readTextFile(t);
@@ -79,7 +88,9 @@ export function createFolderSidecar(
     async write(contents) {
       const r = root();
       if (!r) return; // no-folder/scratch mode: nothing to persist
-      const existing = await locate();
+      // Snapshot `r` once and thread it through every step, so a folder switch mid-write can never write
+      // this folder's contents into another folder's file (the deleted code captured `root` per write too).
+      const existing = await locateUnder(r);
       if (existing) {
         await platform.writeTextFile(existing, contents);
         return;
@@ -88,8 +99,8 @@ export function createFolderSidecar(
         // createFile creates intermediate dirs, so `<dir>/<name>` materializes `<dir>` too.
         fileToken = await platform.createFile(r, relPath, contents);
       } catch {
-        // Lost a create race (the file appeared meanwhile) — re-locate and overwrite.
-        const t = await locate();
+        // Lost a create race (the file appeared meanwhile) — re-locate under the same root and overwrite.
+        const t = await locateUnder(r);
         if (t) await platform.writeTextFile(t, contents);
       }
     },

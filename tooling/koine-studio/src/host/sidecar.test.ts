@@ -130,6 +130,26 @@ describe('createFolderSidecar', () => {
     expect(files.get('R/.koine/reviews.json')).toBe('ours'); // re-located and overwrote the racer's file
   });
 
+  it('write snapshots the root: a folder switch mid-write cannot retarget the create-race re-locate to another folder', async () => {
+    // Empty A and B. During our createFile the user opens folder B (root flips) and a racer plants the
+    // file under A (our snapshot root). The re-locate must look under A — never the now-current B —
+    // exactly as the deleted code did by capturing `root` once per write.
+    const { platform, files } = fakeFs();
+    let root = 'A';
+    const sc = createFolderSidecar(platform, () => root, RELPATH);
+
+    platform.createFile = ((folderToken: string, relPath: string) => {
+      // createFile is called with the snapshot root 'A' even though root() is about to flip to 'B'.
+      root = 'B'; // the user switched folders during our create…
+      files.set(`${folderToken}/${relPath}`, 'raced'); // …and a racer planted the file under that root
+      return Promise.reject(new Error('already exists (raced)'));
+    }) as Platform['createFile'];
+
+    await sc.write('ours');
+    expect(files.get('A/.koine/reviews.json')).toBe('ours'); // re-located under A and overwrote — not B
+    expect(files.has('B/.koine/reviews.json')).toBe(false); // B was never touched
+  });
+
   it('a genuine create failure with no file to fall back to is swallowed (no throw, no file)', async () => {
     const { platform, files } = fakeFs();
     const sc = createFolderSidecar(platform, () => 'R', RELPATH);
