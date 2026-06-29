@@ -407,14 +407,24 @@ internal sealed class PhpExpressionTranslator
             return true;
         }
 
-        if (IsDecimalOperand(left) || IsDecimalOperand(right))
+        // Decimal arithmetic/comparison/equality. A guard-narrowed `Decimal?` operand still infers as
+        // optional (narrowing is validator-only), so it is admitted here ONLY for the operators where
+        // the validator GUARANTEES the optional is guarded — arithmetic (`+`/`-`/`*`/`/`, via
+        // CheckArithmeticNullSafety) and relational comparison (`<`/`<=`/`>`/`>=`, which raise KOI0402
+        // on an unguarded optional). For those, WriteAsDecimal / WriteReceiver coalesce the operand to
+        // a non-null Decimal at the method site (a runtime no-op, since it is provably guarded), rather
+        // than letting it fall back to a native operator on a runtime \Koine\Runtime\Decimal object —
+        // invalid PHP (#787). EQUALITY (`==`/`!=`) is EXCLUDED: the validator does NOT require a guard
+        // there, so an optional operand may be genuinely null at runtime, and coalescing it to
+        // Decimal('0') would corrupt `null == 0` / `null == null` into a wrong `true`. Optional-Decimal
+        // equality therefore keeps the strict both-non-optional gate and falls through to the native
+        // null-distinguishing `===`/`!==` (its pre-#787 behaviour).
+        bool routeDecimal = bin.Op is BinaryOp.Eq or BinaryOp.Neq
+            ? IsDecimal(left) && IsDecimal(right)
+            : IsDecimalOperand(left) || IsDecimalOperand(right);
+        if (routeDecimal)
         {
-            // Decimal arithmetic/comparison. Whichever side is the Decimal is the receiver; the
-            // other operand is coerced to a Decimal expression. A guard-narrowed `Decimal?` operand
-            // still infers as optional (narrowing is validator-only), so IsDecimalOperand admits it
-            // here — and WriteAsDecimal / WriteReceiver coalesce it to a non-null Decimal at the
-            // method site — rather than letting it fall back to a native `+`/`-`/… on a runtime
-            // \Koine\Runtime\Decimal object, which is invalid PHP (#787).
+            // Whichever side is the Decimal is the receiver; the other operand is coerced to a Decimal.
             bool leftIsDecimal = IsDecimalOperand(left);
             Expr receiver = leftIsDecimal ? bin.Left : bin.Right;
             Expr operand = leftIsDecimal ? bin.Right : bin.Left;
