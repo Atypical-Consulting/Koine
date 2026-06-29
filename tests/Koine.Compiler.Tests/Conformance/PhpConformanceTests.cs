@@ -411,6 +411,50 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #814 acceptance: a <c>value</c> with a nullable <em>object-typed</em> member — a
+    /// <c>Decimal?</c> or a value-object-typed optional — emits a structural <c>equals()</c> that must
+    /// type-check under <c>phpstan --level max</c>. An object-typed member compares via its own
+    /// <c>equals()</c> (#686), so a <em>nullable</em> one would, unguarded, call
+    /// <c>$this-&gt;low-&gt;equals(...)</c> on <c>Decimal|null</c> — <c>method.nonObject</c> at phpstan-max
+    /// and a <c>TypeError</c> at runtime when the member is actually <c>null</c>.
+    /// <para>
+    /// The guard that makes this clean shipped with #686 (PR #802): the structural branch wraps a
+    /// nullable member in a null-first ternary
+    /// (<c>$this-&gt;m === null ? $other-&gt;m === null : ($other-&gt;m !== null &amp;&amp; $this-&gt;m-&gt;equals($other-&gt;m))</c>)
+    /// — both-null equal, one-null unequal, both-present structural. This fixture is the regression lock
+    /// that was missing: it lets a <c>Decimal?</c> member live on a <c>value</c> rather than forcing the
+    /// entity workaround #799 used (see <see cref="Guarded_optional_Decimal_arithmetic_typechecks_at_phpstan_level_max"/>).
+    /// It covers both object-typed nullable kinds at once — the scalar <c>Decimal?</c> and a value-object
+    /// optional (<c>Money?</c>) — since both route through the same structural-nullable branch. Skipped
+    /// (not failed) only when no <c>phpstan</c> is present locally; CI installs the toolchain and runs it
+    /// for real.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Value_object_nullable_member_equals_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Catalog {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  value PriceRange {\n" +
+            "    low:  Decimal?\n" +   // the issue's exact repro: a nullable scalar-runtime object member
+            "    high: Decimal\n" +
+            "    cap:  Money?\n" +     // a value-object-typed optional — same structural-nullable branch
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #786 acceptance (the #778 follow-up for mixed operands): a
     /// <c>String + &lt;stringable-non-String&gt;</c> concatenation — and its reverse order — must
     /// type-check under <c>phpstan --level max</c> and be runtime-correct. PR #778 (#717, Bug 3)
