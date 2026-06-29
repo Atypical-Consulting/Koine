@@ -89,6 +89,15 @@ internal class BuildSettings : CommandSettings
         var targetOptions = config.OptionsFor(resolvedTarget);
         var resolvedOut = Out ?? targetOptions.OutDir ?? config.OutDir;
 
+        // The C# matches-invariant ReDoS-guard match timeout (issues #794/#641): a present
+        // regexMatchTimeoutMs must be a positive integer. Validation lives on TargetOptions so the
+        // config-driven emitter entry points (build/coverage/LSP preview) all reject the same bad config
+        // identically — the same hard-error stance `--app-mapping` takes below.
+        if (!targetOptions.TryValidate(out error))
+        {
+            return false;
+        }
+
         // The C# layer selector (issues #128/#129): an explicit --layers wins over targets.<t>.layers
         // (same precedence as --target/--out). Unknown names are a hard error; both opt-in layers
         // imply domain. Absent ⇒ null ⇒ Domain-only (byte-identical to today). The Application-layer

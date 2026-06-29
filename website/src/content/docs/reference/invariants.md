@@ -237,8 +237,17 @@ sink, so Koine bounds the emitted match per target:
 | **PHP** | `(bool)preg_match('/…/', $raw)` | PCRE is **already bounded** by `pcre.backtrack_limit` / `pcre.recursion_limit` (set by default), so a catastrophic pattern fails the match instead of hanging. |
 | **Rust** | `koine_runtime::regex_is_match(r"…", &raw)` | The `regex` crate is a **linear-time** automaton with no catastrophic backtracking — no timeout is needed by construction. |
 
-The C# timeout is configurable on the emitter (`CSharpEmitterOptions.RegexMatchTimeoutMs`,
-default `1000`). The generated TypeScript `regexMatch` helper is the seam to harden untrusted-input
+The C# timeout is configurable via the `koine.config` key
+[`targets.csharp.regexMatchTimeoutMs`](/Koine/guides/cli/#koineconfig) (default `1000`): set a tighter bound
+for hostile-input value objects, or a looser one for a legitimately expensive pattern on trusted batch
+input. The value must be a **positive integer** number of milliseconds — `0` or any negative value is
+rejected at build time (`regexMatchTimeoutMs must be a positive integer (milliseconds); got '…'`),
+because it would otherwise flow into the generated `TimeSpan.FromMilliseconds(N)` and throw at the
+*generated* code's own runtime. Disabling the bound is intentionally not supported — the whole point of
+the guard is to *have* one. A non-integer value is ignored (the emitter keeps its `1000` ms default),
+matching how other malformed config keys are forward-compatibly skipped.
+
+The generated TypeScript `regexMatch` helper is the seam to harden untrusted-input
 matching without touching every call site — replace its body with a linear-time engine (e.g. RE2)
 and every `matches` invariant inherits the bound.
 

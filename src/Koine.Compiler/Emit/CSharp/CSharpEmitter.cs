@@ -28,13 +28,30 @@ public sealed partial class CSharpEmitter : IEmitter
     }
 
     /// <summary>An emitter configured with R16.1 options (namespace remapping, Instant handling).</summary>
-    internal CSharpEmitter(CSharpEmitterOptions options) => _options = options;
+    internal CSharpEmitter(CSharpEmitterOptions options)
+    {
+        // Defense in depth for issues #794/#641: a non-positive match timeout would emit a
+        // `TimeSpan.FromMilliseconds(N)` that throws at the *generated* code's own runtime (0 is not a
+        // usable match budget; `< -1` is out of range for TimeSpan). The CLI rejects this up front, but
+        // a programmatically built options bag (MCP, Studio, tests) must fail fast here too rather than
+        // emit broken code. The infinite/disabled sentinel is intentionally unsupported — #641 is about
+        // HAVING a bound.
+        if (options.RegexMatchTimeoutMs <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.RegexMatchTimeoutMs,
+                "RegexMatchTimeoutMs must be a positive integer (milliseconds).");
+        }
+
+        _options = options;
+    }
 
     /// <summary>
     /// Encodes every C# option that changes emitted bytes (instant mode, source maps, reference-only,
-    /// and the sorted namespace remap pairs) into the cache fingerprint, so toggling any of them busts
-    /// <see cref="Services.KoineCompiler"/>'s emit cache. The namespace pairs are ordered so equal maps
-    /// always produce the same string regardless of insertion order.
+    /// the regex match-timeout budget, and the sorted namespace remap pairs) into the cache fingerprint,
+    /// so toggling any of them busts <see cref="Services.KoineCompiler"/>'s emit cache. The namespace
+    /// pairs are ordered so equal maps always produce the same string regardless of insertion order.
     /// </summary>
     public string CacheDiscriminator
     {
@@ -59,6 +76,7 @@ public sealed partial class CSharpEmitter : IEmitter
                 "layers=" + layers,
                 "mediatr=" + _options.ApplicationMediatr,
                 "mapping=" + _options.Mapping,
+                "regexTimeout=" + _options.RegexMatchTimeoutMs,
                 "ns=" + map);
         }
     }
