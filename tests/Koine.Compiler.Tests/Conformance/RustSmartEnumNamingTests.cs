@@ -174,4 +174,87 @@ public class RustSmartEnumNamingTests
         RustNaming.UniqueVariants(["USD", "EUR", "Draft"])
             .ShouldBe(["Usd", "Eur", "Draft"]);
     }
+
+    // ------------------------------------------------------------------
+    // Issue #437: cross-context same-named enums with case-collapsing members.
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// The #437 repro: two bounded contexts each declare an enum named <c>Status</c> whose members
+    /// PascalCase-collapse (<c>ACTIVE</c> and <c>Active</c> both fold to the variant <c>Active</c>) —
+    /// but in OPPOSITE declaration order, so the member <c>Active</c> disambiguates to <c>Active2</c> in
+    /// <c>Alpha</c> yet stays <c>Active</c> in <c>Beta</c>. Each context references <c>Status.Active</c>
+    /// from a derived member, so the translator must resolve the variant against its OWN context's table.
+    /// The shared member→variant map was keyed by enum name alone (first-owner-wins), so the second
+    /// context's reference bound to the first's variant — a compiling-but-WRONG variant (the <c>2</c>
+    /// suffix lands on the sibling's other member). The fix keys the map by <c>(context, enum name)</c>
+    /// and resolves the owning context per reference.
+    /// </summary>
+    private const string CrossContextSameNameFixture = """
+        context Alpha {
+          enum Status { ACTIVE, Active }
+
+          value AThing {
+            kind: Status
+            flag: Bool = kind == Status.Active
+          }
+        }
+
+        context Beta {
+          enum Status { Active, ACTIVE }
+
+          value BThing {
+            kind: Status
+            flag: Bool = kind == Status.Active
+          }
+        }
+        """;
+
+    [Fact]
+    public void Cross_context_same_named_enum_reference_resolves_to_its_own_context_variant()
+    {
+        var result = new KoineCompiler().Compile(CrossContextSameNameFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var alphaFlag = FlagBody(result, "alpha.rs");
+        var betaFlag = FlagBody(result, "beta.rs");
+
+        // Scope each assertion to the `flag` accessor — the only site the translator produces the
+        // variant. A whole-file check would pass on a regressed reference because each module's enum API
+        // emits both `Status::Active` and `Status::Active2` independently.
+
+        // `Alpha { ACTIVE, Active }`: the member `Active` is the COLLAPSING one, so it is `Active2`.
+        alphaFlag.ShouldContain("Status::Active2", customMessage:
+            "Alpha's `Status.Active` must lower to its OWN table's `Active2`");
+
+        // `Beta { Active, ACTIVE }`: the member `Active` is FIRST, so it is `Active` — NOT the
+        // first-declared sibling's `Active2`. Before the fix the name-keyed map bound it to Alpha's table.
+        Regex.IsMatch(betaFlag, @"Status::Active\b").ShouldBeTrue(
+            $"Beta's `Status.Active` must lower to its OWN table's `Active`, got: {betaFlag}");
+        betaFlag.ShouldNotContain("Status::Active2", customMessage:
+            "Beta's reference must NOT bind to Alpha's first-owner-wins `Active2` variant");
+    }
+
+    [Fact]
+    public void Cross_context_same_named_enums_compile()
+    {
+        var result = new KoineCompiler().Compile(CrossContextSameNameFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>Extracts the body of a module's derived <c>fn flag(&amp;self) -&gt; bool { … }</c> accessor.</summary>
+    private static string FlagBody(Services.CompileResult result, string moduleFile)
+    {
+        var module = result.Files
+            .Single(f => f.RelativePath.EndsWith(moduleFile, StringComparison.Ordinal)).Contents;
+        var body = Regex.Match(module, @"fn flag\(&self\) -> bool \{(.*?)\}", RegexOptions.Singleline)
+            .Groups[1].Value;
+        body.ShouldNotBeEmpty($"could not locate the `flag` accessor in {moduleFile}");
+        return body;
+    }
 }
