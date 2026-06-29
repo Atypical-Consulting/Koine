@@ -32,7 +32,6 @@ import {
   loadWorkspaceCenter,
   loadWorkspaceDeck,
   pushRecentFolder,
-  removeRecentFolder,
   saveActiveContext,
   saveWorkspaceCenter,
   saveWorkspaceDeck,
@@ -40,7 +39,6 @@ import {
   workspaceKeyOf,
   type Settings,
 } from '@/settings/persistence';
-import { createWelcome } from '@/welcome/welcome';
 import { type Template } from '@/welcome/templates';
 import { createCommandWiring } from '@/shell/commandWiring';
 import { createLayoutController } from '@/shell/layout';
@@ -136,6 +134,18 @@ function el<T extends HTMLElement>(id: string): T {
   return node as T;
 }
 
+/** Callbacks the boot layer (main.ts) injects into the IDE — the editor→Home direction of the route
+ *  hand-off that complements #368's Home→editor start-intent. */
+export interface IdeHooks {
+  /**
+   * An open-recent start-intent failed to open its folder (#391). Recovery for a dead recent now lives
+   * on the Home route, so instead of painting the legacy welcome overlay over the editor the IDE reports
+   * the failure here; the boot layer returns to Home and — for an `unreadable` folder — offers to forget
+   * the entry there. Absent in tests that drive init() directly.
+   */
+  onOpenRecentFailed?(path: string, reason: 'unreadable' | 'empty'): void;
+}
+
 // --- the composition-root contract (#757) --------------------------------------------------------
 // init() is a THIN composition root: it constructs the shared handles (platform / lsp / editor session /
 // workspace / inspector controller / store), news up the feature controllers below, and returns the
@@ -161,7 +171,7 @@ function el<T extends HTMLElement>(id: string): T {
 // (inspectorController), undo/redo (historyController), workspace search (searchController), and the
 // editor↔LSP/diagnostics wiring (editorSession) were extracted earlier (#180/#182) and live beside these.
 // What remains in init() is the construction wiring + the inspector rename/description write-path.
-export function init(): () => void {
+export function init(hooks: IdeHooks = {}): () => void {
   // The host backend: the Tauri desktop shell, or a plain browser (compiler via WASM, files via
   // the File System Access API). Everything host-specific — the LSP transport, folder/file I/O,
   // dialogs, the app version — goes through this.
@@ -393,14 +403,11 @@ export function init(): () => void {
   // editorSession; the buffer text+dirty update lives in workspace.syncBuffer). The callback carries
   // the EDITING group's uri (group A's active uri, or group B's current uri) so the edit syncs into
   // the right buffer — a group-B edit must never write group A's (active) buffer (#265). Preserves the
-  // original effect order: welcome.hide → buffer text+dirty → onDocEdited → renderTree (only when that
-  // file's dirty dot just appeared). The active-file-only side effects (recompile via onDocEdited,
-  // history.noteEdit) are gated on `uri === activeUri()`: they are group-A/active-file concerns and a
-  // background B edit must not drive the active file's recompile or undo history.
+  // original effect order: buffer text+dirty → onDocEdited → renderTree (only when that file's dirty
+  // dot just appeared). The active-file-only side effects (recompile via onDocEdited, history.noteEdit)
+  // are gated on `uri === activeUri()`: they are group-A/active-file concerns and a background B edit
+  // must not drive the active file's recompile or undo history.
   editorSession.onChange((doc, uri) => {
-    // First edit dismisses the welcome overlay (shown only on a pristine first-run workspace). Both
-    // groups dismiss it.
-    if (welcome.visible) welcome.hide();
     // Sync into the EDITING group's own buffer (active or B), flipping its dirty flag on first change.
     const becameDirty = workspace.syncBuffer(uri, doc);
     if (uri === workspace.activeUri()) {
@@ -770,7 +777,6 @@ export function init(): () => void {
     setFolderTitle: (name) => {
       treeTitleEl.textContent = name;
     },
-    hideWelcome: () => welcome.hide(),
   });
   // Arm idle auto-save from the persisted setting so it's live at boot (the prefs onChange re-applies
   // it on every toggle); a no-op until an edit calls scheduleAutoSave above.
@@ -904,7 +910,6 @@ export function init(): () => void {
     // (#535): without this, a reload would reopen the example they just left behind. `token` is the
     // host's reserved '(default)' token.
     setLastWorkspace(token);
-    welcome.hide();
   }
 
   // --- overlays + polish surfaces -------------------------------------------
@@ -937,44 +942,16 @@ export function init(): () => void {
     appStore.getState().navigate('home');
   }
 
-  // A start-screen action that swaps the workspace. Confirms unsaved work first. On cancel we do
-  // nothing: the welcome already hid itself when the action was clicked, so the user lands back in
-  // the editor with their unsaved work intact — Cancel means "keep what I have", not "back to home".
-  async function leaveHomeFor(title: string, action: () => void | Promise<void>): Promise<void> {
-    if (await overlays.confirmReplaceWork(title, 'Discard & open')) await action();
-  }
-
-  // Open a folder from the Recent list, recovering gracefully when it's gone. The welcome's recent
-  // row hides the start screen on click, so on failure we re-show it (never strand the user) and, for
-  // a vanished folder/handle, offer to forget the entry.
+  // Open a folder from the Recent list (reached via the Home open-recent start-intent, #368),
+  // recovering gracefully when it's gone. Recovery now lives on the Home route (#391): on any failure
+  // the IDE reports it to the boot layer rather than painting an overlay over the editor — the boot
+  // layer returns to Home (never stranding the user) and, for a vanished folder/handle, offers to
+  // forget the entry there.
   async function openRecentFolder(path: string): Promise<void> {
     const result = await workspace.openFolderPath(path);
     if (result.ok) return;
-    welcome.show();
-    if (result.reason === 'unreadable') {
-      const forget = await overlays.confirm.ask({
-        title: `"${platform.folderName(path)}" is no longer available`,
-        message: 'Its folder may have moved, been deleted, or had its permission revoked. Remove it from Recent?',
-        confirmLabel: 'Remove from Recent',
-        danger: true,
-      });
-      if (forget) {
-        removeRecentFolder(path);
-        welcome.refreshRecent(); // rebuild the list in place — welcome is already shown, so show() would no-op
-      }
-    }
+    hooks.onOpenRecentFailed?.(path, result.reason);
   }
-
-  const welcome = createWelcome(
-    {
-      onNewModel: () => void overlays.requestNewModel(),
-      onOpenFolder: () => void leaveHomeFor('Open a folder?', () => openFolder()),
-      onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => openRecentFolder(path)),
-      onOpenExample: (template) => void leaveHomeFor('Open this template?', () => openExample(template)),
-    },
-    undefined, // templates default to the bundled set
-    platform.canOpenFolders,
-  );
 
   // Workspace search (Mod-Shift-F): a non-modal panel that scans every .koi file in the open folder
   // via the pure search core. The shell supplies the four seams the panel can't own — list the files,

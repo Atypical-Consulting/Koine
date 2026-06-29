@@ -1,4 +1,5 @@
 using System.Reflection;
+using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
@@ -276,5 +277,46 @@ public class R8ExplicitIdFactoryTests
         BlobOf(new TypeScriptEmitter(), src).ShouldContain("const id = bookId;");
         BlobOf(new PythonEmitter(), src).ShouldContain("id = book_id");
         BlobOf(new PhpEmitter(), src).ShouldContain("$id = $bookId;");
+    }
+
+    // ---- the shared generate/omit/alias resolver (#477) --------------------
+
+    /// <summary>Parses <see cref="Model"/> and returns the Book entity and its single factory.</summary>
+    private static (EntityDecl Entity, FactoryDecl Factory) BookRegister(string idParam)
+    {
+        (KoineModel? model, IReadOnlyList<Diagnostic> diagnostics) = new KoineCompiler().Parse(Model(idParam));
+        diagnostics.ShouldBeEmpty(string.Join("\n", diagnostics.Select(d => d.ToString())));
+        EntityDecl entity = model!.Contexts.SelectMany(c => c.Types).OfType<EntityDecl>().Single(e => e.Name == "Book");
+        return (entity, entity.Factories.Single());
+    }
+
+    [Fact]
+    public void ResolveFactoryId_centralises_the_generate_omit_alias_decision()
+    {
+        // The decision the five emitters used to copy-paste, now in one helper. It is parameterised
+        // only by how a target spells a parameter name; the C# casing (ToCamelCase) stands in here.
+
+        // Guid factory → no explicit id → mint a fresh one.
+        (KoineModel? guidModel, _) = new KoineCompiler().Parse("""
+            context Forum {
+              entity Comment identified by CommentId {
+                body: String
+                create reply(parent: CommentId, body: String) { body -> body }
+              }
+            }
+            """);
+        EntityDecl comment = guidModel!.Contexts.SelectMany(c => c.Types).OfType<EntityDecl>().Single();
+        FactoryIdBinding.ResolveFactoryId(comment, comment.Factories.Single(), CSharpNaming.ToCamelCase)
+            .ShouldBe(new FactoryIdBinding(FactoryIdSource.Generate, null));
+
+        // Non-Guid explicit id literally named `id` → the parameter provides the local; emit nothing.
+        (EntityDecl named, FactoryDecl namedFactory) = BookRegister("id");
+        FactoryIdBinding.ResolveFactoryId(named, namedFactory, CSharpNaming.ToCamelCase)
+            .ShouldBe(new FactoryIdBinding(FactoryIdSource.ParamProvidesIdDirectly, null));
+
+        // Non-Guid explicit id named differently → alias the synthetic `id` to the emitted param name.
+        (EntityDecl aliased, FactoryDecl aliasedFactory) = BookRegister("bookId");
+        FactoryIdBinding.ResolveFactoryId(aliased, aliasedFactory, CSharpNaming.ToCamelCase)
+            .ShouldBe(new FactoryIdBinding(FactoryIdSource.Alias, "bookId"));
     }
 }
