@@ -246,7 +246,7 @@ export function init(hooks: IdeHooks = {}): () => void {
       store={appStore}
       host={unsavedEl}
       baseTitle={baseTitle}
-      onSaveAll={() => void workspace.saveAllDirty()}
+      onSaveAll={() => commandWiring.run('save-all')}
     />,
     unsavedHost,
   );
@@ -804,8 +804,8 @@ export function init(hooks: IdeHooks = {}): () => void {
   render(
     <HistoryControls
       store={appStore}
-      onUndo={() => history.undo()}
-      onRedo={() => history.redo()}
+      onUndo={() => commandWiring.run('undo')}
+      onRedo={() => commandWiring.run('redo')}
       undoTitle={`Undo (${formatChord('mod+Z')})`}
       redoTitle={`Redo (${formatChord('mod+Shift+Z')})`}
     />,

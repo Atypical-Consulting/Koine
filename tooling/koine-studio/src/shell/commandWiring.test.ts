@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCommandWiring, type CommandWiringDeps } from '@/shell/commandWiring';
-import { canStopCompile } from '@/host/browser/stopCompile';
+import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
 
 // Mock the runaway-compile gate so tests can flip stop-compile's when() predicate. Defaults to false
 // (Stop hidden), matching an idle editor; individual tests opt into true.
@@ -258,6 +258,62 @@ describe('commandWiring', () => {
       const wiring = createCommandWiring(makeDeps({ canSaveProjects: false }));
       dispose = wiring.dispose;
       expect((document.getElementById('btn-save-project') as HTMLButtonElement).hidden).toBe(true);
+    });
+
+    it('dispatches Generate and Settings through their command ids', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      document.getElementById('btn-generate-project')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(deps.generateProject.open).toHaveBeenCalledOnce();
+
+      document.getElementById('btn-prefs')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(deps.openSettings).toHaveBeenCalledOnce();
+    });
+
+    it('dispatches Save-to-disk through its command id when the host can save projects', () => {
+      const deps = makeDeps({ canSaveProjects: true });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      document.getElementById('btn-save-project')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(deps.saveProjectToDisk).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('run(id) — by-id dispatch for chrome buttons & global chords (#758)', () => {
+    it('dispatches save-all / undo / redo to their actions (the ids ide.tsx wires)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      wiring.run('save-all');
+      expect(deps.workspace.saveAllDirty).toHaveBeenCalledOnce();
+      wiring.run('undo');
+      expect(deps.history.undo).toHaveBeenCalledOnce();
+      wiring.run('redo');
+      expect(deps.history.redo).toHaveBeenCalledOnce();
+    });
+
+    it('is a guarded no-op for an unknown id (never throws)', () => {
+      const wiring = createCommandWiring(makeDeps());
+      dispose = wiring.dispose;
+      expect(() => wiring.run('does-not-exist')).not.toThrow();
+    });
+
+    it('no-ops a disabled command — stop-compile stays inert while idle, fires in flight', () => {
+      vi.mocked(stopRunawayCompile).mockClear();
+      const wiring = createCommandWiring(makeDeps());
+      dispose = wiring.dispose;
+
+      vi.mocked(canStopCompile).mockReturnValue(false);
+      wiring.run('stop-compile'); // when() === false ⇒ guarded no-op
+      expect(stopRunawayCompile).not.toHaveBeenCalled();
+
+      vi.mocked(canStopCompile).mockReturnValue(true);
+      wiring.run('stop-compile'); // enabled ⇒ fires
+      expect(stopRunawayCompile).toHaveBeenCalledOnce();
     });
   });
 });

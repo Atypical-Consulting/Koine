@@ -62,6 +62,12 @@ export interface CommandWiringDeps {
 export interface CommandWiring {
   /** The live command set (re-read on every palette/overflow open). Exposed for tests + the registry sibling. */
   getCommands(): Command[];
+  /**
+   * Dispatch a command by id through the registry — a guarded no-op if the id is unknown or the command
+   * is currently disabled. Toolbar / chrome buttons and global chords address commands this way (#758)
+   * so they can never drift from the catalog entry.
+   */
+  run(id: string): void;
   /** Release the global keyboard-shortcut listener. */
   dispose(): void;
 }
@@ -162,16 +168,18 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     hintEl.appendChild(chord);
     hintEl.addEventListener('click', () => palette.toggle());
   }
-  el<HTMLButtonElement>('btn-home').addEventListener('click', () => deps.goHome());
-  el<HTMLButtonElement>('btn-new').addEventListener('click', () => void deps.requestNewModel());
-  el<HTMLButtonElement>('btn-generate-project').addEventListener('click', () => deps.generateProject.open());
+  // Each toolbar button dispatches its command by id (#758) so it can never drift from the palette entry
+  // or re-derive the action — the registry's run() owns the effect (and its enablement guard).
+  el<HTMLButtonElement>('btn-home').addEventListener('click', () => registry.run('home'));
+  el<HTMLButtonElement>('btn-new').addEventListener('click', () => registry.run('new-model'));
+  el<HTMLButtonElement>('btn-generate-project').addEventListener('click', () => registry.run('generate-project'));
   const saveProjectBtn = el<HTMLButtonElement>('btn-save-project');
-  saveProjectBtn.addEventListener('click', () => void deps.saveProjectToDisk());
+  saveProjectBtn.addEventListener('click', () => registry.run('save-project-to-disk'));
   if (!deps.canSaveProjects) saveProjectBtn.hidden = true;
-  el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
+  el<HTMLButtonElement>('btn-theme').addEventListener('click', () => registry.run('toggle-theme'));
   // The toolbar gear opens the transient Settings overlay over the deck (#center-panel-settings) — now the
-  // single Settings surface every entry point shares (#731), via the openSettings helper.
-  el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => deps.openSettings());
+  // single Settings surface every entry point shares (#731), via the prefs command.
+  el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => registry.run('prefs'));
 
   // Mobile overflow "More" (⋮) menu (#528): at ≤ $bp-narrow the toolbar hides its secondary actions
   // (Save/Check/Install/⌘K/theme/Settings) and reveals this kebab, which collects them into a floating
@@ -238,6 +246,7 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
 
   return {
     getCommands,
+    run: (id) => registry.run(id),
     dispose() {
       window.removeEventListener('keydown', onKeydown);
     },
