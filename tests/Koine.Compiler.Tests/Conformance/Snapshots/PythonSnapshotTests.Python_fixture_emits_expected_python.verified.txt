@@ -754,6 +754,9 @@ class Money:
     def __mul__(self, factor: int) -> Money:
         return Money(self.amount * factor, self.currency)
 
+    def __rmul__(self, factor: int) -> Money:
+        return self.__mul__(factor)
+
     def __add__(self, other: Money) -> Money:
         return Money(self.amount + other.amount, self.currency)
 
@@ -864,4 +867,7 @@ class Weight:
 
     def __truediv__(self, factor: Decimal | int) -> Weight:
         return Weight(self.amount / factor, self.unit)
+
+    def __rmul__(self, factor: Decimal | int) -> Weight:
+        return self.__mul__(factor)
 

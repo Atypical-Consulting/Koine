@@ -20,6 +20,7 @@ public class TypeScriptExpressionTests
         """
         context Shop {
           value Sku { code: String }
+          value Money { amount: Decimal }
           value Line {
             sku:    Sku
             amount: Decimal
@@ -28,6 +29,7 @@ public class TypeScriptExpressionTests
           }
           value Order {
             lines: List<Line>
+            money: Money
           }
 
           aggregate Cart root Basket {
@@ -86,6 +88,38 @@ public class TypeScriptExpressionTests
     }
 
     private static IdentifierExpr Id(string name) => new(name);
+
+    private static LiteralExpr Decimal(string text) => new(LiteralKind.Decimal, text);
+
+    // =========================================================================
+    // Reversed scalar * value-object (#788) — `0.9 * money` (scalar on the LEFT)
+    // must normalize operand order so the value object is the receiver of its own
+    // scalar multiply, byte-identical to the canonical `money * 0.9`. Mirrors the
+    // merged PHP Bug-2 fix (#778): a value object exposes its own scalar multiply,
+    // so it must win regardless of which side it is on — never the wrong
+    // `new Decimal('0.9').multiply(this.money)`, which treats the value object as a
+    // `Decimal | number` factor (a `tsc` type error and a wrong runtime value).
+    // =========================================================================
+
+    [Fact]
+    public void Reversed_scalar_times_value_object_normalizes_operand_order()
+    {
+        // `0.9 * money` — scalar on the LEFT, value object on the RIGHT.
+        var reversed = new BinaryExpr(BinaryOp.Mul, Decimal("0.9"), Id("money"));
+        Translate(reversed).ShouldBe("this.money.multiply(0.9)");
+
+        // The value object is the receiver, NOT the Decimal — the broken form treated `money` as a
+        // Decimal factor of `new Decimal('0.9').multiply(...)`.
+        Translate(reversed).ShouldNotContain("new Decimal(");
+    }
+
+    [Fact]
+    public void Reversed_scalar_times_value_object_is_byte_identical_to_the_canonical_order()
+    {
+        var reversed = new BinaryExpr(BinaryOp.Mul, Decimal("0.9"), Id("money"));
+        var canonical = new BinaryExpr(BinaryOp.Mul, Id("money"), Decimal("0.9"));
+        Translate(reversed).ShouldBe(Translate(canonical));
+    }
 
     // A numeric projection `lines.<op>(l => l.qty)` (qty: Int).
     private static CallExpr MinMax(string op) =>

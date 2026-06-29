@@ -112,6 +112,39 @@ public class TypeScriptConformanceTests
     }
 
     /// <summary>
+    /// Issue #788 acceptance: <c>scalar * value-object</c> with the scalar on the LEFT
+    /// (<c>0.9 * base</c>) must emit the value object's own scalar multiply
+    /// (<c>this.base.multiply(0.9)</c>, byte-identical to the canonical <c>base * 0.9</c>) and
+    /// type-check under <c>--strict</c>. Before the fix the translator inferred only the left operand
+    /// and emitted <c>new Decimal('0.9').multiply(this.base)</c>, passing the value object as a
+    /// <c>Decimal | number</c> factor (TS2345). This mirrors the merged PHP Bug-2 fix (#778); the model
+    /// exercises both operand orders (<c>base * 0.9</c> and <c>1.1 * base</c>).
+    /// </summary>
+    [Fact]
+    public void Reversed_scalar_times_value_object_typechecks_under_strict()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  value Line {\n" +
+            "    base: Money\n" +
+            "    discounted: Money = base * 0.9\n" +
+            "    surcharged: Money = 1.1 * base\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue("scalar * value-object should type-check under --strict:\n" + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
     /// Issues #608/#607/#606 acceptance: collection ops on a <c>Set</c> (and emptiness on a
     /// <c>Map</c>) must type-check under <c>--strict</c>. A <c>Set&lt;T&gt;</c> maps to
     /// <c>ReadonlySet&lt;T&gt;</c> and a <c>Map&lt;K,V&gt;</c> to <c>ReadonlyMap&lt;K,V&gt;</c>, which
