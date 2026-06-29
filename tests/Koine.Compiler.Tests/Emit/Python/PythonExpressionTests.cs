@@ -30,6 +30,7 @@ public class PythonExpressionTests
             total: Int
             discount: Int?
             subtotal: Decimal
+            money: Money
             status: OrderStatus
             note: String?
             prices: List<Decimal>
@@ -101,6 +102,7 @@ public class PythonExpressionTests
     private static IdentifierExpr Id(string name) => new(name);
     private static MemberAccessExpr Member(string target, string member) => new(Id(target), member);
     private static LiteralExpr Int(string text) => new(LiteralKind.Int, text);
+    private static LiteralExpr Dec(string text) => new(LiteralKind.Decimal, text);
     private static LiteralExpr Bool(bool b) => new(LiteralKind.Bool, b ? "true" : "false");
 
     // =========================================================================
@@ -198,6 +200,59 @@ public class PythonExpressionTests
         var intOverDec = new BinaryExpr(BinaryOp.Div, Id("quantity"), Id("subtotal"));
         Translate(decOverInt).ShouldBe("(self.subtotal / self.quantity)");
         Translate(intOverDec).ShouldBe("(self.quantity / self.subtotal)");
+    }
+
+    // =========================================================================
+    // Reversed scalar * value-object (#788) — `0.9 * money` (scalar on the LEFT).
+    // Unlike TypeScript/PHP, the Python translator stays type-blind and keeps the
+    // NATIVE infix `Decimal("0.9") * self.money`; the reversed multiply is made to
+    // work at the value-object boundary instead — the generated frozen-dataclass
+    // value object gains `__rmul__` (delegating to `__mul__`), so Python's reflected
+    // operand fallback (Decimal.__mul__(Money) → NotImplemented → Money.__rmul__)
+    // resolves. Mirrors the merged PHP Bug-2 fix (#778).
+    // =========================================================================
+
+    [Fact]
+    public void Reversed_scalar_times_value_object_keeps_native_infix()
+    {
+        // The translator is UNCHANGED — it must keep emitting native infix; the fix is the value
+        // object's new `__rmul__`, not a translator lowering (a regression guard for that invariant).
+        var reversed = new BinaryExpr(BinaryOp.Mul, Dec("0.9"), Id("money"));
+        Translate(reversed).ShouldBe("(Decimal(\"0.9\") * self.money)");
+    }
+
+    [Fact]
+    public void Scalar_multiplied_value_object_emits_rmul_delegating_to_mul()
+    {
+        // The issue's minimal model: a value object multiplied by a scalar on either side. The
+        // emitted value object must carry `__rmul__` delegating to `__mul__`, so `0.9 * base`
+        // (which Python lowers to `Decimal("0.9").__mul__(Money)` → NotImplemented → the reflected
+        // `Money.__rmul__`) no longer raises `TypeError` and stays `mypy --strict`-clean.
+        const string src =
+            """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0 "an amount cannot be negative"
+              }
+              value Line {
+                base: Money
+                discounted: Money = base * 0.9
+                surcharged: Money = 1.1 * base
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files
+            .First(f => f.RelativePath.EndsWith("value_objects/money.py", StringComparison.Ordinal))
+            .Contents;
+
+        // `__mul__` already exists; `__rmul__` must be emitted alongside it, delegating to `__mul__`.
+        money.ShouldContain("def __mul__(self, factor:");
+        money.ShouldContain("def __rmul__(self, factor:");
+        money.ShouldContain("return self.__mul__(factor)");
     }
 
     // =========================================================================
