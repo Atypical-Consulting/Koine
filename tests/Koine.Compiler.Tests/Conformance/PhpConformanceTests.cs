@@ -446,6 +446,43 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #805 acceptance: a <b>chained</b> mixed concatenation whose chain is led by a
+    /// <em>non-String</em> operand — <c>display: String = hours + ":" + minutes</c>, with
+    /// <c>hours</c>/<c>minutes</c> both <c>Int</c> — must type-check under <c>phpstan --level max</c>.
+    /// PR #800 (#786) routed a single <c>String + &lt;stringable-non-String&gt;</c> join to PHP's
+    /// <c>.</c> operator in either order, so a String-led chain concatenates correctly end-to-end. But
+    /// for the left-associative <c>(hours + ":") + minutes</c>, <see cref="Koine.Compiler.Ast.TypeResolver"/>
+    /// inferred the inner <c>Int + String</c> as <c>Int</c> (its <c>+</c> fallback was left-biased), so the
+    /// outer <c>(…) + minutes</c> looked like <c>Int + Int</c> and stayed on numeric <c>+</c> —
+    /// <c>(($this-&gt;hours . ':') + $this-&gt;minutes)</c>, which phpstan rejects (<c>binaryOp.invalid</c>).
+    /// The fix adds a target-agnostic "String wins" rule to <c>TypeResolver</c>: any <c>+</c> with at least
+    /// one <c>String</c> operand infers <c>String</c>, so the chain carries <c>String</c> forward and every
+    /// join routes to <c>.</c> — <c>(($this-&gt;hours . ':') . $this-&gt;minutes)</c>. No PHP emitter change is
+    /// needed once the types are right. Skipped (not failed) only when no <c>phpstan</c> is present locally;
+    /// CI installs the toolchain and runs it for real.
+    /// </summary>
+    [Fact]
+    public void Int_led_chained_mixed_concatenation_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Scheduling {\n" +
+            "  value TimeOfDay {\n" +
+            "    hours: Int\n" +
+            "    minutes: Int\n" +
+            // Int-led chain: (hours + ":") + minutes — the inner join must carry String to the outer one.
+            "    display: String = hours + \":\" + minutes\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// The always-on syntax gate: a valid PHP snippet must pass <c>php -l</c>.
     /// Skipped (not failed) only when no interpreter is present; with one it MUST parse cleanly.
     /// </summary>

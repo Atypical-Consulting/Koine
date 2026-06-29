@@ -13,10 +13,10 @@
 
   <!-- Version / packaging metadata, shared so the CLI tool packs consistently. -->
   <PropertyGroup>
-    <Version>0.17.7</Version>
+    <Version>0.17.8</Version>
     <!-- Carries the real version into the assembly so the CLI version command can read it
          (the four-part AssemblyVersion otherwise reports 1.0.0.0). -->
-    <InformationalVersion>0.17.7</InformationalVersion>
+    <InformationalVersion>0.17.8</InformationalVersion>
     <Authors>Philippe Matray</Authors>
     <Company>Atypical Consulting</Company>
     <RepositoryUrl>https://github.com/Atypical-Consulting/Koine</RepositoryUrl>

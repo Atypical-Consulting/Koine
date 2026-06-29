@@ -195,6 +195,21 @@ public sealed class TypeResolver
                     KoineType l = Visit(n.Left);
                     KoineType r = Visit(n.Right);
                     var optional = l.IsOptional || r.IsOptional;
+
+                    // "String wins" for `+`: a concatenation with at least one (non-optional)
+                    // String operand is a String in every target language (Int + String / String + Int
+                    // alike). Checked before numeric promotion so a chained mixed concat
+                    // (`hours + ":" + minutes` → `(hours + ":") + minutes`) carries String forward
+                    // through every join instead of losing it the moment a non-String operand leads the
+                    // chain — which left the outer `+` looking numeric and emitted invalid PHP (#805).
+                    // Keyed off a non-optional resolved String so it does not pre-empt the optional
+                    // narrowing path (#787).
+                    if (n.Op == BinaryOp.Add
+                        && ((l.Name == "String" && !l.IsOptional) || (r.Name == "String" && !r.IsOptional)))
+                    {
+                        return String.WithOptional(optional);
+                    }
+
                     KoineType arithmetic =
                         l.IsValueLike ? l :                               // value-object scalar arithmetic (Money * qty)
                         r.IsValueLike ? r :
