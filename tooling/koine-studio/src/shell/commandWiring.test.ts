@@ -1,0 +1,204 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createCommandWiring, type CommandWiringDeps } from '@/shell/commandWiring';
+
+// The toolbar button ids commandWiring wires at construction (index.html owns these in the real shell).
+const TOOLBAR_IDS = [
+  'btn-home',
+  'btn-new',
+  'btn-generate-project',
+  'btn-save-project',
+  'btn-theme',
+  'btn-prefs',
+  'btn-toolbar-overflow',
+];
+
+function mountToolbar(): void {
+  const bar = document.createElement('div');
+  const hint = document.createElement('button');
+  hint.className = 'palette-hint';
+  bar.appendChild(hint);
+  for (const id of TOOLBAR_IDS) {
+    const btn = document.createElement('button');
+    btn.id = id;
+    bar.appendChild(btn);
+  }
+  document.body.appendChild(bar);
+}
+
+function makeDeps(over: Partial<CommandWiringDeps> = {}): CommandWiringDeps {
+  return {
+    history: { undo: vi.fn(), redo: vi.fn() },
+    format: vi.fn(),
+    goHome: vi.fn(),
+    openFolder: vi.fn(),
+    search: { focus: vi.fn(), toggle: vi.fn() },
+    requestNewModel: vi.fn(),
+    workspace: { saveAllDirty: vi.fn(), buffers: new Map() },
+    copyShareLink: vi.fn(),
+    controller: {
+      runCheck: vi.fn(),
+      selectOutput: vi.fn(),
+      selectDocsTab: vi.fn(),
+      selectCenter: vi.fn(),
+      splitCodeCanvas: vi.fn(),
+      selectTech: vi.fn(),
+      selectRight: vi.fn(),
+      selectBottomTab: vi.fn(),
+    },
+    generateProject: { open: vi.fn() },
+    exportSourceZip: vi.fn(),
+    exportActiveDiagram: vi.fn(),
+    copyActiveDiagramMermaid: vi.fn(),
+    saveProjectToDisk: vi.fn(),
+    canSaveProjects: false,
+    layoutActions: {
+      togglePanelSide: vi.fn(),
+      toggleSideRail: vi.fn(),
+      toggleProperties: vi.fn(),
+      toggleNavigator: vi.fn(),
+    },
+    openSettings: vi.fn(),
+    openHelp: vi.fn(),
+    toggleHelp: vi.fn(),
+    toggleStoreInspector: vi.fn(),
+    ensureAssistant: vi.fn(() => ({ explainSelection: vi.fn() })),
+    editor: { addCommentAtSelection: vi.fn() },
+    openUri: vi.fn(),
+    overlayOpen: vi.fn(() => false),
+    toggleFileTree: vi.fn(),
+    ...over,
+  };
+}
+
+function key(init: KeyboardEventInit): KeyboardEvent {
+  return new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+}
+
+describe('commandWiring', () => {
+  let dispose: (() => void) | null = null;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    mountToolbar();
+  });
+
+  afterEach(() => {
+    dispose?.();
+    dispose = null;
+    document.body.innerHTML = '';
+  });
+
+  describe('getCommands() assembly', () => {
+    it('builds the core command set the palette reads', () => {
+      const wiring = createCommandWiring(makeDeps());
+      dispose = wiring.dispose;
+      const ids = wiring.getCommands().map((c) => c.id);
+      // A representative slice across the groups — proves the inline Command[] moved intact.
+      expect(ids).toEqual(expect.arrayContaining([
+        'undo', 'redo', 'format', 'home', 'open-folder', 'search', 'new-model', 'save-all',
+        'share', 'check', 'generate-project', 'export-source-zip', 'toggle-theme', 'prefs',
+        'help', 'about', 'view-assistant', 'add-comment', 'view-review',
+      ]));
+    });
+
+    it('omits Save-to-disk when the host cannot save projects, includes it when it can', () => {
+      const off = createCommandWiring(makeDeps({ canSaveProjects: false }));
+      expect(off.getCommands().map((c) => c.id)).not.toContain('save-project-to-disk');
+      off.dispose();
+
+      const on = createCommandWiring(makeDeps({ canSaveProjects: true }));
+      dispose = on.dispose;
+      expect(on.getCommands().map((c) => c.id)).toContain('save-project-to-disk');
+    });
+
+    it('surfaces each open buffer as a Go-to-File command that opens its uri', () => {
+      const buffers = new Map([
+        ['file:///b.koi', { uri: 'file:///b.koi', relPath: 'b.koi' }],
+        ['file:///a.koi', { uri: 'file:///a.koi', relPath: 'a.koi' }],
+      ]);
+      const deps = makeDeps({ workspace: { saveAllDirty: vi.fn(), buffers } });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+      const gotos = wiring.getCommands().filter((c) => c.group === 'Go to File');
+      // Sorted by relPath, and each runs openUri(buf.uri).
+      expect(gotos.map((c) => c.title)).toEqual(['a.koi', 'b.koi']);
+      gotos[0].run();
+      expect(deps.openUri).toHaveBeenCalledWith('file:///a.koi');
+    });
+
+    it('runs the format command through the injected format() thunk', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+      wiring.getCommands().find((c) => c.id === 'format')!.run();
+      expect(deps.format).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('global keyboard shortcuts', () => {
+    it('dispatches mod+N → requestNewModel, mod+Shift+F → search.toggle, F1 → toggleHelp', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      window.dispatchEvent(key({ key: 'n', ctrlKey: true }));
+      expect(deps.requestNewModel).toHaveBeenCalledOnce();
+
+      window.dispatchEvent(key({ key: 'f', ctrlKey: true, shiftKey: true }));
+      expect(deps.search.toggle).toHaveBeenCalledOnce();
+
+      window.dispatchEvent(key({ key: 'F1' }));
+      expect(deps.toggleHelp).toHaveBeenCalledOnce();
+    });
+
+    it('mod+B toggles the file tree; mod+Alt+B toggles Properties (matched on e.code)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      window.dispatchEvent(key({ key: 'b', code: 'KeyB', ctrlKey: true }));
+      expect(deps.toggleFileTree).toHaveBeenCalledOnce();
+      expect(deps.layoutActions.toggleProperties).not.toHaveBeenCalled();
+
+      window.dispatchEvent(key({ key: 'b', code: 'KeyB', ctrlKey: true, altKey: true }));
+      expect(deps.layoutActions.toggleProperties).toHaveBeenCalledOnce();
+    });
+
+    it('suppresses chords (except mod+K) while an overlay is open', () => {
+      const deps = makeDeps({ overlayOpen: vi.fn(() => true) });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      window.dispatchEvent(key({ key: 'n', ctrlKey: true }));
+      expect(deps.requestNewModel).not.toHaveBeenCalled();
+    });
+
+    it('stops listening after dispose()', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      wiring.dispose();
+      window.dispatchEvent(key({ key: 'n', ctrlKey: true }));
+      expect(deps.requestNewModel).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('toolbar buttons', () => {
+    it('wires Home and New to their commands', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      document.getElementById('btn-home')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(deps.goHome).toHaveBeenCalledOnce();
+
+      document.getElementById('btn-new')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(deps.requestNewModel).toHaveBeenCalledOnce();
+    });
+
+    it('hides the Save-project button when the host cannot save projects', () => {
+      const wiring = createCommandWiring(makeDeps({ canSaveProjects: false }));
+      dispose = wiring.dispose;
+      expect((document.getElementById('btn-save-project') as HTMLButtonElement).hidden).toBe(true);
+    });
+  });
+});
