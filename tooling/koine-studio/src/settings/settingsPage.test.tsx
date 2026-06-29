@@ -29,6 +29,7 @@ vi.mock('@/settings/theme', async (orig) => ({
 import { createSettingsPage, type SettingsPageHandle } from './settingsPage';
 
 const MODE_KEY = 'koine.studio.settingsEditorMode';
+const SCOPE_KEY = 'koine.studio.settingsJsonScope';
 
 // The real header markup (index.html): an <h2> title + an empty #settings-mode-toggle host the
 // radiogroup mounts into.
@@ -348,5 +349,103 @@ describe('createSettingsPage', () => {
     vi.useRealTimers();
     handle = createSettingsPage({ header, body }, cb);
     expect(await axe(document.body)).toHaveNoViolations();
+  });
+
+  // --- Task 2: JSON scope toggle (User | Workspace) #736 -----------------------------------
+  // The scope toggle is a segmented control (role=radiogroup) that lives inside the JSON body,
+  // so it appears only in JSON mode and is torn down on mode-swap or destroy().
+
+  // Helpers: query the scope toggle (it lives in body, not header).
+  const scopeGroup = (b: HTMLElement): HTMLElement | null =>
+    b.querySelector('[role="radiogroup"][aria-label="Settings JSON scope"]');
+  const scopeBtn = (b: HTMLElement, v: 'user' | 'workspace'): HTMLButtonElement | null =>
+    (scopeGroup(b)?.querySelector(`[data-value="${v}"]`) as HTMLButtonElement | null) ?? null;
+
+  it('scope toggle is absent in Visual mode (default)', () => {
+    handle = createSettingsPage({ header, body }, cb);
+    expect(scopeGroup(body)).toBeNull();
+  });
+
+  it('scope toggle appears when starting in JSON mode', () => {
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cb);
+    expect(scopeGroup(body)).not.toBeNull();
+  });
+
+  it('scope toggle appears after switching from Visual to JSON', () => {
+    handle = createSettingsPage({ header, body }, cb);
+    jsonRadio(header).click();
+    expect(scopeGroup(body)).not.toBeNull();
+  });
+
+  it('scope toggle is removed when switching back to Visual', () => {
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cb);
+    expect(scopeGroup(body)).not.toBeNull();
+    visualRadio(header).click();
+    expect(scopeGroup(body)).toBeNull();
+  });
+
+  it('destroy() removes the scope toggle from the body', () => {
+    localStorage.setItem(MODE_KEY, 'json');
+    const h = createSettingsPage({ header, body }, cb);
+    expect(scopeGroup(body)).not.toBeNull();
+    h.destroy();
+    expect(scopeGroup(body)).toBeNull();
+  });
+
+  it('without a workspace: Workspace pill is disabled/aria-disabled, scope forced to user, note shown', () => {
+    // cb has no workspaceKey → wsKey() returns null
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cb);
+
+    const group = scopeGroup(body)!;
+    expect(group).not.toBeNull();
+    // Group marked as disabled
+    expect(group.getAttribute('aria-disabled')).toBe('true');
+    expect(group.classList.contains('is-disabled')).toBe(true);
+    // User is checked, Workspace is not
+    expect(scopeBtn(body, 'user')!.getAttribute('aria-checked')).toBe('true');
+    expect(scopeBtn(body, 'workspace')!.getAttribute('aria-checked')).toBe('false');
+    // Workspace button is natively disabled
+    expect(scopeBtn(body, 'workspace')!.disabled).toBe(true);
+    // Empty-state note shown
+    expect(body.querySelector('.settings-json-scope-empty')).not.toBeNull();
+    expect(body.textContent).toContain('Open a folder to edit workspace settings');
+  });
+
+  it('with a workspace open: pills are enabled, no empty-state note', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => 'ws-key' };
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+
+    const group = scopeGroup(body)!;
+    expect(group.getAttribute('aria-disabled')).toBe('false');
+    expect(group.classList.contains('is-disabled')).toBe(false);
+    expect(scopeBtn(body, 'user')!.disabled).toBe(false);
+    expect(scopeBtn(body, 'workspace')!.disabled).toBe(false);
+    expect(body.querySelector('.settings-json-scope-empty')).toBeNull();
+  });
+
+  it('clicking Workspace (workspace open) flips aria-checked and persists the scope', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => 'ws-key' };
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+
+    scopeBtn(body, 'workspace')!.click();
+
+    expect(scopeBtn(body, 'workspace')!.getAttribute('aria-checked')).toBe('true');
+    expect(localStorage.getItem(SCOPE_KEY)).toBe('workspace');
+  });
+
+  it('ArrowRight on User radio moves to Workspace and persists scope', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => 'ws-key' };
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+
+    scopeBtn(body, 'user')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+
+    expect(scopeBtn(body, 'workspace')!.getAttribute('aria-checked')).toBe('true');
+    expect(localStorage.getItem(SCOPE_KEY)).toBe('workspace');
   });
 });

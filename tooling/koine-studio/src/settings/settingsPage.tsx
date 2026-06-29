@@ -18,8 +18,14 @@ import { el } from '@/shared/el';
 /** Which representation the page is showing. Persisted so the last-used one is restored on reopen. */
 export type SettingsEditorMode = 'visual' | 'json';
 
+/** Which settings document the JSON editor targets. */
+type JsonScope = 'user' | 'workspace';
+
 /** localStorage key for the active representation (visual/json). */
 const MODE_KEY = 'koine.studio.settingsEditorMode';
+
+/** localStorage key for the active JSON scope (user/workspace). */
+const SCOPE_KEY = 'koine.studio.settingsJsonScope';
 
 /** Debounce before a JSON edit is validated + applied — long enough to coalesce a burst of keystrokes. */
 const DEBOUNCE_MS = 350;
@@ -55,6 +61,24 @@ function saveMode(mode: SettingsEditorMode): void {
   }
 }
 
+/** Read the persisted JSON scope, defaulting to 'user' when absent/invalid. */
+function loadScope(): JsonScope {
+  try {
+    return localStorage.getItem(SCOPE_KEY) === 'workspace' ? 'workspace' : 'user';
+  } catch {
+    return 'user';
+  }
+}
+
+/** Persist the JSON scope. A storage failure must never break scope switching. */
+function saveScope(s: JsonScope): void {
+  try {
+    localStorage.setItem(SCOPE_KEY, s);
+  } catch {
+    // Ignore storage failures (private mode / quota).
+  }
+}
+
 const MODES: { value: SettingsEditorMode; label: string }[] = [
   { value: 'visual', label: 'Visual' },
   { value: 'json', label: 'JSON' },
@@ -72,11 +96,19 @@ export function createSettingsPage(
 ): SettingsPageHandle {
   let mode: SettingsEditorMode = loadMode();
 
+  // The current workspace key (or null when no workspace is open / host doesn't scope settings).
+  const wsKey = (): string | null => cb.workspaceKey?.() ?? null;
+
   // Exactly one of these is live at a time (mirrors `mode`).
   let pane: ReturnType<typeof mountPreferencesPane> | null = null;
   let editor: JsonSettingsEditor | null = null;
   let diagnostics: HTMLElement | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // JSON scope state + the scope toggle control (only live while in JSON mode).
+  // Defaults to 'user' when no workspace is open; otherwise restores the persisted choice.
+  let scope: JsonScope = wsKey() === null ? 'user' : loadScope();
+  let scopeToggle: { el: HTMLElement; set(value: JsonScope): void } | null = null;
 
   // --- header: the Visual/JSON segmented control ----------------------------
   // The shared, keyboard-navigable segmented() control (prefs.ts): a role=radiogroup of role=radio
@@ -120,6 +152,17 @@ export function createSettingsPage(
     diagnostics.replaceChildren();
     // Valid document → drop aria-invalid / aria-errormessage so the field reads clean.
     editor?.setInvalid(null);
+  }
+
+  // Switch the JSON scope: persists the new choice, syncs the toggle UI, and clears any stale
+  // diagnostics. Does NOT re-seed the editor or change the apply path — Task 3 owns that.
+  function setScope(next: JsonScope): void {
+    if (next === scope) return;
+    if (next === 'workspace' && wsKey() === null) return; // no workspace open — force user
+    scope = next;
+    saveScope(scope);
+    scopeToggle?.set(scope);
+    clearDiagnostics();
   }
 
   // The JSON editor's onChange (fires on every doc change). Debounced so a burst of keystrokes validates
@@ -167,6 +210,32 @@ export function createSettingsPage(
       // so stealing focus onto a tab would be jarring); the sidecar (re)start is the startMcpOnShow call.
       pane.refresh(undefined, false);
     } else {
+      // --- JSON scope toggle (User | Workspace) — prepended above the editor ---
+      // Force 'user' when no workspace is open (even if persisted as 'workspace' from a prior session).
+      if (wsKey() === null) scope = 'user';
+      scopeToggle = segmented<JsonScope>(
+        'Settings JSON scope',
+        [
+          { value: 'user', label: 'User' },
+          { value: 'workspace', label: 'Workspace' },
+        ],
+        setScope,
+      );
+      scopeToggle.set(scope);
+      // Reflect "no workspace": disable the Workspace pill (mirrors makeScopeBinding.applyEnabled).
+      const wsOpen = wsKey() !== null;
+      scopeToggle.el.setAttribute('aria-disabled', String(!wsOpen));
+      scopeToggle.el.classList.toggle('is-disabled', !wsOpen);
+      for (const b of scopeToggle.el.querySelectorAll<HTMLButtonElement>('.koi-seg')) b.disabled = !wsOpen;
+      const scopeRow = el('div', { class: 'settings-json-scope' });
+      scopeRow.append(scopeToggle.el);
+      if (!wsOpen) {
+        scopeRow.append(
+          el('p', { class: 'settings-json-scope-empty', text: 'Open a folder to edit workspace settings' }),
+        );
+      }
+      hosts.body.append(scopeRow);
+
       // Seed from loadSettings() (the secret is already omitted by settingsToJsonDoc).
       editor = createJsonSettingsEditor(hosts.body, {
         onChange: (text) => scheduleApply(text),
@@ -188,6 +257,8 @@ export function createSettingsPage(
       clearTimeout(debounceTimer);
       debounceTimer = null;
     }
+    // Null out the scope toggle reference; the DOM node is removed by replaceChildren() below.
+    scopeToggle = null;
     if (pane) {
       pane.destroy();
       pane = null;
