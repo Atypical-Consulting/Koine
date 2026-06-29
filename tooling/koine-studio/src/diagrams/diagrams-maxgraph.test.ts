@@ -31,7 +31,7 @@ import {
   setDiagramPersistScope,
   positionKey,
 } from '@/diagrams/diagramContract';
-import { loadDiagramAnnotations, loadDiagramPositions, saveDiagramPositions, saveDiagramZoom } from '@/settings/persistence';
+import { loadDiagramAnnotations, loadDiagramPositions, loadDiagramZoom, saveDiagramPositions, saveDiagramZoom } from '@/settings/persistence';
 import { createBrowserLayoutStore } from '@/diagrams/layoutStore';
 import type { Diagram, DiagramGraph, DiagramNode, DocsFile } from '@/lsp/lsp';
 
@@ -475,6 +475,25 @@ describe('renderContextMapGraph', () => {
       expect(container.querySelector('.koi-ctxmap-graph .koi-canvas')).not.toBeNull();
       // its own root class — NOT the domain canvas's cross-highlight hook (`koi-svg-diagram`)
       expect(container.querySelector('.koi-svg-diagram')).toBeNull();
+    } finally {
+      handle?.dispose();
+    }
+  });
+
+  test('does NOT persist its zoom into the shared per-diagram key — no cross-talk with the domain canvas (#762)', async () => {
+    // The domain canvas remembers 150% under the single shared key; the read-only context map must not
+    // clobber it (the bug that made the domain canvas open at a read-only canvas's zoom instead of its default).
+    saveDiagramZoom('koi-domain-diagram', 150);
+    const graph: DiagramGraph = {
+      nodes: [ctx('A'), ctx('B')],
+      edges: [{ from: 'A', to: 'B', label: 'Customer/Supplier', arrowKind: 'association' }],
+    };
+    const container = makeContainer();
+    const handle = await renderContextMapGraph(container, graph, () => true);
+    try {
+      // Zoom the read-only canvas: its readout updates, but it must not overwrite the domain's saved zoom.
+      container.querySelector<HTMLButtonElement>('[aria-label="Zoom in"]')!.click();
+      expect(loadDiagramZoom('koi-domain-diagram')).toBe(150);
     } finally {
       handle?.dispose();
     }

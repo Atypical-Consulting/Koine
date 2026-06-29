@@ -4,7 +4,6 @@
 // DOM, any renderer (SVG or maxGraph), and any layout engine — so the IDE-side delegated listeners
 // (ide.tsx) and the persistence scope (inspectorController.tsx) couple to this stable contract, not to a
 // particular renderer implementation file. Swapping the renderer is then a one-line factory change.
-import { DIAGRAM_ZOOM_MAX, DIAGRAM_ZOOM_MIN } from '@/settings/persistence';
 
 /**
  * The bubbling `CustomEvent` a node group dispatches when clicked (issue #93, Task 4). `ide.ts`
@@ -178,6 +177,22 @@ export function isDiagramTouchMode(): boolean {
 }
 
 /**
+ * The diagram canvas zoom band (percent). Clamped on save AND load so a hand-edited value can't break
+ * layout. Owned HERE — the target-agnostic diagram contract — so both the persistence layer and the
+ * renderer clamp to the SAME band without a settings↔diagram import cycle (persistence already imports
+ * from this module). They are diagram view concerns, not DOM/renderer/layout, so they fit the charter.
+ */
+export const DIAGRAM_ZOOM_MIN = 10;
+export const DIAGRAM_ZOOM_MAX = 800;
+
+/** Clamp a zoom percent to {@link DIAGRAM_ZOOM_MIN}..{@link DIAGRAM_ZOOM_MAX}, or null when not finite —
+ *  the single clamp the persistence layer (`coerceZoom`) and the renderer accessor below both reuse. */
+export function clampZoomPercent(percent: number): number | null {
+  if (!Number.isFinite(percent)) return null;
+  return Math.min(DIAGRAM_ZOOM_MAX, Math.max(DIAGRAM_ZOOM_MIN, percent));
+}
+
+/**
  * The default zoom (percent) a freshly-opened domain canvas uses when no per-diagram zoom is saved
  * (#762). Mirrors the {@link isDiagramTouchMode}/{@link setDiagramEditing} pattern: a module-level
  * value the IDE flips in from the loaded `Settings` (`defaultCanvasZoom`) so the renderer reads it
@@ -188,8 +203,8 @@ let defaultCanvasZoom = 100;
 /** Set the default canvas zoom (percent), clamped to the diagram zoom band (10–800); a non-finite
  *  value is ignored so the last good zoom is preserved. Called from `ide.tsx` when settings load/change. */
 export function setDefaultCanvasZoom(percent: number): void {
-  if (!Number.isFinite(percent)) return;
-  defaultCanvasZoom = Math.min(DIAGRAM_ZOOM_MAX, Math.max(DIAGRAM_ZOOM_MIN, percent));
+  const z = clampZoomPercent(percent);
+  if (z != null) defaultCanvasZoom = z;
 }
 
 /** The default canvas zoom (percent) the renderer applies to a freshly-opened canvas (default 100). */

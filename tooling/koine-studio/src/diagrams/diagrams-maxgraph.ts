@@ -1099,11 +1099,10 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   // Capture the saved per-diagram zoom ONCE, here at construction — BEFORE `syncPct()` (below) can
   // auto-save the current scale over the key and erase the "nothing saved yet" signal. `applyInitialZoom`
   // reads this captured value so a freshly-opened diagram falls back to the configurable default (#762),
-  // not to whatever scale the readout happened to save first. Restore it now too (best-effort) so the
-  // read-only context-map / event-flow canvases — which call `fit()` rather than `applyInitialZoom()` —
-  // keep painting their initial readout from a consistent scale, exactly as before.
+  // not to whatever scale the readout happened to save first. We don't zoom-to it here: the domain canvas
+  // applies it via `applyInitialZoom()` and the read-only canvases auto-fit, so a construction-time
+  // restore would be immediately overwritten either way.
   const saved = loadDiagramZoom(ZOOM_PERSIST_KEY);
-  if (saved != null) graph.zoomTo(saved / 100, false);
 
   // --- control bar -----------------------------------------------------------
   const controls = document.createElement('div');
@@ -1117,7 +1116,11 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   const syncPct = (): void => {
     const p = Math.round(graph.getView().scale * 100);
     pct.textContent = `${p}%`;
-    saveDiagramZoom(ZOOM_PERSIST_KEY, p);
+    // Persist ONLY for the authoring (domain) canvas. ZOOM_PERSIST_KEY is a single shared key, and the
+    // read-only context-map / event-flow canvases auto-fit on open (they never restore a saved zoom) — so
+    // letting them write here would pollute the domain canvas's remembered zoom and override its default
+    // (#762). They still paint their readout above; they just don't save.
+    if (!readOnly) saveDiagramZoom(ZOOM_PERSIST_KEY, p);
   };
 
   // Open the domain canvas at a PREDICTABLE zoom (#762): the per-diagram saved zoom if there is one, else

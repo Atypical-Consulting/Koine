@@ -21,12 +21,11 @@ import {
   saveKeybindingOverride,
   clearKeybindingOverrides,
   DEFAULT_SETTINGS,
-  DIAGRAM_ZOOM_MIN,
-  DIAGRAM_ZOOM_MAX,
   type Settings,
   type AccentName,
   type PreviewTarget,
 } from '@/settings/persistence';
+import { DIAGRAM_ZOOM_MIN, DIAGRAM_ZOOM_MAX } from '@/diagrams/diagramContract';
 import { setTheme } from '@/settings/theme';
 import { ACCENTS, ACCENT_ORDER } from '@/settings/appearance';
 import { createAboutPanel } from '@/settings/about';
