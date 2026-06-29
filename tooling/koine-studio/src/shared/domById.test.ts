@@ -20,8 +20,12 @@ describe('domById', () => {
   test('narrows to the requested element type', () => {
     const input = document.createElement('input');
     input.id = 'field';
+    input.value = 'typed';
     document.body.appendChild(input);
     const found = domById<HTMLInputElement>('field');
-    expect(found).toBeInstanceOf(HTMLInputElement);
+    // Reading `.value` only compiles if `found` is narrowed to HTMLInputElement (it is absent on the
+    // HTMLElement default), so the `tsc --noEmit` gate proves the generic flows through — and the
+    // runtime check confirms it's the same node.
+    expect(found.value).toBe('typed');
   });
 });
