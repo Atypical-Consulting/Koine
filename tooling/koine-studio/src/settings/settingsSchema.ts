@@ -5,6 +5,60 @@ import Ajv2020, { type ErrorObject } from 'ajv/dist/2020';
 import { isEmitTarget } from '@/shared/emitTargets';
 import { DEFAULT_SETTINGS, type Settings } from './persistence';
 
+// --- the field map: the single source of truth (#750) ------------------------
+// One declarative table maps each runtime `Settings` key to its VS Code-style namespaced
+// position in the editable JSON document (`group.docKey`). The serializer, the parser, the
+// nested JSON Schema, and the parity test all DERIVE from this table, so the three-way drift
+// the old code risked (Settings type vs schema vs serializer) is structurally impossible and a
+// new setting is one row. The runtime type stays FLAT — only the *document* the user edits is
+// grouped — so no localStorage migration and no churn to the ~63 `settings.<field>` read sites.
+//
+// The secret `aiApiKey` is deliberately absent here (as in the schema and document); the parser
+// re-injects the live in-memory key. A later switch to dotted-flat keys ("editor.fontSize") is a
+// one-function change to the serializer, since the map already carries the group + key.
+
+/** The VS Code-style namespaces the settings document groups its fields under. */
+export type SettingsGroup = 'appearance' | 'editor' | 'ai' | 'mcp' | 'preview' | 'lsp' | 'account';
+
+/** One row of the field map: a runtime key placed at `group.docKey` in the JSON document. */
+export interface FieldDef {
+  runtimeKey: Exclude<keyof Settings, 'aiApiKey'>;
+  group: SettingsGroup;
+  docKey: string;
+}
+
+/**
+ * Every non-secret `Settings` key, in document order. Most doc keys match the runtime key; the
+ * few that differ (e.g. runtime `enableMinimap` → doc `editor.minimap`, `aiProvider` → `ai.provider`)
+ * are the renames that live ONLY in the document — the runtime field names never change.
+ */
+export const SETTINGS_FIELDS: readonly FieldDef[] = [
+  { runtimeKey: 'theme', group: 'appearance', docKey: 'theme' },
+  { runtimeKey: 'accent', group: 'appearance', docKey: 'accent' },
+  { runtimeKey: 'reduceMotion', group: 'appearance', docKey: 'reduceMotion' },
+  { runtimeKey: 'fontFamily', group: 'appearance', docKey: 'fontFamily' },
+  { runtimeKey: 'fontSize', group: 'editor', docKey: 'fontSize' },
+  { runtimeKey: 'lineHeight', group: 'editor', docKey: 'lineHeight' },
+  { runtimeKey: 'wordWrap', group: 'editor', docKey: 'wordWrap' },
+  { runtimeKey: 'tabSize', group: 'editor', docKey: 'tabSize' },
+  { runtimeKey: 'formatOnSave', group: 'editor', docKey: 'formatOnSave' },
+  { runtimeKey: 'autoSave', group: 'editor', docKey: 'autoSave' },
+  { runtimeKey: 'enableMinimap', group: 'editor', docKey: 'minimap' },
+  { runtimeKey: 'aiProvider', group: 'ai', docKey: 'provider' },
+  { runtimeKey: 'aiBaseUrl', group: 'ai', docKey: 'baseUrl' },
+  { runtimeKey: 'aiModel', group: 'ai', docKey: 'model' },
+  { runtimeKey: 'aiModelOpenai', group: 'ai', docKey: 'modelOpenai' },
+  { runtimeKey: 'aiAgenticTools', group: 'ai', docKey: 'agenticTools' },
+  { runtimeKey: 'aiInlineCompletions', group: 'ai', docKey: 'inlineCompletions' },
+  { runtimeKey: 'aiConstrainGrammar', group: 'ai', docKey: 'constrainGrammar' },
+  { runtimeKey: 'aiTemperature', group: 'ai', docKey: 'temperature' },
+  { runtimeKey: 'mcpEnabled', group: 'mcp', docKey: 'enabled' },
+  { runtimeKey: 'mcpClient', group: 'mcp', docKey: 'client' },
+  { runtimeKey: 'previewTarget', group: 'preview', docKey: 'target' },
+  { runtimeKey: 'lspTrace', group: 'lsp', docKey: 'trace' },
+  { runtimeKey: 'displayName', group: 'account', docKey: 'displayName' },
+];
+
 // Mirror the editor input bounds in persistence.ts (FONT_MIN/MAX, LINE_HEIGHT_MIN/MAX) and the
 // enum rosters (AccentName, McpClientId, lspTrace, aiProvider). The `properties` set is asserted by
 // settingsSchema.test.ts to equal Object.keys(DEFAULT_SETTINGS) minus the secret aiApiKey, so adding
@@ -41,13 +95,16 @@ export const SETTINGS_JSON_SCHEMA = {
 const ajv = new Ajv2020({ allErrors: true, strict: false });
 const validate = ajv.compile(SETTINGS_JSON_SCHEMA);
 
-/** The Settings keys that appear in the JSON document (everything except the secret). */
-const DOC_KEYS = Object.keys(DEFAULT_SETTINGS).filter((k) => k !== 'aiApiKey') as (keyof Settings)[];
-
-/** Pretty settings.json with the secret stripped — what the JSON editor renders. */
+/**
+ * Pretty, grouped settings.json with the secret stripped — what the JSON editor renders. Builds
+ * `{ [group]: { [docKey]: value } }` from {@link SETTINGS_FIELDS}, so the document is namespaced
+ * (appearance / editor / ai / mcp / preview / lsp / account) while the runtime object stays flat.
+ */
 export function settingsToJsonDoc(s: Settings): string {
-  const out: Record<string, unknown> = {};
-  for (const k of DOC_KEYS) out[k] = s[k];
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const f of SETTINGS_FIELDS) {
+    (out[f.group] ??= {})[f.docKey] = s[f.runtimeKey];
+  }
   return JSON.stringify(out, null, 2);
 }
 

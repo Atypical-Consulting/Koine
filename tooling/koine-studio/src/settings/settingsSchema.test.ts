@@ -21,6 +21,17 @@ describe('settingsSchema', () => {
     expect(JSON.parse(doc)).not.toHaveProperty('aiApiKey');
   });
 
+  it('serializes settings into namespaced groups (#750)', () => {
+    const doc = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, Record<string, unknown>>;
+    expect(Object.keys(doc).sort()).toEqual(['account', 'ai', 'appearance', 'editor', 'lsp', 'mcp', 'preview']);
+    expect(doc.appearance.theme).toBe(DEFAULT_SETTINGS.theme);
+    expect(doc.editor.minimap).toBe(DEFAULT_SETTINGS.enableMinimap); // runtime enableMinimap → doc editor.minimap
+    expect(doc.ai.provider).toBe(DEFAULT_SETTINGS.aiProvider);
+    expect(doc.lsp.trace).toBe(DEFAULT_SETTINGS.lspTrace);
+    expect(doc.account.displayName).toBe(DEFAULT_SETTINGS.displayName);
+    expect(JSON.stringify(doc)).not.toContain('aiApiKey'); // secret invariant
+  });
+
   it('round-trips a valid document back to settings, preserving the in-memory secret', () => {
     const doc = settingsToJsonDoc(withKey);
     const res = jsonDocToSettings(doc, withKey);
