@@ -94,6 +94,11 @@ export interface Settings {
   previewTarget: PreviewTarget;
   /** Name attributed to review comments authored from Studio (#479); blank → the 'You' fallback. */
   displayName: string;
+  /** Override for the integrated terminal's shell arguments (#467). Empty ⇒ the desktop host's built-in
+   *  default `["-l"]` (a login shell, #462's fix), so today's behaviour is unchanged. A bash user who
+   *  keeps PATH/aliases only in `~/.bashrc` can set `["-l", "-i"]` so an interactive shell sources it.
+   *  Desktop-only — the browser host has no shell; the user owns the value (we don't validate args). */
+  terminalShellArgs: string[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -123,6 +128,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mcpClient: 'lm-studio',
   previewTarget: 'csharp',
   displayName: '',
+  terminalShellArgs: [],
 };
 
 // --- storage keys ------------------------------------------------------------
@@ -317,6 +323,13 @@ function coercePreviewTarget(v: unknown): PreviewTarget {
   return isEmitTarget(v) ? (v as PreviewTarget) : DEFAULT_SETTINGS.previewTarget;
 }
 
+/** A list of shell-arg tokens (#467): an array filtered to its string entries (a fresh array, never the
+ *  shared default reference), or an empty list for any non-array / absent / hand-edited garbage value. */
+function coerceShellArgs(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((a): a is string => typeof a === 'string');
+}
+
 /**
  * Load settings, merging any stored partial onto DEFAULT_SETTINGS and validating each
  * field. Unknown shapes, bad JSON, and absent storage all fall back to the defaults.
@@ -365,6 +378,7 @@ export function loadSettings(): Settings {
       mcpClient: coerceMcpClient(parsed.mcpClient),
       previewTarget: coercePreviewTarget(parsed.previewTarget),
       displayName: typeof parsed.displayName === 'string' ? parsed.displayName : DEFAULT_SETTINGS.displayName,
+      terminalShellArgs: coerceShellArgs(parsed.terminalShellArgs),
     };
   } catch {
     return { ...DEFAULT_SETTINGS, aiApiKey: secretCache };
