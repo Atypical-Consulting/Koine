@@ -246,7 +246,7 @@ export function init(hooks: IdeHooks = {}): () => void {
       store={appStore}
       host={unsavedEl}
       baseTitle={baseTitle}
-      onSaveAll={() => void workspace.saveAllDirty()}
+      onSaveAll={() => commandWiring.run('save-all')}
     />,
     unsavedHost,
   );
@@ -812,8 +812,8 @@ export function init(hooks: IdeHooks = {}): () => void {
   render(
     <HistoryControls
       store={appStore}
-      onUndo={() => history.undo()}
-      onRedo={() => history.redo()}
+      onUndo={() => commandWiring.run('undo')}
+      onRedo={() => commandWiring.run('redo')}
       undoTitle={`Undo (${formatChord('mod+Z')})`}
       redoTitle={`Redo (${formatChord('mod+Shift+Z')})`}
     />,
@@ -856,8 +856,10 @@ export function init(hooks: IdeHooks = {}): () => void {
     // Mod+Alt+S → Save all. Match on e.code (the physical S key): on macOS, Option composes e.key
     // into another glyph (e.g. 'ß'), so `e.key === 's'` would miss the chord.
     if (e.altKey && e.code === 'KeyS') {
+      // Save-all dispatches through the command registry by id (#758); Save-active (below) has no command
+      // catalog entry, so it stays a direct call.
       e.preventDefault();
-      void workspace.saveAllDirty();
+      commandWiring.run('save-all');
     } else if (!e.altKey && (e.key === 's' || e.key === 'S')) {
       // Mod+S → save / format the active buffer (unchanged single-file behaviour).
       e.preventDefault();
@@ -866,7 +868,10 @@ export function init(hooks: IdeHooks = {}): () => void {
   });
 
   // Undo/redo drive the single workspace history (CodeMirror's own history was removed). Match on
-  // e.code (physical Z/Y) so macOS Option-composed glyphs don't slip past.
+  // e.code (physical Z/Y) so macOS Option-composed glyphs don't slip past. These chords stay a direct
+  // history call — like every global chord other than Cmd-K and Save-all, they are folded through the
+  // command registry wholesale by #432 (the HistoryControls *buttons* already dispatch run('undo'/'redo'),
+  // so today the chord and button reach the same effect since undo/redo carry no when() gate).
   window.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod) return;

@@ -1,5 +1,11 @@
 import { describe, expect, test, vi, type Mock } from 'vitest';
-import { DEFAULT_BINDINGS, KEYBINDINGS, toKeyBindings, type BindingId } from '@/editor/keybindings';
+import {
+  DEFAULT_BINDINGS,
+  KEYBINDINGS,
+  toKeyBindings,
+  type BindingId,
+  type KeyBindingRow,
+} from '@/editor/keybindings';
 
 // The five LSP-action shortcuts were inline literals in editor.ts's extraKeys block. This pins the
 // registry/builder seam: defaults must match those literals, the array builder must emit one entry
@@ -75,5 +81,16 @@ describe('KEYBINDINGS', () => {
       expect(row.label.length).toBeGreaterThan(0);
       expect(row.defaultKey).toBe(DEFAULT_BINDINGS[row.id]);
     }
+  });
+
+  test('the #432 seam is dormant: no current row carries a commandId, so chord behaviour is unchanged', () => {
+    // Every row still resolves through the editor LSP handlers (keyed by id); the optional commandId the
+    // type now allows is unset everywhere, so #758 introduces the join point without altering today's keymap.
+    for (const row of KEYBINDINGS) expect(row.commandId).toBeUndefined();
+
+    // A row MAY carry a commandId (this is what #432 will add) — and the keymap builder ignores it,
+    // keying off id, so adding one does not change toKeyBindings' output.
+    const seamRow: KeyBindingRow = { id: 'format', label: 'Format document', defaultKey: 'Mod-s', commandId: 'save-all' };
+    expect(seamRow.commandId).toBe('save-all');
   });
 });

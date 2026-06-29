@@ -6,13 +6,10 @@
 // the app wires the global shortcut.
 import { registerOverlay } from '@/shared/overlay';
 
-export interface Command {
-  id: string;
-  title: string;
-  hint?: string;
-  group?: string;
-  run(): void;
-}
+// Command is defined in commandRegistry.ts (the SSOT). Imported for this module's own use AND
+// re-exported so all existing importers (`import type { Command } from '@/shared/palette'`) keep working.
+import type { Command } from '@/shared/commandRegistry';
+export type { Command };
 
 export interface PaletteHandle {
   open(): void;
