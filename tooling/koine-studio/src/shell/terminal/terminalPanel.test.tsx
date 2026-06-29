@@ -21,6 +21,7 @@ interface FakeTerminal {
   open: ReturnType<typeof vi.fn>;
   loadAddon: ReturnType<typeof vi.fn>;
   write: ReturnType<typeof vi.fn>;
+  clear: ReturnType<typeof vi.fn>;
   focus: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
   onData: ReturnType<typeof vi.fn>;
@@ -46,6 +47,7 @@ vi.mock('@xterm/xterm', () => {
     write = vi.fn((_data: string, cb?: () => void) => {
       if (cb) this.writeCallbacks.push(cb);
     });
+    clear = vi.fn();
     focus = vi.fn();
     dispose = vi.fn();
     onData = vi.fn((cb: (d: string) => void) => {
@@ -223,6 +225,39 @@ describe('createTerminalPanel', () => {
     // Parse the rest: the backlog falls below the low-water mark → resume the producer (once).
     term.drainWrites();
     expect(transport.resume).toHaveBeenCalledTimes(1);
+
+    panel.dispose();
+  });
+
+  it('a restart discards the prior shell\'s pending write callbacks so the new session backpressures correctly (#441)', () => {
+    const parent = document.createElement('div');
+    const transport = makeTransport();
+    const platform = { canRunShell: true, createTerminal: () => transport } as unknown as Platform;
+
+    const panel = createTerminalPanel({ parent, platform, cwd: () => null });
+    const term = termInstances[0];
+    const part = Math.floor(TERM_PAUSE_WATER * 0.6);
+
+    // Session 1 floods to a pause; its write callbacks stay un-drained (xterm still busy).
+    transport.emitData('x'.repeat(part));
+    transport.emitData('x'.repeat(part));
+    expect(transport.pause).toHaveBeenCalledTimes(1);
+
+    // The shell exits and the user restarts (Enter). restart() bumps the epoch and zeroes the backlog.
+    transport.emitExit(0);
+    term.emitKeystroke('\r');
+    expect(transport.start).toHaveBeenCalledTimes(2);
+
+    // The prior session's queued callbacks now fire. WITHOUT the epoch guard they would each run
+    // `pendingChars -= part`, driving the counter to ~-120k and delaying the next pause; the guard makes
+    // them self-skip so the relaunched session pauses at exactly the same backlog as a fresh panel.
+    term.drainWrites();
+    (transport.pause as ReturnType<typeof vi.fn>).mockClear();
+
+    transport.emitData('x'.repeat(part));
+    expect(transport.pause).not.toHaveBeenCalled(); // one part is below the mark — counter wasn't left negative
+    transport.emitData('x'.repeat(part));
+    expect(transport.pause).toHaveBeenCalledTimes(1); // two parts cross it, exactly as for a fresh session
 
     panel.dispose();
   });

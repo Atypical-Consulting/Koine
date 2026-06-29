@@ -111,10 +111,13 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
   let exited = false;
 
   // Flow-control state (#441): `pendingChars` is the count of chars handed to xterm but not yet parsed
-  // (the renderer backlog); `flowPaused` tracks whether we've asked the PTY to pause. Reset on restart
-  // so a shell relaunched after an exit never starts wedged in the paused state.
+  // (the renderer backlog); `flowPaused` tracks whether we've asked the PTY to pause. `flowEpoch` is
+  // bumped on restart and dispose so a write callback queued under a prior shell — or after teardown —
+  // self-skips instead of decrementing `pendingChars` into a stale (negative) count or poking a
+  // torn-down transport. Reset on restart so a relaunched shell never starts wedged in the paused state.
   let pendingChars = 0;
   let flowPaused = false;
+  let flowEpoch = 0;
 
   // The cols/rows last sent to the shell, so an unchanged fit() doesn't re-issue a pty_resize IPC.
   let sentCols = 0;
@@ -141,6 +144,7 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
     exited = false;
     pendingChars = 0;
     flowPaused = false;
+    flowEpoch++; // stale write callbacks from the prior shell must not touch the new session's counter
     term.clear();
     void transport.start(cwd(), shellArgs?.() ?? null).then(fit);
   }
@@ -152,17 +156,26 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
   // chunk. Without this a flooding command outruns the UI thread and the IPC bridge backs up; pausing
   // the reader fills the kernel PTY buffer and blocks the shell — real backpressure, no data dropped.
   transport.onData((chunk) => {
+    const epoch = flowEpoch;
     pendingChars += chunk.length;
     term.write(chunk, () => {
+      if (epoch !== flowEpoch) return; // a restart/dispose happened since this write — stale callback
       pendingChars -= chunk.length;
       if (flowPaused && pendingChars <= TERM_RESUME_WATER) {
         flowPaused = false;
-        void transport.resume().catch(() => {});
+        // Revert the intent if the resume IPC fails, so a later callback retries rather than stranding
+        // the reader parked (pause/resume are infallible host commands, but keep the state consistent).
+        void transport.resume().catch(() => {
+          flowPaused = true;
+        });
       }
     });
     if (!flowPaused && pendingChars >= TERM_PAUSE_WATER) {
       flowPaused = true;
-      void transport.pause().catch(() => {});
+      // Revert if the pause IPC fails, so the next chunk retries rather than silently losing backpressure.
+      void transport.pause().catch(() => {
+        flowPaused = false;
+      });
     }
   });
   transport.onExit((code) => {
@@ -207,6 +220,7 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
       term.options.theme = resolveTerminalTheme(host);
     },
     dispose() {
+      flowEpoch++; // a write callback firing during teardown must not resume an already-stopped PTY
       resizeObserver?.disconnect();
       clearTimeout(resizeTimer);
       void transport.stop();
