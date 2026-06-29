@@ -27,6 +27,27 @@ const pkg = JSON.parse(
   readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8"),
 );
 
+// The version Studio shows the user (About chip, Home footer, status bar) is the Koine RELEASE version,
+// whose single source of truth is the repo-root Directory.Build.props `<Version>` — the same value the
+// CLI and compiler pack. Read it here so the web build never drifts to this frontend package's own
+// (independent, placeholder) version; fall back to pkg.version if the props file can't be read (e.g. the
+// studio checked out in isolation). The desktop host reads its version from the Tauri `app_version`
+// command instead, so this only feeds the browser backend's `__APP_VERSION__`.
+function resolveAppVersion(): string {
+  try {
+    const props = readFileSync(
+      fileURLToPath(new URL("../../Directory.Build.props", import.meta.url)),
+      "utf8",
+    );
+    const match = props.match(/<Version>([^<]+)<\/Version>/);
+    if (match) return match[1].trim();
+  } catch {
+    // No reachable Directory.Build.props — fall through to this package's version.
+  }
+  return pkg.version;
+}
+const appVersion = resolveAppVersion();
+
 // Regenerate src/templates.generated.ts before each build (buildStart) and watch the repo
 // `templates/` dir during dev so editing a template.json / .koi regenerates the manifest and
 // triggers an HMR reload. This is belt-and-suspenders alongside the npm pre-scripts: it covers
@@ -142,8 +163,9 @@ export default defineConfig(({ mode }) => {
     base: web ? studioBase || "/" : "/",
 
     // Expose the app version to the browser backend's About dialog (the desktop backend reads it
-    // from the Tauri `app_version` command instead).
-    define: { __APP_VERSION__: JSON.stringify(pkg.version) },
+    // from the Tauri `app_version` command instead). Sourced from Directory.Build.props — see
+    // resolveAppVersion above — so the browser chip always matches the Koine release.
+    define: { __APP_VERSION__: JSON.stringify(appVersion) },
 
     // Pre-bundle the diagram tab's heavy, lazily-imported engines at server startup. They are only
     // `import()`-ed the first time a diagram renders (maxGraph for the domain canvas — see

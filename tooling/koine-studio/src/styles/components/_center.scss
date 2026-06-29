@@ -21,6 +21,14 @@
   // this only bites the real app.)
   display: flex;
   flex-direction: column;
+
+  // The `display: flex` above (an #id selector) outranks the UA `[hidden]` rule, so the chrome's
+  // `centerBodyEl.hidden = settingsOpen` (inspectorController) would not actually hide the deck —
+  // the canvas zone header stayed painted above the Settings page. Redeclare it, exactly as
+  // #center-visual does below, so opening Settings hides the deck cleanly.
+  &[hidden] {
+    display: none;
+  }
 }
 
 .center-host {
