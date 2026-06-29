@@ -9,6 +9,7 @@
 // so getCommands() is moved verbatim (the inline Command[] it already built); when #758 ships, this is
 // where the declarative registry composes in, with no change to init().
 import { createCommandPalette, type Command } from '@/shared/palette';
+import { createCommandRegistry } from '@/shared/commandRegistry';
 import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
 import { devCommands } from '@/shell/devCommands';
 import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
@@ -73,10 +74,14 @@ function el<T extends HTMLElement>(id: string): T {
 
 export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
   // --- command palette command set ------------------------------------------
-  // Hints are authored with a literal 'mod' and formatted to ⌘ / Ctrl per platform so the
-  // palette, help overlay, and toolbar hint all show the same key.
-  function getCommands(): Command[] {
-    const cmds: Command[] = [
+  // The declarative command registry (#758) is the single source of truth: the static catalog below is
+  // registered once, and getCommands() reads it back (enablement-filtered) on every palette / overflow
+  // open, composing the dynamic tail (stop-compile + goto rows) on top — behaviour-identical to before.
+  // Hints are authored with a literal 'mod' and formatted to ⌘ / Ctrl per platform so the palette, help
+  // overlay, and toolbar hint all show the same key.
+  const registry = createCommandRegistry();
+  function buildStaticCatalog(): Command[] {
+    return [
       { id: 'undo', title: 'Undo', hint: 'mod+Z', group: 'Edit', run: () => deps.history.undo() },
       { id: 'redo', title: 'Redo', hint: 'mod+Shift+Z', group: 'Edit', run: () => deps.history.redo() },
       { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void deps.format() },
@@ -118,6 +123,14 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
       { id: 'add-comment', title: 'Add review comment', group: 'Review', run: () => deps.editor.addCommentAtSelection() },
       { id: 'view-review', title: 'Show Review', group: 'Workspace', run: () => deps.controller.selectBottomTab('review') },
     ];
+  }
+  // Register the static catalog once at construction — registration order === palette order.
+  for (const cmd of buildStaticCatalog()) registry.register(cmd);
+
+  function getCommands(): Command[] {
+    // Read the static catalog back from the registry, hiding any command whose when() is currently
+    // false, then append the dynamic tail (still produced per-open: live in-flight + open buffers).
+    const cmds: Command[] = registry.all().filter((c) => registry.isEnabled(c.id));
 
     // Stop a runaway compile: terminate the WASM worker and boot a fresh one (#353). Offered only while a
     // compile is actually in flight on the worker boot path (#469) — in the main-thread fallback there is
