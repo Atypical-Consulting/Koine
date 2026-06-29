@@ -17,7 +17,7 @@
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::Duration;
 
 // `portable-pty` (WezTerm) abstracts Unix openpty + Windows ConPTY behind one API. Its `Child`
@@ -75,6 +75,12 @@ struct PtyState {
     /// Set once the user/app asks to stop; tells the reader thread the EOF was intentional so it
     /// reports a clean exit (0) rather than trying to reap a child `pty_stop` already took.
     shutting_down: Arc<AtomicBool>,
+    /// Flow-control gate for the reader thread (#441). When the inner `bool` is `true` the reader parks
+    /// on the `Condvar` before its next `read`, so it stops draining the PTY: the kernel buffer fills
+    /// and the shell blocks on write — real backpressure. `pty_pause` sets it; `pty_resume` (and
+    /// `pty_stop`) clear it and `notify` so the reader wakes. Shared `Arc` so the reader thread owns a
+    /// clone (managed `State` is not `'static`).
+    paused: Arc<(Mutex<bool>, Condvar)>,
 }
 
 // --- pure framing functions (the cargo test gate) ---------------------------
@@ -464,18 +470,35 @@ impl Coalescer {
 ///   handling: flush the remainder, reap the child to recover its exit code, and emit `pty://exit`
 ///   exactly once. Unlike the LSP sidecar there is **no** supervision/relaunch — an exited shell simply
 ///   closes the terminal. `std::thread` + `std::io` + `std::sync::mpsc` only; no async runtime.
+///
+/// `paused` is the flow-control gate (#441): the reader parks on it before each read while the consumer
+/// has asked the PTY to pause, so the kernel buffer fills and the shell blocks rather than the renderer
+/// being swamped.
 fn spawn_pty_reader_thread(
     app: AppHandle,
     mut reader: Box<dyn Read + Send>,
     shutting_down: Arc<AtomicBool>,
+    paused: Arc<(Mutex<bool>, Condvar)>,
 ) {
     let (tx, rx) = mpsc::channel::<Vec<u8>>();
 
-    // Reader thread: raw bytes off the PTY → channel. Kept minimal so the only blocking call is the
-    // `read`; all coalescing/timing lives in the consumer below.
+    // Reader thread: raw bytes off the PTY → channel. Kept minimal so the only blocking calls are the
+    // pause gate and the `read`; all coalescing/timing lives in the consumer below.
     std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
         loop {
+            // Flow control (#441): park here while paused so we stop draining the PTY. The kernel PTY
+            // buffer then fills and the shell blocks on write — real OS backpressure — until
+            // `pty_resume`/`pty_stop` clears the flag and notifies. The `while` reblocks on a spurious
+            // wakeup. Poison can't occur (the lock is only ever held to flip a bool), but recover the
+            // inner guard rather than panicking the reader if it ever did.
+            {
+                let (lock, cv) = &*paused;
+                let mut is_paused = lock.lock().unwrap_or_else(|e| e.into_inner());
+                while *is_paused {
+                    is_paused = cv.wait(is_paused).unwrap_or_else(|e| e.into_inner());
+                }
+            }
             match reader.read(&mut buf) {
                 Ok(0) => break, // EOF: the shell closed its end of the PTY
                 Ok(n) => {
@@ -1503,8 +1526,10 @@ fn pty_start(
         return Ok(());
     }
 
-    // A fresh start clears any prior shutdown intent so the reader reports a real exit code.
+    // A fresh start clears any prior shutdown intent so the reader reports a real exit code, and any
+    // leftover pause from a previous session (#441) so the new reader isn't born parked.
     state.shutting_down.store(false, Ordering::SeqCst);
+    set_pty_paused(&state.paused, false);
 
     // Open the PTY pair at a conventional default size; the frontend re-syncs it via `pty_resize`
     // as soon as the terminal element is measured.
@@ -1556,7 +1581,12 @@ fn pty_start(
     *state.master.lock().map_err(|e| e.to_string())? = Some(pair.master);
     *child_guard = Some(child);
 
-    spawn_pty_reader_thread(app.clone(), reader, state.shutting_down.clone());
+    spawn_pty_reader_thread(
+        app.clone(),
+        reader,
+        state.shutting_down.clone(),
+        state.paused.clone(),
+    );
 
     Ok(())
 }
@@ -1589,12 +1619,43 @@ fn pty_resize(state: State<'_, PtyState>, cols: u16, rows: u16) -> Result<(), St
     Ok(())
 }
 
+/// Flip the reader's flow-control gate (#441) and wake it if it is parked: `true` makes the reader park
+/// before its next read (`pty_pause`); `false` lets it drain again (`pty_resume`/`pty_start`/`pty_stop`).
+/// Always `notify`s so a parked reader is released even when clearing the flag.
+fn set_pty_paused(paused: &(Mutex<bool>, Condvar), value: bool) {
+    let (lock, cv) = paused;
+    if let Ok(mut g) = lock.lock() {
+        *g = value;
+    }
+    cv.notify_all();
+}
+
+/// Flow control (#441): pause draining the PTY. The reader parks before its next read, so the kernel
+/// PTY buffer fills and the shell blocks on write — backpressure when the renderer falls behind. A
+/// no-op when nothing is running (the flag is simply read by the next reader thread).
+#[tauri::command]
+fn pty_pause(state: State<'_, PtyState>) -> Result<(), String> {
+    set_pty_paused(&state.paused, true);
+    Ok(())
+}
+
+/// Flow control (#441): resume draining the PTY once the renderer has caught up. Wakes a parked reader.
+/// Idempotent and safe to call when not paused.
+#[tauri::command]
+fn pty_resume(state: State<'_, PtyState>) -> Result<(), String> {
+    set_pty_paused(&state.paused, false);
+    Ok(())
+}
+
 /// Intentional shutdown: arm the no-reap flag, drop the writer (so the shell sees stdin EOF), kill
 /// the child to be certain it exits, and drop the master. The reader thread then emits `pty://exit`
 /// (code 0). Idempotent and safe to call when nothing is running.
 #[tauri::command]
 fn pty_stop(state: State<'_, PtyState>) -> Result<(), String> {
     state.shutting_down.store(true, Ordering::SeqCst);
+    // Release a paused reader (#441) so it wakes, sees the killed child's EOF, and exits cleanly
+    // instead of staying parked forever.
+    set_pty_paused(&state.paused, false);
     if let Ok(mut g) = state.writer.lock() {
         *g = None;
     }
@@ -1662,6 +1723,8 @@ pub fn run() {
             pty_start,
             pty_write,
             pty_resize,
+            pty_pause,
+            pty_resume,
             pty_stop,
             app_version,
             list_koi_files,
@@ -2408,6 +2471,39 @@ mod tests {
             flushes * 4 <= READS,
             "expected ≥4× fewer events than one-per-4-KB ({READS}); got {flushes}"
         );
+    }
+
+    #[test]
+    fn pty_pause_gate_parks_a_reader_until_resumed() {
+        // The flow-control gate (#441): a reader using the production park pattern must block while the
+        // flag is set and proceed only once `set_pty_paused(.., false)` clears it and notifies. Models
+        // the gate without opening a PTY.
+        let gate = Arc::new((Mutex::new(true), Condvar::new())); // start paused
+        let (tx, rx) = mpsc::channel::<()>();
+        let worker_gate = gate.clone();
+        let handle = std::thread::spawn(move || {
+            let (lock, cv) = &*worker_gate;
+            let mut is_paused = lock.lock().unwrap_or_else(|e| e.into_inner());
+            while *is_paused {
+                is_paused = cv.wait(is_paused).unwrap_or_else(|e| e.into_inner());
+            }
+            drop(is_paused);
+            let _ = tx.send(()); // only reached after the gate opens
+        });
+
+        // While paused the worker must not pass the gate.
+        assert!(
+            rx.recv_timeout(Duration::from_millis(50)).is_err(),
+            "reader passed the gate while paused"
+        );
+
+        // Resume → the worker wakes and proceeds.
+        set_pty_paused(&gate, false);
+        assert!(
+            rx.recv_timeout(Duration::from_secs(2)).is_ok(),
+            "reader did not wake after resume"
+        );
+        handle.join().unwrap();
     }
 
     // --- source control (git) -----------------------------------------------

@@ -11,6 +11,17 @@ import type { Platform, TerminalTransport } from '@/host/types';
  *  Studio desktop app" is asserted by the panel test, so keep it stable. */
 const PLACEHOLDER_TEXT = 'The integrated terminal is available in the Koine Studio desktop app.';
 
+/**
+ * Flow-control water marks (#441). The panel pairs `term.write` with the PTY's pause/resume so a
+ * high-throughput command (`yes`, `cat bigfile`) can't outrun the renderer: it tracks the chars handed
+ * to xterm but not yet parsed, and when that backlog crosses {@link TERM_PAUSE_WATER} it pauses the
+ * producer, resuming only once the backlog drains below {@link TERM_RESUME_WATER}. The two-mark
+ * hysteresis (resume well below pause) avoids thrashing the PTY on every chunk. Values mirror xterm's
+ * documented write-callback flow-control example; exported for the panel's flow-control test.
+ */
+export const TERM_PAUSE_WATER = 100_000;
+export const TERM_RESUME_WATER = 10_000;
+
 export interface TerminalPanelOptions {
   /** The element the panel mounts into (the bottom panel's `#panel-terminal`). */
   parent: HTMLElement;
@@ -99,6 +110,12 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
   // True once the shell has exited; the next Enter restarts it instead of being written to a dead PTY.
   let exited = false;
 
+  // Flow-control state (#441): `pendingChars` is the count of chars handed to xterm but not yet parsed
+  // (the renderer backlog); `flowPaused` tracks whether we've asked the PTY to pause. Reset on restart
+  // so a shell relaunched after an exit never starts wedged in the paused state.
+  let pendingChars = 0;
+  let flowPaused = false;
+
   // The cols/rows last sent to the shell, so an unchanged fit() doesn't re-issue a pty_resize IPC.
   let sentCols = 0;
   let sentRows = 0;
@@ -122,12 +139,32 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
 
   function restart(): void {
     exited = false;
+    pendingChars = 0;
+    flowPaused = false;
     term.clear();
     void transport.start(cwd(), shellArgs?.() ?? null).then(fit);
   }
 
-  // Shell output → the view; an exit prints a dim, actionable affordance.
-  transport.onData((chunk) => term.write(chunk));
+  // Shell output → the view, WITH flow control (#441). xterm's write(chunk, cb) fires the callback once
+  // the chunk is parsed, so the number of chars written-but-not-yet-parsed is the renderer backlog.
+  // When that backlog crosses TERM_PAUSE_WATER we pause the PTY (the producer); xterm draining it below
+  // TERM_RESUME_WATER resumes it. The two-mark hysteresis stops us toggling pause/resume on every
+  // chunk. Without this a flooding command outruns the UI thread and the IPC bridge backs up; pausing
+  // the reader fills the kernel PTY buffer and blocks the shell — real backpressure, no data dropped.
+  transport.onData((chunk) => {
+    pendingChars += chunk.length;
+    term.write(chunk, () => {
+      pendingChars -= chunk.length;
+      if (flowPaused && pendingChars <= TERM_RESUME_WATER) {
+        flowPaused = false;
+        void transport.resume().catch(() => {});
+      }
+    });
+    if (!flowPaused && pendingChars >= TERM_PAUSE_WATER) {
+      flowPaused = true;
+      void transport.pause().catch(() => {});
+    }
+  });
   transport.onExit((code) => {
     exited = true;
     term.write(`\r\n\x1b[2m[process ended (code ${code}) — press Enter to restart]\x1b[0m\r\n`);

@@ -25,6 +25,9 @@ interface FakeTerminal {
   dispose: ReturnType<typeof vi.fn>;
   onData: ReturnType<typeof vi.fn>;
   emitKeystroke(data: string): void;
+  /** Invoke the oldest `n` un-acked write callbacks (all when omitted) to simulate xterm parsing the
+   *  buffered output — this is what the flow-control test uses to drain the backlog. */
+  drainWrites(n?: number): void;
 }
 
 vi.mock('@xterm/xterm', () => {
@@ -33,9 +36,16 @@ vi.mock('@xterm/xterm', () => {
     rows = 24;
     options: { theme?: FakeTerminalTheme };
     private dataCb?: (d: string) => void;
+    // The not-yet-invoked write callbacks (real xterm calls these once a chunk is parsed); the
+    // flow-control test drains them via drainWrites() to model the renderer catching up.
+    private writeCallbacks: Array<() => void> = [];
     open = vi.fn();
     loadAddon = vi.fn();
-    write = vi.fn();
+    // Mirrors xterm's write(data, callback?): the optional callback fires when the chunk is parsed.
+    // We DON'T fire it eagerly — the test controls draining so it can hold a backlog past the mark.
+    write = vi.fn((_data: string, cb?: () => void) => {
+      if (cb) this.writeCallbacks.push(cb);
+    });
     focus = vi.fn();
     dispose = vi.fn();
     onData = vi.fn((cb: (d: string) => void) => {
@@ -44,6 +54,10 @@ vi.mock('@xterm/xterm', () => {
     });
     emitKeystroke(data: string): void {
       this.dataCb?.(data);
+    }
+    drainWrites(n?: number): void {
+      const batch = this.writeCallbacks.splice(0, n ?? this.writeCallbacks.length);
+      for (const cb of batch) cb();
     }
     constructor(opts?: { theme?: FakeTerminalTheme }) {
       this.options = { theme: opts?.theme };
@@ -62,7 +76,12 @@ vi.mock('@xterm/addon-fit', () => {
   return { FitAddon };
 });
 
-import { createTerminalPanel, resolveTerminalTheme } from '@/shell/terminal/terminalPanel';
+import {
+  createTerminalPanel,
+  resolveTerminalTheme,
+  TERM_PAUSE_WATER,
+  TERM_RESUME_WATER,
+} from '@/shell/terminal/terminalPanel';
 
 /** A fake terminal transport whose `onData`/`onExit` callbacks the test can drive. */
 function makeTransport(): TerminalTransport & { emitData(s: string): void; emitExit(c: number): void } {
@@ -72,6 +91,8 @@ function makeTransport(): TerminalTransport & { emitData(s: string): void; emitE
     start: vi.fn(async () => {}),
     write: vi.fn(async () => {}),
     resize: vi.fn(async () => {}),
+    pause: vi.fn(async () => {}),
+    resume: vi.fn(async () => {}),
     onData: vi.fn((cb: (s: string) => void) => {
       dataCb = cb;
     }),
@@ -166,10 +187,42 @@ describe('createTerminalPanel', () => {
     const term = termInstances[0];
 
     transport.emitData('hello\r\n');
-    expect(term.write).toHaveBeenCalledWith('hello\r\n');
+    // Output is written with a flow-control callback (#441): write(chunk, cb) instead of write(chunk).
+    expect(term.write).toHaveBeenCalledWith('hello\r\n', expect.any(Function));
 
     term.emitKeystroke('ls');
     expect(transport.write).toHaveBeenCalledWith('ls');
+
+    panel.dispose();
+  });
+
+  it('pauses the PTY when xterm output backs up past the high-water mark, and resumes once drained (#441)', () => {
+    const parent = document.createElement('div');
+    const transport = makeTransport();
+    const platform = { canRunShell: true, createTerminal: () => transport } as unknown as Platform;
+
+    const panel = createTerminalPanel({ parent, platform, cwd: () => null });
+    const term = termInstances[0];
+
+    // A flooding command's output arrives while xterm is busy (no write-callbacks fired yet), so the
+    // unparsed backlog only grows. One sub-mark part stays under the threshold; a second crosses it.
+    const part = Math.floor(TERM_PAUSE_WATER * 0.6); // 60% of the mark — well above the resume mark too
+    expect(part).toBeGreaterThan(TERM_RESUME_WATER);
+
+    transport.emitData('x'.repeat(part));
+    expect(transport.pause).not.toHaveBeenCalled(); // one part is below the high-water mark
+
+    transport.emitData('x'.repeat(part));
+    expect(transport.pause).toHaveBeenCalledTimes(1); // two parts cross it → pause the producer
+    expect(transport.resume).not.toHaveBeenCalled();
+
+    // Parse only the first part: the backlog drops but stays above the low-water mark → still paused.
+    term.drainWrites(1);
+    expect(transport.resume).not.toHaveBeenCalled();
+
+    // Parse the rest: the backlog falls below the low-water mark → resume the producer (once).
+    term.drainWrites();
+    expect(transport.resume).toHaveBeenCalledTimes(1);
 
     panel.dispose();
   });
