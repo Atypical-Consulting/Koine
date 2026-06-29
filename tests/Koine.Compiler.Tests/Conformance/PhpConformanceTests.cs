@@ -238,6 +238,44 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #717 (Bug 1) acceptance: a <c>sum</c>/<c>map</c> fold that projects a <em>derived</em>
+    /// member of the element (the pizzeria-style <c>total: Money = lines.sum(l =&gt; l.payable)</c>,
+    /// where <c>payable</c> is a computed getter) must type-check under <c>phpstan --level max</c>.
+    /// Before the fix the lambda body emitted a property read <c>$l-&gt;payable</c> instead of the
+    /// getter call <c>$l-&gt;payable()</c> — <c>property.notFound</c>, and the mapped array degrades to
+    /// <c>list&lt;mixed&gt;</c> so the generic <c>Decimal::sum</c> helper cannot bind its
+    /// <c>@template T</c> (defeating #692 for a derived-member projection). The sibling of #615 for the
+    /// <c>array_map</c>/fold lambda path. Skipped (not failed) only when no <c>phpstan</c> is present
+    /// locally; CI installs the toolchain and runs it for real.
+    /// </summary>
+    [Fact]
+    public void Derived_member_fold_projection_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  value Line {\n" +
+            "    base: Money\n" +
+            "    payable: Money = base\n" +
+            "  }\n" +
+            "  value Cart {\n" +
+            "    lines: List<Line>\n" +
+            "    total: Money = lines.sum(l => l.payable)\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// The always-on syntax gate: a valid PHP snippet must pass <c>php -l</c>.
     /// Skipped (not failed) only when no interpreter is present; with one it MUST parse cleanly.
     /// </summary>

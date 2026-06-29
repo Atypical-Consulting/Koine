@@ -709,6 +709,39 @@ internal sealed class PhpExpressionTranslator
         _membersByName.TryGetValue(name, out Member? member)
         && MemberAnalysis.IsDerived(member, _memberNames);
 
+    /// <summary>
+    /// True when <paramref name="memberName"/> is a <b>derived</b> (computed) member of the named
+    /// value/entity type <paramref name="targetType"/> — so that type's emitter renders it as a getter
+    /// method and a reference reached through the target (e.g. a fold lambda body) must be a method
+    /// call. Resolves the target type the same way the member-type lookup does (context-aware, then a
+    /// global fallback) and classifies over that type's <em>own</em> members with the shared
+    /// <see cref="MemberAnalysis.IsDerived"/>, so the verdict stays identical to how the member was
+    /// emitted on the target class.
+    /// </summary>
+    private bool IsDerivedMemberOf(TypeRef targetType, string memberName)
+    {
+        TypeDecl decl;
+        var context = targetType.Qualifier ?? _resolver.Context;
+        if (context is null || !_index.TryGetDeclIn(context, targetType.Name, out decl))
+        {
+            if (!_index.TryGetDecl(targetType.Name, out decl))
+            {
+                return false;
+            }
+        }
+
+        IReadOnlyList<Member> members = decl switch
+        {
+            ValueObjectDecl v => v.Members,
+            EntityDecl e => e.Members,
+            _ => Array.Empty<Member>()
+        };
+
+        Member? member = members.FirstOrDefault(m => m.Name == memberName);
+        return member is not null
+            && MemberAnalysis.IsDerived(member, members.Select(m => m.Name).ToHashSet(StringComparer.Ordinal));
+    }
+
     private void WriteMemberAccess(MemberAccessExpr ma, StringBuilder sb)
     {
         // Qualified enum-member access: `OrderStatus::Cancelled` -> `OrderStatus::CANCELLED`.
@@ -737,6 +770,17 @@ internal sealed class PhpExpressionTranslator
         {
             sb.Append(t).Append("->")
               .Append(PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(ma.MemberName)));
+
+            // A DERIVED (computed) member of the target type is emitted as a getter METHOD (see
+            // EmitValueObject / EmitEntity), so a reference reached THROUGH the target — e.g. a fold
+            // lambda body `$l->payable` — must be a method CALL `$l->payable()`, never a property read
+            // (an undefined property under strict_types, a phpstan --level max `property.notFound`).
+            // This is the `array_map`/fold-lambda counterpart of the #615 read-model projection fix and
+            // of WriteIdentifier's own stored-vs-derived rule for the enclosing type's members (#717).
+            if (IsDerivedMemberOf(targetType, ma.MemberName))
+            {
+                sb.Append("()");
+            }
             return;
         }
 
