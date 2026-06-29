@@ -13,7 +13,6 @@ import {
 import {
   fileUriToPath,
   helpRows,
-  isSafeShareRelPath,
   pathToFileUri,
 } from '@/shell/ideUtils';
 import { createEditorSession } from '@/shell/editorSession';
@@ -50,16 +49,12 @@ import { takeStartIntent, type StartIntent } from '@/shell/bootIntent';
 import { type Template } from '@/welcome/templates';
 import { createCommandWiring } from '@/shell/commandWiring';
 import { createLayoutController } from '@/shell/layout';
+import { createExportShare } from '@/shell/exportShare';
 import { type PrefsCallbacks } from '@/settings/prefs';
 import { createSettingsPage, type SettingsPageHandle } from '@/settings/settingsPage';
 import { applyAppearance } from '@/settings/appearance';
 import { initEdgeResizer } from '@/shell/resize';
 import { createHelpOverlay } from '@/shared/help';
-import { createGenerateProject } from '@/export/generateProjectWizard';
-import { sanitizeProjectName } from '@/export/generateProject';
-import { buildSourceZip } from '@/export/sourceZip';
-import { exportDiagram } from '@/export/diagramExport';
-import { getActiveDomainExport } from '@/diagrams/diagrams';
 import { formatChord } from '@/shared/platform';
 import {
   DIAGRAM_ANNOTATION_CREATE_EVENT,
@@ -97,7 +92,7 @@ import { createTerminalPanel, type TerminalPanel } from '@/shell/terminal/termin
 import { createReviewStore } from '@/review/reviewStore';
 import { createReviewPanel, resolveReviewAuthor, type ReviewPanel } from '@/review/ReviewPanel';
 import { createCommentComposer, type CommentComposer } from '@/review/CommentComposer';
-import { clearModelHash, readModelFromHash, workspaceShareUrlOrNull } from '@/export/share';
+import { clearModelHash, readModelFromHash } from '@/export/share';
 import { handleBeforeUnload } from '@/shell/dirty';
 import { render } from 'preact';
 import { createHistoryController } from '@/shell/historyController';
@@ -628,8 +623,8 @@ export function init(): () => void {
     onAddConstruct: (kind) => void applyDiagramAddType({ kind }),
     onAddAnnotation: (kind) => createCanvasAnnotation(kind),
     onAddAggregateMember: (kind, aggregateQn) => void applyDiagramAddAggregateMember(kind, aggregateQn),
-    onExportDiagram: (format) => void exportActiveDiagram(format),
-    onCopyDiagramMermaid: () => void copyActiveDiagramMermaid(),
+    onExportDiagram: (format) => void exportShare.exportActiveDiagram(format),
+    onCopyDiagramMermaid: () => void exportShare.copyActiveDiagramMermaid(),
     gotoSourceSpan: (span) => void gotoSourceSpan(span),
     // Cross-axis "Reveal in Files" (#453): the tactical leaf already switched the rail to the Files axis
     // (setAxis) before this fires, so we just point the explorer at the context's `.koi`.
@@ -1509,37 +1504,6 @@ export function init(): () => void {
     await workspace.openFolderPath(token, { recent: true });
   }
 
-  // Import a multi-file workspace carried in a share link. Materializes a real workspace and opens
-  // it in folder mode (mirrors openExample). Runs from the lsp.start callback so the server is up
-  // and the resulting didOpens resolve cross-file refs.
-  async function importSharedWorkspace(
-    files: { relPath: string; text: string }[],
-    active?: string,
-  ): Promise<void> {
-    // A share link is untrusted input. Drop any file whose relPath could escape the workspace root
-    // before it reaches platform.materializeWorkspace (which writes to disk) — defense in depth
-    // against a malicious `..`/absolute path in the payload.
-    const safeFiles = files.filter((f) => isSafeShareRelPath(f.relPath));
-    // Nothing (safe) to import — fall through to the default workspace that already booted.
-    if (safeFiles.length === 0) return;
-
-    // Materialize a real workspace and open it in folder mode (mirrors openExample).
-    const token = await platform.materializeWorkspace(
-      'shared-workspace',
-      safeFiles.map((f) => ({ relPath: f.relPath, contents: f.text })),
-    );
-    if (!token) {
-      setStatus('could not open shared workspace', 'error');
-      return;
-    }
-    await workspace.openFolderPath(token, { recent: false });
-    // openFolderPath activates the first file by relPath; honour the share's `active` when present.
-    if (active) {
-      const target = Array.from(workspace.buffers.values()).find((b) => b.relPath === active);
-      if (target) workspace.activateFile(target.uri);
-    }
-  }
-
   // Return to the Home route (#368): Home and the editor are distinct routes now, so "back to start"
   // navigates rather than popping an overlay over the editor. The boot switch (main.ts) swaps #app out
   // and mounts the Home view; the editor stays initialised behind it for an instant return. Wired to
@@ -1771,14 +1735,6 @@ export function init(): () => void {
       danger: true,
     });
   });
-  // Generate Project wizard: compiles the active model, then bundles the emitted files into a
-  // downloadable archive. I/O is injected so the wizard stays decoupled from the LSP/host wiring.
-  const generateProject = createGenerateProject({
-    emitPreview: (target) => lsp.emitPreview(target),
-    glossary: () => lsp.glossary(),
-    saveZip: (name, data) => platform.saveZip(name, data),
-  });
-
   // The AI assistant panel is created lazily the first time its center pane is shown (the Anthropic SDK
   // is dynamically imported inside ai.ts, so creating the panel does not load it — only sending).
   // ide.ts owns the assistant's lifecycle; the controller only nudges it (syncWorkspace/focus)
@@ -1918,136 +1874,20 @@ export function init(): () => void {
     terminal?.applyTheme();
   });
 
-  // Copy a shareable playground link (the current model encoded in the URL hash) to the clipboard,
-  // flashing a transient confirmation in the status pill. After the flash, re-derive the pill from
-  // the CURRENT diagnostics rather than restoring a snapshot (which could clobber a fresh push).
-  //
-  // Shares the WHOLE workspace (every open buffer) under a versioned envelope, with the active file
-  // flagged so the recipient lands on it. A workspace that overflows the URL-length cap is not
-  // copied as a broken link — instead we steer the user to the `.koi` source zip export.
-  async function copyShareLink(): Promise<void> {
-    try {
-      const files = Array.from(workspace.buffers.values()).map((b) => ({ relPath: b.relPath, text: b.text }));
-      const activeRelPath = workspace.buffers.get(workspace.activeUri())?.relPath;
-      const url = workspaceShareUrlOrNull(files, activeRelPath);
-      if (url === null) {
-        setStatus('Workspace too large to share as a link — export a .koi source zip instead', 'error');
-        setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
-        return;
-      }
-      await navigator.clipboard.writeText(url);
-      setStatus('link copied ✓', 'green');
-      setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
-    } catch (e) {
-      console.error('copy share link failed:', e);
-    }
-  }
-
-  // Bundle every open `.koi` document into a zip and hand it to the host's saveZip seam (Blob
-  // download in the browser, native picker on desktop). Names the archive after the opened folder.
-  // The whole bundle is DOM-free in sourceZip.ts so it can be unit-tested in isolation.
-  async function exportSourceZip(): Promise<void> {
-    try {
-      const files = Array.from(workspace.buffers.values()).map((b) => ({ relPath: b.relPath, text: b.text }));
-      const root = sanitizeProjectName(platform.folderName(workspace.folderRootToken()));
-      const bytes = await buildSourceZip(files, { root });
-      const saved = await platform.saveZip(`${root}.zip`, bytes);
-      if (saved === true) {
-        setStatus('source exported ✓', 'green');
-        setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
-      }
-    } catch (e) {
-      setStatus('export failed', 'error');
-      console.error('export source zip failed:', e);
-    }
-  }
-
-  // Flash a transient confirmation in the status pill, then re-derive it from the CURRENT diagnostics (so a
-  // fresh push isn't clobbered) — the shared idiom behind the diagram export/copy handlers (#271).
-  function flashStatus(message: string, kind: Parameters<typeof setStatus>[1]): void {
-    setStatus(message, kind);
-    setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 1500);
-  }
-
-  // Export the live Visual canvas in the chosen format (#271): SVG/PNG serialize the actual drawing, PlantUML
-  // is mapped from the structured graph client-side. Routes the bytes through the host's saveZip seam (Blob
-  // download in the browser, native save dialog on desktop) with a caption-derived filename. A no-op with a
-  // hint when no diagram is on screen; a user-cancelled save is silent (saveZip resolves false).
-  async function exportActiveDiagram(format: 'svg' | 'png' | 'plantuml'): Promise<void> {
-    const active = getActiveDomainExport();
-    if (!active) {
-      flashStatus('open the Visual diagram to export', 'error');
-      return;
-    }
-    try {
-      const saved = await exportDiagram(format, active.diagram, active.handle, (name, bytes) => platform.saveZip(name, bytes));
-      if (saved === true) flashStatus('diagram exported ✓', 'green');
-    } catch (e) {
-      setStatus('export failed', 'error');
-      console.error('export diagram failed:', e);
-    }
-  }
-
-  // Copy the current diagram's Mermaid to the clipboard (#271), mirroring copyShareLink's flash. The fused
-  // canvas is emitted as one Mermaid document; an empty model has nothing to copy.
-  async function copyActiveDiagramMermaid(): Promise<void> {
-    const mermaid = getActiveDomainExport()?.diagram.mermaid?.trim();
-    if (!mermaid) {
-      flashStatus('no diagram to copy', 'error');
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(mermaid);
-      flashStatus('Mermaid copied ✓', 'green');
-    } catch (e) {
-      setStatus('copy failed', 'error');
-      console.error('copy mermaid failed:', e);
-    }
-  }
-
-  // Save the current workspace as a real, reopenable on-disk project (browser host only). Promotes an
-  // ephemeral example/Untitled workspace into <root>/<name>/, registers it in Recent, and reopens it
-  // from disk so the workspace now IS that folder (further ⌘S writes there).
-  async function saveProjectToDisk(): Promise<void> {
-    if (!platform.canSaveProjects) return;
-    // Flush the active editor's debounced text into its buffer so the snapshot is current.
-    workspace.syncActiveBuffer(editor.getDoc());
-    const files = [...workspace.buffers.values()].map((b) => ({ relPath: b.relPath, contents: b.text }));
-    if (files.length === 0) {
-      setStatus('nothing to save', 'error');
-      return;
-    }
-    let seedValue = workspace.folderRootToken() ? platform.folderName(workspace.folderRootToken()) : 'my-project';
-    let seedError = ''; // a name clash from a prior attempt, shown inline on the re-prompt
-    for (;;) {
-      const name = await promptDialog.ask({
-        title: 'Save project',
-        message: 'Saved to your projects folder and added to Recent.',
-        label: 'Project name',
-        initialValue: seedValue,
-        confirmLabel: 'Save',
-        error: seedError,
-      });
-      if (!name) return; // cancelled / empty
-      try {
-        const token = await platform.saveProjectToRoot(name, files);
-        if (!token) return; // root picker dismissed
-        await workspace.openFolderPath(token, { recent: true });
-        setStatus('Project saved ✓', 'green');
-        return;
-      } catch (e) {
-        if (String(e instanceof Error ? e.message : e).includes('already exists')) {
-          // Re-ask with the clash surfaced inline (no second alert) and the rejected name pre-filled.
-          seedError = `A project named "${name}" already exists — choose another name.`;
-          seedValue = name;
-          continue;
-        }
-        setStatus('save to disk failed', 'error');
-        console.error('saveProjectToDisk failed:', e);
-        return;
-      }
-    }
-  }
+  // The export / share / save-to-disk surface — shareable link, .koi source zip, live-diagram export +
+  // Mermaid copy, Save-to-disk, the Generate Project wizard, and shared-workspace import — lives in the
+  // exportShare controller now (#757). It reaches the host / workspace / editor / status pill through
+  // these deps; the post-flash status-pill refresh (#271) is wrapped as a single thunk.
+  const exportShare = createExportShare({
+    platform,
+    lsp,
+    workspace,
+    editor,
+    setStatus,
+    refreshStatusFromDiagnostics: () =>
+      editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())),
+    promptDialog,
+  });
 
   // --- view layout: editor split + repositionable panels (issue #265) -------
   // The #split data-* mirror, the inspector + left-rail edge resizers (and their live re-wiring on a
@@ -2091,13 +1931,13 @@ export function init(): () => void {
     search,
     requestNewModel: () => void requestNewModel(),
     workspace: { saveAllDirty: () => void workspace.saveAllDirty(), buffers: workspace.buffers },
-    copyShareLink: () => void copyShareLink(),
+    copyShareLink: () => void exportShare.copyShareLink(),
     controller,
-    generateProject,
-    exportSourceZip: () => void exportSourceZip(),
-    exportActiveDiagram: (format) => void exportActiveDiagram(format),
-    copyActiveDiagramMermaid: () => void copyActiveDiagramMermaid(),
-    saveProjectToDisk: () => void saveProjectToDisk(),
+    generateProject: exportShare.generateProject,
+    exportSourceZip: () => void exportShare.exportSourceZip(),
+    exportActiveDiagram: (format) => void exportShare.exportActiveDiagram(format),
+    copyActiveDiagramMermaid: () => void exportShare.copyActiveDiagramMermaid(),
+    saveProjectToDisk: () => void exportShare.saveProjectToDisk(),
     canSaveProjects: platform.canSaveProjects,
     layoutActions,
     openSettings,
@@ -2137,7 +1977,7 @@ export function init(): () => void {
       // and any model hash is cleared so a reload doesn't re-trigger a failing import.
       if (shared?.kind === 'workspace') {
         try {
-          await importSharedWorkspace(shared.files, shared.active);
+          await exportShare.importSharedWorkspace(shared.files, shared.active);
         } catch (e) {
           console.error('importing shared workspace failed:', e);
           setStatus('could not open shared workspace', 'error');
