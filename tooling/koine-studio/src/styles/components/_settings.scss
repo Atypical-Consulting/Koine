@@ -85,6 +85,26 @@
   padding-left: var(--koi-space-4);
 }
 
+/* The JSON scope toggle row (User | Workspace) prepended above the settings.json editor.
+   Reuses the existing .koi-segmented / .koi-seg / .is-disabled styling; this wrapper
+   just provides the bar layout and the separator line. */
+.settings-json-scope {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-3);
+  padding: var(--koi-space-2) var(--koi-space-4);
+  border-bottom: 1px solid var(--koi-line);
+}
+
+/* Quiet hint shown when no folder is open (Workspace scope is unavailable).
+   Styled consistently with .settings-json-diagnostics to share the same visual weight. */
+.settings-json-scope-empty {
+  margin: 0;
+  font-size: var(--koi-text-sm);
+  color: var(--koi-muted);
+  font-style: italic;
+}
+
 .koi-settings-layout {
   display: flex;
   align-items: stretch;

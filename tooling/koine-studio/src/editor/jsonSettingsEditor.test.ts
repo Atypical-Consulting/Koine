@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EditorView } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
 import { CompletionContext } from '@codemirror/autocomplete';
-import { jsonSchema } from 'codemirror-json-schema';
+import { jsonSchema, getJSONSchema } from 'codemirror-json-schema';
 import { createJsonSettingsEditor, settingsSchemaHover, settingsCompletionSource } from './editor';
-import { SETTINGS_JSON_SCHEMA, settingsToJsonDoc } from '@/settings/settingsSchema';
+import { SETTINGS_JSON_SCHEMA, WORKSPACE_SETTINGS_JSON_SCHEMA, settingsToJsonDoc } from '@/settings/settingsSchema';
 import { DEFAULT_SETTINGS } from '@/settings/persistence';
 
 describe('createJsonSettingsEditor', () => {
@@ -76,6 +76,23 @@ describe('createJsonSettingsEditor', () => {
     ed.setInvalid(null);
     expect(cm.hasAttribute('aria-invalid')).toBe(false);
     expect(cm.hasAttribute('aria-errormessage')).toBe(false);
+    ed.destroy();
+  });
+
+  // Fix 2: setSchema swaps the active inline JSON schema (scope User ↔ Workspace toggle).
+  it('setSchema swaps the active JSON schema in the editor state', () => {
+    // Create with the flat Workspace schema.
+    const ed = createJsonSettingsEditor(host, {
+      onChange: () => {},
+      initial: '{}',
+      schema: WORKSPACE_SETTINGS_JSON_SCHEMA,
+    });
+    const view = EditorView.findFromDOM(host.querySelector('.cm-editor') as HTMLElement)!;
+    // Initial schema in state matches what was passed.
+    expect(getJSONSchema(view.state)).toBe(WORKSPACE_SETTINGS_JSON_SCHEMA);
+    // Swap to the full user schema.
+    ed.setSchema(SETTINGS_JSON_SCHEMA);
+    expect(getJSONSchema(view.state)).toBe(SETTINGS_JSON_SCHEMA);
     ed.destroy();
   });
 });
