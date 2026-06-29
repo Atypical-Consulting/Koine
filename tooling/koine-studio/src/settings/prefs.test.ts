@@ -834,6 +834,72 @@ describe('Settings → Display name (#479)', () => {
 // It builds the two-pane category rail + control pane and appends it straight into the given container —
 // no modal chrome / backdrop — and returns a destroy() that tears the form (and its child CodeMirror
 // editors) back down.
+describe('Settings → new namespaced controls (#750): Tab size / Editor font / Temperature', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+  });
+
+  const tabSizeInput = () => document.querySelector<HTMLInputElement>('#koi-set-tab-size')!;
+  const editorFontInput = () => document.querySelector<HTMLInputElement>('#koi-set-editor-font')!;
+  const temperatureInput = () => document.querySelector<HTMLInputElement>('#koi-set-temperature')!;
+
+  it('Editor → Tab size commits tabSize and lives in the Editor panel', () => {
+    openPrefs();
+    const input = tabSizeInput();
+    expect(input).not.toBeNull();
+    expect(input.closest('#koi-settings-panel-editor')).not.toBeNull();
+    input.value = '4';
+    input.dispatchEvent(new Event('change'));
+    expect(loadSettings().tabSize).toBe(4);
+  });
+
+  it('Appearance → Editor font commits fontFamily and lives in the Appearance panel', () => {
+    openPrefs();
+    const input = editorFontInput();
+    expect(input.type).toBe('text');
+    expect(input.closest('#koi-settings-panel-appearance')).not.toBeNull();
+    input.value = 'JetBrains Mono';
+    input.dispatchEvent(new Event('change'));
+    expect(loadSettings().fontFamily).toBe('JetBrains Mono');
+  });
+
+  it('Assistant → Temperature commits aiTemperature and lives in the Assistant panel', () => {
+    openPrefs();
+    const input = temperatureInput();
+    expect(input.closest('#koi-settings-panel-assistant')).not.toBeNull();
+    input.value = '0.7';
+    input.dispatchEvent(new Event('change'));
+    expect(loadSettings().aiTemperature).toBe(0.7);
+  });
+
+  it('clamps an out-of-range Tab size to 8 on commit', () => {
+    openPrefs();
+    const input = tabSizeInput();
+    input.value = '99';
+    input.dispatchEvent(new Event('change'));
+    expect(loadSettings().tabSize).toBe(8);
+  });
+
+  it('repaints all three controls from settings on open', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, tabSize: 6, fontFamily: 'Fira Code', aiTemperature: 1.1 });
+    openPrefs();
+    expect(tabSizeInput().value).toBe('6');
+    expect(editorFontInput().value).toBe('Fira Code');
+    expect(temperatureInput().value).toBe('1.1');
+  });
+
+  it('reports the committed value through onChange', () => {
+    const onChange = vi.fn();
+    openPrefs({ onChange });
+    const input = temperatureInput();
+    input.value = '0.9';
+    input.dispatchEvent(new Event('change'));
+    const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0] as { aiTemperature: number };
+    expect(last.aiTemperature).toBe(0.9);
+  });
+});
+
 describe('mountPreferencesPane', () => {
   let host: HTMLElement;
 
