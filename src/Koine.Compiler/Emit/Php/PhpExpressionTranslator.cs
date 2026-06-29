@@ -316,9 +316,24 @@ internal sealed class PhpExpressionTranslator
             sb.Append('(');
         }
 
-        WriteOperand(bin.Left, sb, EnumTypeName(bin.Right));
-        sb.Append(' ').Append(NativeBinaryOperator(bin)).Append(' ');
-        WriteOperand(bin.Right, sb, EnumTypeName(bin.Left));
+        if (IsStringConcat(bin))
+        {
+            // `String + String` is PHP string CONCATENATION (`.`), never the numeric `+` (which on
+            // strings is a runtime TypeError and a phpstan `binaryOp.invalid`). A guard-narrowed
+            // optional String operand still infers as optional — narrowing is validator-only and never
+            // reaches TypeResolver.Infer — so each operand is written through WriteStringConcatOperand,
+            // which coalesces an optional operand to a non-null string so the `.` site is never
+            // `string|null` (#717 Bug 3, extended to the guarded-optional case in #787).
+            WriteStringConcatOperand(bin.Left, sb);
+            sb.Append(" . ");
+            WriteStringConcatOperand(bin.Right, sb);
+        }
+        else
+        {
+            WriteOperand(bin.Left, sb, EnumTypeName(bin.Right));
+            sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
+            WriteOperand(bin.Right, sb, EnumTypeName(bin.Left));
+        }
 
         if (parenthesize)
         {
@@ -327,18 +342,44 @@ internal sealed class PhpExpressionTranslator
     }
 
     /// <summary>
-    /// The native PHP operator for a primitive binary op. A <c>String + String</c> is PHP string
-    /// concatenation, which uses <c>.</c> — never the numeric <c>+</c>, which on strings is a runtime
-    /// <c>TypeError</c> and a phpstan <c>binaryOp.invalid</c> error (e.g. a chained
-    /// <c>street + ", " + city</c>, whose inner sub-expression is itself a String). Decimal and
-    /// value-object arithmetic is lowered to method calls by <see cref="TryWriteValueBinary"/> before
-    /// reaching here, so this only diverts the String-concat case; <c>Int + Int</c> keeps native
-    /// <c>+</c> (#717, Bug 3).
+    /// True when a binary op is a <c>String + String</c> concatenation — including the guarded-optional
+    /// case where an operand is a narrowed <c>String?</c> (narrowing is validator-only, so it still
+    /// infers as optional here). Decimal and value-object arithmetic is lowered to method calls by
+    /// <see cref="TryWriteValueBinary"/> before reaching here, so this only diverts the String-concat
+    /// case; <c>Int + Int</c> keeps native <c>+</c> (#717, Bug 3).
     /// </summary>
-    private string NativeBinaryOperator(BinaryExpr bin) =>
-        bin.Op == BinaryOp.Add && IsString(InferType(bin.Left)) && IsString(InferType(bin.Right))
-            ? "."
-            : OperatorOf(bin.Op);
+    private bool IsStringConcat(BinaryExpr bin) =>
+        bin.Op == BinaryOp.Add
+        && IsStringConcatOperand(InferType(bin.Left))
+        && IsStringConcatOperand(InferType(bin.Right));
+
+    /// <summary>
+    /// Writes one operand of a PHP string concatenation (<c>.</c>). A nested concatenation is already a
+    /// non-null PHP string, so it is emitted directly — wrapping it would produce a redundant <c>??</c>
+    /// that <c>phpstan --level max</c> rejects (<c>nullCoalesce.expr</c>). A guard-narrowed optional
+    /// <c>String</c> still infers as optional, so it is wrapped as <c>($expr ?? '')</c> to make the
+    /// <c>.</c> site provably non-null. The validator's <c>OptionalDereference</c> check has already
+    /// rejected any UNGUARDED optional in <c>+</c>, so the coalesce is a runtime no-op present only to
+    /// satisfy phpstan (#787).
+    /// </summary>
+    private void WriteStringConcatOperand(Expr expr, StringBuilder sb)
+    {
+        if (expr is BinaryExpr nested)
+        {
+            WriteBinary(nested, sb, parenthesize: true);
+            return;
+        }
+
+        if (InferType(expr) is { IsOptional: true })
+        {
+            sb.Append('(');
+            Write(expr, sb);
+            sb.Append(" ?? '')");
+            return;
+        }
+
+        WriteOperand(expr, sb, enumHint: null);
+    }
 
     /// <summary>
     /// Renders a binary expression whose operand(s) are a runtime <c>Decimal</c> or a value object,
@@ -366,11 +407,15 @@ internal sealed class PhpExpressionTranslator
             return true;
         }
 
-        if (IsDecimal(left) || IsDecimal(right))
+        if (IsDecimalOperand(left) || IsDecimalOperand(right))
         {
             // Decimal arithmetic/comparison. Whichever side is the Decimal is the receiver; the
-            // other operand is coerced to a Decimal expression.
-            bool leftIsDecimal = IsDecimal(left);
+            // other operand is coerced to a Decimal expression. A guard-narrowed `Decimal?` operand
+            // still infers as optional (narrowing is validator-only), so IsDecimalOperand admits it
+            // here — and WriteAsDecimal / WriteReceiver coalesce it to a non-null Decimal at the
+            // method site — rather than letting it fall back to a native `+`/`-`/… on a runtime
+            // \Koine\Runtime\Decimal object, which is invalid PHP (#787).
+            bool leftIsDecimal = IsDecimalOperand(left);
             Expr receiver = leftIsDecimal ? bin.Left : bin.Right;
             Expr operand = leftIsDecimal ? bin.Right : bin.Left;
             WriteDecimalBinary(bin.Op, receiver, operand, leftIsDecimal, sb, parenthesize);
@@ -513,6 +558,20 @@ internal sealed class PhpExpressionTranslator
     /// <summary>Writes an operand as a method receiver, parenthesizing a compound expression.</summary>
     private void WriteReceiver(Expr expr, StringBuilder sb)
     {
+        // A guard-narrowed optional Decimal receiver still infers as optional, so coalesce it to a
+        // non-null Decimal — otherwise the emitted `->equals(...)` / `->compareTo(...)` is a method
+        // call on a `Decimal|null` (a phpstan `method.nonObject`). Safe and a runtime no-op for the
+        // same reason as WriteAsDecimal's coalesce: only guarded (present) optionals reach emit. A
+        // nested Decimal arithmetic sub-expression is already non-null, so it is left to the branch
+        // below (wrapping it would be a redundant `??`) (#787).
+        if (InferType(expr) is { Name: "Decimal", IsOptional: true } && expr is not BinaryExpr)
+        {
+            sb.Append('(');
+            Write(expr, sb);
+            sb.Append(@" ?? new \Koine\Runtime\Decimal('0'))");
+            return;
+        }
+
         if (expr is IdentifierExpr or MemberAccessExpr or CallExpr)
         {
             Write(expr, sb);
@@ -532,9 +591,32 @@ internal sealed class PhpExpressionTranslator
     /// </summary>
     private void WriteAsDecimal(Expr expr, StringBuilder sb)
     {
-        if (IsDecimal(InferType(expr)))
+        TypeRef? t = InferType(expr);
+
+        if (IsDecimal(t))
         {
             Write(expr, sb);
+            return;
+        }
+
+        // A guard-narrowed optional Decimal still infers as optional, so a bare operand would be a
+        // `Decimal|null` at the method site (a phpstan `method.nonObject` / `argument.type`). A nested
+        // Decimal/value-object arithmetic sub-expression already yields a non-null Decimal (it lowers
+        // to add/sub/…), so it must NOT be coalesced — phpstan flags the redundant `??` as
+        // `nullCoalesce.expr` — and is written directly. Otherwise coalesce to a non-null Decimal. Safe
+        // and a runtime no-op because only guarded (present) optionals reach emit (#787).
+        if (t is { Name: "Decimal", IsOptional: true })
+        {
+            if (expr is BinaryExpr)
+            {
+                Write(expr, sb);
+            }
+            else
+            {
+                sb.Append('(');
+                Write(expr, sb);
+                sb.Append(@" ?? new \Koine\Runtime\Decimal('0'))");
+            }
             return;
         }
 
@@ -553,7 +635,15 @@ internal sealed class PhpExpressionTranslator
 
     private static bool IsDecimal(TypeRef? t) => t is { Name: "Decimal", IsOptional: false };
 
-    private static bool IsString(TypeRef? t) => t is { Name: "String", IsOptional: false };
+    // A String operand of a `+`, regardless of optionality: a guard-narrowed `String?` still infers as
+    // optional but must still route to PHP string concatenation (`.`). The non-null guarantee at the
+    // `.` site comes from WriteStringConcatOperand's coalesce, not from this predicate (#787).
+    private static bool IsStringConcatOperand(TypeRef? t) => t is { Name: "String" };
+
+    // A Decimal operand of an arithmetic/comparison op, regardless of optionality: a guard-narrowed
+    // `Decimal?` still infers as optional but must still route to the runtime Decimal method path. The
+    // non-null guarantee at the receiver/argument site comes from WriteAsDecimal / WriteReceiver (#787).
+    private static bool IsDecimalOperand(TypeRef? t) => t is { Name: "Decimal" };
 
     /// <summary>
     /// True when the type is a value object (or quantity) that exposes arithmetic methods — i.e. a
