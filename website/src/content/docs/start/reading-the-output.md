@@ -166,7 +166,7 @@ public sealed class Email : ValueObject
                 type: nameof(Email),
                 rule: "an email cannot be blank");
 
-        if (!Regex.IsMatch(raw, @"^[^@]+@[^@]+\.[^@]+$"))
+        if (!Regex.IsMatch(raw, @"^[^@]+@[^@]+\.[^@]+$", RegexOptions.None, TimeSpan.FromMilliseconds(1000)))
             throw new DomainInvariantViolationException(
                 type: nameof(Email),
                 rule: "invalid email address");

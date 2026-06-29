@@ -143,6 +143,31 @@ export class DomainInvariantViolationError extends Error {
 }
 
 /**
+ * Evaluates a `matches`-invariant regex. Every generated `matches` guard routes through this
+ * one helper so an author-supplied pattern over untrusted input has a single hardening seam.
+ *
+ * JavaScript has NO synchronous per-call regex timeout (unlike .NET's `Regex` matchTimeout),
+ * so a catastrophic-backtracking pattern could otherwise block the event loop on adversarial
+ * input — a ReDoS sink at the value object's trust boundary. As defense-in-depth this bounds
+ * the input length (the dominant trigger for polynomial blow-up) and throws a CONTAINED
+ * `DomainInvariantViolationError` rather than hanging. For a hard, engine-level guarantee
+ * against exponential backtracking, swap a linear-time engine (e.g. RE2) in HERE — this is the
+ * one place every `matches` invariant flows through. (Koine #641.)
+ *
+ * `maxInputLength` defaults to 4096 — generous for the format/identifier fields `matches` is
+ * meant for (emails, SKUs, slugs, postal codes). Raise it at the call site if you validate a
+ * legitimately longer field.
+ */
+export function regexMatch(pattern: RegExp, input: string, maxInputLength = 4096): boolean {
+  if (input.length > maxInputLength) {
+    throw new DomainInvariantViolationError(
+      'String',
+      `input length ${input.length} exceeds the regex-match bound of ${maxInputLength}`);
+  }
+  return pattern.test(input);
+}
+
+/**
  * The marker every domain event satisfies: a record of something that happened,
  * stamped with the instant it occurred. An aggregate records these as it mutates
  * (its `domainEvents` collection) — the analogue of the C# `IDomainEvent`.

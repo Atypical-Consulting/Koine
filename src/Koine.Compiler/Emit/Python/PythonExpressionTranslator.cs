@@ -244,7 +244,10 @@ internal sealed class PythonExpressionTranslator
                 break;
             case MatchExpr m:
                 // `raw matches /pat/` -> `(re.search(r"pat", raw) is not None)`. Unanchored search,
-                // mirroring the TS `.test()` semantics. The per-file header (Task 5) imports `re`.
+                // the same semantics as the other targets. The per-file header (Task 5) imports `re`.
+                // ReDoS note (#641): CPython's stdlib `re` has NO per-call match timeout, so there is no
+                // bounded form to emit here — the limitation is documented in the `matches` reference
+                // (re is backtracking; validate input length / prefer `regex`'s timeout for untrusted input).
                 sb.Append("(re.search(").Append(RawRegexLiteral(m.Pattern)).Append(", ");
                 Write(m.Target, sb);
                 sb.Append(") is not None)");
