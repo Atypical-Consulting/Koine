@@ -31,15 +31,21 @@ import { createSettingsPage, type SettingsPageHandle } from './settingsPage';
 const MODE_KEY = 'koine.studio.settingsEditorMode';
 const SCOPE_KEY = 'koine.studio.settingsJsonScope';
 
-// The real header markup (index.html): an <h2> title + an empty #settings-mode-toggle host the
-// radiogroup mounts into.
+// The real header markup (index.html): an <h2> title + a controls cluster holding the #settings-scope-toggle
+// slot (User/Workspace mounts here in JSON mode) and the #settings-mode-toggle slot (the Visual/JSON
+// radiogroup), so both toggles share one row.
 function makeHeader(): HTMLElement {
   const header = document.createElement('header');
   const h2 = document.createElement('h2');
   h2.textContent = 'Settings';
-  const toggle = document.createElement('div');
-  toggle.id = 'settings-mode-toggle';
-  header.append(h2, toggle);
+  const controls = document.createElement('div');
+  controls.className = 'settings-page-header-controls';
+  const scopeSlot = document.createElement('div');
+  scopeSlot.id = 'settings-scope-toggle';
+  const modeSlot = document.createElement('div');
+  modeSlot.id = 'settings-mode-toggle';
+  controls.append(scopeSlot, modeSlot);
+  header.append(h2, controls);
   return header;
 }
 
@@ -352,46 +358,46 @@ describe('createSettingsPage', () => {
   });
 
   // --- Task 2: JSON scope toggle (User | Workspace) #736 -----------------------------------
-  // The scope toggle is a segmented control (role=radiogroup) that lives inside the JSON body,
-  // so it appears only in JSON mode and is torn down on mode-swap or destroy().
+  // The scope toggle is a segmented control (role=radiogroup) mounted into the HEADER beside the
+  // Visual/JSON toggle. It appears only in JSON mode and is torn down on mode-swap or destroy().
 
-  // Helpers: query the scope toggle (it lives in body, not header).
-  const scopeGroup = (b: HTMLElement): HTMLElement | null =>
-    b.querySelector('[role="radiogroup"][aria-label="Settings JSON scope"]');
-  const scopeBtn = (b: HTMLElement, v: 'user' | 'workspace'): HTMLButtonElement | null =>
-    (scopeGroup(b)?.querySelector(`[data-value="${v}"]`) as HTMLButtonElement | null) ?? null;
+  // Helpers: query the scope toggle (it lives in the header, beside the representation toggle).
+  const scopeGroup = (root: HTMLElement): HTMLElement | null =>
+    root.querySelector('[role="radiogroup"][aria-label="Settings JSON scope"]');
+  const scopeBtn = (root: HTMLElement, v: 'user' | 'workspace'): HTMLButtonElement | null =>
+    (scopeGroup(root)?.querySelector(`[data-value="${v}"]`) as HTMLButtonElement | null) ?? null;
 
   it('scope toggle is absent in Visual mode (default)', () => {
     handle = createSettingsPage({ header, body }, cb);
-    expect(scopeGroup(body)).toBeNull();
+    expect(scopeGroup(header)).toBeNull();
   });
 
   it('scope toggle appears when starting in JSON mode', () => {
     localStorage.setItem(MODE_KEY, 'json');
     handle = createSettingsPage({ header, body }, cb);
-    expect(scopeGroup(body)).not.toBeNull();
+    expect(scopeGroup(header)).not.toBeNull();
   });
 
   it('scope toggle appears after switching from Visual to JSON', () => {
     handle = createSettingsPage({ header, body }, cb);
     jsonRadio(header).click();
-    expect(scopeGroup(body)).not.toBeNull();
+    expect(scopeGroup(header)).not.toBeNull();
   });
 
   it('scope toggle is removed when switching back to Visual', () => {
     localStorage.setItem(MODE_KEY, 'json');
     handle = createSettingsPage({ header, body }, cb);
-    expect(scopeGroup(body)).not.toBeNull();
+    expect(scopeGroup(header)).not.toBeNull();
     visualRadio(header).click();
-    expect(scopeGroup(body)).toBeNull();
+    expect(scopeGroup(header)).toBeNull();
   });
 
-  it('destroy() removes the scope toggle from the body', () => {
+  it('destroy() removes the scope toggle from the header', () => {
     localStorage.setItem(MODE_KEY, 'json');
     const h = createSettingsPage({ header, body }, cb);
-    expect(scopeGroup(body)).not.toBeNull();
+    expect(scopeGroup(header)).not.toBeNull();
     h.destroy();
-    expect(scopeGroup(body)).toBeNull();
+    expect(scopeGroup(header)).toBeNull();
   });
 
   it('without a workspace: Workspace pill is disabled/aria-disabled, scope forced to user, note shown', () => {
@@ -399,16 +405,16 @@ describe('createSettingsPage', () => {
     localStorage.setItem(MODE_KEY, 'json');
     handle = createSettingsPage({ header, body }, cb);
 
-    const group = scopeGroup(body)!;
+    const group = scopeGroup(header)!;
     expect(group).not.toBeNull();
     // Group marked as disabled
     expect(group.getAttribute('aria-disabled')).toBe('true');
     expect(group.classList.contains('is-disabled')).toBe(true);
     // User is checked, Workspace is not
-    expect(scopeBtn(body, 'user')!.getAttribute('aria-checked')).toBe('true');
-    expect(scopeBtn(body, 'workspace')!.getAttribute('aria-checked')).toBe('false');
+    expect(scopeBtn(header, 'user')!.getAttribute('aria-checked')).toBe('true');
+    expect(scopeBtn(header, 'workspace')!.getAttribute('aria-checked')).toBe('false');
     // Workspace button is natively disabled
-    expect(scopeBtn(body, 'workspace')!.disabled).toBe(true);
+    expect(scopeBtn(header, 'workspace')!.disabled).toBe(true);
     // Empty-state note shown
     expect(body.querySelector('.settings-json-scope-empty')).not.toBeNull();
     expect(body.textContent).toContain('Open a folder to edit workspace settings');
@@ -419,11 +425,11 @@ describe('createSettingsPage', () => {
     localStorage.setItem(MODE_KEY, 'json');
     handle = createSettingsPage({ header, body }, cbWs);
 
-    const group = scopeGroup(body)!;
+    const group = scopeGroup(header)!;
     expect(group.getAttribute('aria-disabled')).toBe('false');
     expect(group.classList.contains('is-disabled')).toBe(false);
-    expect(scopeBtn(body, 'user')!.disabled).toBe(false);
-    expect(scopeBtn(body, 'workspace')!.disabled).toBe(false);
+    expect(scopeBtn(header, 'user')!.disabled).toBe(false);
+    expect(scopeBtn(header, 'workspace')!.disabled).toBe(false);
     expect(body.querySelector('.settings-json-scope-empty')).toBeNull();
   });
 
@@ -432,9 +438,9 @@ describe('createSettingsPage', () => {
     localStorage.setItem(MODE_KEY, 'json');
     handle = createSettingsPage({ header, body }, cbWs);
 
-    scopeBtn(body, 'workspace')!.click();
+    scopeBtn(header, 'workspace')!.click();
 
-    expect(scopeBtn(body, 'workspace')!.getAttribute('aria-checked')).toBe('true');
+    expect(scopeBtn(header, 'workspace')!.getAttribute('aria-checked')).toBe('true');
     expect(localStorage.getItem(SCOPE_KEY)).toBe('workspace');
   });
 
@@ -443,9 +449,9 @@ describe('createSettingsPage', () => {
     localStorage.setItem(MODE_KEY, 'json');
     handle = createSettingsPage({ header, body }, cbWs);
 
-    scopeBtn(body, 'user')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    scopeBtn(header, 'user')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
 
-    expect(scopeBtn(body, 'workspace')!.getAttribute('aria-checked')).toBe('true');
+    expect(scopeBtn(header, 'workspace')!.getAttribute('aria-checked')).toBe('true');
     expect(localStorage.getItem(SCOPE_KEY)).toBe('workspace');
   });
 
@@ -460,15 +466,15 @@ describe('createSettingsPage', () => {
     handle = createSettingsPage({ header, body }, cbMutable);
 
     // No workspace open: User is active regardless of the persisted scope.
-    expect(scopeBtn(body, 'user')!.getAttribute('aria-checked')).toBe('true');
-    expect(scopeBtn(body, 'workspace')!.getAttribute('aria-checked')).toBe('false');
+    expect(scopeBtn(header, 'user')!.getAttribute('aria-checked')).toBe('true');
+    expect(scopeBtn(header, 'workspace')!.getAttribute('aria-checked')).toBe('false');
 
     // Simulate folder open mid-session.
     wsk = 'ws-key';
     handle.refresh();
 
     // Now scope should be restored to 'workspace' (from SCOPE_KEY) because a folder is open.
-    expect(scopeBtn(body, 'workspace')!.getAttribute('aria-checked')).toBe('true');
+    expect(scopeBtn(header, 'workspace')!.getAttribute('aria-checked')).toBe('true');
     // Editor is seeded with the flat workspace doc (no overrides → empty object).
     const wsText = EditorView.findFromDOM(body.querySelector('.cm-editor') as HTMLElement)!.state.doc.toString();
     expect(wsText).toContain('{}');
@@ -485,7 +491,7 @@ describe('createSettingsPage', () => {
     localStorage.setItem(MODE_KEY, 'json');
     handle = createSettingsPage({ header, body }, cbWs);
     // Switch to Workspace scope.
-    scopeBtn(body, 'workspace')!.click();
+    scopeBtn(header, 'workspace')!.click();
     cbWs.onChange.mockClear();
 
     // Type a valid workspace doc that sets previewTarget.
@@ -511,7 +517,7 @@ describe('createSettingsPage', () => {
     localStorage.setItem(WS_OVERRIDES_KEY, JSON.stringify({ previewTarget: 'typescript' }));
     localStorage.setItem(MODE_KEY, 'json');
     handle = createSettingsPage({ header, body }, cbWs);
-    scopeBtn(body, 'workspace')!.click();
+    scopeBtn(header, 'workspace')!.click();
 
     // Type an empty workspace doc — clears all scoped overrides.
     typeJson(body, '{}');
@@ -529,7 +535,7 @@ describe('createSettingsPage', () => {
     const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
     localStorage.setItem(MODE_KEY, 'json');
     handle = createSettingsPage({ header, body }, cbWs);
-    scopeBtn(body, 'workspace')!.click();
+    scopeBtn(header, 'workspace')!.click();
     cbWs.onChange.mockClear();
 
     // An unknown key violates additionalProperties:false on the workspace schema.
@@ -556,7 +562,7 @@ describe('createSettingsPage', () => {
     expect(userText).toContain('appearance'); // the grouped user doc has top-level group names
 
     // Switch to Workspace scope.
-    scopeBtn(body, 'workspace')!.click();
+    scopeBtn(header, 'workspace')!.click();
 
     // Editor now shows the flat workspace override doc.
     const wsText = EditorView.findFromDOM(body.querySelector('.cm-editor') as HTMLElement)!.state.doc.toString();
@@ -572,7 +578,7 @@ describe('createSettingsPage', () => {
     const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
     localStorage.setItem(MODE_KEY, 'json');
     handle = createSettingsPage({ header, body }, cbWs);
-    scopeBtn(body, 'workspace')!.click();
+    scopeBtn(header, 'workspace')!.click();
     setTheme.mockClear();
 
     typeJson(body, '{ "previewTarget": "typescript" }');
@@ -592,7 +598,7 @@ describe('createSettingsPage', () => {
     handle = createSettingsPage({ header, body }, cbWs);
 
     // Step 1: switch to Workspace scope and apply two overrides.
-    scopeBtn(body, 'workspace')!.click();
+    scopeBtn(header, 'workspace')!.click();
     cbWs.onChange.mockClear();
 
     typeJson(body, '{ "previewTarget": "typescript", "lspTrace": "verbose" }');
