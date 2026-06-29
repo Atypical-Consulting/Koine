@@ -141,7 +141,19 @@ describe('createTerminalPanel', () => {
 
     expect(termInstances).toHaveLength(1);
     expect(termInstances[0].open).toHaveBeenCalled();
-    expect(transport.start).toHaveBeenCalledWith('/work');
+    // No shellArgs getter configured ⇒ the panel passes null, leaving the host's default shell args.
+    expect(transport.start).toHaveBeenCalledWith('/work', null);
+    panel.dispose();
+  });
+
+  it('forwards the configured shell-args override to the transport on start (#467)', () => {
+    const parent = document.createElement('div');
+    const transport = makeTransport();
+    const platform = { canRunShell: true, createTerminal: () => transport } as unknown as Platform;
+
+    const panel = createTerminalPanel({ parent, platform, cwd: () => '/work', shellArgs: () => ['-l', '-i'] });
+
+    expect(transport.start).toHaveBeenCalledWith('/work', ['-l', '-i']);
     panel.dispose();
   });
 

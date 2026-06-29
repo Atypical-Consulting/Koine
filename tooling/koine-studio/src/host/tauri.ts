@@ -100,14 +100,17 @@ class TauriTerminalTransport implements TerminalTransport {
   // any prior listeners before re-subscribing — otherwise each restart would stack another pty://data
   // listener and the relaunched shell's output would be written to the terminal twice (then 3×, …),
   // and the earlier handles would leak (stop() only holds the latest pair).
-  async start(cwd: string | null): Promise<void> {
+  async start(cwd: string | null, shellArgs?: string[] | null): Promise<void> {
     this.unlistenData?.();
     this.unlistenExit?.();
     this.unlistenData = await listen<string>('pty://data', (e) => this.dataCb?.(e.payload));
     this.unlistenExit = await listen<number>('pty://exit', (e) =>
       this.exitCb?.(typeof e.payload === 'number' ? e.payload : -1),
     );
-    await invoke('pty_start', { cwd });
+    // Pass the args override only when the user configured a non-empty one (#467), so the Rust host's
+    // default `["-l"]` login shell (#462) stays authoritative otherwise. The camelCase `shellArgs`
+    // key maps to the Rust command's `shell_args` param (Tauri's arg-name conversion).
+    await invoke('pty_start', shellArgs && shellArgs.length > 0 ? { cwd, shellArgs } : { cwd });
   }
 
   write(data: string): Promise<void> {
