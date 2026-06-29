@@ -11,14 +11,21 @@ export interface LayoutState {
   /** Which side the collapsible file-explorer rail lives on. */
   sideRail: 'left' | 'right';
   /** Whether the desktop right Properties rail is collapsed (reclaiming its column). The right-edge
-   *  tool-window stripe stays docked; re-expanding restores the last active `RightView`. Desktop-only. */
+   *  tool-window stripe stays docked; re-expanding restores the last active `RightView`. Desktop-only.
+   *  Defaults to collapsed (#730): inspection is contextual, so a fresh workspace starts with the rail
+   *  tucked and reveal-on-select brings Properties out the moment an element is selected. */
   rightCollapsed: boolean;
+  /** Whether the left navigator rail is collapsed to its icon spine. Defaults OPEN (#730): navigation is
+   *  persistent — you orient against the tree constantly — so the spine is an on-demand reclaim, not a
+   *  calm default like `rightCollapsed`. Desktop-only. */
+  leftCollapsed: boolean;
 }
 
 export const DEFAULT_LAYOUT: LayoutState = {
   panelSide: 'bottom',
   sideRail: 'right',
-  rightCollapsed: false,
+  rightCollapsed: true,
+  leftCollapsed: false,
 };
 
 // --- storage key -------------------------------------------------------------
@@ -59,6 +66,10 @@ function coerceRightCollapsed(v: unknown): boolean {
   return typeof v === 'boolean' ? v : DEFAULT_LAYOUT.rightCollapsed;
 }
 
+function coerceLeftCollapsed(v: unknown): boolean {
+  return typeof v === 'boolean' ? v : DEFAULT_LAYOUT.leftCollapsed;
+}
+
 // --- public API --------------------------------------------------------------
 
 /**
@@ -78,6 +89,7 @@ export function loadLayout(): LayoutState {
       panelSide: coercePanelSide(parsed.panelSide),
       sideRail: coerceSideRail(parsed.sideRail),
       rightCollapsed: coerceRightCollapsed(parsed.rightCollapsed),
+      leftCollapsed: coerceLeftCollapsed(parsed.leftCollapsed),
     };
   } catch {
     return { ...DEFAULT_LAYOUT };

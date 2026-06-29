@@ -67,7 +67,7 @@ import {
 import type { SelectedElement } from '@/model/selection';
 import { type ModelOutlineHandlers } from '@/model/modelOutline';
 import { mountDomainNavigator, type DomainNavigatorHandle, type TacticalHandlers } from '@/model/domainNavigator';
-import { buildInspectorElement, renderRules, type InspectorElement, type InspectorHandlers } from '@/model/inspector';
+import { type InspectorElement, type InspectorHandlers } from '@/model/inspector';
 import { buildModelIndex, lookupElement, resolveInspectableQn, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
 import { SourceControlPanel } from '@/model/SourceControlPanel';
@@ -960,6 +960,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   type RailAxis = 'domain' | 'files';
   const filesPane = document.getElementById('rail-files');
   const axisButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('#rail-axis-switch [data-axis]'));
+  // The collapsed-rail spine (#left-strip, #730) carries the same Domain/Files toggles; keep their pressed
+  // state in lockstep with the expanded segmented control so the active axis reads the same in both states.
+  const lstripAxisButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('#left-strip [data-laxis]'));
 
   // Paint the active axis: surface its pane, hide the other, and reflect the segmented control. Showing
   // Files also force-expands its section (its own collapse is ide.ts's #rail-sect chrome) so a reveal
@@ -974,6 +977,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       }
     }
     for (const b of axisButtons) b.setAttribute('aria-selected', String(b.dataset.axis === axis));
+    for (const b of lstripAxisButtons) b.setAttribute('aria-pressed', String(b.dataset.laxis === axis));
   }
 
   function setAxis(axis: RailAxis): void {
@@ -1124,19 +1128,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       <PropertiesPanel store={appStore} index={modelIndex} handlers={inspectorHandlers} />,
       host,
     );
-    renderSelectedRules();
-  }
-
-  // The right-rail "Rules" tab: the selected element's invariants (business rules), resolved through the
-  // same selection → model-index → InspectorElement path as the Properties inspector, so the two tabs
-  // track selection in lockstep. Rendered imperatively into its host (it's a read-only projection).
-  function renderSelectedRules(): void {
-    const sel = appStore.getState().selection;
-    const hit = sel && modelIndex ? lookupElement(modelIndex, sel.qualifiedName) : null;
-    const element: InspectorElement | null = hit
-      ? buildInspectorElement(hit.element.entry, hit.element.node, hit.element.modelMembers)
-      : null;
-    el('rview-rules').replaceChildren(renderRules(element));
   }
 
   // Repaint the Domain axis's strategic/tactical navigator (#453) and the model-index-derived chrome
@@ -1207,12 +1198,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // its own sheet — symmetric with the resize-path's instance setDetent('peek'), and split-brain-proof
     // if more than one sheet ever exists (#221).
     if (inspectorSheet && isNarrowViewport() && sel) inspectorSheet.setDetent('half');
-    // Desktop equivalent of the mobile sheet-raise above (#533): a fresh selection auto-activates the
-    // right rail's Properties tab so the just-selected element's inspector is visible without a second
-    // click — even when the user had Source Control / Rules / Notes open. Only on a NEW, non-null
-    // selection (a deselect leaves the user's current tab as-is, mirroring the `&& sel` guard above), and
-    // only when not already on Properties so an in-scope selection doesn't trigger a redundant repaint.
-    if (sel && appStore.getState().right !== 'props') selectRightView('props');
+    // Desktop reveal-on-select (#533, #730): a fresh selection makes the Properties panel visible —
+    // switching to Properties if another tool window (Source Control / AI Chat) was open, AND expanding the
+    // rail if it was collapsed (the calm default) — so the just-selected element's inspector shows without a
+    // second click. It never auto-COLLAPSES: a deselect or a manual stripe-collapse is the user's, so
+    // nothing moves unbidden (the `&& sel` guard skips deselects). Skip the redundant repaint only when
+    // Properties is already the open, expanded view.
+    const ui = appStore.getState();
+    if (sel && (ui.right !== 'props' || ui.rightCollapsed)) selectRight('props');
     // Re-pass the current model index to the palette so its aggregate-scoped buttons (#254) re-gate against
     // the freshly-selected element — a diagram click rebuilds the index before setting the selection, so
     // resolving the selection's kind here uses the up-to-date index rather than a stale captured prop.
@@ -1521,27 +1514,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // and the deck/facet subscription applies the chrome — so there are no imperative tab click handlers
   // to wire here anymore.
 
-  // The left rail's documentation footer: shortcuts into the model's prose surfaces. ADR + Notes each
-  // open their own Documentation page; the contextmap/glossary actions are retained (the footer no
-  // longer renders those buttons — they moved into the Domain axis, #453 — so they simply bind to
-  // nothing, and a later task can re-wire them from the strategic view). querySelectorAll keeps this
-  // resilient to fixtures that omit the rail, and selectBottomTab (declared below) is hoisted, so
-  // referencing it here is fine.
-  const docLinkActions: Record<string, () => void> = {
-    contextmap: () => focusContextMap(),
-    glossary: () => focusDocs(),
-    adr: () => selectDocsTab('adr'),
-    notes: () => selectDocsTab('notes'),
-  };
-  for (const link of Array.from(document.querySelectorAll<HTMLButtonElement>('.koi-doclink'))) {
-    const action = docLinkActions[link.dataset.doclink ?? ''];
-    if (action) link.addEventListener('click', action);
-  }
-
-  // Right rail: Properties (the inspector) / Rules / Notes. Rules/Notes are placeholder panels for now —
-  // the tab chrome matches the mockup while the inspector stays read-only. The active right view lives in
+  // Right rail: Properties (the inspector) / AI Chat / Source Control. The active right view lives in
   // the uiChrome slice (#193), like center/tech/docs: selectRightView writes it via setRight, so the slice
-  // owns that state rather than it being implicit in the DOM.
+  // owns that state rather than it being implicit in the DOM. (ADR + Notes shortcuts left the left rail
+  // in #730 — those prose surfaces are reached through the center Deck's Docs surface.)
   // The right-edge icon stripe (#right-strip) is the sole right-view switcher (#500 follow-up); the panel
   // carries only a title header naming the active tool window. selectRightView keeps #right-title in sync
   // and shows the matching view — there's no tab row to mark. (Guarded lookup so DOM fixtures that omit
@@ -1550,15 +1526,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const rightViewLabels: Record<RightView, string> = {
     props: 'Properties',
     assistant: 'AI Chat',
-    rules: 'Rules',
-    notes: 'Notes',
     'source-control': 'Source Control',
   };
   const rightViews: Record<RightView, HTMLElement> = {
     props: inspectorHost,
     assistant: assistantView,
-    rules: el('rview-rules'),
-    notes: el('rview-notes'),
     'source-control': sourceControlRightView,
   };
   function selectRightView(view: RightView): void {
@@ -1633,6 +1605,41 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     }
     if (s.rightCollapsed !== prev.rightCollapsed) {
       saveLayout({ rightCollapsed: s.rightCollapsed });
+    }
+  });
+
+  // Left navigator-rail morph-collapse (#730): the mirror of the right stripe on the opposite edge. The
+  // rail tucks to its #left-strip icon spine; the flag is owned by uiChrome (runtime) and mirrored to
+  // layoutStore (persistence), like rightCollapsed. The head's collapse button tucks it; the spine's expand
+  // control re-opens it, and its Domain/Files toggles re-open straight to that axis (setLeftCollapsed(false)
+  // + setAxis). Navigation is persistent, so this defaults OPEN — the collapse is an on-demand reclaim.
+  const railCollapseBtn = document.getElementById('rail-collapse');
+  const leftStripEl = document.getElementById('left-strip');
+  function applyLeftCollapsed(collapsed: boolean): void {
+    // DOM/ARIA only; the collapsed grid (shrink the leftrail track, hide its resizer, #center reclaims the
+    // width) is CSS keyed off this class on #split — the morph that swaps the head/navigator for #left-strip
+    // lives in _leftrail.scss. Persistence happens once per transition in the subscription below.
+    rstripSplitEl.classList.toggle('left-collapsed', collapsed);
+    railCollapseBtn?.setAttribute('aria-expanded', String(!collapsed));
+  }
+  // Seed the runtime flag from persistence before the subscription is wired (so the seed doesn't echo),
+  // then paint the DOM/ARIA once for the restored state — mirroring the right-collapse seed above.
+  appStore.getState().setLeftCollapsed(loadLayout().leftCollapsed);
+  applyLeftCollapsed(appStore.getState().leftCollapsed);
+  railCollapseBtn?.addEventListener('click', () => appStore.getState().setLeftCollapsed(true));
+  // Every spine button re-opens the rail; the Domain/Files toggles additionally set that axis so you land
+  // on the navigator you clicked (the plain expand control carries no data-laxis, so it just re-opens).
+  for (const b of Array.from(leftStripEl?.querySelectorAll<HTMLButtonElement>('button') ?? [])) {
+    b.addEventListener('click', () => {
+      const axis = b.dataset.laxis as RailAxis | undefined;
+      appStore.getState().setLeftCollapsed(false);
+      if (axis) setAxis(axis);
+    });
+  }
+  const unsubscribeLeftCollapsed = appStore.subscribe((s, prev) => {
+    if (s.leftCollapsed !== prev.leftCollapsed) {
+      applyLeftCollapsed(s.leftCollapsed);
+      saveLayout({ leftCollapsed: s.leftCollapsed });
     }
   });
 
@@ -2218,6 +2225,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Drop the right-strip collapse subscription (#500) — its callback mutates the captured #split /
     // .rstrip-btn nodes and persists, which must not fire into a torn-down host after dispose.
     unsubscribeRightCollapsed();
+    // Drop the left-rail morph-collapse subscription (#730) for the same reason — it mutates the captured
+    // #split / #rail-collapse nodes and persists.
+    unsubscribeLeftCollapsed();
     // Drop the deck/facet subscription — its callback re-applies the center chrome + lazy-loads, which
     // must not fire into a torn-down host after dispose. Unmount the deck Preact trees too so their
     // window listeners (the DeckStage keyboard handler) detach.
