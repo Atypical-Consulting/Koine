@@ -88,7 +88,7 @@ public Sku(string code)
             type: nameof(Sku),
             rule: "a SKU cannot be blank");
 
-    if (!Regex.IsMatch(code, @"^[A-Z]{3}-[0-9]{4}$"))
+    if (!Regex.IsMatch(code, @"^[A-Z]{3}-[0-9]{4}$", RegexOptions.None, TimeSpan.FromMilliseconds(1000)))
         throw new DomainInvariantViolationException(
             type: nameof(Sku),
             rule: "SKU must look like ABC-1234");

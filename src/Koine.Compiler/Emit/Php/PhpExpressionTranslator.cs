@@ -255,6 +255,10 @@ internal sealed class PhpExpressionTranslator
                 break;
             case MatchExpr m:
                 // `raw matches /pat/` -> `(bool)preg_match('/pat/', $raw)`.
+                // ReDoS note (#641): PCRE already bounds backtracking via `pcre.backtrack_limit` and
+                // `pcre.recursion_limit` (set by default in PHP), so a catastrophic pattern fails the
+                // match (preg_match returns false) rather than hanging — no extra guard is emitted; the
+                // default-bounded behavior is documented in the `matches` reference.
                 sb.Append("(bool)preg_match('/").Append(EscapeRegex(m.Pattern)).Append("/', ");
                 Write(m.Target, sb);
                 sb.Append(')');

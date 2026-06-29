@@ -114,7 +114,7 @@ Use `matches /regex/` to validate string shape. The pattern goes between literal
 invariant code matches /^[A-Z]{3}-[0-9]{4}$/    "SKU must look like ABC-1234"
 ```
 
-This emits a `Regex.IsMatch(code, @"^[A-Z]{3}-[0-9]{4}$")` guard. Note you can combine a `matches` rule with an ordinary boolean rule in the same type, as `Sku` does above (one for non-blankness, one for shape).
+This emits a timeout-bounded `Regex.IsMatch(code, @"^[A-Z]{3}-[0-9]{4}$", RegexOptions.None, TimeSpan.FromMilliseconds(1000))` guard — the match timeout keeps an author-supplied pattern from becoming a [ReDoS](/Koine/reference/invariants/#bounded-evaluation-redos-hardening) sink. Note you can combine a `matches` rule with an ordinary boolean rule in the same type, as `Sku` does above (one for non-blankness, one for shape).
 
 ### 3. Conditional `when`
 
@@ -157,7 +157,7 @@ public sealed class Email : ValueObject
                 type: nameof(Email),
                 rule: "an email cannot be blank");
 
-        if (!Regex.IsMatch(raw, @"^[^@]+@[^@]+\.[^@]+$"))
+        if (!Regex.IsMatch(raw, @"^[^@]+@[^@]+\.[^@]+$", RegexOptions.None, TimeSpan.FromMilliseconds(1000)))
             throw new DomainInvariantViolationException(
                 type: nameof(Email),
                 rule: "invalid email address");

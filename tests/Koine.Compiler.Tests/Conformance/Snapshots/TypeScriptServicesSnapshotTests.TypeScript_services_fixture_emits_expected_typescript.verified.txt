@@ -59,6 +59,22 @@ export class DomainInvariantViolationError extends Error {
 }
 
 /**
+ * Evaluates a `matches`-invariant regex. Every generated `matches` guard routes through this
+ * one helper so an author-supplied pattern over untrusted input has a single hardening seam.
+ *
+ * JavaScript has NO synchronous per-call regex timeout (unlike .NET's `Regex` matchTimeout),
+ * so a catastrophic-backtracking pattern can still block the event loop on adversarial input —
+ * a ReDoS risk at the value object's trust boundary that the host language cannot bound without
+ * changing match semantics. This helper therefore PRESERVES `matches` semantics exactly (it is
+ * `pattern.test(input)`, identical to every other Koine target) and instead exists as the ONE
+ * place to harden: drop in a linear-time engine (e.g. RE2) here to bound execution for
+ * untrusted input, and every generated `matches` invariant picks it up. (Koine #641.)
+ */
+export function regexMatch(pattern: RegExp, input: string): boolean {
+  return pattern.test(input);
+}
+
+/**
  * The marker every domain event satisfies: a record of something that happened,
  * stamped with the instant it occurred. An aggregate records these as it mutates
  * (its `domainEvents` collection) — the analogue of the C# `IDomainEvent`.

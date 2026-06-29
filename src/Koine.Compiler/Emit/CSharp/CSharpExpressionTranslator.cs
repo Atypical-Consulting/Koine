@@ -523,10 +523,15 @@ internal sealed class CSharpExpressionTranslator
                 break;
 
             case MatchExpr m:
-                // raw matches /pat/  ->  Regex.IsMatch(raw, @"pat")
+                // raw matches /pat/  ->  Regex.IsMatch(raw, @"pat", RegexOptions.None, TimeSpan.FromMilliseconds(N))
+                // The match timeout bounds catastrophic backtracking so an author-supplied pattern in a
+                // value-object/entity guard cannot run unbounded on adversarial input (a ReDoS sink, #641);
+                // a timed-out match throws a contained RegexMatchTimeoutException rather than hanging.
                 sb.Append("Regex.IsMatch(");
                 Write(m.Target, mode, sb);
-                sb.Append(", @\"").Append(m.Pattern.Replace("\"", "\"\"")).Append("\")");
+                sb.Append(", @\"").Append(m.Pattern.Replace("\"", "\"\""))
+                    .Append("\", RegexOptions.None, TimeSpan.FromMilliseconds(")
+                    .Append(_options.RegexMatchTimeoutMs).Append("))");
                 break;
 
             case GuardExpr g:

@@ -221,4 +221,44 @@ public class TypeScriptExpressionTests
         source.ShouldNotContain("this.inner.length");
         source.ShouldNotContain("this.inner.trim()");
     }
+
+    // =========================================================================
+    // Regex match (#641) — `matches` routes through the runtime `regexMatch`
+    // seam rather than an inline `/pat/.test(...)`. JS has no synchronous
+    // per-call regex timeout, so centralizing every match in one helper gives a
+    // single hardening point (the place to swap in a linear-time engine) while
+    // preserving `.test` semantics exactly (no target-divergent behavior).
+    // =========================================================================
+
+    [Fact]
+    public void Matches_lowers_through_the_runtime_regexMatch_seam()
+    {
+        // The old lowering was `/pat/.test(target)`; #641 routes it through `regexMatch`
+        // so an author-supplied pattern over untrusted input has a single ReDoS chokepoint.
+        var expr = new MatchExpr(Id("code"), "[A-Z]{3}");
+        Translate(expr).ShouldBe("regexMatch(/[A-Z]{3}/, code)");
+    }
+
+    [Fact]
+    public void Matches_invariant_imports_regexMatch_from_the_runtime()
+    {
+        // A value object with a `matches` invariant must emit the `regexMatch` seam call AND
+        // auto-import it from the once-emitted runtime module (no inline `.test`).
+        const string src =
+            """
+            context C {
+              value Email {
+                raw: String
+                invariant raw matches /^[^@]+@[^@]+$/  "invalid email address"
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var email = result.Files.Single(f => f.RelativePath.EndsWith("Email.ts")).Contents;
+        email.ShouldContain("regexMatch(/^[^@]+@[^@]+$/, raw)");
+        email.ShouldMatch(@"import \{[^}]*\bregexMatch\b[^}]*\} from '[^']*runtime'");
+        email.ShouldNotContain("/^[^@]+@[^@]+$/.test(");
+    }
 }
