@@ -31,12 +31,13 @@ export function UnsavedIndicator(props: {
   // Mirrors the exact strings the old imperative refreshDirtyIndicator produced ("N unsaved",
   // "Save N unsaved file(s)", "• <title>"). Applied once immediately, then on each store change.
   useEffect(() => {
-    // Baseline label so the host button is NEVER label-less. The button is the static index.html
-    // element, present and visible before this effect first runs; storybook's a11y addon (axe) can race
-    // that pre-`apply` window on the slower macOS CI runner and flag `button-name` on the empty button
-    // (#747). The dirty-count `apply(n>0)` overwrites this with the precise "Save N unsaved file(s)"
-    // text; `apply(0)` restores the baseline (the button is `hidden` then, so it's out of the a11y tree
-    // anyway, but keeping a label means no transient empty button on the n>0 → 0 transition either).
+    // Keep the host button labelled in BOTH states so it's never label-less. The button is the static
+    // index.html element, visible before this effect first runs; storybook's a11y addon (axe) can race
+    // that window on the slower macOS CI runner and flag `button-name` on the empty button (#747).
+    // `apply(n>0)` sets the precise "Save N unsaved file(s)" label; `apply(0)` sets a baseline instead of
+    // removing the label (the button is `hidden` then — out of the a11y tree — but keeping a label also
+    // avoids a transient empty button on the n>0 → 0 transition). The first `apply` runs synchronously
+    // below, so the button carries discernible text the instant this effect runs.
     const baselineLabel = 'Unsaved changes';
     const apply = (n: number): void => {
       document.title = titleWithDirty(baseTitle, n);
@@ -51,9 +52,6 @@ export function UnsavedIndicator(props: {
       }
     };
     const countOf = (b: AppState['buffers']): number => Object.values(b).filter((x) => x.dirty).length;
-    // Set the baseline synchronously before the first `apply`, so the button carries discernible text
-    // the instant this effect runs.
-    host.setAttribute('aria-label', baselineLabel);
     let last = countOf(store.getState().buffers);
     apply(last);
     // The slice methods close over the store's live `get`, so `prev.dirtyCount()` would read the
