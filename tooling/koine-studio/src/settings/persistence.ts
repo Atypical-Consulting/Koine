@@ -53,6 +53,9 @@ export interface Settings {
   autoSave: boolean;
   /** Show the CodeMirror minimap (document overview rail) on the editor's right edge. */
   enableMinimap: boolean;
+  /** Initial zoom (percent) for a freshly-opened domain diagram canvas, when no per-diagram zoom is
+   *  saved (#762). Clamped to the diagram zoom band (10–800); 100 keeps the canvas at its real 1:1 scale. */
+  defaultCanvasZoom: number;
   lspTrace: 'off' | 'messages' | 'verbose';
   /** Which AI backend the assistant uses. */
   aiProvider: 'anthropic' | 'openai';
@@ -99,6 +102,7 @@ export const DEFAULT_SETTINGS: Settings = {
   formatOnSave: true,
   autoSave: false,
   enableMinimap: false,
+  defaultCanvasZoom: 100,
   lspTrace: 'off',
   aiProvider: 'anthropic',
   aiBaseUrl: 'https://api.openai.com/v1',
@@ -332,6 +336,7 @@ export function loadSettings(): Settings {
       autoSave: typeof parsed.autoSave === 'boolean' ? parsed.autoSave : DEFAULT_SETTINGS.autoSave,
       enableMinimap:
         typeof parsed.enableMinimap === 'boolean' ? parsed.enableMinimap : DEFAULT_SETTINGS.enableMinimap,
+      defaultCanvasZoom: coerceDefaultCanvasZoom(parsed.defaultCanvasZoom),
       lspTrace: coerceTrace(parsed.lspTrace),
       aiProvider: parsed.aiProvider === 'openai' ? 'openai' : DEFAULT_SETTINGS.aiProvider,
       aiBaseUrl:
@@ -658,6 +663,13 @@ export function clearLastWorkspace(): void {
 function coerceZoom(v: number): number | null {
   if (!Number.isFinite(v)) return null;
   return Math.min(DIAGRAM_ZOOM_MAX, Math.max(DIAGRAM_ZOOM_MIN, v));
+}
+
+/** Validate a stored {@link Settings.defaultCanvasZoom}: a number clamped to the diagram zoom band
+ *  (10–800), or the default (100) for a missing/non-numeric/garbage value (#762). */
+function coerceDefaultCanvasZoom(v: unknown): number {
+  if (typeof v !== 'number') return DEFAULT_SETTINGS.defaultCanvasZoom;
+  return coerceZoom(v) ?? DEFAULT_SETTINGS.defaultCanvasZoom;
 }
 
 /** The persisted zoom percent for a diagram key, or null when none is stored (or it's malformed). */

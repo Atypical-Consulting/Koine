@@ -160,6 +160,40 @@ describe('Editor autoSave + enableMinimap settings', () => {
   });
 });
 
+describe('Default canvas zoom setting (#762)', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('defaults to 100% out of the box', () => {
+    expect(DEFAULT_SETTINGS.defaultCanvasZoom).toBe(100);
+    expect(loadSettings().defaultCanvasZoom).toBe(100);
+  });
+
+  test('round-trips a valid stored value', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, defaultCanvasZoom: 150 });
+    expect(loadSettings().defaultCanvasZoom).toBe(150);
+  });
+
+  test('clamps a too-small stored value up to the zoom floor (10)', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, defaultCanvasZoom: 5 });
+    expect(loadSettings().defaultCanvasZoom).toBe(10);
+  });
+
+  test('clamps a too-large stored value down to the zoom ceiling (800)', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, defaultCanvasZoom: 9999 });
+    expect(loadSettings().defaultCanvasZoom).toBe(800);
+  });
+
+  test('falls back to the default (100) when the stored value is not a number', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, defaultCanvasZoom: 'big' as never });
+    expect(loadSettings().defaultCanvasZoom).toBe(100);
+  });
+
+  test('falls back to the default (100) when the field is absent from the stored blob', () => {
+    localStorage.setItem('koine.studio.settings', JSON.stringify({ theme: 'light' }));
+    expect(loadSettings().defaultCanvasZoom).toBe(100);
+  });
+});
+
 describe('Namespaced-settings new fields (#750): tabSize, fontFamily, aiTemperature', () => {
   beforeEach(() => localStorage.clear());
 
