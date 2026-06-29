@@ -126,13 +126,40 @@ export interface PrefsPaneHandle {
  *  transient recorder/conflict state ({@link suspend}). Callers that only need teardown see the narrower
  *  {@link PrefsPaneHandle}. */
 interface MountedPrefsPane extends PrefsPaneHandle {
-  /** Repaint every control from the current Settings and (re)start the MCP sidecar; optionally land on a
-   *  category id first. `focusTab` (default true) focuses the active category tab; the embedded center page
-   *  passes false so re-showing it never steals focus from the page. */
+  /** Repaint every control from the current Settings; optionally land on a category id first. `focusTab`
+   *  (default true) focuses the active category tab; the embedded center page passes false so re-showing it
+   *  never steals focus from the page. Repaint only: the MCP sidecar (re)start is the separate on-show
+   *  {@link startMcpSidecar} call (issue #735). */
   refresh(categoryId?: string, focusTab?: boolean): void;
+  /** The Settings "on show" hook: (re)start the desktop MCP sidecar when enabled and reflect it in this
+   *  pane's MCP panel. The center page calls it on show / (re)show; a bare mount never does, so the opt-in
+   *  server is never spawned before Settings is actually presented. */
+  startMcpSidecar(): void;
   /** Cancel any armed keybinding recorder + open conflict prompt — the disarm {@link destroy} also runs,
    *  exposed for a caller that wants to pause transient state without tearing the pane down. */
   suspend(): void;
+}
+
+/**
+ * (Re)start the desktop MCP sidecar when the user has opted in on a host that can run it — the
+ * representation-independent, DOM-free half of the Settings "on show" path (issue #735). The Settings
+ * center page calls this on show for BOTH the Visual and JSON representations; the JSON one mounts no
+ * preferences pane, so it can't rely on the pane's open path. The Visual pane and the modal route their
+ * start through the pane's {@link MountedPrefsPane.startMcpSidecar}, which layers the MCP-panel UI on top
+ * of this same launch.
+ *
+ * It only asks the host to (lazily) (re)spawn `koine mcp --http` and resolves the endpoint it announces
+ * (or `''` when it can't be brought up). The browser host passes `mcpHostable: false` and never spawns; a
+ * disabled `mcpEnabled` is a no-op. `mcpEndpoint` is idempotent (it reuses a running sidecar), so a
+ * redundant call — e.g. on a representation flip — reflects the live endpoint without a second process.
+ */
+export async function startMcpSidecarIfEnabled(cb: PrefsCallbacks, s: Settings = loadSettings()): Promise<string> {
+  if (!(s.mcpEnabled && cb.mcpHostable !== false)) return '';
+  try {
+    return (await cb.mcpEndpoint?.()) ?? '';
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -1309,6 +1336,25 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     mcpTestRow.hidden = !hostable || !enabled;
   }
 
+  // The Settings "on show" sidecar (re)start: (re)spawn the desktop sidecar when enabled and reflect the
+  // endpoint in THIS pane's MCP panel. The launch itself is the shared, DOM-free startMcpSidecarIfEnabled
+  // (so the JSON representation, which mounts no pane, fires the same concern); here we add the panel UI,
+  // guarded by mcpGen so a stale resolve can't repaint after a newer toggle/reset/close superseded it.
+  // The bare mount never calls this, so the opt-in server is never spawned before Settings is shown.
+  function startMcpSidecar(): void {
+    const s = loadSettings();
+    if (s.mcpEnabled && cb.mcpHostable !== false) {
+      const gen = ++mcpGen;
+      void startMcpSidecarIfEnabled(cb, s).then((url) => {
+        if (gen === mcpGen) showMcpStarted(url);
+      });
+    } else {
+      ++mcpGen;
+      showMcpOff();
+    }
+    syncMcpUi(s.mcpEnabled);
+  }
+
   const mcpPanel = panel('mcp', mcpEnableRow, mcpWebHint, mcpEndpointRow, mcpClientRow, mcpRecipe, mcpTestRow);
 
   // --- Workspace root (shown only when the host can save projects) ----------
@@ -1532,14 +1578,12 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
   }
 
   // The pane's "open" state: repaint every control from the current Settings, refresh the About card,
-  // back-fill the workspace-root + secret fields, (re)start the MCP sidecar when shown, and reveal the
-  // active category. Two independent flags:
-  //   • `shown`    — the surface is actually being presented to the user (modal open, or page show), so
-  //                  it's safe to (re)start the opt-in MCP sidecar. False at the bare mount/embed, so a
-  //                  never-shown Settings surface never spawns a background process.
-  //   • `focusTab` — move focus onto the active category tab. Wanted when a MODAL opens (focus into the
-  //                  dialog), but NOT for the embedded center page (it would steal focus from the page).
-  function applyOpenState({ shown, focusTab }: { shown: boolean; focusTab: boolean }): void {
+  // back-fill the workspace-root + secret fields, sync the MCP panel's enabled/host visibility, and reveal
+  // the active category. This is REPAINT ONLY — the MCP sidecar (re)start is the separate on-show
+  // {@link startMcpSidecar} call (issue #735), so a bare mount / never-shown embed never spawns the opt-in
+  // server. `focusTab` moves focus onto the active category tab: wanted when a MODAL opens (focus into the
+  // dialog), but NOT for the embedded center page (it would steal focus from the page).
+  function applyOpenState({ focusTab }: { focusTab: boolean }): void {
     disarmReset();
     const s = loadSettings();
     populate(s);
@@ -1550,26 +1594,13 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     void whenSecretsReady().then(() => {
       if (aiKeyInput.value === '') aiKeyInput.value = loadSettings().aiApiKey;
     });
-    // Only the desktop, only when the user has enabled MCP, AND only when the surface is actually shown
-    // does this (re)start the sidecar — the server is opt-in, so a never-shown Settings surface must never
-    // spawn a background process. The modal builds this pane at init (long before its first open) via the
-    // mount-time applyOpenState({ shown: false }), so probing/launching there would break that invariant.
-    if (shown && s.mcpEnabled && cb.mcpHostable !== false) {
-      const gen = ++mcpGen;
-      void resolveMcpEndpoint().then((url) => {
-        if (gen === mcpGen) showMcpStarted(url);
-      });
-    } else {
-      ++mcpGen;
-      showMcpOff();
-    }
-    syncMcpUi(s.mcpEnabled);
+    syncMcpUi(s.mcpEnabled); // reflect enabled/host visibility; the actual (re)start is startMcpSidecar
     selectCategory(activeIndex, focusTab); // keep the last-open category across opens
   }
 
-  // Repaint from the current Settings, optionally landing on a named category first, and (since the surface
-  // is now shown) (re)start the MCP sidecar. The reusing modal calls this on every open (mirroring the old
-  // onOpen): an 'about'-style id lands on that tab, a no-arg call keeps the last-active one. `focusTab`
+  // Repaint from the current Settings, optionally landing on a named category first. Repaint only — the
+  // caller fires the MCP sidecar (re)start separately via {@link startMcpSidecar} on show (issue #735), so
+  // re-syncing the form (e.g. a center-page re-show) never re-triggers the start on its own. `focusTab`
   // defaults true (the modal focuses the tab on open); the embedded center page passes false so re-showing
   // it never steals focus from the page.
   function refresh(categoryId?: string, focusTab = true): void {
@@ -1577,7 +1608,7 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
       const i = categories.findIndex((c) => c.id === categoryId);
       if (i >= 0) activeIndex = i;
     }
-    applyOpenState({ shown: true, focusTab });
+    applyOpenState({ focusTab });
   }
 
   // Cancel any in-flight transient state: an armed keybinding recorder (whose document-level capture
@@ -1603,8 +1634,11 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
 
   // Populate immediately from the current Settings so an embedded pane shows live values without the
   // caller wiring anything; the surface is NOT yet shown (so no sidecar spawns) and focus is NOT moved
-  // (that would steal it from the surrounding page).
-  applyOpenState({ shown: false, focusTab: false });
+  // (that would steal it from the surrounding page). Baseline the MCP panel to "server off" (renders the
+  // placeholder recipe) until the surface is shown and startMcpSidecar runs.
+  applyOpenState({ focusTab: false });
+  ++mcpGen;
+  showMcpOff();
 
-  return { destroy, refresh, suspend };
+  return { destroy, refresh, startMcpSidecar, suspend };
 }

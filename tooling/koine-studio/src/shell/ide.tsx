@@ -1725,9 +1725,12 @@ export function init(): () => void {
 
   // The gear-launched Settings center page (#center-panel-settings) is the SINGLE Settings surface (#731 —
   // the legacy createPreferences modal is retired). Built LAZILY on the first route into Settings, not at
-  // init: mounting its Visual pane runs mountPreferencesPane's open path, which (re)starts the MCP sidecar
-  // when enabled — so an eager mount would spawn that background process before the user ever opens Settings.
-  // An optional category (#731) lands the pane on that tab (the About deep-link).
+  // init: createSettingsPage runs its first "show", which fires the on-show MCP sidecar (re)start when
+  // enabled (issue #735) — so constructing it IS showing it, and an eager build would spawn that background
+  // process before the user ever opens Settings. (The pane mount itself no longer starts the sidecar; the
+  // explicit on-show startMcpOnShow does.) It reuses the SAME prefsCallbacks across representations, so a
+  // JSON or Visual edit on the page live-applies through the identical onChange hook. An optional category
+  // (#731) lands the pane on that tab (the About deep-link).
   let settingsPage: SettingsPageHandle | null = null;
   function ensureSettingsPage(): void {
     // The landing category is the store's `settingsCategory` (set by controller.showSettings) — the single
