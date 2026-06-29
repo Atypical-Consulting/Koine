@@ -98,8 +98,6 @@ const APP_HTML = `
         <div id="right-body">
           <div id="inspector-host" class="rview" role="tabpanel"></div>
           <section id="view-assistant" class="rview" role="tabpanel" hidden></section>
-          <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden></div>
-          <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden></div>
           <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
         </div>
       </aside>
@@ -1106,7 +1104,7 @@ describe('createInspectorController — right-edge tool-window stripe (#500)', (
     const ctl = createInspectorController(makeDeps(makeLsp()));
     ctl.init();
     expect(splitEl().classList.contains('right-collapsed')).toBe(true);
-    for (const v of ['props', 'rules', 'notes', 'source-control']) {
+    for (const v of ['props', 'assistant', 'source-control']) {
       expect(stripBtn(v).getAttribute('aria-pressed')).toBe('false');
     }
     ctl.dispose();
@@ -1128,6 +1126,9 @@ describe('createInspectorController — right-edge tool-window stripe (#500)', (
   });
 
   test("clicking the active view's icon again collapses and persists the flag", () => {
+    // Start expanded explicitly (the persisted default is now collapsed, #730) so this exercises the
+    // open → click-active → collapse transition.
+    saveLayout({ rightCollapsed: false });
     const deps = makeDeps(makeLsp());
     const ctl = createInspectorController(deps);
     ctl.init();
@@ -1141,16 +1142,89 @@ describe('createInspectorController — right-edge tool-window stripe (#500)', (
   });
 
   test('clicking a different view while open switches the view without collapsing', () => {
+    // Start expanded explicitly (the persisted default is now collapsed, #730) so this exercises a
+    // view-to-view switch on an already-open rail rather than an expand-from-collapsed.
+    saveLayout({ rightCollapsed: false });
     const deps = makeDeps(makeLsp());
     const ctl = createInspectorController(deps);
     ctl.init();
     expect(deps.store.getState().right).toBe('props');
 
-    stripBtn('notes').click();
+    stripBtn('source-control').click();
     expect(splitEl().classList.contains('right-collapsed')).toBe(false);
-    expect(deps.store.getState().right).toBe('notes');
-    expect(stripBtn('notes').getAttribute('aria-pressed')).toBe('true');
+    expect(deps.store.getState().right).toBe('source-control');
+    expect(stripBtn('source-control').getAttribute('aria-pressed')).toBe('true');
     expect(stripBtn('props').getAttribute('aria-pressed')).toBe('false');
+    ctl.dispose();
+  });
+});
+
+describe('createInspectorController — left navigator morph-collapse (#730)', () => {
+  const LAYOUT_KEY = 'koine.studio.layout';
+  const RAIL_AXIS_KEY = 'koine.studio.railAxis';
+  const splitEl = () => el('split');
+  const railCollapse = () => document.getElementById('rail-collapse')!;
+  const lspineBtn = (sel: string) => document.querySelector<HTMLButtonElement>(`#left-strip ${sel}`)!;
+  const axisSelected = (axis: string) =>
+    document.querySelector(`#rail-axis-switch [data-axis="${axis}"]`)!.getAttribute('aria-selected');
+
+  // Clear both the layout key AND the separately-persisted rail axis so a prior test's setAxis('files')
+  // can't leak the active axis into the next boot.
+  beforeEach(() => {
+    localStorage.removeItem(LAYOUT_KEY);
+    localStorage.removeItem(RAIL_AXIS_KEY);
+  });
+
+  test('left rail is open by default: no left-collapsed class, collapse button expanded', () => {
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    expect(splitEl().classList.contains('left-collapsed')).toBe(false);
+    expect(railCollapse().getAttribute('aria-expanded')).toBe('true');
+    ctl.dispose();
+  });
+
+  test('boots collapsed from persisted layout: #split has left-collapsed, button not expanded', () => {
+    saveLayout({ leftCollapsed: true });
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    expect(splitEl().classList.contains('left-collapsed')).toBe(true);
+    expect(railCollapse().getAttribute('aria-expanded')).toBe('false');
+    ctl.dispose();
+  });
+
+  test('clicking the collapse button tucks the rail and persists the flag', () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    expect(splitEl().classList.contains('left-collapsed')).toBe(false);
+    railCollapse().click();
+    expect(splitEl().classList.contains('left-collapsed')).toBe(true);
+    expect(deps.store.getState().leftCollapsed).toBe(true);
+    expect(loadLayout().leftCollapsed).toBe(true);
+    ctl.dispose();
+  });
+
+  test('a spine axis toggle re-opens the rail and switches to that axis', () => {
+    saveLayout({ leftCollapsed: true });
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    expect(splitEl().classList.contains('left-collapsed')).toBe(true);
+    lspineBtn('[data-laxis="files"]').click();
+    expect(splitEl().classList.contains('left-collapsed')).toBe(false);
+    expect(deps.store.getState().leftCollapsed).toBe(false);
+    expect(axisSelected('files')).toBe('true');
+    ctl.dispose();
+  });
+
+  test('the spine expand control re-opens the rail, leaving the axis unchanged', () => {
+    saveLayout({ leftCollapsed: true });
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    expect(splitEl().classList.contains('left-collapsed')).toBe(true);
+    lspineBtn('[data-lexpand]').click();
+    expect(splitEl().classList.contains('left-collapsed')).toBe(false);
+    expect(axisSelected('domain')).toBe('true');
     ctl.dispose();
   });
 });
