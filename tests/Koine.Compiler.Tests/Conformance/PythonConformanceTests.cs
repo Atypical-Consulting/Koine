@@ -536,6 +536,58 @@ public class PythonConformanceTests
         run.Ok.ShouldBeTrue("entity distinctBy should dedupe by id at runtime:\n" + string.Join("\n", run.Errors));
     }
 
+    /// <summary>
+    /// Issue #788 acceptance: <c>scalar * value-object</c> with the scalar on the LEFT
+    /// (<c>1.1 * base</c>) must type-check under <c>mypy --strict</c> AND evaluate without a
+    /// <c>TypeError</c> at runtime. The Python translator keeps native infix
+    /// (<c>Decimal("1.1") * self.base</c>); the generated value object's new <c>__rmul__</c>
+    /// (delegating to <c>__mul__</c>) is what makes Python's reflected-operand fallback
+    /// (<c>Decimal.__mul__(Money)</c> → <c>NotImplemented</c> → <c>Money.__rmul__</c>) resolve. Before
+    /// the fix <c>0.9 * base</c> raised <c>TypeError: unsupported operand type(s)</c>. Mirrors the
+    /// merged PHP Bug-2 fix (#778); the model exercises both operand orders.
+    /// </summary>
+    [Fact]
+    public void Reversed_scalar_times_value_object_typechecks_and_runs()
+    {
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0 "an amount cannot be negative"
+              }
+              value Line {
+                base: Money
+                discounted: Money = base * 0.9
+                surcharged: Money = 1.1 * base
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.PythonCheck types = TestSupport.TypeCheckPython(result.Files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeTrue(
+            "scalar * value-object should type-check under mypy --strict:\n" + string.Join("\n", types.Errors));
+
+        const string driver = """
+            from decimal import Decimal
+            from shop.value_objects.money import Money
+            from shop.value_objects.line import Line
+
+            line = Line(Money(Decimal("100")))
+            # `discounted = base * 0.9` (value object on the LEFT) and `surcharged = 1.1 * base`
+            # (scalar on the LEFT — the reversed order #788 is about) must BOTH evaluate, no TypeError.
+            assert line.discounted.amount == Decimal("90.0"), line.discounted.amount
+            assert line.surcharged.amount == Decimal("110.0"), line.surcharged.amount
+            """;
+
+        TestSupport.PythonCheck run = TestSupport.RunPython(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+        run.Ok.ShouldBeTrue(
+            "reversed scalar * value-object should evaluate without TypeError:\n" + string.Join("\n", run.Errors));
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {
