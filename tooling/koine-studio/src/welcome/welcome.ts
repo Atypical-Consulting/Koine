@@ -162,6 +162,22 @@ interface BuildWelcomeOpts {
 interface BuiltWelcome extends WelcomeHandle {
   readonly root: HTMLElement;
   destroy(): void;
+  /** Surface the dead-recent recovery confirm and, on accept, forget the entry + refresh the list (#391). */
+  recover(path: string): Promise<void>;
+}
+
+/**
+ * The routed Home view's imperative handle (returned by {@link mountHome}). Beyond teardown it exposes
+ * the two seams the boot layer drives when an open-recent start-intent fails: {@link refreshRecent} to
+ * rebuild the recents list in place, and {@link recover} to run the dead-recent recovery on Home (#391)
+ * instead of painting the legacy overlay over the editor.
+ */
+export interface HomeHandle {
+  destroy(): void;
+  /** Rebuild the recent-folders list from storage, in place. */
+  refreshRecent(): void;
+  /** Confirm "Remove from Recent?" on this view and, on accept, forget the dead entry + refresh the list. */
+  recover(path: string): Promise<void>;
 }
 
 /**
@@ -924,6 +940,24 @@ function buildWelcome(
     root.remove();
   }
 
+  // Dead-recent recovery (#391): surface the "Remove from Recent?" confirm on this view and, on accept,
+  // forget the entry then rebuild the recents list in place. The routed Home calls this when an
+  // open-recent start-intent failed because the folder is gone — recovery now lives here, on Home,
+  // rather than as an overlay painted over the editor. The folder is named with baseName() so the
+  // prompt labels it exactly as its recents row does.
+  async function recover(path: string): Promise<void> {
+    const forget = await koiConfirm({
+      title: `"${baseName(path)}" is no longer available`,
+      message: 'Its folder may have moved, been deleted, or had its permission revoked. Remove it from Recent?',
+      confirmLabel: 'Remove from Recent',
+      danger: true,
+    });
+    if (forget) {
+      removeRecentFolder(path);
+      renderRecent(); // rebuild the list in place — show()'s `if (shown) return` would swallow a re-render
+    }
+  }
+
   return {
     show,
     hide,
@@ -931,6 +965,7 @@ function buildWelcome(
     // that mutated the recents (e.g. after forgetting a dead entry) can refresh the list without the
     // `if (shown) return` early-out swallowing the re-render.
     refreshRecent: renderRecent,
+    recover,
     get visible() {
       return shown;
     },
@@ -966,9 +1001,9 @@ export function mountHome(
   templates: readonly Template[] = TEMPLATES,
   canOpenFolders = true,
   opts: { canResume?: boolean } = {},
-): { destroy(): void } {
+): HomeHandle {
   const welcome = buildWelcome(cb, templates, canOpenFolders, { embedded: true, canResume: opts.canResume });
   welcome.refreshRecent();
   container.appendChild(welcome.root);
-  return { destroy: welcome.destroy };
+  return { destroy: welcome.destroy, refreshRecent: welcome.refreshRecent, recover: welcome.recover };
 }

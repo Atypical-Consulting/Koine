@@ -7,7 +7,7 @@ import '@maxgraph/core/css/common.css';
 import '@xterm/xterm/css/xterm.css';
 import '@/styles/main.scss';
 import { init } from '@/shell/ide';
-import { mountHome, type WelcomeCallbacks } from '@/welcome/welcome';
+import { mountHome, type WelcomeCallbacks, type HomeHandle } from '@/welcome/welcome';
 import { appStore } from '@/store';
 import { type Route, routeFromHash, hashFromRoute, resolveInitialRoute } from '@/store/slices/route';
 import { hasPersistedWorkspace, markWorkspaceOpened } from '@/shell/workspaceFlag';
@@ -140,7 +140,7 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
 
   let ideStarted = false;
   let ideDispose: (() => void) | null = null;
-  let home: { destroy(): void } | null = null;
+  let home: HomeHandle | null = null;
 
   function showEditor(): void {
     home?.destroy();
@@ -149,7 +149,16 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
     if (appEl) appEl.hidden = false;
     if (!ideStarted) {
       ideStarted = true;
-      ideDispose = init();
+      ideDispose = init({
+        // The editor→Home leg of the route hand-off (#391): an open-recent start-intent that fails to
+        // open its folder recovers on Home, not via an overlay over the editor. Returning to Home
+        // re-mounts it (showHome runs synchronously inside navigate), so `home` is set before recover();
+        // for a vanished folder we then offer to forget the dead entry there.
+        onOpenRecentFailed: (path, reason) => {
+          appStore.getState().navigate('home');
+          if (reason === 'unreadable') void home?.recover(path);
+        },
+      });
       // Warm the offline WASM compiler cache now that the editor (the only surface that needs the
       // multi-MB bundle) is in use — on idle, never blocking first paint, and never on a Home-only
       // visit. No-op where the SW didn't register (unsupported browser / Tauri desktop). (#443)

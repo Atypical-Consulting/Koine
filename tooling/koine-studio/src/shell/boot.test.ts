@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Stub the IDE shell so booting doesn't pull the whole editor module graph, and so we can assert
 // whether init() runs per route. The real init() is exercised exhaustively in ide.test.ts.
-const { ideInit } = vi.hoisted(() => ({ ideInit: vi.fn<() => () => void>(() => () => {}) }));
+const { ideInit } = vi.hoisted(() => ({
+  ideInit: vi.fn<(hooks?: { onOpenRecentFailed?: (path: string, reason: 'unreadable' | 'empty') => void }) => () => void>(
+    () => () => {},
+  ),
+}));
 vi.mock('@/shell/ide', () => ({ init: ideInit }));
 
 // Mock the shared live-region announcer (#522) so the perceivability-gated announcement (#573) is
@@ -155,6 +159,40 @@ describe('bootStudio — a single routed view (no IDE→Home flash)', () => {
     expect(appStore.getState().route).toBe('editor'); // resumed into the live session
     expect(ideInit).toHaveBeenCalledTimes(1); // resumed, not re-initialised
     expect(root.querySelector('.koi-welcome')).toBeNull();
+  });
+
+  it('a dead open-recent reported by the IDE returns to Home and offers to forget the entry there (#391)', async () => {
+    // The IDE reports a failed open-recent through the hook bootStudio injects (#391) instead of
+    // painting the legacy welcome overlay over the editor. Capture that hook from the mocked init().
+    let hooks: { onOpenRecentFailed?: (path: string, reason: 'unreadable' | 'empty') => void } | undefined;
+    ideInit.mockImplementationOnce((h) => {
+      hooks = h;
+      return () => {};
+    });
+
+    localStorage.setItem('koine.studio.recentFolders', JSON.stringify(['ghost']));
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+
+    dispose = bootStudio(root);
+    appStore.getState().navigate('editor'); // boots the (mocked) IDE → captures the hook
+    expect(hooks?.onOpenRecentFailed).toBeTypeOf('function');
+
+    // The IDE hits a dead recent and reports it: bootStudio must return to Home and surface the
+    // "Remove from Recent?" recovery confirm there — never as an overlay over the editor.
+    hooks!.onOpenRecentFailed!('ghost', 'unreadable');
+    expect(appStore.getState().route).toBe('home');
+    expect(root.querySelector('.koi-welcome')).not.toBeNull();
+
+    const okBtn = document.querySelector<HTMLButtonElement>('.koi-confirm-btn-danger');
+    expect(okBtn).not.toBeNull();
+    okBtn!.click();
+    await Promise.resolve(); // let recover()'s confirm promise settle, then remove + refresh
+    await Promise.resolve();
+
+    // The dead recent is forgotten and the recents list rebuilt to its empty state on Home.
+    expect(localStorage.getItem('koine.studio.recentFolders')).not.toContain('ghost');
+    expect(root.querySelector('.koi-welcome-empty')).not.toBeNull();
   });
 });
 
