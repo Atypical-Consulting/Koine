@@ -815,7 +815,7 @@ final class OrderLine
     {
         return $this->product === $other->product
             && $this->quantity === $other->quantity
-            && $this->unitPrice === $other->unitPrice;
+            && $this->unitPrice->equals($other->unitPrice);
     }
 }
 
