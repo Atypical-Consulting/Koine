@@ -15,6 +15,7 @@ import { MapMode, type ChangeSet, type Text } from '@codemirror/state';
 import type { Platform } from '@/host';
 import { createFolderSidecar } from '@/host/sidecar';
 import type { SourceSpan } from '@/lsp/lsp';
+import { prefixedId } from '@/shared/ids';
 
 /** The committable reviews sidecar, written under the opened folder's `.koine/` directory. */
 export const REVIEWS_DIR = '.koine';
@@ -82,13 +83,9 @@ function byId(a: ReviewThread, b: ReviewThread): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
-/** A monotonic fallback so a thread gets a stable, unique id even where crypto.randomUUID is absent. */
-let threadIdSeq = 0;
-
 /** A unique id for a freshly-opened thread. */
 function newThreadId(): string {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  return `review-${uuid ?? `${Date.now().toString(36)}-${++threadIdSeq}`}`;
+  return prefixedId('review');
 }
 
 /** Coerce a candidate span back to a fully-formed {@link SourceSpan}, defaulting missing numbers. */
