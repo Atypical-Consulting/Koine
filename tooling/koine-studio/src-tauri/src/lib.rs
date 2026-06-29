@@ -474,6 +474,39 @@ impl Coalescer {
     }
 }
 
+/// End a PTY session: take the dead child out (returned so the caller can reap it for its exit code)
+/// and clear the session's `writer`/`master`.
+///
+/// `on_race_window` runs after the child has been taken, at the exact point a concurrent `pty_start`
+/// could interleave — production passes a no-op; the unit tests use it to drive a racing start and
+/// assert teardown stays mutually exclusive with it (#810). Generic over the handle types so the
+/// lock-ordering is unit-tested without opening a real PTY (the existing test convention).
+fn take_pty_child_and_clear_handles<C, W, M>(
+    child: &Mutex<Option<C>>,
+    writer: &Mutex<Option<W>>,
+    master: &Mutex<Option<M>>,
+    on_race_window: impl FnOnce(),
+) -> Option<C> {
+    // Hold the `child` lock across the whole teardown — taking the child AND clearing
+    // `writer`/`master` — so a concurrent `pty_start` (which takes the `child` lock first, then
+    // installs `writer`/`master`) is fully serialized and can never have its freshly installed
+    // handles clobbered here (#810). Lock order is `child` → `writer` → `master`, matching
+    // `pty_start`, so there is no lock-order inversion; nothing on this path re-locks `child`, so no
+    // self-deadlock. The child is reaped by the caller AFTER this returns (outside the lock), keeping
+    // the held critical section tight so a new shell isn't delayed by the reap's `wait()`.
+    let mut child_guard = child.lock().unwrap_or_else(|e| e.into_inner());
+    let reaped = child_guard.take();
+    on_race_window();
+    if let Ok(mut g) = writer.lock() {
+        *g = None;
+    }
+    if let Ok(mut g) = master.lock() {
+        *g = None;
+    }
+    drop(child_guard);
+    reaped
+}
+
 /// Spawn the reader that drains the PTY master and relays it to the frontend, coalescing reads so a
 /// flooding command (`yes`, `cat bigfile`) can't fire thousands of Tauri IPC events per second (#441).
 ///
@@ -592,10 +625,13 @@ fn spawn_pty_reader_thread(
             let _ = app.emit("pty://data", String::from_utf8_lossy(&carry).into_owned());
         }
 
-        // Recover the exit code and announce it once, then clear the managed handles so a later
-        // `pty_start` is a clean fresh start.
+        // Recover the exit code and announce it once. Take the dead child and clear the managed
+        // handles so a later `pty_start` is a clean fresh start — atomically, so a `pty_start` that
+        // raced this teardown can't have its fresh handles clobbered (#810). The child is reaped
+        // after the handles are cleared (outside the lock) to keep the critical section tight.
         let state = app.state::<PtyState>();
-        let reaped = state.child.lock().ok().and_then(|mut g| g.take());
+        let reaped =
+            take_pty_child_and_clear_handles(&state.child, &state.writer, &state.master, || {});
         let code = if shutting_down.load(Ordering::SeqCst) {
             // Intentional stop: `pty_stop` already took and killed the child, so there is nothing to
             // reap — report a clean exit.
@@ -608,12 +644,6 @@ fn spawn_pty_reader_thread(
                 .map(|status| status.exit_code() as i32)
                 .unwrap_or(0)
         };
-        if let Ok(mut g) = state.writer.lock() {
-            *g = None;
-        }
-        if let Ok(mut g) = state.master.lock() {
-            *g = None;
-        }
         let _ = app.emit("pty://exit", code);
     });
 }
@@ -2790,5 +2820,78 @@ mod tests {
         assert!(git_log(plain.path(), None).is_err());
         assert!(git_branches(plain.path()).is_err());
         assert!(git_diff(plain.path(), "anything.txt".to_string(), false).is_err());
+    }
+
+    // --- PTY teardown / pty_start race (#810) --------------------------------
+    //
+    // On shell exit the coalescer takes the dead child and clears the session's `writer`/`master`;
+    // `pty_start` installs a new session by taking the `child` lock FIRST and then storing fresh
+    // `writer`/`master`. If teardown clears the handles without holding the `child` lock, a
+    // `pty_start` that interleaves between the child-take and the clears installs handles that
+    // teardown then wipes. `take_pty_child_and_clear_handles` must therefore hold the `child` lock
+    // across the clears so the two are mutually exclusive. Both tests drive sentinel handles so the
+    // lock-ordering is exercised without opening a real PTY (the existing test convention).
+
+    #[test]
+    fn teardown_holds_child_lock_while_clearing_handles() {
+        let child = Mutex::new(Some("child-N"));
+        let writer = Mutex::new(Some("writer-N"));
+        let master = Mutex::new(Some("master-N"));
+
+        let mut child_lock_was_held = false;
+        let reaped = take_pty_child_and_clear_handles(&child, &writer, &master, || {
+            // Teardown has taken the dead child and is about to clear writer/master — the exact
+            // window a concurrent `pty_start` exploits. Probe the lock from another thread (so the
+            // result is the genuine cross-thread state): teardown must still hold it here.
+            std::thread::scope(|s| {
+                child_lock_was_held = s.spawn(|| child.try_lock().is_err()).join().unwrap();
+            });
+        });
+
+        assert_eq!(reaped, Some("child-N"), "teardown should hand back the reaped child");
+        assert!(
+            child_lock_was_held,
+            "#810: teardown must hold the child lock while clearing writer/master, else a racing \
+             pty_start interleaves and its fresh handles are clobbered"
+        );
+        assert!(writer.lock().unwrap().is_none(), "writer should be cleared by teardown");
+        assert!(master.lock().unwrap().is_none(), "master should be cleared by teardown");
+    }
+
+    #[test]
+    fn pty_start_racing_teardown_keeps_its_fresh_handles() {
+        let child = Mutex::new(Some("child-N"));
+        let writer = Mutex::new(Some("writer-N"));
+        let master = Mutex::new(Some("master-N"));
+
+        std::thread::scope(|s| {
+            let mut start = None;
+            take_pty_child_and_clear_handles(&child, &writer, &master, || {
+                // Mid-teardown (old child taken, handles about to clear), session N+1 starts.
+                // `pty_start` takes the child lock first, so while teardown holds it this thread
+                // parks until teardown completes, then installs its handles uncontended.
+                start = Some(s.spawn(|| {
+                    let mut cg = child.lock().unwrap_or_else(|e| e.into_inner());
+                    *writer.lock().unwrap() = Some("writer-N+1");
+                    *master.lock().unwrap() = Some("master-N+1");
+                    *cg = Some("child-N+1");
+                }));
+                // Give the racing start a chance to contend for the child lock before we clear.
+                std::thread::yield_now();
+            });
+            start.expect("start thread spawned").join().expect("start thread");
+        });
+
+        assert_eq!(
+            *writer.lock().unwrap(),
+            Some("writer-N+1"),
+            "#810: the new session's writer was clobbered by the previous session's teardown"
+        );
+        assert_eq!(
+            *master.lock().unwrap(),
+            Some("master-N+1"),
+            "#810: the new session's master was clobbered by the previous session's teardown"
+        );
+        assert_eq!(*child.lock().unwrap(), Some("child-N+1"));
     }
 }
