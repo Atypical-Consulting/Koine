@@ -425,8 +425,14 @@ function installPlatform(): FakePlatform {
  * captured handler in isolation tests exactly the guard the current boot wired up — the production
  * single-init reality — without cross-test leakage. (init() registers it once at line ~2132.)
  */
-async function boot(opts: { dom?: boolean; platform?: FakePlatform } = {}): Promise<{
-  init: () => void;
+async function boot(opts: {
+  dom?: boolean;
+  platform?: FakePlatform;
+  // The boot-layer seam main.ts injects (#391): a failed open-recent is reported here rather than
+  // overlaid on the editor. Forwarded into init() so a test can observe the report.
+  hooks?: { onOpenRecentFailed?: (path: string, reason: 'unreadable' | 'empty') => void };
+} = {}): Promise<{
+  init: (hooks?: { onOpenRecentFailed?: (path: string, reason: 'unreadable' | 'empty') => void }) => void;
   platform: FakePlatform;
   beforeUnload: (e: Event) => void;
 }> {
@@ -446,7 +452,7 @@ async function boot(opts: { dom?: boolean; platform?: FakePlatform } = {}): Prom
     // init() returns a teardown that disposes the controller's pending debounce timers. Capture it so
     // afterEach can release them — otherwise boot's onDocEdited debounce (a real 350ms timer) fires
     // after this file's happy-dom env is gone, throwing "document is not defined" as an unhandled error.
-    disposeIde = init();
+    disposeIde = init(opts.hooks);
   } finally {
     spy.mockRestore();
   }
@@ -777,9 +783,9 @@ describe('ide init() — Save to disk', () => {
   });
 });
 
-describe('ide init() — Recent open recovery', () => {
-  test('opening a dead Recent (via the Home start-intent) keeps the start screen up and offers removal', async () => {
-    // Seed one recent so the recovered start screen renders a row for it.
+describe('ide init() — Recent open recovery routes to the Home route (#391)', () => {
+  test('a dead Recent (via the Home start-intent) is reported to the boot layer, not overlaid on the editor', async () => {
+    // Seed one recent — production renders its row on the Home recovery view, not over the editor.
     localStorage.setItem('koine.studio.recentFolders', JSON.stringify(['ghost']));
 
     const p = installPlatform();
@@ -794,41 +800,24 @@ describe('ide init() — Recent open recovery', () => {
     );
 
     // Home opens a recent by queuing a start-intent then navigating to the editor (#368); the IDE
-    // consumes it once at boot. listKoiFiles throws → openRecentFolder shows the start screen and a
-    // "Remove from Recent?" confirm rather than stranding the user.
+    // consumes it once at boot. listKoiFiles throws → the IDE no longer paints the legacy welcome
+    // overlay over the editor (#391): it hands the failure back to the boot layer (which returns to
+    // Home and runs the dead-recent recovery there — exercised in boot.test.ts).
     window.location.hash = '';
     // Import setStartIntent AFTER beforeEach's vi.resetModules() so it shares the SAME bootIntent module
     // instance that boot()'s dynamic import('@/shell/ide') will load — a static top-of-file import binds
     // the pre-reset instance, whose `pending` the freshly-loaded IDE would never see.
     const { setStartIntent } = await import('@/shell/bootIntent');
     setStartIntent({ kind: 'open-recent', path: 'ghost' });
-    await boot({ platform: p });
+
+    const onOpenRecentFailed = vi.fn();
+    await boot({ platform: p, hooks: { onOpenRecentFailed } });
     await settleBoot();
 
-    // The start screen is up with the 'ghost' row, and the confirm modal must now be visible.
-    expect(document.querySelector('.koi-welcome-recent')).not.toBeNull();
-    const okBtn = document.querySelector<HTMLButtonElement>('.koi-confirm-btn-danger');
-    expect(okBtn).not.toBeNull();
-
-    // Confirm removal — this resolves the confirmDialog.ask() promise with true.
-    okBtn!.click();
-    await settleBoot();
-
-    // The dead recent must be gone from localStorage.
-    expect(localStorage.getItem('koine.studio.recentFolders')).not.toContain('ghost');
-
-    // The welcome (start screen) must still be present — the user is never stranded.
-    expect(document.querySelector('.koi-welcome-recent')).not.toBeNull();
-
-    // …AND the list must have rebuilt: the dead row is gone from the DOM, not just from storage.
-    // (Regression guard: welcome.show() early-returns when already shown, so the post-removal refresh
-    // must use refreshRecent() to re-render — otherwise the stale row lingers on screen.)
-    const remainingRows = Array.from(
-      document.querySelectorAll<HTMLElement>('.koi-welcome-recent-item-name'),
-    ).map((el) => el.textContent);
-    expect(remainingRows).not.toContain('ghost');
-    // It was the only recent, so the empty-state copy is now shown in its place.
-    expect(document.querySelector('.koi-welcome-empty')).not.toBeNull();
+    // The IDE reported the dead recent to the boot layer, with its reason…
+    expect(onOpenRecentFailed).toHaveBeenCalledWith('ghost', 'unreadable');
+    // …and never mounted an in-editor start-screen overlay (the two-surfaces case #368/#391 remove).
+    expect(document.querySelector('.koi-welcome')).toBeNull();
   });
 });
 
