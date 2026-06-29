@@ -5,26 +5,38 @@ namespace Koine.Compiler.Tests;
 
 /// <summary>
 /// Issue #794: the C# <c>matches</c>-invariant ReDoS-guard match timeout (#641) is user-settable via
-/// <c>targets.csharp.regexMatchTimeoutMs</c>, so an invalid (non-positive) value must be rejected
-/// before it reaches the generated <c>TimeSpan.FromMilliseconds(N)</c> — which throws at the generated
-/// code's OWN runtime for <c>0</c> / <c>&lt; -1</c>. Validation is two-layered: a friendly CLI
-/// hard-error in <see cref="BuildSettings.TryResolve"/> (mirroring how <c>--app-mapping</c> rejects an
-/// unknown mode), plus a defensive guard in the C# emitter for a programmatically-supplied value
-/// (MCP / Studio / tests).
+/// <c>targets.csharp.regexMatchTimeoutMs</c>, so a present-but-invalid value must be rejected before it
+/// reaches the generated <c>TimeSpan.FromMilliseconds(N)</c> — a non-integer would silently disarm the
+/// guard (falling back to 1000 ms), and <c>0</c> / <c>&lt; -1</c> would throw at the generated code's
+/// OWN runtime. Validation is two-layered: a friendly hard-error in <see cref="BuildSettings.TryResolve"/>
+/// via <c>TargetOptions.TryValidate</c> (the same check coverage and the LSP preview share), plus a
+/// defensive guard in the C# emitter for a programmatically-supplied value (MCP / Studio / tests).
 /// </summary>
-public class BuildRegexTimeoutTests
+public sealed class BuildRegexTimeoutTests : IDisposable
 {
-    private static BuildSettings SettingsWithConfig(string rawValue)
+    private readonly List<string> _tempFiles = new();
+
+    private BuildSettings SettingsWithConfig(string rawValue)
     {
         var configPath = Path.Combine(Path.GetTempPath(), $"koine-{Guid.NewGuid():N}.config");
         File.WriteAllText(configPath, $"targets.csharp.regexMatchTimeoutMs = {rawValue}\n");
+        _tempFiles.Add(configPath);
         return new BuildSettings { Path = "x.koi", Config = configPath };
+    }
+
+    public void Dispose()
+    {
+        // File.Delete is a no-op for an already-absent path, so this is safe even if a test never wrote.
+        foreach (var path in _tempFiles)
+        {
+            File.Delete(path);
+        }
     }
 
     [Fact]
     public void Positive_timeout_resolves_onto_the_plan()
     {
-        // Also confirms Task 2's threading: the resolved value reaches BuildPlan.Options unchanged.
+        // Also confirms the threading: the resolved value reaches BuildPlan.Options unchanged.
         SettingsWithConfig("250").TryResolve(out var plan, out var error).ShouldBeTrue(error);
         plan.Options.RegexMatchTimeoutMs.ShouldBe(250);
     }
@@ -52,6 +64,19 @@ public class BuildRegexTimeoutTests
         SettingsWithConfig("-5").TryResolve(out _, out var error).ShouldBeFalse();
         error.ShouldNotBeNull();
         error.ShouldContain("-5");
+    }
+
+    [Fact]
+    public void Non_integer_timeout_is_a_hard_error()
+    {
+        // The dangerous case: a typo like `50ms` must NOT silently fall back to the 1000 ms default and
+        // ship a 20x-looser ReDoS bound than the user asked for. A present-but-unparseable value is a
+        // hard error, showing the offending text.
+        SettingsWithConfig("soon").TryResolve(out _, out var error).ShouldBeFalse();
+        error.ShouldNotBeNull();
+        error.ShouldContain("regexMatchTimeoutMs");
+        error.ShouldContain("positive");
+        error.ShouldContain("'soon'");
     }
 
     [Fact]

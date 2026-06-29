@@ -49,9 +49,9 @@ public sealed partial class CSharpEmitter : IEmitter
 
     /// <summary>
     /// Encodes every C# option that changes emitted bytes (instant mode, source maps, reference-only,
-    /// and the sorted namespace remap pairs) into the cache fingerprint, so toggling any of them busts
-    /// <see cref="Services.KoineCompiler"/>'s emit cache. The namespace pairs are ordered so equal maps
-    /// always produce the same string regardless of insertion order.
+    /// the regex match-timeout budget, and the sorted namespace remap pairs) into the cache fingerprint,
+    /// so toggling any of them busts <see cref="Services.KoineCompiler"/>'s emit cache. The namespace
+    /// pairs are ordered so equal maps always produce the same string regardless of insertion order.
     /// </summary>
     public string CacheDiscriminator
     {
@@ -76,6 +76,7 @@ public sealed partial class CSharpEmitter : IEmitter
                 "layers=" + layers,
                 "mediatr=" + _options.ApplicationMediatr,
                 "mapping=" + _options.Mapping,
+                "regexTimeout=" + _options.RegexMatchTimeoutMs,
                 "ns=" + map);
         }
     }

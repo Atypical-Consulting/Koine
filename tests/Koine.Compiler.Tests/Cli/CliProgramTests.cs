@@ -422,4 +422,26 @@ public class CliProgramTests
         code.ShouldBe(1);
         stderr.ShouldContain("config not found:");
     }
+
+    [Fact]
+    public void Coverage_Config_InvalidRegexTimeout_ExitsWithFriendlyError()
+    {
+        // Issue #794: a bad targets.csharp.regexMatchTimeoutMs must give coverage the SAME friendly
+        // diagnostic build gives — not let the C# emitter's last-resort guard throw an unhandled
+        // exception (coverage builds the emitter from config without going through BuildSettings).
+        const string src = """
+            context Sales {
+              value Money { amount: Decimal }
+            }
+            """;
+        var (modelFile, dir) = TempModel(src, "domain.koi");
+        File.WriteAllText(
+            Path.Combine(dir, "koine.config"),
+            "target = csharp\ntargets.csharp.regexMatchTimeoutMs = 0\n");
+
+        var (code, _, stderr) = Run("coverage", modelFile);
+
+        code.ShouldBe(1);
+        stderr.ShouldContain("regexMatchTimeoutMs must be a positive integer");
+    }
 }

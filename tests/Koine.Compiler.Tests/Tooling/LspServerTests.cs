@@ -1326,6 +1326,36 @@ public class LspServerTests
         finally { dir.Delete(recursive: true); }
     }
 
+    [Fact]
+    public void EmitPreview_rejects_an_invalid_regex_match_timeout_as_a_structured_error()
+    {
+        // Issue #794: a bad targets.csharp.regexMatchTimeoutMs must surface as a structured preview error
+        // (the same friendly diagnostic `build` gives), not let the C# emitter's last-resort guard throw —
+        // which the dispatch loop would swallow, leaving the Generated pane blank with no explanation.
+        var dir = Directory.CreateTempSubdirectory("koi-cfg-");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "koine.config"),
+                "target = csharp\ntargets.csharp.regexMatchTimeoutMs = 0\n");
+            var koiPath = Path.Combine(dir.FullName, "billing.koi");
+            const string doc = "context Billing {\n  value Money { amount: Decimal }\n}\n";
+            File.WriteAllText(koiPath, doc);
+
+            var rootUri = new Uri(dir.FullName).AbsoluteUri;
+            var koiUri = new Uri(koiPath).AbsoluteUri;
+
+            var output = RunSession(
+                InitializeWithRoot(rootUri),
+                DidOpen(koiUri, doc),
+                EmitPreview(koiUri, "csharp"));
+
+            output.ShouldContain("regexMatchTimeoutMs must be a positive integer");
+            output.ShouldContain("\"files\":[]");
+            output.ShouldNotContain("-32601"); // a normal result, not a JSON-RPC error or a thrown exception
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
     // ---- koine/glossary ----
 
     [Fact]
