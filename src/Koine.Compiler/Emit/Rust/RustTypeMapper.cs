@@ -99,6 +99,29 @@ internal sealed class RustTypeMapper
             : $"crate::{ownerModule}::{pascal}";
     }
 
+    /// <summary>
+    /// The bounded context whose module emits the enum that a reference to <paramref name="koineName"/>
+    /// resolves to — the key into the per-<c>(context, enum)</c> variant table. Mirrors
+    /// <see cref="QualifyTypeName"/> exactly: a uniquely-owned or shared-kernel type living in a
+    /// <em>different</em> module resolves to that owner (the reference qualifies as
+    /// <c>crate::&lt;owner&gt;::Type</c>); otherwise the bare name binds to the current module, so the
+    /// current context wins — including the same-name-in-multiple-contexts case (#437) where a bare
+    /// reference must resolve against the local sibling, not the first-declared one. Null only in the
+    /// legacy context-agnostic mode.
+    /// </summary>
+    public string? ResolveOwnerContext(string koineName)
+    {
+        if (_context is null)
+        {
+            return null;
+        }
+
+        return OwnerContextOf(koineName) is { } owner
+            && !string.Equals(ModuleNameOf(owner), ModuleNameOf(_context), StringComparison.Ordinal)
+                ? owner
+                : _context;
+    }
+
     /// <summary>The single bounded context whose module emits a type, or null when unknown/ambiguous.</summary>
     private string? OwnerContextOf(string koineName)
     {
