@@ -8,6 +8,15 @@ may include breaking changes.
 
 ## [Unreleased]
 
+### Changed
+- **Koine Studio Web now always opens on Home.** Opening Studio (a cold load at the base URL / `#/`) lands
+  on the Home start console every time instead of auto-skipping a returning user straight into the editor —
+  the persisted "workspace was opened" flag is no longer a routing input (issue #766). The returning-user
+  fast path is preserved as a one-click **Resume** control on a cold-open Home, so getting back to the last
+  workspace is now a deliberate choice rather than an automatic jump. Explicit `#/editor` deep-links (and
+  same-tab editor refreshes) and `#model=…` share links still open the editor, and #368's no-flash,
+  single-view boot is unchanged.
+
 ### Fixed
 - **Live Playground compiler failed to boot ("Koine worker timed out after 30s").** The marketing-site
   Playground's in-browser compiler hung at boot: its wasm Web Worker installed the message loop with a
