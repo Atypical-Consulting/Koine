@@ -2122,7 +2122,7 @@ mod tests {
         // `$SHELL` (the first arg) wins over the passwd-recovered shell. On Unix the interactive
         // shell is spawned as a *login* shell (`-l`) so a Finder/Dock launch — whose stripped GUI
         // env never sourced `~/.zprofile` — still gets a real `PATH` (Homebrew/user dirs).
-        let (program, args) = resolve_shell_command(Some("/bin/zsh"), Some("/bin/bash"));
+        let (program, args) = resolve_shell_command(Some("/bin/zsh"), Some("/bin/bash"), None);
         assert_eq!(program, "/bin/zsh", "an explicit $SHELL is honoured verbatim");
         #[cfg(unix)]
         assert!(
@@ -2139,7 +2139,7 @@ mod tests {
         // The GUI-launch case: no `$SHELL`, so fall through to the user's shell recovered from
         // `getpwuid` (passed as the second arg) rather than defaulting straight to `/bin/sh` —
         // still as a login shell.
-        let (program, args) = resolve_shell_command(None, Some("/opt/homebrew/bin/fish"));
+        let (program, args) = resolve_shell_command(None, Some("/opt/homebrew/bin/fish"), None);
         assert_eq!(program, "/opt/homebrew/bin/fish", "the passwd shell is the next preference");
         assert!(args.iter().any(|a| a == "-l"), "the recovered shell is still a login shell");
     }
@@ -2149,7 +2149,7 @@ mod tests {
     fn resolve_shell_command_falls_back_to_bin_sh_as_a_last_resort() {
         // Neither `$SHELL` nor a passwd shell available: `/bin/sh` keeps `pty_start` able to spawn
         // *something*, still logged-in.
-        let (program, args) = resolve_shell_command(None, None);
+        let (program, args) = resolve_shell_command(None, None, None);
         assert_eq!(program, "/bin/sh", "/bin/sh is the final fallback");
         assert!(args.iter().any(|a| a == "-l"));
     }
@@ -2160,9 +2160,51 @@ mod tests {
         // The Windows spawn path is unchanged: with nothing named, `cmd` is the default and no login
         // flag is added. (Guards the `os_shell.unwrap_or("cmd")` branch, which the Unix-gated tests
         // above never exercise.)
-        let (program, args) = resolve_shell_command(None, None);
+        let (program, args) = resolve_shell_command(None, None, None);
         assert_eq!(program, "cmd", "Windows defaults to cmd when no shell is named");
         assert!(args.is_empty(), "the Windows spawn path adds no login flag");
+    }
+
+    #[test]
+    fn resolve_shell_command_honours_a_non_empty_args_override() {
+        // The #467 opt-in: a caller-supplied (Studio setting) args override replaces the default `-l`
+        // verbatim on Unix, so a bash user who keeps PATH/aliases only in ~/.bashrc can pass
+        // ["-l", "-i"] to get an interactive shell that sources it. Program resolution is unchanged.
+        let override_args = vec!["-l".to_string(), "-i".to_string()];
+        let (program, args) = resolve_shell_command(Some("/bin/bash"), None, Some(&override_args));
+        assert_eq!(program, "/bin/bash", "the override changes only the args, not the program");
+        #[cfg(unix)]
+        assert_eq!(args, override_args, "a non-empty override replaces the default -l args verbatim");
+        #[cfg(windows)]
+        assert!(args.is_empty(), "Windows ignores the override — its spawn path is unchanged");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn resolve_shell_command_falls_back_to_login_when_the_override_is_empty() {
+        // An *empty* override is treated as "unset", so the built-in default ["-l"] still applies —
+        // #462's login-shell fix is unchanged when the user configured nothing.
+        let empty: Vec<String> = Vec::new();
+        let (_program, args) = resolve_shell_command(Some("/bin/zsh"), None, Some(&empty));
+        assert_eq!(args, vec!["-l".to_string()], "an empty override falls back to the default login flag");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn resolve_shell_command_defaults_to_login_when_no_override_is_given() {
+        // No override (None) ⇒ the default ["-l"] login shell — today's behaviour, the safe default.
+        let (_program, args) = resolve_shell_command(Some("/bin/zsh"), None, None);
+        assert_eq!(args, vec!["-l".to_string()], "no override keeps the default login flag");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn resolve_shell_command_ignores_the_args_override_on_windows() {
+        // The Windows spawn path is untouched: even a non-empty override yields no args.
+        let override_args = vec!["-l".to_string(), "-i".to_string()];
+        let (program, args) = resolve_shell_command(None, None, Some(&override_args));
+        assert_eq!(program, "cmd", "Windows still defaults to cmd");
+        assert!(args.is_empty(), "Windows ignores the override and adds no args");
     }
 
     // --- PTY chunk decoding (pure) ------------------------------------------
