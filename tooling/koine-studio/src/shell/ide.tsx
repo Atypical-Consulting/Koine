@@ -16,7 +16,7 @@ import {
 import { createEditorSession } from '@/shell/editorSession';
 import { createInspectorController } from '@/shell/inspectorController';
 import { leftRailMarkup } from '@/shell/leftRail';
-import { rightStripMarkup } from '@/shell/rightStrip';
+import { RightStrip } from '@/shell/RightStrip';
 import { createCanvasWrite } from '@/shell/canvasWrite';
 import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
@@ -427,10 +427,12 @@ export function init(hooks: IdeHooks = {}): () => void {
   // the inspector controller below — so #filetree-body / #rail-domain-pane / the doclinks all resolve.
   el<HTMLElement>('leftrail').innerHTML = leftRailMarkup();
 
-  // The right-edge tool-window stripe's buttons are owned by rightStrip.ts (single source of truth, #500);
-  // index.html keeps <div id="right-strip"> a thin shell. Inject before the inspector controller below so
-  // its `.rstrip-btn` lookup + wiring resolve, mirroring the leftRail injection above.
-  el<HTMLElement>('right-strip').innerHTML = rightStripMarkup();
+  // The right-edge tool-window stripe's buttons are owned by the RightStrip Preact component (#759, was
+  // the #500 rightStripMarkup string builder); index.html keeps <div id="right-strip"> a thin shell.
+  // Render synchronously before the inspector controller below so its `.rstrip-btn` lookup + wiring
+  // resolve, mirroring the leftRail injection above. RightStrip never re-renders, so the controller's
+  // captured nodes + imperative aria-pressed writes are never reconciled away.
+  render(<RightStrip />, el<HTMLElement>('right-strip'));
 
   const treeBodyEl = el<HTMLElement>('filetree-body');
   const treeTitleEl = el<HTMLElement>('filetree-title');

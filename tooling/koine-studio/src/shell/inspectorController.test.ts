@@ -14,8 +14,9 @@ import {
   type InspectorControllerDeps,
   type InspectorControllerLsp,
 } from '@/shell/inspectorController';
+import { createElement, render } from 'preact';
 import { leftRailMarkup } from '@/shell/leftRail';
-import { rightStripMarkup } from '@/shell/rightStrip';
+import { RightStrip } from '@/shell/RightStrip';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
 import { createAppStore } from '@/store/index';
 import * as maxgraphRenderer from '@/diagrams/diagrams-maxgraph';
@@ -101,13 +102,16 @@ const APP_HTML = `
           <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
         </div>
       </aside>
-      <div id="right-strip" class="pane" role="toolbar" aria-label="Tool windows" aria-orientation="vertical">${rightStripMarkup()}</div>
+      <div id="right-strip" class="pane" role="toolbar" aria-label="Tool windows" aria-orientation="vertical"></div>
     </main>
     <footer id="statusbar"><span class="sb-item" id="sb-context">Context: —</span></footer>
   </div>`;
 
 function seedDom(): void {
   document.body.innerHTML = APP_HTML;
+  // The #right-strip buttons are a Preact component now (#759, was rightStripMarkup): render them into the
+  // thin shell so the controller's `.rstrip-btn` capture + aria-pressed wiring resolve, as the boot does.
+  render(createElement(RightStrip, null), document.getElementById('right-strip')!);
 }
 
 function el<T extends HTMLElement>(id: string): T {
