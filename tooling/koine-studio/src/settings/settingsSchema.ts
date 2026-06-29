@@ -3,7 +3,7 @@
 // the schema is additionalProperties:false and the parser re-injects the live in-memory key.
 import Ajv2020, { type ErrorObject } from 'ajv/dist/2020';
 import { isEmitTarget } from '@/shared/emitTargets';
-import { DEFAULT_SETTINGS, type Settings } from './persistence';
+import { DEFAULT_SETTINGS, WORKSPACE_SCOPED_KEYS, type Settings } from './persistence';
 
 // --- the field map: the single source of truth (#750) ------------------------
 // One declarative table maps each runtime `Settings` key to its VS Code-style namespaced
@@ -220,6 +220,77 @@ const LEGACY_FLAT_SCHEMA = buildFlatSchema();
 const ajv = new Ajv2020({ allErrors: true, strict: false });
 const validateNested = ajv.compile(SETTINGS_JSON_SCHEMA);
 const validateFlat = ajv.compile(LEGACY_FLAT_SCHEMA);
+
+// --- workspace-scoped settings document schema (#736) -----------------------
+// A FLAT Draft 2020-12 schema whose properties cover ONLY the four WORKSPACE_SCOPED_KEYS.
+// Derived from WORKSPACE_SCOPED_KEYS + LEAF_SCHEMAS so it can never drift from the field map.
+
+/** The Draft 2020-12 JSON schema for the workspace-level settings.json document.
+ *  Properties are exactly the four {@link WORKSPACE_SCOPED_KEYS}; `additionalProperties:false`
+ *  rejects any other key, including non-scoped user-level settings. */
+export const WORKSPACE_SETTINGS_JSON_SCHEMA = (() => {
+  const properties: Record<string, LeafSchema> = {};
+  for (const k of WORKSPACE_SCOPED_KEYS) {
+    properties[k as string] = LEAF_SCHEMAS[k as FieldDef['runtimeKey']];
+  }
+  return { $schema: SCHEMA_DIALECT, type: 'object', additionalProperties: false as const, properties };
+})();
+
+const validateWorkspace = ajv.compile(WORKSPACE_SETTINGS_JSON_SCHEMA);
+
+/**
+ * Serialize a `Partial<Settings>` of workspace overrides to a pretty-printed JSON string.
+ * Only the four {@link WORKSPACE_SCOPED_KEYS} are emitted, in their canonical order; keys not
+ * present in `overrides` are omitted. An object with no scoped keys serializes to `{}`.
+ */
+export function workspaceOverridesToJsonDoc(overrides: Partial<Settings>): string {
+  const out: Record<string, unknown> = {};
+  for (const k of WORKSPACE_SCOPED_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(overrides, k)) {
+      out[k as string] = overrides[k as keyof Settings];
+    }
+  }
+  return JSON.stringify(out, null, 2);
+}
+
+/**
+ * Parse and schema-validate a workspace settings.json document, returning either a
+ * `Partial<Settings>` of only the recognized scoped keys present, or structured diagnostics.
+ *
+ * Mirrors `jsonDocToSettings` in error-ordering and the `previewTarget`/`isEmitTarget` guard.
+ */
+export function jsonDocToWorkspaceOverrides(
+  text: string,
+): { overrides?: Partial<Settings>; errors?: Array<{ message: string; line?: number }> } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    return { errors: [{ message: (err as Error).message }] };
+  }
+  if (!validateWorkspace(parsed)) {
+    // Surface field-specific errors before structural root errors (additionalProperties),
+    // exactly as jsonDocToSettings does.
+    const ordered = [...(validateWorkspace.errors ?? [])].sort(
+      (a, b) => (a.instancePath ? 0 : 1) - (b.instancePath ? 0 : 1),
+    );
+    return { errors: ordered.map((e) => ({ message: formatError(e) })) };
+  }
+  // Extract only the recognized scoped keys present in the validated document.
+  const obj = parsed as Record<string, unknown>;
+  const out: Partial<Settings> = {};
+  for (const k of WORKSPACE_SCOPED_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(obj, k)) {
+      (out as Record<string, unknown>)[k as string] = obj[k as string];
+    }
+  }
+  // previewTarget guard: mirror the user-scope path — open string in the leaf schema so validate
+  // against the live emit-target registry (same predicate coercePreviewTarget uses).
+  if ('previewTarget' in out && !isEmitTarget(out.previewTarget)) {
+    return { errors: [{ message: `previewTarget: unknown emit target "${String(out.previewTarget)}"` }] };
+  }
+  return { overrides: out };
+}
 
 /** Runtime keys, used to detect a legacy flat document by its top-level keys (which are runtime keys,
  *  whereas a grouped document's top-level keys are group names — the two sets never overlap). */

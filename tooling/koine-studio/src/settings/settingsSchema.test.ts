@@ -3,11 +3,14 @@ import {
   SETTINGS_JSON_SCHEMA,
   SETTINGS_FIELDS,
   SETTINGS_FIELD_META,
+  WORKSPACE_SETTINGS_JSON_SCHEMA,
   settingsFieldMeta,
   settingsToJsonDoc,
   jsonDocToSettings,
+  workspaceOverridesToJsonDoc,
+  jsonDocToWorkspaceOverrides,
 } from './settingsSchema';
-import { DEFAULT_SETTINGS, type Settings } from './persistence';
+import { DEFAULT_SETTINGS, WORKSPACE_SCOPED_KEYS, type Settings } from './persistence';
 
 const withKey: Settings = { ...DEFAULT_SETTINGS, aiApiKey: 'sk-SECRET' };
 
@@ -218,5 +221,98 @@ describe('settingsSchema', () => {
     expect(res.settings?.theme).toBe('light');
     expect(res.settings?.previewTarget).toBe('rust');
     expect(res.settings?.aiBaseUrl).toBe('http://localhost:1234/v1');
+  });
+});
+
+describe('workspace settings schema (#736)', () => {
+  it('schema drift guard: WORKSPACE_SETTINGS_JSON_SCHEMA.properties keys match WORKSPACE_SCOPED_KEYS exactly', () => {
+    expect(Object.keys(WORKSPACE_SETTINGS_JSON_SCHEMA.properties)).toEqual([...WORKSPACE_SCOPED_KEYS]);
+  });
+
+  it('WORKSPACE_SETTINGS_JSON_SCHEMA is additionalProperties:false with the Draft 2020-12 dialect', () => {
+    expect(WORKSPACE_SETTINGS_JSON_SCHEMA.additionalProperties).toBe(false);
+    expect(WORKSPACE_SETTINGS_JSON_SCHEMA.$schema).toBe('https://json-schema.org/draft/2020-12/schema');
+  });
+
+  it('workspaceOverridesToJsonDoc({}) serializes to "{}"', () => {
+    expect(workspaceOverridesToJsonDoc({})).toBe('{}');
+  });
+
+  it('jsonDocToWorkspaceOverrides("{}") returns empty overrides with no errors', () => {
+    const res = jsonDocToWorkspaceOverrides('{}');
+    expect(res.errors).toBeUndefined();
+    expect(res.overrides).toEqual({});
+  });
+
+  it('round-trips all four scoped keys', () => {
+    const o: Partial<Settings> = { previewTarget: 'csharp', formatOnSave: false, wordWrap: true, lspTrace: 'verbose' };
+    const res = jsonDocToWorkspaceOverrides(workspaceOverridesToJsonDoc(o));
+    expect(res.errors).toBeUndefined();
+    expect(res.overrides).toEqual(o);
+  });
+
+  it('round-trips a partial override (only previewTarget)', () => {
+    const o: Partial<Settings> = { previewTarget: 'typescript' };
+    const res = jsonDocToWorkspaceOverrides(workspaceOverridesToJsonDoc(o));
+    expect(res.errors).toBeUndefined();
+    expect(res.overrides).toEqual(o);
+    // Only the one key present — non-scoped or absent keys not included
+    expect(Object.keys(res.overrides!)).toEqual(['previewTarget']);
+  });
+
+  it('workspaceOverridesToJsonDoc emits keys in WORKSPACE_SCOPED_KEYS order', () => {
+    const o: Partial<Settings> = { lspTrace: 'messages', wordWrap: true, previewTarget: 'python', formatOnSave: true };
+    const doc = JSON.parse(workspaceOverridesToJsonDoc(o)) as Record<string, unknown>;
+    expect(Object.keys(doc)).toEqual([...WORKSPACE_SCOPED_KEYS]);
+  });
+
+  it('rejects an unknown top-level key (e.g. theme) with errors and no overrides', () => {
+    const res = jsonDocToWorkspaceOverrides(JSON.stringify({ theme: 'dark' }));
+    expect(res.overrides).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('rejects an unknown top-level key (e.g. foo) with errors and no overrides', () => {
+    const res = jsonDocToWorkspaceOverrides(JSON.stringify({ foo: 1 }));
+    expect(res.overrides).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('rejects a bad lspTrace enum value ("loud") with errors and no overrides', () => {
+    const res = jsonDocToWorkspaceOverrides(JSON.stringify({ lspTrace: 'loud' }));
+    expect(res.overrides).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('rejects wrong type for formatOnSave (string "yes") with errors and no overrides', () => {
+    const res = jsonDocToWorkspaceOverrides(JSON.stringify({ formatOnSave: 'yes' }));
+    expect(res.overrides).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('rejects an unknown previewTarget ("cobol") with a previewTarget diagnostic and no overrides', () => {
+    const res = jsonDocToWorkspaceOverrides(JSON.stringify({ previewTarget: 'cobol' }));
+    expect(res.overrides).toBeUndefined();
+    expect(res.errors?.[0]?.message).toMatch(/previewTarget/i);
+  });
+
+  it('rejects malformed JSON with errors and no overrides', () => {
+    const res = jsonDocToWorkspaceOverrides('{');
+    expect(res.overrides).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('accepts a valid previewTarget ("csharp") and round-trips it', () => {
+    const res = jsonDocToWorkspaceOverrides(JSON.stringify({ previewTarget: 'csharp' }));
+    expect(res.errors).toBeUndefined();
+    expect(res.overrides?.previewTarget).toBe('csharp');
+  });
+
+  it('non-scoped keys in the overrides object are silently dropped by workspaceOverridesToJsonDoc', () => {
+    // A full Settings object passed — only the four scoped keys should appear in the output
+    const full = { ...DEFAULT_SETTINGS, theme: 'light' } as Partial<Settings>;
+    const doc = JSON.parse(workspaceOverridesToJsonDoc(full)) as Record<string, unknown>;
+    expect(Object.keys(doc)).toEqual([...WORKSPACE_SCOPED_KEYS]);
+    expect(doc).not.toHaveProperty('theme');
   });
 });
