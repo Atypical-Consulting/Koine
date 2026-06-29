@@ -21,6 +21,9 @@ import type { PrefsCallbacks } from '@/settings/prefs';
 // localStorage key for the active representation (private to settingsPage.tsx; mirrored here so each story
 // can deterministically open on its own side regardless of the previous story's persisted choice).
 const MODE_KEY = 'koine.studio.settingsEditorMode';
+// localStorage key for the active JSON scope (private to settingsPage.tsx; reset before each mount so a
+// prior story's Workspace selection does not bleed into later stories).
+const SCOPE_KEY = 'koine.studio.settingsJsonScope';
 
 // The page only ever calls cb.onChange; every other PrefsCallbacks member is optional, and omitting
 // mcpEndpoint means the bare story env never (re)starts the MCP sidecar. A no-op live-apply hook is all a
@@ -30,18 +33,26 @@ const callbacks: PrefsCallbacks = { onChange: () => {} };
 // Render the production host markup and run createSettingsPage into it once mounted. The persisted
 // representation is seeded into localStorage BEFORE construct (the factory reads it at construct time), so
 // the page opens on the requested side; on unmount the handle is destroyed so the next story starts clean.
-function mountSettingsPage(mode: SettingsEditorMode) {
+// An optional `cb` override lets workspace-capable stories inject a workspaceKey callback.
+function mountSettingsPage(mode: SettingsEditorMode, cb: PrefsCallbacks = callbacks) {
   let handle: SettingsPageHandle | null = null;
   const mountRef = (root: HTMLElement | null): void => {
     if (root && !handle) {
       try {
         localStorage.setItem(MODE_KEY, mode);
+        // Reset scope so a prior story's Workspace selection never bleeds into this one.
+        localStorage.removeItem(SCOPE_KEY);
+        // If this is a workspace-capable story, clear any stale workspace overrides blob too.
+        if (cb.workspaceKey) {
+          const wsKey = cb.workspaceKey();
+          if (wsKey) localStorage.removeItem(`koine.studio.wsOverrides.${wsKey}`);
+        }
       } catch {
         // private-mode / quota: the factory simply falls back to its default representation.
       }
       const header = root.querySelector<HTMLElement>('#settings-page-header')!;
       const body = root.querySelector<HTMLElement>('#settings-page-body')!;
-      handle = createSettingsPage({ header, body }, callbacks);
+      handle = createSettingsPage({ header, body }, cb);
     } else if (!root && handle) {
       handle.destroy();
       handle = null;
@@ -95,5 +106,38 @@ export const InvalidJson: Story = {
       },
       { timeout: 3000 },
     );
+  },
+};
+
+/** JSON mode with a workspace OPEN (Workspace pill enabled) and the editor switched to Workspace scope.
+ * The play function clicks the Workspace radio so axe sees the enabled, selected scope toggle and the
+ * flat workspace document. Drives the Chromium axe project's contrast + roles check for the new control. */
+export const JsonWorkspaceScope: Story = {
+  render: () =>
+    mountSettingsPage('json', { onChange: () => {}, workspaceKey: () => 'sb-ws' }),
+  play: async ({ canvasElement }) => {
+    const scopeGroup = canvasElement.querySelector<HTMLElement>('[role="radiogroup"][aria-label="Settings JSON scope"]');
+    const wsRadio = scopeGroup?.querySelector<HTMLElement>('[data-value="workspace"]');
+    wsRadio?.click();
+    await waitFor(
+      () => {
+        expect(wsRadio?.getAttribute('aria-checked')).toBe('true');
+      },
+      { timeout: 3000 },
+    );
+  },
+};
+
+/** JSON mode with NO workspace open (default callbacks, no workspaceKey): the Workspace pill is disabled
+ * and the empty-state note "Open a folder to edit workspace settings" renders. Lets axe verify the
+ * disabled control and the note's color-contrast. */
+export const JsonNoWorkspace: Story = {
+  render: () => mountSettingsPage('json'),
+  play: async ({ canvasElement }) => {
+    const note = canvasElement.querySelector<HTMLElement>('.settings-json-scope-empty');
+    expect(note).not.toBeNull();
+    const scopeGroup = canvasElement.querySelector<HTMLElement>('[role="radiogroup"][aria-label="Settings JSON scope"]');
+    const wsRadio = scopeGroup?.querySelector<HTMLButtonElement>('[data-value="workspace"]');
+    expect(wsRadio?.disabled).toBe(true);
   },
 };

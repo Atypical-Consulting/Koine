@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { axe } from 'vitest-axe';
 import { EditorView } from '@codemirror/view';
-import { DEFAULT_SETTINGS } from '@/settings/persistence';
+import { DEFAULT_SETTINGS, effectiveSettings } from '@/settings/persistence';
 
 // vi.mock is hoisted above module-scope consts, so the spies must come from vi.hoisted(). loadSettings()
 // returns a COMPLETE Settings incl the live secret `aiApiKey: 'sk-LIVE'` — settingsToJsonDoc must strip
@@ -29,6 +29,7 @@ vi.mock('@/settings/theme', async (orig) => ({
 import { createSettingsPage, type SettingsPageHandle } from './settingsPage';
 
 const MODE_KEY = 'koine.studio.settingsEditorMode';
+const SCOPE_KEY = 'koine.studio.settingsJsonScope';
 
 // The real header markup (index.html): an <h2> title + an empty #settings-mode-toggle host the
 // radiogroup mounts into.
@@ -348,5 +349,280 @@ describe('createSettingsPage', () => {
     vi.useRealTimers();
     handle = createSettingsPage({ header, body }, cb);
     expect(await axe(document.body)).toHaveNoViolations();
+  });
+
+  // --- Task 2: JSON scope toggle (User | Workspace) #736 -----------------------------------
+  // The scope toggle is a segmented control (role=radiogroup) that lives inside the JSON body,
+  // so it appears only in JSON mode and is torn down on mode-swap or destroy().
+
+  // Helpers: query the scope toggle (it lives in body, not header).
+  const scopeGroup = (b: HTMLElement): HTMLElement | null =>
+    b.querySelector('[role="radiogroup"][aria-label="Settings JSON scope"]');
+  const scopeBtn = (b: HTMLElement, v: 'user' | 'workspace'): HTMLButtonElement | null =>
+    (scopeGroup(b)?.querySelector(`[data-value="${v}"]`) as HTMLButtonElement | null) ?? null;
+
+  it('scope toggle is absent in Visual mode (default)', () => {
+    handle = createSettingsPage({ header, body }, cb);
+    expect(scopeGroup(body)).toBeNull();
+  });
+
+  it('scope toggle appears when starting in JSON mode', () => {
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cb);
+    expect(scopeGroup(body)).not.toBeNull();
+  });
+
+  it('scope toggle appears after switching from Visual to JSON', () => {
+    handle = createSettingsPage({ header, body }, cb);
+    jsonRadio(header).click();
+    expect(scopeGroup(body)).not.toBeNull();
+  });
+
+  it('scope toggle is removed when switching back to Visual', () => {
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cb);
+    expect(scopeGroup(body)).not.toBeNull();
+    visualRadio(header).click();
+    expect(scopeGroup(body)).toBeNull();
+  });
+
+  it('destroy() removes the scope toggle from the body', () => {
+    localStorage.setItem(MODE_KEY, 'json');
+    const h = createSettingsPage({ header, body }, cb);
+    expect(scopeGroup(body)).not.toBeNull();
+    h.destroy();
+    expect(scopeGroup(body)).toBeNull();
+  });
+
+  it('without a workspace: Workspace pill is disabled/aria-disabled, scope forced to user, note shown', () => {
+    // cb has no workspaceKey → wsKey() returns null
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cb);
+
+    const group = scopeGroup(body)!;
+    expect(group).not.toBeNull();
+    // Group marked as disabled
+    expect(group.getAttribute('aria-disabled')).toBe('true');
+    expect(group.classList.contains('is-disabled')).toBe(true);
+    // User is checked, Workspace is not
+    expect(scopeBtn(body, 'user')!.getAttribute('aria-checked')).toBe('true');
+    expect(scopeBtn(body, 'workspace')!.getAttribute('aria-checked')).toBe('false');
+    // Workspace button is natively disabled
+    expect(scopeBtn(body, 'workspace')!.disabled).toBe(true);
+    // Empty-state note shown
+    expect(body.querySelector('.settings-json-scope-empty')).not.toBeNull();
+    expect(body.textContent).toContain('Open a folder to edit workspace settings');
+  });
+
+  it('with a workspace open: pills are enabled, no empty-state note', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => 'ws-key' };
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+
+    const group = scopeGroup(body)!;
+    expect(group.getAttribute('aria-disabled')).toBe('false');
+    expect(group.classList.contains('is-disabled')).toBe(false);
+    expect(scopeBtn(body, 'user')!.disabled).toBe(false);
+    expect(scopeBtn(body, 'workspace')!.disabled).toBe(false);
+    expect(body.querySelector('.settings-json-scope-empty')).toBeNull();
+  });
+
+  it('clicking Workspace (workspace open) flips aria-checked and persists the scope', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => 'ws-key' };
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+
+    scopeBtn(body, 'workspace')!.click();
+
+    expect(scopeBtn(body, 'workspace')!.getAttribute('aria-checked')).toBe('true');
+    expect(localStorage.getItem(SCOPE_KEY)).toBe('workspace');
+  });
+
+  it('ArrowRight on User radio moves to Workspace and persists scope', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => 'ws-key' };
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+
+    scopeBtn(body, 'user')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+
+    expect(scopeBtn(body, 'workspace')!.getAttribute('aria-checked')).toBe('true');
+    expect(localStorage.getItem(SCOPE_KEY)).toBe('workspace');
+  });
+
+  // --- Fix 3: mid-session folder-open restores persisted scope (#736) -------
+  it('mid-session folder open restores persisted workspace scope', () => {
+    // A prior session persisted 'workspace' as the preferred scope.
+    localStorage.setItem(SCOPE_KEY, 'workspace');
+    // Start with NO workspace key — scope must be forced to 'user'.
+    let wsk: string | null = null;
+    const cbMutable = { onChange: vi.fn(), workspaceKey: () => wsk };
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbMutable);
+
+    // No workspace open: User is active regardless of the persisted scope.
+    expect(scopeBtn(body, 'user')!.getAttribute('aria-checked')).toBe('true');
+    expect(scopeBtn(body, 'workspace')!.getAttribute('aria-checked')).toBe('false');
+
+    // Simulate folder open mid-session.
+    wsk = 'ws-key';
+    handle.refresh();
+
+    // Now scope should be restored to 'workspace' (from SCOPE_KEY) because a folder is open.
+    expect(scopeBtn(body, 'workspace')!.getAttribute('aria-checked')).toBe('true');
+    // Editor is seeded with the flat workspace doc (no overrides → empty object).
+    const wsText = EditorView.findFromDOM(body.querySelector('.cm-editor') as HTMLElement)!.state.doc.toString();
+    expect(wsText).toContain('{}');
+  });
+
+  // --- Task 3: Workspace scope round-trip (#736) -----------------------------------------
+  // Each test uses a workspace-capable cb so the Workspace pill is enabled.
+
+  const WS_KEY = 'ws-key';
+  const WS_OVERRIDES_KEY = `koine.studio.wsOverrides.${WS_KEY}`;
+
+  it('a valid Workspace doc sets the wsOverrides blob and calls onChange with user-level settings', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+    // Switch to Workspace scope.
+    scopeBtn(body, 'workspace')!.click();
+    cbWs.onChange.mockClear();
+
+    // Type a valid workspace doc that sets previewTarget.
+    typeJson(body, '{ "previewTarget": "typescript" }');
+    vi.advanceTimersByTime(500);
+
+    // (1) The keyed wsOverrides blob carries previewTarget.
+    const blob = JSON.parse(localStorage.getItem(WS_OVERRIDES_KEY) ?? '{}') as Record<string, unknown>;
+    expect(blob.previewTarget).toBe('typescript');
+    // (2) cb.onChange receives USER-level settings (not merged). The host computes effectiveSettings
+    //     itself using the persisted blob — passing merged settings here would leak overrides into the
+    //     user baseline and contaminate other workspaces.
+    expect(cbWs.onChange).toHaveBeenCalledTimes(1);
+    const received = cbWs.onChange.mock.calls[0][0] as typeof DEFAULT_SETTINGS;
+    expect(received.previewTarget).toBe(DEFAULT_SETTINGS.previewTarget); // user-level: 'csharp'
+    // The override IS live-applicable: the merge the host would compute gives 'typescript'.
+    expect(effectiveSettings(loadSettings(), WS_KEY).previewTarget).toBe('typescript');
+  });
+
+  it('setting the Workspace doc to {} clears the override from the blob', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
+    // Pre-seed a workspace override in localStorage.
+    localStorage.setItem(WS_OVERRIDES_KEY, JSON.stringify({ previewTarget: 'typescript' }));
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+    scopeBtn(body, 'workspace')!.click();
+
+    // Type an empty workspace doc — clears all scoped overrides.
+    typeJson(body, '{}');
+    vi.advanceTimersByTime(500);
+
+    // All four scoped keys must be absent from the blob after replace.
+    const blob = JSON.parse(localStorage.getItem(WS_OVERRIDES_KEY) ?? '{}') as Record<string, unknown>;
+    expect(blob.previewTarget).toBeUndefined();
+    expect(blob.formatOnSave).toBeUndefined();
+    expect(blob.wordWrap).toBeUndefined();
+    expect(blob.lspTrace).toBeUndefined();
+  });
+
+  it('an invalid Workspace doc renders diagnostics and persists nothing to the blob', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+    scopeBtn(body, 'workspace')!.click();
+    cbWs.onChange.mockClear();
+
+    // An unknown key violates additionalProperties:false on the workspace schema.
+    typeJson(body, '{ "badKey": "value" }');
+    vi.advanceTimersByTime(500);
+
+    // Diagnostics strip is visible.
+    expect(body.querySelector<HTMLElement>('.settings-json-diagnostics')?.hidden).toBe(false);
+    expect(body.textContent?.toLowerCase()).toMatch(/invalid|error/);
+    // Nothing was persisted — blob is still absent.
+    expect(localStorage.getItem(WS_OVERRIDES_KEY)).toBeNull();
+    // No onChange call.
+    expect(cbWs.onChange).not.toHaveBeenCalled();
+  });
+
+  it('switching to Workspace scope re-seeds the editor with the flat workspace doc', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
+    // Pre-seed an override so the workspace doc is non-empty.
+    localStorage.setItem(WS_OVERRIDES_KEY, JSON.stringify({ previewTarget: 'typescript' }));
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+    // Currently User scope — editor shows the grouped user settings.json.
+    const userText = EditorView.findFromDOM(body.querySelector('.cm-editor') as HTMLElement)!.state.doc.toString();
+    expect(userText).toContain('appearance'); // the grouped user doc has top-level group names
+
+    // Switch to Workspace scope.
+    scopeBtn(body, 'workspace')!.click();
+
+    // Editor now shows the flat workspace override doc.
+    const wsText = EditorView.findFromDOM(body.querySelector('.cm-editor') as HTMLElement)!.state.doc.toString();
+    expect(wsText).toContain('"previewTarget"');
+    expect(wsText).toContain('"typescript"');
+    expect(wsText).not.toContain('appearance');
+    // A scope switch alone must NOT persist anything.
+    vi.advanceTimersByTime(500);
+    expect(cbWs.onChange).not.toHaveBeenCalled();
+  });
+
+  it('a valid Workspace doc does not call setTheme (theme is not a scoped key)', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+    scopeBtn(body, 'workspace')!.click();
+    setTheme.mockClear();
+
+    typeJson(body, '{ "previewTarget": "typescript" }');
+    vi.advanceTimersByTime(500);
+
+    expect(setTheme).not.toHaveBeenCalled();
+  });
+
+  // --- Task 4: partial-removal-reverts-to-user integration (#736) ----------------------------
+  // Removing a key from the Workspace doc (rather than setting it to the User value) must
+  // drop it from the wsOverrides blob entirely — reverting the effective setting to the User
+  // value — while the remaining overridden keys stay in the blob and in effectiveSettings.
+
+  it('partial removal of a Workspace key reverts that key to the User value while others stay overridden', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+
+    // Step 1: switch to Workspace scope and apply two overrides.
+    scopeBtn(body, 'workspace')!.click();
+    cbWs.onChange.mockClear();
+
+    typeJson(body, '{ "previewTarget": "typescript", "lspTrace": "verbose" }');
+    vi.advanceTimersByTime(500);
+
+    // Both keys are in the blob.
+    const blobAfterTwo = JSON.parse(localStorage.getItem(WS_OVERRIDES_KEY) ?? '{}') as Record<string, unknown>;
+    expect(blobAfterTwo.previewTarget).toBe('typescript');
+    expect(blobAfterTwo.lspTrace).toBe('verbose');
+    expect(cbWs.onChange).toHaveBeenCalledTimes(1);
+    // onChange receives user-level settings (not merged); verify the effective merge separately.
+    const effectiveAfterTwo = effectiveSettings(loadSettings(), WS_KEY) as typeof DEFAULT_SETTINGS;
+    expect(effectiveAfterTwo.previewTarget).toBe('typescript');
+    expect(effectiveAfterTwo.lspTrace).toBe('verbose');
+
+    // Step 2: apply a doc with only lspTrace (drop previewTarget).
+    cbWs.onChange.mockClear();
+    typeJson(body, '{ "lspTrace": "verbose" }');
+    vi.advanceTimersByTime(500);
+
+    // previewTarget is gone from the blob (reverted to User value); lspTrace remains.
+    const blobAfterOne = JSON.parse(localStorage.getItem(WS_OVERRIDES_KEY) ?? '{}') as Record<string, unknown>;
+    expect(blobAfterOne.previewTarget).toBeUndefined();
+    expect(blobAfterOne.lspTrace).toBe('verbose');
+
+    // The effective merge now shows the revert: previewTarget is the User default, lspTrace stays.
+    // onChange receives user-level settings; the host's effectiveSettings() is the source of truth.
+    expect(cbWs.onChange).toHaveBeenCalledTimes(1);
+    const effectiveAfterOne = effectiveSettings(loadSettings(), WS_KEY) as typeof DEFAULT_SETTINGS;
+    expect(effectiveAfterOne.previewTarget).toBe(DEFAULT_SETTINGS.previewTarget); // reverted to user default
+    expect(effectiveAfterOne.lspTrace).toBe('verbose'); // still overridden
   });
 });

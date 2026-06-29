@@ -10,16 +10,22 @@
 // neither display nor clear the encrypted key.
 import { mountPreferencesPane, segmented, startMcpSidecarIfEnabled, type PrefsCallbacks } from '@/settings/prefs';
 import { createJsonSettingsEditor, type JsonSettingsEditor } from '@/editor/editor';
-import { settingsToJsonDoc, jsonDocToSettings } from '@/settings/settingsSchema';
-import { loadSettings, saveSettings } from '@/settings/persistence';
+import { settingsToJsonDoc, jsonDocToSettings, workspaceOverridesToJsonDoc, jsonDocToWorkspaceOverrides, SETTINGS_JSON_SCHEMA, WORKSPACE_SETTINGS_JSON_SCHEMA } from '@/settings/settingsSchema';
+import { loadSettings, saveSettings, loadWorkspaceOverrides, replaceWorkspaceOverrides } from '@/settings/persistence';
 import { setTheme } from '@/settings/theme';
 import { el } from '@/shared/el';
 
 /** Which representation the page is showing. Persisted so the last-used one is restored on reopen. */
 export type SettingsEditorMode = 'visual' | 'json';
 
+/** Which settings document the JSON editor targets. */
+type JsonScope = 'user' | 'workspace';
+
 /** localStorage key for the active representation (visual/json). */
 const MODE_KEY = 'koine.studio.settingsEditorMode';
+
+/** localStorage key for the active JSON scope (user/workspace). */
+const SCOPE_KEY = 'koine.studio.settingsJsonScope';
 
 /** Debounce before a JSON edit is validated + applied — long enough to coalesce a burst of keystrokes. */
 const DEBOUNCE_MS = 350;
@@ -55,6 +61,24 @@ function saveMode(mode: SettingsEditorMode): void {
   }
 }
 
+/** Read the persisted JSON scope, defaulting to 'user' when absent/invalid. */
+function loadScope(): JsonScope {
+  try {
+    return localStorage.getItem(SCOPE_KEY) === 'workspace' ? 'workspace' : 'user';
+  } catch {
+    return 'user';
+  }
+}
+
+/** Persist the JSON scope. A storage failure must never break scope switching. */
+function saveScope(s: JsonScope): void {
+  try {
+    localStorage.setItem(SCOPE_KEY, s);
+  } catch {
+    // Ignore storage failures (private mode / quota).
+  }
+}
+
 const MODES: { value: SettingsEditorMode; label: string }[] = [
   { value: 'visual', label: 'Visual' },
   { value: 'json', label: 'JSON' },
@@ -72,11 +96,30 @@ export function createSettingsPage(
 ): SettingsPageHandle {
   let mode: SettingsEditorMode = loadMode();
 
+  // The current workspace key (or null when no workspace is open / host doesn't scope settings).
+  const wsKey = (): string | null => cb.workspaceKey?.() ?? null;
+
   // Exactly one of these is live at a time (mirrors `mode`).
   let pane: ReturnType<typeof mountPreferencesPane> | null = null;
   let editor: JsonSettingsEditor | null = null;
   let diagnostics: HTMLElement | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // JSON scope state + the scope toggle control (only live while in JSON mode).
+  // Defaults to 'user' when no workspace is open; otherwise restores the persisted choice.
+  let scope: JsonScope = wsKey() === null ? 'user' : loadScope();
+
+  // Return the JSON schema for the active scope: the workspace schema is flat (no group nesting),
+  // the user schema is the full grouped settings.json schema. Drives the editor's inline linting.
+  function schemaForScope(): Record<string, unknown> {
+    return scope === 'workspace' ? WORKSPACE_SETTINGS_JSON_SCHEMA : SETTINGS_JSON_SCHEMA;
+  }
+  let scopeToggle: { el: HTMLElement; set(value: JsonScope): void } | null = null;
+
+  // The wsKey() value captured when the JSON body was last built, so refresh() can detect a
+  // workspace-availability change and fully rebuild the body (toggle enabled-state + seed) instead
+  // of just re-seeding the existing editor.
+  let builtWsKey: string | null = null;
 
   // --- header: the Visual/JSON segmented control ----------------------------
   // The shared, keyboard-navigable segmented() control (prefs.ts): a role=radiogroup of role=radio
@@ -93,6 +136,19 @@ export function createSettingsPage(
   toggleHost.append(modeToggle.el);
 
   // --- body: the active representation ---------------------------------------
+
+  // Return the correct seed document for the active scope: the full user settings.json (grouped,
+  // namespaced) for 'user', or the flat workspace-scoped overrides document for 'workspace'.
+  // Falls back to the user seed when no workspace key is available (defensive — the Workspace pill
+  // is disabled when wsKey() is null, so this branch should not occur in normal use).
+  function seedForScope(): string {
+    if (scope === 'workspace') {
+      const key = wsKey();
+      if (key === null) return settingsToJsonDoc(loadSettings()); // fallback: no workspace open
+      return workspaceOverridesToJsonDoc(loadWorkspaceOverrides(key));
+    }
+    return settingsToJsonDoc(loadSettings());
+  }
 
   function renderDiagnostics(errors: Array<{ message: string; line?: number }>): void {
     if (!diagnostics) return;
@@ -122,6 +178,38 @@ export function createSettingsPage(
     editor?.setInvalid(null);
   }
 
+  // Switch the JSON scope: persists the new choice, syncs the toggle UI, cancels any in-flight
+  // debounce (abandoning an invalid draft — mirrors the Visual↔JSON swap behavior), clears stale
+  // diagnostics, and re-seeds the editor from the scope's own document.
+  function setScope(next: JsonScope): void {
+    if (next === scope) return;
+    if (next === 'workspace' && wsKey() === null) {
+      scopeToggle?.set(scope); // re-sync the toggle to the unchanged scope (Fix 4)
+      return;
+    }
+    scope = next;
+    saveScope(scope);
+    scopeToggle?.set(scope);
+    // Cancel any pending debounce so the old draft is never applied to the new scope.
+    if (debounceTimer !== null) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    clearDiagnostics();
+    // Re-seed the live editor from the scope-appropriate document and swap the inline schema so
+    // the linter/completions/hover stay aligned with the document being edited (Fix 2).
+    if (editor) {
+      editor.setSchema(schemaForScope());
+      editor.setContent(seedForScope());
+      // The setContent triggers onChange which schedules a new debounce; cancel it — the seed is
+      // already the persisted state, so re-applying it is unnecessary.
+      if (debounceTimer !== null) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+    }
+  }
+
   // The JSON editor's onChange (fires on every doc change). Debounced so a burst of keystrokes validates
   // once; a valid document persists + live-applies, an invalid one only surfaces diagnostics.
   function scheduleApply(text: string): void {
@@ -133,6 +221,26 @@ export function createSettingsPage(
   }
 
   function applyJsonText(text: string): void {
+    if (scope === 'workspace') {
+      // Defensive guard: never enter the workspace apply path without a workspace key.
+      const key = wsKey();
+      if (key === null) return;
+      const res = jsonDocToWorkspaceOverrides(text);
+      if (res.overrides !== undefined) {
+        clearDiagnostics();
+        replaceWorkspaceOverrides(key, res.overrides);
+        // Notify listeners with the USER-level settings. The host (ide.tsx) caches this as the user
+        // baseline and computes effectiveSettings(s, wsKey()) itself — passing the merged object would
+        // leak workspace overrides into other workspaces as the user baseline. The override is already
+        // persisted via replaceWorkspaceOverrides above, so the host's effectiveSettings picks it up.
+        // Theme is not a scoped key so setTheme is not needed here.
+        cb.onChange(loadSettings());
+      } else if (res.errors) {
+        renderDiagnostics(res.errors); // surface messages; do NOT persist
+      }
+      return;
+    }
+    // user scope (unchanged) -------------------------------------------------
     // `current` = the last persisted settings; jsonDocToSettings re-injects its secret so a JSON edit can
     // never clear/overwrite the encrypted key.
     const res = jsonDocToSettings(text, loadSettings());
@@ -167,10 +275,47 @@ export function createSettingsPage(
       // so stealing focus onto a tab would be jarring); the sidecar (re)start is the startMcpOnShow call.
       pane.refresh(undefined, false);
     } else {
-      // Seed from loadSettings() (the secret is already omitted by settingsToJsonDoc).
+      // Snapshot the workspace key once so refresh() can detect an availability change and so every
+      // conditional in this branch reads a consistent value (Fix 3 — avoid triple wsKey() reads).
+      const currentWsKey = wsKey();
+      builtWsKey = currentWsKey;
+      // --- JSON scope toggle (User | Workspace) — prepended above the editor ---
+      // Re-derive scope from persistence on each build: restores a persisted 'workspace' scope when a
+      // folder opens mid-session (Fix 3); forces 'user' when no workspace is available.
+      scope = currentWsKey === null ? 'user' : loadScope();
+      scopeToggle = segmented<JsonScope>(
+        'Settings JSON scope',
+        [
+          { value: 'user', label: 'User' },
+          { value: 'workspace', label: 'Workspace' },
+        ],
+        setScope,
+      );
+      scopeToggle.set(scope);
+      // Reflect "no workspace": disable the Workspace pill (mirrors makeScopeBinding.applyEnabled).
+      const wsOpen = currentWsKey !== null;
+      scopeToggle.el.setAttribute('aria-disabled', String(!wsOpen));
+      scopeToggle.el.classList.toggle('is-disabled', !wsOpen);
+      for (const b of scopeToggle.el.querySelectorAll<HTMLButtonElement>('.koi-seg')) b.disabled = !wsOpen;
+      const scopeRow = el('div', { class: 'settings-json-scope' });
+      scopeRow.append(scopeToggle.el);
+      if (!wsOpen) {
+        // Give the note a stable id so the disabled scope group can reference it via aria-describedby,
+        // letting a screen-reader user hear why the group is disabled (Fix 5).
+        const noteId = 'settings-json-scope-note';
+        const note = el('p', { class: 'settings-json-scope-empty', text: 'Open a folder to edit workspace settings' });
+        note.id = noteId;
+        scopeToggle.el.setAttribute('aria-describedby', noteId);
+        scopeRow.append(note);
+      }
+      hosts.body.append(scopeRow);
+
+      // Seed from the scope-appropriate document (user: full settings.json; workspace: flat overrides),
+      // and wire the matching inline JSON schema so the linter/completions reflect the document's shape.
       editor = createJsonSettingsEditor(hosts.body, {
         onChange: (text) => scheduleApply(text),
-        initial: settingsToJsonDoc(loadSettings()),
+        initial: seedForScope(),
+        schema: schemaForScope(),
       });
       // The diagnostics strip lives below the editor; role=alert so a fresh error is announced. The id lets
       // the editor content's aria-errormessage point at it while the document is invalid (setInvalid).
@@ -188,6 +333,8 @@ export function createSettingsPage(
       clearTimeout(debounceTimer);
       debounceTimer = null;
     }
+    // Null out the scope toggle reference; the DOM node is removed by replaceChildren() below.
+    scopeToggle = null;
     if (pane) {
       pane.destroy();
       pane = null;
@@ -227,12 +374,23 @@ export function createSettingsPage(
     if (mode === 'visual') {
       pane?.refresh(category, false); // repaint from live settings; land on `category` when given
     } else if (editor) {
-      // Re-seed only when the persisted document actually differs, so a re-open doesn't clobber an
-      // in-flight valid edit. A programmatic re-seed is not a user edit, so drop the onChange-scheduled
-      // re-apply it would otherwise trigger. Either way, clear any stale diagnostics.
-      const fresh = settingsToJsonDoc(loadSettings());
+      // If workspace availability changed since the body was built (e.g. a folder was opened or closed
+      // while the page sat hidden), fully rebuild the body so the scope toggle's enabled/empty-state
+      // AND the seeded document both reflect the current wsKey(). buildBody calls startMcpOnShow.
+      if (wsKey() !== builtWsKey) {
+        // Clear a visible stale diagnostics strip before teardown so the role=alert node is emptied
+        // before its parent is removed — avoids a momentary stale error announcement (Fix 5).
+        clearDiagnostics();
+        teardownBody();
+        buildBody();
+        return; // buildBody already called startMcpOnShow — skip the outer call
+      }
+      // Lightweight re-seed: only when the scope-appropriate document actually differs, so a re-open
+      // doesn't clobber an in-flight valid edit. Either way, clear any stale diagnostics.
+      const fresh = seedForScope();
       if (editor.getText() !== fresh) {
         editor.setContent(fresh);
+        // A programmatic re-seed is not a user edit — cancel the debounce onChange just scheduled.
         if (debounceTimer !== null) {
           clearTimeout(debounceTimer);
           debounceTimer = null;

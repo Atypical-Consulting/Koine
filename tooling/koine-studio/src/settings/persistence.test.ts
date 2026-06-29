@@ -35,6 +35,7 @@ import {
   workspaceKeyOf,
   loadWorkspaceOverrides,
   saveWorkspaceOverride,
+  replaceWorkspaceOverrides,
   effectiveSettings,
   WORKSPACE_SCOPED_KEYS,
   loadKeybindingOverrides,
@@ -900,6 +901,67 @@ describe('workspace-scoped settings overrides', () => {
     const user: typeof DEFAULT_SETTINGS = { ...DEFAULT_SETTINGS, wordWrap: false };
     effectiveSettings(user, key);
     expect(user.wordWrap).toBe(false);
+  });
+});
+
+describe('replaceWorkspaceOverrides', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('sets present keys and deletes absent ones in the keyed blob', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    // Write all four overrides first.
+    saveWorkspaceOverride(key, 'previewTarget', 'typescript');
+    saveWorkspaceOverride(key, 'formatOnSave', false);
+    saveWorkspaceOverride(key, 'wordWrap', true);
+    saveWorkspaceOverride(key, 'lspTrace', 'messages');
+    // Replace with only two of the four — the other two must be deleted from the blob.
+    replaceWorkspaceOverrides(key, { previewTarget: 'python', wordWrap: false });
+    const overrides = loadWorkspaceOverrides(key);
+    expect(overrides.previewTarget).toBe('python');
+    expect(overrides.wordWrap).toBe(false);
+    // formatOnSave and lspTrace were absent in the replacement → must be gone.
+    expect(overrides.formatOnSave).toBeUndefined();
+    expect(overrides.lspTrace).toBeUndefined();
+  });
+
+  test('{} clears every override — blob becomes empty, loadWorkspaceOverrides returns {}', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    saveWorkspaceOverride(key, 'previewTarget', 'typescript');
+    saveWorkspaceOverride(key, 'wordWrap', true);
+    replaceWorkspaceOverrides(key, {});
+    expect(loadWorkspaceOverrides(key)).toEqual({});
+  });
+
+  test('a present key written via replaceWorkspaceOverrides is readable back via loadWorkspaceOverrides', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    replaceWorkspaceOverrides(key, { previewTarget: 'typescript', formatOnSave: false });
+    const overrides = loadWorkspaceOverrides(key);
+    expect(overrides.previewTarget).toBe('typescript');
+    expect(overrides.formatOnSave).toBe(false);
+    // The two absent keys must not appear.
+    expect(overrides.wordWrap).toBeUndefined();
+    expect(overrides.lspTrace).toBeUndefined();
+  });
+
+  test('overwrites any value already in the blob (idempotent replace semantics)', () => {
+    const key = workspaceKeyOf(['/work/billing']);
+    replaceWorkspaceOverrides(key, { previewTarget: 'typescript', wordWrap: true });
+    // Now replace again with a different subset.
+    replaceWorkspaceOverrides(key, { lspTrace: 'verbose' });
+    const overrides = loadWorkspaceOverrides(key);
+    // Only lspTrace survived — the previous two were deleted.
+    expect(overrides.lspTrace).toBe('verbose');
+    expect(overrides.previewTarget).toBeUndefined();
+    expect(overrides.wordWrap).toBeUndefined();
+  });
+
+  test('overrides written to distinct workspace keys are isolated', () => {
+    const keyA = workspaceKeyOf(['/work/billing']);
+    const keyB = workspaceKeyOf(['/work/ordering']);
+    replaceWorkspaceOverrides(keyA, { previewTarget: 'typescript' });
+    replaceWorkspaceOverrides(keyB, { previewTarget: 'python' });
+    expect(loadWorkspaceOverrides(keyA).previewTarget).toBe('typescript');
+    expect(loadWorkspaceOverrides(keyB).previewTarget).toBe('python');
   });
 });
 
