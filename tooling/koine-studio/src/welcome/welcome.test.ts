@@ -400,6 +400,52 @@ describe('mountHome (routed Home view)', () => {
   });
 });
 
+describe('mountHome — dead-recent recovery (recover hook, #391)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = '';
+  });
+
+  test('recover(path) confirms, forgets the dead recent, and rebuilds the list in place', async () => {
+    localStorage.setItem(KEY, JSON.stringify(['ghost']));
+    const el = document.createElement('div');
+    const home = mountHome(el, makeCallbacks(), SAMPLE);
+    // The seeded recent renders one row.
+    expect(el.querySelectorAll('.koi-welcome-recent-item').length).toBe(1);
+
+    // recover() surfaces the "Remove from Recent?" confirm on the Home view (not via an overlay over the
+    // editor) and, on accept, forgets the dead entry and refreshes the recents list in place.
+    const recovered = home.recover('ghost');
+    const okBtn = document.querySelector<HTMLButtonElement>('.koi-confirm-btn-danger');
+    expect(okBtn).not.toBeNull();
+    okBtn!.click();
+    await recovered;
+
+    expect(localStorage.getItem(KEY)).not.toContain('ghost');
+    // It was the only recent, so the empty-state copy now shows in the rebuilt list.
+    expect(el.querySelector('.koi-welcome-empty')).not.toBeNull();
+    expect(el.querySelectorAll('.koi-welcome-recent-item').length).toBe(0);
+  });
+
+  test('recover(path) on cancel keeps the entry and leaves the list intact', async () => {
+    localStorage.setItem(KEY, JSON.stringify(['ghost']));
+    const el = document.createElement('div');
+    const home = mountHome(el, makeCallbacks(), SAMPLE);
+
+    const recovered = home.recover('ghost');
+    const cancelBtn = [...document.querySelectorAll<HTMLButtonElement>('.koi-confirm-btn')].find(
+      (b) => b.textContent === 'Cancel',
+    );
+    expect(cancelBtn).toBeDefined();
+    cancelBtn!.click();
+    await recovered;
+
+    // Cancelled — the dead entry is still remembered and its row still shows.
+    expect(localStorage.getItem(KEY)).toContain('ghost');
+    expect(el.querySelectorAll('.koi-welcome-recent-item').length).toBe(1);
+  });
+});
+
 describe('Home colophon footer', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
