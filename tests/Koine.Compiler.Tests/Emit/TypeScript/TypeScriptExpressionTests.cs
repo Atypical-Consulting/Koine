@@ -226,11 +226,12 @@ public class TypeScriptExpressionTests
     // Regex match (#641) — `matches` routes through the runtime `regexMatch`
     // seam rather than an inline `/pat/.test(...)`. JS has no synchronous
     // per-call regex timeout, so centralizing every match in one helper gives a
-    // single hardening point (input-length bound now; a linear-time engine later).
+    // single hardening point (the place to swap in a linear-time engine) while
+    // preserving `.test` semantics exactly (no target-divergent behavior).
     // =========================================================================
 
     [Fact]
-    public void Matches_lowers_through_the_bounded_regexMatch_helper()
+    public void Matches_lowers_through_the_runtime_regexMatch_seam()
     {
         // The old lowering was `/pat/.test(target)`; #641 routes it through `regexMatch`
         // so an author-supplied pattern over untrusted input has a single ReDoS chokepoint.
@@ -241,8 +242,8 @@ public class TypeScriptExpressionTests
     [Fact]
     public void Matches_invariant_imports_regexMatch_from_the_runtime()
     {
-        // A value object with a `matches` invariant must emit the bounded helper call AND
-        // auto-import `regexMatch` from the once-emitted runtime module (no inline `.test`).
+        // A value object with a `matches` invariant must emit the `regexMatch` seam call AND
+        // auto-import it from the once-emitted runtime module (no inline `.test`).
         const string src =
             """
             context C {

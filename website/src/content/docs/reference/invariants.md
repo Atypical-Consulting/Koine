@@ -232,14 +232,15 @@ sink, so Koine bounds the emitted match per target:
 | Target | Emitted form | Bound |
 | --- | --- | --- |
 | **C#** | `Regex.IsMatch(raw, @"…", RegexOptions.None, TimeSpan.FromMilliseconds(1000))` | A real **per-call match timeout** (1000 ms). A timed-out match throws a *contained* `RegexMatchTimeoutException` from the constructor — it never hangs. |
-| **TypeScript** | `regexMatch(/…/, raw)` (a runtime helper) | JS has **no** synchronous per-call regex timeout, so every match routes through one `regexMatch` seam that bounds input length (default 4096) as defense-in-depth — and is the single place to swap in a linear-time engine (e.g. RE2) for a hard guarantee. |
+| **TypeScript** | `regexMatch(/…/, raw)` (a runtime helper) | JS has **no** synchronous per-call regex timeout, so the host can't bound a match without changing its result. Every match routes through one `regexMatch` seam that preserves semantics exactly (it *is* `.test`) and is the single place to swap in a linear-time engine (e.g. RE2) for a hard guarantee on untrusted input. |
 | **Python** | `re.search(r"…", raw) is not None` | CPython's stdlib `re` has **no** per-call timeout; the form is unchanged. For untrusted input, cap input length or use the third-party `regex` module's `timeout=`. |
 | **PHP** | `(bool)preg_match('/…/', $raw)` | PCRE is **already bounded** by `pcre.backtrack_limit` / `pcre.recursion_limit` (set by default), so a catastrophic pattern fails the match instead of hanging. |
 | **Rust** | `koine_runtime::regex_is_match(r"…", &raw)` | The `regex` crate is a **linear-time** automaton with no catastrophic backtracking — no timeout is needed by construction. |
 
 The C# timeout is configurable on the emitter (`CSharpEmitterOptions.RegexMatchTimeoutMs`,
-default `1000`); the TypeScript bound is the `maxInputLength` parameter of the generated
-`regexMatch` helper.
+default `1000`). The generated TypeScript `regexMatch` helper is the seam to harden untrusted-input
+matching without touching every call site — replace its body with a linear-time engine (e.g. RE2)
+and every `matches` invariant inherits the bound.
 
 ## 10.7 Conditional invariants (`when`)
 

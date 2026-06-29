@@ -460,23 +460,14 @@ export class DomainInvariantViolationError extends Error {
  * one helper so an author-supplied pattern over untrusted input has a single hardening seam.
  *
  * JavaScript has NO synchronous per-call regex timeout (unlike .NET's `Regex` matchTimeout),
- * so a catastrophic-backtracking pattern could otherwise block the event loop on adversarial
- * input — a ReDoS sink at the value object's trust boundary. As defense-in-depth this bounds
- * the input length (the dominant trigger for polynomial blow-up) and throws a CONTAINED
- * `DomainInvariantViolationError` rather than hanging. For a hard, engine-level guarantee
- * against exponential backtracking, swap a linear-time engine (e.g. RE2) in HERE — this is the
- * one place every `matches` invariant flows through. (Koine #641.)
- *
- * `maxInputLength` defaults to 4096 — generous for the format/identifier fields `matches` is
- * meant for (emails, SKUs, slugs, postal codes). Raise it at the call site if you validate a
- * legitimately longer field.
+ * so a catastrophic-backtracking pattern can still block the event loop on adversarial input —
+ * a ReDoS risk at the value object's trust boundary that the host language cannot bound without
+ * changing match semantics. This helper therefore PRESERVES `matches` semantics exactly (it is
+ * `pattern.test(input)`, identical to every other Koine target) and instead exists as the ONE
+ * place to harden: drop in a linear-time engine (e.g. RE2) here to bound execution for
+ * untrusted input, and every generated `matches` invariant picks it up. (Koine #641.)
  */
-export function regexMatch(pattern: RegExp, input: string, maxInputLength = 4096): boolean {
-  if (input.length > maxInputLength) {
-    throw new DomainInvariantViolationError(
-      'String',
-      `input length ${input.length} exceeds the regex-match bound of ${maxInputLength}`);
-  }
+export function regexMatch(pattern: RegExp, input: string): boolean {
   return pattern.test(input);
 }
 

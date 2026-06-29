@@ -240,9 +240,9 @@ internal sealed class TypeScriptExpressionTranslator
             case MatchExpr m:
                 // raw matches /pat/  ->  regexMatch(/pat/, raw)
                 // Routed through the runtime `regexMatch` seam (not an inline `/pat/.test(...)`) so an
-                // author-supplied pattern over untrusted input has a single ReDoS chokepoint (#641):
-                // JS has no synchronous per-call regex timeout, so the helper bounds input length now
-                // and is the one place to swap in a linear-time engine (RE2) later.
+                // author-supplied pattern over untrusted input has a single ReDoS chokepoint (#641).
+                // The seam preserves `matches` semantics exactly (it IS `.test`) — JS has no synchronous
+                // per-call regex timeout — and is the one place to swap in a linear-time engine (RE2).
                 sb.Append("regexMatch(/").Append(m.Pattern).Append("/, ");
                 Write(m.Target, sb);
                 sb.Append(')');
