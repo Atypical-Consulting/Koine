@@ -746,14 +746,13 @@ internal sealed class PhpExpressionTranslator
     /// </summary>
     private bool IsDerivedMemberOf(TypeRef targetType, string memberName)
     {
-        TypeDecl decl;
+        // Resolve the target type the same context-then-global way the member-type lookup that gated
+        // entry into this branch did (mirrors ReadModelSourceMembers and the validator's resolution).
         var context = targetType.Qualifier ?? _resolver.Context;
-        if (context is null || !_index.TryGetDeclIn(context, targetType.Name, out decl))
+        if ((context is null || !_index.TryGetDeclIn(context, targetType.Name, out TypeDecl decl))
+            && !_index.TryGetDecl(targetType.Name, out decl))
         {
-            if (!_index.TryGetDecl(targetType.Name, out decl))
-            {
-                return false;
-            }
+            return false;
         }
 
         IReadOnlyList<Member> members = decl switch
