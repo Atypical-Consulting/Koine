@@ -1920,8 +1920,13 @@ export function init(): () => void {
 
   // Diagrams are rendered with a theme-matched Mermaid palette; re-render on a theme flip (covers
   // the toolbar toggle, the command palette, and Preferences — all route through setTheme). The
-  // controller owns the diagram cache + center state, so it decides whether to re-render now.
-  onThemeChange(() => controller.onThemeChanged());
+  // controller owns the diagram cache + center state, so it decides whether to re-render now. The
+  // integrated terminal (#751) paints from concrete xterm colours that can't read var(), so re-resolve
+  // its theme here too — ide.tsx owns the panel handle and this fan-out (the same way it drives fit()).
+  onThemeChange(() => {
+    controller.onThemeChanged();
+    terminal?.applyTheme();
+  });
 
   // Copy a shareable playground link (the current model encoded in the URL hash) to the clipboard,
   // flashing a transient confirmation in the status pill. After the flash, re-derive the pill from
