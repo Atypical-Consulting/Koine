@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { SETTINGS_JSON_SCHEMA, SETTINGS_FIELDS, settingsToJsonDoc, jsonDocToSettings } from './settingsSchema';
+import {
+  SETTINGS_JSON_SCHEMA,
+  SETTINGS_FIELDS,
+  SETTINGS_FIELD_META,
+  settingsFieldMeta,
+  settingsToJsonDoc,
+  jsonDocToSettings,
+} from './settingsSchema';
 import { DEFAULT_SETTINGS, type Settings } from './persistence';
 
 const withKey: Settings = { ...DEFAULT_SETTINGS, aiApiKey: 'sk-SECRET' };
@@ -22,6 +29,25 @@ describe('settingsSchema', () => {
     // 3) the secret appears nowhere in the schema, and unknown groups are rejected at the root.
     expect(JSON.stringify(SETTINGS_JSON_SCHEMA)).not.toContain('aiApiKey');
     expect(SETTINGS_JSON_SCHEMA.additionalProperties).toBe(false);
+  });
+
+  it('exposes non-empty title + description for every field, secret absent (#765)', () => {
+    // The hover/completion copy (#765) is driven entirely by this accessor; a blank title or
+    // description would render an empty tooltip / completion detail, so lock both to non-empty.
+    for (const f of SETTINGS_FIELDS) {
+      const meta = settingsFieldMeta(f.group, f.docKey);
+      expect(meta, `${f.group}.${f.docKey}`).toBeDefined();
+      expect(meta!.title.length, `${f.group}.${f.docKey} title`).toBeGreaterThan(0);
+      expect(meta!.description.length, `${f.group}.${f.docKey} description`).toBeGreaterThan(0);
+    }
+    // One entry per field, no path collisions — the completion source keys off this map.
+    expect(Object.keys(SETTINGS_FIELD_META).length).toBe(SETTINGS_FIELDS.length);
+    // The secret never has a metadata entry, so no hover/completion copy can leak it.
+    expect(Object.keys(SETTINGS_FIELD_META).some((k) => k.toLowerCase().includes('apikey'))).toBe(false);
+    expect(settingsFieldMeta('ai', 'apiKey')).toBeUndefined();
+    // An unknown group / typo'd key resolves to nothing (hover/completion degrade silently).
+    expect(settingsFieldMeta('editor', 'nope')).toBeUndefined();
+    expect(settingsFieldMeta('bogus', 'tabSize')).toBeUndefined();
   });
 
   it('settingsToJsonDoc omits aiApiKey from the serialized document', () => {
