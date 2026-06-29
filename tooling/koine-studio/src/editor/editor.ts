@@ -62,6 +62,7 @@ import {
   jsonCompletion,
   handleRefresh,
   stateExtensions,
+  updateSchema,
   jsonPointerForPosition,
 } from 'codemirror-json-schema';
 import type {
@@ -1550,6 +1551,12 @@ export interface JsonSettingsEditor {
    * invalid and pointed at the diagnostics strip — unlike the one-shot `role="alert"` announcement.
    */
   setInvalid(diagnosticsId: string | null): void;
+  /**
+   * Swap the active inline JSON schema (lint/completion/hover) without rebuilding the editor. Call when
+   * the settings scope switches between User (full grouped schema) and Workspace (flat overrides schema)
+   * so the inline linter/completions stay aligned with the document being edited.
+   */
+  setSchema(schema: Record<string, unknown>): void;
   destroy(): void;
 }
 
@@ -1632,7 +1639,7 @@ function settingsSchemaExtensions(schema: Parameters<typeof stateExtensions>[0])
  */
 export function createJsonSettingsEditor(
   parent: HTMLElement,
-  opts: { onChange: (text: string) => void; initial?: string },
+  opts: { onChange: (text: string) => void; initial?: string; schema?: Record<string, unknown> },
 ): JsonSettingsEditor {
   // The content's ARIA name. Kept aside so both the initial config and every setInvalid reconfigure
   // re-apply it (a reconfigure REPLACES the compartment's contents, so the name must be re-listed).
@@ -1641,6 +1648,8 @@ export function createJsonSettingsEditor(
   // invalid/error relationship without rebuilding the editor (same pattern as the .koi editor's
   // lineWrap/minimap compartments). Initially: just the aria-label, no invalid state.
   const contentAttributes = new Compartment();
+  // The active JSON schema, seeded from opts.schema (or the full user schema when not given).
+  const activeSchema = opts.schema ?? SETTINGS_JSON_SCHEMA;
   const view = new EditorView({
     parent,
     state: EditorState.create({
@@ -1650,7 +1659,7 @@ export function createJsonSettingsEditor(
         lineNumbers(),
         // The JSON language, JSON-parse + schema linters, schema-aware completion and our title-aware
         // hover — the whole schema-aware editing surface, composed so the hover can surface field titles.
-        ...settingsSchemaExtensions(SETTINGS_JSON_SCHEMA as unknown as Parameters<typeof stateExtensions>[0]),
+        ...settingsSchemaExtensions(activeSchema as unknown as Parameters<typeof stateExtensions>[0]),
         syntaxHighlighting(koineHighlight),
         syntaxHighlighting(defaultHighlightStyle),
         sharedTheme,
@@ -1674,6 +1683,9 @@ export function createJsonSettingsEditor(
           ? { ...ariaLabel, 'aria-invalid': 'true', 'aria-errormessage': diagnosticsId }
           : { ...ariaLabel };
       view.dispatch({ effects: contentAttributes.reconfigure(EditorView.contentAttributes.of(attrs)) });
+    },
+    setSchema(schema) {
+      updateSchema(view, schema as unknown as Parameters<typeof stateExtensions>[0]);
     },
     destroy: () => view.destroy(),
   };

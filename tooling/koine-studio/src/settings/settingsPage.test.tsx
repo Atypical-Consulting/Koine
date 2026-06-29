@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { axe } from 'vitest-axe';
 import { EditorView } from '@codemirror/view';
-import { DEFAULT_SETTINGS } from '@/settings/persistence';
+import { DEFAULT_SETTINGS, effectiveSettings } from '@/settings/persistence';
 
 // vi.mock is hoisted above module-scope consts, so the spies must come from vi.hoisted(). loadSettings()
 // returns a COMPLETE Settings incl the live secret `aiApiKey: 'sk-LIVE'` — settingsToJsonDoc must strip
@@ -449,13 +449,38 @@ describe('createSettingsPage', () => {
     expect(localStorage.getItem(SCOPE_KEY)).toBe('workspace');
   });
 
+  // --- Fix 3: mid-session folder-open restores persisted scope (#736) -------
+  it('mid-session folder open restores persisted workspace scope', () => {
+    // A prior session persisted 'workspace' as the preferred scope.
+    localStorage.setItem(SCOPE_KEY, 'workspace');
+    // Start with NO workspace key — scope must be forced to 'user'.
+    let wsk: string | null = null;
+    const cbMutable = { onChange: vi.fn(), workspaceKey: () => wsk };
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbMutable);
+
+    // No workspace open: User is active regardless of the persisted scope.
+    expect(scopeBtn(body, 'user')!.getAttribute('aria-checked')).toBe('true');
+    expect(scopeBtn(body, 'workspace')!.getAttribute('aria-checked')).toBe('false');
+
+    // Simulate folder open mid-session.
+    wsk = 'ws-key';
+    handle.refresh();
+
+    // Now scope should be restored to 'workspace' (from SCOPE_KEY) because a folder is open.
+    expect(scopeBtn(body, 'workspace')!.getAttribute('aria-checked')).toBe('true');
+    // Editor is seeded with the flat workspace doc (no overrides → empty object).
+    const wsText = EditorView.findFromDOM(body.querySelector('.cm-editor') as HTMLElement)!.state.doc.toString();
+    expect(wsText).toContain('{}');
+  });
+
   // --- Task 3: Workspace scope round-trip (#736) -----------------------------------------
   // Each test uses a workspace-capable cb so the Workspace pill is enabled.
 
   const WS_KEY = 'ws-key';
   const WS_OVERRIDES_KEY = `koine.studio.wsOverrides.${WS_KEY}`;
 
-  it('a valid Workspace doc sets the wsOverrides blob and calls onChange with effectiveSettings', () => {
+  it('a valid Workspace doc sets the wsOverrides blob and calls onChange with user-level settings', () => {
     const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
     localStorage.setItem(MODE_KEY, 'json');
     handle = createSettingsPage({ header, body }, cbWs);
@@ -470,10 +495,14 @@ describe('createSettingsPage', () => {
     // (1) The keyed wsOverrides blob carries previewTarget.
     const blob = JSON.parse(localStorage.getItem(WS_OVERRIDES_KEY) ?? '{}') as Record<string, unknown>;
     expect(blob.previewTarget).toBe('typescript');
-    // (2) cb.onChange received settings with the override applied (effectiveSettings merged it).
+    // (2) cb.onChange receives USER-level settings (not merged). The host computes effectiveSettings
+    //     itself using the persisted blob — passing merged settings here would leak overrides into the
+    //     user baseline and contaminate other workspaces.
     expect(cbWs.onChange).toHaveBeenCalledTimes(1);
     const received = cbWs.onChange.mock.calls[0][0] as typeof DEFAULT_SETTINGS;
-    expect(received.previewTarget).toBe('typescript');
+    expect(received.previewTarget).toBe(DEFAULT_SETTINGS.previewTarget); // user-level: 'csharp'
+    // The override IS live-applicable: the merge the host would compute gives 'typescript'.
+    expect(effectiveSettings(loadSettings(), WS_KEY).previewTarget).toBe('typescript');
   });
 
   it('setting the Workspace doc to {} clears the override from the blob', () => {
@@ -508,7 +537,7 @@ describe('createSettingsPage', () => {
     vi.advanceTimersByTime(500);
 
     // Diagnostics strip is visible.
-    expect(body.querySelector('.settings-json-diagnostics')?.hidden).toBe(false);
+    expect(body.querySelector<HTMLElement>('.settings-json-diagnostics')?.hidden).toBe(false);
     expect(body.textContent?.toLowerCase()).toMatch(/invalid|error/);
     // Nothing was persisted — blob is still absent.
     expect(localStorage.getItem(WS_OVERRIDES_KEY)).toBeNull();
@@ -569,12 +598,13 @@ describe('createSettingsPage', () => {
     typeJson(body, '{ "previewTarget": "typescript", "lspTrace": "verbose" }');
     vi.advanceTimersByTime(500);
 
-    // Both keys are in the blob and in the onChange payload.
+    // Both keys are in the blob.
     const blobAfterTwo = JSON.parse(localStorage.getItem(WS_OVERRIDES_KEY) ?? '{}') as Record<string, unknown>;
     expect(blobAfterTwo.previewTarget).toBe('typescript');
     expect(blobAfterTwo.lspTrace).toBe('verbose');
     expect(cbWs.onChange).toHaveBeenCalledTimes(1);
-    const effectiveAfterTwo = cbWs.onChange.mock.calls[0][0] as typeof DEFAULT_SETTINGS;
+    // onChange receives user-level settings (not merged); verify the effective merge separately.
+    const effectiveAfterTwo = effectiveSettings(loadSettings(), WS_KEY) as typeof DEFAULT_SETTINGS;
     expect(effectiveAfterTwo.previewTarget).toBe('typescript');
     expect(effectiveAfterTwo.lspTrace).toBe('verbose');
 
@@ -588,9 +618,10 @@ describe('createSettingsPage', () => {
     expect(blobAfterOne.previewTarget).toBeUndefined();
     expect(blobAfterOne.lspTrace).toBe('verbose');
 
-    // The latest onChange reflects the revert: previewTarget is the User default (csharp), lspTrace stays.
+    // The effective merge now shows the revert: previewTarget is the User default, lspTrace stays.
+    // onChange receives user-level settings; the host's effectiveSettings() is the source of truth.
     expect(cbWs.onChange).toHaveBeenCalledTimes(1);
-    const effectiveAfterOne = cbWs.onChange.mock.calls[0][0] as typeof DEFAULT_SETTINGS;
+    const effectiveAfterOne = effectiveSettings(loadSettings(), WS_KEY) as typeof DEFAULT_SETTINGS;
     expect(effectiveAfterOne.previewTarget).toBe(DEFAULT_SETTINGS.previewTarget); // reverted to user default
     expect(effectiveAfterOne.lspTrace).toBe('verbose'); // still overridden
   });
