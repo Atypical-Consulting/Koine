@@ -15,7 +15,7 @@ import {
 } from '@/shell/ideUtils';
 import { createEditorSession } from '@/shell/editorSession';
 import { createInspectorController } from '@/shell/inspectorController';
-import { leftRailMarkup } from '@/shell/leftRail';
+import { LeftRail } from '@/shell/LeftRail';
 import { RightStrip } from '@/shell/RightStrip';
 import { createCanvasWrite } from '@/shell/canvasWrite';
 import { getPlatform } from '@/host';
@@ -422,10 +422,12 @@ export function init(hooks: IdeHooks = {}): () => void {
     workspace.scheduleAutoSave();
   });
 
-  // The left rail's inner markup is owned by leftRail.ts (single source of truth, #453); index.html keeps
-  // <aside id="leftrail"> a thin shell. Inject it here — synchronously, before any rail el(...) lookup or
-  // the inspector controller below — so #filetree-body / #rail-domain-pane / the doclinks all resolve.
-  el<HTMLElement>('leftrail').innerHTML = leftRailMarkup();
+  // The left rail's inner markup is owned by the LeftRail Preact component (#759, was the #453
+  // leftRailMarkup string builder); index.html keeps <aside id="leftrail"> a thin shell. Render it here —
+  // synchronously, before any rail el(...) lookup or the inspector controller below — so #filetree-body /
+  // #rail-domain-pane all resolve. LeftRail never re-renders, so the imperative explorer/outline islands
+  // that later mount into those (empty) hosts are never reconciled away.
+  render(<LeftRail />, el<HTMLElement>('leftrail'));
 
   // The right-edge tool-window stripe's buttons are owned by the RightStrip Preact component (#759, was
   // the #500 rightStripMarkup string builder); index.html keeps <div id="right-strip"> a thin shell.

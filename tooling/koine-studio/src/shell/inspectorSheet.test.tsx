@@ -6,8 +6,9 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent } from '@testing-library/preact';
 import { axe } from 'vitest-axe';
+import { render } from 'preact';
 import { createInspectorSheet, openInspectorSheet, type InspectorSheet } from '@/shell/inspectorSheet';
-import { leftRailMarkup } from '@/shell/leftRail';
+import { LeftRail } from '@/shell/LeftRail';
 import {
   createInspectorController,
   type InspectorAssistant,
@@ -221,7 +222,7 @@ const APP_HTML = `
   <div id="app">
     <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
     <main id="split">
-      <aside id="leftrail" class="pane">${leftRailMarkup()}</aside>
+      <aside id="leftrail" class="pane"></aside>
       <section id="center" class="pane">
         <div id="deck-bar"></div>
         <div id="center-body">
@@ -386,6 +387,9 @@ async function flush(): Promise<void> {
 describe('inspectorController — bottom sheet on a narrow viewport', () => {
   beforeEach(() => {
     document.body.innerHTML = APP_HTML;
+    // The left rail is a Preact component now (#759, was leftRailMarkup): render it into the thin shell so
+    // the controller's rail el() lookups resolve, as the boot does.
+    render(<LeftRail />, document.getElementById('leftrail')!);
     setViewport(500); // below $bp-narrow (640)
   });
 

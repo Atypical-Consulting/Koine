@@ -15,7 +15,7 @@ import {
   type InspectorControllerLsp,
 } from '@/shell/inspectorController';
 import { createElement, render } from 'preact';
-import { leftRailMarkup } from '@/shell/leftRail';
+import { LeftRail } from '@/shell/LeftRail';
 import { RightStrip } from '@/shell/RightStrip';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
 import { createAppStore } from '@/store/index';
@@ -42,7 +42,7 @@ const APP_HTML = `
   <div id="app">
     <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
     <main id="split">
-      <aside id="leftrail" class="pane">${leftRailMarkup()}</aside>
+      <aside id="leftrail" class="pane"></aside>
       <section id="center" class="pane">
         <div id="deck-bar"></div>
         <div id="center-body">
@@ -109,8 +109,10 @@ const APP_HTML = `
 
 function seedDom(): void {
   document.body.innerHTML = APP_HTML;
-  // The #right-strip buttons are a Preact component now (#759, was rightStripMarkup): render them into the
-  // thin shell so the controller's `.rstrip-btn` capture + aria-pressed wiring resolve, as the boot does.
+  // The left rail + right-strip buttons are Preact components now (#759, were leftRailMarkup /
+  // rightStripMarkup): render them into their thin shells so the controller's rail/`.rstrip-btn` lookups +
+  // wiring resolve, as the boot does.
+  render(createElement(LeftRail, null), document.getElementById('leftrail')!);
   render(createElement(RightStrip, null), document.getElementById('right-strip')!);
 }
 
