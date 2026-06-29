@@ -17,7 +17,7 @@ public sealed partial class RustEmitter
     internal sealed record RustEmitContext(
         ModelIndex Index,
         IReadOnlyDictionary<string, string> EnumMemberToType,
-        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> EnumVariants,
+        IReadOnlyDictionary<(string Context, string Enum), IReadOnlyDictionary<string, string>> EnumVariants,
         IReadOnlySet<string> AdditiveNeeds,
         IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds);
 
@@ -179,25 +179,23 @@ public sealed partial class RustEmitter
     }
 
     /// <summary>
-    /// The shared per-enum member→variant lookup (enum name → member name → emitted Rust variant),
-    /// de-duplicated via <see cref="RustNaming.UniqueVariants"/> so members that PascalCase-collapse
-    /// (e.g. <c>EUR</c>/<c>Eur</c>) map to distinct variants (#323). Both the enum emitter (declaration
-    /// and smart-enum API) and <see cref="RustExpressionTranslator"/> (member references) resolve through
-    /// the same map, so a referenced member always renders the same variant its declaration emits. Keyed
-    /// first-owner-wins on enum name, mirroring <see cref="BuildEnumMemberMap"/>.
+    /// The shared per-enum member→variant lookup ((context, enum name) → member name → emitted Rust
+    /// variant), de-duplicated via <see cref="RustNaming.UniqueVariants"/> so members that
+    /// PascalCase-collapse (e.g. <c>EUR</c>/<c>Eur</c>) map to distinct variants (#323). Both the enum
+    /// emitter (declaration and smart-enum API) and <see cref="RustExpressionTranslator"/> (member
+    /// references) resolve through the same map, so a referenced member always renders the same variant
+    /// its declaration emits. Keyed by <c>(context, enum name)</c> rather than enum name alone (#437): two
+    /// bounded contexts may declare a same-named enum whose case-collapsing members disambiguate
+    /// differently, so a reference must resolve against its OWN context's table — the previous
+    /// name-only, first-owner-wins keying silently bound the second context to the first's variants.
     /// </summary>
-    private static Dictionary<string, IReadOnlyDictionary<string, string>> BuildEnumVariantMap(KoineModel model)
+    private static Dictionary<(string Context, string Enum), IReadOnlyDictionary<string, string>> BuildEnumVariantMap(KoineModel model)
     {
-        var map = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.Ordinal);
+        var map = new Dictionary<(string Context, string Enum), IReadOnlyDictionary<string, string>>();
         foreach (ContextNode ctx in model.Contexts)
         {
             foreach (EnumDecl @enum in ctx.AllTypeDecls().OfType<EnumDecl>())
             {
-                if (map.ContainsKey(@enum.Name))
-                {
-                    continue;
-                }
-
                 IReadOnlyList<string> names = @enum.MemberNames;
                 IReadOnlyList<string> variants = RustNaming.UniqueVariants(names);
                 var byMember = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -206,7 +204,7 @@ public sealed partial class RustEmitter
                     byMember.TryAdd(names[i], variants[i]);
                 }
 
-                map[@enum.Name] = byMember;
+                map[(ctx.Name, @enum.Name)] = byMember;
             }
         }
         return map;

@@ -264,6 +264,46 @@ describe('Review-comment display name (#479)', () => {
   });
 });
 
+describe('Terminal shell-args setting (#467)', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('defaults to an empty list (⇒ the host’s built-in -l login shell)', () => {
+    expect(DEFAULT_SETTINGS.terminalShellArgs).toEqual([]);
+    expect(loadSettings().terminalShellArgs).toEqual([]);
+  });
+
+  test('round-trips a saved non-empty args list', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, terminalShellArgs: ['-l', '-i'] });
+    expect(loadSettings().terminalShellArgs).toEqual(['-l', '-i']);
+  });
+
+  test('drops non-string and blank entries (a blank token would kill the shell on spawn)', () => {
+    localStorage.setItem(
+      'koine.studio.settings',
+      JSON.stringify({ terminalShellArgs: ['-l', 7, '', '-i', null] }),
+    );
+    expect(loadSettings().terminalShellArgs).toEqual(['-l', '-i']);
+  });
+
+  test('coerces a non-array terminalShellArgs back to the empty default', () => {
+    localStorage.setItem('koine.studio.settings', JSON.stringify({ terminalShellArgs: '-l' }));
+    expect(loadSettings().terminalShellArgs).toEqual([]);
+  });
+
+  test('returns a FRESH array, never the shared DEFAULT_SETTINGS reference', () => {
+    // Guards against an in-place mutation of a loaded settings object corrupting the global default.
+    localStorage.setItem('koine.studio.settings', JSON.stringify({ terminalShellArgs: 'bogus' }));
+    const loaded = loadSettings().terminalShellArgs;
+    expect(loaded).toEqual([]);
+    expect(loaded).not.toBe(DEFAULT_SETTINGS.terminalShellArgs);
+  });
+
+  test('falls back to the empty default when terminalShellArgs is absent from the stored blob', () => {
+    localStorage.setItem('koine.studio.settings', JSON.stringify({ theme: 'light' }));
+    expect(loadSettings().terminalShellArgs).toEqual([]);
+  });
+});
+
 describe('API key secret', () => {
   beforeEach(async () => {
     localStorage.clear();

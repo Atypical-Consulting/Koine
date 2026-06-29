@@ -367,14 +367,19 @@ public sealed partial class PythonEmitter
         //    (`<IdName>.new()`); when the factory supplies it as an explicit identity-typed parameter
         //    (#324), bind `id` to that parameter instead — omit when the parameter is already named
         //    `id`, else alias it (`id = book_id`).
-        Param? explicitId = MemberAnalysis.ExplicitIdParameter(entity, factory);
-        if (explicitId is null)
+        FactoryIdBinding idBinding = FactoryIdBinding.ResolveFactoryId(
+            entity, factory, name => PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(name)));
+        switch (idBinding.Source)
         {
-            sb.Append(Indent).Append(Indent).Append("id = ").Append(idName).Append(".new()\n");
-        }
-        else if (PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(explicitId.Name)) is var idParam && idParam != "id")
-        {
-            sb.Append(Indent).Append(Indent).Append("id = ").Append(idParam).Append('\n');
+            case FactoryIdSource.Generate:
+                sb.Append(Indent).Append(Indent).Append("id = ").Append(idName).Append(".new()\n");
+                break;
+            case FactoryIdSource.Alias:
+                sb.Append(Indent).Append(Indent).Append("id = ").Append(idBinding.AliasFrom).Append('\n');
+                break;
+            case FactoryIdSource.ParamProvidesIdDirectly:
+                // The `id` parameter already provides the local — emit nothing.
+                break;
         }
 
         // 2. Preconditions — checked before any state is constructed.

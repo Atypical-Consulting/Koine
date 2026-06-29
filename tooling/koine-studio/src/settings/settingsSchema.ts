@@ -18,7 +18,7 @@ import { DEFAULT_SETTINGS, WORKSPACE_SCOPED_KEYS, type Settings } from './persis
 // one-function change to the serializer, since the map already carries the group + key.
 
 /** The VS Code-style namespaces the settings document groups its fields under. */
-export type SettingsGroup = 'appearance' | 'editor' | 'ai' | 'mcp' | 'preview' | 'lsp' | 'account';
+export type SettingsGroup = 'appearance' | 'editor' | 'ai' | 'mcp' | 'preview' | 'lsp' | 'account' | 'terminal';
 
 /** One row of the field map: a runtime key placed at `group.docKey` in the JSON document. */
 export interface FieldDef {
@@ -58,6 +58,7 @@ export const SETTINGS_FIELDS: readonly FieldDef[] = [
   { runtimeKey: 'previewTarget', group: 'preview', docKey: 'target' },
   { runtimeKey: 'lspTrace', group: 'lsp', docKey: 'trace' },
   { runtimeKey: 'displayName', group: 'account', docKey: 'displayName' },
+  { runtimeKey: 'terminalShellArgs', group: 'terminal', docKey: 'shellArgs' },
 ];
 
 // --- per-field leaf schemas -------------------------------------------------
@@ -154,6 +155,14 @@ const LEAF_SCHEMAS: Record<FieldDef['runtimeKey'], LeafSchema> = {
     type: 'string',
     title: 'Display name',
     description: 'Name attributed to review comments authored from Studio.',
+  },
+  terminalShellArgs: {
+    type: 'array',
+    // `minLength: 1` rejects a blank token in the JSON editor (a blank arg makes the shell exit on spawn,
+    // #467); the load path drops blanks too (coerceShellArgs), so what applies == what survives a reload.
+    items: { type: 'string', minLength: 1 },
+    title: 'Terminal shell args',
+    description: 'Arguments for the integrated terminal shell (desktop). Empty uses the default login shell (["-l"]).',
   },
 };
 
