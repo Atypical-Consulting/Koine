@@ -1,7 +1,10 @@
 # Preact migration recipe (Studio chrome)
 
-> Status: **in progress** (#759, finishing the #193 foundation). This doc is the contract for migrating
-> the remaining imperative-DOM islands in Studio's chrome onto Preact, one panel at a time.
+> Status: **#759 landed** (finishing the #193 foundation). The interactive chrome hosts now render via
+> Preact — the right strip, the left rail, and the AI-Chat host were migrated, the export menu was
+> consolidated into a tested component, and the capability gate + this recipe were established. The
+> remaining imperative DOM is the intentional islands listed under *non-goals* below. This doc stays the
+> contract for migrating any future panel and for the gate.
 
 ## Why
 
@@ -74,19 +77,28 @@ the developer building it can see it without flipping a flag. It reuses the thro
 
 ## Inventory of imperative islands (grouped)
 
-> Updated as the migration proceeds (Task 8 re-runs the census). The `src/shell` `innerHTML` /
-> `createElement` count is the headline metric.
+> Census (post-#759): `grep -rE 'innerHTML|document\.createElement' src/shell | grep -v '\.test\.' | wc -l`
+> → **88** production sites. The remaining sites are the intentional imperative islands below (CodeMirror,
+> the file explorer, maxGraph, the assistant `aiPanel`, the `src/host` seam, and inspectorController's
+> direct DOM writes) — not chrome shells. (The all-files count is higher because the migrated panels'
+> tests now seed their hosts via Preact `render`/`createElement`.)
 
 - **Already Preact (reference patterns — do not redo):** `HistoryControls`, `UnsavedIndicator`,
   `CompilingIndicator`, `MobileZoneBar`, `StoreInspector`, `inspectorSheet`; `src/model/PropertiesPanel`,
   `RelationshipsPanel`, `EventsPanel`, `GlossaryPanel`, `ModelOutlinePanel`, `ContextBreadcrumb`,
-  **`SourceControlPanel`**; `src/docs/DocsPanelHost`; the export menu (Preact JSX in
-  `src/diagrams/CanvasPalette.tsx`).
+  `SourceControlPanel`; `src/docs/DocsPanelHost`.
+- **Migrated in #759:** the **right strip** → `src/shell/RightStrip.tsx`; the **left rail** →
+  `src/shell/LeftRail.tsx`; the **AI-Chat host** → `src/shell/AssistantView.tsx` (a thin Preact host
+  around the imperative `aiPanel`); the **export menu** → `src/diagrams/ExportMenu.tsx`; the capability
+  **gate** → `src/shell/panelGate.ts`. Each renders once into its `index.html` thin-shell host, so the
+  controller's captured nodes and the imperative islands mounted into the rail's `#filetree-body` /
+  `#rail-domain-pane` hosts are never reconciled away.
 - **Resolved by prior work (no longer placeholders):** the right-rail **Rules** / **Notes** tabs were
   retired in #730 (invariants now surface in Properties; model Notes live in the center Deck's Docs
   surface); the **Compatibility** `view-check` paints a real "Check against baseline…" idle state.
-- **To convert (this issue):** the **right strip** (`rightStripMarkup()` in `src/shell/rightStrip.ts`),
-  the **left rail** (`leftRailMarkup()` in `src/shell/leftRail.ts`), the **AI Chat** `view-assistant`
-  host (imperative `src/ai/aiPanel.ts`).
-- **Stay imperative (non-goals):** CodeMirror, maxGraph, the `src/host/` seam, and the global
-  export-menu dismissal seam where it remains a document-level listener.
+- **Stay imperative (non-goals):** **CodeMirror** (the editor, `editorSession`), the **file explorer**
+  (`explorer.ts`, fills `#filetree-body`), **maxGraph** (the domain canvas, fills `#rail-domain-pane`),
+  the assistant **`aiPanel`** (large transcript/changeset DOM + lazy SDK; `AssistantView` only hosts it),
+  the **`src/host/` seam**, and the global export-menu **dismissal** seam (`exportMenuDismiss.ts`, a
+  document-level listener). These own and mutate their own DOM/lifecycle; do not re-render them through
+  Preact.

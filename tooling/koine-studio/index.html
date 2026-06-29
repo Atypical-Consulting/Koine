@@ -159,12 +159,11 @@
 
       <main id="split">
         <!-- One left sidebar, one scroll bar: a DDD "Domain" navigator with a labelled Domain·Files axis
-             switch over one navigator host (the Domain construct tree or the workspace file tree), plus a
-             slim documentation footer. The rail is the single scroll container. Its inner markup is the
-             single source of truth in src/shell/leftRail.ts (leftRailMarkup) and is injected here by
-             ide.tsx's boot BEFORE any el(...) lookup — keep this <aside> a thin shell so the two can't
-             drift. -->
-        <aside id="leftrail" class="pane" aria-label="Workspace"><!-- injected at boot: leftRailMarkup() --></aside>
+             switch over one navigator host (the Domain construct tree or the workspace file tree). The rail
+             is the single scroll container. Its inner markup is the LeftRail Preact component
+             (src/shell/LeftRail.tsx), rendered here by ide.tsx's boot BEFORE any el(...) lookup — keep this
+             <aside> a thin shell so the two can't drift. -->
+        <aside id="leftrail" class="pane" aria-label="Workspace"><!-- rendered at boot: <LeftRail/> --></aside>
         <div class="koi-resizer" id="leftrail-resizer" aria-hidden="true"></div>
 
         <!-- Center: Visual (the diagram) / Code (the editor plus the generated code, the compatibility
@@ -281,10 +280,11 @@
 
         <!-- Right-edge tool-window stripe (#500): a slim, always-on Rider-style bar of icon toggles —
              one per right-rail view — that open/close (and switch) the #right Properties panel. The
-             buttons are injected at boot by rightStripMarkup(); inspectorController wires the
-             toggle/switch behaviour and the live aria-pressed state. Desktop-only — hidden below
-             $bp-narrow, where the inspector bottom-sheet (#221) owns Properties. -->
-        <div id="right-strip" class="pane" role="toolbar" aria-label="Tool windows" aria-orientation="vertical"><!-- injected at boot: rightStripMarkup() --></div>
+             buttons are the RightStrip Preact component (src/shell/RightStrip.tsx), rendered at boot;
+             inspectorController wires the toggle/switch behaviour and the live aria-pressed state.
+             Desktop-only — hidden below $bp-narrow, where the inspector bottom-sheet (#221) owns
+             Properties. -->
+        <div id="right-strip" class="pane" role="toolbar" aria-label="Tool windows" aria-orientation="vertical"><!-- rendered at boot: <RightStrip/> --></div>
       </main>
 
       <!-- Bottom status bar. Per the single-home contract (docs/shell-bars-contract.md, #756) this bar
