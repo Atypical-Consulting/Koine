@@ -209,6 +209,7 @@ internal sealed class CSharpExpressionTranslator
 
     // Monotonic per-type counter naming each emitted [GeneratedRegex] method (`<PascalField>Regex0`,
     // `…Regex1`, …), so multiple `matches` invariants in one type get distinct, deterministic names.
+    // (Mutated by WriteMatch; the analyzer's "make readonly" suggestion is wrong here.)
     private int _regexCounter;
 
     /// <summary>

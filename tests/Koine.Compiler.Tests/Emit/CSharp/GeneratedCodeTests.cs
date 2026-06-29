@@ -249,6 +249,47 @@ public class GeneratedCodeTests
     }
 
     [Fact]
+    public void Multiple_matches_invariants_emit_distinctly_named_generated_regex_methods()
+    {
+        // Issue #795: a type may hold several `matches` invariants — including two on the SAME field — so the
+        // source-generated form names each [GeneratedRegex] method with a per-type counter
+        // (<PascalField>Regex<index>) to stay collision-free and deterministic. Here `raw` carries two
+        // matches and `label` one: three distinctly-named partial methods.
+        const string src =
+            "context C {\n  value Code {\n    raw: String\n    label: String\n" +
+            "    invariant raw matches /^[A-Z]/     \"must start with an uppercase letter\"\n" +
+            "    invariant raw matches /[0-9]$/     \"must end with a digit\"\n" +
+            "    invariant label matches /^[a-z]+$/ \"label must be lowercase letters\"\n  }\n}\n";
+        var result = new KoineCompiler().Compile(
+            src, new CSharpEmitter(CSharpEmitterOptions.Empty with { RegexMode = RegexMode.SourceGenerated }));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var code = result.Files.Single(f => f.RelativePath.EndsWith("Code.cs")).Contents;
+        code.ShouldContain("public sealed partial class Code");
+
+        // One [GeneratedRegex] partial method per `matches`, every name DISTINCT (the per-type counter keeps
+        // the two matches on `raw` from colliding).
+        var methodNames = System.Text.RegularExpressions.Regex
+            .Matches(code, @"private static partial Regex (\w+)\(\);")
+            .Select(m => m.Groups[1].Value)
+            .ToList();
+        methodNames.Count.ShouldBe(3);
+        methodNames.Distinct().Count().ShouldBe(3);
+
+        // Compiles + executes under the source generator: a value satisfying all three guards constructs;
+        // violating any one throws.
+        var (asm, errors) = TestSupport.Compile(result.Files, runRegexGenerator: true);
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+        var type = asm.GetType("C.Code")!;
+
+        Activator.CreateInstance(type, "A1", "abc").ShouldNotBeNull();
+        Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(type, "a1", "abc")) // bad raw
+            .InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
+        Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(type, "A1", "ABC")) // bad label
+            .InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
+    }
+
+    [Fact]
     public void Matches_invariant_emits_a_source_generated_regex()
     {
         // Issue #795: under the opt-in RegexMode.SourceGenerated, a `matches` invariant lowers to a cached,
