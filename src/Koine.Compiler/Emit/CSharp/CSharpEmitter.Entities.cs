@@ -216,6 +216,13 @@ public sealed partial class CSharpEmitter
             sb.Append(Indent).Append(Indent).Append("=> !(left == right);\n");
         }
 
+        // Issue #795: when RegexMode.SourceGenerated collected [GeneratedRegex] methods while rendering this
+        // entity's guards (invariants / command preconditions), append them inside the class body and stamp
+        // `partial` on the declaration. A no-op (and byte-identical) under the default Inline mode. (The
+        // generated identity value object is hand-emitted with no `matches` guard, so it never needs this.)
+        WriteGeneratedRegexMethods(sb, translator);
+        StampPartialIfGeneratedRegex(sb, "public sealed class " + entity.Name, translator);
+
         sb.Append("}\n");
 
         var contents = Assemble(emit, ns, sb.ToString(),

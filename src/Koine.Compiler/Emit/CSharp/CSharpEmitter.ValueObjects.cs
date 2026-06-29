@@ -146,6 +146,12 @@ public sealed partial class CSharpEmitter
         // Structural value equality: the components are the non-derived (stored) fields.
         WriteEqualityComponents(sb, storedFields);
 
+        // Issue #795: when RegexMode.SourceGenerated collected [GeneratedRegex] methods while rendering this
+        // VO's guards, append them inside the class body and stamp `partial` on the declaration. A no-op (and
+        // byte-identical) under the default Inline mode, where the translator collected nothing.
+        WriteGeneratedRegexMethods(sb, translator);
+        StampPartialIfGeneratedRegex(sb, "public sealed class " + vo.Name + " : ValueObject", translator);
+
         sb.Append("}\n");
 
         var contents = Assemble(emit, ns, sb.ToString(),

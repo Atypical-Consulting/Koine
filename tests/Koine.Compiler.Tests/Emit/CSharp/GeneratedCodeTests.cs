@@ -247,4 +247,42 @@ public class GeneratedCodeTests
         var ex = Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(type, "not-an-email"));
         ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
     }
+
+    [Fact]
+    public void Matches_invariant_emits_a_source_generated_regex()
+    {
+        // Issue #795: under the opt-in RegexMode.SourceGenerated, a `matches` invariant lowers to a cached,
+        // allocation-free [GeneratedRegex] partial method instead of the inline Regex.IsMatch(...) — the
+        // SAME pattern, RegexOptions.None, and timeout, so match behavior is identical (only the evaluation
+        // strategy differs). The containing type gains the `partial` modifier so the source generator can
+        // supply the method body.
+        const string src =
+            "context C {\n  value Email {\n    raw: String\n" +
+            "    invariant raw matches /^[^@]+@[^@]+$/  \"invalid email address\"\n  }\n}\n";
+        var result = new KoineCompiler().Compile(
+            src, new CSharpEmitter(CSharpEmitterOptions.Empty with { RegexMode = RegexMode.SourceGenerated }));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var email = result.Files.Single(f => f.RelativePath.EndsWith("Email.cs")).Contents;
+        email.ShouldContain("[GeneratedRegex(");
+        email.ShouldContain("private static partial Regex");
+        email.ShouldContain("public sealed partial class Email");
+        email.ShouldContain("matchTimeoutMilliseconds: 1000");
+        email.ShouldContain(".IsMatch(");
+        // UsingCollector already pulls in the namespace from the `Regex` token (no collector change needed).
+        email.ShouldContain("using System.Text.RegularExpressions;");
+        // The inline static call must be gone — the guard now goes through the cached matcher.
+        email.ShouldNotContain("Regex.IsMatch(");
+
+        // Run the regex source generator so the partial method gets its body, then construct instances to
+        // prove the source-generated matcher accepts a valid value and rejects an invalid one — parity with
+        // the inline form. A missing generator body would fail this compile, which is what proves it ran.
+        var (asm, errors) = TestSupport.Compile(result.Files, runRegexGenerator: true);
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+        var type = asm.GetType("C.Email")!;
+
+        Activator.CreateInstance(type, "a@b.co").ShouldNotBeNull();
+        var ex = Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(type, "not-an-email"));
+        ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
+    }
 }
