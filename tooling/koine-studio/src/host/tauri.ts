@@ -24,6 +24,7 @@ import { saveMetaFor } from '@/host/saveMeta';
 import { normalizeCompileTarget, normalizeMcpValidate, runEditToolStaging } from '@/ai/assistantTools';
 import type { EditSession } from '@/ai/editSession';
 import { mcpCall } from '@/mcp/mcp';
+import { basename } from '@/shared/path';
 
 /** LSP transport over Tauri IPC. Mirrors the wiring previously inlined in lsp.ts. */
 class TauriLspTransport implements LspTransport {
@@ -270,7 +271,7 @@ export class TauriPlatform implements Platform {
   }
 
   folderName(token: string): string {
-    return token.split(/[\\/]/).filter(Boolean).pop() ?? token;
+    return basename(token);
   }
 
   listKoiFiles(token: string): Promise<KoiFile[]> {

@@ -25,6 +25,7 @@ import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
 import { koineMark } from '@/shared/logo';
 import { setEmitTargets } from '@/shared/emitTargets';
+import { basename } from '@/shared/path';
 import { initTheme, onThemeChange, toggleTheme } from '@/settings/theme';
 import {
   peekLegacyScratch,
@@ -470,7 +471,7 @@ export function init(): () => void {
     sbConnection: sbConnEl,
     sbValidity: sbValidityEl,
     activeUri: () => workspace.activeUri(),
-    uriLabel: (uri) => workspace.buffers.get(uri)?.relPath ?? (uri.split('/').pop() ?? uri),
+    uriLabel: (uri) => workspace.buffers.get(uri)?.relPath ?? basename(uri),
     onNavigate: (loc) => navigateToDefinition(loc),
     onApplyWorkspaceEdit: (edit) => workspace.applyWorkspaceEdit(edit),
     // A diagnostics push re-renders the tree so non-active files can badge their error/warning counts
@@ -1619,7 +1620,7 @@ export function init(): () => void {
     if (root && (token.startsWith(root + '/') || token.startsWith(root + '\\'))) {
       return token.slice(root.length + 1).replace(/\\/g, '/');
     }
-    return token.split(/[\\/]/).pop() ?? uri;
+    return basename(token);
   }
   async function revealSearchMatch(uri: string, match: Match): Promise<void> {
     // Make the matched file the active buffer (opening it from disk if it isn't open yet), then select
