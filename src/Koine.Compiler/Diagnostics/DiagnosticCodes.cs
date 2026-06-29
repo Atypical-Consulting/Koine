@@ -78,6 +78,7 @@ public static class DiagnosticCodes
     public const string AggregateSelector = "KOI0212";
     public const string AmbiguousEnumMember = "KOI0213";
     public const string DuplicateLetBinding = "KOI0214";
+    public const string ValueObjectScalarArithmetic = "KOI0215";
 
     // ---- Determinism / value rules (KOI0300–0399) -------------------------
     public const string NowAsStoredDefault = "KOI0301";
@@ -267,6 +268,7 @@ public static class DiagnosticCodes
             [AggregateSelector] = D(AggregateSelector, "A sum/min/max selector has an unsupported result type.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
             [AmbiguousEnumMember] = D(AmbiguousEnumMember, "A bare enum member belongs to more than one enum; qualify it.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
             [DuplicateLetBinding] = D(DuplicateLetBinding, "A let binding name is declared more than once in the same let.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
+            [ValueObjectScalarArithmetic] = D(ValueObjectScalarArithmetic, "A scalar was added to or subtracted from a value object; a value object scales with '*' but '+'/'-' apply only between two values of its own type.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
 
             // ---- Determinism / value rules -----------------------------------
             [NowAsStoredDefault] = D(NowAsStoredDefault, "'now' cannot be used as a stored (constructor) default.", DiagnosticCategory.Determinism, DiagnosticSeverity.Error),

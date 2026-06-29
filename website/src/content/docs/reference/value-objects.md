@@ -212,6 +212,12 @@ public static Money operator +(Money left, Money right) => new Money(left.Amount
 Notice the operators preserve `Currency` and route the result back through the validating constructor, so
 the arithmetic can never produce an invalid value object.
 
+A value object **scales** by a scalar (`money * 2`, either operand order) and **adds** to another value
+object of its own type (`money + money`, e.g. via `lines.sum(...)`), but a bare scalar is never a valid
+`+`/`-` operand: `5.0 + money` or `money - 1` is a type mismatch (`KOI0215`), because there is no
+`value-object ± scalar` operation in any target. Use `*` to scale; reach for the value object's own type
+to add or subtract.
+
 :::caution
 Operators are demand-driven, not exhaustive. If you want `Money / int` available to hand-written code, use
 it somewhere in a `.koi` derived field or command so the emitter generates it. There is no flag to emit
