@@ -66,7 +66,8 @@ capability flags — `canHostMcp`, `compatNeedsInProcessSources`, `usesServiceWo
 pre-existing `canUseGit`, `canSaveProjects`, and so on — and never through `platform.kind` or
 `isTauri()`. The `kind` field remains on the port but is reserved for diagnostics and telemetry
 only. This rule is enforced automatically by `src/host/seamGuard.test.ts`, a vitest guard that
-fails CI if any `isTauri(`/`=== 'tauri'`/`=== 'browser'` branch appears outside `src/host/`.
+fails CI if any platform-identity branch — an `isTauri()` call, an `=== 'tauri'`/`=== 'browser'`
+comparison (either quote style), or a `switch`/`case` on a host kind — appears outside `src/host/`.
 Keeping the seam leak-free means adding a host or renaming a capability never forces a grep-and-fix
 across the whole codebase.
 
