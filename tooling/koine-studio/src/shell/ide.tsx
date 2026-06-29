@@ -50,7 +50,7 @@ import { createCommandWiring } from '@/shell/commandWiring';
 import { createLayoutController } from '@/shell/layout';
 import { createExportShare } from '@/shell/exportShare';
 import { type PrefsCallbacks } from '@/settings/prefs';
-import { createSettingsPage, type SettingsPageHandle } from '@/settings/settingsPage';
+import { createPanelHost } from '@/shell/panelHost';
 import { applyAppearance } from '@/settings/appearance';
 import { initEdgeResizer } from '@/shell/resize';
 import { formatChord } from '@/shared/platform';
@@ -80,15 +80,11 @@ import {
 import { isAllContexts } from '@/model/activeContext';
 import { appStore } from '@/store/index';
 import { badgeCounts, createDiagCountGate } from '@/diagnostics/diagCountGate';
-import { severityErrorOrWarning } from '@/lsp/severity';
 import { reanchorSelectionAfterRename, type SelectedElement } from '@/model/selection';
 import { resolveInspectableQn } from '@/model/modelIndex';
 import { renameStatusMessage, type InspectorElement } from '@/model/inspector';
-import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
-import { createScenarioPanel, type ScenarioPanel } from '@/scenarios/scenarioPanel';
-import { createTerminalPanel, type TerminalPanel } from '@/shell/terminal/terminalPanel';
 import { createReviewStore } from '@/review/reviewStore';
-import { createReviewPanel, resolveReviewAuthor, type ReviewPanel } from '@/review/ReviewPanel';
+import { resolveReviewAuthor } from '@/review/ReviewPanel';
 import { createCommentComposer, type CommentComposer } from '@/review/CommentComposer';
 import { clearModelHash, readModelFromHash } from '@/export/share';
 import { handleBeforeUnload } from '@/shell/dirty';
@@ -627,10 +623,10 @@ export function init(): () => void {
     // Cross-axis "Reveal in Files" (#453): the tactical leaf already switched the rail to the Files axis
     // (setAxis) before this fires, so we just point the explorer at the context's `.koi`.
     revealInFiles: (context) => explorer.revealByContext(context),
-    ensureAssistant: () => ensureAssistant(),
-    ensureScenarios: () => ensureScenarios(),
-    ensureTerminal: () => ensureTerminal(),
-    ensureReview: () => ensureReview(),
+    ensureAssistant: () => panelHost.ensureAssistant(),
+    ensureScenarios: () => panelHost.ensureScenarios(),
+    ensureTerminal: () => panelHost.ensureTerminal(),
+    ensureReview: () => panelHost.ensureReview(),
     initEdgeResizer,
   });
   // Thin shims over the app store (the single source of truth) for the two state reads ide.ts needs:
@@ -1392,7 +1388,7 @@ export function init(): () => void {
   // Stop the brokered shell when the page genuinely goes away (#256). `pagehide` (not the cancellable
   // `beforeunload`) is used so aborting a close doesn't kill a live terminal; the desktop PTY also
   // gets SIGHUP when the process exits, but this disposes cleanly on a webview reload too.
-  window.addEventListener('pagehide', () => terminal?.dispose());
+  window.addEventListener('pagehide', () => panelHost.disposeTerminal());
 
   // --- new model ----------------------------------------------------
   // Reset the default workspace to a single untouched BLANK model: empty it on disk, recreate
@@ -1619,46 +1615,6 @@ export function init(): () => void {
     },
   };
 
-  // The gear-launched Settings center page (#center-panel-settings) is the SINGLE Settings surface (#731 —
-  // the legacy createPreferences modal is retired). Built LAZILY on the first route into Settings, not at
-  // init: createSettingsPage runs its first "show", which fires the on-show MCP sidecar (re)start when
-  // enabled (issue #735) — so constructing it IS showing it, and an eager build would spawn that background
-  // process before the user ever opens Settings. (The pane mount itself no longer starts the sidecar; the
-  // explicit on-show startMcpOnShow does.) It reuses the SAME prefsCallbacks across representations, so a
-  // JSON or Visual edit on the page live-applies through the identical onChange hook. An optional category
-  // (#731) lands the pane on that tab (the About deep-link).
-  let settingsPage: SettingsPageHandle | null = null;
-  function ensureSettingsPage(): void {
-    // The landing category is the store's `settingsCategory` (set by controller.showSettings) — the single
-    // source of truth, so this host reads it back rather than threading a parallel argument. Null ⇒ keep
-    // the pane's last-used tab.
-    const category = appStore.getState().settingsCategory ?? undefined;
-    if (settingsPage) {
-      // Already built — re-sync from the live settings on re-open, so a theme/setting changed from the
-      // toolbar or palette while Settings sat hidden shows correctly when it's brought back; land on
-      // `category` when one was requested.
-      settingsPage.refresh(category);
-      return;
-    }
-    settingsPage = createSettingsPage(
-      { header: el('settings-page-header'), body: el('settings-page-body') },
-      prefsCallbacks,
-    );
-    // A first build already paints from the live settings; only a deep-link needs the extra repaint to
-    // land on its tab (a plain open keeps the pane's last-used category).
-    if (category) settingsPage.refresh(category);
-  }
-
-  // The ONE entry every Settings affordance routes through (#731): the toolbar gear, the command palette's
-  // "Settings…" / "About", the mod+, chord, and the Assistant's "Open Settings". Record the intent in the
-  // store FIRST (settingsOpen + the landing category — the single source of truth, which also reveals the
-  // overlay via the deck subscription: it's NOT a deck surface, so the deck/persistence are untouched and
-  // focusing any surface leaves it), then build/refresh the center page from that store state.
-  function openSettings(category?: string): void {
-    controller.showSettings(category);
-    ensureSettingsPage();
-  }
-
   // The modal-overlay surface — confirm/prompt dialogs, the shortcuts help overlay, the overlay-open
   // gate, the unsaved-work New guard, and the memory-only banner — lives in the overlays controller now
   // (#757). It reaches the workspace's dirty check + blank-model reset through these two deps.
@@ -1679,134 +1635,34 @@ export function init(): () => void {
       danger: true,
     });
   });
-  // The AI assistant panel is created lazily the first time its center pane is shown (the Anthropic SDK
-  // is dynamically imported inside ai.ts, so creating the panel does not load it — only sending).
-  // ide.ts owns the assistant's lifecycle; the controller only nudges it (syncWorkspace/focus)
-  // via the injected ensureAssistant callback, so the #view-assistant host is looked up here.
-  const assistantView = el('view-assistant');
-  let assistant: AssistantPanel | null = null;
-  function ensureAssistant(): AssistantPanel {
-    if (assistant) return assistant;
-    assistant = createAssistantPanel({
-      container: assistantView,
-      getProvider: () => loadSettings().aiProvider,
-      getBaseUrl: () => loadSettings().aiBaseUrl,
-      getApiKey: () => loadSettings().aiApiKey,
-      getModel: () => {
-        const s = loadSettings();
-        return s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
-      },
-      getTemperature: () => loadSettings().aiTemperature,
-      getContext: async () => {
-        const diagnostics = editorSession.diagnosticsFor(workspace.activeUri()).map((d) => ({
-          line: d.range.start.line + 1,
-          col: d.range.start.character + 1,
-          severity: severityErrorOrWarning(d.severity),
-          message: d.message,
-        }));
-        const base: AssistantContext = {
-          fileName: workspace.buffers.get(workspace.activeUri())?.name ?? 'model.koi',
-          source: editor.getDoc(),
-          diagnostics,
-        };
-        // The file/diagnostics snapshot above is cheap and per-call; the domain index is the expensive
-        // part (two LSP recompiles), so the controller builds it once and reuses it until the next edit
-        // clears the cache (invalidateDocViews) rather than rebuilding it on every send.
-        const domainIndex = await controller.getCachedDomainIndex();
-        return domainIndex ? { ...base, domainIndex } : base;
-      },
-      getSelection: () => {
-        const sel = editor.view.state.selection.main;
-        if (!sel.empty) return { text: editor.view.state.sliceDoc(sel.from, sel.to) };
-        // No selection: fall back to the (non-blank) line under the cursor; null → panel uses whole file.
-        const line = editor.view.state.doc.lineAt(sel.head);
-        return line.text.trim() ? { text: line.text } : null;
-      },
-      onApplyModel: (source) => replaceActiveDoc(source),
-      onOpenPrefs: () => openSettings(),
-      // Per-workspace conversation key: each opened folder keeps its own transcript; scratch mode
-      // (no host folder behind it) uses the literal 'scratch'. selectView calls syncWorkspace on tab
-      // show so re-opening the Assistant after a folder switch loads that folder's history.
-      getWorkspaceKey: () => workspace.folderRootToken() ?? 'scratch',
-      // Let the assistant call koine tools (validate/compile/format), executed by the host: in-WASM in
-      // the browser, via the `koine mcp --http` sidecar on the desktop.
-      runCompilerTool: platform.runCompilerTool
-        ? (name, argsJson) => platform.runCompilerTool!(name, argsJson)
-        : undefined,
-      // Opt-in: advertising tools makes local servers (LM Studio) buffer instead of stream, so the
-      // tools are only offered when the user enables them in Settings → Assistant.
-      getUseTools: () => loadSettings().aiAgenticTools,
-      // On by default (#257): constrain a grammar-capable local model to the Koine GBNF, and
-      // validate-and-repair every other provider's output before "Apply to editor" is enabled.
-      getConstrainGrammar: () => loadSettings().aiConstrainGrammar,
-      // The GBNF comes from the host's resident compiler. Browser-host only — the desktop host omits
-      // gbnfGrammar(), so the panel falls back to parse-and-repair there.
-      getGrammar: platform.gbnfGrammar ? () => platform.gbnfGrammar!() : undefined,
-      // Workspace snapshot for multi-file agentic editing: relPath→current text of every open buffer.
-      getWorkspaceFiles: () => Object.fromEntries([...workspace.buffers.values()].map((b) => [b.relPath, b.text])),
-      // Host executor for the staged list/read/write edit tools (browser WASM / desktop MCP).
-      runEditTool: platform.runEditTool ? (name, argsJson, session) => platform.runEditTool!(name, argsJson, session) : undefined,
-      // Once-per-turn whole-staged-workspace validation (issue #474): the loop calls this a single time
-      // at end of turn (browser WASM DiagnoseWorkspace / desktop MCP koine_validate) instead of after
-      // each write, and the panel surfaces the diagnostics for pre-apply review.
-      validateStaged: platform.validateStagedWorkspace ? (session) => platform.validateStagedWorkspace!(session) : undefined,
-      // Commit an accepted multi-file change set through the controller (new files under the folder root).
-      // applyFileEdit returns null (not throw) on a failed write/create — collect those relPaths so the
-      // panel reports a partial apply instead of a false "Applied ✓".
-      onApplyChangeSet: async (files) => {
-        const failed: string[] = [];
-        for (const f of files) {
-          if ((await workspace.applyFileEdit(f.relPath, f.body)) === null) failed.push(f.relPath);
-        }
-        return { failed };
-      },
-    });
-    return assistant;
-  }
-
-  // The scenario-runner panel (#149) is created lazily the first time its tab is shown; the controller
-  // calls refresh() on every open so the catalog tracks the latest model. ide.ts owns the #view-scenarios
-  // host lookup; the panel itself is backend-agnostic (it only talks to the lsp client).
-  const scenariosView = el('view-scenarios');
-  let scenarios: ScenarioPanel | null = null;
-  function ensureScenarios(): ScenarioPanel {
-    if (scenarios) return scenarios;
-    scenarios = createScenarioPanel({
-      container: scenariosView,
-      lsp,
-      setStatus: (message) => setStatus(message, 'green'),
-    });
-    return scenarios;
-  }
-
-  // The integrated terminal panel (#256), created lazily the first time its bottom-panel tab is shown
-  // (the scenarios/assistant pattern). It is rooted at the opened workspace folder (or no cwd in
-  // no-folder mode); the desktop host brokers a real PTY, the browser host renders a placeholder.
-  let terminal: TerminalPanel | null = null;
-  function ensureTerminal(): TerminalPanel {
-    if (terminal) return terminal;
-    terminal = createTerminalPanel({
-      parent: el('panel-terminal'),
-      platform,
-      cwd: () => workspace.folderRootToken() || null,
-    });
-    return terminal;
-  }
-
-  // The Review panel (#259), created lazily the first time its bottom-panel tab is shown (the
-  // terminal/scenarios pattern). It renders the review store grouped by file; clicking a thread jumps the
-  // editor to its span via the shared gotoSourceSpan.
-  let review: ReviewPanel | null = null;
-  function ensureReview(): void {
-    if (review) return;
-    review = createReviewPanel({
-      parent: el('panel-review'),
-      store: reviewStore,
-      onNavigate: (file, span) =>
-        void gotoSourceSpan({ file, line: span.line, column: span.column, endLine: span.endLine, endColumn: span.endColumn }),
-      author: () => reviewAuthorName(),
-    });
-  }
+  // The lazy-panel host — the Settings center page, the AI assistant, the scenario runner, the
+  // integrated terminal, and the Review panel — lives in panelHost now (#757). Each is built on first
+  // ensure*/openSettings and reused; nothing here loads until the user opens it. The host reaches the
+  // editor / workspace / inspector controller / LSP / review store through these deps. The assistant's
+  // selection + source readers stay here as thunks (they peek into the live CodeMirror view).
+  const panelHost = createPanelHost({
+    prefsCallbacks,
+    settingsCategory: () => appStore.getState().settingsCategory ?? undefined,
+    showSettings: (category) => controller.showSettings(category),
+    getSource: () => editor.getDoc(),
+    getSelection: () => {
+      const sel = editor.view.state.selection.main;
+      if (!sel.empty) return { text: editor.view.state.sliceDoc(sel.from, sel.to) };
+      // No selection: fall back to the (non-blank) line under the cursor; null → panel uses whole file.
+      const line = editor.view.state.doc.lineAt(sel.head);
+      return line.text.trim() ? { text: line.text } : null;
+    },
+    applyModel: replaceActiveDoc,
+    diagnosticsFor: (uri) => editorSession.diagnosticsFor(uri),
+    workspace,
+    getCachedDomainIndex: () => controller.getCachedDomainIndex(),
+    lsp,
+    platform,
+    setStatus,
+    reviewStore,
+    gotoSourceSpan: (span) => void gotoSourceSpan(span),
+    reviewAuthorName: () => reviewAuthorName(),
+  });
 
   // Diagrams are rendered with a theme-matched Mermaid palette; re-render on a theme flip (covers
   // the toolbar toggle, the command palette, and Preferences — all route through setTheme). The
@@ -1815,7 +1671,7 @@ export function init(): () => void {
   // its theme here too — ide.tsx owns the panel handle and this fan-out (the same way it drives fit()).
   onThemeChange(() => {
     controller.onThemeChanged();
-    terminal?.applyTheme();
+    panelHost.applyTerminalTheme();
   });
 
   // The export / share / save-to-disk surface — shareable link, .koi source zip, live-diagram export +
@@ -1884,11 +1740,11 @@ export function init(): () => void {
     saveProjectToDisk: () => void exportShare.saveProjectToDisk(),
     canSaveProjects: platform.canSaveProjects,
     layoutActions,
-    openSettings,
+    openSettings: panelHost.openSettings,
     openHelp: () => overlays.openHelp(),
     toggleHelp: () => overlays.toggleHelp(),
     toggleStoreInspector: () => void toggleStoreInspector(),
-    ensureAssistant,
+    ensureAssistant: panelHost.ensureAssistant,
     editor,
     openUri,
     overlayOpen: () => overlays.overlayOpen(),
@@ -1996,9 +1852,7 @@ export function init(): () => void {
     layoutController.dispose(); // release the edge resizers + section-disclosure listeners (#757)
     overlays.dispose(); // (#757) overlays are page-lifetime; dispose is a no-op, kept for symmetry
     window.removeEventListener('resize', onDiagramViewportResize);
-    terminal?.dispose(); // stop the brokered shell + dispose xterm (#256)
-    settingsPage?.destroy(); // tear down the Settings center page (pane/editor + header toggle) if it was opened
-    review?.dispose(); // unmount the Review panel + release its store subscription (#259)
+    panelHost.dispose(); // dispose the terminal + Settings page + Review panel if they were built (#757)
     unsubReviewStore(); // release the editor-repaint subscription (the editorSession is destroyed above)
     workspace.setAutoSave(false);
     unsubRouteIntent();
