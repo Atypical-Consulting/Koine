@@ -48,7 +48,7 @@ export const Populated: Story = {
     s.setActiveContext('Ordering');
     s.setSelection({ qualifiedName: 'Ordering.Order', context: 'Ordering' });
     s.setBottom('events');
-    s.setRight('rules');
+    s.setRight('source-control');
     s.setActiveUri('file:///ordering.koi');
     s.setBuffers({ a: buf('file:///ordering.koi', true), b: buf('file:///billing.koi', false) });
     s.setDiagnostics('file:///ordering.koi', [err]);

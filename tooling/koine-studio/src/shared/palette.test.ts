@@ -454,6 +454,7 @@ describe('layoutCommands — the view-layout palette commands', () => {
       togglePanelSide: vi.fn(),
       toggleSideRail: vi.fn(),
       toggleProperties: vi.fn(),
+      toggleNavigator: vi.fn(),
     };
   }
 
@@ -463,6 +464,7 @@ describe('layoutCommands — the view-layout palette commands', () => {
     { id: 'layout.panelSide', action: 'togglePanelSide' },
     { id: 'layout.sideRail', action: 'toggleSideRail' },
     { id: 'layout.toggleProperties', action: 'toggleProperties' },
+    { id: 'layout.toggleNavigator', action: 'toggleNavigator' },
   ];
 
   test('returns exactly the layout commands, by id', () => {
@@ -480,6 +482,18 @@ describe('layoutCommands — the view-layout palette commands', () => {
     expect(store.getState().rightCollapsed).toBe(false);
     cmd.run();
     expect(store.getState().rightCollapsed).toBe(true);
+  });
+
+  test('the Toggle navigator rail command, wired to the store, flips leftCollapsed (#730)', () => {
+    const store = createStore<UiChromeSlice>((set, get) => createUiChromeSlice(set, get));
+    const cmd = layoutCommands({
+      ...spyActions(),
+      toggleNavigator: () => store.getState().toggleLeftCollapsed(),
+    }).find((c) => c.id === 'layout.toggleNavigator')!;
+    expect(cmd.title).toBe('Toggle navigator rail');
+    expect(store.getState().leftCollapsed).toBe(false);
+    cmd.run();
+    expect(store.getState().leftCollapsed).toBe(true);
   });
 
   test('every command carries a non-empty title', () => {

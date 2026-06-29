@@ -318,7 +318,8 @@ export function init(): () => void {
   el('sb-version').textContent = `v${__APP_VERSION__}`;
 
   // Global unsaved-work surfacing: the document title gains a `•` and a clickable "N unsaved" pill
-  // appears beside the status whenever any open buffer is dirty. baseTitle is captured once, clean.
+  // appears in the status bar (beside validity/problems) whenever any open buffer is dirty. baseTitle
+  // is captured once, clean.
   // The pill is now the <UnsavedIndicator> Preact panel (#193) bound to the existing static button: it
   // subscribes to the workspace slice's dirty count, sets the button's text/hidden/aria-label + the
   // title bullet, and wires Save-all. So `refreshDirtyIndicator` here just projects the controller's
@@ -2136,6 +2137,12 @@ export function init(): () => void {
       // subscribes to it and reconciles the DOM + persistence (the #500 stripe wiring), so the command
       // just flips the slice. The stripe icons and this command therefore stay in lock-step.
       appStore.getState().toggleRightCollapsed();
+    },
+    toggleNavigator() {
+      // Symmetric to toggleProperties (#730): the left navigator rail's collapse flag is owned by the
+      // uiChrome slice and reconciled by inspectorController's morph-collapse wiring, so the command just
+      // flips the slice — the head's collapse button, the spine, and this command stay in lock-step.
+      appStore.getState().toggleLeftCollapsed();
     },
   };
 
