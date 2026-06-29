@@ -28,17 +28,24 @@ export function hashFromRoute(route: Route): string {
 }
 
 /**
- * Decide which view to mount on a cold load — **synchronously**, from the URL hash and a synchronous
- * "a workspace was previously open" signal. This is deliberately pure and IO-free: it must NOT await
- * `openDefaultWorkspaceFlow` (or any probe). That async gate is exactly what made the home overlay
- * fade in over an already-painted editor (#368); resolving the route up front, before first paint,
- * is what removes the race rather than patching it.
+ * Decide which view to mount on a cold load — **synchronously**, from the URL hash alone. This is
+ * deliberately pure and IO-free: it must NOT await `openDefaultWorkspaceFlow` (or any probe). That
+ * async gate is exactly what made the home overlay fade in over an already-painted editor (#368);
+ * resolving the route up front, before first paint, is what removes the race rather than patching it.
  *
- * Editor wins when the hash explicitly asks for it (`#/editor`) or a workspace was already open;
- * otherwise it's a pristine first load → Home.
+ * **Opening Studio always lands on Home.** Only an explicit `#/editor` deep-link (or a same-tab refresh
+ * while in the editor) opens the editor; a `#model=…` share link also opens the editor but is
+ * short-circuited upstream in `main.ts`, before this resolver. A previously-opened workspace no longer
+ * auto-skips Home — the returning-user fast path is the one-click Resume control on Home, not an
+ * automatic jump into the editor (#766). Everything else (``, `#/`, an unknown hash) → Home.
+ *
+ * Since #766 dropped the persisted-workspace input, the body now delegates straight to
+ * {@link routeFromHash}. It is deliberately kept as the named boot-time seam — distinct from the
+ * hash-vocabulary helper — so `main.ts` reads as "resolve the initial route" and any future startup
+ * policy (e.g. an "On startup: Home vs Last workspace" setting, #766 approach B) has one obvious home.
  */
-export function resolveInitialRoute(input: { hash: string; hasPersistedWorkspace: boolean }): Route {
-  return routeFromHash(input.hash) === 'editor' || input.hasPersistedWorkspace ? 'editor' : 'home';
+export function resolveInitialRoute(hash: string): Route {
+  return routeFromHash(hash);
 }
 
 export function createRouteSlice(

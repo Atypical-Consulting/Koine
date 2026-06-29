@@ -319,7 +319,8 @@
 
     <!-- The routed Home view mounts here (mountHome). The boot switch (main.ts) shows exactly one of
          #app / #home-root per route, so Home and the editor never paint at once (issue #368). Starts
-         hidden; the boot reveals whichever the resolved route needs before first paint. -->
+         hidden; the boot reveals whichever the resolved route needs before first paint — and a plain
+         open always resolves to Home, never auto-skipping a returning user into the editor (issue #766). -->
     <div id="home-root" hidden></div>
   </body>
 </html>
