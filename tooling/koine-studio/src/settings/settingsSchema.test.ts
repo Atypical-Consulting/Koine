@@ -142,6 +142,16 @@ describe('settingsSchema', () => {
     expect(res.errors?.length).toBeGreaterThan(0);
   });
 
+  it('rejects a blank entry in terminal.shellArgs (items minLength:1) (#467)', () => {
+    // A blank token would spawn the shell with an empty arg and kill it; the schema rejects it at edit
+    // time, matching the load path's drop-blanks coercion (what applies == what survives a reload).
+    const doc = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, Record<string, unknown>>;
+    doc.terminal.shellArgs = ['-l', ''];
+    const res = jsonDocToSettings(JSON.stringify(doc), withKey);
+    expect(res.settings).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
   it('rejects an out-of-bounds grouped tabSize / temperature (#750)', () => {
     const doc = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, Record<string, unknown>>;
     doc.editor.tabSize = 99;

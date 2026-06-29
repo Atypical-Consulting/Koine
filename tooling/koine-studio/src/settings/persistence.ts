@@ -323,11 +323,14 @@ function coercePreviewTarget(v: unknown): PreviewTarget {
   return isEmitTarget(v) ? (v as PreviewTarget) : DEFAULT_SETTINGS.previewTarget;
 }
 
-/** A list of shell-arg tokens (#467): an array filtered to its string entries (a fresh array, never the
- *  shared default reference), or an empty list for any non-array / absent / hand-edited garbage value. */
+/** A list of shell-arg tokens (#467): an array filtered to its NON-BLANK string entries (always a fresh
+ *  array, never the shared default reference). A blank token would spawn e.g. `bash ""`, which bash reads
+ *  as a missing script path and exits — killing the terminal on every (re)start — so empty tokens are
+ *  dropped, consistent with the "empty ⇒ unset" treatment of the whole list. Any non-array / absent /
+ *  hand-edited garbage value yields a fresh copy of the declared default (the single source of truth). */
 function coerceShellArgs(v: unknown): string[] {
-  if (!Array.isArray(v)) return [];
-  return v.filter((a): a is string => typeof a === 'string');
+  if (!Array.isArray(v)) return [...DEFAULT_SETTINGS.terminalShellArgs];
+  return v.filter((a): a is string => typeof a === 'string' && a.length > 0);
 }
 
 /**

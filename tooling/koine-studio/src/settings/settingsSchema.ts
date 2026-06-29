@@ -158,7 +158,9 @@ const LEAF_SCHEMAS: Record<FieldDef['runtimeKey'], LeafSchema> = {
   },
   terminalShellArgs: {
     type: 'array',
-    items: { type: 'string' },
+    // `minLength: 1` rejects a blank token in the JSON editor (a blank arg makes the shell exit on spawn,
+    // #467); the load path drops blanks too (coerceShellArgs), so what applies == what survives a reload.
+    items: { type: 'string', minLength: 1 },
     title: 'Terminal shell args',
     description: 'Arguments for the integrated terminal shell (desktop). Empty uses the default login shell (["-l"]).',
   },
