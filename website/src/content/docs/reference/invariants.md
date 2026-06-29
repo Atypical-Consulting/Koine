@@ -291,9 +291,17 @@ invariants gets one deterministically-named partial method per pattern (`RawRege
 the output is stable across rebuilds.
 
 The mode is **default-off**: unless it is enabled, every `matches` invariant emits the inline form
-above, byte-for-byte. It requires **C# 11+ / .NET 7+** (the `[GeneratedRegex]` source generator), which a
-default `net8.0`+ target satisfies. The other emitter targets are unaffected — their bounded forms in the
-table above are unchanged.
+above, byte-for-byte. It applies only to **value objects and entities** (which declare the partial method
+and become `partial`); a `matches` in a spec, domain service, or generated validator keeps the inline
+bounded form, so output always compiles. It requires **C# 11+ / .NET 7+** (the `[GeneratedRegex]` source
+generator), which a default `net8.0`+ target satisfies. The other emitter targets are unaffected — their
+bounded forms in the table above are unchanged.
+
+:::note
+The mode is currently selected through the emitter API (`CSharpEmitterOptions.RegexMode`); a
+`targets.csharp.regexMode` `koine.config` key to toggle it from the CLI is a planned follow-up. Until then
+the default CLI/`koine build` output is the inline form.
+:::
 
 ## 10.7 Conditional invariants (`when`)
 

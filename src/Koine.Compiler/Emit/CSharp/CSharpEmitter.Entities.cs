@@ -50,17 +50,18 @@ public sealed partial class CSharpEmitter
             .Append(new Member("id", new TypeRef(entity.IdentityName), null))
             .ToList();
         var translator = new CSharpExpressionTranslator(index, scopeMembers, enumMemberToType, SpecBodiesFor(entity.Name, index), context: ContextOf(ns), options: _options);
+        // Entities DECLARE the [GeneratedRegex] methods + stamp the type `partial`, so they opt into the
+        // source-generated `matches` form (issue #795); translators that don't (specs/services) keep inline.
+        translator.EnableGeneratedRegexForm();
 
         var sb = new StringBuilder();
 
         WriteXmlDoc(sb, entity.Doc, "");
         WriteObsolete(sb, entity.Deprecated, "");
-        sb.Append("public sealed class ").Append(entity.Name);
-        if (isRoot)
-        {
-            sb.Append(" : IAggregateRoot");
-        }
-
+        // Capture the exact declaration text so the optional `partial` stamp (issue #795) keys on the same
+        // string that was written, not a reconstruction that could silently drift out of sync.
+        var declaration = "public sealed class " + entity.Name + (isRoot ? " : IAggregateRoot" : "");
+        sb.Append(declaration);
         sb.Append('\n');
         sb.Append("{\n");
 
@@ -218,10 +219,13 @@ public sealed partial class CSharpEmitter
 
         // Issue #795: when RegexMode.SourceGenerated collected [GeneratedRegex] methods while rendering this
         // entity's guards (invariants / command preconditions), append them inside the class body and stamp
-        // `partial` on the declaration. A no-op (and byte-identical) under the default Inline mode. (The
+        // `partial` on the declaration. Skipped entirely (byte-identical) under the default Inline mode. (The
         // generated identity value object is hand-emitted with no `matches` guard, so it never needs this.)
-        WriteGeneratedRegexMethods(sb, translator);
-        StampPartialIfGeneratedRegex(sb, "public sealed class " + entity.Name, translator);
+        if (translator.GeneratedRegexMethods.Count > 0)
+        {
+            WriteGeneratedRegexMethods(sb, translator);
+            StampPartial(sb, declaration);
+        }
 
         sb.Append("}\n");
 

@@ -113,10 +113,20 @@ public static class TestSupport
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
                 nullableContextOptions: NullableContextOptions.Enable));
 
-        if (runRegexGenerator && ResolveRegexGenerator() is { } generator)
+        if (runRegexGenerator && _regexGenerator.Value is { } generator)
         {
-            CSharpGeneratorDriver.Create(generator)
-                .RunGeneratorsAndUpdateCompilation(compilation, out compilation, out _);
+            try
+            {
+                CSharpGeneratorDriver.Create(generator)
+                    .RunGeneratorsAndUpdateCompilation(compilation, out Compilation updated, out _);
+                compilation = updated;
+            }
+            catch
+            {
+                // A generator that loads but throws DURING the run (e.g. Roslyn API drift against the test's
+                // pinned Microsoft.CodeAnalysis) must not crash the suite — leave `compilation` un-augmented so
+                // the missing [GeneratedRegex] body surfaces as a clear CS8795 instead of an obscure exception.
+            }
         }
 
         using var ms = new MemoryStream();
@@ -135,25 +145,20 @@ public static class TestSupport
         return (asm, Array.Empty<string>());
     }
 
-    private static ISourceGenerator? _regexGenerator;
-    private static bool _regexGeneratorResolved;
+    // Resolved once, thread-safely: xUnit runs test classes in parallel, so a plain
+    // resolve-and-cache pair could let one thread observe "resolved" before the generator field was assigned.
+    private static readonly Lazy<ISourceGenerator?> _regexGenerator = new(ResolveRegexGenerator);
 
     /// <summary>
     /// Loads the in-box <c>System.Text.RegularExpressions.Generator</c> source generator from the .NET
-    /// ref-pack analyzers so the Roslyn meta-test can run it (issue #795). The result is cached after the
-    /// first resolve. Returns <c>null</c> when no analyzer pack can be located or the generator fails to
-    /// load (e.g. a Roslyn version mismatch) — the caller then falls back to a plain compile, and a
-    /// source-generated test fails loudly on the missing <c>[GeneratedRegex]</c> body rather than passing
-    /// silently. The .NET SDK ships this generator in-box, so it is present wherever the suite builds.
+    /// ref-pack analyzers so the Roslyn meta-test can run it (issue #795). Returns <c>null</c> when no
+    /// analyzer pack can be located or the generator fails to load (e.g. a Roslyn version mismatch) — the
+    /// caller then falls back to a plain compile, and a source-generated test fails loudly on the missing
+    /// <c>[GeneratedRegex]</c> body rather than passing silently. The .NET SDK ships this generator in-box, so
+    /// it is present wherever the suite builds. Invoked once through <see cref="_regexGenerator"/>.
     /// </summary>
     private static ISourceGenerator? ResolveRegexGenerator()
     {
-        if (_regexGeneratorResolved)
-        {
-            return _regexGenerator;
-        }
-
-        _regexGeneratorResolved = true;
         try
         {
             if (FindRegexGeneratorAssembly() is not { } dll)
@@ -189,8 +194,7 @@ public static class TestSupport
                 return null;
             }
 
-            _regexGenerator = incremental.AsSourceGenerator();
-            return _regexGenerator;
+            return incremental.AsSourceGenerator();
         }
         catch
         {
@@ -221,10 +225,9 @@ public static class TestSupport
             }
 
             var candidates = Directory.EnumerateDirectories(refPacks)
-                .Select(d => (Dir: d, Ver: Version.TryParse(Path.GetFileName(d), out Version? v) ? v : null))
-                .Where(x => x.Ver is not null)
-                .OrderByDescending(x => x.Ver!.Major == runtimeMajor) // major-matching packs first
-                .ThenByDescending(x => x.Ver!)
+                .Select(d => (Dir: d, Ver: ParseRefPackVersion(Path.GetFileName(d))))
+                .OrderByDescending(x => x.Ver?.Major == runtimeMajor) // major-matching packs first
+                .ThenByDescending(x => x.Ver ?? new Version(0, 0))     // then highest version (unparseable last)
                 .Select(x => Path.Combine(x.Dir, "analyzers", "dotnet", "cs", dllName));
 
             if (candidates.FirstOrDefault(File.Exists) is { } found)
@@ -235,6 +238,14 @@ public static class TestSupport
 
         return null;
     }
+
+    /// <summary>
+    /// Parses a ref-pack folder name to its numeric version, tolerating a prerelease suffix
+    /// (e.g. <c>10.0.0-rc.2.24473.5</c> → <c>10.0.0</c>) so preview SDKs are not silently skipped. Returns
+    /// <c>null</c> when the numeric core does not parse.
+    /// </summary>
+    private static Version? ParseRefPackVersion(string folderName) =>
+        Version.TryParse(folderName.Split('-', 2)[0], out Version? v) ? v : null;
 
     /// <summary>The candidate .NET install roots: the one hosting the running shared framework, then <c>DOTNET_ROOT</c>.</summary>
     private static IEnumerable<string> DotnetRoots()

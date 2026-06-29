@@ -25,6 +25,9 @@ public sealed partial class CSharpEmitter
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
         var translator = new CSharpExpressionTranslator(index, vo.Members, enumMemberToType, SpecBodiesFor(vo.Name, index), context: ContextOf(ns), options: _options);
+        // Value objects DECLARE the [GeneratedRegex] methods + stamp the type `partial`, so they opt into the
+        // source-generated `matches` form (issue #795); translators that don't (specs/services) keep inline.
+        translator.EnableGeneratedRegexForm();
 
         // The lowered field projection (Commit 5): ctor-vs-derived classification, default dispositions,
         // collection shape, and canonical ctor ordering are all owned by the bound nodes now, computed
@@ -36,7 +39,10 @@ public sealed partial class CSharpEmitter
 
         WriteXmlDoc(sb, vo.Doc, "");
         WriteObsolete(sb, vo.Deprecated, "");
-        sb.Append("public sealed class ").Append(vo.Name).Append(" : ValueObject\n");
+        // Capture the exact declaration text so the optional `partial` stamp (issue #795) keys on the same
+        // string that was written, not a reconstruction that could silently drift out of sync.
+        var declaration = "public sealed class " + vo.Name + " : ValueObject";
+        sb.Append(declaration).Append('\n');
         sb.Append("{\n");
 
         // Properties (one per stored field, in declaration order).
@@ -147,10 +153,13 @@ public sealed partial class CSharpEmitter
         WriteEqualityComponents(sb, storedFields);
 
         // Issue #795: when RegexMode.SourceGenerated collected [GeneratedRegex] methods while rendering this
-        // VO's guards, append them inside the class body and stamp `partial` on the declaration. A no-op (and
-        // byte-identical) under the default Inline mode, where the translator collected nothing.
-        WriteGeneratedRegexMethods(sb, translator);
-        StampPartialIfGeneratedRegex(sb, "public sealed class " + vo.Name + " : ValueObject", translator);
+        // VO's guards, append them inside the class body and stamp `partial` on the declaration. Skipped
+        // entirely (byte-identical) under the default Inline mode, where the translator collected nothing.
+        if (translator.GeneratedRegexMethods.Count > 0)
+        {
+            WriteGeneratedRegexMethods(sb, translator);
+            StampPartial(sb, declaration);
+        }
 
         sb.Append("}\n");
 

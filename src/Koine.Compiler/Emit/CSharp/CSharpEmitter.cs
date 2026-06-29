@@ -134,16 +134,16 @@ public sealed partial class CSharpEmitter : IEmitter
     /// Appends one cached, allocation-free
     /// <c>[GeneratedRegex(@"…", RegexOptions.None, matchTimeoutMilliseconds: N)] private static partial Regex &lt;Name&gt;();</c>
     /// declaration per regex method the <paramref name="translator"/> collected while rendering this type's
-    /// guards under <see cref="RegexMode.SourceGenerated"/> (issue #795). The pattern is verbatim-escaped
-    /// exactly as the inline form (doubling <c>"</c>). A no-op — and therefore byte-identical to today —
-    /// under the default <see cref="RegexMode.Inline"/>, where the translator collects nothing.
+    /// guards under <see cref="RegexMode.SourceGenerated"/> (issue #795). The pattern is verbatim-escaped via
+    /// <see cref="CSharpNaming.VerbatimContent"/> — the same escape the inline form uses, so the two modes
+    /// always carry the identical literal. Callers invoke this only when the collection is non-empty.
     /// </summary>
     private static void WriteGeneratedRegexMethods(StringBuilder sb, CSharpExpressionTranslator translator)
     {
         foreach ((var methodName, var pattern, var timeoutMs) in translator.GeneratedRegexMethods)
         {
             sb.Append('\n').Append(Indent)
-              .Append("[GeneratedRegex(@\"").Append(pattern.Replace("\"", "\"\""))
+              .Append("[GeneratedRegex(@\"").Append(CSharpNaming.VerbatimContent(pattern))
               .Append("\", RegexOptions.None, matchTimeoutMilliseconds: ").Append(timeoutMs).Append(")]\n");
             sb.Append(Indent).Append("private static partial Regex ").Append(methodName).Append("();\n");
         }
@@ -151,23 +151,14 @@ public sealed partial class CSharpEmitter : IEmitter
 
     /// <summary>
     /// Stamps the <c>partial</c> modifier onto a <c>public sealed class …</c> declaration already written to
-    /// <paramref name="sb"/>, but only when the <paramref name="translator"/> collected
-    /// <c>[GeneratedRegex]</c> methods for the type — a <c>partial</c> method requires a <c>partial</c>
-    /// containing type (issue #795). <paramref name="nonPartialDeclaration"/> is the exact declaration text
-    /// already emitted (e.g. <c>"public sealed class Email : ValueObject"</c>), unique within the type's
-    /// file, so the targeted replace hits only the declaration. A no-op when nothing was collected, keeping
-    /// <see cref="RegexMode.Inline"/> output byte-identical.
+    /// <paramref name="sb"/> — a <c>partial</c> method requires a <c>partial</c> containing type (issue #795).
+    /// <paramref name="declaration"/> is the EXACT declaration text the caller wrote (e.g.
+    /// <c>"public sealed class Email : ValueObject"</c>), so the replace targets that one line with no risk of
+    /// drifting out of sync with a reconstructed string. Callers invoke this only when partial methods were
+    /// collected.
     /// </summary>
-    private static void StampPartialIfGeneratedRegex(
-        StringBuilder sb, string nonPartialDeclaration, CSharpExpressionTranslator translator)
-    {
-        if (translator.GeneratedRegexMethods.Count > 0)
-        {
-            sb.Replace(
-                nonPartialDeclaration,
-                nonPartialDeclaration.Replace("public sealed class", "public sealed partial class"));
-        }
-    }
+    private static void StampPartial(StringBuilder sb, string declaration) =>
+        sb.Replace(declaration, declaration.Replace("public sealed class", "public sealed partial class"));
 
     public IReadOnlyList<EmittedFile> Emit(KoineModel model) => Emit(model, null);
 

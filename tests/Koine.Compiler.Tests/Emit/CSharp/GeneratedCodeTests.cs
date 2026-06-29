@@ -355,6 +355,43 @@ public class GeneratedCodeTests
         AssertTimesOut(sourceGen, evil);
     }
 
+    [Fact]
+    public void Source_generated_mode_keeps_matches_in_specs_and_services_compiling()
+    {
+        // Issue #795 regression: the source-generated form (a `[GeneratedRegex]` partial-method CALL) is only
+        // safe where the emitter also DECLARES the method and stamps the type `partial` — i.e. value objects
+        // and entities. `matches` can also appear in a spec condition or a service operation, rendered through
+        // a different translator into a class that declares no partial methods. Those must keep emitting the
+        // (always-valid) inline `Regex.IsMatch` form under SourceGenerated, or the generated C# would call an
+        // undeclared method (CS0103) in a non-partial class.
+        const string src =
+            "context C {\n" +
+            "  value Code {\n    raw: String\n    invariant raw matches /^[A-Z]+$/ \"must be uppercase\"\n  }\n" +
+            "  spec LooksValid on Code = raw matches /^[A-Z]+$/\n" +
+            "  service Checker {\n    operation isCode(raw: String): Bool = raw matches /^[A-Z]+$/\n  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(
+            src, new CSharpEmitter(CSharpEmitterOptions.Empty with { RegexMode = RegexMode.SourceGenerated }));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // The value object gets the optimized [GeneratedRegex] form...
+        var code = result.Files.Single(f => f.RelativePath.EndsWith("Code.cs")).Contents;
+        code.ShouldContain("[GeneratedRegex(");
+        code.ShouldContain("public sealed partial class Code");
+
+        // ...while the spec and service keep the inline bounded form (no dangling generated-method call).
+        var spec = result.Files.Single(f => f.RelativePath.EndsWith("Specifications.cs")).Contents;
+        spec.ShouldContain("Regex.IsMatch(");
+        spec.ShouldNotContain("[GeneratedRegex(");
+        var service = result.Files.Single(f => f.RelativePath.EndsWith("Checker.cs")).Contents;
+        service.ShouldContain("Regex.IsMatch(");
+        service.ShouldNotContain("[GeneratedRegex(");
+
+        // The whole emission must compile (with the regex generator wired in for the VO's partial method).
+        var (asm, errors) = TestSupport.Compile(result.Files, runRegexGenerator: true);
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+    }
+
     /// <summary>Emits <paramref name="src"/> with <paramref name="options"/>, Roslyn-compiles it (optionally running the regex source generator), and returns the named type.</summary>
     private static Type CompileMatchType(string src, CSharpEmitterOptions options, string typeName, bool runRegexGenerator)
     {
