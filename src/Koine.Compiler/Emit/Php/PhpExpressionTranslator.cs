@@ -342,25 +342,51 @@ internal sealed class PhpExpressionTranslator
     }
 
     /// <summary>
-    /// True when a binary op is a <c>String + String</c> concatenation — including the guarded-optional
-    /// case where an operand is a narrowed <c>String?</c> (narrowing is validator-only, so it still
-    /// infers as optional here). Decimal and value-object arithmetic is lowered to method calls by
-    /// <see cref="TryWriteValueBinary"/> before reaching here, so this only diverts the String-concat
-    /// case; <c>Int + Int</c> keeps native <c>+</c> (#717, Bug 3).
+    /// True when a binary <c>+</c> is a PHP string concatenation, lowered to <c>.</c> rather than the
+    /// numeric <c>+</c> (which between a string and any operand is a runtime <c>TypeError</c> and a
+    /// phpstan <c>binaryOp.invalid</c>). At least one operand must be statically a <c>String</c> and the
+    /// OTHER must be statically <em>stringable</em> (<see cref="IsStringableOperand"/>: a <c>String</c> or
+    /// <c>Int</c>, which PHP's <c>.</c> coerces) — covering both <c>String + String</c> (e.g. a chained
+    /// <c>street + ", " + city</c> — #717 Bug 3) and the mixed <c>String + Int</c> case in either operand
+    /// order (e.g. <c>"Order #" + number</c> / <c>number + " items"</c> — #786). A guard-narrowed optional
+    /// operand still infers as optional (narrowing is validator-only and never reaches
+    /// <see cref="TypeResolver"/>), so optionals are admitted here and made non-null at the <c>.</c> site
+    /// by <see cref="WriteStringConcatOperand"/>'s coalesce (#787). A non-stringable operand — an enum
+    /// case, value object, or branded <c>Id</c> — is never routed to <c>.</c> (itself a
+    /// <c>binaryOp.invalid</c>), and <c>Int + Int</c> keeps native <c>+</c> (neither side is a String).
+    /// Decimal/value-object arithmetic is lowered to method calls by <see cref="TryWriteValueBinary"/>
+    /// before reaching here.
+    /// <para>
+    /// Decided per binary node from each operand's <em>inferred</em> type, so a single mixed op in either
+    /// order routes to <c>.</c>. An <b>Int-led</b> multi-op chain (e.g. <c>hours + ":" + minutes</c>) is
+    /// only partially covered: the inner <c>Int + String</c> routes to <c>.</c>, but
+    /// <see cref="TypeResolver"/> infers that sub-expression as <c>Int</c> (left-biased arithmetic
+    /// fallback), so the outer <c>(…) + minutes</c> sees <c>Int + Int</c> and stays numeric. Fixing that
+    /// needs a String-wins rule in the target-agnostic <see cref="TypeResolver"/> (tracked separately); a
+    /// String-led chain already routes to <c>.</c> throughout.
+    /// </para>
     /// </summary>
-    private bool IsStringConcat(BinaryExpr bin) =>
-        bin.Op == BinaryOp.Add
-        && IsStringConcatOperand(InferType(bin.Left))
-        && IsStringConcatOperand(InferType(bin.Right));
+    private bool IsStringConcat(BinaryExpr bin)
+    {
+        if (bin.Op != BinaryOp.Add)
+        {
+            return false;
+        }
+
+        TypeRef? left = InferType(bin.Left);
+        TypeRef? right = InferType(bin.Right);
+        return (IsStringConcatOperand(left) || IsStringConcatOperand(right))
+            && IsStringableOperand(left) && IsStringableOperand(right);
+    }
 
     /// <summary>
     /// Writes one operand of a PHP string concatenation (<c>.</c>). A nested concatenation is already a
     /// non-null PHP string, so it is emitted directly — wrapping it would produce a redundant <c>??</c>
     /// that <c>phpstan --level max</c> rejects (<c>nullCoalesce.expr</c>). A guard-narrowed optional
-    /// <c>String</c> still infers as optional, so it is wrapped as <c>($expr ?? '')</c> to make the
-    /// <c>.</c> site provably non-null. The validator's <c>OptionalDereference</c> check has already
-    /// rejected any UNGUARDED optional in <c>+</c>, so the coalesce is a runtime no-op present only to
-    /// satisfy phpstan (#787).
+    /// operand still infers as optional, so it is wrapped as <c>($expr ?? '')</c> to make the <c>.</c>
+    /// site provably non-null. The validator's <c>OptionalDereference</c> check has already rejected any
+    /// UNGUARDED optional in <c>+</c>, so the coalesce is a runtime no-op present only to satisfy
+    /// phpstan (#787).
     /// </summary>
     private void WriteStringConcatOperand(Expr expr, StringBuilder sb)
     {
@@ -654,6 +680,19 @@ internal sealed class PhpExpressionTranslator
     // `Decimal?` still infers as optional but must still route to the runtime Decimal method path. The
     // non-null guarantee at the receiver/argument site comes from WriteAsDecimal / WriteReceiver (#787).
     private static bool IsDecimalOperand(TypeRef? t) => t is { Name: "Decimal" };
+
+    /// <summary>
+    /// True when a type is a valid operand of PHP's <c>.</c> string-concatenation operator — a closed
+    /// allow-list of <c>String</c> and <c>Int</c> (both of which <c>.</c> coerces without a cast),
+    /// regardless of optionality. Deliberately excludes enums, value objects, and branded <c>Id</c>s
+    /// (a class with no <c>__toString</c>), so a <c>String + &lt;such&gt;</c> never gets routed to
+    /// <c>.</c>. <c>Decimal</c> is also absent because a <c>Decimal</c> operand is intercepted by
+    /// <see cref="TryWriteValueBinary"/> before string-concat routing runs, so it never reaches here.
+    /// An OPTIONAL <c>String</c>/<c>Int</c> IS admitted (a guard-narrowed operand still infers as
+    /// optional); <see cref="WriteStringConcatOperand"/> coalesces it to a non-null value at the
+    /// <c>.</c> site so phpstan never sees a nullable operand (#787).
+    /// </summary>
+    private static bool IsStringableOperand(TypeRef? t) => t is { Name: "String" or "Int" };
 
     /// <summary>
     /// True when the type is a value object (or quantity) that exposes arithmetic methods — i.e. a
