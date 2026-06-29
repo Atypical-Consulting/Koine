@@ -54,9 +54,9 @@
 }
 
 /* Transient "compiling…" indicator (#516): a muted, pulsing affordance shown while a compile is in
-   flight (debounced reveal, immediate hide), mirroring the connecting-pill's pulse so "busy" reads
-   consistently across the shell. The `.sb-item` rule sets display:inline-flex, which would defeat the
-   UA `[hidden]` styling, so honour the hidden attribute explicitly when idle. */
+   flight (debounced reveal, immediate hide) so "busy" reads consistently in the status bar. The
+   `.sb-item` rule sets display:inline-flex, which would defeat the UA `[hidden]` styling, so honour the
+   hidden attribute explicitly when idle. */
 .koi-compiling-indicator {
   color: var(--koi-muted);
   font-style: italic;
@@ -82,7 +82,9 @@
   }
 }
 
-/* Toolbar connection-status pill (top-right of the toolbar). */
+/* Toolbar action-feedback pill (top-right of the toolbar): the transient last-action toast
+   (Saved / Renamed X→Y / errors), green for success and error for a failed action. NOT a connection
+   indicator — connection lives in #sb-connection (see docs/shell-bars-contract.md, #756). */
 #status {
   display: inline-flex;
   align-items: center;
@@ -97,6 +99,22 @@
   color: var(--koi-muted);
 }
 
+/* No last action yet (boot, before the first toast) → don't show an empty bordered pill, but keep the
+   live region MOUNTED. Do NOT `display:none` it: toggling a role=status/aria-live region's presence in
+   the same update that sets its text is unreliable for screen readers (the project's a11y convention —
+   see src/shell/liveRegion.ts), which would silently drop the first action toast's announcement. So the
+   pill stays in the a11y tree and we only strip its chrome while empty; the first toast then merely
+   changes text in an already-present region (WCAG 2.1 AA SC 4.1.3 Status Messages). */
+#status:empty {
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+#status:empty::before {
+  display: none;
+}
+
 #status::before {
   content: '';
   width: 7px;
@@ -104,14 +122,6 @@
   border-radius: var(--koi-radius-pill);
   background: currentColor;
   box-shadow: 0 0 0 0 currentColor;
-}
-
-#status[data-kind="connecting"] {
-  color: var(--koi-muted);
-}
-
-#status[data-kind="connecting"]::before {
-  animation: koi-pulse 1.3s ease-in-out infinite;
 }
 
 #status[data-kind="green"] {
