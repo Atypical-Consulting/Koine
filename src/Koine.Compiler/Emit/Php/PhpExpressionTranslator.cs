@@ -313,7 +313,7 @@ internal sealed class PhpExpressionTranslator
         }
 
         WriteOperand(bin.Left, sb, EnumTypeName(bin.Right));
-        sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
+        sb.Append(' ').Append(NativeBinaryOperator(bin)).Append(' ');
         WriteOperand(bin.Right, sb, EnumTypeName(bin.Left));
 
         if (parenthesize)
@@ -321,6 +321,20 @@ internal sealed class PhpExpressionTranslator
             sb.Append(')');
         }
     }
+
+    /// <summary>
+    /// The native PHP operator for a primitive binary op. A <c>String + String</c> is PHP string
+    /// concatenation, which uses <c>.</c> — never the numeric <c>+</c>, which on strings is a runtime
+    /// <c>TypeError</c> and a phpstan <c>binaryOp.invalid</c> error (e.g. a chained
+    /// <c>street + ", " + city</c>, whose inner sub-expression is itself a String). Decimal and
+    /// value-object arithmetic is lowered to method calls by <see cref="TryWriteValueBinary"/> before
+    /// reaching here, so this only diverts the String-concat case; <c>Int + Int</c> keeps native
+    /// <c>+</c> (#717, Bug 3).
+    /// </summary>
+    private string NativeBinaryOperator(BinaryExpr bin) =>
+        bin.Op == BinaryOp.Add && IsString(InferType(bin.Left)) && IsString(InferType(bin.Right))
+            ? "."
+            : OperatorOf(bin.Op);
 
     /// <summary>
     /// Renders a binary expression whose operand(s) are a runtime <c>Decimal</c> or a value object,
@@ -534,6 +548,8 @@ internal sealed class PhpExpressionTranslator
     private TypeRef? InferType(Expr expr) => _resolver.Infer(expr, EffectiveScope());
 
     private static bool IsDecimal(TypeRef? t) => t is { Name: "Decimal", IsOptional: false };
+
+    private static bool IsString(TypeRef? t) => t is { Name: "String", IsOptional: false };
 
     /// <summary>
     /// True when the type is a value object (or quantity) that exposes arithmetic methods — i.e. a

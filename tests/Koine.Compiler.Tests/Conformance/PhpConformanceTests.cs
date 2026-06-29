@@ -311,6 +311,36 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #717 (Bug 3) acceptance: a <c>String + String</c> concatenation — the pizzeria-style
+    /// <c>full: String = street + ", " + city</c> — must type-check under <c>phpstan --level max</c>
+    /// and be runtime-correct. Before the fix the translator emitted PHP numeric <c>+</c>
+    /// (<c>($this-&gt;street + ', ') + $this-&gt;city</c>), which phpstan rejects (a binary <c>+</c> on
+    /// strings) and which throws a <c>TypeError</c> at runtime; the fix emits the PHP string operator
+    /// <c>.</c> for a <c>String + String</c> chain while leaving <c>Decimal</c>/<c>Int</c> arithmetic
+    /// untouched. Skipped (not failed) only when no <c>phpstan</c> is present locally; CI installs the
+    /// toolchain and runs it for real.
+    /// </summary>
+    [Fact]
+    public void String_concatenation_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Address {\n" +
+            "    street: String\n" +
+            "    city: String\n" +
+            "    full: String = street + \", \" + city\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// The always-on syntax gate: a valid PHP snippet must pass <c>php -l</c>.
     /// Skipped (not failed) only when no interpreter is present; with one it MUST parse cleanly.
     /// </summary>
