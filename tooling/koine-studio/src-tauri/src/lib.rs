@@ -17,7 +17,7 @@
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
 // `portable-pty` (WezTerm) abstracts Unix openpty + Windows ConPTY behind one API. Its `Child`
@@ -402,42 +402,131 @@ fn take_decodable(carry: &mut Vec<u8>) -> Option<String> {
     Some(chunk)
 }
 
-/// Spawn the reader thread that drains the PTY master and relays it to the frontend. It reads raw
-/// bytes (terminal output is not line- or frame-delimited) into a carry buffer and emits the longest
-/// valid-UTF-8 prefix as `pty://data`, holding back any partial multibyte tail until its continuation
-/// bytes arrive (see [`take_decodable`]) so non-ASCII output (TUIs, emoji/CJK filenames) is not
-/// mojibake'd at read boundaries. When the read hits EOF the shell has gone: we flush any trailing
-/// bytes, reap the child to recover its exit code, and emit `pty://exit` exactly once. Unlike the LSP
-/// sidecar there is **no** supervision/relaunch — an exited shell simply closes the terminal.
-/// `std::thread` + `std::io` only; no async runtime.
+/// Size window: flush the coalescer once this many bytes of decodable output have accumulated. ~16 KB
+/// lets one IPC event carry ~four 4 KB reads' worth of output under flood, so a flooding command emits
+/// roughly `bytes / 16 KB` `pty://data` events instead of one per read.
+const PTY_FLUSH_BYTES: usize = 16 * 1024;
+/// Time window: if no read arrives for this long, flush whatever is buffered so tiny interactive output
+/// (a shell prompt, a short command's result) reaches the renderer at once instead of waiting for the
+/// size window to fill. ~16 ms ≈ one frame, so the latency is imperceptible.
+const PTY_FLUSH_WINDOW: Duration = Duration::from_millis(16);
+
+/// Coalesces decodable PTY text to bound the `pty://data` event rate under a high-throughput flood
+/// (#441). The reader feeds each decodable chunk (from [`take_decodable`]); [`Coalescer::push`] buffers
+/// it and returns a flush only once the buffer reaches [`PTY_FLUSH_BYTES`] — so one IPC event carries
+/// many reads instead of one-per-4 KB. Between size flushes the reader flushes on the
+/// [`PTY_FLUSH_WINDOW`] time window and on EOF via [`Coalescer::take`]; nothing is ever dropped. Pure,
+/// so the size policy is unit-tested without opening a PTY.
+struct Coalescer {
+    buf: String,
+    flush_threshold: usize,
+}
+
+impl Coalescer {
+    fn new(flush_threshold: usize) -> Self {
+        Self {
+            buf: String::new(),
+            flush_threshold,
+        }
+    }
+
+    /// Append a decodable chunk; return the buffered text to emit once it reaches the size window, else
+    /// `None` (held back for a later size/time/EOF flush).
+    fn push(&mut self, chunk: &str) -> Option<String> {
+        self.buf.push_str(chunk);
+        if self.buf.len() >= self.flush_threshold {
+            self.take()
+        } else {
+            None
+        }
+    }
+
+    /// Take whatever is currently buffered (the time-window or EOF flush), or `None` when empty.
+    fn take(&mut self) -> Option<String> {
+        if self.buf.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(&mut self.buf))
+        }
+    }
+}
+
+/// Spawn the reader that drains the PTY master and relays it to the frontend, coalescing reads so a
+/// flooding command (`yes`, `cat bigfile`) can't fire thousands of Tauri IPC events per second (#441).
+///
+/// Two threads, because a blocking `read` cannot also honour a flush timer:
+/// - **Reader** — blocks on `read`, forwarding each 4 KB read to the coalescer over a channel; dropping
+///   the sender on EOF (or a read error) signals "no more output".
+/// - **Coalescer** — drains the channel into a carry buffer, holds back any partial multibyte tail
+///   until its continuation arrives (see [`take_decodable`]) so non-ASCII output isn't mojibake'd at
+///   read boundaries, and emits one `pty://data` per flush: on the [`Coalescer`] size window, on a
+///   `recv_timeout` lapse (the [`PTY_FLUSH_WINDOW`] time window), and on EOF. It also owns the exit
+///   handling: flush the remainder, reap the child to recover its exit code, and emit `pty://exit`
+///   exactly once. Unlike the LSP sidecar there is **no** supervision/relaunch — an exited shell simply
+///   closes the terminal. `std::thread` + `std::io` + `std::sync::mpsc` only; no async runtime.
 fn spawn_pty_reader_thread(
     app: AppHandle,
     mut reader: Box<dyn Read + Send>,
     shutting_down: Arc<AtomicBool>,
 ) {
+    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+
+    // Reader thread: raw bytes off the PTY → channel. Kept minimal so the only blocking call is the
+    // `read`; all coalescing/timing lives in the consumer below.
     std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
-        let mut carry: Vec<u8> = Vec::new();
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break, // EOF: the shell closed its end of the PTY
                 Ok(n) => {
-                    carry.extend_from_slice(&buf[..n]);
-                    while let Some(chunk) = take_decodable(&mut carry) {
-                        let _ = app.emit("pty://data", chunk);
+                    if tx.send(buf[..n].to_vec()).is_err() {
+                        break; // the coalescer is gone — nothing left to feed
                     }
                 }
                 Err(_) => break, // a read error means the PTY is gone; treat it as EOF
             }
         }
-        // Flush any trailing bytes (an incomplete sequence at the very end) lossily so nothing the
-        // shell wrote before closing is silently dropped.
+        // Dropping `tx` here disconnects the channel, ending the coalescer's loop.
+    });
+
+    // Coalescer thread: channel → coalesced `pty://data`, then the one-shot exit handling.
+    std::thread::spawn(move || {
+        let mut carry: Vec<u8> = Vec::new();
+        let mut coalescer = Coalescer::new(PTY_FLUSH_BYTES);
+        loop {
+            match rx.recv_timeout(PTY_FLUSH_WINDOW) {
+                Ok(bytes) => {
+                    carry.extend_from_slice(&bytes);
+                    while let Some(chunk) = take_decodable(&mut carry) {
+                        if let Some(flush) = coalescer.push(&chunk) {
+                            let _ = app.emit("pty://data", flush);
+                        }
+                    }
+                }
+                // No output for a full window: flush what's buffered so interactive output isn't held
+                // back waiting for the size window to fill. An incomplete multibyte tail stays in
+                // `carry` (it isn't decodable yet) until its continuation arrives or EOF.
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if let Some(flush) = coalescer.take() {
+                        let _ = app.emit("pty://data", flush);
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break, // the reader hit EOF
+            }
+        }
+
+        // EOF: flush the coalesced remainder, then any trailing undecodable bytes (lossily) so nothing
+        // the shell wrote before closing is dropped. Order matters — the coalescer holds text that
+        // precedes the partial tail in `carry`.
+        if let Some(flush) = coalescer.take() {
+            let _ = app.emit("pty://data", flush);
+        }
         if !carry.is_empty() {
             let _ = app.emit("pty://data", String::from_utf8_lossy(&carry).into_owned());
         }
 
-        // The PTY reached EOF. Recover the exit code and announce it once, then clear the managed
-        // handles so a later `pty_start` is a clean fresh start.
+        // Recover the exit code and announce it once, then clear the managed handles so a later
+        // `pty_start` is a clean fresh start.
         let state = app.state::<PtyState>();
         let reaped = state.child.lock().ok().and_then(|mut g| g.take());
         let code = if shutting_down.load(Ordering::SeqCst) {
