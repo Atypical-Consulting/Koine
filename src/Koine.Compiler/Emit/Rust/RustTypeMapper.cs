@@ -116,7 +116,10 @@ internal sealed class RustTypeMapper
             return null;
         }
 
-        return OwnerContextOf(koineName) is { } owner
+        // Same short-circuit as QualifyTypeName: a non-qualifiable type (e.g. a branded Id, which is
+        // re-materialized locally rather than module-qualified) binds to the current module.
+        return IsQualifiable(koineName)
+            && OwnerContextOf(koineName) is { } owner
             && !string.Equals(ModuleNameOf(owner), ModuleNameOf(_context), StringComparison.Ordinal)
                 ? owner
                 : _context;
