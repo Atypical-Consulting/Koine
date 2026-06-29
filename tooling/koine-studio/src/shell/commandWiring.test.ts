@@ -133,6 +133,22 @@ describe('commandWiring', () => {
       wiring.getCommands().find((c) => c.id === 'format')!.run();
       expect(deps.format).toHaveBeenCalledOnce();
     });
+
+    it('includes the dev store-inspector command only in dev builds (when: () => isDevMode())', () => {
+      // The dev command is registered always but gated by its when() predicate, so getCommands()
+      // (which filters by isEnabled) surfaces it under vite serve and hides it in shipped builds.
+      vi.stubEnv('DEV', false);
+      const off = createCommandWiring(makeDeps());
+      expect(off.getCommands().map((c) => c.id)).not.toContain('toggle-store-inspector');
+      off.dispose();
+
+      vi.stubEnv('DEV', true);
+      const on = createCommandWiring(makeDeps());
+      dispose = on.dispose;
+      expect(on.getCommands().map((c) => c.id)).toContain('toggle-store-inspector');
+
+      vi.unstubAllEnvs();
+    });
   });
 
   describe('global keyboard shortcuts', () => {

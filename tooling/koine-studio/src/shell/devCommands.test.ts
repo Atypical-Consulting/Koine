@@ -8,14 +8,22 @@ afterEach(() => {
 const noop = () => {};
 
 describe('devCommands', () => {
-  test('includes the store-inspector command in dev builds', () => {
-    vi.stubEnv('DEV', true);
-    const cmds = devCommands(noop);
-    expect(cmds.some((c) => c.id === 'toggle-store-inspector')).toBe(true);
+  test('registers the store-inspector command always (no longer gated by an early return)', () => {
+    // Registered in both dev and prod; the dev gate now lives on the command's when() predicate so the
+    // registry keeps it and the palette filters by isEnabled (#758).
+    vi.stubEnv('DEV', false);
+    expect(devCommands(noop).map((c) => c.id)).toEqual(['toggle-store-inspector']);
   });
 
-  test('is empty in production builds', () => {
+  test('the command is enabled (when() === true) in dev builds', () => {
+    vi.stubEnv('DEV', true);
+    const cmd = devCommands(noop).find((c) => c.id === 'toggle-store-inspector')!;
+    expect(cmd.when?.()).toBe(true);
+  });
+
+  test('the command is disabled (when() === false) in production builds', () => {
     vi.stubEnv('DEV', false);
-    expect(devCommands(noop)).toEqual([]);
+    const cmd = devCommands(noop).find((c) => c.id === 'toggle-store-inspector')!;
+    expect(cmd.when?.()).toBe(false);
   });
 });
