@@ -59,41 +59,134 @@ export const SETTINGS_FIELDS: readonly FieldDef[] = [
   { runtimeKey: 'displayName', group: 'account', docKey: 'displayName' },
 ];
 
-// Mirror the editor input bounds in persistence.ts (FONT_MIN/MAX, LINE_HEIGHT_MIN/MAX) and the
-// enum rosters (AccentName, McpClientId, lspTrace, aiProvider). The `properties` set is asserted by
-// settingsSchema.test.ts to equal Object.keys(DEFAULT_SETTINGS) minus the secret aiApiKey, so adding
-// a non-secret field to Settings must add it here too.
-export const SETTINGS_JSON_SCHEMA = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    theme: { type: 'string', enum: ['dark', 'light'] },
-    accent: { type: 'string', enum: ['blue', 'teal', 'violet', 'amber'] },
-    reduceMotion: { type: 'boolean' },
-    fontSize: { type: 'number', minimum: 10, maximum: 22 },
-    lineHeight: { type: 'number', minimum: 1.2, maximum: 2.4 },
-    wordWrap: { type: 'boolean' },
-    formatOnSave: { type: 'boolean' },
-    autoSave: { type: 'boolean' },
-    enableMinimap: { type: 'boolean' },
-    lspTrace: { type: 'string', enum: ['off', 'messages', 'verbose'] },
-    aiProvider: { type: 'string', enum: ['anthropic', 'openai'] },
-    aiBaseUrl: { type: 'string' },
-    aiModel: { type: 'string' },
-    aiModelOpenai: { type: 'string' },
-    aiAgenticTools: { type: 'boolean' },
-    aiInlineCompletions: { type: 'boolean' },
-    aiConstrainGrammar: { type: 'boolean' },
-    mcpEnabled: { type: 'boolean' },
-    mcpClient: { type: 'string', enum: ['claude-desktop', 'lm-studio', 'cursor', 'vscode', 'generic'] },
-    previewTarget: { type: 'string' },
-    displayName: { type: 'string' },
+// --- per-field leaf schemas -------------------------------------------------
+// One leaf schema per runtime key, carrying its type/enum/bounds (mirroring the editor input bounds
+// in persistence.ts and the enum rosters AccentName/McpClientId/lspTrace/aiProvider) plus a
+// VS Code-style `title`/`description` — the seed for JSON-editor hovers/IntelliSense (surfacing them
+// in the editor UI is a follow-up). Both the nested document schema and the legacy flat schema are
+// built from these, keyed by runtime key, so they can never drift from the field map.
+type LeafSchema = Record<string, unknown>;
+
+const LEAF_SCHEMAS: Record<FieldDef['runtimeKey'], LeafSchema> = {
+  theme: { type: 'string', enum: ['dark', 'light'], title: 'Theme', description: 'Studio color theme.' },
+  accent: {
+    type: 'string',
+    enum: ['blue', 'teal', 'violet', 'amber'],
+    title: 'Accent',
+    description: 'Accent hue applied over the active theme.',
   },
-} as const;
+  reduceMotion: { type: 'boolean', title: 'Reduce motion', description: 'Collapse UI animations and transitions.' },
+  fontFamily: {
+    type: 'string',
+    title: 'Editor font',
+    description: 'Editor font stack (CSS font-family). Empty uses the theme default.',
+  },
+  fontSize: { type: 'number', minimum: 10, maximum: 22, title: 'Font size', description: 'Editor text size in pixels.' },
+  lineHeight: {
+    type: 'number',
+    minimum: 1.2,
+    maximum: 2.4,
+    title: 'Line height',
+    description: 'Editor line height as a multiple of the font size.',
+  },
+  wordWrap: { type: 'boolean', title: 'Word wrap', description: 'Soft-wrap long editor lines.' },
+  tabSize: { type: 'integer', minimum: 1, maximum: 8, title: 'Tab size', description: 'Indent width in spaces.' },
+  formatOnSave: { type: 'boolean', title: 'Format on save', description: 'Run the formatter when a file is saved.' },
+  autoSave: { type: 'boolean', title: 'Auto save', description: 'Persist dirty buffers automatically after a short idle.' },
+  enableMinimap: { type: 'boolean', title: 'Minimap', description: 'Show the editor minimap (document overview).' },
+  aiProvider: {
+    type: 'string',
+    enum: ['anthropic', 'openai'],
+    title: 'Provider',
+    description: 'Which AI backend the assistant uses.',
+  },
+  aiBaseUrl: { type: 'string', title: 'Base URL', description: 'Base URL for the OpenAI-compatible provider.' },
+  aiModel: { type: 'string', title: 'Model (Anthropic)', description: 'Anthropic model id.' },
+  aiModelOpenai: { type: 'string', title: 'Model (OpenAI)', description: 'OpenAI-compatible model id.' },
+  aiAgenticTools: {
+    type: 'boolean',
+    title: 'Agentic tools',
+    description: 'Advertise the Koine compiler tools to the OpenAI-compatible model.',
+  },
+  aiInlineCompletions: {
+    type: 'boolean',
+    title: 'Inline completions',
+    description: 'LLM ghost-text completions in the editor.',
+  },
+  aiConstrainGrammar: {
+    type: 'boolean',
+    title: 'Constrain grammar',
+    description: 'Guarantee the assistant generated .koi parses.',
+  },
+  aiTemperature: {
+    type: 'number',
+    minimum: 0,
+    maximum: 2,
+    title: 'Temperature',
+    description: 'Assistant sampling temperature (0..2). Lower is more deterministic.',
+  },
+  mcpEnabled: { type: 'boolean', title: 'Enable MCP', description: 'Enable the local MCP server (desktop sidecar).' },
+  mcpClient: {
+    type: 'string',
+    enum: ['claude-desktop', 'lm-studio', 'cursor', 'vscode', 'generic'],
+    title: 'MCP client',
+    description: 'Which client the MCP setup recipe targets.',
+  },
+  previewTarget: { type: 'string', title: 'Preview target', description: 'The language the emitted-code preview renders.' },
+  lspTrace: {
+    type: 'string',
+    enum: ['off', 'messages', 'verbose'],
+    title: 'LSP trace',
+    description: 'Language-server trace verbosity.',
+  },
+  displayName: {
+    type: 'string',
+    title: 'Display name',
+    description: 'Name attributed to review comments authored from Studio.',
+  },
+};
+
+const SCHEMA_DIALECT = 'https://json-schema.org/draft/2020-12/schema';
+
+/** Build the nested, namespaced document schema from the field map: one object per group, each
+ *  `additionalProperties:false`, leaves carrying their leaf schema. Root is `additionalProperties:false`. */
+function buildNestedSchema() {
+  const groups: Record<string, { type: 'object'; additionalProperties: false; properties: Record<string, LeafSchema> }> = {};
+  for (const f of SETTINGS_FIELDS) {
+    (groups[f.group] ??= { type: 'object', additionalProperties: false, properties: {} }).properties[f.docKey] =
+      LEAF_SCHEMAS[f.runtimeKey];
+  }
+  return { $schema: SCHEMA_DIALECT, type: 'object', additionalProperties: false, properties: groups };
+}
+
+/** Build the retained FLAT schema (top-level runtime keys) so an old/hand-saved flat document still
+ *  validates and applies. Also derived from the field map, keyed by runtime key, so it stays in lockstep. */
+function buildFlatSchema() {
+  const properties: Record<string, LeafSchema> = {};
+  for (const f of SETTINGS_FIELDS) properties[f.runtimeKey] = LEAF_SCHEMAS[f.runtimeKey];
+  return { $schema: SCHEMA_DIALECT, type: 'object', additionalProperties: false, properties };
+}
+
+/** The nested, namespaced settings document schema (#750) — the source the JSON editor validates against. */
+export const SETTINGS_JSON_SCHEMA = buildNestedSchema();
+
+/** The pre-#750 flat schema, retained only to validate a legacy/hand-saved flat document. */
+const LEGACY_FLAT_SCHEMA = buildFlatSchema();
 
 const ajv = new Ajv2020({ allErrors: true, strict: false });
-const validate = ajv.compile(SETTINGS_JSON_SCHEMA);
+const validateNested = ajv.compile(SETTINGS_JSON_SCHEMA);
+const validateFlat = ajv.compile(LEGACY_FLAT_SCHEMA);
+
+/** Runtime keys, used to detect a legacy flat document by its top-level keys (which are runtime keys,
+ *  whereas a grouped document's top-level keys are group names — the two sets never overlap). */
+const RUNTIME_KEYS = new Set<string>(SETTINGS_FIELDS.map((f) => f.runtimeKey));
+
+/** group → (docKey → runtimeKey), for flattening a validated grouped document back to the flat runtime shape. */
+const DOC_TO_RUNTIME: Record<string, Record<string, FieldDef['runtimeKey']>> = (() => {
+  const out: Record<string, Record<string, FieldDef['runtimeKey']>> = {};
+  for (const f of SETTINGS_FIELDS) (out[f.group] ??= {})[f.docKey] = f.runtimeKey;
+  return out;
+})();
 
 /**
  * Pretty, grouped settings.json with the secret stripped — what the JSON editor renders. Builds
@@ -115,9 +208,41 @@ function formatError(e: ErrorObject): string {
   return where ? `${where}: ${e.message}` : (e.message ?? 'invalid value');
 }
 
+/** Detect a legacy FLAT document: a plain object with at least one top-level key that is a runtime
+ *  key. A grouped document's top-level keys are group names (which are never runtime keys), so the
+ *  two shapes are unambiguous; `{}` is treated as grouped (a valid, empty partial). */
+function isLegacyFlat(parsed: unknown): boolean {
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  return Object.keys(parsed as Record<string, unknown>).some((k) => RUNTIME_KEYS.has(k));
+}
+
+/** Flatten a validated document to a Partial<Settings> of ONLY the keys it actually carries, so
+ *  omitted fields fall back to `current` on merge (the "merge onto current" semantics). */
+function flattenDoc(parsed: unknown, flat: boolean): Partial<Settings> {
+  const out: Record<string, unknown> = {};
+  if (flat) {
+    const o = parsed as Record<string, unknown>;
+    for (const f of SETTINGS_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(o, f.runtimeKey)) out[f.runtimeKey] = o[f.runtimeKey];
+    }
+  } else {
+    const o = parsed as Record<string, Record<string, unknown>>;
+    for (const [group, leaves] of Object.entries(o)) {
+      const map = DOC_TO_RUNTIME[group];
+      if (!map || leaves === null || typeof leaves !== 'object') continue;
+      for (const [docKey, value] of Object.entries(leaves)) {
+        const runtimeKey = map[docKey];
+        if (runtimeKey) out[runtimeKey] = value;
+      }
+    }
+  }
+  return out as Partial<Settings>;
+}
+
 /**
- * Parse + schema-validate an edited document. On success returns settings with the secret
- * re-injected from `current` (the JSON never carries it). On failure returns diagnostics only.
+ * Parse + schema-validate an edited document — accepting the grouped (#750) shape OR a legacy flat
+ * document — and flatten it back to the runtime `Settings` shape. On success returns settings with the
+ * secret re-injected from `current` (the JSON never carries it). On failure returns diagnostics only.
  */
 export function jsonDocToSettings(
   text: string,
@@ -129,6 +254,8 @@ export function jsonDocToSettings(
   } catch (err) {
     return { errors: [{ message: (err as Error).message }] };
   }
+  const flat = isLegacyFlat(parsed);
+  const validate = flat ? validateFlat : validateNested;
   if (!validate(parsed)) {
     // Surface field-specific errors (a bad enum/range on `theme`, `fontSize`, …) before structural
     // root errors (additionalProperties), so the first diagnostic points at the offending field.
@@ -137,7 +264,7 @@ export function jsonDocToSettings(
     );
     return { errors: ordered.map((e) => ({ message: formatError(e) })) };
   }
-  const doc = parsed as Partial<Settings>;
+  const doc = flattenDoc(parsed, flat);
   // previewTarget and aiBaseUrl are deliberately open `string`s in the schema (a dynamic, backend-seeded
   // target must validate), so the schema gate alone lets through values loadSettings() would later drop —
   // the live↔reload divergence (#734). Re-apply the load path's accept-set here so what applies == what survives.

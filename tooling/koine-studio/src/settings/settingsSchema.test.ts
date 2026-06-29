@@ -39,6 +39,64 @@ describe('settingsSchema', () => {
     expect(res.settings).toEqual(withKey);
   });
 
+  it('round-trips the grouped document back to settings (#750)', () => {
+    const res = jsonDocToSettings(settingsToJsonDoc(withKey), withKey);
+    expect(res.errors).toBeUndefined();
+    expect(res.settings).toEqual(withKey);
+  });
+
+  it('rejects an unknown key inside a group (per-group additionalProperties:false) (#750)', () => {
+    const doc = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, Record<string, unknown>>;
+    doc.editor.bogus = 1;
+    const res = jsonDocToSettings(JSON.stringify(doc), withKey);
+    expect(res.settings).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('rejects an unknown top-level group (root additionalProperties:false) (#750)', () => {
+    const doc = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, unknown>;
+    doc.bogusGroup = { x: 1 };
+    const res = jsonDocToSettings(JSON.stringify(doc), withKey);
+    expect(res.settings).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('still accepts a legacy FLAT document and applies it (#750)', () => {
+    const res = jsonDocToSettings(JSON.stringify({ theme: 'light', fontSize: 16 }), withKey);
+    expect(res.errors).toBeUndefined();
+    expect(res.settings?.theme).toBe('light');
+    expect(res.settings?.fontSize).toBe(16);
+    expect(res.settings?.aiApiKey).toBe('sk-SECRET'); // secret preserved
+  });
+
+  it('rejects a smuggled aiApiKey inside a group (#750)', () => {
+    const doc = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, Record<string, unknown>>;
+    doc.ai.aiApiKey = 'sneaky';
+    const res = jsonDocToSettings(JSON.stringify(doc), withKey);
+    expect(res.settings).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('round-trips the three new grouped options (#750)', () => {
+    const custom: Settings = { ...withKey, tabSize: 4, fontFamily: 'JetBrains Mono', aiTemperature: 0.7 };
+    const doc = JSON.parse(settingsToJsonDoc(custom)) as Record<string, Record<string, unknown>>;
+    expect(doc.editor.tabSize).toBe(4);
+    expect(doc.appearance.fontFamily).toBe('JetBrains Mono');
+    expect(doc.ai.temperature).toBe(0.7);
+    const res = jsonDocToSettings(settingsToJsonDoc(custom), withKey);
+    expect(res.errors).toBeUndefined();
+    expect(res.settings).toEqual(custom);
+  });
+
+  it('rejects an out-of-bounds grouped tabSize / temperature (#750)', () => {
+    const doc = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, Record<string, unknown>>;
+    doc.editor.tabSize = 99;
+    expect(jsonDocToSettings(JSON.stringify(doc), withKey).settings).toBeUndefined();
+    const doc2 = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, Record<string, unknown>>;
+    doc2.ai.temperature = 5;
+    expect(jsonDocToSettings(JSON.stringify(doc2), withKey).settings).toBeUndefined();
+  });
+
   it('applies an edited field while keeping the current secret', () => {
     const edited = settingsToJsonDoc(withKey).replace('"dark"', '"light"');
     const res = jsonDocToSettings(edited, withKey);
