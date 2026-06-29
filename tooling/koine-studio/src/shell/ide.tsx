@@ -25,7 +25,7 @@ import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
 import { koineMark } from '@/shared/logo';
 import { setEmitTargets } from '@/shared/emitTargets';
-import { initTheme, onThemeChange, toggleTheme } from '@/settings/theme';
+import { initTheme, onThemeChange } from '@/settings/theme';
 import {
   peekLegacyScratch,
   clearLegacyScratch,
@@ -48,11 +48,9 @@ import {
 import { createWelcome } from '@/welcome/welcome';
 import { takeStartIntent, type StartIntent } from '@/shell/bootIntent';
 import { type Template } from '@/welcome/templates';
-import { createCommandPalette, type Command } from '@/shared/palette';
-import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
+import { type LayoutActions } from '@/shell/layoutCommands';
 import { loadLayout, saveLayout, type LayoutState } from '@/shell/layoutStore';
-import { devCommands } from '@/shell/devCommands';
-import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
+import { createCommandWiring } from '@/shell/commandWiring';
 import { type PrefsCallbacks } from '@/settings/prefs';
 import { createSettingsPage, type SettingsPageHandle } from '@/settings/settingsPage';
 import { applyAppearance } from '@/settings/appearance';
@@ -109,7 +107,6 @@ import { HistoryControls } from '@/shell/HistoryControls';
 import { MobileZoneBar } from '@/shell/MobileZoneBar';
 import { type MobileZone } from '@/store/slices/uiChrome';
 import { isNarrowViewport } from '@/shared/breakpoint';
-import { buildOverflowItems, toggleOverflowMenu } from '@/shell/toolbarOverflow';
 import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { CompilingIndicator } from '@/shell/CompilingIndicator';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
@@ -1606,8 +1603,6 @@ export function init(): () => void {
     platform.canOpenFolders,
   );
 
-  const palette = createCommandPalette(() => getCommands());
-
   // Workspace search (Mod-Shift-F): a non-modal panel that scans every .koi file in the open folder
   // via the pure search core. The shell supplies the four seams the panel can't own — list the files,
   // read a closed file, reveal a match in the editor, snapshot the open buffers — plus a label fn.
@@ -2176,46 +2171,6 @@ export function init(): () => void {
   // controller.init()'s construction. The diagnostics strip content (#diag-body / #diag-count) is still
   // owned by editorSession; the controller only toggles which bottom panel is visible.
 
-  // Toolbar buttons unique to this phase.
-  const hintEl = document.querySelector('.palette-hint');
-  if (hintEl) {
-    // Render the chord into an aria-hidden span: the visible "⌘+K" is decorative chrome, while the
-    // button's accessible name stays "Open command palette" (aria-label). Setting textContent directly
-    // would make the chord the visible label and break WCAG 2.5.3 (Label in Name).
-    hintEl.replaceChildren();
-    const chord = document.createElement('span');
-    chord.setAttribute('aria-hidden', 'true');
-    chord.textContent = formatChord('mod+K'); // ⌘+K / Ctrl+K per platform
-    hintEl.appendChild(chord);
-    hintEl.addEventListener('click', () => palette.toggle());
-  }
-  el<HTMLButtonElement>('btn-home').addEventListener('click', () => goHome());
-  el<HTMLButtonElement>('btn-new').addEventListener('click', () => void requestNewModel());
-  el<HTMLButtonElement>('btn-generate-project').addEventListener('click', () => generateProject.open());
-  const saveProjectBtn = el<HTMLButtonElement>('btn-save-project');
-  saveProjectBtn.addEventListener('click', () => void saveProjectToDisk());
-  if (!platform.canSaveProjects) saveProjectBtn.hidden = true;
-  el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
-  // The toolbar gear opens the transient Settings overlay over the deck (#center-panel-settings) — now the
-  // single Settings surface every entry point shares (#731), via the openSettings helper.
-  el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => openSettings());
-
-  // Mobile overflow "More" (⋮) menu (#528): at ≤ $bp-narrow the toolbar hides its secondary actions
-  // (Save/Check/Install/⌘K/theme/Settings) and reveals this kebab, which collects them into a floating
-  // menu. Items reuse the command-palette handlers (getCommands) so they never drift; Install is gated
-  // on its affordance being revealed (#442) and reuses the #btn-install handler.
-  const overflowBtn = el<HTMLButtonElement>('btn-toolbar-overflow');
-  overflowBtn.addEventListener('click', () =>
-    toggleOverflowMenu(overflowBtn, () =>
-      buildOverflowItems({
-        commands: getCommands(),
-        openPalette: () => palette.open(),
-        installAvailable: !el<HTMLElement>('install-affordance').hidden,
-        install: () => el<HTMLButtonElement>('btn-install').click(),
-      }),
-    ),
-  );
-
   // Format the active document via the LSP and apply the edits (shared by the palette command
   // and format-on-save). Degrades silently if the request fails.
   async function formatActive(): Promise<void> {
@@ -2227,119 +2182,37 @@ export function init(): () => void {
     }
   }
 
-  // --- command palette command set ------------------------------------------
-  // Hints are authored with a literal 'mod' and formatted to ⌘ / Ctrl per platform so the
-  // palette, help overlay, and toolbar hint all show the same key.
-  function getCommands(): Command[] {
-    const cmds: Command[] = [
-      { id: 'undo', title: 'Undo', hint: 'mod+Z', group: 'Edit', run: () => history.undo() },
-      { id: 'redo', title: 'Redo', hint: 'mod+Shift+Z', group: 'Edit', run: () => history.redo() },
-      { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void formatActive() },
-      { id: 'home', title: 'Go to start screen', group: 'File', run: () => goHome() },
-      { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void openFolder() },
-      { id: 'search', title: 'Search across files…', hint: 'mod+Shift+F', group: 'Edit', run: () => search.focus() },
-      { id: 'new-model', title: 'New model', hint: 'mod+N', group: 'File', run: () => void requestNewModel() },
-      { id: 'save-all', title: 'Save all', hint: 'mod+Alt+S', group: 'File', run: () => void workspace.saveAllDirty() },
-      { id: 'share', title: 'Copy shareable link', group: 'File', run: () => void copyShareLink() },
-      { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void controller.runCheck() },
-      { id: 'generate-project', title: 'Generate project…', group: 'File', run: () => generateProject.open() },
-      { id: 'export-source-zip', title: 'Export .koi source (.zip)', group: 'File', run: () => void exportSourceZip() },
-      { id: 'export-diagram-svg', title: 'Export diagram as SVG', group: 'File', run: () => void exportActiveDiagram('svg') },
-      { id: 'export-diagram-png', title: 'Export diagram as PNG', group: 'File', run: () => void exportActiveDiagram('png') },
-      { id: 'export-diagram-plantuml', title: 'Export diagram as PlantUML', group: 'File', run: () => void exportActiveDiagram('plantuml') },
-      { id: 'copy-diagram-mermaid', title: 'Copy diagram as Mermaid', group: 'File', run: () => void copyActiveDiagramMermaid() },
-      ...(platform.canSaveProjects
-        ? [{ id: 'save-project-to-disk', title: 'Save to disk…', group: 'File', run: () => void saveProjectToDisk() } as Command]
-        : []),
-      { id: 'toggle-theme', title: 'Toggle theme', group: 'View', run: () => toggleTheme() },
-      // The editor-split + panel-reposition commands (issue #265). Built from the pure layoutCommands
-      // module so the list is unit-tested; each run() drives the layoutActions wired at boot above.
-      ...layoutCommands(layoutActions),
-      { id: 'prefs', title: 'Settings…', hint: 'mod+,', group: 'View', run: () => openSettings() },
-      { id: 'help', title: 'Keyboard shortcuts', hint: 'F1', group: 'Help', run: () => help.open() },
-      { id: 'about', title: 'About Koine Studio', group: 'Help', run: () => openSettings('about') },
-      ...devCommands(() => void toggleStoreInspector()),
-      { id: 'view-preview', title: 'Show Emitted Preview', group: 'Workspace', run: () => controller.selectOutput('generated') },
-      { id: 'view-glossary', title: 'Show Glossary', group: 'Workspace', run: () => controller.selectDocsTab('glossary') },
-      { id: 'view-decisions', title: 'Show Decisions (ADRs)', group: 'Workspace', run: () => controller.selectDocsTab('adr') },
-      { id: 'view-notes', title: 'Show Notes', group: 'Workspace', run: () => controller.selectDocsTab('notes') },
-      { id: 'view-diagrams', title: 'Show Visual Editor', group: 'Workspace', run: () => controller.selectCenter('visual') },
-      { id: 'split-code-canvas', title: 'Split: Code ⟷ Canvas', group: 'Workspace', run: () => controller.splitCodeCanvas() },
-      { id: 'view-contextmap', title: 'Show Context Map', group: 'Workspace', run: () => controller.selectOutput('contextmap') },
-      { id: 'view-check', title: 'Show Compatibility Check', group: 'Workspace', run: () => controller.selectOutput('compatibility') },
-      { id: 'view-scenarios', title: 'Show Scenario Runner', group: 'Workspace', run: () => controller.selectTech('scenarios') },
-      { id: 'view-assistant', title: 'Show AI Chat', group: 'Workspace', run: () => controller.selectRight('assistant') },
-      { id: 'assistant-explain', title: 'Explain this construct', group: 'Workspace', run: () => { controller.selectRight('assistant'); ensureAssistant().explainSelection(); } },
-      { id: 'add-comment', title: 'Add review comment', group: 'Review', run: () => editor.addCommentAtSelection() },
-      { id: 'view-review', title: 'Show Review', group: 'Workspace', run: () => controller.selectBottomTab('review') },
-    ];
-
-    // Stop a runaway compile: terminate the WASM worker and boot a fresh one (#353). Offered only while a
-    // compile is actually in flight on the worker boot path (#469) — in the main-thread fallback there is
-    // nothing to terminate, and an idle Stop would pointlessly restart the worker. getCommands() re-runs
-    // on every palette open, so the command appears and disappears with the live in-flight state.
-    if (canStopCompile()) {
-      cmds.push({
-        id: 'stop-compile',
-        title: 'Stop compilation (restart compiler)',
-        group: 'Workspace',
-        run: () => stopRunawayCompile(),
-      });
-    }
-
-    // Surface every open file as a "Go to File" entry so the palette doubles as a
-    // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open.
-    for (const buf of Array.from(workspace.buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath))) {
-      cmds.push({ id: 'goto:' + buf.uri, title: buf.relPath, group: 'Go to File', run: () => openUri(buf.uri) });
-    }
-
-    return cmds.map((c) => (c.hint ? { ...c, hint: formatChord(c.hint) } : c));
-  }
-
-  // --- global keyboard shortcuts --------------------------------------------
-  // The existing Cmd/Ctrl-S save listener lives below this. This handler owns the rest of
-  // the global chords; each overlay binds its own Esc, so Esc is intentionally not handled here.
-  window.addEventListener('keydown', (e) => {
-    const mod = e.metaKey || e.ctrlKey;
-    if (!mod && e.key !== 'F1') return;
-
-    // mod+K always toggles the palette (so it can also dismiss itself); every other global
-    // shortcut is suppressed while an overlay is open so it doesn't act on the editor beneath.
-    if (mod && (e.key === 'k' || e.key === 'K')) {
-      e.preventDefault();
-      palette.toggle();
-      return;
-    }
-    if (overlayOpen()) return;
-
-    if (mod && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
-      // Mod+Shift+F → open/focus the workspace search panel (toggle closes it).
-      e.preventDefault();
-      search.toggle();
-    } else if (mod && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
-      e.preventDefault();
-      void openFolder();
-    } else if (mod && !e.shiftKey && (e.key === 'n' || e.key === 'N')) {
-      e.preventDefault();
-      void requestNewModel();
-    } else if (mod && e.key === ',') {
-      e.preventDefault();
-      openSettings();
-    } else if (e.key === 'F1') {
-      e.preventDefault();
-      help.toggle();
-    } else if (mod && e.altKey && e.code === 'KeyB') {
-      // Mod+Alt+B → toggle the right Properties panel (the #500 tool-window stripe's collapse toggle,
-      // mirroring VS Code's secondary-side-bar chord). Matched on e.code: on macOS, Option composes the
-      // 'b' key into another glyph, so `e.key === 'b'` would miss this chord. Checked before the plain
-      // Mod+B file-tree branch below so the Alt variant isn't swallowed by it.
-      e.preventDefault();
-      layoutActions.toggleProperties();
-    } else if (mod && !e.altKey && (e.key === 'b' || e.key === 'B')) {
-      // Toggle the file tree.
-      e.preventDefault();
-      toggleFileTree();
-    }
+  // The command surface — the palette, the command list (getCommands), the toolbar command buttons
+  // (Home / New / Generate / Save-to-disk / Theme / Settings + the mobile overflow ⋮), and the global
+  // keyboard shortcuts — lives in commandWiring now (#757). It reaches the rest of the shell through this
+  // typed deps bag of thunks; init() constructs it here, once everything it dispatches to exists. The
+  // Cmd/Ctrl-S save + undo/redo keydown listeners stay below — they persist edits, not commands.
+  const commandWiring = createCommandWiring({
+    history,
+    format: () => void formatActive(),
+    goHome,
+    openFolder: () => void openFolder(),
+    search,
+    requestNewModel: () => void requestNewModel(),
+    workspace: { saveAllDirty: () => void workspace.saveAllDirty(), buffers: workspace.buffers },
+    copyShareLink: () => void copyShareLink(),
+    controller,
+    generateProject,
+    exportSourceZip: () => void exportSourceZip(),
+    exportActiveDiagram: (format) => void exportActiveDiagram(format),
+    copyActiveDiagramMermaid: () => void copyActiveDiagramMermaid(),
+    saveProjectToDisk: () => void saveProjectToDisk(),
+    canSaveProjects: platform.canSaveProjects,
+    layoutActions,
+    openSettings,
+    openHelp: () => help.open(),
+    toggleHelp: () => help.toggle(),
+    toggleStoreInspector: () => void toggleStoreInspector(),
+    ensureAssistant,
+    editor,
+    openUri,
+    overlayOpen,
+    toggleFileTree,
   });
 
   // Boot: attach listeners (inside start) before messages flow, then open the doc. The #status pill
@@ -2439,6 +2312,7 @@ export function init(): () => void {
   return () => {
     controller.dispose();
     editorSession.destroy();
+    commandWiring.dispose(); // release the global command-shortcut keydown listener (#757)
     window.removeEventListener('resize', onDiagramViewportResize);
     terminal?.dispose(); // stop the brokered shell + dispose xterm (#256)
     settingsPage?.destroy(); // tear down the Settings center page (pane/editor + header toggle) if it was opened

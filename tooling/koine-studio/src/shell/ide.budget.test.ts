@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 // RATCHET: lower this on every ide.tsx extraction; target ≤ ~800.
-const IDE_TSX_MAX_LINES = 2451;
+const IDE_TSX_MAX_LINES = 2325;
 
 describe('ide.tsx line-budget guard', () => {
   it(`keeps ide.tsx under ${IDE_TSX_MAX_LINES} lines (the composition root must stay thin)`, () => {
