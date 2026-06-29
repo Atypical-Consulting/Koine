@@ -57,6 +57,8 @@ export interface AssistantPanelOptions {
   getApiKey: () => string;
   /** The model id to use (provider-appropriate defaults handled in ai.ts). */
   getModel: () => string;
+  /** The assistant sampling temperature (Settings → Assistant, #750); omitted ⇒ the provider default. */
+  getTemperature?: () => number;
   /** The current editor model + diagnostics, captured fresh on each send (may be async). */
   getContext: () => AssistantContext | Promise<AssistantContext>;
   /** The current editor selection (the construct to explain), or null when there's nothing useful. */
@@ -826,6 +828,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
               baseUrl: opts.getBaseUrl(),
               apiKey: opts.getApiKey(),
               model: opts.getModel(),
+              temperature: opts.getTemperature?.(),
               system: buildSystem(ctx),
               messages: [...messages, { role: 'user', content: buildRepairPrompt(previous, diagnostics) }],
               signal: aborter?.signal,
@@ -1000,6 +1003,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
             baseUrl,
             apiKey,
             model: opts.getModel(),
+            temperature: opts.getTemperature?.(),
             system: 'Probe.',
             messages: [{ role: 'user', content: 'ping' }],
             grammar,
@@ -1045,6 +1049,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         baseUrl,
         apiKey,
         model: opts.getModel(),
+        temperature: opts.getTemperature?.(),
         // In workspace mode, steer the model toward the multi-file edit tools (otherwise the primer's
         // "output one ```koine block" instruction wins and the change-set path never fires).
         system: editSession ? `${buildSystem(ctx)}\n\n${WORKSPACE_EDIT_GUIDE}` : buildSystem(ctx),

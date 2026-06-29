@@ -28,6 +28,7 @@ import {
   syntaxHighlighting,
   defaultHighlightStyle,
   indentOnInput,
+  indentUnit,
   bracketMatching,
 } from '@codemirror/language';
 import {
@@ -241,7 +242,12 @@ function lspCompletionSource(onCompletion: CompletionFn) {
 
 const sharedTheme = EditorView.theme({
   '&': { height: '100%', fontSize: 'var(--koi-editor-font-size, 13.5px)' },
-  '.cm-scroller': { fontFamily: 'var(--koi-font-mono)', lineHeight: 'var(--koi-editor-line-height, 1.6)' },
+  // The editor font stack comes from Settings → Appearance → Editor font (#750) via the
+  // --koi-editor-font-family CSS var, falling back to the theme's default mono font when unset.
+  '.cm-scroller': {
+    fontFamily: 'var(--koi-editor-font-family, var(--koi-font-mono))',
+    lineHeight: 'var(--koi-editor-line-height, 1.6)',
+  },
   '.cm-gutters': { backgroundColor: 'transparent', color: 'var(--koi-muted)', border: 'none' },
   '.cm-content': { caretColor: 'var(--koi-accent)' },
   // drawSelection() hides the native caret and paints its own .cm-cursor via border-left, which
@@ -862,6 +868,8 @@ export interface KoineEditor {
   setLineWrap(on: boolean): void;
   /** Show/hide the document-overview minimap (reconfigures a compartment; no state loss). */
   setMinimap(on: boolean): void;
+  /** Set the editor indent width / tab size in spaces (reconfigures a compartment; no state loss). */
+  setTabSize(spaces: number): void;
   /** Rebuild the editor keymap from the persisted keybinding overrides (reconfigures a compartment; no state loss). */
   reconfigureKeybindings(): void;
   /**
@@ -1153,6 +1161,17 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
   // The minimap lives in its own compartment too (same pattern as lineWrap), so Settings can show/hide
   // the overview rail live without losing editor state.
   const minimap = new Compartment();
+  // Indentation (Settings → Editor → Tab size, #750) lives in its own compartment so setTabSize can
+  // reconfigure it live. `indentUnit` is the whitespace inserted on indent; `EditorState.tabSize` is
+  // the rendered tab width — both follow the configured space count. Round + floor-at-1 so a non-integer
+  // or zero value (e.g. a fraction typed into the step-1 Settings number input, which reaches here via
+  // onChange before a reload's coerceTabSize would round it) renders a sane integer indent and keeps
+  // live-apply == reload (#734) — never an empty indent unit from `' '.repeat(0)`.
+  const indent = new Compartment();
+  const indentConfig = (n: number): Extension => {
+    const width = Math.max(1, Math.round(n));
+    return [indentUnit.of(' '.repeat(width)), EditorState.tabSize.of(width)];
+  };
 
   // Inline (ghost-text) AI completions (#263). The pure state machine debounces keystrokes and owns
   // abort/staleness; the AI client (requestInline) talks to the configured provider. Both the master
@@ -1207,6 +1226,8 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         EditorView.contentAttributes.of({ 'aria-label': 'Koine model source editor' }),
         lineWrap.of(opts.lineWrap ? EditorView.lineWrapping : []),
         minimap.of(opts.minimap ? minimapExtension() : []),
+        // Indentation width from Settings → Editor → Tab size (#750); reconfigured live via setTabSize.
+        indent.of(indentConfig(loadSettings().tabSize)),
         // Multi-cursor (VS Code parity). allowMultipleSelections is the enabling switch: without it
         // CodeMirror reduces every multi-range selection to its main range (.asSingle()), so the
         // add-cursor commands silently collapse to one caret. The familiar bindings are ALREADY wired
@@ -1323,6 +1344,9 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     },
     setMinimap(on: boolean) {
       view.dispatch({ effects: minimap.reconfigure(on ? minimapExtension() : []) });
+    },
+    setTabSize(spaces: number) {
+      view.dispatch({ effects: indent.reconfigure(indentConfig(spaces)) });
     },
     reconfigureKeybindings() {
       view.dispatch({ effects: keybindingCompartment.reconfigure(buildExtraKeys(resolveKeybindings(), keybindingHandlers)) });

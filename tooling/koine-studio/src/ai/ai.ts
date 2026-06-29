@@ -80,6 +80,8 @@ export interface AssistantRequest {
   /** Base URL for the OpenAI-compatible provider (ignored for 'anthropic'). */
   baseUrl?: string;
   model?: string;
+  /** Sampling temperature (Settings → Assistant → Temperature, #750). Sent to both providers when set. */
+  temperature?: number;
   system: string;
   messages: ChatMessage[];
   /**
@@ -284,6 +286,8 @@ async function runAnthropic(req: AssistantRequest): Promise<string> {
           thinking: { type: 'adaptive' },
           system: req.system,
           messages,
+          // Sampling temperature from Settings → Assistant (#750); omitted when unset so the SDK default applies.
+          ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
           // The cast bridges the neutral `object` schema to the SDK's `Tool.InputSchema`.
           ...(offerTools ? { tools: activeToolDefs(req).map(toAnthropicTool) as Tool[] } : {}),
         },
@@ -342,6 +346,8 @@ async function runOpenAiCompatible(req: AssistantRequest): Promise<string> {
           model: req.model || DEFAULT_OPENAI_MODEL,
           stream: true,
           messages,
+          // Sampling temperature from Settings → Assistant (#750); omitted when unset so the server default applies.
+          ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
           ...(offerTools ? { tools: activeToolDefs(req).map(toOpenAiTool), tool_choice: 'auto' as const } : {}),
           // `grammar` is the llama.cpp-server / Ollama GBNF body field (issue #257): a local backend
           // that honours it can only decode tokens the grammar permits. Spread so the unknown-to-the-SDK
