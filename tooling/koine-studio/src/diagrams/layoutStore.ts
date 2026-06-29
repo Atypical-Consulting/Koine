@@ -12,6 +12,7 @@
 // back to the browser store on its own. Everything here is a VIEW concern — it never round-trips into `.koi`.
 import type { Platform } from '@/host';
 import { createFolderSidecar } from '@/host/sidecar';
+import { byId } from '@/shared/sort';
 import {
   emptyDiagramLayout,
   positionKey,
@@ -43,11 +44,6 @@ interface LayoutFile {
   positions: Record<string, DiagramPosition>;
   notes: DiagramNote[];
   groups: DiagramGroup[];
-}
-
-/** Stable id comparison (locale-independent) so two runs sort notes/groups identically. */
-function byId(a: { id: string }, b: { id: string }): number {
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
 /** Serialize the layout as a stable, minimal-diff `koine.layout.json`: versioned, integer coords, SORTED

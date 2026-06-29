@@ -16,6 +16,7 @@ import type { Platform } from '@/host';
 import { createFolderSidecar } from '@/host/sidecar';
 import type { SourceSpan } from '@/lsp/lsp';
 import { prefixedId } from '@/shared/ids';
+import { byId } from '@/shared/sort';
 
 /** The committable reviews sidecar, written under the opened folder's `.koine/` directory. */
 export const REVIEWS_DIR = '.koine';
@@ -76,11 +77,6 @@ export interface ReviewStore {
 interface ReviewsFile {
   version: number;
   threads: ReviewThread[];
-}
-
-/** Stable id comparison (locale-independent) so two runs serialize threads identically. */
-function byId(a: ReviewThread, b: ReviewThread): number {
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
 /** A unique id for a freshly-opened thread. */
