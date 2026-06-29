@@ -41,10 +41,11 @@ import type {
   WorkspaceEdit,
 } from '@/lsp/lsp';
 
-/** The status pill kinds — connecting (boot), green (model valid / success toast), error (diagnostics
- *  or a failed action toast). NOTE: the pill is transient UI only; the persistent connection indicator
- *  (#sb-connection) is driven separately by the LSP lifecycle, not by this kind. */
-export type StatusKind = 'connecting' | 'green' | 'error';
+/** The status pill kinds — green (model valid / success toast) or error (diagnostics or a failed action
+ *  toast). The pill is the topbar's transient ACTION-FEEDBACK toast only; the persistent connection
+ *  indicator (#sb-connection) is a separate status-bar fact driven by the LSP lifecycle, never by this
+ *  kind — so 'connecting' is deliberately NOT a pill kind (the pill must not impersonate connection, #756). */
+export type StatusKind = 'green' | 'error';
 
 /**
  * The slice of {@link import('@/lsp/lsp').KoineLsp} the editor callback wall + diagnostics wiring needs.

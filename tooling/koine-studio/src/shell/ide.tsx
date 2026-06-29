@@ -309,8 +309,10 @@ export function init(): () => void {
   const diagBodyEl = el('diag-body');
   const diagCountEl = el('diag-count');
 
-  // Bottom status-bar fields — a pure projection of existing state (no new data sources). #status stays
-  // in the toolbar; #sb-connection mirrors its kind here. #sb-validity by the diagnostics strip, and
+  // Bottom status-bar fields — a pure projection of existing state (no new data sources). Per the
+  // single-home contract (docs/shell-bars-contract.md, #756): #sb-connection is the SOLE connection
+  // indicator (driven by setConnection over the LSP lifecycle), NOT a mirror of the topbar #status pill
+  // — that pill is transient action-feedback only. #sb-validity by the diagnostics strip, and
   // #sb-version once at boot from the build-time define. (#sb-context is written by the inspector
   // controller's bounded-context switcher.)
   const sbConnEl = el('sb-connection');
@@ -2326,8 +2328,9 @@ export function init(): () => void {
     }
   });
 
-  // Boot: attach listeners (inside start) before messages flow, then open the doc.
-  setStatus('connecting…', 'connecting');
+  // Boot: attach listeners (inside start) before messages flow, then open the doc. The #status pill
+  // stays empty (the action-feedback toast has nothing to report yet); connection state is shown by
+  // #sb-connection, which boots "Connecting…" and flips to "Local" on the first server push (#756).
   lsp.onServerRestart(() => {
     // Fresh sidecar is back in sync; refresh whatever doc view is showing.
     controller.invalidateDocViews();

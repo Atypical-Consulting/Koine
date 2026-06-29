@@ -54,9 +54,9 @@
 }
 
 /* Transient "compiling…" indicator (#516): a muted, pulsing affordance shown while a compile is in
-   flight (debounced reveal, immediate hide), mirroring the connecting-pill's pulse so "busy" reads
-   consistently across the shell. The `.sb-item` rule sets display:inline-flex, which would defeat the
-   UA `[hidden]` styling, so honour the hidden attribute explicitly when idle. */
+   flight (debounced reveal, immediate hide) so "busy" reads consistently in the status bar. The
+   `.sb-item` rule sets display:inline-flex, which would defeat the UA `[hidden]` styling, so honour the
+   hidden attribute explicitly when idle. */
 .koi-compiling-indicator {
   color: var(--koi-muted);
   font-style: italic;
@@ -82,7 +82,9 @@
   }
 }
 
-/* Toolbar connection-status pill (top-right of the toolbar). */
+/* Toolbar action-feedback pill (top-right of the toolbar): the transient last-action toast
+   (Saved / Renamed X→Y / errors), green for success and error for a failed action. NOT a connection
+   indicator — connection lives in #sb-connection (see docs/shell-bars-contract.md, #756). */
 #status {
   display: inline-flex;
   align-items: center;
@@ -97,6 +99,12 @@
   color: var(--koi-muted);
 }
 
+/* No last action yet (boot, before the first toast) → no empty bordered pill floating in the toolbar.
+   Action feedback gives it text; until then it stays out of the layout entirely. */
+#status:empty {
+  display: none;
+}
+
 #status::before {
   content: '';
   width: 7px;
@@ -104,14 +112,6 @@
   border-radius: var(--koi-radius-pill);
   background: currentColor;
   box-shadow: 0 0 0 0 currentColor;
-}
-
-#status[data-kind="connecting"] {
-  color: var(--koi-muted);
-}
-
-#status[data-kind="connecting"]::before {
-  animation: koi-pulse 1.3s ease-in-out infinite;
 }
 
 #status[data-kind="green"] {

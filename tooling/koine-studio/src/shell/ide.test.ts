@@ -305,7 +305,7 @@ const APP_HTML = `
           <button type="button" id="btn-theme" class="icon-btn">theme</button>
           <button type="button" id="btn-prefs" class="icon-btn">prefs</button>
           <button type="button" id="btn-toolbar-overflow" class="icon-btn" aria-haspopup="menu" aria-expanded="false" hidden>⋮</button>
-          <div id="status" data-kind="connecting" role="status" aria-live="polite">connecting…</div>
+          <div id="status" role="status" aria-live="polite"></div>
           <button type="button" id="unsaved-indicator" class="unsaved-indicator" hidden></button>
         </div>
       </header>
