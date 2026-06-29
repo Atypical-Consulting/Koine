@@ -44,4 +44,25 @@ describe('rightStripMarkup', () => {
     const container = mountStrip();
     expect(await axe(container)).toHaveNoViolations();
   });
+
+  // Regression guard for F6/F7 (#759): the Rules and Notes right-rail tabs were retired in #730 (a
+  // selected element's invariants now surface in Properties, model Notes live in the center Deck's Docs
+  // surface). The stripe must never reintroduce them, and must never ship the bare "Coming soon."
+  // placeholder that exposed those unfinished surfaces to users. panelGate (src/shell/panelGate.ts) is
+  // the mechanism for hiding any *future* incomplete surface; this guard locks the resolved state.
+  it('does not reintroduce the retired Rules or Notes views', () => {
+    mountStrip();
+    const views = [...document.querySelectorAll('#right-strip [data-rview]')].map(
+      (b) => (b as HTMLElement).dataset.rview,
+    );
+    expect(views).not.toContain('rules');
+    expect(views).not.toContain('notes');
+  });
+
+  it('never ships a "Coming soon" / placeholder leak in the stripe markup', () => {
+    const markup = rightStripMarkup().toLowerCase();
+    expect(markup).not.toContain('coming soon');
+    expect(markup).not.toContain('placeholder');
+    expect(markup).not.toContain('todo');
+  });
 });

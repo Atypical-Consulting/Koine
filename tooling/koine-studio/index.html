@@ -249,10 +249,12 @@
         </section>
         <div class="koi-resizer" id="split-resizer" aria-hidden="true"></div>
 
-        <!-- Right rail: the element inspector. Properties is the live editor; Rules and Notes are
-             read-only informational views until the invariants-on-the-wire follow-up lets them edit
-             per-element rules/notes (tracked separately). Their panels carry an honest empty state
-             pointing at where each capability lives today, rather than a bare "Coming soon". -->
+        <!-- Right rail: the element inspector. Properties is the live editor; AI Chat and Source Control
+             dock here too (the #right-strip stripe switches between them). The Rules and Notes tabs were
+             retired in #730 — a selected element's invariants now surface in the Properties panel's
+             Invariants section, and model Notes live in the center Deck's Docs surface. Any future
+             not-yet-ready surface is hidden via panelGate (src/shell/panelGate.ts), never a bare
+             "Coming soon" placeholder. -->
         <aside id="right" class="pane" aria-labelledby="right-title">
           <!-- Tool-window title header: the right-edge icon stripe (#right-strip) is the sole view
                switcher, so the panel needs only a title naming the active tool window — not a second,
