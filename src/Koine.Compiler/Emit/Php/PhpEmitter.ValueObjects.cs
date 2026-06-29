@@ -90,9 +90,9 @@ public sealed partial class PhpEmitter
                 WriteScalarOp(sb, fields);
             }
 
-            // Demand-driven additive (only when the model sums this VO).
-            bool hasSummableAdd = emit.AdditiveNeeds.Contains(vo.Name);
-            if (hasSummableAdd)
+            // Demand-driven additive (only when the model sums this VO). A summed VO is exactly a
+            // Summable VO (`isSummable`), and gets its `add` via the Summable seam here.
+            if (isSummable)
             {
                 WriteAdditiveOp(sb, fields);
             }
@@ -102,7 +102,7 @@ public sealed partial class PhpEmitter
             // duplicate; `subtract` is never part of the Summable seam and is emitted on demand.
             if (emit.BinaryArithmeticNeeds.TryGetValue(vo.Name, out IReadOnlySet<BinaryOp>? arithmeticOps))
             {
-                WriteBinaryArithmeticOps(sb, fields, arithmeticOps, hasSummableAdd);
+                WriteBinaryArithmeticOps(sb, fields, arithmeticOps, isSummable);
             }
         }
 
@@ -356,37 +356,21 @@ public sealed partial class PhpEmitter
         sb.Append('\n');
         sb.Append(Indent).Append(@"public function multipliedBy(\Koine\Runtime\Decimal $factor): self").Append('\n');
         sb.Append(Indent).Append("{\n");
-        sb.Append(Indent).Append(Indent).Append("return new self(\n");
 
-        // Positional args must follow the reordered ctor signature (defaulted/optional last).
-        var ordered = OrderCtorParams(fields).ToList();
-        for (int i = 0; i < ordered.Count; i++)
+        WriteFieldwiseSelf(sb, fields, m =>
         {
-            Member m = ordered[i];
             var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
-            string arg;
-            if (numeric.Contains(m.Name))
+            if (!numeric.Contains(m.Name))
             {
-                // Decimal: use ->mul(); Int: cast to Decimal via runtime for consistency
-                if (m.Type.Name == "Decimal")
-                {
-                    arg = "$this->" + prop + "->mul($factor)";
-                }
-                else
-                {
-                    // Int field — wrap then multiply
-                    arg = "(new \\Koine\\Runtime\\Decimal($this->" + prop + "))->mul($factor)";
-                }
+                return "$this->" + prop;
             }
-            else
-            {
-                arg = "$this->" + prop;
-            }
-            var sep = i < ordered.Count - 1 ? "," : "";
-            sb.Append(Indent).Append(Indent).Append(Indent).Append(arg).Append(sep).Append('\n');
-        }
 
-        sb.Append(Indent).Append(Indent).Append(");\n");
+            // Decimal: use ->mul(); Int: cast to Decimal via runtime for consistency, then multiply.
+            return m.Type.Name == "Decimal"
+                ? "$this->" + prop + "->mul($factor)"
+                : "(new \\Koine\\Runtime\\Decimal($this->" + prop + "))->mul($factor)";
+        });
+
         sb.Append(Indent).Append("}\n");
     }
 
@@ -407,35 +391,20 @@ public sealed partial class PhpEmitter
         sb.Append(Indent).Append("/** @param self $other */\n");
         sb.Append(Indent).Append("public function add(\\Koine\\Runtime\\Summable $other): self\n");
         sb.Append(Indent).Append("{\n");
-        sb.Append(Indent).Append(Indent).Append("return new self(\n");
 
-        // Positional args must follow the reordered ctor signature (defaulted/optional last).
-        var ordered = OrderCtorParams(fields).ToList();
-        for (int i = 0; i < ordered.Count; i++)
+        WriteFieldwiseSelf(sb, fields, m =>
         {
-            Member m = ordered[i];
             var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
-            string arg;
-            if (numeric.Contains(m.Name))
+            if (!numeric.Contains(m.Name))
             {
-                if (m.Type.Name == "Decimal")
-                {
-                    arg = "$this->" + prop + "->add($other->" + prop + ")";
-                }
-                else
-                {
-                    arg = "$this->" + prop + " + $other->" + prop;
-                }
+                return "$this->" + prop;
             }
-            else
-            {
-                arg = "$this->" + prop;
-            }
-            var sep = i < ordered.Count - 1 ? "," : "";
-            sb.Append(Indent).Append(Indent).Append(Indent).Append(arg).Append(sep).Append('\n');
-        }
 
-        sb.Append(Indent).Append(Indent).Append(");\n");
+            return m.Type.Name == "Decimal"
+                ? "$this->" + prop + "->add($other->" + prop + ")"
+                : "$this->" + prop + " + $other->" + prop;
+        });
+
         sb.Append(Indent).Append("}\n");
     }
 
@@ -484,29 +453,43 @@ public sealed partial class PhpEmitter
         sb.Append('\n');
         sb.Append(Indent).Append("public function ").Append(methodName).Append("(self $other): self\n");
         sb.Append(Indent).Append("{\n");
+
+        WriteFieldwiseSelf(sb, fields, m =>
+        {
+            var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
+            if (!numeric.Contains(m.Name))
+            {
+                return "$this->" + prop;
+            }
+
+            return m.Type.Name == "Decimal"
+                ? "$this->" + prop + "->" + decimalMethod + "($other->" + prop + ")"
+                : "$this->" + prop + " " + intOp + " $other->" + prop;
+        });
+
+        sb.Append(Indent).Append("}\n");
+    }
+
+    /// <summary>
+    /// Writes a <c>return new self(&lt;args&gt;);</c> body whose positional arguments follow the reordered
+    /// constructor signature (defaulted/optional last, via <see cref="OrderCtorParams"/>) — one per field,
+    /// each produced by <paramref name="argFor"/>. Shared by the demand-driven arithmetic emitters
+    /// (<see cref="WriteScalarOp"/>, <see cref="WriteAdditiveOp"/>,
+    /// <see cref="WriteValueObjectAdditiveMethod"/>) so the field-wise reconstruction lives in one place;
+    /// each caller supplies only the per-field argument expression.
+    /// </summary>
+    private static void WriteFieldwiseSelf(StringBuilder sb, IReadOnlyList<Member> fields, Func<Member, string> argFor)
+    {
         sb.Append(Indent).Append(Indent).Append("return new self(\n");
 
         var ordered = OrderCtorParams(fields).ToList();
         for (int i = 0; i < ordered.Count; i++)
         {
-            Member m = ordered[i];
-            var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
-            string arg;
-            if (numeric.Contains(m.Name))
-            {
-                arg = m.Type.Name == "Decimal"
-                    ? "$this->" + prop + "->" + decimalMethod + "($other->" + prop + ")"
-                    : "$this->" + prop + " " + intOp + " $other->" + prop;
-            }
-            else
-            {
-                arg = "$this->" + prop;
-            }
+            var arg = argFor(ordered[i]);
             var sep = i < ordered.Count - 1 ? "," : "";
             sb.Append(Indent).Append(Indent).Append(Indent).Append(arg).Append(sep).Append('\n');
         }
 
         sb.Append(Indent).Append(Indent).Append(");\n");
-        sb.Append(Indent).Append("}\n");
     }
 }

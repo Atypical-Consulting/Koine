@@ -441,7 +441,7 @@ internal sealed class PhpExpressionTranslator
             : IsArithmeticValueObject(left) || IsArithmeticValueObject(right);
         if (routeValueObject)
         {
-            WriteValueObjectBinary(bin, left, sb, parenthesize);
+            WriteValueObjectBinary(bin, left, right, sb, parenthesize);
             return true;
         }
 
@@ -533,13 +533,12 @@ internal sealed class PhpExpressionTranslator
     /// underlying <c>amount</c> accessor (no comparison method is generated on the VO).
     /// </summary>
     private void WriteValueObjectBinary(
-        BinaryExpr bin, TypeRef? left, StringBuilder sb, bool parenthesize)
+        BinaryExpr bin, TypeRef? left, TypeRef? right, StringBuilder sb, bool parenthesize)
     {
         // Prefer a strict (non-optional) value object as the receiver; only when neither side is a strict
         // VO (the both-guarded-optional arithmetic case) does an optional VO operand become the receiver.
         // This keeps the equality/comparison arms — only ever reached with a strict VO present — emitting
         // exactly as before, while letting `optionalMoney + optionalMoney` pick a (narrowed) receiver.
-        TypeRef? right = InferType(bin.Right);
         bool leftIsVo = IsArithmeticValueObject(left)
             || (!IsArithmeticValueObject(right) && IsArithmeticValueObjectOperand(left));
         Expr vo = leftIsVo ? bin.Left : bin.Right;
