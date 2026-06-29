@@ -1,5 +1,6 @@
 using Koine.Compiler.Ast;
 using Koine.Compiler.Emit;
+using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
 
@@ -118,6 +119,46 @@ public class EmitterRegistryTests
         // Locks the shared formatter the CLI and MCP error messages both delegate to.
         var registry = new EmitterRegistry();
         registry.SupportedList.ShouldBe(string.Join(", ", registry.SupportedTargets));
+    }
+
+    // ------------------------------------------------------------------
+    // Issue #794 — the C# matches-invariant regex match timeout (#641) is
+    // configurable via the neutral EmitterOptions.RegexMatchTimeoutMs seam.
+    // A timeout-only bag must NOT collapse to the Empty singleton, or the
+    // configured value would never reach the emitted guard.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Csharp_provider_threads_a_configured_regex_match_timeout_into_the_emitted_guard()
+    {
+        // A timeout-only neutral bag must not short-circuit to CSharpEmitterOptions.Empty (issue #794):
+        // the configured value has to reach the matches-invariant guard the C# emitter stamps (#641).
+        var configured = new CSharpEmitterProvider().Create(
+            new EmitterOptions(new Dictionary<string, string>(StringComparer.Ordinal), RegexMatchTimeoutMs: 250));
+
+        EmitEmailGuard(configured).ShouldContain("TimeSpan.FromMilliseconds(250)");
+    }
+
+    [Fact]
+    public void Csharp_provider_keeps_the_default_regex_match_timeout_when_unset()
+    {
+        // No key set ⇒ the emitter keeps the historical 1000 ms bound ⇒ byte-identical output.
+        EmitEmailGuard(new CSharpEmitterProvider().Create(EmitterOptions.Empty))
+            .ShouldContain("TimeSpan.FromMilliseconds(1000)");
+    }
+
+    /// <summary>
+    /// Emits the one-value-object matches-invariant fixture with <paramref name="emitter"/> and returns
+    /// the generated Email source, where the timeout-bounded <c>Regex.IsMatch(…)</c> guard lives.
+    /// </summary>
+    private static string EmitEmailGuard(IEmitter emitter)
+    {
+        const string src =
+            "context C {\n  value Email {\n    raw: String\n" +
+            "    invariant raw matches /^[^@]+@[^@]+$/  \"invalid email address\"\n  }\n}\n";
+        var result = new KoineCompiler().Compile(src, emitter);
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        return result.Files.Single(f => f.RelativePath.EndsWith("Email.cs")).Contents;
     }
 
     private static KoineModel EmptyModel() => new(Array.Empty<ContextNode>(), ContextMap: null);
