@@ -91,9 +91,18 @@ public sealed partial class PhpEmitter
             }
 
             // Demand-driven additive (only when the model sums this VO).
-            if (emit.AdditiveNeeds.Contains(vo.Name))
+            bool hasSummableAdd = emit.AdditiveNeeds.Contains(vo.Name);
+            if (hasSummableAdd)
             {
                 WriteAdditiveOp(sb, fields);
+            }
+
+            // Demand-driven plain binary value-object arithmetic — `base + base` / `base - base`
+            // (issue #813). A summed VO already got its `add` from WriteAdditiveOp, so suppress the
+            // duplicate; `subtract` is never part of the Summable seam and is emitted on demand.
+            if (emit.BinaryArithmeticNeeds.TryGetValue(vo.Name, out IReadOnlySet<BinaryOp>? arithmeticOps))
+            {
+                WriteBinaryArithmeticOps(sb, fields, arithmeticOps, hasSummableAdd);
             }
         }
 
@@ -417,6 +426,77 @@ public sealed partial class PhpEmitter
                 {
                     arg = "$this->" + prop + " + $other->" + prop;
                 }
+            }
+            else
+            {
+                arg = "$this->" + prop;
+            }
+            var sep = i < ordered.Count - 1 ? "," : "";
+            sb.Append(Indent).Append(Indent).Append(Indent).Append(arg).Append(sep).Append('\n');
+        }
+
+        sb.Append(Indent).Append(Indent).Append(");\n");
+        sb.Append(Indent).Append("}\n");
+    }
+
+    // -------------------------------------------------------------------------
+    // Demand-driven plain binary arithmetic (non-quantity value objects, used in `value + value`)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Emits the concrete arithmetic methods a value object needs because the model uses it directly in
+    /// a plain <c>value + value</c> / <c>value - value</c> expression (issue #813) — as opposed to a
+    /// <c>sum</c> fold (<see cref="WriteAdditiveOp"/>) or a scalar scale (<see cref="WriteScalarOp"/>).
+    /// The lowered call site (<c>$vo-&gt;add(...)</c>) is produced by
+    /// <see cref="PhpExpressionTranslator"/>; without these methods it targets an undefined method.
+    /// <paramref name="hasSummableAdd"/> suppresses a duplicate <c>add</c> when the value object is also
+    /// summed (and so already implements <c>Summable</c> with its own <c>add</c>).
+    /// </summary>
+    private static void WriteBinaryArithmeticOps(
+        StringBuilder sb, IReadOnlyList<Member> fields, IReadOnlySet<BinaryOp> ops, bool hasSummableAdd)
+    {
+        if (ops.Contains(BinaryOp.Add) && !hasSummableAdd)
+        {
+            WriteValueObjectAdditiveMethod(sb, fields, "add", "add", "+");
+        }
+
+        if (ops.Contains(BinaryOp.Sub))
+        {
+            WriteValueObjectAdditiveMethod(sb, fields, "subtract", "sub", "-");
+        }
+    }
+
+    /// <summary>
+    /// Writes one concrete <c>methodName(self $other): self</c> that combines this value object with
+    /// another field-by-field: a <c>Decimal</c> field delegates to the runtime Decimal's
+    /// <paramref name="decimalMethod"/> (<c>add</c>/<c>sub</c>), an <c>Int</c> field uses the native PHP
+    /// <paramref name="intOp"/> (<c>+</c>/<c>-</c>), and any other field is carried through from
+    /// <c>$this</c> unchanged. Positional constructor args follow the reordered ctor signature
+    /// (defaulted/optional last), matching <see cref="WriteScalarOp"/> / <see cref="WriteAdditiveOp"/>.
+    /// </summary>
+    private static void WriteValueObjectAdditiveMethod(
+        StringBuilder sb, IReadOnlyList<Member> fields, string methodName, string decimalMethod, string intOp)
+    {
+        var numeric = new HashSet<string>(
+            fields.Where(m => m.Type.Name is "Int" or "Decimal").Select(m => m.Name),
+            StringComparer.Ordinal);
+
+        sb.Append('\n');
+        sb.Append(Indent).Append("public function ").Append(methodName).Append("(self $other): self\n");
+        sb.Append(Indent).Append("{\n");
+        sb.Append(Indent).Append(Indent).Append("return new self(\n");
+
+        var ordered = OrderCtorParams(fields).ToList();
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            Member m = ordered[i];
+            var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
+            string arg;
+            if (numeric.Contains(m.Name))
+            {
+                arg = m.Type.Name == "Decimal"
+                    ? "$this->" + prop + "->" + decimalMethod + "($other->" + prop + ")"
+                    : "$this->" + prop + " " + intOp + " $other->" + prop;
             }
             else
             {
