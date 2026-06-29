@@ -12,7 +12,6 @@ import {
 } from '@/lsp/lsp';
 import {
   fileUriToPath,
-  helpRows,
   pathToFileUri,
 } from '@/shell/ideUtils';
 import { createEditorSession } from '@/shell/editorSession';
@@ -54,7 +53,6 @@ import { type PrefsCallbacks } from '@/settings/prefs';
 import { createSettingsPage, type SettingsPageHandle } from '@/settings/settingsPage';
 import { applyAppearance } from '@/settings/appearance';
 import { initEdgeResizer } from '@/shell/resize';
-import { createHelpOverlay } from '@/shared/help';
 import { formatChord } from '@/shared/platform';
 import {
   DIAGRAM_ANNOTATION_CREATE_EVENT,
@@ -107,7 +105,7 @@ import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
 import { createWorkspaceController, type WorkspaceController } from '@/shell/workspaceController';
 import { createSearchPanel } from '@/shell/searchController';
 import { type Match } from '@/shell/workspaceSearch';
-import { createConfirmDialog, createPromptDialog } from '@/shared/overlay';
+import { createOverlays } from '@/shell/overlays';
 
 // --- workspace fs contract ---------------------------------------------------
 // `KoiFile` (path / name / relPath) is provided by the host platform layer (src/host), whose
@@ -958,7 +956,7 @@ export function init(): () => void {
   async function applyDiagramConnect(detail: DiagramConnectDetail): Promise<void> {
     const targetSimple = detail.targetQualifiedName.slice(detail.targetQualifiedName.lastIndexOf('.') + 1);
     const suggested = targetSimple.charAt(0).toLowerCase() + targetSimple.slice(1);
-    const fieldName = await promptDialog.ask({
+    const fieldName = await overlays.prompt.ask({
       title: 'Add field',
       message: `On ${detail.sourceLabel}, referencing ${detail.targetLabel}.`,
       label: 'Field name',
@@ -975,7 +973,7 @@ export function init(): () => void {
 
   // Removing a relationship = removing the field that backs it.
   async function applyDiagramDisconnect(detail: DiagramDisconnectDetail): Promise<void> {
-    const ok = await confirmDialog.ask({
+    const ok = await overlays.confirm.ask({
       title: `Remove ${detail.label}?`,
       message: 'This rewrites the .koi source.',
       confirmLabel: 'Remove',
@@ -1021,7 +1019,7 @@ export function init(): () => void {
       scope = all[0];
     }
     const kind = detail?.kind ?? 'value';
-    const name = await promptDialog.ask({
+    const name = await overlays.prompt.ask({
       title: `New ${kind}`,
       message: `In ${scope}.`,
       label: 'Name',
@@ -1041,7 +1039,7 @@ export function init(): () => void {
   async function applyDiagramAddAggregateMember(kind: AggregateMemberKind, aggregateQn: string): Promise<void> {
     const aggregateName = aggregateQn.split('.').pop() ?? aggregateQn;
     if (kind === 'rule') {
-      const name = await promptDialog.ask({
+      const name = await overlays.prompt.ask({
         title: 'New rule',
         message: `An aggregate-scoped specification over ${aggregateName}.`,
         label: 'Name',
@@ -1319,7 +1317,7 @@ export function init(): () => void {
     clearLegacyScratch();
     // No-OPFS browsers (Safari / Firefox Private) run on the in-memory fallback: the editor + compiler
     // work, but a reload loses everything. Warn once so the user exports their work rather than losing it.
-    if (!platform.persistsWorkspace) showMemoryOnlyBanner();
+    if (!platform.persistsWorkspace) overlays.showMemoryOnlyBanner();
   }
 
   // Perform the action the user chose on the Home route (#368), handed across via the start-intent.
@@ -1344,36 +1342,6 @@ export function init(): () => void {
     }
   }
 
-  // A one-time, dismissible top banner shown when the workspace is memory-only (no OPFS) — so work
-  // that won't survive a reload is never lost silently. Points at the durable escape hatches.
-  function showMemoryOnlyBanner(): void {
-    if (document.getElementById('koi-memory-banner')) return;
-    const bar = document.createElement('div');
-    bar.id = 'koi-memory-banner';
-    bar.className = 'koi-memory-banner';
-    bar.setAttribute('role', 'status');
-    const msg = document.createElement('span');
-    msg.className = 'koi-memory-banner-msg';
-    msg.textContent =
-      'This browser can’t save to disk — your work lives only in this tab and is lost on reload. Use “Copy shareable link”, or open Studio in Chrome/Edge to keep it.';
-    const dismiss = document.createElement('button');
-    dismiss.type = 'button';
-    dismiss.className = 'koi-memory-banner-dismiss';
-    dismiss.setAttribute('aria-label', 'Dismiss');
-    dismiss.textContent = '✕';
-    dismiss.addEventListener('click', () => bar.remove());
-    bar.append(msg, dismiss);
-    document.getElementById('app')?.prepend(bar);
-  }
-
-  // True when the command palette or a modal dialog (help, confirm/prompt, generate) is open, so global
-  // shortcuts don't fire 'through' an overlay at the editor underneath. The gear-launched Settings overlay
-  // is a center panel, not a modal backdrop, so it's intentionally not counted. The welcome screen is
-  // deliberately excluded — its own actions own that surface.
-  function overlayOpen(): boolean {
-    return document.querySelector('.koi-palette-backdrop:not([hidden]), .koi-modal-backdrop:not([hidden])') !== null;
-  }
-
   // Dismiss the diagram Export ▾ disclosure on an outside-click or when any overlay opens, so the
   // native <details> menu can't linger above a modal scrim (#534). Teardown runs on IDE unmount.
   const teardownExportMenuDismiss = installExportMenuDismiss();
@@ -1386,7 +1354,7 @@ export function init(): () => void {
   window.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod) return;
-    if (overlayOpen()) return; // don't act on the editor under an open overlay
+    if (overlays.overlayOpen()) return; // don't act on the editor under an open overlay
     // Mod+Alt+S → Save all. Match on e.code (the physical S key): on macOS, Option composes e.key
     // into another glyph (e.g. 'ß'), so `e.key === 's'` would miss the chord.
     if (e.altKey && e.code === 'KeyS') {
@@ -1404,7 +1372,7 @@ export function init(): () => void {
   window.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod) return;
-    if (overlayOpen()) return;
+    if (overlays.overlayOpen()) return;
     if (e.code === 'KeyZ') {
       e.preventDefault();
       if (e.shiftKey) history.redo();
@@ -1429,7 +1397,7 @@ export function init(): () => void {
   // --- new model ----------------------------------------------------
   // Reset the default workspace to a single untouched BLANK model: empty it on disk, recreate
   // model.koi, close every open doc, and reopen. The raw reset with no confirmation; user-initiated
-  // New goes through requestNewModel() (below), which guards unsaved work first.
+  // New goes through overlays.requestNewModel() (overlays.ts), which guards unsaved work first.
   async function newModel(): Promise<void> {
     const token = await platform.defaultWorkspace(BLANK);
     if (!token) {
@@ -1454,32 +1422,6 @@ export function init(): () => void {
     // host's reserved '(default)' token.
     setLastWorkspace(token);
     welcome.hide();
-  }
-
-  // Does the workspace hold unsaved work that New would destroy? Files live on disk,
-  // so only a dirty open buffer is at risk.
-  function hasUnsavedWork(): boolean {
-    return workspace.anyDirty();
-  }
-
-  // Confirm before an action that would replace the current model and lose unsaved work. Resolves
-  // true to proceed (nothing to lose, or the user confirmed), false to abort. Shared by New and the
-  // start-screen actions that swap the workspace (open folder / recent / example).
-  async function confirmReplaceWork(title: string, confirmLabel: string): Promise<boolean> {
-    if (!hasUnsavedWork()) return true;
-    const save = formatChord('mod+S');
-    return confirmDialog.ask({
-      title,
-      message: `Files with unsaved changes will lose them. Save with ${save} first to keep them.`,
-      confirmLabel,
-      danger: true,
-    });
-  }
-
-  // User-initiated New (button, ⌘N, palette, welcome). Confirms before discarding unsaved work;
-  // proceeds straight to a fresh blank model when there's nothing to lose.
-  async function requestNewModel(): Promise<void> {
-    if (await confirmReplaceWork('Start a new model?', 'Discard & start new')) await newModel();
   }
 
   // --- overlays + polish surfaces -------------------------------------------
@@ -1516,7 +1458,7 @@ export function init(): () => void {
   // nothing: the welcome already hid itself when the action was clicked, so the user lands back in
   // the editor with their unsaved work intact — Cancel means "keep what I have", not "back to home".
   async function leaveHomeFor(title: string, action: () => void | Promise<void>): Promise<void> {
-    if (await confirmReplaceWork(title, 'Discard & open')) await action();
+    if (await overlays.confirmReplaceWork(title, 'Discard & open')) await action();
   }
 
   // Open a folder from the Recent list, recovering gracefully when it's gone. The welcome's recent
@@ -1527,7 +1469,7 @@ export function init(): () => void {
     if (result.ok) return;
     welcome.show();
     if (result.reason === 'unreadable') {
-      const forget = await confirmDialog.ask({
+      const forget = await overlays.confirm.ask({
         title: `"${platform.folderName(path)}" is no longer available`,
         message: 'Its folder may have moved, been deleted, or had its permission revoked. Remove it from Recent?',
         confirmLabel: 'Remove from Recent',
@@ -1542,7 +1484,7 @@ export function init(): () => void {
 
   const welcome = createWelcome(
     {
-      onNewModel: () => void requestNewModel(),
+      onNewModel: () => void overlays.requestNewModel(),
       onOpenFolder: () => void leaveHomeFor('Open a folder?', () => openFolder()),
       onOpenRecent: (path) => void leaveHomeFor('Open this folder?', () => openRecentFolder(path)),
       onOpenExample: (template) => void leaveHomeFor('Open this template?', () => openExample(template)),
@@ -1717,18 +1659,20 @@ export function init(): () => void {
     ensureSettingsPage();
   }
 
-  const help = createHelpOverlay(helpRows());
-  // Guards the user-initiated New command against silently discarding unsaved work.
-  const confirmDialog = createConfirmDialog();
-  // Single-field text prompts (name a new construct, a field, a project) — Koine's own modal, not the browser's.
-  const promptDialog = createPromptDialog();
+  // The modal-overlay surface — confirm/prompt dialogs, the shortcuts help overlay, the overlay-open
+  // gate, the unsaved-work New guard, and the memory-only banner — lives in the overlays controller now
+  // (#757). It reaches the workspace's dirty check + blank-model reset through these two deps.
+  const overlays = createOverlays({
+    anyDirty: () => workspace.anyDirty(),
+    newModel: () => newModel(),
+  });
 
   // Desktop window-close guard (Tauri only): mirror the web beforeunload — confirm before closing
   // the window when any buffer is dirty. The browser host omits onCloseRequested (its beforeunload
   // guard already covers tab close / reload), so this is a no-op there.
   void platform.onCloseRequested?.(async () => {
     if (!workspace.anyDirty()) return true;
-    return confirmDialog.ask({
+    return overlays.confirm.ask({
       title: 'Close Koine Studio?',
       message: `Files with unsaved changes will lose them. Save with ${formatChord('mod+Alt+S')} first to keep them.`,
       confirmLabel: 'Close & discard',
@@ -1886,7 +1830,7 @@ export function init(): () => void {
     setStatus,
     refreshStatusFromDiagnostics: () =>
       editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())),
-    promptDialog,
+    promptDialog: overlays.prompt,
   });
 
   // --- view layout: editor split + repositionable panels (issue #265) -------
@@ -1929,7 +1873,7 @@ export function init(): () => void {
     goHome,
     openFolder: () => void openFolder(),
     search,
-    requestNewModel: () => void requestNewModel(),
+    requestNewModel: () => void overlays.requestNewModel(),
     workspace: { saveAllDirty: () => void workspace.saveAllDirty(), buffers: workspace.buffers },
     copyShareLink: () => void exportShare.copyShareLink(),
     controller,
@@ -1941,13 +1885,13 @@ export function init(): () => void {
     canSaveProjects: platform.canSaveProjects,
     layoutActions,
     openSettings,
-    openHelp: () => help.open(),
-    toggleHelp: () => help.toggle(),
+    openHelp: () => overlays.openHelp(),
+    toggleHelp: () => overlays.toggleHelp(),
     toggleStoreInspector: () => void toggleStoreInspector(),
     ensureAssistant,
     editor,
     openUri,
-    overlayOpen,
+    overlayOpen: () => overlays.overlayOpen(),
     toggleFileTree: () => layoutController.toggleFileTree(),
   });
 
@@ -2050,6 +1994,7 @@ export function init(): () => void {
     editorSession.destroy();
     commandWiring.dispose(); // release the global command-shortcut keydown listener (#757)
     layoutController.dispose(); // release the edge resizers + section-disclosure listeners (#757)
+    overlays.dispose(); // (#757) overlays are page-lifetime; dispose is a no-op, kept for symmetry
     window.removeEventListener('resize', onDiagramViewportResize);
     terminal?.dispose(); // stop the brokered shell + dispose xterm (#256)
     settingsPage?.destroy(); // tear down the Settings center page (pane/editor + header toggle) if it was opened
