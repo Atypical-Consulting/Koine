@@ -157,6 +157,39 @@ const LEAF_SCHEMAS: Record<FieldDef['runtimeKey'], LeafSchema> = {
   },
 };
 
+// --- per-field UI copy accessor (#765) --------------------------------------
+// The settings.json editor surfaces each field's `title`/`description` as a hover tooltip and as
+// completion detail. Both read this DOM-free accessor, derived from the field map + leaf schemas
+// (keyed by the document path `group.docKey`, matching the JSON pointer the editor resolves at the
+// cursor) so the editor never has to know the schema's nested shape and the copy can't drift from the
+// field map. The secret `aiApiKey` has no field-map row, so it is structurally absent here — no
+// hover/completion copy can ever leak it.
+
+/** A field's human-readable title + description, surfaced in the settings.json editor's hover/completion. */
+export interface SettingsFieldMeta {
+  readonly title: string;
+  readonly description: string;
+}
+
+/** `${group}.${docKey}` → {@link SettingsFieldMeta}, derived from {@link SETTINGS_FIELDS} + the leaf schemas. */
+export const SETTINGS_FIELD_META: Readonly<Record<string, SettingsFieldMeta>> = (() => {
+  const out: Record<string, SettingsFieldMeta> = {};
+  for (const f of SETTINGS_FIELDS) {
+    const leaf = LEAF_SCHEMAS[f.runtimeKey];
+    out[`${f.group}.${f.docKey}`] = {
+      title: typeof leaf.title === 'string' ? leaf.title : '',
+      description: typeof leaf.description === 'string' ? leaf.description : '',
+    };
+  }
+  return out;
+})();
+
+/** Look up a field's title/description by its document group + key (e.g. `'editor'`, `'tabSize'`).
+ *  Returns `undefined` for an unknown group/key so the editor's hover/completion degrade silently. */
+export function settingsFieldMeta(group: string, docKey: string): SettingsFieldMeta | undefined {
+  return SETTINGS_FIELD_META[`${group}.${docKey}`];
+}
+
 const SCHEMA_DIALECT = 'https://json-schema.org/draft/2020-12/schema';
 
 /** Build the nested, namespaced document schema from the field map: one object per group, each
