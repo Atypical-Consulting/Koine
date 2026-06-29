@@ -89,6 +89,18 @@ internal class BuildSettings : CommandSettings
         var targetOptions = config.OptionsFor(resolvedTarget);
         var resolvedOut = Out ?? targetOptions.OutDir ?? config.OutDir;
 
+        // The C# matches-invariant ReDoS-guard match timeout (issues #794/#641): a user-supplied value
+        // must be a positive millisecond budget. A non-positive value (0, or any negative) would flow
+        // into the generated `TimeSpan.FromMilliseconds(N)` and throw at the *generated* code's own
+        // runtime, so reject it up front with a friendly message — the same hard-error stance
+        // `--app-mapping` takes below. (A non-integer config value parses to null and keeps the default,
+        // matching how other malformed config keys are forward-compatibly ignored.)
+        if (targetOptions.RegexMatchTimeoutMs is { } regexTimeoutMs && regexTimeoutMs <= 0)
+        {
+            error = $"regexMatchTimeoutMs must be a positive integer (milliseconds); got '{regexTimeoutMs}'";
+            return false;
+        }
+
         // The C# layer selector (issues #128/#129): an explicit --layers wins over targets.<t>.layers
         // (same precedence as --target/--out). Unknown names are a hard error; both opt-in layers
         // imply domain. Absent ⇒ null ⇒ Domain-only (byte-identical to today). The Application-layer
