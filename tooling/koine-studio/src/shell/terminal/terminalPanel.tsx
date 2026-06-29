@@ -18,6 +18,10 @@ export interface TerminalPanelOptions {
   platform: Platform;
   /** The working directory to root the shell at, read lazily (the opened folder token, or null). */
   cwd: () => string | null;
+  /** The terminal's shell-args override, read lazily (the Studio `terminal.shellArgs` setting, #467).
+   *  Empty/null/omitted keeps the host's default `-l` login shell — read at each (re)start so a changed
+   *  setting takes effect on the next spawn. */
+  shellArgs?: () => string[] | null;
 }
 
 export interface TerminalPanel {
@@ -52,7 +56,7 @@ export function resolveTerminalTheme(el: HTMLElement): { background: string; for
  * Returns a handle the shell (ide.tsx) uses to re-fit on show/resize and to dispose on teardown.
  */
 export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
-  const { parent, platform, cwd } = opts;
+  const { parent, platform, cwd, shellArgs } = opts;
 
   // --- browser / no-shell host: graceful placeholder, no transport ----------
   if (!platform.canRunShell || !platform.createTerminal) {
@@ -119,7 +123,7 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
   function restart(): void {
     exited = false;
     term.clear();
-    void transport.start(cwd()).then(fit);
+    void transport.start(cwd(), shellArgs?.() ?? null).then(fit);
   }
 
   // Shell output → the view; an exit prints a dim, actionable affordance.
@@ -154,7 +158,7 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
 
   // Attach listeners (done above) BEFORE starting so no early output is missed, then spawn the shell
   // and fit once it is up.
-  void transport.start(cwd()).then(fit);
+  void transport.start(cwd(), shellArgs?.() ?? null).then(fit);
 
   return {
     fit() {

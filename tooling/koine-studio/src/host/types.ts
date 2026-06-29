@@ -72,8 +72,10 @@ export interface LspTransport {
  * `stop`s on teardown.
  */
 export interface TerminalTransport {
-  /** Spawn the shell, rooted at `cwd` when given (null lets the host pick the default). */
-  start(cwd: string | null): Promise<void>;
+  /** Spawn the shell, rooted at `cwd` when given (null lets the host pick the default). `shellArgs`
+   *  overrides the shell's arguments (the Studio `terminal.shellArgs` setting, #467); an omitted, null,
+   *  or empty value keeps the host's built-in default (a `-l` login shell). */
+  start(cwd: string | null, shellArgs?: string[] | null): Promise<void>;
   /** Feed keystrokes / pasted text to the shell. */
   write(data: string): Promise<void>;
   /** Tell the shell the viewport changed so it (and full-screen TUIs) re-flow. */

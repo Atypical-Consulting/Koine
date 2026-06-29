@@ -354,14 +354,18 @@ public sealed partial class RustEmitter
         //    `id` to that parameter instead: if the parameter's field name is already `id` it provides
         //    the local directly (emit nothing); otherwise alias it with `.clone()` (the id newtype
         //    derives Clone) so the parameter stays usable for any later reference.
-        Param? explicitId = MemberAnalysis.ExplicitIdParameter(entity, factory);
-        if (explicitId is null)
+        FactoryIdBinding idBinding = FactoryIdBinding.ResolveFactoryId(entity, factory, RustNaming.Field);
+        switch (idBinding.Source)
         {
-            body.Append(Indent).Append(Indent).Append("let id = ").Append(idType).Append("::generate();\n");
-        }
-        else if (RustNaming.Field(explicitId.Name) is var idParam && idParam != "id")
-        {
-            body.Append(Indent).Append(Indent).Append("let id = ").Append(idParam).Append(".clone();\n");
+            case FactoryIdSource.Generate:
+                body.Append(Indent).Append(Indent).Append("let id = ").Append(idType).Append("::generate();\n");
+                break;
+            case FactoryIdSource.Alias:
+                body.Append(Indent).Append(Indent).Append("let id = ").Append(idBinding.AliasFrom).Append(".clone();\n");
+                break;
+            case FactoryIdSource.ParamProvidesIdDirectly:
+                // The `id` parameter already provides the local — emit nothing.
+                break;
         }
 
         // 2. Preconditions — checked before any state is constructed.

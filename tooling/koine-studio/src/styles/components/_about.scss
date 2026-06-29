@@ -8,7 +8,12 @@
   padding-block: var(--koi-space-4);
 }
 
+/* The shared `.koi-welcome-logo` is `display: inline-flex`, which left-aligns it in the start-of-line
+   flow; every other About element centres itself with `text-align: center`. Re-flow the logo as a
+   block-level flex so it centres in the 30rem colophon like the wordmark, chip and links beneath it. */
 .koi-about-logo {
+  display: flex;
+  justify-content: center;
   margin-bottom: var(--koi-space-3-5);
 }
 

@@ -59,7 +59,7 @@ describe('settingsSchema', () => {
 
   it('serializes settings into namespaced groups (#750)', () => {
     const doc = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, Record<string, unknown>>;
-    expect(Object.keys(doc).sort()).toEqual(['account', 'ai', 'appearance', 'editor', 'lsp', 'mcp', 'preview']);
+    expect(Object.keys(doc).sort()).toEqual(['account', 'ai', 'appearance', 'editor', 'lsp', 'mcp', 'preview', 'terminal']);
     expect(doc.appearance.theme).toBe(DEFAULT_SETTINGS.theme);
     expect(doc.editor.minimap).toBe(DEFAULT_SETTINGS.enableMinimap); // runtime enableMinimap → doc editor.minimap
     expect(doc.editor.defaultCanvasZoom).toBe(DEFAULT_SETTINGS.defaultCanvasZoom); // diagram canvas default zoom (#762)
@@ -123,6 +123,33 @@ describe('settingsSchema', () => {
     const res = jsonDocToSettings(settingsToJsonDoc(custom), withKey);
     expect(res.errors).toBeUndefined();
     expect(res.settings).toEqual(custom);
+  });
+
+  it('round-trips the terminal.shellArgs override (#467)', () => {
+    const custom: Settings = { ...withKey, terminalShellArgs: ['-l', '-i'] };
+    const doc = JSON.parse(settingsToJsonDoc(custom)) as Record<string, Record<string, unknown>>;
+    expect(doc.terminal.shellArgs).toEqual(['-l', '-i']);
+    const res = jsonDocToSettings(settingsToJsonDoc(custom), withKey);
+    expect(res.errors).toBeUndefined();
+    expect(res.settings?.terminalShellArgs).toEqual(['-l', '-i']);
+  });
+
+  it('rejects a non-string entry in terminal.shellArgs (items: string) (#467)', () => {
+    const doc = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, Record<string, unknown>>;
+    doc.terminal.shellArgs = ['-l', 7];
+    const res = jsonDocToSettings(JSON.stringify(doc), withKey);
+    expect(res.settings).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('rejects a blank entry in terminal.shellArgs (items minLength:1) (#467)', () => {
+    // A blank token would spawn the shell with an empty arg and kill it; the schema rejects it at edit
+    // time, matching the load path's drop-blanks coercion (what applies == what survives a reload).
+    const doc = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, Record<string, unknown>>;
+    doc.terminal.shellArgs = ['-l', ''];
+    const res = jsonDocToSettings(JSON.stringify(doc), withKey);
+    expect(res.settings).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
   });
 
   it('rejects an out-of-bounds grouped tabSize / temperature (#750)', () => {
