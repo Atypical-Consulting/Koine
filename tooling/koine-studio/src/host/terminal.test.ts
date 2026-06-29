@@ -22,7 +22,7 @@ describe('Platform.canRunShell + terminal transport', () => {
 
   it('the Tauri terminal transport implements the full TerminalTransport surface', () => {
     const transport = new TauriPlatform().createTerminal!();
-    for (const method of ['start', 'write', 'resize', 'onData', 'onExit', 'stop'] as const) {
+    for (const method of ['start', 'write', 'resize', 'pause', 'resume', 'onData', 'onExit', 'stop'] as const) {
       expect(typeof transport[method]).toBe('function');
     }
   });
