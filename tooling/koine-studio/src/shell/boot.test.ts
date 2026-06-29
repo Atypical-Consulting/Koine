@@ -14,6 +14,7 @@ import { bootStudio } from '../main';
 import { appStore } from '@/store';
 import { takeStartIntent } from '@/shell/bootIntent';
 import { INSTALL_ANNOUNCEMENT, type BeforeInstallPromptEvent } from '@/shell/pwaInstall';
+import { buildShareUrl } from '@/export/share';
 
 let dispose: (() => void) | null = null;
 
@@ -58,6 +59,7 @@ describe('bootStudio — a single routed view (no IDE→Home flash)', () => {
 
   it('a previously-open workspace now lands on Home (not the editor) with a one-click Resume control (#766)', () => {
     const root = document.createElement('div');
+    root.hidden = true; // mirror index.html's `<div id="home-root" hidden>` so the reveal is observable
     document.body.appendChild(root);
     // The synchronous "a workspace was open" flag — written by markWorkspaceOpened(). An empty hash.
     localStorage.setItem('koine.studio.workspace-opened', '1');
@@ -66,10 +68,24 @@ describe('bootStudio — a single routed view (no IDE→Home flash)', () => {
 
     // Opening always lands on Home; the persisted flag no longer auto-skips into the editor (#766).
     expect(root.querySelector('.koi-welcome')).not.toBeNull();
-    expect(root.hidden).toBe(false); // #home-root is revealed
+    expect(root.hidden).toBe(false); // showHome() actually un-hid #home-root (was hidden pre-boot)
     expect(ideInit).not.toHaveBeenCalled(); // the editor is NOT booted on a plain open
     // The returning-user fast path survives as a one-click Resume on cold-open Home.
     expect(root.querySelector('[data-action="resume"]')).not.toBeNull();
+  });
+
+  it('a #model=… share link still boots straight to the editor (the only non-#/editor path to it) (#766)', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    // After #766 resolveInitialRoute returns 'editor' ONLY for #/editor, so the isShareLink short-circuit
+    // in bootStudio is the sole guarantee a shared playground link still opens the editor — guard it here.
+    const url = buildShareUrl('context Demo {}');
+    location.hash = url.slice(url.indexOf('#'));
+
+    dispose = bootStudio(root);
+
+    expect(ideInit).toHaveBeenCalledTimes(1);
+    expect(root.querySelector('.koi-welcome')).toBeNull();
   });
 
   it('a cold #/editor deep link (no persisted workspace) boots to the editor, not Home', () => {

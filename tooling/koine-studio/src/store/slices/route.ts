@@ -38,6 +38,11 @@ export function hashFromRoute(route: Route): string {
  * short-circuited upstream in `main.ts`, before this resolver. A previously-opened workspace no longer
  * auto-skips Home — the returning-user fast path is the one-click Resume control on Home, not an
  * automatic jump into the editor (#766). Everything else (``, `#/`, an unknown hash) → Home.
+ *
+ * Since #766 dropped the persisted-workspace input, the body now delegates straight to
+ * {@link routeFromHash}. It is deliberately kept as the named boot-time seam — distinct from the
+ * hash-vocabulary helper — so `main.ts` reads as "resolve the initial route" and any future startup
+ * policy (e.g. an "On startup: Home vs Last workspace" setting, #766 approach B) has one obvious home.
  */
 export function resolveInitialRoute(hash: string): Route {
   return routeFromHash(hash);

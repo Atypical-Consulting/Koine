@@ -36,9 +36,13 @@ function homeCallbacks(): WelcomeCallbacks {
     onOpenFolder: () => go({ kind: 'open-folder' }),
     onOpenRecent: (path) => go({ kind: 'open-recent', path }),
     onOpenExample: (template) => go({ kind: 'open-example', template }),
-    // Resume (#392): step straight back into the already-live editor session. Unlike the start actions
-    // it sets no start-intent and opens no workspace — the IDE stayed initialised behind the route
-    // (#368), so this is a pure route swap that leaves the session exactly as it was.
+    // Resume (#392 / #766): return to the editor. It sets no start-intent and opens no workspace, so the
+    // outcome depends on whether the IDE is already live. Warm — returning Home after an editor visit
+    // this session — is a pure route swap that leaves the session exactly as it was (the IDE stayed
+    // initialised behind the route, #368). Cold — a returning user whose Home offered Resume from the
+    // persisted-workspace flag before the IDE booted this session (#766) — navigates in, boots the IDE,
+    // and the cold-boot ladder restores the last workspace via getLastWorkspace(): the old auto-skip,
+    // now an explicit choice.
     onResume: () => appStore.getState().navigate('editor'),
   };
 }
