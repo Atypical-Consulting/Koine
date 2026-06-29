@@ -1698,6 +1698,7 @@ export function init(): () => void {
       // pieces prefs can't reach — soft-wrap on both the source editor and the output preview.
       applyAppearance(s);
       editor.setMinimap(s.enableMinimap);
+      editor.setTabSize(s.tabSize);
       workspace.setAutoSave(s.autoSave);
       // The scoped fields (word-wrap on both surfaces + the Generated-tab relabel via the preview
       // target) apply from the EFFECTIVE view so a Workspace override drives live behavior.

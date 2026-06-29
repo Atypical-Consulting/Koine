@@ -60,9 +60,21 @@ export function applyEditorMetrics(fontSize: number, lineHeight: number): void {
   style.setProperty('--koi-editor-line-height', String(lineHeight));
 }
 
+/**
+ * Apply (or clear) the editor font-stack override (Settings → Appearance → Editor font, #750), read by
+ * the CodeMirror theme as `--koi-editor-font-family`. An empty stack removes the property so the theme's
+ * default mono font (var(--koi-font-mono)) wins again — exactly the `applyAccent` set-or-remove pattern.
+ */
+export function applyEditorFont(fontFamily: string): void {
+  const style = root().style;
+  if (fontFamily) style.setProperty('--koi-editor-font-family', fontFamily);
+  else style.removeProperty('--koi-editor-font-family');
+}
+
 /** Apply every <html>-level appearance setting at once (startup + after a Settings change). */
 export function applyAppearance(s: Settings): void {
   applyAccent(s.accent);
   applyReduceMotion(s.reduceMotion);
   applyEditorMetrics(s.fontSize, s.lineHeight);
+  applyEditorFont(s.fontFamily);
 }
