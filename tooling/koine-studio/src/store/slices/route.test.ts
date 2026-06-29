@@ -18,14 +18,22 @@ describe('route helpers', () => {
 });
 
 describe('resolveInitialRoute', () => {
-  it('pristine first load → home', () => {
-    expect(resolveInitialRoute({ hash: '', hasPersistedWorkspace: false })).toBe('home');
+  it('pristine first load (empty hash) → home', () => {
+    expect(resolveInitialRoute('')).toBe('home');
   });
-  it('explicit #/editor → editor', () => {
-    expect(resolveInitialRoute({ hash: '#/editor', hasPersistedWorkspace: false })).toBe('editor');
+  it('the home hash (#/) → home', () => {
+    expect(resolveInitialRoute('#/')).toBe('home');
   });
-  it('a previously-open workspace → editor', () => {
-    expect(resolveInitialRoute({ hash: '', hasPersistedWorkspace: true })).toBe('editor');
+  it('an explicit #/editor deep-link → editor', () => {
+    expect(resolveInitialRoute('#/editor')).toBe('editor');
+  });
+  it('an unknown hash → home (never strands the user on a blank editor)', () => {
+    expect(resolveInitialRoute('#/nope')).toBe('home');
+  });
+  it('a previously-open workspace no longer forces the editor — opening always lands on Home (#766)', () => {
+    // Was: resolveInitialRoute({ hash: '', hasPersistedWorkspace: true }) === 'editor'. The persisted
+    // flag is no longer a routing input; the returning-user fast path is now the Resume control on Home.
+    expect(resolveInitialRoute('')).toBe('home');
   });
 });
 

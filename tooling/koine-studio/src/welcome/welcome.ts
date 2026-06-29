@@ -21,9 +21,11 @@ export interface WelcomeCallbacks {
   /** Open one of the starter templates as a workspace. */
   onOpenExample(template: Template): void;
   /**
-   * Return to a live editor session as-is — fired by the "Resume editing" control, which is only
-   * rendered when a session exists to resume ({@link BuildWelcomeOpts.canResume}). Unlike the start
-   * actions, this changes nothing about the workspace. Optional: the legacy body overlay never wires it.
+   * Return to the user's editor session — fired by the "Resume editing" control, rendered only when
+   * there is something to resume ({@link BuildWelcomeOpts.canResume}). Unlike the start actions it sets
+   * no template/folder intent; what it resolves to is the caller's concern (issues #392 / #766): a pure
+   * route swap back into a still-live session, or a cold boot that restores the last workspace. Optional:
+   * the legacy body overlay never wires it.
    */
   onResume?(): void;
 }
@@ -148,10 +150,10 @@ interface BuildWelcomeOpts {
    */
   embedded: boolean;
   /**
-   * A live editor session exists to return to (issue #392): the IDE has booted and a workspace is open
-   * behind the route. When true, render a "Resume editing" control that fires {@link WelcomeCallbacks.onResume}
-   * to step back into that session unchanged. A pristine first-load Home leaves this false, so the
-   * control stays absent and Home stays clean.
+   * There is a session or a previously-opened workspace to return to (issues #392 / #766): either the
+   * IDE is already live behind the route, or a prior visit left a workspace the caller can restore. When
+   * true, render a "Resume editing" control that fires {@link WelcomeCallbacks.onResume}. A pristine
+   * first-load Home leaves this false, so the control stays absent and Home stays clean.
    */
   canResume?: boolean;
 }
@@ -303,10 +305,10 @@ function buildWelcome(
   const launch = document.createElement('div');
   launch.className = 'koi-welcome-launch';
 
-  // The launch rail's heading row: the "Start" title on the left and — when a live editor session
-  // exists to return to — the "Resume editing" control aligned on its right (issue #490). The control
-  // is the purpose-built return-to-session affordance (issue #392); rendered only when `canResume`, so a
-  // pristine first-load Home stays clean. On embedded Home the card's own top bar is gone, so this row
+  // The launch rail's heading row: the "Start" title on the left and — when there is a session or a
+  // previously-opened workspace to return to — the "Resume editing" control aligned on its right (issue
+  // #490). The control is the purpose-built return-to-session affordance (issues #392 / #766); rendered
+  // only when `canResume`, so a pristine first-load Home stays clean. On embedded Home the card's own top bar is gone, so this row
   // is the only place the control can live; the legacy overlay shows it here too for consistency.
   const launchHead = document.createElement('div');
   launchHead.className = 'koi-welcome-rail-head';
@@ -955,8 +957,8 @@ export function createWelcome(
  * Mount the welcome screen as a routed, full-page Home view inside `container` — the Home half of
  * issue #368's distinct Home/Editor routes. No `document.body` overlay and no `hidden` toggle: the
  * card is shown the moment it mounts, recents rendered immediately. `destroy()` detaches it when the
- * router swaps to the editor. Pass `opts.canResume` when an editor session is already live so Home
- * offers a "Resume editing" control back into it (issue #392).
+ * router swaps to the editor. Pass `opts.canResume` when there is a session or a previously-opened
+ * workspace to return to, so Home offers a "Resume editing" control back into it (issues #392 / #766).
  */
 export function mountHome(
   container: HTMLElement,
