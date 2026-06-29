@@ -311,6 +311,42 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #813 acceptance (plain face): a <c>value op value</c> arithmetic — the canonical
+    /// <c>combined: Money = base + base</c> on a single-field decimal value object — must type-check
+    /// under <c>phpstan --level max</c>. The call site already lowers to <c>$this-&gt;base-&gt;add(...)</c>
+    /// (<see cref="PhpExpressionTranslator"/>'s value-object arithmetic path), but the PHP emitter does
+    /// not generate the <c>add()</c> method unless the model folds the value object with <c>sum</c>
+    /// (<c>OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds</c> only fires on a <c>sum(selector)</c>), so
+    /// <c>add()</c> is undefined and phpstan reports <c>method.notFound</c>. The fix records a value
+    /// object used in plain <c>+</c>/<c>-</c> arithmetic as needing the operator method and emits a
+    /// concrete <c>add(self $other): self</c> delegating to the backing <c>Decimal</c>'s runtime
+    /// <c>add</c>. Skipped (not failed) only when no <c>phpstan</c> is present locally; CI installs the
+    /// toolchain and runs it for real.
+    /// </summary>
+    [Fact]
+    public void Value_object_Decimal_arithmetic_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  value Line {\n" +
+            "    base: Money\n" +
+            "    combined: Money = base + base\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #717 (Bug 3) acceptance: a <c>String + String</c> concatenation — the pizzeria-style
     /// <c>full: String = street + ", " + city</c> — must type-check under <c>phpstan --level max</c>
     /// and be runtime-correct. Before the fix the translator emitted PHP numeric <c>+</c>
