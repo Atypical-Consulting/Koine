@@ -276,6 +276,41 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #717 (Bug 2) acceptance: a <c>value-object × scalar</c> (and <c>scalar × value-object</c>)
+    /// multiplication — the pizzeria-style <c>payable: Money = lineTotal * 0.9</c> — must type-check
+    /// under <c>phpstan --level max</c> and be runtime-correct. Before the fix the translator routed it
+    /// through the Decimal-arithmetic path, wrapping the value-object operand in
+    /// <c>new \Koine\Runtime\Decimal($this-&gt;base())</c> (the <c>Decimal</c> ctor expects
+    /// <c>string|int</c>) — <c>argument.type</c>, plus a wrong runtime value. The fix routes either
+    /// operand-order to the value object's generated <c>multipliedBy(Decimal $factor): Money</c> scalar
+    /// op (driven by <c>OperatorNeedsAnalyzer.BuildScalarOperatorNeeds</c>). Skipped (not failed) only
+    /// when no <c>phpstan</c> is present locally; CI installs the toolchain and runs it for real.
+    /// </summary>
+    [Fact]
+    public void Value_object_times_scalar_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  value Line {\n" +
+            "    base: Money\n" +
+            "    discounted: Money = base * 0.9\n" +
+            "    surcharged: Money = 1.1 * base\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// The always-on syntax gate: a valid PHP snippet must pass <c>php -l</c>.
     /// Skipped (not failed) only when no interpreter is present; with one it MUST parse cleanly.
     /// </summary>

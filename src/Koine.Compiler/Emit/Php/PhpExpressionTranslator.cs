@@ -332,6 +332,22 @@ internal sealed class PhpExpressionTranslator
         TypeRef? left = InferType(bin.Left);
         TypeRef? right = InferType(bin.Right);
 
+        // A value object exposes its OWN arithmetic methods (add/subtract/multipliedBy/dividedBy), so
+        // when EITHER operand is one the value-object path must win — even when the OTHER operand is a
+        // Decimal (e.g. `Money * 0.9`, where the `0.9` literal is a Decimal). Routing such a
+        // `value-object × scalar` through the Decimal path below would wrap the value object in
+        // `new \Koine\Runtime\Decimal($vo)` — a ctor that takes `string|int`, so a phpstan
+        // `argument.type` error AND a wrong runtime value — instead of calling the VO's generated
+        // `$vo->multipliedBy(...)` scalar op. Checking the value object FIRST routes it correctly
+        // regardless of operand order (#717, Bug 2). A value-object-vs-raw-Decimal *comparison* never
+        // reaches here — the semantic checker rejects it as IncomparableTypes — so the only VO
+        // comparisons that arrive are VO-vs-same-VO, which the comparison arm already handles.
+        if (IsArithmeticValueObject(left) || IsArithmeticValueObject(right))
+        {
+            WriteValueObjectBinary(bin, left, sb, parenthesize);
+            return true;
+        }
+
         if (IsDecimal(left) || IsDecimal(right))
         {
             // Decimal arithmetic/comparison. Whichever side is the Decimal is the receiver; the
@@ -340,12 +356,6 @@ internal sealed class PhpExpressionTranslator
             Expr receiver = leftIsDecimal ? bin.Left : bin.Right;
             Expr operand = leftIsDecimal ? bin.Right : bin.Left;
             WriteDecimalBinary(bin.Op, receiver, operand, leftIsDecimal, sb, parenthesize);
-            return true;
-        }
-
-        if (IsArithmeticValueObject(left) || IsArithmeticValueObject(right))
-        {
-            WriteValueObjectBinary(bin, left, sb, parenthesize);
             return true;
         }
 
