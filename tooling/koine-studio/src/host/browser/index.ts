@@ -105,6 +105,12 @@ export class BrowserPlatform implements Platform {
     return fs.openDefaultWorkspace(seed);
   }
 
+  // The OPFS default + `example-*` example dirs re-acquire with no permission prompt, so boot may
+  // restore them; a picked folder needs a user-gesture re-grant, so it stays a manual Recents click.
+  isAutoRestorableToken(token: string): Promise<boolean> {
+    return Promise.resolve(fs.isAutoRestorableToken(token));
+  }
+
   folderName(token: string): string {
     return fs.folderName(token);
   }
