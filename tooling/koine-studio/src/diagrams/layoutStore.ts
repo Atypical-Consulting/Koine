@@ -11,6 +11,7 @@
 // store the IDE injected via `setDiagramLayoutStore`; when none is injected (tests, first boot) it falls
 // back to the browser store on its own. Everything here is a VIEW concern — it never round-trips into `.koi`.
 import type { Platform } from '@/host';
+import { createFolderSidecar } from '@/host/sidecar';
 import {
   emptyDiagramLayout,
   positionKey,
@@ -125,42 +126,15 @@ export function createBrowserLayoutStore(): DiagramLayoutStore {
  * so dragging a node (many CELLS_MOVED) results in a single write.
  */
 export function createFolderLayoutStore(platform: Platform, folderRootToken: string): DiagramLayoutStore {
-  let fileToken: string | null = null; // cached once discovered or created
+  // The committable sidecar at `<folderRoot>/koine.layout.json`. A fresh store is created per opened
+  // folder, so the root getter is constant for this store's lifetime (the sidecar never re-discovers).
+  const sidecar = createFolderSidecar(platform, () => folderRootToken, LAYOUT_FILE);
   let pending: DiagramLayout | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   // The most recently seen annotations (from a load or save), so clear() (auto-arrange) can reset positions
   // while preserving notes/groups without an extra disk read — and without losing a not-yet-flushed edit.
   let lastNotes: DiagramNote[] = [];
   let lastGroups: DiagramGroup[] = [];
-
-  /** Find (and register, so writeTextFile resolves) the root-level layout file's token, if it exists. */
-  async function locate(): Promise<string | null> {
-    if (fileToken) return fileToken;
-    try {
-      const entries = await platform.listDir(folderRootToken, '');
-      const hit = entries.find((e) => e.kind === 'file' && e.name === LAYOUT_FILE);
-      if (hit) fileToken = hit.token;
-    } catch {
-      // Root unreadable (or no such folder) — treat as "no file yet".
-    }
-    return fileToken;
-  }
-
-  async function write(layout: DiagramLayout): Promise<void> {
-    const json = serialize(layout);
-    const existing = await locate();
-    if (existing) {
-      await platform.writeTextFile(existing, json);
-      return;
-    }
-    try {
-      fileToken = await platform.createFile(folderRootToken, LAYOUT_FILE, json);
-    } catch {
-      // Lost a create race (the file appeared meanwhile) — re-locate and overwrite.
-      const t = await locate();
-      if (t) await platform.writeTextFile(t, json);
-    }
-  }
 
   function flush(): void {
     if (timer) {
@@ -170,22 +144,18 @@ export function createFolderLayoutStore(platform: Platform, folderRootToken: str
     if (pending) {
       const p = pending;
       pending = null;
-      void write(p);
+      void sidecar.write(serialize(p));
     }
   }
 
   return {
     async load() {
-      const t = await locate();
-      if (!t) return emptyDiagramLayout();
-      try {
-        const layout = parse(await platform.readTextFile(t));
-        lastNotes = layout.notes;
-        lastGroups = layout.groups;
-        return layout;
-      } catch {
-        return emptyDiagramLayout();
-      }
+      const text = await sidecar.read();
+      if (text == null) return emptyDiagramLayout();
+      const layout = parse(text);
+      lastNotes = layout.notes;
+      lastGroups = layout.groups;
+      return layout;
     },
     save(layout) {
       lastNotes = layout.notes;
@@ -203,7 +173,7 @@ export function createFolderLayoutStore(platform: Platform, folderRootToken: str
         timer = null;
       }
       pending = null;
-      void write({ positions: {}, notes: lastNotes, groups: lastGroups });
+      void sidecar.write(serialize({ positions: {}, notes: lastNotes, groups: lastGroups }));
     },
   };
 }

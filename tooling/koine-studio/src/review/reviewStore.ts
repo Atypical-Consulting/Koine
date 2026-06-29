@@ -13,6 +13,7 @@
 // the `.koi` semantic model or the emitter output. All filesystem access goes through {@link Platform}.
 import { MapMode, type ChangeSet, type Text } from '@codemirror/state';
 import type { Platform } from '@/host';
+import { createFolderSidecar } from '@/host/sidecar';
 import type { SourceSpan } from '@/lsp/lsp';
 
 /** The committable reviews sidecar, written under the opened folder's `.koine/` directory. */
@@ -230,48 +231,20 @@ export function remapSpans(threads: ReviewThread[], change: ChangeSet, doc: Text
 export function createReviewStore(platform: Platform, folderToken: () => string | null): ReviewStore {
   let threads: ReviewThread[] = [];
   const listeners = new Set<() => void>();
-  let fileToken: string | null = null; // cached once discovered or created
+  // The committable sidecar at `<folder>/.koine/reviews.json`. Its token cache is keyed by the current
+  // folder, so it re-discovers under each newly-opened root — reproducing this store's old "reset the
+  // cached token on every load" without an explicit reset — and stays in-memory-only in scratch mode.
+  const sidecar = createFolderSidecar(platform, folderToken, REVIEWS_FILE);
   let writeChain: Promise<void> = Promise.resolve(); // serialize persists; avoids a create-race
 
   function notify(): void {
     for (const cb of listeners) cb();
   }
 
-  /** Find (and register, so writeTextFile resolves) the reviews file's token under `.koine`, if it exists. */
-  async function locate(root: string): Promise<string | null> {
-    if (fileToken) return fileToken;
-    try {
-      const entries = await platform.listDir(root, REVIEWS_DIR);
-      const hit = entries.find((e) => e.kind === 'file' && e.name === 'reviews.json');
-      if (hit) fileToken = hit.token;
-    } catch {
-      // `.koine` does not exist (or is unreadable) — treat as "no file yet".
-    }
-    return fileToken;
-  }
-
-  async function write(root: string): Promise<void> {
-    const json = serialize(threads);
-    const existing = await locate(root);
-    if (existing) {
-      await platform.writeTextFile(existing, json);
-      return;
-    }
-    try {
-      // createFile creates intermediate dirs, so `.koine/reviews.json` materializes `.koine/` too.
-      fileToken = await platform.createFile(root, REVIEWS_FILE, json);
-    } catch {
-      // Lost a create race (the file appeared meanwhile) — re-locate and overwrite.
-      const t = await locate(root);
-      if (t) await platform.writeTextFile(t, json);
-    }
-  }
-
   /** Persist the current threads when a folder is open; a no-op (in-memory only) in scratch mode. */
   function persist(): void {
-    const root = folderToken();
-    if (!root) return;
-    writeChain = writeChain.then(() => write(root)).catch(() => {
+    if (!folderToken()) return;
+    writeChain = writeChain.then(() => sidecar.write(serialize(threads))).catch(() => {
       // Swallow write failures: the in-memory set stays the source of truth and the next mutation retries.
     });
   }
@@ -284,21 +257,12 @@ export function createReviewStore(platform: Platform, folderToken: () => string 
 
   return {
     async load() {
-      // Drop any token cached for a previously-opened folder: load() runs on every folder open, and the
-      // cache must be re-discovered under the CURRENT root or persistence would read/write the old folder.
-      fileToken = null;
-      const root = folderToken();
-      if (!root) return; // scratch mode: nothing on disk to hydrate from
-      const t = await locate(root);
-      if (!t) {
-        threads = [];
-        return;
-      }
-      try {
-        threads = parse(await platform.readTextFile(t));
-      } catch {
-        threads = [];
-      }
+      // Hydrate from `.koine/reviews.json` under the current folder. The sidecar re-discovers the file
+      // whenever the root changes, so a folder re-open reads the new folder. Scratch mode (no folder)
+      // keeps the in-memory set — there is nothing on disk to hydrate from.
+      if (!folderToken()) return;
+      const text = await sidecar.read();
+      threads = text == null ? [] : parse(text);
     },
     list() {
       return [...threads];
