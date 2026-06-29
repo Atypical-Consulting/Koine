@@ -337,16 +337,17 @@ describe('serviceWorkerUpdate — registerStudioServiceWorker (guarded)', () => 
   it('is a no-op where the Service Worker API is unavailable (older browsers)', () => {
     const attempted = registerStudioServiceWorker({
       navigatorRef: {} as Navigator, // no `serviceWorker`
-      isTauriRef: () => false,
+      usesServiceWorker: true,
     });
     expect(attempted).toBe(false);
   });
 
-  it('does not register inside the Tauri desktop shell', () => {
+  it('skips registration when the host is not service-worker updated', () => {
     const register = vi.fn();
     const attempted = registerStudioServiceWorker({
       navigatorRef: { serviceWorker: { controller: null, register } } as unknown as Navigator,
-      isTauriRef: () => true,
+      usesServiceWorker: false,
+      startImmediately: true,
     });
     expect(attempted).toBe(false);
     expect(register).not.toHaveBeenCalled();
@@ -360,7 +361,7 @@ describe('serviceWorkerUpdate — registerStudioServiceWorker (guarded)', () => 
 
     const attempted = registerStudioServiceWorker({
       navigatorRef: { serviceWorker: { controller: {}, register } } as unknown as Navigator,
-      isTauriRef: () => false,
+      usesServiceWorker: true,
       base: '/studio/',
       startImmediately: true,
       onUpdateReady,

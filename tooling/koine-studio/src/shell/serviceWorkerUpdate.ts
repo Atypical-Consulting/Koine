@@ -7,7 +7,7 @@
 // Mirrors the shape of pwaInstall.ts (#442): pure, dependency-injected helpers + a DOM-light controller
 // the shell wires to its markup, so everything unit-tests under happy-dom without a real ServiceWorker.
 
-import { isTauri } from '@/host';
+import { getPlatform } from '@/host';
 import { announce as defaultAnnounce } from './liveRegion';
 import { connectRevealAnnouncer } from './revealAnnouncer';
 
@@ -200,8 +200,8 @@ export interface RegisterServiceWorkerDeps {
   windowRef?: Window;
   /** Document used to decide whether to register now or on `load` (defaults to the real one). */
   documentRef?: Document;
-  /** Override the Tauri-shell check (defaults to host.isTauri). */
-  isTauriRef?: () => boolean;
+  /** Override the host's service-worker capability (defaults to the platform's `usesServiceWorker`). */
+  usesServiceWorker?: boolean;
   /** The Vite base (defaults to import.meta.env.BASE_URL). */
   base?: string;
   /** Register synchronously instead of waiting for `window.load` (used by tests). */
@@ -222,8 +222,8 @@ let registered = false;
 export function registerStudioServiceWorker(deps: RegisterServiceWorkerDeps = {}): boolean {
   if (registered) return false; // once per page
   const nav = deps.navigatorRef ?? (typeof navigator !== 'undefined' ? navigator : undefined);
-  const isTauriShell = deps.isTauriRef ?? isTauri;
-  if (isTauriShell()) return false; // desktop shell — no SW needed
+  const usesServiceWorker = deps.usesServiceWorker ?? getPlatform().usesServiceWorker;
+  if (!usesServiceWorker) return false; // host serves natively — no SW needed
   if (!nav || !('serviceWorker' in nav)) return false; // unsupported → online-only, no error
 
   registered = true;
