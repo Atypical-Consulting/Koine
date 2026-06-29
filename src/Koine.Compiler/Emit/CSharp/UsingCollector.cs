@@ -25,7 +25,7 @@ internal sealed class UsingCollector
     {
         new("System", new[]
         {
-            "Guid", "DateTimeOffset", "IEquatable", "new HashCode(", "HashCode.Combine",
+            "Guid", "DateTimeOffset", "TimeSpan", "IEquatable", "new HashCode(", "HashCode.Combine",
             "IComparable", ": Exception", "ArgumentOutOfRangeException", "ArgumentNullException",
             "InvalidOperationException", "[Obsolete("
         }),

@@ -72,6 +72,11 @@ internal enum CSharpLayer
 /// MediatR request/handler shape (default plain handlers); <see cref="Mapping"/> selects the
 /// DTO/read-model mapping strategy. All three default off / plain, so an unconfigured emit stays
 /// byte-identical to the historical output.</para>
+/// <para><see cref="RegexMatchTimeoutMs"/> is the per-call match timeout (milliseconds, default
+/// <c>1000</c>) the emitter stamps onto every <c>matches</c>-invariant <c>Regex.IsMatch(…)</c> guard,
+/// so an author-supplied catastrophic-backtracking pattern in a value-object constructor cannot run
+/// unbounded and become a ReDoS sink (issue #641). A timed-out match surfaces as a contained
+/// <c>RegexMatchTimeoutException</c> from the constructor, not a hang.</para>
 /// </remarks>
 internal sealed record CSharpEmitterOptions(
     IReadOnlyDictionary<string, string> NamespaceMap,
@@ -80,7 +85,8 @@ internal sealed record CSharpEmitterOptions(
     bool ReferenceOnly = false,
     IReadOnlySet<CSharpLayer>? Layers = null,
     bool ApplicationMediatr = false,
-    CSharpMappingMode Mapping = CSharpMappingMode.Plain)
+    CSharpMappingMode Mapping = CSharpMappingMode.Plain,
+    int RegexMatchTimeoutMs = 1000)
 {
     public static readonly CSharpEmitterOptions Empty =
         new(new Dictionary<string, string>(StringComparer.Ordinal));

@@ -212,7 +212,7 @@ value Email {
 ```
 
 ```csharp
-if (!Regex.IsMatch(raw, @"^[^@]+@[^@]+\.[^@]+$"))
+if (!Regex.IsMatch(raw, @"^[^@]+@[^@]+\.[^@]+$", RegexOptions.None, TimeSpan.FromMilliseconds(1000)))
     throw new DomainInvariantViolationException(
         type: nameof(Email),
         rule: "invalid email address");
@@ -220,6 +220,27 @@ if (!Regex.IsMatch(raw, @"^[^@]+@[^@]+\.[^@]+$"))
 
 The pattern between the slashes is copied verbatim into a C# verbatim string (`@"…"`),
 so write the regex exactly as .NET's `Regex` expects it.
+
+### Bounded evaluation (ReDoS hardening)
+
+A `matches` pattern is **author-supplied** and a value object is exactly where untrusted
+external input (emails, identifiers, free text) crosses the trust boundary. A
+catastrophic-backtracking pattern could otherwise turn the constructor into a
+[ReDoS](https://owasp.org/www-community/attacks/Regular_expression_Denial_of_Service_-_ReDoS)
+sink, so Koine bounds the emitted match per target:
+
+| Target | Emitted form | Bound |
+| --- | --- | --- |
+| **C#** | `Regex.IsMatch(raw, @"…", RegexOptions.None, TimeSpan.FromMilliseconds(1000))` | A real **per-call match timeout** (1000 ms). A timed-out match throws a *contained* `RegexMatchTimeoutException` from the constructor — it never hangs. |
+| **TypeScript** | `regexMatch(/…/, raw)` (a runtime helper) | JS has **no** synchronous per-call regex timeout, so the host can't bound a match without changing its result. Every match routes through one `regexMatch` seam that preserves semantics exactly (it *is* `.test`) and is the single place to swap in a linear-time engine (e.g. RE2) for a hard guarantee on untrusted input. |
+| **Python** | `re.search(r"…", raw) is not None` | CPython's stdlib `re` has **no** per-call timeout; the form is unchanged. For untrusted input, cap input length or use the third-party `regex` module's `timeout=`. |
+| **PHP** | `(bool)preg_match('/…/', $raw)` | PCRE is **already bounded** by `pcre.backtrack_limit` / `pcre.recursion_limit` (set by default), so a catastrophic pattern fails the match instead of hanging. |
+| **Rust** | `koine_runtime::regex_is_match(r"…", &raw)` | The `regex` crate is a **linear-time** automaton with no catastrophic backtracking — no timeout is needed by construction. |
+
+The C# timeout is configurable on the emitter (`CSharpEmitterOptions.RegexMatchTimeoutMs`,
+default `1000`). The generated TypeScript `regexMatch` helper is the seam to harden untrusted-input
+matching without touching every call site — replace its body with a linear-time engine (e.g. RE2)
+and every `matches` invariant inherits the bound.
 
 ## 10.7 Conditional invariants (`when`)
 
@@ -276,7 +297,7 @@ composing, and reusing named predicates.
 | Form | Emits |
 | --- | --- |
 | `invariant <expr> "msg"` | `if (!(<expr>)) throw …` |
-| `invariant <field> matches /re/ "msg"` | `if (!Regex.IsMatch(<field>, @"re")) throw …` |
+| `invariant <field> matches /re/ "msg"` | `if (!Regex.IsMatch(<field>, @"re", RegexOptions.None, TimeSpan.FromMilliseconds(1000))) throw …` |
 | `invariant <body> when <cond>` | `if (<cond> && !(<body>)) throw …` |
 | `invariant <SpecName> "msg"?` | inlines the named spec's predicate into the guard |
 

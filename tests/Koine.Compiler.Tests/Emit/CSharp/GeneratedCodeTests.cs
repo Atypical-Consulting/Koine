@@ -220,4 +220,31 @@ public class GeneratedCodeTests
 
         TestSupport.Render(second).ShouldBe(TestSupport.Render(first));
     }
+
+    [Fact]
+    public void Matches_invariant_emits_a_timeout_bounded_regex()
+    {
+        // A `matches` invariant must lower to a TIMEOUT-bounded Regex.IsMatch so a
+        // catastrophic-backtracking pattern in a value object cannot become a ReDoS sink
+        // (issue #641). The emitted guard carries `RegexOptions.None, TimeSpan.From...`.
+        const string src =
+            "context C {\n  value Email {\n    raw: String\n" +
+            "    invariant raw matches /^[^@]+@[^@]+$/  \"invalid email address\"\n  }\n}\n";
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var email = result.Files.Single(f => f.RelativePath.EndsWith("Email.cs")).Contents;
+        email.ShouldContain("Regex.IsMatch(");
+        email.ShouldContain("RegexOptions.None, TimeSpan.From");
+
+        // The bounded form still behaves identically for normal input: a valid value is
+        // accepted and an invalid one is rejected (Roslyn compile + execute).
+        var (asm, errors) = TestSupport.Compile(result.Files);
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+        var type = asm.GetType("C.Email")!;
+
+        Activator.CreateInstance(type, "a@b.co").ShouldNotBeNull();
+        var ex = Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(type, "not-an-email"));
+        ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
+    }
 }
