@@ -1,16 +1,26 @@
 import { describe, it, expect } from 'vitest';
-import { SETTINGS_JSON_SCHEMA, settingsToJsonDoc, jsonDocToSettings } from './settingsSchema';
+import { SETTINGS_JSON_SCHEMA, SETTINGS_FIELDS, settingsToJsonDoc, jsonDocToSettings } from './settingsSchema';
 import { DEFAULT_SETTINGS, type Settings } from './persistence';
 
 const withKey: Settings = { ...DEFAULT_SETTINGS, aiApiKey: 'sk-SECRET' };
 
 describe('settingsSchema', () => {
-  it('schema declares every Settings field except the secret aiApiKey', () => {
-    const props = (SETTINGS_JSON_SCHEMA.properties ?? {}) as Record<string, unknown>;
-    const schemaKeys = Object.keys(props).sort();
-    const settingsKeys = Object.keys(DEFAULT_SETTINGS).filter((k) => k !== 'aiApiKey').sort();
-    expect(schemaKeys).toEqual(settingsKeys);
-    expect(props).not.toHaveProperty('aiApiKey');
+  it('locks Settings ⇄ field map ⇄ nested schema in three-way parity (#750)', () => {
+    // 1) field map ⇄ Settings: every non-secret runtime key has exactly one field-map row, secret excluded.
+    const settingsKeys = Object.keys(DEFAULT_SETTINGS)
+      .filter((k) => k !== 'aiApiKey')
+      .sort();
+    const mapKeys = SETTINGS_FIELDS.map((f) => f.runtimeKey).sort();
+    expect(mapKeys).toEqual(settingsKeys);
+    // 2) nested-schema leaves ⇄ field map (group.docKey): the schema is built FROM the map, so it can't drift.
+    const groups = SETTINGS_JSON_SCHEMA.properties as Record<string, { properties: Record<string, unknown> }>;
+    const schemaLeaves = Object.entries(groups)
+      .flatMap(([g, gs]) => Object.keys(gs.properties).map((k) => `${g}.${k}`))
+      .sort();
+    const mapLeaves = SETTINGS_FIELDS.map((f) => `${f.group}.${f.docKey}`).sort();
+    expect(schemaLeaves).toEqual(mapLeaves);
+    // 3) the secret appears nowhere in the schema, and unknown groups are rejected at the root.
+    expect(JSON.stringify(SETTINGS_JSON_SCHEMA)).not.toContain('aiApiKey');
     expect(SETTINGS_JSON_SCHEMA.additionalProperties).toBe(false);
   });
 
