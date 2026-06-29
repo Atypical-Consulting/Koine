@@ -99,9 +99,19 @@
   color: var(--koi-muted);
 }
 
-/* No last action yet (boot, before the first toast) → no empty bordered pill floating in the toolbar.
-   Action feedback gives it text; until then it stays out of the layout entirely. */
+/* No last action yet (boot, before the first toast) → don't show an empty bordered pill, but keep the
+   live region MOUNTED. Do NOT `display:none` it: toggling a role=status/aria-live region's presence in
+   the same update that sets its text is unreliable for screen readers (the project's a11y convention —
+   see src/shell/liveRegion.ts), which would silently drop the first action toast's announcement. So the
+   pill stays in the a11y tree and we only strip its chrome while empty; the first toast then merely
+   changes text in an already-present region (WCAG 2.1 AA SC 4.1.3 Status Messages). */
 #status:empty {
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+#status:empty::before {
   display: none;
 }
 

@@ -24,8 +24,9 @@ beforeAll(() => {
   doc = new DOMParser().parseFromString(html, 'text/html');
 });
 
-// Persistent ambient state → the status bar. (The clickable #unsaved-indicator is also a status-bar
-// item under the contract, but its placement is asserted by the unsaved-work suites — see the doc.)
+// Persistent ambient state → the status bar. Includes the clickable #unsaved-indicator (relocated here
+// from the toolbar): no other suite asserts its bar membership, so this guard is the single home for
+// that invariant too.
 const STATUS_BAR_ITEMS = [
   'sb-context',
   'sb-validity',
@@ -33,6 +34,7 @@ const STATUS_BAR_ITEMS = [
   'sb-compiling-host',
   'sb-connection',
   'sb-version',
+  'unsaved-indicator',
 ];
 
 // Model actions + the transient action-feedback pill → the topbar.

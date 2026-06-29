@@ -45,8 +45,8 @@ exit) — see `src/shell/editorSession.tsx`.
 The `#unsaved-indicator` is a *persistent* state (open files have unsaved changes until you save), kept
 **actionable** by being a clickable Save-all button — that is why a standing state lives here rather
 than as a transient toast. It was relocated into the status bar from the toolbar by the shell calm-pass
-work; its placement is exercised by the unsaved-work suites, so the structural guard does not re-assert
-it (to avoid coupling the contract guard to that move).
+work; the structural guard pins its bar membership alongside the other status-bar items (no other suite
+asserts it).
 
 ### Topbar — actions + transient action-feedback
 
