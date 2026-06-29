@@ -447,6 +447,70 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #813 acceptance (guarded-optional face — the #787 deferred half): a guard-narrowed
+    /// optional value-object operand in arithmetic — <c>if base.isPresent then base + base else base</c>
+    /// on a <c>Money?</c> member — must type-check under <c>phpstan --level max</c>. Narrowing in Koine
+    /// is validator-only, so the operand still infers as <c>Money?</c> and
+    /// <see cref="PhpExpressionTranslator"/>'s value-object arithmetic path (gated on the
+    /// non-optional <c>IsArithmeticValueObject</c>) skipped it, falling back to the native <c>+</c> —
+    /// invalid PHP on a class operand (<c>binaryOp.invalid</c>). The fix admits a guard-narrowed optional
+    /// value-object operand to the method path and coalesces it to a non-null receiver/argument (mirror
+    /// of the <c>Decimal</c> wrapper pattern in PR #799), so the <c>add()</c> site never sees
+    /// <c>Money|null</c>. The fixture is an <b>entity</b> (its <c>equals()</c> compares its <c>id</c>
+    /// alone) to isolate the guarded-optional arithmetic from the independent nullable-member structural
+    /// <c>equals()</c> gap — identical reasoning to
+    /// <see cref="Guarded_optional_Decimal_arithmetic_typechecks_at_phpstan_level_max"/>. Skipped (not
+    /// failed) only when no <c>phpstan</c> is present locally; CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Guarded_optional_value_object_arithmetic_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "  }\n" +
+            "  entity Account identified by AccountId {\n" +
+            "    base: Money?\n" +
+            "    total: Money? = if base.isPresent then base + base else base\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #813 regression: an <b>unguarded</b> optional value-object operand in arithmetic —
+    /// <c>total: Money? = base + base</c> with no <c>isPresent</c> guard — must stay a compile error.
+    /// The guarded-optional fix relaxes only the PHP <em>emission/routing</em>; it must not weaken the
+    /// validator, which still rejects dereferencing a possibly-absent optional in arithmetic (the same
+    /// null-safety check that guards the <c>Decimal?</c> case). Guards the routing relaxation against
+    /// silently accepting genuinely-nullable arithmetic.
+    /// </summary>
+    [Fact]
+    public void Unguarded_optional_value_object_arithmetic_is_a_compile_error()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "  }\n" +
+            "  entity Account identified by AccountId {\n" +
+            "    base: Money?\n" +
+            "    total: Money? = base + base\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+
+        result.Success.ShouldBeFalse();
+    }
+
+    /// <summary>
     /// Issue #786 acceptance (the #778 follow-up for mixed operands): a
     /// <c>String + &lt;stringable-non-String&gt;</c> concatenation — and its reverse order — must
     /// type-check under <c>phpstan --level max</c> and be runtime-correct. PR #778 (#717, Bug 3)
