@@ -109,9 +109,11 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
       { id: 'export-diagram-png', title: 'Export diagram as PNG', group: 'File', run: () => void deps.exportActiveDiagram('png') },
       { id: 'export-diagram-plantuml', title: 'Export diagram as PlantUML', group: 'File', run: () => void deps.exportActiveDiagram('plantuml') },
       { id: 'copy-diagram-mermaid', title: 'Copy diagram as Mermaid', group: 'File', run: () => void deps.copyActiveDiagramMermaid() },
-      ...(deps.canSaveProjects
-        ? [{ id: 'save-project-to-disk', title: 'Save to disk…', group: 'File', run: () => void deps.saveProjectToDisk() } as Command]
-        : []),
+      // Registered unconditionally but gated by when() on the host capability, so it is filtered out of
+      // the palette when the host can't save (identical to the old conditional spread) AND the toolbar
+      // button's run('save-project-to-disk') is a guarded no-op rather than an unknown-id warn if the
+      // hidden button is ever force-shown.
+      { id: 'save-project-to-disk', title: 'Save to disk…', group: 'File', run: () => void deps.saveProjectToDisk(), when: () => deps.canSaveProjects },
       { id: 'toggle-theme', title: 'Toggle theme', group: 'View', run: () => toggleTheme() },
       // The editor-split + panel-reposition commands (issue #265). Built from the pure layoutCommands
       // module so the list is unit-tested; each run() drives the layoutActions wired at boot above.

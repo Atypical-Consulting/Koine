@@ -332,6 +332,16 @@ describe('commandWiring', () => {
       expect(backdrop().hidden).toBe(false);
     });
 
+    it('no-ops Save-to-disk dispatch when the host cannot save projects (when-gated, not unknown)', () => {
+      const deps = makeDeps({ canSaveProjects: false });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+      // Registered-but-disabled ⇒ run() is a guarded no-op, and it never reaches the palette list.
+      wiring.run('save-project-to-disk');
+      expect(deps.saveProjectToDisk).not.toHaveBeenCalled();
+      expect(wiring.getCommands().map((c) => c.id)).not.toContain('save-project-to-disk');
+    });
+
     it('no-ops a disabled command — stop-compile stays inert while idle, fires in flight', () => {
       vi.mocked(stopRunawayCompile).mockClear();
       const wiring = createCommandWiring(makeDeps());

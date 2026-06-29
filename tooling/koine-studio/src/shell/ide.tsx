@@ -860,7 +860,10 @@ export function init(hooks: IdeHooks = {}): () => void {
   });
 
   // Undo/redo drive the single workspace history (CodeMirror's own history was removed). Match on
-  // e.code (physical Z/Y) so macOS Option-composed glyphs don't slip past.
+  // e.code (physical Z/Y) so macOS Option-composed glyphs don't slip past. These chords stay a direct
+  // history call — like every global chord other than Cmd-K and Save-all, they are folded through the
+  // command registry wholesale by #432 (the HistoryControls *buttons* already dispatch run('undo'/'redo'),
+  // so today the chord and button reach the same effect since undo/redo carry no when() gate).
   window.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod) return;
