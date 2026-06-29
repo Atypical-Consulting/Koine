@@ -341,6 +341,111 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #787 acceptance: a <c>String + String</c> concatenation whose left operand is a
+    /// <b>guard-narrowed optional</b> <c>String?</c> — <c>if name.isPresent then name + "!" …</c> —
+    /// must type-check under <c>phpstan --level max</c>. Narrowing in Koine is validator-only
+    /// (<c>ExpressionChecker._present</c>) and never reaches <see cref="Koine.Compiler.Ast.TypeResolver"/>,
+    /// so the operand still infers as <c>String?</c> and #717's routing (gated on
+    /// <c>IsString(IsOptional: false)</c>) fell back to the numeric <c>+</c> — invalid PHP on strings
+    /// (<c>binaryOp.invalid</c>). The fix relaxes the routing so an optional <c>String</c> operand still
+    /// selects <c>.</c> and writes it through a null-coalescing wrapper (<c>($expr ?? '')</c>) so the
+    /// <c>.</c> site is provably non-null. The result member is optional (and the <c>else</c> branch
+    /// yields the optional <c>name</c>) because the narrowed concat itself still infers as <c>String?</c>,
+    /// which <c>OptionalAssignedToNonOptional</c> rejects for a non-optional member. Skipped (not failed)
+    /// only when no <c>phpstan</c> is present locally; CI installs the toolchain and runs it for real.
+    /// </summary>
+    [Fact]
+    public void Guarded_optional_String_concatenation_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Profile {\n" +
+            "    name: String?\n" +
+            "    label: String? = if name.isPresent then name + \"!\" else name\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #787 sibling: the guarded-optional <b>Decimal</b> arithmetic gap that shares the
+    /// <c>IsDecimal(IsOptional: false)</c> shape. A guard-narrowed <c>Decimal?</c> operand
+    /// (<c>if base.isPresent then base + base …</c>) still infers as <c>Decimal?</c>, so
+    /// <c>TryWriteValueBinary</c> did not route it to the runtime <c>Decimal::add</c> and fell back to
+    /// the native <c>+</c> — numeric arithmetic on a <c>\Koine\Runtime\Decimal</c> object, again
+    /// <c>binaryOp.invalid</c>. The fix routes a guarded optional Decimal operand to <c>add</c>/… with a
+    /// Decimal-non-null wrapper so the receiver/argument is never <c>Decimal|null</c>.
+    /// <para>
+    /// This fixture is an <b>entity</b> (not a value object) deliberately: an entity's generated
+    /// <c>equals()</c> compares its <c>id</c> alone, whereas a value object's structural <c>equals()</c>
+    /// would call <c>$this-&gt;base-&gt;equals(...)</c> on the nullable <c>Decimal?</c> member — an
+    /// <em>independent</em> pre-existing emitter gap (<c>method.nonObject</c> on <c>Decimal|null</c>)
+    /// that is out of scope for #787 (which is contained to <c>PhpExpressionTranslator</c>). Using an
+    /// entity isolates the guarded-optional <em>arithmetic</em> path under test from that unrelated gap.
+    /// Skipped (not failed) only when no <c>phpstan</c> is present locally; CI runs it for real.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Guarded_optional_Decimal_arithmetic_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Account identified by AccountId {\n" +
+            "    base: Decimal?\n" +
+            "    total: Decimal? = if base.isPresent then base + base else base\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #786 acceptance (the #778 follow-up for mixed operands): a
+    /// <c>String + &lt;stringable-non-String&gt;</c> concatenation — and its reverse order — must
+    /// type-check under <c>phpstan --level max</c> and be runtime-correct. PR #778 (#717, Bug 3)
+    /// diverted only the <c>String + String</c> case to PHP's <c>.</c> operator and deliberately left
+    /// the mixed case (e.g. <c>label: String = "Order #" + number</c>, where <c>number</c> is an
+    /// <c>Int</c>) on numeric <c>+</c>, which phpstan rejects (<c>binaryOp.invalid</c>, "Binary
+    /// operation + between string and int results in an error") and which throws a <c>TypeError</c> at
+    /// runtime. The fix routes <c>String + Int</c> (in either operand order) to <c>.</c> too — PHP's
+    /// <c>.</c> coerces an <c>int</c> on either side — while never routing a non-stringable operand
+    /// (enum / value object / branded Id) to <c>.</c>. Skipped (not failed) only when no <c>phpstan</c>
+    /// is present locally; CI installs the toolchain and runs it for real.
+    /// </summary>
+    [Fact]
+    public void String_plus_non_string_concatenation_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Ticket {\n" +
+            "    number: Int\n" +
+            // mixed String + Int (Int on the right)
+            "    label: String = \"Order #\" + number\n" +
+            // mixed Int + String (Int on the left) — exercises both operand orders
+            "    caption: String = number + \" items\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// The always-on syntax gate: a valid PHP snippet must pass <c>php -l</c>.
     /// Skipped (not failed) only when no interpreter is present; with one it MUST parse cleanly.
     /// </summary>

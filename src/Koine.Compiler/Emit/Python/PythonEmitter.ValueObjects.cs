@@ -338,6 +338,14 @@ public sealed partial class PythonEmitter
             sb.Append(Indent).Append(Indent).Append("return ")
               .Append(Construct($"self.{amt} {op} factor", $"self.{u}")).Append('\n');
         }
+
+        // Reversed scalar multiply: `scalar * quantity` (#788). Like the value-object scalar op, the
+        // reflected `__rmul__` delegates to `__mul__` so `0.9 * weight` scales identically to
+        // `weight * 0.9` instead of raising `TypeError`. No `__rtruediv__`: `scalar / quantity` is not
+        // a defined operation.
+        sb.Append('\n');
+        sb.Append(Indent).Append("def __rmul__(self, factor: Decimal | int) -> ").Append(name).Append(":\n");
+        sb.Append(Indent).Append(Indent).Append("return self.__mul__(factor)\n");
     }
 
     /// <summary>
@@ -362,6 +370,15 @@ public sealed partial class PythonEmitter
         sb.Append(Indent).Append("def __mul__(self, factor: ").Append(factorType).Append(") -> ").Append(name).Append(":\n");
         sb.Append(Indent).Append(Indent).Append("return ").Append(name).Append('(')
           .Append(string.Join(", ", fields.Select(Arg))).Append(")\n");
+
+        // Reversed operand order: `scalar * value-object` (#788). Python evaluates
+        // `Decimal.__mul__(<vo>)` → NotImplemented → falls back to the reflected `<vo>.__rmul__(scalar)`;
+        // without this method that raises `TypeError`. Delegate to `__mul__` so both operand orders
+        // scale identically — the Pythonic mirror of the merged PHP Bug-2 fix (#778). An explicit typed
+        // method (not an `__rmul__ = __mul__` alias) keeps `mypy --strict` clean.
+        sb.Append('\n');
+        sb.Append(Indent).Append("def __rmul__(self, factor: ").Append(factorType).Append(") -> ").Append(name).Append(":\n");
+        sb.Append(Indent).Append(Indent).Append("return self.__mul__(factor)\n");
     }
 
     /// <summary>

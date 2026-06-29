@@ -17,8 +17,8 @@
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{mpsc, Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 // `portable-pty` (WezTerm) abstracts Unix openpty + Windows ConPTY behind one API. Its `Child`
 // trait collides by name with `std::process::Child`, so it is imported under an alias.
@@ -75,6 +75,12 @@ struct PtyState {
     /// Set once the user/app asks to stop; tells the reader thread the EOF was intentional so it
     /// reports a clean exit (0) rather than trying to reap a child `pty_stop` already took.
     shutting_down: Arc<AtomicBool>,
+    /// Flow-control gate for the reader thread (#441). When the inner `bool` is `true` the reader parks
+    /// on the `Condvar` before its next `read`, so it stops draining the PTY: the kernel buffer fills
+    /// and the shell blocks on write — real backpressure. `pty_pause` sets it; `pty_resume` (and
+    /// `pty_stop`) clear it and `notify` so the reader wakes. Shared `Arc` so the reader thread owns a
+    /// clone (managed `State` is not `'static`).
+    paused: Arc<(Mutex<bool>, Condvar)>,
 }
 
 // --- pure framing functions (the cargo test gate) ---------------------------
@@ -402,42 +408,192 @@ fn take_decodable(carry: &mut Vec<u8>) -> Option<String> {
     Some(chunk)
 }
 
-/// Spawn the reader thread that drains the PTY master and relays it to the frontend. It reads raw
-/// bytes (terminal output is not line- or frame-delimited) into a carry buffer and emits the longest
-/// valid-UTF-8 prefix as `pty://data`, holding back any partial multibyte tail until its continuation
-/// bytes arrive (see [`take_decodable`]) so non-ASCII output (TUIs, emoji/CJK filenames) is not
-/// mojibake'd at read boundaries. When the read hits EOF the shell has gone: we flush any trailing
-/// bytes, reap the child to recover its exit code, and emit `pty://exit` exactly once. Unlike the LSP
-/// sidecar there is **no** supervision/relaunch — an exited shell simply closes the terminal.
-/// `std::thread` + `std::io` only; no async runtime.
+/// Size window: flush the coalescer once this many bytes of decodable output have accumulated. ~16 KB
+/// lets one IPC event carry ~four 4 KB reads' worth of output under flood, so a flooding command emits
+/// roughly `bytes / 16 KB` `pty://data` events instead of one per read.
+const PTY_FLUSH_BYTES: usize = 16 * 1024;
+/// Time window: if no read arrives for this long, flush whatever is buffered so tiny interactive output
+/// (a shell prompt, a short command's result) reaches the renderer at once instead of waiting for the
+/// size window to fill. ~16 ms ≈ one frame, so the latency is imperceptible.
+const PTY_FLUSH_WINDOW: Duration = Duration::from_millis(16);
+/// Bound on the reader→coalescer channel (#441). A *bounded* channel makes the reader block on `send`
+/// once the coalescer falls behind, so it stops draining the PTY and the kernel buffer fills — i.e. it
+/// restores the automatic producer backpressure the old inline-emit reader had, and caps Rust-side
+/// memory (≤ `cap × 4 KB`) under a flood even before the frontend's flow control kicks in.
+const PTY_CHANNEL_CAPACITY: usize = 64;
+/// Upper bound on how long the reader will stay parked for flow control (#441). The frontend resumes
+/// within a frame or two in normal use (xterm drains its backlog in well under this), so the cap only
+/// matters when the frontend vanishes mid-pause — a webview reload/crash during a flood. After it the
+/// reader resumes reading so the shell's eventual EOF is still observed and the child reaped, rather
+/// than leaking the shell + threads until the app exits.
+const PTY_MAX_PAUSE: Duration = Duration::from_secs(10);
+
+/// Coalesces decodable PTY text to bound the `pty://data` event rate under a high-throughput flood
+/// (#441). The reader feeds each decodable chunk (from [`take_decodable`]); [`Coalescer::push`] buffers
+/// it and returns a flush only once the buffer reaches [`PTY_FLUSH_BYTES`] — so one IPC event carries
+/// many reads instead of one-per-4 KB. Between size flushes the reader flushes on the
+/// [`PTY_FLUSH_WINDOW`] time window and on EOF via [`Coalescer::take`]; nothing is ever dropped. Pure,
+/// so the size policy is unit-tested without opening a PTY.
+struct Coalescer {
+    buf: String,
+    flush_threshold: usize,
+}
+
+impl Coalescer {
+    fn new(flush_threshold: usize) -> Self {
+        Self {
+            buf: String::new(),
+            flush_threshold,
+        }
+    }
+
+    /// Append a decodable chunk; return the buffered text to emit once it reaches the size window, else
+    /// `None` (held back for a later size/time/EOF flush).
+    fn push(&mut self, chunk: &str) -> Option<String> {
+        self.buf.push_str(chunk);
+        if self.buf.len() >= self.flush_threshold {
+            self.take()
+        } else {
+            None
+        }
+    }
+
+    /// Take whatever is currently buffered (the time-window or EOF flush), or `None` when empty.
+    fn take(&mut self) -> Option<String> {
+        if self.buf.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(&mut self.buf))
+        }
+    }
+
+    /// Whether anything is buffered. Lets the coalescer loop arm the time-window deadline only while it
+    /// holds output, and otherwise block indefinitely — no idle wakeups when the shell is quiet.
+    fn is_empty(&self) -> bool {
+        self.buf.is_empty()
+    }
+}
+
+/// Spawn the reader that drains the PTY master and relays it to the frontend, coalescing reads so a
+/// flooding command (`yes`, `cat bigfile`) can't fire thousands of Tauri IPC events per second (#441).
+///
+/// Two threads, because a blocking `read` cannot also honour a flush timer:
+/// - **Reader** — blocks on `read`, forwarding each 4 KB read to the coalescer over a *bounded* channel
+///   ([`PTY_CHANNEL_CAPACITY`]); dropping the sender on EOF (or a read error) signals "no more output".
+///   The bound means a reader outrunning the coalescer blocks on `send`, stops draining the PTY, and
+///   lets the kernel buffer fill — automatic producer backpressure, capping Rust-side memory.
+/// - **Coalescer** — drains the channel into a carry buffer, holds back any partial multibyte tail
+///   until its continuation arrives (see [`take_decodable`]) so non-ASCII output isn't mojibake'd at
+///   read boundaries, and emits one `pty://data` per flush: on the [`Coalescer`] size window, on the
+///   [`PTY_FLUSH_WINDOW`] time window (armed only while it holds buffered output, so an idle shell costs
+///   no wakeups), and on EOF. It also owns the exit handling: flush the remainder, reap the child to
+///   recover its exit code, and emit `pty://exit` exactly once. Unlike the LSP sidecar there is **no**
+///   supervision/relaunch — an exited shell simply closes the terminal. `std::thread` + `std::io` +
+///   `std::sync::mpsc` only; no async runtime.
+///
+/// `paused` is the flow-control gate (#441): the reader parks on it before each read while the consumer
+/// has asked the PTY to pause, so the kernel buffer fills and the shell blocks rather than the renderer
+/// being swamped. The park is capped at [`PTY_MAX_PAUSE`] so a frontend that vanishes mid-pause can't
+/// wedge the reader (and leak the shell) forever.
 fn spawn_pty_reader_thread(
     app: AppHandle,
     mut reader: Box<dyn Read + Send>,
     shutting_down: Arc<AtomicBool>,
+    paused: Arc<(Mutex<bool>, Condvar)>,
 ) {
+    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(PTY_CHANNEL_CAPACITY);
+
+    // Reader thread: raw bytes off the PTY → channel. Kept minimal so the only blocking calls are the
+    // pause gate, the `read`, and a full-channel `send`; all coalescing/timing lives in the consumer.
     std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
-        let mut carry: Vec<u8> = Vec::new();
         loop {
+            // Flow control (#441): park here while paused so we stop draining the PTY. The kernel PTY
+            // buffer then fills and the shell blocks on write — real OS backpressure — until
+            // `pty_resume`/`pty_stop` clears the flag and notifies. The `while` reblocks on a spurious
+            // wakeup; the [`PTY_MAX_PAUSE`] deadline bounds the park so a vanished frontend (webview
+            // reload/crash mid-pause) can't wedge the reader forever — after it we resume reading so the
+            // shell's eventual EOF is still observed. Poison can't occur (the lock is only ever held to
+            // flip a bool), but recover the inner guard rather than panicking the reader if it ever did.
+            {
+                let (lock, cv) = &*paused;
+                let mut is_paused = lock.lock().unwrap_or_else(|e| e.into_inner());
+                let deadline = Instant::now() + PTY_MAX_PAUSE;
+                while *is_paused {
+                    let now = Instant::now();
+                    if now >= deadline {
+                        // Paused too long — assume the frontend is gone and give up pausing entirely so
+                        // the reader drains at full speed to EOF (a later resume/pause still works).
+                        *is_paused = false;
+                        break;
+                    }
+                    let (guard, _timed_out) = cv
+                        .wait_timeout(is_paused, deadline - now)
+                        .unwrap_or_else(|e| e.into_inner());
+                    is_paused = guard;
+                }
+            }
             match reader.read(&mut buf) {
                 Ok(0) => break, // EOF: the shell closed its end of the PTY
                 Ok(n) => {
-                    carry.extend_from_slice(&buf[..n]);
-                    while let Some(chunk) = take_decodable(&mut carry) {
-                        let _ = app.emit("pty://data", chunk);
+                    if tx.send(buf[..n].to_vec()).is_err() {
+                        break; // the coalescer is gone — nothing left to feed
                     }
                 }
                 Err(_) => break, // a read error means the PTY is gone; treat it as EOF
             }
         }
-        // Flush any trailing bytes (an incomplete sequence at the very end) lossily so nothing the
-        // shell wrote before closing is silently dropped.
+        // Dropping `tx` here disconnects the channel, ending the coalescer's loop.
+    });
+
+    // Coalescer thread: channel → coalesced `pty://data`, then the one-shot exit handling.
+    std::thread::spawn(move || {
+        let mut carry: Vec<u8> = Vec::new();
+        let mut coalescer = Coalescer::new(PTY_FLUSH_BYTES);
+        loop {
+            // Block indefinitely while nothing is buffered (no idle spin), but arm the time-window
+            // deadline once we hold output so a quiet producer still gets flushed within
+            // [`PTY_FLUSH_WINDOW`]. An incomplete multibyte tail in `carry` isn't decodable yet, so it
+            // never counts as "buffered" here — it waits in `carry` for its continuation or EOF.
+            let received = if coalescer.is_empty() {
+                rx.recv().map_err(|_| ()) // Err(()) == the reader dropped its sender (EOF)
+            } else {
+                match rx.recv_timeout(PTY_FLUSH_WINDOW) {
+                    Ok(bytes) => Ok(bytes),
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        if let Some(flush) = coalescer.take() {
+                            let _ = app.emit("pty://data", flush);
+                        }
+                        continue;
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => Err(()),
+                }
+            };
+            match received {
+                Ok(bytes) => {
+                    carry.extend_from_slice(&bytes);
+                    while let Some(chunk) = take_decodable(&mut carry) {
+                        if let Some(flush) = coalescer.push(&chunk) {
+                            let _ = app.emit("pty://data", flush);
+                        }
+                    }
+                }
+                Err(()) => break, // the reader hit EOF
+            }
+        }
+
+        // EOF: flush the coalesced remainder, then any trailing undecodable bytes (lossily) so nothing
+        // the shell wrote before closing is dropped. Order matters — the coalescer holds text that
+        // precedes the partial tail in `carry`.
+        if let Some(flush) = coalescer.take() {
+            let _ = app.emit("pty://data", flush);
+        }
         if !carry.is_empty() {
             let _ = app.emit("pty://data", String::from_utf8_lossy(&carry).into_owned());
         }
 
-        // The PTY reached EOF. Recover the exit code and announce it once, then clear the managed
-        // handles so a later `pty_start` is a clean fresh start.
+        // Recover the exit code and announce it once, then clear the managed handles so a later
+        // `pty_start` is a clean fresh start.
         let state = app.state::<PtyState>();
         let reaped = state.child.lock().ok().and_then(|mut g| g.take());
         let code = if shutting_down.load(Ordering::SeqCst) {
@@ -1414,8 +1570,10 @@ fn pty_start(
         return Ok(());
     }
 
-    // A fresh start clears any prior shutdown intent so the reader reports a real exit code.
+    // A fresh start clears any prior shutdown intent so the reader reports a real exit code, and any
+    // leftover pause from a previous session (#441) so the new reader isn't born parked.
     state.shutting_down.store(false, Ordering::SeqCst);
+    set_pty_paused(&state.paused, false);
 
     // Open the PTY pair at a conventional default size; the frontend re-syncs it via `pty_resize`
     // as soon as the terminal element is measured.
@@ -1467,7 +1625,12 @@ fn pty_start(
     *state.master.lock().map_err(|e| e.to_string())? = Some(pair.master);
     *child_guard = Some(child);
 
-    spawn_pty_reader_thread(app.clone(), reader, state.shutting_down.clone());
+    spawn_pty_reader_thread(
+        app.clone(),
+        reader,
+        state.shutting_down.clone(),
+        state.paused.clone(),
+    );
 
     Ok(())
 }
@@ -1500,12 +1663,43 @@ fn pty_resize(state: State<'_, PtyState>, cols: u16, rows: u16) -> Result<(), St
     Ok(())
 }
 
+/// Flip the reader's flow-control gate (#441) and wake it if it is parked: `true` makes the reader park
+/// before its next read (`pty_pause`); `false` lets it drain again (`pty_resume`/`pty_start`/`pty_stop`).
+/// Always `notify`s so a parked reader is released even when clearing the flag.
+fn set_pty_paused(paused: &(Mutex<bool>, Condvar), value: bool) {
+    let (lock, cv) = paused;
+    if let Ok(mut g) = lock.lock() {
+        *g = value;
+    }
+    cv.notify_all();
+}
+
+/// Flow control (#441): pause draining the PTY. The reader parks before its next read, so the kernel
+/// PTY buffer fills and the shell blocks on write — backpressure when the renderer falls behind. A
+/// no-op when nothing is running (the flag is simply read by the next reader thread).
+#[tauri::command]
+fn pty_pause(state: State<'_, PtyState>) -> Result<(), String> {
+    set_pty_paused(&state.paused, true);
+    Ok(())
+}
+
+/// Flow control (#441): resume draining the PTY once the renderer has caught up. Wakes a parked reader.
+/// Idempotent and safe to call when not paused.
+#[tauri::command]
+fn pty_resume(state: State<'_, PtyState>) -> Result<(), String> {
+    set_pty_paused(&state.paused, false);
+    Ok(())
+}
+
 /// Intentional shutdown: arm the no-reap flag, drop the writer (so the shell sees stdin EOF), kill
 /// the child to be certain it exits, and drop the master. The reader thread then emits `pty://exit`
 /// (code 0). Idempotent and safe to call when nothing is running.
 #[tauri::command]
 fn pty_stop(state: State<'_, PtyState>) -> Result<(), String> {
     state.shutting_down.store(true, Ordering::SeqCst);
+    // Release a paused reader (#441) so it wakes, sees the killed child's EOF, and exits cleanly
+    // instead of staying parked forever.
+    set_pty_paused(&state.paused, false);
     if let Ok(mut g) = state.writer.lock() {
         *g = None;
     }
@@ -1573,6 +1767,8 @@ pub fn run() {
             pty_start,
             pty_write,
             pty_resize,
+            pty_pause,
+            pty_resume,
             pty_stop,
             app_version,
             list_koi_files,
@@ -2270,6 +2466,88 @@ mod tests {
         assert_eq!(take_decodable(&mut carry).as_deref(), Some("\u{FFFD}"));
         assert_eq!(take_decodable(&mut carry).as_deref(), Some("x"));
         assert!(carry.is_empty());
+    }
+
+    // --- PTY read coalescing (backpressure, #441) ---------------------------
+    //
+    // The reader feeds each decodable chunk (from `take_decodable`) into a `Coalescer`, which buffers
+    // text and only emits a `pty://data` flush once it crosses `PTY_FLUSH_BYTES`. Under a flooding
+    // command this bounds the IPC event rate to ~bytes/PTY_FLUSH_BYTES instead of one event per 4 KB
+    // read, while losing nothing (the remainder is flushed on the time window and on EOF).
+
+    #[test]
+    fn coalescer_bounds_flush_count_far_below_one_event_per_4kb() {
+        // Simulate a flooding command (`yes`, `cat bigfile`): 1 MiB arriving as 4 KB reads, exactly the
+        // shape the reader sees today as `READS` separate `pty://data` events.
+        const READ: usize = 4096;
+        const READS: usize = 256; // 1 MiB total
+        let total_bytes = READ * READS;
+        let read_chunk = "a".repeat(READ); // a fully-decodable 4 KB read
+
+        let mut coalescer = Coalescer::new(PTY_FLUSH_BYTES);
+        let mut flushes = 0usize;
+        let mut emitted = 0usize;
+        for _ in 0..READS {
+            if let Some(chunk) = coalescer.push(&read_chunk) {
+                flushes += 1;
+                emitted += chunk.len();
+            }
+        }
+        if let Some(tail) = coalescer.take() {
+            // The EOF / time-window flush drains whatever is still buffered.
+            flushes += 1;
+            emitted += tail.len();
+        }
+
+        // No data loss: every byte read is eventually emitted.
+        assert_eq!(emitted, total_bytes, "coalescing must not drop or duplicate output");
+
+        // The event rate is bounded by the size window, not the 4 KB read size: at most one flush per
+        // PTY_FLUSH_BYTES (+1 for the trailing remainder).
+        let max_flushes = total_bytes / PTY_FLUSH_BYTES + 1;
+        assert!(
+            flushes <= max_flushes,
+            "flush count {flushes} exceeded the size-window bound {max_flushes}"
+        );
+        // ...and that is far below the legacy one-event-per-4-KB-read rate (a ≥4× reduction at a 16 KB
+        // window) — the whole point of coalescing.
+        assert!(
+            flushes * 4 <= READS,
+            "expected ≥4× fewer events than one-per-4-KB ({READS}); got {flushes}"
+        );
+    }
+
+    #[test]
+    fn pty_pause_gate_parks_a_reader_until_resumed() {
+        // The flow-control gate (#441): a reader using the production park pattern must block while the
+        // flag is set and proceed only once `set_pty_paused(.., false)` clears it and notifies. Models
+        // the gate without opening a PTY.
+        let gate = Arc::new((Mutex::new(true), Condvar::new())); // start paused
+        let (tx, rx) = mpsc::channel::<()>();
+        let worker_gate = gate.clone();
+        let handle = std::thread::spawn(move || {
+            let (lock, cv) = &*worker_gate;
+            let mut is_paused = lock.lock().unwrap_or_else(|e| e.into_inner());
+            while *is_paused {
+                is_paused = cv.wait(is_paused).unwrap_or_else(|e| e.into_inner());
+            }
+            drop(is_paused);
+            let _ = tx.send(()); // only reached after the gate opens
+        });
+
+        // While paused the worker must not pass the gate.
+        assert!(
+            rx.recv_timeout(Duration::from_millis(50)).is_err(),
+            "reader passed the gate while paused"
+        );
+
+        // Resume → the worker wakes and proceeds.
+        set_pty_paused(&gate, false);
+        assert!(
+            rx.recv_timeout(Duration::from_secs(2)).is_ok(),
+            "reader did not wake after resume"
+        );
+        handle.join().unwrap();
     }
 
     // --- source control (git) -----------------------------------------------

@@ -47,6 +47,21 @@ public class KoineConfigTests
     }
 
     [Fact]
+    public void Parses_regex_match_timeout()
+    {
+        // Issue #794: the per-target C# ReDoS-guard match timeout (#641) is now config-settable.
+        var cfg = KoineConfig.Parse("targets.csharp.regexMatchTimeoutMs = 250\n");
+        cfg.OptionsFor("csharp").RegexMatchTimeoutMs.ShouldBe(250);
+    }
+
+    [Fact]
+    public void Unset_regex_match_timeout_is_null()
+    {
+        // Absent ⇒ null ⇒ emitter keeps its 1000 ms default ⇒ byte-identical output.
+        KoineConfig.Parse("target = csharp\n").OptionsFor("csharp").RegexMatchTimeoutMs.ShouldBeNull();
+    }
+
+    [Fact]
     public void Unknown_target_yields_empty_options()
     {
         var cfg = KoineConfig.Parse("target = csharp\n");

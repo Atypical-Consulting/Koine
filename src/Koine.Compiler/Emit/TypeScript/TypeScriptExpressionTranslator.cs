@@ -384,8 +384,27 @@ internal sealed class TypeScriptExpressionTranslator
 
         TypeScope scope = EffectiveScope();
         TypeRef? left = _resolver.Infer(bin.Left, scope);
+        TypeRef? right = _resolver.Infer(bin.Right, scope);
         var leftDecimal = left?.Name == "Decimal";
         var leftValue = _resolver.IsValueLike(left);
+        var rightValue = _resolver.IsValueLike(right);
+
+        // Reversed operand order: `scalar * value-object` (the value object is on the RIGHT, e.g.
+        // `0.9 * money`). A value object exposes its OWN scalar multiply, so it must be the receiver
+        // regardless of which side it is on — mirroring PhpExpressionTranslator.TryWriteValueBinary's
+        // value-object-first check (#778, the PHP Bug-2 fix). Without this the left-only inference
+        // below takes the Decimal-receiver path and emits `new Decimal('0.9').multiply(this.money)`,
+        // which treats the value object as a `Decimal | number` factor — a `tsc` type error and a
+        // wrong runtime value (#788). Only `Mul` admits a scalar; `Decimal * Decimal` keeps its
+        // left-receiver order via the path below, where neither side is value-like.
+        if (bin.Op == BinaryOp.Mul && rightValue && !leftValue)
+        {
+            Write(bin.Right, sb);
+            sb.Append(".multiply(");
+            WriteScalarArgument(bin.Left, sb);
+            sb.Append(')');
+            return true;
+        }
 
         if (!leftDecimal && !leftValue)
         {
@@ -404,9 +423,9 @@ internal sealed class TypeScriptExpressionTranslator
         // A value-object scalar multiply (Money * quantity) takes a plain `number`, so a Decimal
         // literal scalar (e.g. 0.9) renders as a bare number, not a `new Decimal(...)`. A Decimal *
         // Decimal/Int (true decimal arithmetic) passes the operand through unchanged.
-        if (bin.Op == BinaryOp.Mul && leftValue && bin.Right is LiteralExpr { Kind: LiteralKind.Int or LiteralKind.Decimal } scalarLit)
+        if (bin.Op == BinaryOp.Mul && leftValue)
         {
-            sb.Append(scalarLit.Text);
+            WriteScalarArgument(bin.Right, sb);
         }
         else
         {
@@ -414,6 +433,23 @@ internal sealed class TypeScriptExpressionTranslator
         }
         sb.Append(')');
         return true;
+    }
+
+    /// <summary>
+    /// Writes the scalar argument of a value-object scalar multiply. A numeric literal renders bare
+    /// (the value object's <c>multiply</c> takes a plain <c>number</c>, not a <c>Decimal</c>); any
+    /// other scalar expression renders through <see cref="Write"/>.
+    /// </summary>
+    private void WriteScalarArgument(Expr scalar, StringBuilder sb)
+    {
+        if (scalar is LiteralExpr { Kind: LiteralKind.Int or LiteralKind.Decimal } scalarLit)
+        {
+            sb.Append(scalarLit.Text);
+        }
+        else
+        {
+            Write(scalar, sb);
+        }
     }
 
     private void WriteOperand(Expr expr, StringBuilder sb, string? enumHint)

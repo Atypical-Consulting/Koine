@@ -122,6 +122,17 @@ class TauriTerminalTransport implements TerminalTransport {
     return invoke('pty_resize', { cols, rows }) as Promise<void>;
   }
 
+  // Flow control (#441): the panel calls these when xterm's backlog crosses its water marks. The Rust
+  // reader parks while paused, so the kernel PTY buffer fills and the shell blocks on write — real
+  // backpressure — and drains again on resume.
+  pause(): Promise<void> {
+    return invoke('pty_pause') as Promise<void>;
+  }
+
+  resume(): Promise<void> {
+    return invoke('pty_resume') as Promise<void>;
+  }
+
   async stop(): Promise<void> {
     this.unlistenData?.();
     this.unlistenExit?.();
