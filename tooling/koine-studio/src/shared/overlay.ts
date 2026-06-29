@@ -128,6 +128,10 @@ export function createModal(opts: ModalOptions): ModalHandle {
     if (isOpen) return;
     isOpen = true;
     opener = document.activeElement as HTMLElement | null; // restore focus here on close
+    // Re-attach if a host wiped the body out from under this (shared singletons like koiConfirm are
+    // built once and live across route swaps; the Home recovery confirm — #391 — opens after Home
+    // re-mounts). A no-op on the normal path where the backdrop is already connected.
+    if (!backdrop.isConnected) document.body.appendChild(backdrop);
     backdrop.hidden = false;
     unregister = registerOverlay(close);
     closeBtn.focus();
