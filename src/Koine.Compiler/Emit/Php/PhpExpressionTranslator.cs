@@ -327,18 +327,38 @@ internal sealed class PhpExpressionTranslator
     }
 
     /// <summary>
-    /// The native PHP operator for a primitive binary op. A <c>String + String</c> is PHP string
-    /// concatenation, which uses <c>.</c> — never the numeric <c>+</c>, which on strings is a runtime
-    /// <c>TypeError</c> and a phpstan <c>binaryOp.invalid</c> error (e.g. a chained
-    /// <c>street + ", " + city</c>, whose inner sub-expression is itself a String). Decimal and
-    /// value-object arithmetic is lowered to method calls by <see cref="TryWriteValueBinary"/> before
-    /// reaching here, so this only diverts the String-concat case; <c>Int + Int</c> keeps native
-    /// <c>+</c> (#717, Bug 3).
+    /// The native PHP operator for a primitive binary op. A String concatenation uses <c>.</c> — never
+    /// the numeric <c>+</c>, which between a string and any operand is a runtime <c>TypeError</c> and a
+    /// phpstan <c>binaryOp.invalid</c> error. This covers both <c>String + String</c> (e.g. a chained
+    /// <c>street + ", " + city</c>, whose inner sub-expression is itself a String — #717, Bug 3) and the
+    /// mixed <c>String + &lt;stringable-non-String&gt;</c> case in either operand order (e.g.
+    /// <c>"Order #" + number</c> / <c>number + " items"</c>, where <c>number</c> is an <c>Int</c> —
+    /// #786), since PHP's <c>.</c> coerces an <c>int</c> on either side. The non-<c>String</c> operand is
+    /// gated to a closed stringable allow-list (<see cref="IsStringable"/>) so a non-stringable operand —
+    /// an enum case, a value object, a branded <c>Id</c> — is <b>never</b> routed to <c>.</c> (which on
+    /// those is itself a <c>binaryOp.invalid</c> + runtime <c>TypeError</c>); it keeps today's behavior.
+    /// <c>Int + Int</c> keeps native <c>+</c> (neither side is a <c>String</c>). Decimal and value-object
+    /// arithmetic is lowered to method calls by <see cref="TryWriteValueBinary"/> before reaching here.
     /// </summary>
-    private string NativeBinaryOperator(BinaryExpr bin) =>
-        bin.Op == BinaryOp.Add && IsString(InferType(bin.Left)) && IsString(InferType(bin.Right))
-            ? "."
-            : OperatorOf(bin.Op);
+    private string NativeBinaryOperator(BinaryExpr bin) => IsStringConcat(bin) ? "." : OperatorOf(bin.Op);
+
+    /// <summary>
+    /// True when a binary <c>+</c> is a PHP string concatenation: at least one operand is statically a
+    /// <c>String</c> and the <em>other</em> operand is statically stringable (see <see cref="IsStringable"/>).
+    /// The "at least one String" guard keeps <c>Int + Int</c> on numeric <c>+</c>; requiring both sides
+    /// stringable keeps <c>String + &lt;enum/value-object/Id&gt;</c> off <c>.</c> (unchanged from today).
+    /// </summary>
+    private bool IsStringConcat(BinaryExpr bin)
+    {
+        if (bin.Op != BinaryOp.Add)
+        {
+            return false;
+        }
+
+        TypeRef? left = InferType(bin.Left);
+        TypeRef? right = InferType(bin.Right);
+        return (IsString(left) || IsString(right)) && IsStringable(left) && IsStringable(right);
+    }
 
     /// <summary>
     /// Renders a binary expression whose operand(s) are a runtime <c>Decimal</c> or a value object,
@@ -554,6 +574,17 @@ internal sealed class PhpExpressionTranslator
     private static bool IsDecimal(TypeRef? t) => t is { Name: "Decimal", IsOptional: false };
 
     private static bool IsString(TypeRef? t) => t is { Name: "String", IsOptional: false };
+
+    /// <summary>
+    /// True when a type is statically safe as an operand of PHP's <c>.</c> string-concatenation
+    /// operator at <c>phpstan --level max</c> — a closed allow-list of <c>String</c> and <c>Int</c>
+    /// (both of which <c>.</c> coerces without a cast). Deliberately excludes enums, value objects, and
+    /// branded <c>Id</c>s (a class with no <c>__toString</c>), so a <c>String + &lt;such&gt;</c> never
+    /// gets routed to <c>.</c>. <c>Decimal</c> is also absent because a <c>Decimal</c> operand is
+    /// intercepted by <see cref="TryWriteValueBinary"/> before <see cref="NativeBinaryOperator"/> runs,
+    /// so it never reaches this predicate. An optional operand is excluded (matching <see cref="IsString"/>).
+    /// </summary>
+    private static bool IsStringable(TypeRef? t) => t is { IsOptional: false, Name: "String" or "Int" };
 
     /// <summary>
     /// True when the type is a value object (or quantity) that exposes arithmetic methods — i.e. a

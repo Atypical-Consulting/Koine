@@ -341,6 +341,41 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #786 acceptance (the #778 follow-up for mixed operands): a
+    /// <c>String + &lt;stringable-non-String&gt;</c> concatenation — and its reverse order — must
+    /// type-check under <c>phpstan --level max</c> and be runtime-correct. PR #778 (#717, Bug 3)
+    /// diverted only the <c>String + String</c> case to PHP's <c>.</c> operator and deliberately left
+    /// the mixed case (e.g. <c>label: String = "Order #" + number</c>, where <c>number</c> is an
+    /// <c>Int</c>) on numeric <c>+</c>, which phpstan rejects (<c>binaryOp.invalid</c>, "Binary
+    /// operation + between string and int results in an error") and which throws a <c>TypeError</c> at
+    /// runtime. The fix routes <c>String + Int</c> (in either operand order) to <c>.</c> too — PHP's
+    /// <c>.</c> coerces an <c>int</c> on either side — while never routing a non-stringable operand
+    /// (enum / value object / branded Id) to <c>.</c>. Skipped (not failed) only when no <c>phpstan</c>
+    /// is present locally; CI installs the toolchain and runs it for real.
+    /// </summary>
+    [Fact]
+    public void String_plus_non_string_concatenation_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Ticket {\n" +
+            "    number: Int\n" +
+            // mixed String + Int (Int on the right)
+            "    label: String = \"Order #\" + number\n" +
+            // mixed Int + String (Int on the left) — exercises both operand orders
+            "    caption: String = number + \" items\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// The always-on syntax gate: a valid PHP snippet must pass <c>php -l</c>.
     /// Skipped (not failed) only when no interpreter is present; with one it MUST parse cleanly.
     /// </summary>
