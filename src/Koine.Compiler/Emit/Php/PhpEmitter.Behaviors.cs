@@ -266,14 +266,19 @@ public sealed partial class PhpEmitter
         // 1. Identity. By default mint it (`<IdName>::generate()`); when the factory supplies it as an
         //    explicit identity-typed parameter (#324), bind `$id` to that parameter instead — omit when
         //    the parameter is already named `id`, else alias it (`$id = $bookId;`).
-        Param? explicitId = MemberAnalysis.ExplicitIdParameter(entity, factory);
-        if (explicitId is null)
+        FactoryIdBinding idBinding = FactoryIdBinding.ResolveFactoryId(
+            entity, factory, name => PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(name)));
+        switch (idBinding.Source)
         {
-            sb.Append(Indent).Append(Indent).Append("$id = ").Append(idName).Append("::generate();\n");
-        }
-        else if (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(explicitId.Name)) is var idParam && idParam != "id")
-        {
-            sb.Append(Indent).Append(Indent).Append("$id = $").Append(idParam).Append(";\n");
+            case FactoryIdSource.Generate:
+                sb.Append(Indent).Append(Indent).Append("$id = ").Append(idName).Append("::generate();\n");
+                break;
+            case FactoryIdSource.Alias:
+                sb.Append(Indent).Append(Indent).Append("$id = $").Append(idBinding.AliasFrom).Append(";\n");
+                break;
+            case FactoryIdSource.ParamProvidesIdDirectly:
+                // The `id` parameter already provides the local — emit nothing.
+                break;
         }
 
         // 2. Preconditions.
