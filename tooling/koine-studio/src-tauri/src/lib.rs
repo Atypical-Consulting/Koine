@@ -2272,6 +2272,55 @@ mod tests {
         assert!(carry.is_empty());
     }
 
+    // --- PTY read coalescing (backpressure, #441) ---------------------------
+    //
+    // The reader feeds each decodable chunk (from `take_decodable`) into a `Coalescer`, which buffers
+    // text and only emits a `pty://data` flush once it crosses `PTY_FLUSH_BYTES`. Under a flooding
+    // command this bounds the IPC event rate to ~bytes/PTY_FLUSH_BYTES instead of one event per 4 KB
+    // read, while losing nothing (the remainder is flushed on the time window and on EOF).
+
+    #[test]
+    fn coalescer_bounds_flush_count_far_below_one_event_per_4kb() {
+        // Simulate a flooding command (`yes`, `cat bigfile`): 1 MiB arriving as 4 KB reads, exactly the
+        // shape the reader sees today as `READS` separate `pty://data` events.
+        const READ: usize = 4096;
+        const READS: usize = 256; // 1 MiB total
+        let total_bytes = READ * READS;
+        let read_chunk = "a".repeat(READ); // a fully-decodable 4 KB read
+
+        let mut coalescer = Coalescer::new(PTY_FLUSH_BYTES);
+        let mut flushes = 0usize;
+        let mut emitted = 0usize;
+        for _ in 0..READS {
+            if let Some(chunk) = coalescer.push(&read_chunk) {
+                flushes += 1;
+                emitted += chunk.len();
+            }
+        }
+        if let Some(tail) = coalescer.take() {
+            // The EOF / time-window flush drains whatever is still buffered.
+            flushes += 1;
+            emitted += tail.len();
+        }
+
+        // No data loss: every byte read is eventually emitted.
+        assert_eq!(emitted, total_bytes, "coalescing must not drop or duplicate output");
+
+        // The event rate is bounded by the size window, not the 4 KB read size: at most one flush per
+        // PTY_FLUSH_BYTES (+1 for the trailing remainder).
+        let max_flushes = total_bytes / PTY_FLUSH_BYTES + 1;
+        assert!(
+            flushes <= max_flushes,
+            "flush count {flushes} exceeded the size-window bound {max_flushes}"
+        );
+        // ...and that is far below the legacy one-event-per-4-KB-read rate (a ≥4× reduction at a 16 KB
+        // window) — the whole point of coalescing.
+        assert!(
+            flushes * 4 <= READS,
+            "expected ≥4× fewer events than one-per-4-KB ({READS}); got {flushes}"
+        );
+    }
+
     // --- source control (git) -----------------------------------------------
     //
     // These exercise the real `git` binary against a throwaway repo built under the system temp
