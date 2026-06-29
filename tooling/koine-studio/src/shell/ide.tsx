@@ -136,6 +136,31 @@ function el<T extends HTMLElement>(id: string): T {
   return node as T;
 }
 
+// --- the composition-root contract (#757) --------------------------------------------------------
+// init() is a THIN composition root: it constructs the shared handles (platform / lsp / editor session /
+// workspace / inspector controller / store), news up the feature controllers below, and returns the
+// aggregate teardown. It must STAY thin — a vitest line budget (ide.budget.test.ts) fails CI if it
+// regrows. When you add a Studio feature, EXTEND the controller that owns its surface, don't grow init():
+//
+//   commandWiring.ts  — command palette + command list (getCommands) + toolbar command buttons + global
+//                        keyboard shortcuts. (Composes onto the command-registry sibling #758 when it lands.)
+//   layout.ts         — #split data-* mirror + inspector/left-rail edge resizers + rail-section disclosure
+//                        + the ⌘B file-tree toggle + the layout palette actions.
+//   exportShare.ts    — shareable link, .koi source zip, diagram export (SVG/PNG/PlantUML) + Mermaid copy,
+//                        Save-to-disk, the Generate Project wizard, shared-workspace import.
+//   overlays.ts       — confirm/prompt dialogs, the shortcuts help overlay, the overlay-open gate, the
+//                        unsaved-work New guard (requestNewModel), the memory-only banner.
+//   panelHost.ts      — the lazily-built Settings page / AI assistant / scenario runner / terminal /
+//                        Review panels (nothing constructed until first use).
+//   canvasWrite.ts    — the diagram-authoring write-path (#91 model→.koi round-trip), canvas annotations,
+//                        the in-editor review-comment composer, the mobile-zone switcher + DIAGRAM_* listeners.
+//   lifecycleBoot.ts  — the lsp.start boot ladder, the Home start-intent, the route-intent subscription,
+//                        and the aggregate teardown (preserving disposal order).
+//
+// The buffer/open/save lifecycle (workspaceController), the center views + Properties inspector
+// (inspectorController), undo/redo (historyController), workspace search (searchController), and the
+// editor↔LSP/diagnostics wiring (editorSession) were extracted earlier (#180/#182) and live beside these.
+// What remains in init() is the construction wiring + the inspector rename/description write-path.
 export function init(): () => void {
   // The host backend: the Tauri desktop shell, or a plain browser (compiler via WASM, files via
   // the File System Access API). Everything host-specific — the LSP transport, folder/file I/O,
