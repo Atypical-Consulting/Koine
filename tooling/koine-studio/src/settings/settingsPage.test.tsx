@@ -448,4 +448,107 @@ describe('createSettingsPage', () => {
     expect(scopeBtn(body, 'workspace')!.getAttribute('aria-checked')).toBe('true');
     expect(localStorage.getItem(SCOPE_KEY)).toBe('workspace');
   });
+
+  // --- Task 3: Workspace scope round-trip (#736) -----------------------------------------
+  // Each test uses a workspace-capable cb so the Workspace pill is enabled.
+
+  const WS_KEY = 'ws-key';
+  const WS_OVERRIDES_KEY = `koine.studio.wsOverrides.${WS_KEY}`;
+
+  it('a valid Workspace doc sets the wsOverrides blob and calls onChange with effectiveSettings', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+    // Switch to Workspace scope.
+    scopeBtn(body, 'workspace')!.click();
+    cbWs.onChange.mockClear();
+
+    // Type a valid workspace doc that sets previewTarget.
+    typeJson(body, '{ "previewTarget": "typescript" }');
+    vi.advanceTimersByTime(500);
+
+    // (1) The keyed wsOverrides blob carries previewTarget.
+    const blob = JSON.parse(localStorage.getItem(WS_OVERRIDES_KEY) ?? '{}') as Record<string, unknown>;
+    expect(blob.previewTarget).toBe('typescript');
+    // (2) cb.onChange received settings with the override applied (effectiveSettings merged it).
+    expect(cbWs.onChange).toHaveBeenCalledTimes(1);
+    const received = cbWs.onChange.mock.calls[0][0] as typeof DEFAULT_SETTINGS;
+    expect(received.previewTarget).toBe('typescript');
+  });
+
+  it('setting the Workspace doc to {} clears the override from the blob', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
+    // Pre-seed a workspace override in localStorage.
+    localStorage.setItem(WS_OVERRIDES_KEY, JSON.stringify({ previewTarget: 'typescript' }));
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+    scopeBtn(body, 'workspace')!.click();
+
+    // Type an empty workspace doc — clears all scoped overrides.
+    typeJson(body, '{}');
+    vi.advanceTimersByTime(500);
+
+    // All four scoped keys must be absent from the blob after replace.
+    const blob = JSON.parse(localStorage.getItem(WS_OVERRIDES_KEY) ?? '{}') as Record<string, unknown>;
+    expect(blob.previewTarget).toBeUndefined();
+    expect(blob.formatOnSave).toBeUndefined();
+    expect(blob.wordWrap).toBeUndefined();
+    expect(blob.lspTrace).toBeUndefined();
+  });
+
+  it('an invalid Workspace doc renders diagnostics and persists nothing to the blob', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+    scopeBtn(body, 'workspace')!.click();
+    cbWs.onChange.mockClear();
+
+    // An unknown key violates additionalProperties:false on the workspace schema.
+    typeJson(body, '{ "badKey": "value" }');
+    vi.advanceTimersByTime(500);
+
+    // Diagnostics strip is visible.
+    expect(body.querySelector('.settings-json-diagnostics')?.hidden).toBe(false);
+    expect(body.textContent?.toLowerCase()).toMatch(/invalid|error/);
+    // Nothing was persisted — blob is still absent.
+    expect(localStorage.getItem(WS_OVERRIDES_KEY)).toBeNull();
+    // No onChange call.
+    expect(cbWs.onChange).not.toHaveBeenCalled();
+  });
+
+  it('switching to Workspace scope re-seeds the editor with the flat workspace doc', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
+    // Pre-seed an override so the workspace doc is non-empty.
+    localStorage.setItem(WS_OVERRIDES_KEY, JSON.stringify({ previewTarget: 'typescript' }));
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+    // Currently User scope — editor shows the grouped user settings.json.
+    const userText = EditorView.findFromDOM(body.querySelector('.cm-editor') as HTMLElement)!.state.doc.toString();
+    expect(userText).toContain('appearance'); // the grouped user doc has top-level group names
+
+    // Switch to Workspace scope.
+    scopeBtn(body, 'workspace')!.click();
+
+    // Editor now shows the flat workspace override doc.
+    const wsText = EditorView.findFromDOM(body.querySelector('.cm-editor') as HTMLElement)!.state.doc.toString();
+    expect(wsText).toContain('"previewTarget"');
+    expect(wsText).toContain('"typescript"');
+    expect(wsText).not.toContain('appearance');
+    // A scope switch alone must NOT persist anything.
+    vi.advanceTimersByTime(500);
+    expect(cbWs.onChange).not.toHaveBeenCalled();
+  });
+
+  it('a valid Workspace doc does not call setTheme (theme is not a scoped key)', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+    scopeBtn(body, 'workspace')!.click();
+    setTheme.mockClear();
+
+    typeJson(body, '{ "previewTarget": "typescript" }');
+    vi.advanceTimersByTime(500);
+
+    expect(setTheme).not.toHaveBeenCalled();
+  });
 });

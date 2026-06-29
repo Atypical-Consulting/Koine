@@ -10,8 +10,8 @@
 // neither display nor clear the encrypted key.
 import { mountPreferencesPane, segmented, startMcpSidecarIfEnabled, type PrefsCallbacks } from '@/settings/prefs';
 import { createJsonSettingsEditor, type JsonSettingsEditor } from '@/editor/editor';
-import { settingsToJsonDoc, jsonDocToSettings } from '@/settings/settingsSchema';
-import { loadSettings, saveSettings } from '@/settings/persistence';
+import { settingsToJsonDoc, jsonDocToSettings, workspaceOverridesToJsonDoc, jsonDocToWorkspaceOverrides } from '@/settings/settingsSchema';
+import { loadSettings, saveSettings, loadWorkspaceOverrides, replaceWorkspaceOverrides, effectiveSettings } from '@/settings/persistence';
 import { setTheme } from '@/settings/theme';
 import { el } from '@/shared/el';
 
@@ -110,6 +110,11 @@ export function createSettingsPage(
   let scope: JsonScope = wsKey() === null ? 'user' : loadScope();
   let scopeToggle: { el: HTMLElement; set(value: JsonScope): void } | null = null;
 
+  // The wsKey() value captured when the JSON body was last built, so refresh() can detect a
+  // workspace-availability change and fully rebuild the body (toggle enabled-state + seed) instead
+  // of just re-seeding the existing editor.
+  let builtWsKey: string | null = null;
+
   // --- header: the Visual/JSON segmented control ----------------------------
   // The shared, keyboard-navigable segmented() control (prefs.ts): a role=radiogroup of role=radio
   // buttons with roving tabindex (checked → 0, other → -1) and arrow/Home/End navigation where focus
@@ -125,6 +130,19 @@ export function createSettingsPage(
   toggleHost.append(modeToggle.el);
 
   // --- body: the active representation ---------------------------------------
+
+  // Return the correct seed document for the active scope: the full user settings.json (grouped,
+  // namespaced) for 'user', or the flat workspace-scoped overrides document for 'workspace'.
+  // Falls back to the user seed when no workspace key is available (defensive — the Workspace pill
+  // is disabled when wsKey() is null, so this branch should not occur in normal use).
+  function seedForScope(): string {
+    if (scope === 'workspace') {
+      const key = wsKey();
+      if (key === null) return settingsToJsonDoc(loadSettings()); // fallback: no workspace open
+      return workspaceOverridesToJsonDoc(loadWorkspaceOverrides(key));
+    }
+    return settingsToJsonDoc(loadSettings());
+  }
 
   function renderDiagnostics(errors: Array<{ message: string; line?: number }>): void {
     if (!diagnostics) return;
@@ -154,15 +172,31 @@ export function createSettingsPage(
     editor?.setInvalid(null);
   }
 
-  // Switch the JSON scope: persists the new choice, syncs the toggle UI, and clears any stale
-  // diagnostics. Does NOT re-seed the editor or change the apply path — Task 3 owns that.
+  // Switch the JSON scope: persists the new choice, syncs the toggle UI, cancels any in-flight
+  // debounce (abandoning an invalid draft — mirrors the Visual↔JSON swap behavior), clears stale
+  // diagnostics, and re-seeds the editor from the scope's own document.
   function setScope(next: JsonScope): void {
     if (next === scope) return;
     if (next === 'workspace' && wsKey() === null) return; // no workspace open — force user
     scope = next;
     saveScope(scope);
     scopeToggle?.set(scope);
+    // Cancel any pending debounce so the old draft is never applied to the new scope.
+    if (debounceTimer !== null) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
     clearDiagnostics();
+    // Re-seed the live editor from the scope-appropriate document.
+    if (editor) {
+      editor.setContent(seedForScope());
+      // The setContent triggers onChange which schedules a new debounce; cancel it — the seed is
+      // already the persisted state, so re-applying it is unnecessary.
+      if (debounceTimer !== null) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+    }
   }
 
   // The JSON editor's onChange (fires on every doc change). Debounced so a burst of keystrokes validates
@@ -176,6 +210,23 @@ export function createSettingsPage(
   }
 
   function applyJsonText(text: string): void {
+    if (scope === 'workspace') {
+      // Defensive guard: never enter the workspace apply path without a workspace key.
+      const key = wsKey();
+      if (key === null) return;
+      const res = jsonDocToWorkspaceOverrides(text);
+      if (res.overrides !== undefined) {
+        clearDiagnostics();
+        replaceWorkspaceOverrides(key, res.overrides);
+        // Notify listeners with the merged (effective) settings so downstream sees the override.
+        // Theme is not a scoped key so setTheme is not needed here.
+        cb.onChange(effectiveSettings(loadSettings(), key));
+      } else if (res.errors) {
+        renderDiagnostics(res.errors); // surface messages; do NOT persist
+      }
+      return;
+    }
+    // user scope (unchanged) -------------------------------------------------
     // `current` = the last persisted settings; jsonDocToSettings re-injects its secret so a JSON edit can
     // never clear/overwrite the encrypted key.
     const res = jsonDocToSettings(text, loadSettings());
@@ -210,6 +261,8 @@ export function createSettingsPage(
       // so stealing focus onto a tab would be jarring); the sidecar (re)start is the startMcpOnShow call.
       pane.refresh(undefined, false);
     } else {
+      // Snapshot the workspace key so refresh() can detect an availability change.
+      builtWsKey = wsKey();
       // --- JSON scope toggle (User | Workspace) — prepended above the editor ---
       // Force 'user' when no workspace is open (even if persisted as 'workspace' from a prior session).
       if (wsKey() === null) scope = 'user';
@@ -236,10 +289,10 @@ export function createSettingsPage(
       }
       hosts.body.append(scopeRow);
 
-      // Seed from loadSettings() (the secret is already omitted by settingsToJsonDoc).
+      // Seed from the scope-appropriate document (user: full settings.json; workspace: flat overrides).
       editor = createJsonSettingsEditor(hosts.body, {
         onChange: (text) => scheduleApply(text),
-        initial: settingsToJsonDoc(loadSettings()),
+        initial: seedForScope(),
       });
       // The diagnostics strip lives below the editor; role=alert so a fresh error is announced. The id lets
       // the editor content's aria-errormessage point at it while the document is invalid (setInvalid).
@@ -298,12 +351,20 @@ export function createSettingsPage(
     if (mode === 'visual') {
       pane?.refresh(category, false); // repaint from live settings; land on `category` when given
     } else if (editor) {
-      // Re-seed only when the persisted document actually differs, so a re-open doesn't clobber an
-      // in-flight valid edit. A programmatic re-seed is not a user edit, so drop the onChange-scheduled
-      // re-apply it would otherwise trigger. Either way, clear any stale diagnostics.
-      const fresh = settingsToJsonDoc(loadSettings());
+      // If workspace availability changed since the body was built (e.g. a folder was opened or closed
+      // while the page sat hidden), fully rebuild the body so the scope toggle's enabled/empty-state
+      // AND the seeded document both reflect the current wsKey(). buildBody calls startMcpOnShow.
+      if (wsKey() !== builtWsKey) {
+        teardownBody();
+        buildBody();
+        return; // buildBody already called startMcpOnShow — skip the outer call
+      }
+      // Lightweight re-seed: only when the scope-appropriate document actually differs, so a re-open
+      // doesn't clobber an in-flight valid edit. Either way, clear any stale diagnostics.
+      const fresh = seedForScope();
       if (editor.getText() !== fresh) {
         editor.setContent(fresh);
+        // A programmatic re-seed is not a user edit — cancel the debounce onChange just scheduled.
         if (debounceTimer !== null) {
           clearTimeout(debounceTimer);
           debounceTimer = null;

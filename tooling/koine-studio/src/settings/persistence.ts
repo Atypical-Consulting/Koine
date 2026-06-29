@@ -882,6 +882,25 @@ export function saveWorkspaceOverride<K extends keyof Settings>(
 }
 
 /**
+ * Replace ALL workspace-level overrides for the given key in a single read-modify-write.
+ * For each field in {@link WORKSPACE_SCOPED_KEYS}, sets it when present in `overrides`, else
+ * deletes it from the blob — so a key removed from the JSON doc reverts that field to the User
+ * value. An empty `overrides` ({}) deletes all four fields (clears every override for the workspace).
+ */
+export function replaceWorkspaceOverrides(key: string, overrides: Partial<Settings>): void {
+  const storageKey = WORKSPACE_OVERRIDE_KEY_PREFIX + key;
+  const blob = readJsonObject(storageKey);
+  for (const k of WORKSPACE_SCOPED_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(overrides, k)) {
+      blob[k as string] = overrides[k as keyof Settings];
+    } else {
+      delete blob[k as string];
+    }
+  }
+  writeRaw(storageKey, JSON.stringify(blob));
+}
+
+/**
  * Return the effective settings for a workspace: user settings merged with any workspace-level
  * overrides. When `workspaceKey` is null, or when no override blob exists for it, the result
  * is the user settings object unchanged (identity semantics — no extra allocation).
