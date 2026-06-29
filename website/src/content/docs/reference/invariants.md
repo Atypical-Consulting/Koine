@@ -251,6 +251,50 @@ The generated TypeScript `regexMatch` helper is the seam to harden untrusted-inp
 matching without touching every call site — replace its body with a linear-time engine (e.g. RE2)
 and every `matches` invariant inherits the bound.
 
+### Source-generated form (opt-in, C#)
+
+A hot-path value object — an `Email`, an identifier, a free-text field constructed thousands of
+times — pays a per-call cost in the inline form: the static `Regex.IsMatch(string, string, …)` overload
+parses the pattern and builds its automaton on **every** call, even though the pattern is a compile-time
+constant. The opt-in **`RegexMode.SourceGenerated`** mode emits the .NET
+[`[GeneratedRegex]`](https://learn.microsoft.com/dotnet/standard/base-types/regular-expression-source-generators)
+source-generator form instead: the pattern is compiled **once, ahead of time**, into a cached,
+allocation-free matcher.
+
+With the mode on, the same `Email` emits:
+
+```csharp
+public sealed partial class Email : ValueObject        // the type becomes `partial`
+{
+    public string Raw { get; }
+
+    public Email(string raw)
+    {
+        if (!RawRegex0().IsMatch(raw))                  // the call site uses the cached matcher
+            throw new DomainInvariantViolationException(
+                type: nameof(Email),
+                rule: "invalid email address");
+        Raw = raw;
+    }
+
+    [GeneratedRegex(@"^[^@]+@[^@]+\.[^@]+$", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex RawRegex0();            // compiled once by the source generator
+}
+```
+
+This is a **performance optimization, not a behavior change**. The pattern, `RegexOptions.None`, and the
+match timeout are identical to the inline form — only the *evaluation strategy* changes. The same
+[`targets.csharp.regexMatchTimeoutMs`](/Koine/guides/cli/#koineconfig) bound flows into
+`matchTimeoutMilliseconds:` exactly as it flows into `TimeSpan.FromMilliseconds(N)` above, so a timed-out
+match still surfaces the same contained `RegexMatchTimeoutException`. A type holding several `matches`
+invariants gets one deterministically-named partial method per pattern (`RawRegex0`, `RawRegex1`, …), so
+the output is stable across rebuilds.
+
+The mode is **default-off**: unless it is enabled, every `matches` invariant emits the inline form
+above, byte-for-byte. It requires **C# 11+ / .NET 7+** (the `[GeneratedRegex]` source generator), which a
+default `net8.0`+ target satisfies. The other emitter targets are unaffected — their bounded forms in the
+table above are unchanged.
+
 ## 10.7 Conditional invariants (`when`)
 
 Sometimes a rule only applies in a particular state. Append a `when <cond>` clause and the
