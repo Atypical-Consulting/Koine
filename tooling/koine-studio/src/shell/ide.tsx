@@ -73,6 +73,7 @@ import {
   EMPTY_STATE_PICK_EVENT,
   NODE_EDIT_EVENT,
   NODE_NAVIGATE_EVENT,
+  setDefaultCanvasZoom,
   setDiagramEditing,
   setDiagramTouchMode,
   type AddNodeKind,
@@ -873,6 +874,9 @@ export function init(): () => void {
   // re-evaluated only when the breakpoint is actually crossed, re-rendering the canvas so the renderer
   // re-wires its gestures for the new mode.
   setDiagramTouchMode(isNarrowViewport());
+  // The default zoom a freshly-opened domain canvas uses when nothing per-diagram is saved (#762).
+  // Seeded from the loaded settings here, then kept in sync from prefsCallbacks.onChange below.
+  setDefaultCanvasZoom(settings.defaultCanvasZoom);
   let diagramWasNarrow = isNarrowViewport();
   // Named so the init() teardown can removeEventListener it — otherwise this listener (and its closed-over
   // controller) outlives the IDE and a breakpoint cross would call loadDiagrams() on a torn-down controller.
@@ -1703,6 +1707,9 @@ export function init(): () => void {
       editor.setMinimap(s.enableMinimap);
       editor.setTabSize(s.tabSize);
       workspace.setAutoSave(s.autoSave);
+      // Keep the diagram renderer's default zoom in lockstep with the setting (#762); applies to the
+      // NEXT freshly-opened canvas (a live canvas keeps its current zoom until re-rendered).
+      setDefaultCanvasZoom(s.defaultCanvasZoom);
       // The scoped fields (word-wrap on both surfaces + the Generated-tab relabel via the preview
       // target) apply from the EFFECTIVE view so a Workspace override drives live behavior.
       applyEffectiveScoped(eff);

@@ -141,9 +141,10 @@ const RECENT_CAP = 25;
 // The diagram canvas (#145) remembers each diagram's last zoom level, keyed per-diagram under this
 // prefix, so reopening the Diagrams tab restores the zoom the user left it at.
 const DIAGRAM_ZOOM_KEY_PREFIX = 'koine.studio.diagramZoom.';
-/** Zoom percent is clamped to this sane band on save AND load, so a hand-edited key can't break layout. */
-const DIAGRAM_ZOOM_MIN = 10;
-const DIAGRAM_ZOOM_MAX = 800;
+/** Zoom percent is clamped to this sane band on save AND load, so a hand-edited key can't break layout.
+ *  Exported so the renderer-facing default-zoom accessor (diagramContract) clamps to the SAME band. */
+export const DIAGRAM_ZOOM_MIN = 10;
+export const DIAGRAM_ZOOM_MAX = 800;
 
 // The assistant transcript is namespaced per workspace under its own key prefix (distinct from
 // settings/scratch/recentFolders), so each opened folder keeps its own conversation.

@@ -4,6 +4,7 @@
 // DOM, any renderer (SVG or maxGraph), and any layout engine — so the IDE-side delegated listeners
 // (ide.tsx) and the persistence scope (inspectorController.tsx) couple to this stable contract, not to a
 // particular renderer implementation file. Swapping the renderer is then a one-line factory change.
+import { DIAGRAM_ZOOM_MAX, DIAGRAM_ZOOM_MIN } from '@/settings/persistence';
 
 /**
  * The bubbling `CustomEvent` a node group dispatches when clicked (issue #93, Task 4). `ide.ts`
@@ -174,6 +175,26 @@ export function setDiagramTouchMode(on: boolean): void {
 /** Whether the canvas is currently in touch mode (read by the active renderer). */
 export function isDiagramTouchMode(): boolean {
   return touchMode;
+}
+
+/**
+ * The default zoom (percent) a freshly-opened domain canvas uses when no per-diagram zoom is saved
+ * (#762). Mirrors the {@link isDiagramTouchMode}/{@link setDiagramEditing} pattern: a module-level
+ * value the IDE flips in from the loaded `Settings` (`defaultCanvasZoom`) so the renderer reads it
+ * without importing the settings page. 100 keeps the canvas at its real 1:1 scale.
+ */
+let defaultCanvasZoom = 100;
+
+/** Set the default canvas zoom (percent), clamped to the diagram zoom band (10–800); a non-finite
+ *  value is ignored so the last good zoom is preserved. Called from `ide.tsx` when settings load/change. */
+export function setDefaultCanvasZoom(percent: number): void {
+  if (!Number.isFinite(percent)) return;
+  defaultCanvasZoom = Math.min(DIAGRAM_ZOOM_MAX, Math.max(DIAGRAM_ZOOM_MIN, percent));
+}
+
+/** The default canvas zoom (percent) the renderer applies to a freshly-opened canvas (default 100). */
+export function getDefaultCanvasZoom(): number {
+  return defaultCanvasZoom;
 }
 
 /**
