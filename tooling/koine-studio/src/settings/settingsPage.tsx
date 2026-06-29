@@ -279,7 +279,7 @@ export function createSettingsPage(
       // conditional in this branch reads a consistent value (Fix 3 — avoid triple wsKey() reads).
       const currentWsKey = wsKey();
       builtWsKey = currentWsKey;
-      // --- JSON scope toggle (User | Workspace) — prepended above the editor ---
+      // --- JSON scope toggle (User | Workspace) — mounted into the header, beside the Visual/JSON toggle ---
       // Re-derive scope from persistence on each build: restores a persisted 'workspace' scope when a
       // folder opens mid-session (Fix 3); forces 'user' when no workspace is available.
       scope = currentWsKey === null ? 'user' : loadScope();
@@ -297,18 +297,22 @@ export function createSettingsPage(
       scopeToggle.el.setAttribute('aria-disabled', String(!wsOpen));
       scopeToggle.el.classList.toggle('is-disabled', !wsOpen);
       for (const b of scopeToggle.el.querySelectorAll<HTMLButtonElement>('.koi-seg')) b.disabled = !wsOpen;
-      const scopeRow = el('div', { class: 'settings-json-scope' });
-      scopeRow.append(scopeToggle.el);
+      // Mount the scope toggle into the header's #settings-scope-toggle slot so User/Workspace sits on the
+      // SAME row as the Visual/JSON representation toggle (next to it). Fall back to the header itself when
+      // the slot is absent (keeps tests/callers that pass a bare header working). teardownBody() removes it.
+      const scopeHost = hosts.header.querySelector('#settings-scope-toggle') ?? hosts.header;
+      scopeHost.append(scopeToggle.el);
       if (!wsOpen) {
-        // Give the note a stable id so the disabled scope group can reference it via aria-describedby,
-        // letting a screen-reader user hear why the group is disabled (Fix 5).
+        // The disabled Workspace pill needs an explanation, but the header has no room for a sentence, so the
+        // note renders as a quiet hint above the editor in the body. A stable id keeps the cross-DOM
+        // aria-describedby link (header toggle → body note) so a screen-reader user still hears why the group
+        // is disabled (aria-describedby resolves by id regardless of DOM position). Removed by replaceChildren.
         const noteId = 'settings-json-scope-note';
         const note = el('p', { class: 'settings-json-scope-empty', text: 'Open a folder to edit workspace settings' });
         note.id = noteId;
         scopeToggle.el.setAttribute('aria-describedby', noteId);
-        scopeRow.append(note);
+        hosts.body.append(note);
       }
-      hosts.body.append(scopeRow);
 
       // Seed from the scope-appropriate document (user: full settings.json; workspace: flat overrides),
       // and wire the matching inline JSON schema so the linter/completions reflect the document's shape.
@@ -333,8 +337,13 @@ export function createSettingsPage(
       clearTimeout(debounceTimer);
       debounceTimer = null;
     }
-    // Null out the scope toggle reference; the DOM node is removed by replaceChildren() below.
-    scopeToggle = null;
+    // The scope toggle lives in the HEADER (not the body), so replaceChildren() below won't reach it —
+    // remove its node explicitly. The empty-state note (when present) is in the body and goes with the
+    // replaceChildren() sweep.
+    if (scopeToggle) {
+      scopeToggle.el.remove();
+      scopeToggle = null;
+    }
     if (pane) {
       pane.destroy();
       pane = null;
