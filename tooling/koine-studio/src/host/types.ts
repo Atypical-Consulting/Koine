@@ -127,7 +127,21 @@ export interface GitLogEntry {
 
 /** The host environment the studio runs in, and its capabilities. */
 export interface Platform {
-  readonly kind: 'tauri' | 'browser';
+  /**
+   * Capability convention: a `readonly` flag (`canX`/`usesX`) is the single source of truth for a
+   * host capability. An optional method (`x?()`) MAY accompany a flag and exists iff the flag is true.
+   * An always-present method must DEGRADE (null/empty/no-op or async reject) — never a sync throw.
+   * NEVER branch the UI on {@link kind}; ask a capability.
+   */
+  readonly kind: 'tauri' | 'browser'; // diagnostics/telemetry only — see convention above
+
+  /** Whether this host can serve a local `koine mcp --http` sidecar (desktop yes; a browser tab cannot listen). */
+  readonly canHostMcp: boolean;
+  /** Whether the compatibility check runs in-process and must be handed the baseline `.koi` sources (browser yes; the desktop server reads the path). */
+  readonly compatNeedsInProcessSources: boolean;
+  /** Whether this host receives app updates via a service worker (browser yes; the Tauri shell serves natively and needs none). */
+  readonly usesServiceWorker: boolean;
+
   /** Whether opening a folder of models is available (native dialog / File System Access API). */
   readonly canOpenFolders: boolean;
 

@@ -133,6 +133,9 @@ class TauriTerminalTransport implements TerminalTransport {
 
 export class TauriPlatform implements Platform {
   readonly kind = 'tauri' as const;
+  readonly canHostMcp = true;
+  readonly compatNeedsInProcessSources = false;
+  readonly usesServiceWorker = false;
   readonly canOpenFolders = true;
   readonly canSaveProjects = false;
   readonly persistsWorkspace = true;
