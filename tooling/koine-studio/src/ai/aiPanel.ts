@@ -1003,6 +1003,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
             baseUrl,
             apiKey,
             model: opts.getModel(),
+            temperature: opts.getTemperature?.(),
             system: 'Probe.',
             messages: [{ role: 'user', content: 'ping' }],
             grammar,

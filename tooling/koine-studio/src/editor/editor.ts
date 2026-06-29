@@ -1163,9 +1163,15 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
   const minimap = new Compartment();
   // Indentation (Settings → Editor → Tab size, #750) lives in its own compartment so setTabSize can
   // reconfigure it live. `indentUnit` is the whitespace inserted on indent; `EditorState.tabSize` is
-  // the rendered tab width — both follow the configured space count.
+  // the rendered tab width — both follow the configured space count. Round + floor-at-1 so a non-integer
+  // or zero value (e.g. a fraction typed into the step-1 Settings number input, which reaches here via
+  // onChange before a reload's coerceTabSize would round it) renders a sane integer indent and keeps
+  // live-apply == reload (#734) — never an empty indent unit from `' '.repeat(0)`.
   const indent = new Compartment();
-  const indentConfig = (n: number): Extension => [indentUnit.of(' '.repeat(n)), EditorState.tabSize.of(n)];
+  const indentConfig = (n: number): Extension => {
+    const width = Math.max(1, Math.round(n));
+    return [indentUnit.of(' '.repeat(width)), EditorState.tabSize.of(width)];
+  };
 
   // Inline (ghost-text) AI completions (#263). The pure state machine debounces keystrokes and owns
   // abort/staleness; the AI client (requestInline) talks to the configured provider. Both the master

@@ -47,4 +47,16 @@ describe('editor tab size (#750)', () => {
     expect(ed.view.state.tabSize).toBe(8);
     expect(ed.getDoc()).toBe('context Billing {}\n');
   });
+
+  it('rounds + floors a non-integer / zero tab size so live indent matches a reload (#734)', () => {
+    const ed = makeEditor();
+    // A fractional value (e.g. typed into the step-1 Settings number input) rounds, matching coerceTabSize.
+    ed.setTabSize(3.5);
+    expect(ed.view.state.facet(indentUnit)).toBe('    '); // round(3.5) → 4 spaces
+    expect(ed.view.state.tabSize).toBe(4);
+    // 0/negative floors to a sane single space rather than emitting an empty indent unit.
+    ed.setTabSize(0);
+    expect(ed.view.state.facet(indentUnit)).toBe(' ');
+    expect(ed.view.state.tabSize).toBe(1);
+  });
 });
