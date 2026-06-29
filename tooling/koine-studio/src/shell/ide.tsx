@@ -1807,6 +1807,7 @@ export function init(): () => void {
         const s = loadSettings();
         return s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
       },
+      getTemperature: () => loadSettings().aiTemperature,
       getContext: async () => {
         const diagnostics = editorSession.diagnosticsFor(workspace.activeUri()).map((d) => ({
           line: d.range.start.line + 1,
