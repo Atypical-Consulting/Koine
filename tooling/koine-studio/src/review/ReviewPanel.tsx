@@ -8,6 +8,7 @@ import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import type { ReviewStore, ReviewThread } from '@/review/reviewStore';
 import type { SourceSpan } from '@/lsp/lsp';
+import { basename } from '@/shared/path';
 
 /**
  * The author attributed to comments authored from Studio when no display name is configured. The
@@ -51,12 +52,6 @@ export interface ReviewPanelOptions {
 export interface ReviewPanel {
   /** Unmount the Preact tree (its store subscription is released by the unmount effect cleanup). */
   dispose(): void;
-}
-
-/** A short, human label for a file uri — the trailing path segment (e.g. `billing.koi`). */
-function basename(uri: string): string {
-  const seg = uri.replace(/[/\\]+$/, '').split(/[/\\]/).pop();
-  return seg && seg.length > 0 ? seg : uri;
 }
 
 /** Group threads by their file uri, files sorted stably, threads kept in store order within a file. */

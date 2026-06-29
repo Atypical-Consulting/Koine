@@ -20,6 +20,7 @@
 import { dirtyCount, saveAllDirtyBuffers } from '@/shell/dirty';
 import { matchesInclude } from '@/shell/workspaceSearch';
 import { pathToFileUri } from '@/shell/ideUtils';
+import { basename } from '@/shared/path';
 import type { FsEntry, KoiFile, Platform } from '@/host';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
 
@@ -298,7 +299,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   }
 
   function nameOf(token: string): string {
-    return token.split(/[\\/]/).filter(Boolean).pop() ?? token;
+    return basename(token);
   }
 
   function parentTokenOf(token: string): string | null {

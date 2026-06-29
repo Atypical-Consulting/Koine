@@ -42,6 +42,7 @@ import {
 } from '@/diagrams/diagramContract';
 import { createBrowserLayoutStore } from '@/diagrams/layoutStore';
 import { koiConfirm, koiPrompt } from '@/shared/overlay';
+import { prefixedId } from '@/shared/ids';
 
 // The DDD palette as literal hex (theme-independent — abstracts/_ddd.scss never redefines it per theme),
 // used for the maxGraph cell SHAPE fill/stroke. The shape is what the Outline minimap draws and what
@@ -351,13 +352,9 @@ function isAnnotationCell(cell: MxCell | null | undefined): boolean {
   return annotationValue(cell) != null;
 }
 
-/** A monotonic fallback so authored annotations get a stable, unique id even where crypto.randomUUID is absent. */
-let annotationIdSeq = 0;
-
 /** A unique id for a freshly-authored annotation, e.g. `note-1a2b…` / `group-3` (#255). */
 function newAnnotationId(kind: CanvasAnnotationKind): string {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  return `${kind}-${uuid ?? `${++annotationIdSeq}`}`;
+  return prefixedId(kind);
 }
 
 /** The HTML label for an annotation cell: a sticky note's text, or a group's corner label. */
