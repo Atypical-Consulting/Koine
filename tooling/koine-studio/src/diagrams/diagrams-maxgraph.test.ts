@@ -24,13 +24,14 @@ import {
   isDiagramEditing,
   DIAGRAM_ANNOTATION_CREATE_EVENT,
   DIAGRAM_REFIT_EVENT,
+  setDefaultCanvasZoom,
   setDiagramEditing,
   setDiagramTouchMode,
   setDiagramLayoutStore,
   setDiagramPersistScope,
   positionKey,
 } from '@/diagrams/diagramContract';
-import { loadDiagramAnnotations, loadDiagramPositions, saveDiagramPositions } from '@/settings/persistence';
+import { loadDiagramAnnotations, loadDiagramPositions, loadDiagramZoom, saveDiagramPositions, saveDiagramZoom } from '@/settings/persistence';
 import { createBrowserLayoutStore } from '@/diagrams/layoutStore';
 import type { Diagram, DiagramGraph, DiagramNode, DocsFile } from '@/lsp/lsp';
 
@@ -48,6 +49,7 @@ afterEach(() => {
   setDiagramTouchMode(false);
   setDiagramPersistScope('scratch');
   setDiagramLayoutStore(null);
+  setDefaultCanvasZoom(100);
   localStorage.clear();
   vi.restoreAllMocks();
   vi.clearAllMocks(); // also clear the koiPrompt/koiConfirm call history between editing-gesture tests
@@ -388,6 +390,51 @@ describe('createMaxGraphRenderer.render', () => {
   });
 });
 
+describe('initial canvas zoom: open at the saved-or-default zoom, not auto-fit (#762)', () => {
+  // A graph wide enough that the (old) auto-fit scale is clearly ≠ 1.0 — so "opens at the default,
+  // not fit" is observable rather than coinciding with 100%.
+  const wideGraph = (): DiagramGraph => ({
+    nodes: Array.from({ length: 8 }, (_, i) =>
+      node({ id: `Ordering.N${i}`, qualifiedName: `Ordering.N${i}`, stereotype: i === 0 ? 'aggregate root' : undefined }),
+    ),
+    edges: [],
+  });
+
+  function renderWide(container: HTMLElement): Promise<void> {
+    return createMaxGraphRenderer().render(container, [file([diagram('aggregate', wideGraph())])], 'dark', () => true);
+  }
+
+  test('opens at the default 100% (1:1), with the readout synced to the real scale', async () => {
+    setDefaultCanvasZoom(100);
+    const container = makeContainer();
+    await renderWide(container);
+    expect(container.querySelector('.koi-canvas-zoom-pct')?.textContent).toBe('100%');
+  });
+
+  test('the + button steps zoom up monotonically (×1.2): 100% → 120%', async () => {
+    setDefaultCanvasZoom(100);
+    const container = makeContainer();
+    await renderWide(container);
+    container.querySelector<HTMLButtonElement>('[aria-label="Zoom in"]')!.click();
+    expect(container.querySelector('.koi-canvas-zoom-pct')?.textContent).toBe('120%');
+  });
+
+  test('honors a configurable default zoom (75%) when nothing per-diagram is saved', async () => {
+    setDefaultCanvasZoom(75);
+    const container = makeContainer();
+    await renderWide(container);
+    expect(container.querySelector('.koi-canvas-zoom-pct')?.textContent).toBe('75%');
+  });
+
+  test('a saved per-diagram zoom (150%) wins over the default', async () => {
+    setDefaultCanvasZoom(100);
+    saveDiagramZoom('koi-domain-diagram', 150);
+    const container = makeContainer();
+    await renderWide(container);
+    expect(container.querySelector('.koi-canvas-zoom-pct')?.textContent).toBe('150%');
+  });
+});
+
 describe('routeContextMapClick', () => {
   const ctxNode = node({ id: 'Sales', qualifiedName: 'Sales', kind: 'context' });
   const relEdge = { from: 'Sales', to: 'Shipping', label: 'Customer/Supplier', arrowKind: 'association' };
@@ -428,6 +475,25 @@ describe('renderContextMapGraph', () => {
       expect(container.querySelector('.koi-ctxmap-graph .koi-canvas')).not.toBeNull();
       // its own root class — NOT the domain canvas's cross-highlight hook (`koi-svg-diagram`)
       expect(container.querySelector('.koi-svg-diagram')).toBeNull();
+    } finally {
+      handle?.dispose();
+    }
+  });
+
+  test('does NOT persist its zoom into the shared per-diagram key — no cross-talk with the domain canvas (#762)', async () => {
+    // The domain canvas remembers 150% under the single shared key; the read-only context map must not
+    // clobber it (the bug that made the domain canvas open at a read-only canvas's zoom instead of its default).
+    saveDiagramZoom('koi-domain-diagram', 150);
+    const graph: DiagramGraph = {
+      nodes: [ctx('A'), ctx('B')],
+      edges: [{ from: 'A', to: 'B', label: 'Customer/Supplier', arrowKind: 'association' }],
+    };
+    const container = makeContainer();
+    const handle = await renderContextMapGraph(container, graph, () => true);
+    try {
+      // Zoom the read-only canvas: its readout updates, but it must not overwrite the domain's saved zoom.
+      container.querySelector<HTMLButtonElement>('[aria-label="Zoom in"]')!.click();
+      expect(loadDiagramZoom('koi-domain-diagram')).toBe(150);
     } finally {
       handle?.dispose();
     }
