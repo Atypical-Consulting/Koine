@@ -28,6 +28,22 @@ export interface TerminalPanel {
 }
 
 /**
+ * Resolve the app's surface design-tokens into an xterm `ITheme`, so the terminal matches the rest of
+ * Studio instead of a hardcoded scheme. xterm paints glyphs from concrete colour strings (it can't read
+ * `var(--koi-…)`), so the live token values are pulled off `el`'s computed style with `getComputedStyle`
+ * and re-resolved on every dark/light flip (see {@link TerminalPanel.applyTheme}). Background tracks the
+ * bottom panel's own surface (`--koi-paper-2`); foreground/cursor track `--koi-fg`. The `||` fallbacks
+ * keep today's conventional `#1e1e1e`/`#d4d4d4` if a token is missing (detached node / unset var) so the
+ * terminal never renders un-themed.
+ */
+export function resolveTerminalTheme(el: HTMLElement): { background: string; foreground: string; cursor: string } {
+  const cs = getComputedStyle(el);
+  const read = (name: string) => cs.getPropertyValue(name).trim();
+  const fg = read('--koi-fg') || '#d4d4d4';
+  return { background: read('--koi-paper-2') || '#1e1e1e', foreground: fg, cursor: fg };
+}
+
+/**
  * Create the terminal panel inside `parent`. On a host that {@link Platform.canRunShell}, mounts
  * xterm.js wired to a fresh {@link TerminalTransport}; otherwise renders the desktop-only placeholder.
  * Returns a handle the shell (ide.tsx) uses to re-fit on show/resize and to dispose on teardown.
@@ -60,9 +76,10 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
     cursorBlink: true,
     fontFamily: '"JetBrains Mono Variable", ui-monospace, "SFMono-Regular", monospace',
     fontSize: 13,
-    // A terminal is conventionally dark regardless of the editor theme (matches VS Code's terminal);
-    // the panel chrome around it themes via CSS.
-    theme: { background: '#1e1e1e', foreground: '#d4d4d4' },
+    // Theme the terminal off the app's surface tokens so it matches the bottom panel it lives in
+    // (background = --koi-paper-2, foreground/cursor = --koi-fg) instead of a fixed dark scheme.
+    // Re-applied on the dark/light toggle via applyTheme() — xterm needs concrete colours, not var().
+    theme: resolveTerminalTheme(host),
   });
   const fitAddon = new FitAddon();
   term.loadAddon(fitAddon);

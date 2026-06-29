@@ -52,7 +52,7 @@ vi.mock('@xterm/addon-fit', () => {
   return { FitAddon };
 });
 
-import { createTerminalPanel } from '@/shell/terminal/terminalPanel';
+import { createTerminalPanel, resolveTerminalTheme } from '@/shell/terminal/terminalPanel';
 
 /** A fake terminal transport whose `onData`/`onExit` callbacks the test can drive. */
 function makeTransport(): TerminalTransport & { emitData(s: string): void; emitExit(c: number): void } {
@@ -76,6 +76,36 @@ function makeTransport(): TerminalTransport & { emitData(s: string): void; emitE
 
 beforeEach(() => {
   termInstances.length = 0;
+});
+
+describe('resolveTerminalTheme', () => {
+  // getComputedStyle only resolves an element's CSS custom properties once it is connected to the
+  // document (in the app the host inherits the tokens from the cascade), so attach before reading.
+  it('reads the app surface tokens (--koi-paper-2 / --koi-fg) off the element', () => {
+    const el = document.createElement('div');
+    el.style.setProperty('--koi-paper-2', '#161b22');
+    el.style.setProperty('--koi-fg', '#d6dde8');
+    document.body.appendChild(el);
+
+    const theme = resolveTerminalTheme(el);
+
+    expect(theme.background).toBe('#161b22');
+    expect(theme.foreground).toBe('#d6dde8');
+    expect(theme.cursor).toBe('#d6dde8');
+    el.remove();
+  });
+
+  it('falls back to the conventional dark colours when the tokens are unset', () => {
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+
+    const theme = resolveTerminalTheme(el);
+
+    expect(theme.background).toBe('#1e1e1e');
+    expect(theme.foreground).toBe('#d4d4d4');
+    expect(theme.cursor).toBe('#d4d4d4');
+    el.remove();
+  });
 });
 
 describe('createTerminalPanel', () => {
