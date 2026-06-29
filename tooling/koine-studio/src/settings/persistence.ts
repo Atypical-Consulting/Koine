@@ -39,11 +39,15 @@ export interface Settings {
   accent: AccentName;
   /** Collapse UI animations/transitions — an explicit companion to the OS reduced-motion setting. */
   reduceMotion: boolean;
+  /** Editor font stack override (CSS font-family list). Empty string → the theme's default mono font. */
+  fontFamily: string;
   fontSize: number;
   /** Editor line height as a unitless multiple of the font size. */
   lineHeight: number;
   /** Soft-wrap long editor lines instead of scrolling horizontally. */
   wordWrap: boolean;
+  /** Indent width in spaces (also the rendered tab width). Clamped to 1..8. */
+  tabSize: number;
   formatOnSave: boolean;
   /** Persist dirty buffers automatically after a short idle, instead of only on explicit save. */
   autoSave: boolean;
@@ -71,6 +75,8 @@ export interface Settings {
    *  local models are decode-constrained to the Koine grammar; other providers validate-and-repair the
    *  candidate before "Apply to editor" is enabled, so unparseable text can never be applied. */
   aiConstrainGrammar: boolean;
+  /** Assistant sampling temperature (0..2). Lower is more deterministic; default 0.2 keeps codegen steady. */
+  aiTemperature: number;
   /** Whether the local MCP server (desktop sidecar) is enabled. Opt-in: no background server unless on. */
   mcpEnabled: boolean;
   /** Which client the Settings → MCP setup recipe is shown for. */
@@ -85,9 +91,11 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'dark',
   accent: 'blue',
   reduceMotion: false,
+  fontFamily: '',
   fontSize: 13.5,
   lineHeight: 1.6,
   wordWrap: false,
+  tabSize: 2,
   formatOnSave: true,
   autoSave: false,
   enableMinimap: false,
@@ -100,6 +108,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiAgenticTools: false,
   aiInlineCompletions: false,
   aiConstrainGrammar: true,
+  aiTemperature: 0.2,
   mcpEnabled: false,
   mcpClient: 'lm-studio',
   previewTarget: 'csharp',
@@ -166,6 +175,14 @@ const FONT_MAX = 22;
 // Editor line-height bounds — likewise mirror the Settings input range in prefs.ts.
 const LINE_HEIGHT_MIN = 1.2;
 const LINE_HEIGHT_MAX = 2.4;
+
+// Editor tab-size bounds — an integer indent width; mirror the Settings input range in prefs.ts.
+const TAB_MIN = 1;
+const TAB_MAX = 8;
+
+// Assistant sampling-temperature bounds — both Anthropic and OpenAI accept 0..2.
+const TEMP_MIN = 0;
+const TEMP_MAX = 2;
 
 // The canonical accent roster. This data layer owns the list; the appearance layer derives its
 // presets and picker order from it, so a new accent is added in exactly one place.
@@ -250,6 +267,23 @@ function coerceLineHeight(v: unknown): number {
   return Math.min(Math.max(v, LINE_HEIGHT_MIN), LINE_HEIGHT_MAX);
 }
 
+/** A finite integer clamped into the tab-size range (rounded), else the default. */
+function coerceTabSize(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return DEFAULT_SETTINGS.tabSize;
+  return Math.min(Math.max(Math.round(v), TAB_MIN), TAB_MAX);
+}
+
+/** A finite number clamped into the assistant temperature range, else the default. */
+function coerceTemperature(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return DEFAULT_SETTINGS.aiTemperature;
+  return Math.min(Math.max(v, TEMP_MIN), TEMP_MAX);
+}
+
+/** A string font-family override (empty allowed), else the default empty string. */
+function coerceFontFamily(v: unknown): string {
+  return typeof v === 'string' ? v : DEFAULT_SETTINGS.fontFamily;
+}
+
 /** A known accent name, else the default. */
 function coerceAccent(v: unknown): AccentName {
   return ACCENT_NAMES.includes(v as AccentName) ? (v as AccentName) : DEFAULT_SETTINGS.accent;
@@ -289,9 +323,11 @@ export function loadSettings(): Settings {
       theme: coerceTheme(parsed.theme),
       accent: coerceAccent(parsed.accent),
       reduceMotion: typeof parsed.reduceMotion === 'boolean' ? parsed.reduceMotion : DEFAULT_SETTINGS.reduceMotion,
+      fontFamily: coerceFontFamily(parsed.fontFamily),
       fontSize: coerceFontSize(parsed.fontSize),
       lineHeight: coerceLineHeight(parsed.lineHeight),
       wordWrap: typeof parsed.wordWrap === 'boolean' ? parsed.wordWrap : DEFAULT_SETTINGS.wordWrap,
+      tabSize: coerceTabSize(parsed.tabSize),
       formatOnSave: typeof parsed.formatOnSave === 'boolean' ? parsed.formatOnSave : DEFAULT_SETTINGS.formatOnSave,
       autoSave: typeof parsed.autoSave === 'boolean' ? parsed.autoSave : DEFAULT_SETTINGS.autoSave,
       enableMinimap:
@@ -314,6 +350,7 @@ export function loadSettings(): Settings {
         typeof parsed.aiConstrainGrammar === 'boolean'
           ? parsed.aiConstrainGrammar
           : DEFAULT_SETTINGS.aiConstrainGrammar,
+      aiTemperature: coerceTemperature(parsed.aiTemperature),
       mcpEnabled: typeof parsed.mcpEnabled === 'boolean' ? parsed.mcpEnabled : DEFAULT_SETTINGS.mcpEnabled,
       mcpClient: coerceMcpClient(parsed.mcpClient),
       previewTarget: coercePreviewTarget(parsed.previewTarget),

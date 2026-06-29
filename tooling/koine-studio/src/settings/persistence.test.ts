@@ -160,6 +160,51 @@ describe('Editor autoSave + enableMinimap settings', () => {
   });
 });
 
+describe('Namespaced-settings new fields (#750): tabSize, fontFamily, aiTemperature', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('defaults the new fields (tabSize 2, fontFamily "", aiTemperature 0.2)', () => {
+    expect(DEFAULT_SETTINGS.tabSize).toBe(2);
+    expect(DEFAULT_SETTINGS.fontFamily).toBe('');
+    expect(DEFAULT_SETTINGS.aiTemperature).toBe(0.2);
+    const def = loadSettings();
+    expect(def.tabSize).toBe(2);
+    expect(def.fontFamily).toBe('');
+    expect(def.aiTemperature).toBe(0.2);
+  });
+
+  test('clamps tabSize to 1..8 and aiTemperature to 0..2; a non-string fontFamily falls back', () => {
+    localStorage.setItem('koine.studio.settings', JSON.stringify({ tabSize: 99, aiTemperature: 5, fontFamily: 42 }));
+    const s = loadSettings();
+    expect(s.tabSize).toBe(8);
+    expect(s.aiTemperature).toBe(2);
+    expect(s.fontFamily).toBe(''); // non-string → default
+  });
+
+  test('clamps the low end too (tabSize 0 → 1, aiTemperature -1 → 0)', () => {
+    localStorage.setItem('koine.studio.settings', JSON.stringify({ tabSize: 0, aiTemperature: -1 }));
+    const s = loadSettings();
+    expect(s.tabSize).toBe(1);
+    expect(s.aiTemperature).toBe(0);
+  });
+
+  test('round-trips valid in-range values and a non-empty fontFamily', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, tabSize: 4, fontFamily: 'JetBrains Mono', aiTemperature: 0.7 });
+    const s = loadSettings();
+    expect(s.tabSize).toBe(4);
+    expect(s.fontFamily).toBe('JetBrains Mono');
+    expect(s.aiTemperature).toBe(0.7);
+  });
+
+  test('falls back to defaults when the new fields are absent or non-finite', () => {
+    localStorage.setItem('koine.studio.settings', JSON.stringify({ theme: 'light', tabSize: 'x', aiTemperature: NaN }));
+    const s = loadSettings();
+    expect(s.tabSize).toBe(2);
+    expect(s.aiTemperature).toBe(0.2);
+    expect(s.fontFamily).toBe('');
+  });
+});
+
 describe('Review-comment display name (#479)', () => {
   beforeEach(() => localStorage.clear());
 
