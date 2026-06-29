@@ -37,7 +37,7 @@ internal sealed class RustExpressionTranslator
     private readonly TypeScope _scope;
     private readonly ISet<string> _memberNames;
     private readonly IReadOnlyDictionary<string, string> _enumMemberToType;
-    private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> _enumVariants;
+    private readonly IReadOnlyDictionary<(string Context, string Enum), IReadOnlyDictionary<string, string>> _enumVariants;
 
     private readonly HashSet<string> _locals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TypeRef> _localTypes = new(StringComparer.Ordinal);
@@ -51,7 +51,7 @@ internal sealed class RustExpressionTranslator
         ModelIndex index,
         IReadOnlyList<Member> members,
         IReadOnlyDictionary<string, string> enumMemberToType,
-        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> enumVariants,
+        IReadOnlyDictionary<(string Context, string Enum), IReadOnlyDictionary<string, string>> enumVariants,
         RustTypeMapper typeMapper,
         string? context = null,
         string memberReceiver = "self",
@@ -682,11 +682,16 @@ internal sealed class RustExpressionTranslator
     /// Resolves a referenced enum member to its emitted Rust variant via the shared per-enum
     /// member→variant map (#323), so a reference renders the SAME disambiguated variant the enum
     /// declaration emits (e.g. the second of <c>EUR</c>/<c>Eur</c> resolves to <c>Eur2</c>, not a second
-    /// <c>Eur</c>). Falls back to <see cref="RustNaming.Variant"/> for an enum/member the map does not
-    /// carry, matching the pre-de-dup behavior.
+    /// <c>Eur</c>). The map is keyed by <c>(context, enum name)</c>, so the owning context is resolved
+    /// the same way the type name qualifies (<see cref="RustTypeMapper.ResolveOwnerContext"/>) — a bare
+    /// reference binds to the current context's sibling, a qualified one to its owner's. This keeps two
+    /// same-named enums in different contexts from aliasing onto one variant table (#437). Falls back to
+    /// <see cref="RustNaming.Variant"/> for an enum/member the map does not carry, matching the
+    /// pre-de-dup behavior.
     /// </summary>
     private string VariantOf(string enumName, string memberName) =>
-        _enumVariants.TryGetValue(enumName, out IReadOnlyDictionary<string, string>? byMember)
+        _typeMapper.ResolveOwnerContext(enumName) is { } owner
+            && _enumVariants.TryGetValue((owner, enumName), out IReadOnlyDictionary<string, string>? byMember)
             && byMember.TryGetValue(memberName, out var variant)
                 ? variant
                 : RustNaming.Variant(memberName);
