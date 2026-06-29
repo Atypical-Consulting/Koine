@@ -57,6 +57,7 @@ export async function requestInline(ctx: InlineRequestContext, signal: AbortSign
       // Keep the Claude/OpenAI ids separate so switching providers can't send a Claude id to OpenAI;
       // a blank id lets ai.ts apply the provider-appropriate default.
       model: s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel,
+      temperature: s.aiTemperature,
       system: `${KOINE_PRIMER}\n\n${INLINE_INSTRUCTION}`,
       messages: [{ role: 'user', content: user }],
       // Inline completion only needs the final text; the streamed deltas are irrelevant here.

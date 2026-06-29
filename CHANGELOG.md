@@ -22,6 +22,18 @@ may include breaking changes.
   never ship silently again.
 
 ### Added
+- **Koine Studio — Settings JSON reorganized into VS Code-style namespaced groups (+ new options).** The
+  editable `settings.json` document is now grouped under `appearance` / `editor` / `ai` / `mcp` / `preview` /
+  `lsp` / `account` namespaces instead of a flat bag of keys, so hand-edits are easy to scan and a new setting
+  has an obvious home (issue #750). A single declarative field map (`runtimeKey → group.docKey`) is the source
+  of truth driving the serializer, the nested JSON Schema (with per-field `title`/`description` metadata), the
+  parser, and a three-way parity test in lockstep. The runtime `Settings` type stays **flat**, so there is no
+  localStorage migration and no churn to existing read sites — only the document the user edits is grouped — and
+  an old/hand-saved **flat** document still parses through a legacy fallback. The encrypted AI API key remains
+  absent from the schema and document (re-injected on save). Ships three new, fully-wired options: **`editor.tabSize`**
+  (indent width 1–8, applied as the editor's indent unit / tab width), **`appearance.fontFamily`** (an editor
+  font-stack override; blank uses the theme default), and **`ai.temperature`** (0–2 sampling temperature sent on
+  every assistant request) — each with a runtime coercer, a real consumer, and a Visual-pane control.
 - **Koine Studio — Settings is now a gear-launched center page (Visual/JSON).** The toolbar gear opens
   Settings as a transient center view (a peer of Visual/Code/Documentation) rather than a modal, with a
   **Visual/JSON** segmented toggle in the page header. The Visual side is the same two-pane preference form

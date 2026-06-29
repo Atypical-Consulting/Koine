@@ -91,6 +91,14 @@ const LINE_HEIGHT_MIN = 1.2;
 const LINE_HEIGHT_MAX = 2.4;
 const LINE_HEIGHT_STEP = 0.1;
 
+// Indent width + assistant temperature bounds (#750); mirror the load-time clamps in persistence.ts.
+const TAB_MIN = 1;
+const TAB_MAX = 8;
+
+const TEMP_MIN = 0;
+const TEMP_MAX = 2;
+const TEMP_STEP = 0.1;
+
 // Category rail icons, drawn in the studio's 16×16 line-icon idiom (stroke = currentColor).
 const ICON = {
   appearance:
@@ -610,11 +618,24 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     commit({ displayName: displayNameInput.value.trim() });
   });
 
+  // Editor font-stack override (#750). A blank value falls back to the theme's default mono font, applied
+  // live via applyAppearance (onChange) like the other appearance fields. Committed trimmed.
+  const fontFamilyInput = document.createElement('input');
+  fontFamilyInput.type = 'text';
+  fontFamilyInput.className = 'koi-text';
+  fontFamilyInput.spellcheck = false;
+  fontFamilyInput.autocomplete = 'off';
+  fontFamilyInput.placeholder = 'Theme default (monospace)';
+  fontFamilyInput.addEventListener('change', () => {
+    commit({ fontFamily: fontFamilyInput.value.trim() });
+  });
+
   const appearancePanel = panel(
     'appearance',
     row('Theme', 'Light or dark surfaces across the whole studio.', themeSeg.el),
     row('Accent', 'The highlight colour for selections, focus, and actions.', accent.el),
     row('Reduce motion', 'Collapse animations and transitions.', reduceMotion.el),
+    row('Editor font', 'A CSS font-family for the editor. Blank uses the theme’s default monospace font.', fontFamilyInput),
     row(
       'Display name',
       'The name your review comments are attributed to. Leave blank to show as “You”.',
@@ -638,6 +659,15 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     LINE_HEIGHT_STEP,
     () => loadSettings().lineHeight,
     (v) => commit({ lineHeight: v }),
+  );
+
+  // Indent width in spaces (#750), clamped 1..8; the editor re-applies it live via setTabSize (onChange).
+  const tabSizeInput = metricInput(
+    TAB_MIN,
+    TAB_MAX,
+    1,
+    () => loadSettings().tabSize,
+    (v) => commit({ tabSize: v }),
   );
 
   // A live type specimen: a short Koine snippet that renders at the current font size, line height,
@@ -709,6 +739,7 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     specimen,
     row('Font size', 'Editor text size, in pixels.', fontInput),
     row('Line height', 'Vertical spacing between lines.', lineHeightInput),
+    row('Tab size', 'Number of spaces per indent level (1–8).', tabSizeInput),
     wordWrapRow,
     formatOnSaveRow,
     row('Auto-save', 'Save edits automatically after a short pause in typing.', autoSave.el),
@@ -1057,6 +1088,20 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     aiConstrainGrammar.setDisabled(toolsOn);
   }
 
+  // Assistant sampling temperature (#750), clamped 0..2; sent on every assistant request (getTemperature).
+  const temperatureInput = metricInput(
+    TEMP_MIN,
+    TEMP_MAX,
+    TEMP_STEP,
+    () => loadSettings().aiTemperature,
+    (v) => commit({ aiTemperature: v }),
+  );
+  const temperatureRow = row(
+    'Temperature',
+    'Assistant sampling temperature (0–2). Lower is steadier; higher is more varied.',
+    temperatureInput,
+  );
+
   const baseUrlRow = row('Base URL', 'Endpoint for the OpenAI-compatible provider.', aiBaseUrlInput);
   const agenticToolsRow = row(
     'Compiler tools',
@@ -1110,6 +1155,7 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     baseUrlRow,
     row('API key', 'Encrypted in this browser and never leaves this device — sent only to the provider you choose.', aiKeyInput),
     row('Model', 'The model id the assistant requests.', aiModelInput),
+    temperatureRow,
     agenticToolsRow,
     inlineCompletionsRow,
     constrainGrammarRow,
@@ -1541,8 +1587,10 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     accent.set(s.accent);
     reduceMotion.set(s.reduceMotion);
     displayNameInput.value = s.displayName;
+    fontFamilyInput.value = s.fontFamily;
     fontInput.value = String(s.fontSize);
     lineHeightInput.value = String(s.lineHeight);
+    tabSizeInput.value = String(s.tabSize);
     autoSave.set(s.autoSave);
     minimap.set(s.enableMinimap);
     refreshSpecimen();
@@ -1554,6 +1602,7 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     aiBaseUrlInput.value = s.aiBaseUrl;
     aiKeyInput.value = s.aiApiKey;
     aiModelInput.value = s.aiProvider === 'openai' ? s.aiModelOpenai : s.aiModel;
+    temperatureInput.value = String(s.aiTemperature);
     // #447: Compiler-tools and grammar-constraint are mutually exclusive. A legacy persisted state with
     // BOTH on is the silently-broken combination → normalize to grammar-wins (tools off) and persist
     // the correction, so the panel never even shows the broken pairing.

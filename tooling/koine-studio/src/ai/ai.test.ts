@@ -117,6 +117,38 @@ describe('runOpenAiCompatible — plain chat (no executor)', () => {
   });
 });
 
+describe('assistant temperature wiring (#750)', () => {
+  test('OpenAI-compatible request body carries the configured temperature', async () => {
+    const params: Record<string, unknown>[] = [];
+    h.createImpl = (p) => {
+      params.push(p as Record<string, unknown>);
+      return Promise.resolve(streamFrom(TEXT));
+    };
+    await runAssistant(baseReq({ temperature: 0.7 }));
+    expect(params[0].temperature).toBe(0.7);
+  });
+
+  test('Anthropic request body carries the configured temperature', async () => {
+    const params: Record<string, unknown>[] = [];
+    h.streamImpl = (p) => {
+      params.push(p as Record<string, unknown>);
+      return anthropicStream(A_TEXT);
+    };
+    await runAssistant(anthropicReq({ temperature: 0.7 }));
+    expect(params[0].temperature).toBe(0.7);
+  });
+
+  test('omits temperature from the body when none is configured', async () => {
+    const params: Record<string, unknown>[] = [];
+    h.createImpl = (p) => {
+      params.push(p as Record<string, unknown>);
+      return Promise.resolve(streamFrom(TEXT));
+    };
+    await runAssistant(baseReq()); // no temperature passed
+    expect(params[0].temperature).toBeUndefined();
+  });
+});
+
 describe('runOpenAiCompatible — agentic tool loop', () => {
   test('accumulates a streamed tool_call, executes it, feeds the result back, then returns text', async () => {
     const params: Record<string, unknown>[] = [];

@@ -1,16 +1,26 @@
 import { describe, it, expect } from 'vitest';
-import { SETTINGS_JSON_SCHEMA, settingsToJsonDoc, jsonDocToSettings } from './settingsSchema';
+import { SETTINGS_JSON_SCHEMA, SETTINGS_FIELDS, settingsToJsonDoc, jsonDocToSettings } from './settingsSchema';
 import { DEFAULT_SETTINGS, type Settings } from './persistence';
 
 const withKey: Settings = { ...DEFAULT_SETTINGS, aiApiKey: 'sk-SECRET' };
 
 describe('settingsSchema', () => {
-  it('schema declares every Settings field except the secret aiApiKey', () => {
-    const props = (SETTINGS_JSON_SCHEMA.properties ?? {}) as Record<string, unknown>;
-    const schemaKeys = Object.keys(props).sort();
-    const settingsKeys = Object.keys(DEFAULT_SETTINGS).filter((k) => k !== 'aiApiKey').sort();
-    expect(schemaKeys).toEqual(settingsKeys);
-    expect(props).not.toHaveProperty('aiApiKey');
+  it('locks Settings ⇄ field map ⇄ nested schema in three-way parity (#750)', () => {
+    // 1) field map ⇄ Settings: every non-secret runtime key has exactly one field-map row, secret excluded.
+    const settingsKeys = Object.keys(DEFAULT_SETTINGS)
+      .filter((k) => k !== 'aiApiKey')
+      .sort();
+    const mapKeys = SETTINGS_FIELDS.map((f) => f.runtimeKey).sort();
+    expect(mapKeys).toEqual(settingsKeys);
+    // 2) nested-schema leaves ⇄ field map (group.docKey): the schema is built FROM the map, so it can't drift.
+    const groups = SETTINGS_JSON_SCHEMA.properties as Record<string, { properties: Record<string, unknown> }>;
+    const schemaLeaves = Object.entries(groups)
+      .flatMap(([g, gs]) => Object.keys(gs.properties).map((k) => `${g}.${k}`))
+      .sort();
+    const mapLeaves = SETTINGS_FIELDS.map((f) => `${f.group}.${f.docKey}`).sort();
+    expect(schemaLeaves).toEqual(mapLeaves);
+    // 3) the secret appears nowhere in the schema, and unknown groups are rejected at the root.
+    expect(JSON.stringify(SETTINGS_JSON_SCHEMA)).not.toContain('aiApiKey');
     expect(SETTINGS_JSON_SCHEMA.additionalProperties).toBe(false);
   });
 
@@ -21,11 +31,80 @@ describe('settingsSchema', () => {
     expect(JSON.parse(doc)).not.toHaveProperty('aiApiKey');
   });
 
+  it('serializes settings into namespaced groups (#750)', () => {
+    const doc = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, Record<string, unknown>>;
+    expect(Object.keys(doc).sort()).toEqual(['account', 'ai', 'appearance', 'editor', 'lsp', 'mcp', 'preview']);
+    expect(doc.appearance.theme).toBe(DEFAULT_SETTINGS.theme);
+    expect(doc.editor.minimap).toBe(DEFAULT_SETTINGS.enableMinimap); // runtime enableMinimap → doc editor.minimap
+    expect(doc.ai.provider).toBe(DEFAULT_SETTINGS.aiProvider);
+    expect(doc.lsp.trace).toBe(DEFAULT_SETTINGS.lspTrace);
+    expect(doc.account.displayName).toBe(DEFAULT_SETTINGS.displayName);
+    expect(JSON.stringify(doc)).not.toContain('aiApiKey'); // secret invariant
+  });
+
   it('round-trips a valid document back to settings, preserving the in-memory secret', () => {
     const doc = settingsToJsonDoc(withKey);
     const res = jsonDocToSettings(doc, withKey);
     expect(res.errors).toBeUndefined();
     expect(res.settings).toEqual(withKey);
+  });
+
+  it('round-trips the grouped document back to settings (#750)', () => {
+    const res = jsonDocToSettings(settingsToJsonDoc(withKey), withKey);
+    expect(res.errors).toBeUndefined();
+    expect(res.settings).toEqual(withKey);
+  });
+
+  it('rejects an unknown key inside a group (per-group additionalProperties:false) (#750)', () => {
+    const doc = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, Record<string, unknown>>;
+    doc.editor.bogus = 1;
+    const res = jsonDocToSettings(JSON.stringify(doc), withKey);
+    expect(res.settings).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('rejects an unknown top-level group (root additionalProperties:false) (#750)', () => {
+    const doc = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, unknown>;
+    doc.bogusGroup = { x: 1 };
+    const res = jsonDocToSettings(JSON.stringify(doc), withKey);
+    expect(res.settings).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('still accepts a legacy FLAT document and applies it (#750)', () => {
+    const res = jsonDocToSettings(JSON.stringify({ theme: 'light', fontSize: 16 }), withKey);
+    expect(res.errors).toBeUndefined();
+    expect(res.settings?.theme).toBe('light');
+    expect(res.settings?.fontSize).toBe(16);
+    expect(res.settings?.aiApiKey).toBe('sk-SECRET'); // secret preserved
+  });
+
+  it('rejects a smuggled aiApiKey inside a group (#750)', () => {
+    const doc = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, Record<string, unknown>>;
+    doc.ai.aiApiKey = 'sneaky';
+    const res = jsonDocToSettings(JSON.stringify(doc), withKey);
+    expect(res.settings).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('round-trips the three new grouped options (#750)', () => {
+    const custom: Settings = { ...withKey, tabSize: 4, fontFamily: 'JetBrains Mono', aiTemperature: 0.7 };
+    const doc = JSON.parse(settingsToJsonDoc(custom)) as Record<string, Record<string, unknown>>;
+    expect(doc.editor.tabSize).toBe(4);
+    expect(doc.appearance.fontFamily).toBe('JetBrains Mono');
+    expect(doc.ai.temperature).toBe(0.7);
+    const res = jsonDocToSettings(settingsToJsonDoc(custom), withKey);
+    expect(res.errors).toBeUndefined();
+    expect(res.settings).toEqual(custom);
+  });
+
+  it('rejects an out-of-bounds grouped tabSize / temperature (#750)', () => {
+    const doc = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, Record<string, unknown>>;
+    doc.editor.tabSize = 99;
+    expect(jsonDocToSettings(JSON.stringify(doc), withKey).settings).toBeUndefined();
+    const doc2 = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, Record<string, unknown>>;
+    doc2.ai.temperature = 5;
+    expect(jsonDocToSettings(JSON.stringify(doc2), withKey).settings).toBeUndefined();
   });
 
   it('applies an edited field while keeping the current secret', () => {
