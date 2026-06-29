@@ -382,13 +382,17 @@ public class PhpConformanceTests
     /// <c>binaryOp.invalid</c>. The fix routes a guarded optional Decimal operand to <c>add</c>/… with a
     /// Decimal-non-null wrapper so the receiver/argument is never <c>Decimal|null</c>.
     /// <para>
-    /// This fixture is an <b>entity</b> (not a value object) deliberately: an entity's generated
-    /// <c>equals()</c> compares its <c>id</c> alone, whereas a value object's structural <c>equals()</c>
-    /// would call <c>$this-&gt;base-&gt;equals(...)</c> on the nullable <c>Decimal?</c> member — an
-    /// <em>independent</em> pre-existing emitter gap (<c>method.nonObject</c> on <c>Decimal|null</c>)
-    /// that is out of scope for #787 (which is contained to <c>PhpExpressionTranslator</c>). Using an
-    /// entity isolates the guarded-optional <em>arithmetic</em> path under test from that unrelated gap.
-    /// Skipped (not failed) only when no <c>phpstan</c> is present locally; CI runs it for real.
+    /// This fixture is an <b>entity</b> (not a value object) deliberately, to keep it focused on the
+    /// guarded-optional <em>arithmetic</em> path: an entity's generated <c>equals()</c> compares its
+    /// <c>id</c> alone, whereas a value object's structural <c>equals()</c> would <em>also</em> call
+    /// <c>$this-&gt;base-&gt;equals(...)</c> on the nullable <c>Decimal?</c> member, dragging an unrelated
+    /// concern into this fixture. When #787 landed, that structural-nullable-<c>equals()</c> concern was an
+    /// independent untested gap (<c>method.nonObject</c> on <c>Decimal|null</c>); it is <b>now closed and
+    /// locked</b> — the structural branch null-guards a nullable object member (shipped with #686 / PR
+    /// #802) and is covered by
+    /// <see cref="Value_object_nullable_member_equals_typechecks_at_phpstan_level_max"/> (#814). The entity
+    /// here is retained only to keep this test on the arithmetic path. Skipped (not failed) only when no
+    /// <c>phpstan</c> is present locally; CI runs it for real.
     /// </para>
     /// </summary>
     [Fact]
