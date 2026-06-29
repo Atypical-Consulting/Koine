@@ -387,6 +387,11 @@ th[aria-sort='descending'] .koi-th-sort::after {
 .terminal-host {
   width: 100%;
   height: 100%;
+  /* A ~10px left gutter so the prompt/output don't butt against the panel chrome (#751). The strip
+     inherits the panel's --koi-paper-2, matching the xterm background seamlessly; box-sizing keeps the
+     host at full width and xterm's fit-addon already re-measures the narrower content box on reveal. */
+  padding-left: 10px;
+  box-sizing: border-box;
 }
 /* Docked right (#265), the panel height is `auto`; make the terminal fill its grid cell instead so
    xterm's fit-addon measures a real height. */
