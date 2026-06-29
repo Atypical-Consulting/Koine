@@ -31,6 +31,14 @@ export function UnsavedIndicator(props: {
   // Mirrors the exact strings the old imperative refreshDirtyIndicator produced ("N unsaved",
   // "Save N unsaved file(s)", "• <title>"). Applied once immediately, then on each store change.
   useEffect(() => {
+    // Keep the host button labelled in BOTH states so it's never label-less. The button is the static
+    // index.html element, visible before this effect first runs; storybook's a11y addon (axe) can race
+    // that window on the slower macOS CI runner and flag `button-name` on the empty button (#747).
+    // `apply(n>0)` sets the precise "Save N unsaved file(s)" label; `apply(0)` sets a baseline instead of
+    // removing the label (the button is `hidden` then — out of the a11y tree — but keeping a label also
+    // avoids a transient empty button on the n>0 → 0 transition). The first `apply` runs synchronously
+    // below, so the button carries discernible text the instant this effect runs.
+    const baselineLabel = 'Unsaved changes';
     const apply = (n: number): void => {
       document.title = titleWithDirty(baseTitle, n);
       if (n > 0) {
@@ -39,7 +47,7 @@ export function UnsavedIndicator(props: {
         host.hidden = false;
       } else {
         host.textContent = '';
-        host.removeAttribute('aria-label');
+        host.setAttribute('aria-label', baselineLabel);
         host.hidden = true;
       }
     };
