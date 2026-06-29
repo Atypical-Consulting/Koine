@@ -56,16 +56,20 @@ describe('bootStudio — a single routed view (no IDE→Home flash)', () => {
     expect(root.querySelector('.koi-welcome')).toBeNull();
   });
 
-  it('a previously-open workspace boots straight to the editor', () => {
+  it('a previously-open workspace now lands on Home (not the editor) with a one-click Resume control (#766)', () => {
     const root = document.createElement('div');
     document.body.appendChild(root);
-    // The synchronous "a workspace was open" flag — written by markWorkspaceOpened().
+    // The synchronous "a workspace was open" flag — written by markWorkspaceOpened(). An empty hash.
     localStorage.setItem('koine.studio.workspace-opened', '1');
 
     dispose = bootStudio(root);
 
-    expect(ideInit).toHaveBeenCalledTimes(1);
-    expect(root.querySelector('.koi-welcome')).toBeNull();
+    // Opening always lands on Home; the persisted flag no longer auto-skips into the editor (#766).
+    expect(root.querySelector('.koi-welcome')).not.toBeNull();
+    expect(root.hidden).toBe(false); // #home-root is revealed
+    expect(ideInit).not.toHaveBeenCalled(); // the editor is NOT booted on a plain open
+    // The returning-user fast path survives as a one-click Resume on cold-open Home.
+    expect(root.querySelector('[data-action="resume"]')).not.toBeNull();
   });
 
   it('a cold #/editor deep link (no persisted workspace) boots to the editor, not Home', () => {
@@ -86,8 +90,8 @@ describe('bootStudio — a single routed view (no IDE→Home flash)', () => {
     dispose = bootStudio(root); // pristine → Home
     expect(root.querySelector('.koi-welcome')).not.toBeNull();
 
-    // Clicking a start action sends the user into the editor and remembers a workspace was opened, so
-    // the next cold load boots straight to the editor (refresh-stable).
+    // Clicking a start action sends the user into the editor and remembers a workspace was opened, so a
+    // later cold-open Home offers a one-click Resume back to it (#766).
     root.querySelector<HTMLButtonElement>('[data-action="open-folder"]')!.click();
 
     expect(localStorage.getItem('koine.studio.workspace-opened')).toBe('1');

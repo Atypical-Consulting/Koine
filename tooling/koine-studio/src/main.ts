@@ -22,9 +22,9 @@ import {
 } from '@/shell/serviceWorkerUpdate';
 
 // Home actions: each queues what the editor should do on its next boot (the start-intent), remembers a
-// workspace was opened (so the next cold load returns to the editor), then navigates to the editor —
-// where the IDE consumes the intent and performs the real work. Home can't call the IDE directly
-// because, by design (#368), the editor isn't mounted while Home is showing.
+// workspace was opened (so a later cold-open Home offers a one-click Resume back to it — #766), then
+// navigates to the editor — where the IDE consumes the intent and performs the real work. Home can't
+// call the IDE directly because, by design (#368), the editor isn't mounted while Home is showing.
 function homeCallbacks(): WelcomeCallbacks {
   const go = (intent: StartIntent): void => {
     setStartIntent(intent);
@@ -114,12 +114,11 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
       : null;
   registerStudioServiceWorker({ onUpdateReady: () => updateController.markUpdateReady() });
 
-  // A shared playground link (`#model=…`) always opens the editor; otherwise the hash and the
-  // synchronous "a workspace was open" flag decide. Resolved before any paint.
+  // A shared playground link (`#model=…`) always opens the editor; otherwise the hash alone decides and
+  // a plain open (empty / `#/` / unknown hash) always lands on Home — the persisted-workspace flag no
+  // longer auto-skips it; the returning-user fast path is Resume on Home (#766). Resolved before paint.
   const isShareLink = readModelFromHash() !== null;
-  const initial: Route = isShareLink
-    ? 'editor'
-    : resolveInitialRoute({ hash: location.hash, hasPersistedWorkspace: hasPersistedWorkspace() });
+  const initial: Route = isShareLink ? 'editor' : resolveInitialRoute(location.hash);
   appStore.setState({ route: initial });
 
   // Canonicalise the URL hash to the resolved route so a refresh / bookmark lands on the same view —
@@ -158,12 +157,19 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
     if (appEl) appEl.hidden = true;
     if (homeRoot) {
       homeRoot.hidden = false;
-      // A session is "live" once the IDE has booted (#392): `ideStarted` never resets, so every Home
-      // entry after the first editor visit offers a Resume-editing control, while a pristine first-load
-      // Home (ideStarted still false) stays clean. The two `undefined`s keep mountHome's `templates`
-      // and `canOpenFolders` defaults (a default param applies when the arg is undefined) — we only
-      // want to set the trailing `opts`.
-      if (!home) home = mountHome(homeRoot, homeCallbacks(), undefined, undefined, { canResume: ideStarted });
+      // Offer a one-click Resume whenever there's a session to return to. Two cases qualify: the IDE
+      // has booted this session (`ideStarted`, #392) — every Home entry after the first editor visit —
+      // OR a workspace was opened on a prior visit (`hasPersistedWorkspace()`), so a returning user gets
+      // Resume on a *cold-open* Home, before the IDE boots this session. `onResume` navigates to the
+      // editor, which boots the IDE and restores the last workspace — reproducing the old auto-skip fast
+      // path, now an explicit choice rather than a forced jump (#766). A pristine first-load Home (no
+      // flag, IDE not booted) stays clean. The two `undefined`s keep mountHome's `templates` and
+      // `canOpenFolders` defaults (a default param applies when the arg is undefined) — we only set opts.
+      if (!home) {
+        home = mountHome(homeRoot, homeCallbacks(), undefined, undefined, {
+          canResume: ideStarted || hasPersistedWorkspace(),
+        });
+      }
     }
   }
 
