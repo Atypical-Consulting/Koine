@@ -49,6 +49,19 @@
   overflow: auto;
 }
 
+/* In the embedded Settings page the Visual two-pane form fills the body height, so the category rail
+   and the active panel run the full height of the surface. `.koi-settings-panels` below carries a fixed
+   `height: 460px` — a modal-era constant that kept the old dialog one size on every tab; in this taller
+   center page it left dead space under the controls. Stretch the layout to the body and let the panels
+   size to it (they keep their own `overflow-y: auto`, so a tall panel like MCP still scrolls in place). */
+.settings-page .koi-settings-layout {
+  min-height: 100%;
+}
+
+.settings-page .koi-settings-panels {
+  height: auto;
+}
+
 /* The JSON editor's inline diagnostics strip (invalid settings.json — not saved). */
 .settings-json-diagnostics {
   padding: var(--koi-space-1-5) var(--koi-space-4);
