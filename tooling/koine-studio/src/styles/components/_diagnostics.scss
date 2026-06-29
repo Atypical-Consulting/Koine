@@ -376,10 +376,11 @@ th[aria-sort='descending'] .koi-th-sort::after {
 }
 
 /* --- integrated terminal panel (issue #256) ---
-   Unlike the list/table panels, the terminal fills its box edge-to-edge (xterm.js owns the padding
-   and its own internal scroll), so the shared `.diag-panel` horizontal padding is dropped and the
-   host element stretches to the draggable strip height. The browser placeholder reuses the muted,
-   centred empty-state treatment. */
+   Unlike the list/table panels, xterm.js owns its own vertical padding and internal scroll, so the
+   shared `.diag-panel` horizontal padding is dropped from `.diag-panel-terminal` and the host element
+   stretches to the draggable strip height. The host then re-adds only a small left gutter (#751, see
+   `.terminal-host` below) so the content isn't flush against the panel chrome. The browser placeholder
+   reuses the muted, centred empty-state treatment. */
 .diag-panel-terminal {
   padding: 0;
   overflow: hidden;
