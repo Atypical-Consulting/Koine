@@ -1754,14 +1754,18 @@ public sealed partial class CSharpEmitter : IEmitter
         //    parameter (#324), bind the synthetic `id` to that parameter instead of minting: if the
         //    parameter is literally named `id` it already provides the local (emit nothing); otherwise
         //    alias it (`var id = bookId;`).
-        Param? explicitId = MemberAnalysis.ExplicitIdParameter(entity, factory);
-        if (explicitId is null)
+        FactoryIdBinding idBinding = FactoryIdBinding.ResolveFactoryId(entity, factory, CSharpNaming.ToCamelCase);
+        switch (idBinding.Source)
         {
-            sb.Append(Indent).Append(Indent).Append("var id = ").Append(entity.IdentityName).Append(".New();\n");
-        }
-        else if (CSharpNaming.ToCamelCase(explicitId.Name) is var idParam && idParam != "id")
-        {
-            sb.Append(Indent).Append(Indent).Append("var id = ").Append(idParam).Append(";\n");
+            case FactoryIdSource.Generate:
+                sb.Append(Indent).Append(Indent).Append("var id = ").Append(entity.IdentityName).Append(".New();\n");
+                break;
+            case FactoryIdSource.Alias:
+                sb.Append(Indent).Append(Indent).Append("var id = ").Append(idBinding.AliasFrom).Append(";\n");
+                break;
+            case FactoryIdSource.ParamProvidesIdDirectly:
+                // The `id` parameter already provides the local — emit nothing.
+                break;
         }
 
         // 2. Preconditions — checked before any state is constructed.

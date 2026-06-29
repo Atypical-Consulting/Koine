@@ -558,14 +558,18 @@ public sealed partial class TypeScriptEmitter
         // Identity. By default generate client-side (`<Id>New()`). When the factory supplies it as an
         // explicit identity-typed parameter (#324), bind `id` to that parameter instead of generating:
         // omit when the parameter is already named `id`; otherwise alias it (`const id = bookId;`).
-        Param? explicitId = MemberAnalysis.ExplicitIdParameter(entity, factory);
-        if (explicitId is null)
+        FactoryIdBinding idBinding = FactoryIdBinding.ResolveFactoryId(entity, factory, TypeScriptNaming.ToCamelCase);
+        switch (idBinding.Source)
         {
-            sb.Append(Indent).Append(Indent).Append("const id = ").Append(idName).Append("New();\n");
-        }
-        else if (TypeScriptNaming.ToCamelCase(explicitId.Name) is var idParam && idParam != "id")
-        {
-            sb.Append(Indent).Append(Indent).Append("const id = ").Append(idParam).Append(";\n");
+            case FactoryIdSource.Generate:
+                sb.Append(Indent).Append(Indent).Append("const id = ").Append(idName).Append("New();\n");
+                break;
+            case FactoryIdSource.Alias:
+                sb.Append(Indent).Append(Indent).Append("const id = ").Append(idBinding.AliasFrom).Append(";\n");
+                break;
+            case FactoryIdSource.ParamProvidesIdDirectly:
+                // The `id` parameter already provides the local — emit nothing.
+                break;
         }
 
         foreach (RequiresClause req in factory.Body.OfType<RequiresClause>())
