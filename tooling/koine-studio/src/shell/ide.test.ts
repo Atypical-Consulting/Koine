@@ -127,6 +127,9 @@ const ROOT = 'mem://workspace';
 
 class FakePlatform implements Platform {
   readonly kind = 'browser' as const;
+  readonly canHostMcp = false;
+  readonly compatNeedsInProcessSources = true;
+  readonly usesServiceWorker = true;
   readonly canOpenFolders = true;
   readonly canSaveProjects = true;
   readonly canRunShell = false;
@@ -377,8 +380,6 @@ const APP_HTML = `
           <div id="right-body">
             <div id="inspector-host" class="rview" role="tabpanel"></div>
             <section id="view-assistant" class="rview" role="tabpanel" hidden></section>
-            <div id="rview-rules" class="rview doc-view" role="tabpanel" hidden><p class="muted">Coming soon.</p></div>
-            <div id="rview-notes" class="rview doc-view" role="tabpanel" hidden><p class="muted">Coming soon.</p></div>
             <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
           </div>
         </aside>

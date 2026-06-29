@@ -14,9 +14,14 @@ describe('layoutStore defaults', () => {
     expect(loadLayout().sideRail).toBe('right');
   });
 
-  test('right rail is not collapsed by default', () => {
-    expect(DEFAULT_LAYOUT.rightCollapsed).toBe(false);
-    expect(loadLayout().rightCollapsed).toBe(false);
+  test('right rail is collapsed by default (#730: inspection is contextual)', () => {
+    expect(DEFAULT_LAYOUT.rightCollapsed).toBe(true);
+    expect(loadLayout().rightCollapsed).toBe(true);
+  });
+
+  test('left navigator rail is open by default (#730: navigation is persistent)', () => {
+    expect(DEFAULT_LAYOUT.leftCollapsed).toBe(false);
+    expect(loadLayout().leftCollapsed).toBe(false);
   });
 });
 
@@ -46,6 +51,11 @@ describe('layoutStore round-trip', () => {
   test('rightCollapsed round-trips', () => {
     saveLayout({ rightCollapsed: true });
     expect(loadLayout().rightCollapsed).toBe(true);
+  });
+
+  test('leftCollapsed round-trips', () => {
+    saveLayout({ leftCollapsed: true });
+    expect(loadLayout().leftCollapsed).toBe(true);
   });
 
   test('saveLayout returns the full merged state', () => {
@@ -88,7 +98,7 @@ describe('layoutStore per-field coercion', () => {
 
   test('bogus rightCollapsed value coerces to the default', () => {
     localStorage.setItem('koine.studio.layout', JSON.stringify({ rightCollapsed: 'yes' }));
-    expect(loadLayout().rightCollapsed).toBe(false);
+    expect(loadLayout().rightCollapsed).toBe(true);
   });
 
   test('valid fields survive alongside a bogus field', () => {

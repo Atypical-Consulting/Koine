@@ -7,9 +7,17 @@ import type { Platform, TerminalTransport } from '@/host/types';
 // hoisted mock factory. The placeholder branch (browser) mounts no terminal at all.
 const { termInstances } = vi.hoisted(() => ({ termInstances: [] as FakeTerminal[] }));
 
+interface FakeTerminalTheme {
+  background: string;
+  foreground: string;
+  cursor: string;
+}
+
 interface FakeTerminal {
   cols: number;
   rows: number;
+  // xterm's live theme bag — set at construction and reassigned by applyTheme().
+  options: { theme?: FakeTerminalTheme };
   open: ReturnType<typeof vi.fn>;
   loadAddon: ReturnType<typeof vi.fn>;
   write: ReturnType<typeof vi.fn>;
@@ -23,6 +31,7 @@ vi.mock('@xterm/xterm', () => {
   class Terminal implements FakeTerminal {
     cols = 80;
     rows = 24;
+    options: { theme?: FakeTerminalTheme };
     private dataCb?: (d: string) => void;
     open = vi.fn();
     loadAddon = vi.fn();
@@ -36,7 +45,8 @@ vi.mock('@xterm/xterm', () => {
     emitKeystroke(data: string): void {
       this.dataCb?.(data);
     }
-    constructor() {
+    constructor(opts?: { theme?: FakeTerminalTheme }) {
+      this.options = { theme: opts?.theme };
       termInstances.push(this);
     }
   }
@@ -52,7 +62,7 @@ vi.mock('@xterm/addon-fit', () => {
   return { FitAddon };
 });
 
-import { createTerminalPanel } from '@/shell/terminal/terminalPanel';
+import { createTerminalPanel, resolveTerminalTheme } from '@/shell/terminal/terminalPanel';
 
 /** A fake terminal transport whose `onData`/`onExit` callbacks the test can drive. */
 function makeTransport(): TerminalTransport & { emitData(s: string): void; emitExit(c: number): void } {
@@ -76,6 +86,36 @@ function makeTransport(): TerminalTransport & { emitData(s: string): void; emitE
 
 beforeEach(() => {
   termInstances.length = 0;
+});
+
+describe('resolveTerminalTheme', () => {
+  // getComputedStyle only resolves an element's CSS custom properties once it is connected to the
+  // document (in the app the host inherits the tokens from the cascade), so attach before reading.
+  it('reads the app surface tokens (--koi-paper-2 / --koi-fg) off the element', () => {
+    const el = document.createElement('div');
+    el.style.setProperty('--koi-paper-2', '#161b22');
+    el.style.setProperty('--koi-fg', '#d6dde8');
+    document.body.appendChild(el);
+
+    const theme = resolveTerminalTheme(el);
+
+    expect(theme.background).toBe('#161b22');
+    expect(theme.foreground).toBe('#d6dde8');
+    expect(theme.cursor).toBe('#d6dde8');
+    el.remove();
+  });
+
+  it('falls back to the conventional dark colours when the tokens are unset', () => {
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+
+    const theme = resolveTerminalTheme(el);
+
+    expect(theme.background).toBe('#1e1e1e');
+    expect(theme.foreground).toBe('#d4d4d4');
+    expect(theme.cursor).toBe('#d4d4d4');
+    el.remove();
+  });
 });
 
 describe('createTerminalPanel', () => {
@@ -130,5 +170,38 @@ describe('createTerminalPanel', () => {
     panel.dispose();
 
     expect(transport.stop).toHaveBeenCalled();
+  });
+
+  it('re-resolves the theme from the host tokens when applyTheme() is called', () => {
+    // The host must be in the document for getComputedStyle to resolve its custom properties.
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const transport = makeTransport();
+    const platform = { canRunShell: true, createTerminal: () => transport } as unknown as Platform;
+
+    const panel = createTerminalPanel({ parent, platform, cwd: () => null });
+    const term = termInstances[0];
+    const host = parent.querySelector('.terminal-host') as HTMLElement;
+
+    // Simulate a theme flip: the app surface tokens now resolve to the light palette.
+    host.style.setProperty('--koi-paper-2', '#f4f6fa');
+    host.style.setProperty('--koi-fg', '#1c2230');
+    panel.applyTheme();
+
+    expect(term.options.theme).toEqual({ background: '#f4f6fa', foreground: '#1c2230', cursor: '#1c2230' });
+
+    panel.dispose();
+    parent.remove();
+  });
+
+  it('applyTheme() is a no-op on the browser placeholder branch', () => {
+    const parent = document.createElement('div');
+    const platform = { canRunShell: false } as unknown as Platform;
+
+    const panel = createTerminalPanel({ parent, platform, cwd: () => null });
+
+    expect(() => panel.applyTheme()).not.toThrow();
+    expect(termInstances).toHaveLength(0);
+    panel.dispose();
   });
 });

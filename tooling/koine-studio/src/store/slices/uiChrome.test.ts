@@ -34,9 +34,9 @@ describe('uiChrome slice', () => {
   test('tab setters are independent', () => {
     const s = make();
     s.getState().setBottom('events');
-    s.getState().setRight('notes');
+    s.getState().setRight('source-control');
     expect(s.getState().bottom).toBe('events');
-    expect(s.getState().right).toBe('notes');
+    expect(s.getState().right).toBe('source-control');
   });
 
   test('outlineFilter defaults to empty and is set independently (it survives panel remounts)', () => {
@@ -72,6 +72,25 @@ describe('uiChrome slice', () => {
     s.getState().toggleRightCollapsed();
     expect(s.getState().rightCollapsed).toBe(true);
     expect(s.getState().right).toBe('source-control');
+  });
+
+  test('leftCollapsed defaults to false and setLeftCollapsed switches it (#730)', () => {
+    const s = make();
+    expect(s.getState().leftCollapsed).toBe(false);
+    s.getState().setLeftCollapsed(true);
+    expect(s.getState().leftCollapsed).toBe(true);
+    s.getState().setLeftCollapsed(false);
+    expect(s.getState().leftCollapsed).toBe(false);
+  });
+
+  test('toggleLeftCollapsed flips the flag independently of rightCollapsed', () => {
+    const s = make();
+    expect(s.getState().leftCollapsed).toBe(false);
+    s.getState().toggleLeftCollapsed();
+    expect(s.getState().leftCollapsed).toBe(true);
+    expect(s.getState().rightCollapsed).toBe(false);
+    s.getState().toggleLeftCollapsed();
+    expect(s.getState().leftCollapsed).toBe(false);
   });
 });
 

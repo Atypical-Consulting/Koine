@@ -89,4 +89,20 @@ describe('UnsavedIndicator', () => {
     });
     expect(await axe(button)).toHaveNoViolations();
   });
+
+  test('keeps a baseline aria-label even with no unsaved buffers (so the button is never label-less)', () => {
+    const button = host();
+    const store = createAppStore();
+
+    // Mount with zero dirty buffers: the pill is hidden, but the host button must still carry a
+    // non-empty baseline aria-label. axe (storybook's a11y addon on macOS CI, #747) can otherwise race
+    // the transient window where the static button is visible but the effect hasn't labelled it yet and
+    // flag `button-name`; a baseline label means the button is never label-less.
+    act(() => {
+      render(<UnsavedIndicator store={store} host={button} baseTitle="Koine Studio" onSaveAll={() => {}} />);
+    });
+
+    expect(button.hidden).toBe(true);
+    expect(button.getAttribute('aria-label')).toBe('Unsaved changes');
+  });
 });

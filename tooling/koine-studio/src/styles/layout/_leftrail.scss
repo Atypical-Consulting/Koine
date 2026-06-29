@@ -1,3 +1,5 @@
+@use '../abstracts' as a;
+
 /* --- left sidebar: the DDD "Domain" navigator (#453) ---
    A labelled Domain·Files axis switch over one navigator host (the Domain construct tree or the
    workspace Files tree), plus a slim documentation footer pinned to the bottom. One column, ONE scroll
@@ -11,14 +13,49 @@
   overflow-x: hidden;
 }
 
+/* The rail head: the axis switch and the collapse control on one row. The outer margin that used to sit on
+   #rail-axis-switch lives here now so the two share a baseline; the switch grows, the collapse button is a
+   fixed-size square at the end. */
+.rail-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: var(--koi-space-1);
+  margin: var(--koi-space-2) var(--koi-space-2) 0;
+}
+
+/* The collapse control: a square icon button tucking the rail to its #left-strip spine. Mirrors the toolbar
+   icon-button idiom; the chevron points to the edge it collapses toward. */
+.rail-collapse {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  background: var(--koi-paper);
+  color: var(--koi-muted);
+  cursor: pointer;
+  transition: background var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease;
+
+  &:hover {
+    color: var(--koi-accent);
+    background: var(--koi-surface);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+}
+
 /* The axis switch: a labelled segmented control choosing Domain vs Files. Two equal-width segments; the
    active one wears the app's accent-TINTED pill (accent text on a faint accent wash + accent border) —
    not a solid accent fill, which fails WCAG AA on the mid-blue accent — matching the toolbar/docs pills. */
 #rail-axis-switch {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   display: flex;
   gap: var(--koi-space-0-5);
-  margin: var(--koi-space-2) var(--koi-space-2) 0;
   padding: var(--koi-space-0-5);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
@@ -168,93 +205,6 @@
   overflow: visible;
 }
 
-/* The documentation footer: shortcuts into the model's prose surfaces (ADR, Notes — Context Map and the
-   glossary moved into the Domain axis, #453). margin-top:auto sinks it to the bottom of the rail; a top
-   rule separates it from the navigator. These are navigation, so they wear the toolbar's stroked
-   line-icon idiom — not the Domain navigator's colour-coded construct shapes. */
-.rail-docs-foot {
-  flex: 0 0 auto;
-  margin-top: auto;
-  padding: var(--koi-space-2) var(--koi-space-2) var(--koi-space-3);
-  border-top: 1px solid var(--koi-line);
-}
-
-.koi-doclinks {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.koi-doclink {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: var(--koi-space-2);
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: none;
-  color: var(--koi-ink-soft);
-  padding: var(--koi-space-1-25) var(--koi-space-2);
-  border-radius: var(--koi-radius-sm);
-  cursor: pointer;
-  font-family: var(--koi-font-body);
-  font-size: var(--koi-text-base-plus);
-  transition: background var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease;
-
-  /* The accent spine: a short bar that grows in on hover/focus, echoing the inspector's construct
-     accent bar so the rail's two navigators share one visual signature. */
-  &::before {
-    content: '';
-    position: absolute;
-    left: 2px;
-    top: 50%;
-    width: 2px;
-    height: 0;
-    border-radius: var(--koi-radius-pill);
-    background: var(--koi-accent);
-    transform: translateY(-50%);
-    transition: height var(--koi-dur-fast) ease;
-  }
-
-  &:hover,
-  &:focus-visible {
-    background: var(--koi-surface);
-    color: var(--koi-accent);
-  }
-  &:hover::before,
-  &:focus-visible::before {
-    height: 58%;
-  }
-  &:focus-visible {
-    outline: 2px solid var(--koi-accent);
-    outline-offset: -2px;
-  }
-}
-
-.koi-doclink-ico {
-  flex: 0 0 auto;
-  width: 15px;
-  height: 15px;
-  color: var(--koi-muted);
-  transition: color var(--koi-dur-fast) ease;
-}
-.koi-doclink:hover .koi-doclink-ico,
-.koi-doclink:focus-visible .koi-doclink-ico {
-  color: var(--koi-accent);
-}
-
-.koi-doclink-label {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* --- Domain navigator: the drill / zoom transition (#453) ---
    Changing altitude (strategic ⇄ tactical) swaps the navigator body to a freshly-built level; the
    controller tags that level `.koi-domain-enter` so it plays a brief zoom-in entrance — a spatial cue
@@ -275,5 +225,78 @@
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+/* --- collapsed-state morph: the rail tucks to its icon spine (#730) ---
+   When #split carries .left-collapsed the head + navigator hide and #left-strip takes over, while
+   _split.scss shrinks the leftrail track to the stripe width. The spine is hidden by default (expanded),
+   shown only when collapsed — the mirror of the right rail's stripe, on the opposite edge. */
+#left-strip {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--koi-space-1);
+  padding: var(--koi-space-2) var(--koi-space-1);
+}
+
+#split.left-collapsed .rail-head,
+#split.left-collapsed .rail-navigator-body {
+  display: none;
+}
+#split.left-collapsed #left-strip {
+  display: flex;
+}
+
+/* The spine's icon toggles: an expand control plus the Domain/Files axis toggles. Same line-icon idiom as
+   the right-edge tool-window stripe (.rstrip-btn) so the two rails' collapsed states read consistently; the
+   active axis toggle wears the accent tint, matching the expanded segmented control. */
+.lstrip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
+  background: transparent;
+  color: var(--koi-muted);
+  cursor: pointer;
+  transition: background var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease,
+    border-color var(--koi-dur-fast) ease;
+
+  &:hover {
+    color: var(--koi-accent);
+    background: var(--koi-surface);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+  &[aria-pressed='true'] {
+    background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+    border-color: var(--koi-accent);
+    color: var(--koi-accent);
+  }
+}
+
+/* The expand control reads as the primary action of the spine; a touch of separation from the axis toggles
+   below it. */
+.lstrip-expand {
+  margin-bottom: var(--koi-space-1);
+  color: var(--koi-fg);
+}
+
+/* The morph-collapse is a desktop affordance. Below $bp-narrow the rail is the full-width "Files" zone of
+   the mobile shell, so a persisted .left-collapsed must NOT tuck it: undo the morph (re-show the head +
+   navigator, hide the spine). These match the desktop morph selectors' specificity and, living after them
+   in this file, win on source order inside the query. */
+@media (max-width: a.$bp-narrow) {
+  #split.left-collapsed .rail-head,
+  #split.left-collapsed .rail-navigator-body {
+    display: flex;
+  }
+  #split.left-collapsed #left-strip {
+    display: none;
   }
 }
