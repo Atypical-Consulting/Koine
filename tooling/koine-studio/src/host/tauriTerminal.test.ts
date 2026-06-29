@@ -74,6 +74,16 @@ describe('TauriTerminalTransport', () => {
     expect(unlistenSpies[3]).not.toHaveBeenCalled();
   });
 
+  it('pause()/resume() invoke the host flow-control commands (#441)', async () => {
+    const transport = new TauriPlatform().createTerminal!();
+
+    await transport.pause();
+    expect(invokeMock).toHaveBeenCalledWith('pty_pause');
+
+    await transport.resume();
+    expect(invokeMock).toHaveBeenCalledWith('pty_resume');
+  });
+
   it('stop() detaches the live listeners and asks the host to stop the PTY', async () => {
     const transport = new TauriPlatform().createTerminal!();
     await transport.start(null);

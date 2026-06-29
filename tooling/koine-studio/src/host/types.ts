@@ -68,8 +68,8 @@ export interface LspTransport {
  * shell over Tauri IPC (`pty_start`/`pty_write`/`pty_resize`/`pty_stop` + `pty://data`/`pty://exit`
  * events); the browser has no host shell, so it offers no transport at all (see
  * {@link Platform.createTerminal}). The panel (src/shell/terminal) drives this: it attaches the
- * `onData`/`onExit` handlers, then `start`s; feeds keystrokes via `write`; reflows on `resize`; and
- * `stop`s on teardown.
+ * `onData`/`onExit` handlers, then `start`s; feeds keystrokes via `write`; reflows on `resize`;
+ * `pause`s/`resume`s the reader for flow control when the renderer backs up; and `stop`s on teardown.
  */
 export interface TerminalTransport {
   /** Spawn the shell, rooted at `cwd` when given (null lets the host pick the default). `shellArgs`
@@ -80,6 +80,12 @@ export interface TerminalTransport {
   write(data: string): Promise<void>;
   /** Tell the shell the viewport changed so it (and full-screen TUIs) re-flow. */
   resize(cols: number, rows: number): Promise<void>;
+  /** Backpressure (#441): stop the host draining the PTY so the kernel buffer fills and the shell
+   *  blocks on write — called when xterm's unparsed backlog crosses the high-water mark. */
+  pause(): Promise<void>;
+  /** Backpressure (#441): resume draining the PTY once the renderer has caught up (the backlog drains
+   *  below the low-water mark). Safe to call when not paused. */
+  resume(): Promise<void>;
   /** Register the handler for a chunk of shell output. Call before `start`. */
   onData(cb: (data: string) => void): void;
   /** Register the handler for the shell exiting (its exit code). Call before `start`. */
