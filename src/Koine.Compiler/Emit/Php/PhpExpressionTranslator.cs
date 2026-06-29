@@ -347,6 +347,16 @@ internal sealed class PhpExpressionTranslator
     /// <c>String</c> and the <em>other</em> operand is statically stringable (see <see cref="IsStringable"/>).
     /// The "at least one String" guard keeps <c>Int + Int</c> on numeric <c>+</c>; requiring both sides
     /// stringable keeps <c>String + &lt;enum/value-object/Id&gt;</c> off <c>.</c> (unchanged from today).
+    /// <para>
+    /// This is decided per binary node from each operand's <em>inferred</em> type, so a single mixed op
+    /// in either order (<c>"x" + n</c>, <c>n + "x"</c>) routes to <c>.</c>. A multi-op chain that is
+    /// <b>Int-led</b> (e.g. <c>hours + ":" + minutes</c>) is only partially covered: the inner
+    /// <c>Int + String</c> routes to <c>.</c> correctly, but <see cref="TypeResolver"/> infers that
+    /// sub-expression as <c>Int</c> (its arithmetic fallback is left-biased), so the outer
+    /// <c>(…) + minutes</c> sees <c>Int + Int</c> and stays on numeric <c>+</c>. Fixing that needs a
+    /// String-wins rule in the target-agnostic <see cref="TypeResolver"/> (tracked separately), not the
+    /// emitter; a String-led chain (<c>name + ":" + minutes</c>) already routes to <c>.</c> throughout.
+    /// </para>
     /// </summary>
     private bool IsStringConcat(BinaryExpr bin)
     {
