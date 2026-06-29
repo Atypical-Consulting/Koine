@@ -31,6 +31,14 @@ may include breaking changes.
   never ship silently again.
 
 ### Added
+- **Koine Studio — Settings JSON `User | Workspace` scope toggle.** The Settings JSON view now has a
+  VS Code-style **User | Workspace** segmented toggle above the editor, so the four workspace-scopable
+  fields (`previewTarget`, `formatOnSave`, `wordWrap`, `lspTrace`) can be hand-edited per workspace in a
+  flat `settings.json` overlay without touching the global user settings. The `Workspace` pill is
+  disabled with an empty-state note ("Open a folder to edit workspace settings") when no workspace is
+  open; switching scope re-seeds the editor with the appropriate document; valid edits are persisted to a
+  per-workspace `wsOverrides` blob and live-applied via `effectiveSettings`; removing a key from the
+  workspace doc reverts that field to the user value (issue #736).
 - **Koine Studio — Settings JSON reorganized into VS Code-style namespaced groups (+ new options).** The
   editable `settings.json` document is now grouped under `appearance` / `editor` / `ai` / `mcp` / `preview` /
   `lsp` / `account` namespaces instead of a flat bag of keys, so hand-edits are easy to scan and a new setting

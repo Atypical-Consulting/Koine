@@ -551,4 +551,47 @@ describe('createSettingsPage', () => {
 
     expect(setTheme).not.toHaveBeenCalled();
   });
+
+  // --- Task 4: partial-removal-reverts-to-user integration (#736) ----------------------------
+  // Removing a key from the Workspace doc (rather than setting it to the User value) must
+  // drop it from the wsOverrides blob entirely — reverting the effective setting to the User
+  // value — while the remaining overridden keys stay in the blob and in effectiveSettings.
+
+  it('partial removal of a Workspace key reverts that key to the User value while others stay overridden', () => {
+    const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
+    localStorage.setItem(MODE_KEY, 'json');
+    handle = createSettingsPage({ header, body }, cbWs);
+
+    // Step 1: switch to Workspace scope and apply two overrides.
+    scopeBtn(body, 'workspace')!.click();
+    cbWs.onChange.mockClear();
+
+    typeJson(body, '{ "previewTarget": "typescript", "lspTrace": "verbose" }');
+    vi.advanceTimersByTime(500);
+
+    // Both keys are in the blob and in the onChange payload.
+    const blobAfterTwo = JSON.parse(localStorage.getItem(WS_OVERRIDES_KEY) ?? '{}') as Record<string, unknown>;
+    expect(blobAfterTwo.previewTarget).toBe('typescript');
+    expect(blobAfterTwo.lspTrace).toBe('verbose');
+    expect(cbWs.onChange).toHaveBeenCalledTimes(1);
+    const effectiveAfterTwo = cbWs.onChange.mock.calls[0][0] as typeof DEFAULT_SETTINGS;
+    expect(effectiveAfterTwo.previewTarget).toBe('typescript');
+    expect(effectiveAfterTwo.lspTrace).toBe('verbose');
+
+    // Step 2: apply a doc with only lspTrace (drop previewTarget).
+    cbWs.onChange.mockClear();
+    typeJson(body, '{ "lspTrace": "verbose" }');
+    vi.advanceTimersByTime(500);
+
+    // previewTarget is gone from the blob (reverted to User value); lspTrace remains.
+    const blobAfterOne = JSON.parse(localStorage.getItem(WS_OVERRIDES_KEY) ?? '{}') as Record<string, unknown>;
+    expect(blobAfterOne.previewTarget).toBeUndefined();
+    expect(blobAfterOne.lspTrace).toBe('verbose');
+
+    // The latest onChange reflects the revert: previewTarget is the User default (csharp), lspTrace stays.
+    expect(cbWs.onChange).toHaveBeenCalledTimes(1);
+    const effectiveAfterOne = cbWs.onChange.mock.calls[0][0] as typeof DEFAULT_SETTINGS;
+    expect(effectiveAfterOne.previewTarget).toBe(DEFAULT_SETTINGS.previewTarget); // reverted to user default
+    expect(effectiveAfterOne.lspTrace).toBe('verbose'); // still overridden
+  });
 });
