@@ -848,8 +848,10 @@ export function init(hooks: IdeHooks = {}): () => void {
     // Mod+Alt+S → Save all. Match on e.code (the physical S key): on macOS, Option composes e.key
     // into another glyph (e.g. 'ß'), so `e.key === 's'` would miss the chord.
     if (e.altKey && e.code === 'KeyS') {
+      // Save-all dispatches through the command registry by id (#758); Save-active (below) has no command
+      // catalog entry, so it stays a direct call.
       e.preventDefault();
-      void workspace.saveAllDirty();
+      commandWiring.run('save-all');
     } else if (!e.altKey && (e.key === 's' || e.key === 'S')) {
       // Mod+S → save / format the active buffer (unchanged single-file behaviour).
       e.preventDefault();

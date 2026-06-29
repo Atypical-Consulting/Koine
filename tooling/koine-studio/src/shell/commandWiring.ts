@@ -72,6 +72,11 @@ export interface CommandWiring {
   dispose(): void;
 }
 
+// The id of the palette-toggle command (#758). Registered so global chords — and, in #432, the editor
+// keybindings registry — can address "open/close the command palette" by id through run(). Deliberately
+// excluded from the palette's own list (the palette never lists the command that opens itself).
+export const PALETTE_COMMAND_ID = 'command-palette';
+
 function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
   if (!node) throw new Error(`missing #${id}`);
@@ -141,8 +146,9 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
 
   function getCommands(): Command[] {
     // The static catalog from the registry, hiding any command whose when() is currently false (the dev
-    // store-inspector and stop-compile), then the dynamic goto: quick-open rows on top.
-    const cmds: Command[] = registry.all().filter((c) => registry.isEnabled(c.id));
+    // store-inspector and stop-compile) and the palette-toggle meta-command, then the dynamic goto:
+    // quick-open rows on top.
+    const cmds: Command[] = registry.all().filter((c) => c.id !== PALETTE_COMMAND_ID && registry.isEnabled(c.id));
 
     // Surface every open file as a "Go to File" entry so the palette doubles as a
     // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open.
@@ -155,6 +161,10 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
 
   const palette = createCommandPalette(() => getCommands());
 
+  // Register the palette-toggle command (#758): global chords (and #432's keybindings registry) address
+  // it by id through run(); getCommands() filters PALETTE_COMMAND_ID out so it never appears as a row.
+  registry.register({ id: PALETTE_COMMAND_ID, title: 'Command palette', run: () => palette.toggle() });
+
   // --- toolbar buttons unique to this phase ---------------------------------
   const hintEl = document.querySelector('.palette-hint');
   if (hintEl) {
@@ -166,7 +176,7 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     chord.setAttribute('aria-hidden', 'true');
     chord.textContent = formatChord('mod+K'); // ⌘+K / Ctrl+K per platform
     hintEl.appendChild(chord);
-    hintEl.addEventListener('click', () => palette.toggle());
+    hintEl.addEventListener('click', () => registry.run(PALETTE_COMMAND_ID));
   }
   // Each toolbar button dispatches its command by id (#758) so it can never drift from the palette entry
   // or re-derive the action — the registry's run() owns the effect (and its enablement guard).
@@ -207,8 +217,10 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     // mod+K always toggles the palette (so it can also dismiss itself); every other global
     // shortcut is suppressed while an overlay is open so it doesn't act on the editor beneath.
     if (mod && (e.key === 'k' || e.key === 'K')) {
+      // Dispatch through the registry so the chord resolves to a command id (#758) — the seam #432 lifts
+      // the rest of the global chords into.
       e.preventDefault();
-      palette.toggle();
+      registry.run(PALETTE_COMMAND_ID);
       return;
     }
     if (deps.overlayOpen()) return;

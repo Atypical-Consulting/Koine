@@ -8,9 +8,24 @@ import { type Extension } from '@codemirror/state';
 
 export type BindingId = 'goToDefinition' | 'format' | 'rename' | 'findReferences' | 'codeActions';
 
+// One rebindable chord row. `commandId` is the seam for #432: today every row resolves to one of the
+// five editor LSP `handlers` (keyed by `id`); when #432 folds the GLOBAL chords (Cmd-K, Save-all, the
+// call-hierarchy chords …) into this registry, a row will instead carry the command-registry id it
+// dispatches and the keymap will call `commandWiring.run(commandId)` — so adding a global shortcut
+// becomes "add a row pointing at an existing command id" (#758's command layer) rather than authoring a
+// literal `keydown` branch. The field is optional and unset on every current row, so behaviour here is
+// unchanged; it only documents and types the join point #432 builds on.
+export interface KeyBindingRow {
+  id: BindingId;
+  label: string;
+  defaultKey: string;
+  /** Future (#432): the command-registry id this chord dispatches via run(); see PALETTE_COMMAND_ID. */
+  commandId?: string;
+}
+
 // Single source of truth: the registry rows the Settings UI renders. `defaultKey` mirrors the literal
 // each command carried in editor.ts; DEFAULT_BINDINGS is derived from this list so the two can't drift.
-export const KEYBINDINGS: { id: BindingId; label: string; defaultKey: string }[] = [
+export const KEYBINDINGS: KeyBindingRow[] = [
   { id: 'goToDefinition', label: 'Go to definition', defaultKey: 'F12' },
   { id: 'format', label: 'Format document', defaultKey: 'Mod-s' },
   { id: 'rename', label: 'Rename symbol', defaultKey: 'F2' },

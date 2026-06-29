@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createCommandWiring, type CommandWiringDeps } from '@/shell/commandWiring';
+import { createCommandWiring, PALETTE_COMMAND_ID, type CommandWiringDeps } from '@/shell/commandWiring';
 import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
 
 // Mock the runaway-compile gate so tests can flip stop-compile's when() predicate. Defaults to false
@@ -8,6 +8,11 @@ vi.mock('@/host/browser/stopCompile', () => ({
   canStopCompile: vi.fn(() => false),
   stopRunawayCompile: vi.fn(),
 }));
+
+// happy-dom doesn't implement scrollIntoView; the palette calls it on open (the Cmd-K tests open it).
+if (typeof (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView !== 'function') {
+  (HTMLElement.prototype as { scrollIntoView: () => void }).scrollIntoView = () => {};
+}
 
 // The toolbar button ids commandWiring wires at construction (index.html owns these in the real shell).
 const TOOLBAR_IDS = [
@@ -195,6 +200,19 @@ describe('commandWiring', () => {
   });
 
   describe('global keyboard shortcuts', () => {
+    it('mod+K toggles the command palette through the registered palette command (#758)', () => {
+      const wiring = createCommandWiring(makeDeps());
+      dispose = wiring.dispose;
+      const backdrop = () => document.body.querySelector<HTMLElement>('.koi-palette-backdrop')!;
+      expect(backdrop().hidden).toBe(true);
+
+      window.dispatchEvent(key({ key: 'k', ctrlKey: true }));
+      expect(backdrop().hidden).toBe(false); // opened via registry.run(PALETTE_COMMAND_ID)
+
+      window.dispatchEvent(key({ key: 'k', ctrlKey: true }));
+      expect(backdrop().hidden).toBe(true); // toggled closed
+    });
+
     it('dispatches mod+N → requestNewModel, mod+Shift+F → search.toggle, F1 → toggleHelp', () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);
@@ -300,6 +318,18 @@ describe('commandWiring', () => {
       const wiring = createCommandWiring(makeDeps());
       dispose = wiring.dispose;
       expect(() => wiring.run('does-not-exist')).not.toThrow();
+    });
+
+    it('registers the palette-toggle command but keeps it out of the palette list', () => {
+      const wiring = createCommandWiring(makeDeps());
+      dispose = wiring.dispose;
+      // Not a row (the palette never lists the command that opens itself)...
+      expect(wiring.getCommands().map((c) => c.id)).not.toContain(PALETTE_COMMAND_ID);
+      // ...but registered & enabled, so run() toggles the palette open.
+      const backdrop = () => document.body.querySelector<HTMLElement>('.koi-palette-backdrop')!;
+      expect(backdrop().hidden).toBe(true);
+      wiring.run(PALETTE_COMMAND_ID);
+      expect(backdrop().hidden).toBe(false);
     });
 
     it('no-ops a disabled command — stop-compile stays inert while idle, fires in flight', () => {
