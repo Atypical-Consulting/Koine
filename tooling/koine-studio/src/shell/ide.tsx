@@ -22,6 +22,7 @@ import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
 import { koineMark } from '@/shared/logo';
 import { basename } from '@/shared/path';
+import { domById } from '@/shared/domById';
 import { createLifecycleBoot } from '@/shell/lifecycleBoot';
 import { initTheme, onThemeChange } from '@/settings/theme';
 import {
@@ -129,12 +130,6 @@ const BLANK = `context NewModel {
 }
 `;
 
-function el<T extends HTMLElement>(id: string): T {
-  const node = document.getElementById(id);
-  if (!node) throw new Error(`missing #${id}`);
-  return node as T;
-}
-
 /** Callbacks the boot layer (main.ts) injects into the IDE — the editor→Home direction of the route
  *  hand-off that complements #368's Home→editor start-intent. */
 export interface IdeHooks {
@@ -211,11 +206,11 @@ export function init(hooks: IdeHooks = {}): () => void {
   // The read-only emitted-code viewer in #view-preview. Owned here (boot-error + Settings soft-wrap
   // also write to it) and injected into the inspector controller, which owns the Generated-preview
   // load path + the overlaid copy button.
-  const output = createOutputView(el('view-preview'), settings.wordWrap);
+  const output = createOutputView(domById('view-preview'), settings.wordWrap);
 
-  const statusEl = el('status');
-  const diagBodyEl = el('diag-body');
-  const diagCountEl = el('diag-count');
+  const statusEl = domById('status');
+  const diagBodyEl = domById('diag-body');
+  const diagCountEl = domById('diag-count');
 
   // Bottom status-bar fields — a pure projection of existing state (no new data sources). Per the
   // single-home contract (docs/shell-bars-contract.md, #756): #sb-connection is the SOLE connection
@@ -223,9 +218,9 @@ export function init(hooks: IdeHooks = {}): () => void {
   // — that pill is transient action-feedback only. #sb-validity by the diagnostics strip, and
   // #sb-version once at boot from the build-time define. (#sb-context is written by the inspector
   // controller's bounded-context switcher.)
-  const sbConnEl = el('sb-connection');
-  const sbValidityEl = el('sb-validity');
-  el('sb-version').textContent = `v${__APP_VERSION__}`;
+  const sbConnEl = domById('sb-connection');
+  const sbValidityEl = domById('sb-validity');
+  domById('sb-version').textContent = `v${__APP_VERSION__}`;
 
   // Global unsaved-work surfacing: the document title gains a `•` and a clickable "N unsaved" pill
   // appears in the status bar (beside validity/problems) whenever any open buffer is dirty. baseTitle
@@ -235,9 +230,9 @@ export function init(hooks: IdeHooks = {}): () => void {
   // title bullet, and wires Save-all. So `refreshDirtyIndicator` here just projects the controller's
   // live buffers Map into the slice on every dirty transition (edit, save, save-all, rename, swap) —
   // the panel re-renders off the slice. (The button stays index.html's element, so the controller's
-  // `el(...)` lookups and the test's getElementById are untouched.)
+  // `domById(...)` lookups and the test's getElementById are untouched.)
   const baseTitle = document.title;
-  const unsavedEl = el('unsaved-indicator') as HTMLButtonElement;
+  const unsavedEl = domById('unsaved-indicator') as HTMLButtonElement;
   // <UnsavedIndicator> renders no tree of its own (it governs the static button via effects), so it
   // mounts into a throwaway holder rather than the button — keeping the reconciler off the button node.
   const unsavedHost = document.createElement('div');
@@ -258,12 +253,12 @@ export function init(hooks: IdeHooks = {}): () => void {
   // Workspace-wide problems rollup beside #sb-validity (which is active-file only): a status-bar badge
   // summarising every file's diagnostics, hidden while the workspace is clean. Subscribes to the
   // diagnostics slice, so the LSP publish path keeps it current with no extra wiring.
-  render(<WorkspaceProblemsBadge store={appStore} />, el('sb-problems-host'));
+  render(<WorkspaceProblemsBadge store={appStore} />, domById('sb-problems-host'));
 
   // Transient "compiling…" indicator (#516): surfaces the existing compile-in-flight signal (#469) while
   // the compiler is busy (diagnose / emit-preview / run-scenario), debounced so a fast keystroke-diagnose
   // doesn't flash it. Subscribes to compileActivity's onCompileActivityChange seam — no store wiring.
-  render(<CompilingIndicator />, el('sb-compiling-host'));
+  render(<CompilingIndicator />, domById('sb-compiling-host'));
 
   // The top-bar "scope path" breadcrumb (the bounded-context selector + the selected element) is owned by
   // the inspector controller — it holds the contexts list + model index the breadcrumb needs, and routes
@@ -366,7 +361,7 @@ export function init(hooks: IdeHooks = {}): () => void {
   const reviewStore = createReviewStore(platform, () => workspace.folderRootToken() || null);
 
   const editorSession = createEditorSession({
-    parent: el('editor-pane'),
+    parent: domById('editor-pane'),
     doc: initialDoc,
     lineWrap: settings.wordWrap,
     minimap: settings.enableMinimap,
@@ -423,18 +418,18 @@ export function init(hooks: IdeHooks = {}): () => void {
   });
 
   // The left rail's inner markup is owned by leftRail.ts (single source of truth, #453); index.html keeps
-  // <aside id="leftrail"> a thin shell. Inject it here — synchronously, before any rail el(...) lookup or
+  // <aside id="leftrail"> a thin shell. Inject it here — synchronously, before any rail domById(...) lookup or
   // the inspector controller below — so #filetree-body / #rail-domain-pane / the doclinks all resolve.
-  el<HTMLElement>('leftrail').innerHTML = leftRailMarkup();
+  domById<HTMLElement>('leftrail').innerHTML = leftRailMarkup();
 
   // The right-edge tool-window stripe's buttons are owned by rightStrip.ts (single source of truth, #500);
   // index.html keeps <div id="right-strip"> a thin shell. Inject before the inspector controller below so
   // its `.rstrip-btn` lookup + wiring resolve, mirroring the leftRail injection above.
-  el<HTMLElement>('right-strip').innerHTML = rightStripMarkup();
+  domById<HTMLElement>('right-strip').innerHTML = rightStripMarkup();
 
-  const treeBodyEl = el<HTMLElement>('filetree-body');
-  const treeTitleEl = el<HTMLElement>('filetree-title');
-  const splitEl = el<HTMLElement>('split');
+  const treeBodyEl = domById<HTMLElement>('filetree-body');
+  const treeTitleEl = domById<HTMLElement>('filetree-title');
+  const splitEl = domById<HTMLElement>('split');
 
   // The left-rail section disclosure, the file-tree (⌘B) toggle, and the #split layout (data-* mirror +
   // edge resizers + the layout palette actions) live in the layout controller now (#757), constructed
@@ -660,7 +655,7 @@ export function init(hooks: IdeHooks = {}): () => void {
 
   // Check… — pick a baseline folder and diff the current buffer against it. Owned by the controller
   // (it surfaces in the Code tab's Compatibility sub-view); the button + palette just trigger it.
-  el<HTMLButtonElement>('btn-check').addEventListener('click', () => void controller.runCheck());
+  domById<HTMLButtonElement>('btn-check').addEventListener('click', () => void controller.runCheck());
 
   // Boot the center chrome into the restored mode + label the Generated sub-tab (no fetch — the boot
   // flow's refreshActiveSurfaces loads everything once the workspace document is open).
@@ -668,7 +663,7 @@ export function init(hooks: IdeHooks = {}): () => void {
 
   // --- open folder (directory-mode workspace) -------------------------------
 
-  const openFolderBtn = el<HTMLButtonElement>('btn-open-folder');
+  const openFolderBtn = domById<HTMLButtonElement>('btn-open-folder');
   openFolderBtn.addEventListener('click', () => void openFolder());
   // Opening a folder relies on the File System Access API (Chromium-only). On browsers without it, the
   // button would look active but only ever raise an error toast — so disable it with an explanatory
@@ -809,7 +804,7 @@ export function init(hooks: IdeHooks = {}): () => void {
       undoTitle={`Undo (${formatChord('mod+Z')})`}
       redoTitle={`Redo (${formatChord('mod+Shift+Z')})`}
     />,
-    el('history-controls-host'),
+    domById('history-controls-host'),
   );
 
   // Switching files: repaint the active file's diagnostics, invalidate the doc views so they re-fetch,

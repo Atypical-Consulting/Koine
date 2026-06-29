@@ -11,6 +11,7 @@ import { createTerminalPanel, type TerminalPanel } from '@/shell/terminal/termin
 import { createReviewPanel, type ReviewPanel } from '@/review/ReviewPanel';
 import { loadSettings } from '@/settings/persistence';
 import { severityErrorOrWarning } from '@/lsp/severity';
+import { domById } from '@/shared/domById';
 import type { PrefsCallbacks } from '@/settings/prefs';
 import type { Platform } from '@/host';
 import type { KoineLsp, SourceSpan } from '@/lsp/lsp';
@@ -64,17 +65,11 @@ export interface PanelHost {
   dispose(): void;
 }
 
-function el<T extends HTMLElement>(id: string): T {
-  const node = document.getElementById(id);
-  if (!node) throw new Error(`missing #${id}`);
-  return node as T;
-}
-
 export function createPanelHost(deps: PanelHostDeps): PanelHost {
   // ide.ts owns the assistant's lifecycle; the #view-assistant / #view-scenarios hosts are looked up at
   // construction (cheap DOM lookups), but the panels themselves stay unbuilt until first ensure*.
-  const assistantView = el('view-assistant');
-  const scenariosView = el('view-scenarios');
+  const assistantView = domById('view-assistant');
+  const scenariosView = domById('view-scenarios');
 
   // The gear-launched Settings center page (#center-panel-settings) is the SINGLE Settings surface (#731).
   // Built LAZILY on the first route into Settings: createSettingsPage runs its first "show", which fires
@@ -94,7 +89,7 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
       return;
     }
     settingsPage = createSettingsPage(
-      { header: el('settings-page-header'), body: el('settings-page-body') },
+      { header: domById('settings-page-header'), body: domById('settings-page-body') },
       deps.prefsCallbacks,
     );
     // A first build already paints from the live settings; only a deep-link needs the extra repaint to
@@ -205,7 +200,7 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
   function ensureTerminal(): TerminalPanel {
     if (terminal) return terminal;
     terminal = createTerminalPanel({
-      parent: el('panel-terminal'),
+      parent: domById('panel-terminal'),
       platform: deps.platform,
       cwd: () => deps.workspace.folderRootToken() || null,
       // Read the override fresh at each (re)start (#467), so changing the setting takes effect on the
@@ -222,7 +217,7 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
   function ensureReview(): void {
     if (review) return;
     review = createReviewPanel({
-      parent: el('panel-review'),
+      parent: domById('panel-review'),
       store: deps.reviewStore,
       onNavigate: (file, span) =>
         void deps.gotoSourceSpan({ file, line: span.line, column: span.column, endLine: span.endLine, endColumn: span.endColumn }),
