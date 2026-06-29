@@ -9,6 +9,7 @@
 // so getCommands() is moved verbatim (the inline Command[] it already built); when #758 ships, this is
 // where the declarative registry composes in, with no change to init().
 import { createCommandPalette, type Command } from '@/shared/palette';
+import { createCommandRegistry } from '@/shared/commandRegistry';
 import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
 import { devCommands } from '@/shell/devCommands';
 import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
@@ -61,9 +62,20 @@ export interface CommandWiringDeps {
 export interface CommandWiring {
   /** The live command set (re-read on every palette/overflow open). Exposed for tests + the registry sibling. */
   getCommands(): Command[];
+  /**
+   * Dispatch a command by id through the registry — a guarded no-op if the id is unknown or the command
+   * is currently disabled. Toolbar / chrome buttons and global chords address commands this way (#758)
+   * so they can never drift from the catalog entry.
+   */
+  run(id: string): void;
   /** Release the global keyboard-shortcut listener. */
   dispose(): void;
 }
+
+// The id of the palette-toggle command (#758). Registered so global chords — and, in #432, the editor
+// keybindings registry — can address "open/close the command palette" by id through run(). Deliberately
+// excluded from the palette's own list (the palette never lists the command that opens itself).
+export const PALETTE_COMMAND_ID = 'command-palette';
 
 function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -73,10 +85,14 @@ function el<T extends HTMLElement>(id: string): T {
 
 export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
   // --- command palette command set ------------------------------------------
-  // Hints are authored with a literal 'mod' and formatted to ⌘ / Ctrl per platform so the
-  // palette, help overlay, and toolbar hint all show the same key.
-  function getCommands(): Command[] {
-    const cmds: Command[] = [
+  // The declarative command registry (#758) is the single source of truth: the static catalog below is
+  // registered once, and getCommands() reads it back (enablement-filtered) on every palette / overflow
+  // open, composing the dynamic tail (stop-compile + goto rows) on top — behaviour-identical to before.
+  // Hints are authored with a literal 'mod' and formatted to ⌘ / Ctrl per platform so the palette, help
+  // overlay, and toolbar hint all show the same key.
+  const registry = createCommandRegistry();
+  function buildStaticCatalog(): Command[] {
+    return [
       { id: 'undo', title: 'Undo', hint: 'mod+Z', group: 'Edit', run: () => deps.history.undo() },
       { id: 'redo', title: 'Redo', hint: 'mod+Shift+Z', group: 'Edit', run: () => deps.history.redo() },
       { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void deps.format() },
@@ -93,9 +109,11 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
       { id: 'export-diagram-png', title: 'Export diagram as PNG', group: 'File', run: () => void deps.exportActiveDiagram('png') },
       { id: 'export-diagram-plantuml', title: 'Export diagram as PlantUML', group: 'File', run: () => void deps.exportActiveDiagram('plantuml') },
       { id: 'copy-diagram-mermaid', title: 'Copy diagram as Mermaid', group: 'File', run: () => void deps.copyActiveDiagramMermaid() },
-      ...(deps.canSaveProjects
-        ? [{ id: 'save-project-to-disk', title: 'Save to disk…', group: 'File', run: () => void deps.saveProjectToDisk() } as Command]
-        : []),
+      // Registered unconditionally but gated by when() on the host capability, so it is filtered out of
+      // the palette when the host can't save (identical to the old conditional spread) AND the toolbar
+      // button's run('save-project-to-disk') is a guarded no-op rather than an unknown-id warn if the
+      // hidden button is ever force-shown.
+      { id: 'save-project-to-disk', title: 'Save to disk…', group: 'File', run: () => void deps.saveProjectToDisk(), when: () => deps.canSaveProjects },
       { id: 'toggle-theme', title: 'Toggle theme', group: 'View', run: () => toggleTheme() },
       // The editor-split + panel-reposition commands (issue #265). Built from the pure layoutCommands
       // module so the list is unit-tested; each run() drives the layoutActions wired at boot above.
@@ -117,20 +135,22 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
       { id: 'assistant-explain', title: 'Explain this construct', group: 'Workspace', run: () => { deps.controller.selectRight('assistant'); deps.ensureAssistant().explainSelection(); } },
       { id: 'add-comment', title: 'Add review comment', group: 'Review', run: () => deps.editor.addCommentAtSelection() },
       { id: 'view-review', title: 'Show Review', group: 'Workspace', run: () => deps.controller.selectBottomTab('review') },
+      // Stop a runaway compile (#353): terminate the WASM worker and boot a fresh one. Gated by when()
+      // so it surfaces only while a compile is actually in flight (#469) — idle, it stays out of the
+      // palette and is a no-op if dispatched; the main-thread fallback has no worker to terminate, so
+      // canStopCompile() is false. getCommands() re-reads isEnabled on every open, so it appears and
+      // disappears with the live in-flight state exactly as the old conditional push did.
+      { id: 'stop-compile', title: 'Stop compilation (restart compiler)', group: 'Workspace', run: () => stopRunawayCompile(), when: () => canStopCompile() },
     ];
+  }
+  // Register the static catalog once at construction — registration order === palette order.
+  for (const cmd of buildStaticCatalog()) registry.register(cmd);
 
-    // Stop a runaway compile: terminate the WASM worker and boot a fresh one (#353). Offered only while a
-    // compile is actually in flight on the worker boot path (#469) — in the main-thread fallback there is
-    // nothing to terminate, and an idle Stop would pointlessly restart the worker. getCommands() re-runs
-    // on every palette open, so the command appears and disappears with the live in-flight state.
-    if (canStopCompile()) {
-      cmds.push({
-        id: 'stop-compile',
-        title: 'Stop compilation (restart compiler)',
-        group: 'Workspace',
-        run: () => stopRunawayCompile(),
-      });
-    }
+  function getCommands(): Command[] {
+    // The static catalog from the registry, hiding any command whose when() is currently false (the dev
+    // store-inspector and stop-compile) and the palette-toggle meta-command, then the dynamic goto:
+    // quick-open rows on top.
+    const cmds: Command[] = registry.all().filter((c) => c.id !== PALETTE_COMMAND_ID && registry.isEnabled(c.id));
 
     // Surface every open file as a "Go to File" entry so the palette doubles as a
     // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open.
@@ -143,6 +163,10 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
 
   const palette = createCommandPalette(() => getCommands());
 
+  // Register the palette-toggle command (#758): global chords (and #432's keybindings registry) address
+  // it by id through run(); getCommands() filters PALETTE_COMMAND_ID out so it never appears as a row.
+  registry.register({ id: PALETTE_COMMAND_ID, title: 'Command palette', run: () => palette.toggle() });
+
   // --- toolbar buttons unique to this phase ---------------------------------
   const hintEl = document.querySelector('.palette-hint');
   if (hintEl) {
@@ -154,18 +178,20 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     chord.setAttribute('aria-hidden', 'true');
     chord.textContent = formatChord('mod+K'); // ⌘+K / Ctrl+K per platform
     hintEl.appendChild(chord);
-    hintEl.addEventListener('click', () => palette.toggle());
+    hintEl.addEventListener('click', () => registry.run(PALETTE_COMMAND_ID));
   }
-  el<HTMLButtonElement>('btn-home').addEventListener('click', () => deps.goHome());
-  el<HTMLButtonElement>('btn-new').addEventListener('click', () => void deps.requestNewModel());
-  el<HTMLButtonElement>('btn-generate-project').addEventListener('click', () => deps.generateProject.open());
+  // Each toolbar button dispatches its command by id (#758) so it can never drift from the palette entry
+  // or re-derive the action — the registry's run() owns the effect (and its enablement guard).
+  el<HTMLButtonElement>('btn-home').addEventListener('click', () => registry.run('home'));
+  el<HTMLButtonElement>('btn-new').addEventListener('click', () => registry.run('new-model'));
+  el<HTMLButtonElement>('btn-generate-project').addEventListener('click', () => registry.run('generate-project'));
   const saveProjectBtn = el<HTMLButtonElement>('btn-save-project');
-  saveProjectBtn.addEventListener('click', () => void deps.saveProjectToDisk());
+  saveProjectBtn.addEventListener('click', () => registry.run('save-project-to-disk'));
   if (!deps.canSaveProjects) saveProjectBtn.hidden = true;
-  el<HTMLButtonElement>('btn-theme').addEventListener('click', () => toggleTheme());
+  el<HTMLButtonElement>('btn-theme').addEventListener('click', () => registry.run('toggle-theme'));
   // The toolbar gear opens the transient Settings overlay over the deck (#center-panel-settings) — now the
-  // single Settings surface every entry point shares (#731), via the openSettings helper.
-  el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => deps.openSettings());
+  // single Settings surface every entry point shares (#731), via the prefs command.
+  el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => registry.run('prefs'));
 
   // Mobile overflow "More" (⋮) menu (#528): at ≤ $bp-narrow the toolbar hides its secondary actions
   // (Save/Check/Install/⌘K/theme/Settings) and reveals this kebab, which collects them into a floating
@@ -193,8 +219,10 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     // mod+K always toggles the palette (so it can also dismiss itself); every other global
     // shortcut is suppressed while an overlay is open so it doesn't act on the editor beneath.
     if (mod && (e.key === 'k' || e.key === 'K')) {
+      // Dispatch through the registry so the chord resolves to a command id (#758) — the seam #432 lifts
+      // the rest of the global chords into.
       e.preventDefault();
-      palette.toggle();
+      registry.run(PALETTE_COMMAND_ID);
       return;
     }
     if (deps.overlayOpen()) return;
@@ -232,6 +260,7 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
 
   return {
     getCommands,
+    run: (id) => registry.run(id),
     dispose() {
       window.removeEventListener('keydown', onKeydown);
     },

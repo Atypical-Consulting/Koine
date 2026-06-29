@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { createCommandPalette, type Command } from '@/shared/palette';
+import { createCommandRegistry } from '@/shared/commandRegistry';
 import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
 import { createUiChromeSlice, type UiChromeSlice } from '@/store/slices/uiChrome';
 
@@ -80,6 +81,36 @@ describe('createCommandPalette — mounting & structure', () => {
     expect(palette.isOpen).toBe(false);
     // Nothing rendered before the first open.
     expect(rows().length).toBe(0);
+  });
+});
+
+describe('registry-backed provider — enablement filtering (#758)', () => {
+  // The real shell wires the palette as createCommandPalette(() => registry.all().filter(isEnabled)).
+  // These lock that composition: a disabled command is filtered out; enabled ones render in
+  // registration order with their hints intact.
+  test('a command whose when() is false does not render', () => {
+    const registry = createCommandRegistry();
+    registry.register(cmd('always', 'Always Enabled'));
+    registry.register({ ...cmd('gated', 'Gated Command'), when: () => false });
+
+    const palette = createCommandPalette(() => registry.all().filter((c) => registry.isEnabled(c.id)));
+    palette.open();
+
+    expect(titles()).toEqual(['Always Enabled']);
+  });
+
+  test('enabled commands render in registration order with their hints', () => {
+    const registry = createCommandRegistry();
+    registry.register(cmd('one', 'First', { hint: 'Cmd+1' }));
+    registry.register({ ...cmd('two', 'Second'), when: () => true });
+    registry.register(cmd('three', 'Third', { hint: 'Cmd+3' }));
+
+    const palette = createCommandPalette(() => registry.all().filter((c) => registry.isEnabled(c.id)));
+    palette.open();
+
+    expect(titles()).toEqual(['First', 'Second', 'Third']);
+    const hints = rows().map((r) => r.querySelector('.koi-palette-item-hint')?.textContent ?? null);
+    expect(hints).toEqual(['Cmd+1', null, 'Cmd+3']);
   });
 });
 
