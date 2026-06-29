@@ -272,6 +272,77 @@ describe('createSettingsPage', () => {
     expect(body.querySelector('.cm-editor')).toBeNull();
   });
 
+  // --- #735: the desktop MCP sidecar (re)starts on Settings SHOW for BOTH representations -----------
+  // Pre-#727 the modal's open path always revived the sidecar; after the Visual/JSON page split the
+  // (re)start lived behind the Visual pane, so opening straight into JSON mode never revived it. The
+  // page now fires the representation-independent (re)start on show for both panes (assert via the
+  // mcpEndpoint callback, the actual host hook that (re)spawns `koine mcp --http`).
+  const desktopCb = () => ({
+    onChange: vi.fn(),
+    mcpEndpoint: vi.fn(async () => 'http://127.0.0.1:51000/mcp'),
+    mcpStop: vi.fn(async () => {}),
+    mcpHostable: true,
+  });
+  const enabledMcp = () =>
+    loadSettings.mockImplementation(() => ({ ...DEFAULT_SETTINGS, aiApiKey: 'sk-LIVE', mcpEnabled: true }));
+
+  it('opening straight into JSON mode (desktop, MCP enabled) (re)starts the sidecar', () => {
+    localStorage.setItem(MODE_KEY, 'json');
+    enabledMcp();
+    const c = desktopCb();
+    handle = createSettingsPage({ header, body }, c);
+    // No Visual pane is mounted in JSON mode, yet the on-show concern must still revive the sidecar.
+    expect(c.mcpEndpoint).toHaveBeenCalled();
+  });
+
+  it('opening into JSON mode on a browser host (not hostable) never starts a sidecar', () => {
+    localStorage.setItem(MODE_KEY, 'json');
+    enabledMcp();
+    const c = { ...desktopCb(), mcpHostable: false };
+    handle = createSettingsPage({ header, body }, c);
+    expect(c.mcpEndpoint).not.toHaveBeenCalled();
+  });
+
+  it('opening into JSON mode with MCP disabled does not start a sidecar', () => {
+    localStorage.setItem(MODE_KEY, 'json');
+    // mcpEnabled stays false (DEFAULT_SETTINGS).
+    const c = desktopCb();
+    handle = createSettingsPage({ header, body }, c);
+    expect(c.mcpEndpoint).not.toHaveBeenCalled();
+  });
+
+  it('opening into Visual mode (desktop, MCP enabled) starts the sidecar exactly once (no double-start)', () => {
+    // Default mode is Visual.
+    enabledMcp();
+    const c = desktopCb();
+    handle = createSettingsPage({ header, body }, c);
+    expect(c.mcpEndpoint).toHaveBeenCalledTimes(1);
+  });
+
+  it('a Visual↔JSON flip fires the (re)start once per representation build, never twice (#735)', () => {
+    // Default mode is Visual. The flip re-invokes the (idempotent) on-show concern exactly once per build
+    // — so flipping to Visual reflects the live endpoint, and the host reuses the running sidecar rather
+    // than spawning a second one. The Studio-side guarantee under test is "one mcpEndpoint call per build".
+    enabledMcp();
+    const c = desktopCb();
+    handle = createSettingsPage({ header, body }, c);
+    expect(c.mcpEndpoint).toHaveBeenCalledTimes(1); // initial Visual show
+    jsonRadio(header).click(); // flip to JSON
+    expect(c.mcpEndpoint).toHaveBeenCalledTimes(2);
+    visualRadio(header).click(); // flip back to Visual
+    expect(c.mcpEndpoint).toHaveBeenCalledTimes(3);
+  });
+
+  it('re-showing the page in JSON mode (refresh) (re)starts the sidecar again', () => {
+    localStorage.setItem(MODE_KEY, 'json');
+    enabledMcp();
+    const c = desktopCb();
+    handle = createSettingsPage({ header, body }, c);
+    c.mcpEndpoint.mockClear();
+    handle.refresh(); // the host calls this on every re-open of Settings
+    expect(c.mcpEndpoint).toHaveBeenCalled();
+  });
+
   it('has no a11y violations', async () => {
     // axe schedules its async ruleset on real setTimeout, so it never resolves under fake timers.
     vi.useRealTimers();

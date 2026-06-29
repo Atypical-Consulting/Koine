@@ -1,6 +1,11 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mountPreferencesPane, type PrefsCallbacks, type PrefsPaneHandle } from '@/settings/prefs';
+import {
+  mountPreferencesPane,
+  startMcpSidecarIfEnabled,
+  type PrefsCallbacks,
+  type PrefsPaneHandle,
+} from '@/settings/prefs';
 import {
   DEFAULT_SETTINGS,
   loadSettings,
@@ -26,9 +31,11 @@ const URL = 'http://127.0.0.1:51000/mcp';
 const MCP_URL_PLACEHOLDER = 'http://127.0.0.1:PORT/mcp';
 
 // Mount the preferences pane (the same two-pane form the gear-launched Settings page embeds) into a fresh
-// host appended to the body, then open it (refresh → shown=true: repaint every control + start the MCP
-// sidecar when enabled). The legacy createPreferences modal was retired (#731), so these tests drive the
-// pane the overlay actually mounts. Returns the pane handle for the few tests that drive refresh/suspend.
+// host appended to the body, then open it. The legacy createPreferences modal was retired (#731), so these
+// tests drive the pane the overlay actually mounts. "Open" reproduces the center page's on-show path: a
+// repaint (refresh) followed by the explicit MCP sidecar (re)start (startMcpSidecar) — refresh is
+// repaint-only since #735 lifted the start out of it. Returns the pane handle for the few tests that drive
+// refresh/suspend.
 function openPrefs(over: Partial<PrefsCallbacks> = {}): ReturnType<typeof mountPreferencesPane> {
   const host = document.createElement('div');
   document.body.appendChild(host);
@@ -39,7 +46,8 @@ function openPrefs(over: Partial<PrefsCallbacks> = {}): ReturnType<typeof mountP
     mcpHostable: true,
     ...over,
   });
-  pane.refresh(); // open: repaint from the live Settings, focus the active tab, (re)start the sidecar
+  pane.refresh(); // open: repaint from the live Settings, focus the active tab
+  pane.startMcpSidecar(); // ...then (re)start the sidecar on show (issue #735), as the center page does
   return pane;
 }
 
@@ -92,6 +100,35 @@ describe('Settings → MCP panel', () => {
     expect(mcpEndpoint).toHaveBeenCalled();
     expect(endpointUrl().value).toBe(URL);
     expect(snippet().textContent).toContain(URL);
+  });
+
+  it('opening Settings with MCP already enabled (re)starts the sidecar and shows the live URL (#735)', async () => {
+    // The on-show path is the "open Settings to revive the sidecar" affordance — it must survive the start
+    // being lifted out of applyOpenState into an explicit on-show call.
+    saveSettings({ ...DEFAULT_SETTINGS, mcpEnabled: true });
+    const mcpEndpoint = vi.fn(async () => URL);
+    openPrefs({ mcpEndpoint });
+    await settle();
+    expect(mcpEndpoint).toHaveBeenCalled();
+    expect(endpointUrl().value).toBe(URL);
+  });
+
+  it('a disable during the on-open (re)start drops the stale resolve (mcpGen guard) (#735)', async () => {
+    // Open with MCP enabled so startMcpSidecar launches; before its endpoint resolves, the user disables
+    // MCP. The mcpGen staleness guard must discard the in-flight resolve so it can't repaint a live URL
+    // over the just-disabled "Server off" state. A manually-controlled promise makes the race deterministic.
+    saveSettings({ ...DEFAULT_SETTINGS, mcpEnabled: true });
+    let resolveEndpoint!: (u: string) => void;
+    const mcpEndpoint = vi.fn(() => new Promise<string>((res) => (resolveEndpoint = res)));
+    openPrefs({ mcpEndpoint });
+    // The on-open start is in flight (endpoint promise still pending). Disable MCP now.
+    mcpToggle().click();
+    await settle();
+    // The stale on-open endpoint resolves AFTER the disable — the guard must drop it.
+    resolveEndpoint(URL);
+    await settle();
+    expect(status().dataset.state).toBe('off');
+    expect(endpointUrl().value).toBe('');
   });
 
   it('disabling stops the sidecar', async () => {
@@ -184,6 +221,54 @@ describe('Settings → MCP panel', () => {
     await settle();
 
     expect(writeText).toHaveBeenCalledWith(expected);
+  });
+});
+
+// The representation-independent (re)start concern extracted in #735: a DOM-free helper the Settings
+// page calls on show for BOTH the Visual and JSON representations (the JSON one mounts no preferences
+// pane, so it can't rely on the pane's open path). It only asks the host to (lazily) (re)spawn the
+// sidecar; reflecting the endpoint in the MCP panel stays the Visual pane's job.
+describe('startMcpSidecarIfEnabled (#735)', () => {
+  const ENABLED = { ...DEFAULT_SETTINGS, mcpEnabled: true };
+  const DISABLED = { ...DEFAULT_SETTINGS, mcpEnabled: false };
+
+  beforeEach(() => {
+    localStorage.clear();
+    saveSettings({ ...DEFAULT_SETTINGS });
+  });
+
+  it('(re)starts the sidecar on a hostable desktop host when MCP is enabled', async () => {
+    const mcpEndpoint = vi.fn(async () => URL);
+    const url = await startMcpSidecarIfEnabled({ onChange: () => {}, mcpEndpoint, mcpHostable: true }, ENABLED);
+    expect(mcpEndpoint).toHaveBeenCalledTimes(1);
+    expect(url).toBe(URL);
+  });
+
+  it('does nothing when MCP is disabled', async () => {
+    const mcpEndpoint = vi.fn(async () => URL);
+    const url = await startMcpSidecarIfEnabled({ onChange: () => {}, mcpEndpoint, mcpHostable: true }, DISABLED);
+    expect(mcpEndpoint).not.toHaveBeenCalled();
+    expect(url).toBe('');
+  });
+
+  it('does nothing on a non-hostable (browser) host even when enabled', async () => {
+    const mcpEndpoint = vi.fn(async () => URL);
+    const url = await startMcpSidecarIfEnabled({ onChange: () => {}, mcpEndpoint, mcpHostable: false }, ENABLED);
+    expect(mcpEndpoint).not.toHaveBeenCalled();
+    expect(url).toBe('');
+  });
+
+  it('reads loadSettings() when no snapshot is passed', async () => {
+    saveSettings({ ...DEFAULT_SETTINGS, mcpEnabled: true });
+    const mcpEndpoint = vi.fn(async () => URL);
+    await startMcpSidecarIfEnabled({ onChange: () => {}, mcpEndpoint, mcpHostable: true });
+    expect(mcpEndpoint).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats an omitted mcpHostable as hostable (desktop default)', async () => {
+    const mcpEndpoint = vi.fn(async () => URL);
+    await startMcpSidecarIfEnabled({ onChange: () => {}, mcpEndpoint }, ENABLED);
+    expect(mcpEndpoint).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -781,6 +866,20 @@ describe('mountPreferencesPane', () => {
     const handle = mountPreferencesPane(host, noopCb);
     const input = host.querySelector<HTMLInputElement>('#koi-set-display-name')!;
     expect(input.value).toBe('Ada Lovelace');
+    handle.destroy();
+  });
+
+  it('a bare mount never spawns the sidecar; startMcpSidecar is what (re)starts it on show (#735)', async () => {
+    // The modal mounts this pane at app init (long before its first open), so the opt-in server must NOT
+    // spawn until the surface is actually shown. The (re)start moved to the explicit startMcpSidecar call.
+    saveSettings({ ...DEFAULT_SETTINGS, mcpEnabled: true });
+    const mcpEndpoint = vi.fn(async () => URL);
+    const handle = mountPreferencesPane(host, { onChange: () => {}, mcpEndpoint, mcpHostable: true });
+    await settle();
+    expect(mcpEndpoint).not.toHaveBeenCalled(); // mounted but never shown → no spawn
+    handle.startMcpSidecar(); // the on-show hook
+    await settle();
+    expect(mcpEndpoint).toHaveBeenCalledTimes(1);
     handle.destroy();
   });
 

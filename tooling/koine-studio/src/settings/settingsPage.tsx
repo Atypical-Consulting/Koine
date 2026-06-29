@@ -8,7 +8,7 @@
 // SECRET INVARIANT: the aiApiKey is never serialized into the JSON. settingsToJsonDoc() strips it from
 // the seed and jsonDocToSettings() re-injects the live in-memory key on parse, so the JSON surface can
 // neither display nor clear the encrypted key.
-import { mountPreferencesPane, segmented, type PrefsCallbacks } from '@/settings/prefs';
+import { mountPreferencesPane, segmented, startMcpSidecarIfEnabled, type PrefsCallbacks } from '@/settings/prefs';
 import { createJsonSettingsEditor, type JsonSettingsEditor } from '@/editor/editor';
 import { settingsToJsonDoc, jsonDocToSettings } from '@/settings/settingsSchema';
 import { loadSettings, saveSettings } from '@/settings/persistence';
@@ -149,11 +149,22 @@ export function createSettingsPage(
     }
   }
 
+  // The desktop MCP sidecar (re)start on Settings SHOW, fired for BOTH representations (issue #735).
+  // Before #727 the Settings modal's open path always revived the sidecar; after the Visual/JSON split the
+  // (re)start lived behind the Visual pane, so opening straight into JSON never revived it. The Visual pane
+  // layers its MCP-panel UI on top via startMcpSidecar; JSON mode mounts no pane, so it calls the DOM-free
+  // concern directly. `cb.mcpEndpoint` is idempotent (it reuses a running sidecar), so re-resolving — e.g.
+  // after a Visual↔JSON flip — reflects the live endpoint without ever spawning a second process.
+  function startMcpOnShow(): void {
+    if (mode === 'visual') pane?.startMcpSidecar();
+    else void startMcpSidecarIfEnabled(cb);
+  }
+
   function buildBody(): void {
     if (mode === 'visual') {
       pane = mountPreferencesPane(hosts.body, cb);
-      // Show the pane (repaint + start the MCP sidecar when enabled) but DON'T focus the category tab —
-      // this is an embedded center page, not a modal, so stealing focus onto a tab would be jarring.
+      // Repaint the pane (but DON'T focus the category tab — this is an embedded center page, not a modal,
+      // so stealing focus onto a tab would be jarring); the sidecar (re)start is the startMcpOnShow call.
       pane.refresh(undefined, false);
     } else {
       // Seed from loadSettings() (the secret is already omitted by settingsToJsonDoc).
@@ -169,6 +180,7 @@ export function createSettingsPage(
       });
       hosts.body.append(diagnostics);
     }
+    startMcpOnShow(); // (re)start the sidecar on show, for whichever representation just mounted
   }
 
   function teardownBody(): void {
@@ -228,6 +240,7 @@ export function createSettingsPage(
       }
       clearDiagnostics();
     }
+    startMcpOnShow(); // a re-open is a show too — (re)start the sidecar regardless of representation (#735)
   }
 
   // Initial paint.
