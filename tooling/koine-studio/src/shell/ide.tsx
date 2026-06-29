@@ -427,6 +427,10 @@ export function init(hooks: IdeHooks = {}): () => void {
   // synchronously, before any rail el(...) lookup or the inspector controller below — so #filetree-body /
   // #rail-domain-pane all resolve. LeftRail never re-renders, so the imperative explorer/outline islands
   // that later mount into those (empty) hosts are never reconciled away.
+  // GUARDRAIL: this render-once invariant is load-bearing — do NOT give LeftRail/RightStrip/AssistantView
+  // a store subscription or reactive state, and do NOT add a `render(null, host)` teardown for these
+  // hosts; either would make Preact reconcile and wipe the imperative islands' DOM. init() runs once and
+  // is never torn down (src/main.ts), so a single render is correct.
   render(<LeftRail />, el<HTMLElement>('leftrail'));
 
   // The right-edge tool-window stripe's buttons are owned by the RightStrip Preact component (#759, was
