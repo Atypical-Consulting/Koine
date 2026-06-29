@@ -13,10 +13,10 @@ import type { PrefsCallbacks } from '@/settings/prefs';
 // JSON surface never serializes the encrypted key anyway.
 //
 // The factory mounts into EXISTING DOM hosts, so each story renders the production host markup (mirroring
-// index.html: a #settings-page-header carrying the #settings-mode-toggle slot + a #settings-page-body) and
-// calls the factory from a callback ref once those hosts exist — the same imperative-mount idiom the panel
-// hosts (DocsPanelHost) use. The whole thing sits inside a <main> landmark so the axe "region"
-// best-practice rule is satisfied (matching settingsPage.test.tsx).
+// index.html: a #settings-page-header carrying the #settings-scope-toggle + #settings-mode-toggle slots on
+// one row + a #settings-page-body) and calls the factory from a callback ref once those hosts exist — the
+// same imperative-mount idiom the panel hosts (DocsPanelHost) use. The whole thing sits inside a <main>
+// landmark so the axe "region" best-practice rule is satisfied (matching settingsPage.test.tsx).
 
 // localStorage key for the active representation (private to settingsPage.tsx; mirrored here so each story
 // can deterministically open on its own side regardless of the previous story's persisted choice).
@@ -63,7 +63,10 @@ function mountSettingsPage(mode: SettingsEditorMode, cb: PrefsCallbacks = callba
       <section id="center-panel-settings" class="center-host" role="tabpanel" aria-label="Settings" ref={mountRef}>
         <header id="settings-page-header" class="settings-page-header">
           <h2 class="settings-page-title">Settings</h2>
-          <div id="settings-mode-toggle" class="settings-mode-toggle"></div>
+          <div class="settings-page-header-controls">
+            <div id="settings-scope-toggle" class="settings-scope-toggle"></div>
+            <div id="settings-mode-toggle" class="settings-mode-toggle"></div>
+          </div>
         </header>
         <div id="settings-page-body" class="settings-page-body"></div>
       </section>

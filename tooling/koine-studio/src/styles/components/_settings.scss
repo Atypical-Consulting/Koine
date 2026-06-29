@@ -37,6 +37,20 @@
   border-bottom: 1px solid var(--koi-line);
 }
 
+/* Right-hand cluster of the header: the JSON scope toggle (User | Workspace) and the representation
+   toggle (Visual | JSON) sit together on one row, to the right of the title. */
+.settings-page-header-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-3);
+}
+
+/* The scope-toggle slot is only populated in JSON mode; collapse it when empty (Visual mode) so it adds
+   no stray flex gap before the representation toggle. */
+.settings-scope-toggle:empty {
+  display: none;
+}
+
 .settings-page-title {
   margin: 0;
   font-size: var(--koi-text-md);
@@ -85,21 +99,13 @@
   padding-left: var(--koi-space-4);
 }
 
-/* The JSON scope toggle row (User | Workspace) prepended above the settings.json editor.
-   Reuses the existing .koi-segmented / .koi-seg / .is-disabled styling; this wrapper
-   just provides the bar layout and the separator line. */
-.settings-json-scope {
-  display: flex;
-  align-items: center;
-  gap: var(--koi-space-3);
-  padding: var(--koi-space-2) var(--koi-space-4);
-  border-bottom: 1px solid var(--koi-line);
-}
-
-/* Quiet hint shown when no folder is open (Workspace scope is unavailable).
-   Styled consistently with .settings-json-diagnostics to share the same visual weight. */
+/* Quiet hint shown when no folder is open (Workspace scope is unavailable). The Workspace pill lives in
+   the header; this note explains why it's disabled and renders as a thin strip above the settings.json
+   editor in the body (the header has no room for a sentence). Mirrors the diagnostics strip's bar layout. */
 .settings-json-scope-empty {
   margin: 0;
+  padding: var(--koi-space-2) var(--koi-space-4);
+  border-bottom: 1px solid var(--koi-line);
   font-size: var(--koi-text-sm);
   color: var(--koi-muted);
   font-style: italic;
