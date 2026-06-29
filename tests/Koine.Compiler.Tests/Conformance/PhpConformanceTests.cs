@@ -476,6 +476,13 @@ public class PhpConformanceTests
         var result = new KoineCompiler().Compile(src, new PhpEmitter());
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
+        // Always-on guard (runs without a phpstan toolchain): the #805 regression surface is the OUTER
+        // join staying on numeric `+`. Assert the emitted chain routes to PHP's `.` at both joins so the
+        // target-agnostic "String wins" inference is locked everywhere, not only on a phpstan-equipped CI.
+        var php = string.Join("\n", result.Files.Select(f => f.Contents));
+        php.ShouldContain("($this->hours . ':') . $this->minutes");
+        php.ShouldNotContain("+ $this->minutes");
+
         var r = TestSupport.TypeCheckPhp(result.Files);
         TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
 
