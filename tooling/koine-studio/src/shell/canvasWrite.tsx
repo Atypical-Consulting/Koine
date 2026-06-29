@@ -138,8 +138,9 @@ export interface CanvasWriteDeps {
   /** Repaint the editors' review marks after a comment lands (editorSession.refreshReviewDecorations). */
   refreshReviewDecorations(): void;
   reviewAuthorName(): string;
-  /** Jump the editor to a RAW 1-based source span (the shared gotoSourceSpan). */
-  gotoSourceSpan(span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>): void;
+  /** Jump the editor to a RAW 1-based source span (the shared gotoSourceSpan). Returns the underlying
+   *  promise so navigateToDiagramNode's `await` waits on the buffer-open + caret-move, as it did inline. */
+  gotoSourceSpan(span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>): Promise<void> | void;
   /** The #split grid host whose data-mobile-zone attribute mirrors the active mobile zone. */
   splitEl: HTMLElement;
   /** The default canvas zoom seeded from settings (#762). */

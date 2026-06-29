@@ -1167,7 +1167,7 @@ export function init(): () => void {
     reviewStore,
     refreshReviewDecorations: () => editorSession.refreshReviewDecorations(),
     reviewAuthorName: () => reviewAuthorName(),
-    gotoSourceSpan: (span) => void gotoSourceSpan(span),
+    gotoSourceSpan: (span) => gotoSourceSpan(span),
     splitEl,
     defaultCanvasZoom: settings.defaultCanvasZoom,
     blank: BLANK,
