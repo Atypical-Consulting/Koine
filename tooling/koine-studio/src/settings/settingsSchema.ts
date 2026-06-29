@@ -44,6 +44,7 @@ export const SETTINGS_FIELDS: readonly FieldDef[] = [
   { runtimeKey: 'formatOnSave', group: 'editor', docKey: 'formatOnSave' },
   { runtimeKey: 'autoSave', group: 'editor', docKey: 'autoSave' },
   { runtimeKey: 'enableMinimap', group: 'editor', docKey: 'minimap' },
+  { runtimeKey: 'defaultCanvasZoom', group: 'editor', docKey: 'defaultCanvasZoom' },
   { runtimeKey: 'aiProvider', group: 'ai', docKey: 'provider' },
   { runtimeKey: 'aiBaseUrl', group: 'ai', docKey: 'baseUrl' },
   { runtimeKey: 'aiModel', group: 'ai', docKey: 'model' },
@@ -94,6 +95,16 @@ const LEAF_SCHEMAS: Record<FieldDef['runtimeKey'], LeafSchema> = {
   formatOnSave: { type: 'boolean', title: 'Format on save', description: 'Run the formatter when a file is saved.' },
   autoSave: { type: 'boolean', title: 'Auto save', description: 'Persist dirty buffers automatically after a short idle.' },
   enableMinimap: { type: 'boolean', title: 'Minimap', description: 'Show the editor minimap (document overview).' },
+  defaultCanvasZoom: {
+    // `number`, not `integer`: the Visual control and the load-time clamp keep a finite value as-is (like
+    // fontSize/lineHeight/temperature), so the JSON editor must accept the same — an `integer` schema would
+    // reject a fractional zoom the number control could persist (#762). The readout rounds for display.
+    type: 'number',
+    minimum: 10,
+    maximum: 800,
+    title: 'Default canvas zoom',
+    description: 'Initial zoom (%) for a freshly-opened domain diagram canvas.',
+  },
   aiProvider: {
     type: 'string',
     enum: ['anthropic', 'openai'],

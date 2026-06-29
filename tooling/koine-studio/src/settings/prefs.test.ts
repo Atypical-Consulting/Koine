@@ -958,3 +958,50 @@ describe('mountPreferencesPane', () => {
     expect(document.querySelector('.koi-mcp-snippet .cm-editor')).toBeNull();
   });
 });
+
+describe('Settings → Editor: default canvas zoom (#762)', () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+  });
+
+  const zoomInput = () => document.querySelector<HTMLInputElement>('#koi-set-default-canvas-zoom')!;
+
+  it('renders a number control in the Editor panel reflecting the saved defaultCanvasZoom', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, defaultCanvasZoom: 150 });
+    openPrefs();
+    const input = zoomInput();
+    expect(input).not.toBeNull();
+    expect(input.closest('#koi-settings-panel-editor')).not.toBeNull();
+    expect(input.value).toBe('150');
+  });
+
+  it('carries an associated <label> and a name/id for accessibility', () => {
+    openPrefs();
+    const input = zoomInput();
+    const label = document.querySelector<HTMLLabelElement>(`label[for="${input.id}"]`);
+    expect(label?.textContent).toContain('Default canvas zoom');
+    expect(input.getAttribute('name')).toBe(input.id);
+  });
+
+  it('commits a clamped value through the settings save path on change (9999 → 800)', () => {
+    const onChange = vi.fn();
+    openPrefs({ onChange });
+    const input = zoomInput();
+    input.value = '9999';
+    input.dispatchEvent(new Event('change'));
+    expect(input.value).toBe('800');
+    expect(loadSettings().defaultCanvasZoom).toBe(800);
+    expect(onChange).toHaveBeenCalled();
+  });
+
+  it('clamps a too-small value up to the floor (5 → 10)', () => {
+    openPrefs();
+    const input = zoomInput();
+    input.value = '5';
+    input.dispatchEvent(new Event('change'));
+    expect(input.value).toBe('10');
+    expect(loadSettings().defaultCanvasZoom).toBe(10);
+  });
+});

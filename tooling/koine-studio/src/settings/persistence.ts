@@ -10,7 +10,13 @@
 
 import { loadSecret, saveSecret } from '@/ai/secrets';
 import type { ChatMessage } from '@/ai/ai';
-import { sanitizeGroups, sanitizeNotes, type DiagramGroup, type DiagramNote } from '@/diagrams/diagramContract';
+import {
+  clampZoomPercent,
+  sanitizeGroups,
+  sanitizeNotes,
+  type DiagramGroup,
+  type DiagramNote,
+} from '@/diagrams/diagramContract';
 import { isEmitTarget } from '@/shared/emitTargets';
 import { DEFAULT_BINDINGS, type BindingId } from '@/editor/keybindings';
 import { DEFAULT_DECK_STATE, isValidCenter, isValidDeckState, type CenterView, type DeckState } from '@/store/slices/uiChrome';
@@ -53,6 +59,9 @@ export interface Settings {
   autoSave: boolean;
   /** Show the CodeMirror minimap (document overview rail) on the editor's right edge. */
   enableMinimap: boolean;
+  /** Initial zoom (percent) for a freshly-opened domain diagram canvas, when no per-diagram zoom is
+   *  saved (#762). Clamped to the diagram zoom band (10–800); 100 keeps the canvas at its real 1:1 scale. */
+  defaultCanvasZoom: number;
   lspTrace: 'off' | 'messages' | 'verbose';
   /** Which AI backend the assistant uses. */
   aiProvider: 'anthropic' | 'openai';
@@ -99,6 +108,7 @@ export const DEFAULT_SETTINGS: Settings = {
   formatOnSave: true,
   autoSave: false,
   enableMinimap: false,
+  defaultCanvasZoom: 100,
   lspTrace: 'off',
   aiProvider: 'anthropic',
   aiBaseUrl: 'https://api.openai.com/v1',
@@ -137,9 +147,8 @@ const RECENT_CAP = 25;
 // The diagram canvas (#145) remembers each diagram's last zoom level, keyed per-diagram under this
 // prefix, so reopening the Diagrams tab restores the zoom the user left it at.
 const DIAGRAM_ZOOM_KEY_PREFIX = 'koine.studio.diagramZoom.';
-/** Zoom percent is clamped to this sane band on save AND load, so a hand-edited key can't break layout. */
-const DIAGRAM_ZOOM_MIN = 10;
-const DIAGRAM_ZOOM_MAX = 800;
+// The zoom band (DIAGRAM_ZOOM_MIN/MAX) and its clamp (clampZoomPercent) are owned by diagramContract and
+// imported above, so this layer and the renderer clamp to the SAME band with a one-way dependency.
 
 // The assistant transcript is namespaced per workspace under its own key prefix (distinct from
 // settings/scratch/recentFolders), so each opened folder keeps its own conversation.
@@ -332,6 +341,7 @@ export function loadSettings(): Settings {
       autoSave: typeof parsed.autoSave === 'boolean' ? parsed.autoSave : DEFAULT_SETTINGS.autoSave,
       enableMinimap:
         typeof parsed.enableMinimap === 'boolean' ? parsed.enableMinimap : DEFAULT_SETTINGS.enableMinimap,
+      defaultCanvasZoom: coerceDefaultCanvasZoom(parsed.defaultCanvasZoom),
       lspTrace: coerceTrace(parsed.lspTrace),
       aiProvider: parsed.aiProvider === 'openai' ? 'openai' : DEFAULT_SETTINGS.aiProvider,
       aiBaseUrl:
@@ -654,21 +664,22 @@ export function clearLastWorkspace(): void {
 // plan: a tab re-open re-fits and re-centers but keeps the magnification the user chose. Values are
 // clamped on both read and write so a malformed/hand-edited key can never feed the layout a bad number.
 
-/** Clamp to the sane zoom band, or null when not a finite number. */
-function coerceZoom(v: number): number | null {
-  if (!Number.isFinite(v)) return null;
-  return Math.min(DIAGRAM_ZOOM_MAX, Math.max(DIAGRAM_ZOOM_MIN, v));
+/** Validate a stored {@link Settings.defaultCanvasZoom}: a number clamped to the diagram zoom band
+ *  (10–800), or the default (100) for a missing/non-numeric/garbage value (#762). */
+function coerceDefaultCanvasZoom(v: unknown): number {
+  if (typeof v !== 'number') return DEFAULT_SETTINGS.defaultCanvasZoom;
+  return clampZoomPercent(v) ?? DEFAULT_SETTINGS.defaultCanvasZoom;
 }
 
 /** The persisted zoom percent for a diagram key, or null when none is stored (or it's malformed). */
 export function loadDiagramZoom(key: string): number | null {
   const raw = readRaw(DIAGRAM_ZOOM_KEY_PREFIX + key);
-  return raw == null ? null : coerceZoom(Number(raw));
+  return raw == null ? null : clampZoomPercent(Number(raw));
 }
 
 /** Persist a diagram's zoom percent (best-effort), clamped to the sane band. */
 export function saveDiagramZoom(key: string, percent: number): void {
-  const z = coerceZoom(percent);
+  const z = clampZoomPercent(percent);
   if (z == null) return;
   writeRaw(DIAGRAM_ZOOM_KEY_PREFIX + key, String(Math.round(z)));
 }

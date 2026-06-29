@@ -25,6 +25,7 @@ import {
   type AccentName,
   type PreviewTarget,
 } from '@/settings/persistence';
+import { DIAGRAM_ZOOM_MIN, DIAGRAM_ZOOM_MAX } from '@/diagrams/diagramContract';
 import { setTheme } from '@/settings/theme';
 import { ACCENTS, ACCENT_ORDER } from '@/settings/appearance';
 import { createAboutPanel } from '@/settings/about';
@@ -94,6 +95,10 @@ const LINE_HEIGHT_STEP = 0.1;
 // Indent width + assistant temperature bounds (#750); mirror the load-time clamps in persistence.ts.
 const TAB_MIN = 1;
 const TAB_MAX = 8;
+
+// Default domain-canvas zoom control step (#762). The min/max mirror the diagram zoom band exported by
+// persistence (DIAGRAM_ZOOM_MIN/MAX = 10/800), so the control and the load-time clamp agree.
+const CANVAS_ZOOM_STEP = 10;
 
 const TEMP_MIN = 0;
 const TEMP_MAX = 2;
@@ -670,6 +675,17 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     (v) => commit({ tabSize: v }),
   );
 
+  // Default domain-canvas zoom (#762): the zoom a freshly-opened diagram canvas uses when nothing
+  // per-diagram is saved. Clamped to the diagram zoom band (10–800); applied to the NEXT opened canvas
+  // via setDefaultCanvasZoom in ide.tsx's onChange (a live canvas keeps its current zoom until re-rendered).
+  const defaultCanvasZoomInput = metricInput(
+    DIAGRAM_ZOOM_MIN,
+    DIAGRAM_ZOOM_MAX,
+    CANVAS_ZOOM_STEP,
+    () => loadSettings().defaultCanvasZoom,
+    (v) => commit({ defaultCanvasZoom: v }),
+  );
+
   // A live type specimen: a short Koine snippet that renders at the current font size, line height,
   // and word-wrap so the numeric inputs above have something tangible to read against. It updates on
   // every keystroke — visual only; the real editor re-skins through onChange like every other field.
@@ -744,6 +760,11 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     formatOnSaveRow,
     row('Auto-save', 'Save edits automatically after a short pause in typing.', autoSave.el),
     row('Minimap', 'Show a document overview rail on the editor’s right edge.', minimap.el),
+    row(
+      'Default canvas zoom',
+      'Initial zoom (%) for a freshly-opened domain diagram canvas (10–800).',
+      defaultCanvasZoomInput,
+    ),
   );
 
   // --- Keyboard -------------------------------------------------------------
@@ -1593,6 +1614,7 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     tabSizeInput.value = String(s.tabSize);
     autoSave.set(s.autoSave);
     minimap.set(s.enableMinimap);
+    defaultCanvasZoomInput.value = String(s.defaultCanvasZoom);
     refreshSpecimen();
     // Rebuild the language cards from the live EMIT_TARGETS first: the picker was constructed during
     // init() (before the backend seed), so a backend-seeded target only appears once this re-renders
