@@ -284,6 +284,19 @@ export interface Platform {
    */
   defaultWorkspace(seed: string): Promise<string | null>;
 
+  /**
+   * Whether the cold-boot ladder may SILENTLY re-open `token` (the persisted last workspace) with no
+   * user gesture. True only for host-internal, materialized workspaces that re-acquire without a
+   * permission prompt: in the browser the OPFS-backed example dirs (token `example-*`); on the desktop
+   * the materialized template dirs under `<appData>/workspaces/*`. A browser *picked* folder needs a
+   * `requestPermission` re-grant boot can't supply, so it stays a manual Recents click; the default
+   * workspace is excluded (it has its own re-open flow, {@link defaultWorkspace}). This is a host
+   * capability rather than a token-shape guess so the boot path never branches on {@link kind}: the
+   * browser uses `example-*` slugs, the desktop uses absolute `<appData>` paths, and only the host
+   * knows which of its own tokens are safe to restore. Never throws.
+   */
+  isAutoRestorableToken(token: string): Promise<boolean>;
+
   /** A human-readable display name for a folder token (the last path segment). */
   folderName(token: string): string;
 

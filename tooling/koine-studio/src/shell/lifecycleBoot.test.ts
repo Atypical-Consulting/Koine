@@ -33,6 +33,8 @@ function makeDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
     importSharedWorkspace: vi.fn(async () => undefined),
     openWorkspaceWith1File: vi.fn(async () => undefined),
     openFolderPath: vi.fn(async () => ({ ok: true })),
+    // Default to the browser host's rule; desktop-path tests override this with their own predicate.
+    isAutoRestorableToken: vi.fn(async (t: string) => t === '(default)' || t.startsWith('example-')),
     openHostDefaultWorkspaceFlow: vi.fn(async () => ({ opened: true })),
     setStatus: vi.fn(),
     setOutput: vi.fn(),
@@ -100,6 +102,32 @@ describe('lifecycleBoot', () => {
     await flush();
     expect(deps.openFolderPath).toHaveBeenCalledWith('example-billing', { recent: false });
     expect(deps.openHostDefaultWorkspaceFlow).not.toHaveBeenCalled(); // the restore succeeded
+  });
+
+  // Regression: a desktop template token is an absolute `<appData>/workspaces/<id>` path, NOT a browser
+  // `example-*` slug. The ladder must restore it via the HOST capability (not a hardcoded slug test);
+  // before the fix this token matched nothing and every reload reverted to the blank default workspace.
+  it('restores any token the host vouches for (e.g. a desktop <appData>/workspaces path)', async () => {
+    const token = '/Users/x/Library/Application Support/com.atypical.koine-studio/workspaces/pizzeria';
+    getLastWorkspaceMock.mockReturnValue(token);
+    // The desktop host says any path under its materialized workspaces dir is auto-restorable.
+    const deps = makeDeps({ isAutoRestorableToken: vi.fn(async (t: string) => t.includes('/workspaces/')) });
+    createLifecycleBoot(deps);
+    await flush();
+    expect(deps.isAutoRestorableToken).toHaveBeenCalledWith(token);
+    expect(deps.openFolderPath).toHaveBeenCalledWith(token, { recent: false });
+    expect(deps.openHostDefaultWorkspaceFlow).not.toHaveBeenCalled();
+  });
+
+  // The complement: a token the host declines (a picked external folder, or any non-internal token)
+  // is NOT auto-opened — the ladder falls through to the seeded default workspace.
+  it('falls through to the default when the host declines the token (e.g. a picked folder)', async () => {
+    getLastWorkspaceMock.mockReturnValue('/Users/x/some/picked/project');
+    const deps = makeDeps({ isAutoRestorableToken: vi.fn(async () => false), seed: 'THE_SEED' });
+    createLifecycleBoot(deps);
+    await flush();
+    expect(deps.openFolderPath).not.toHaveBeenCalled();
+    expect(deps.openHostDefaultWorkspaceFlow).toHaveBeenCalledWith('THE_SEED');
   });
 
   it('falls through to the default workspace (seeded) when nothing is restorable', async () => {

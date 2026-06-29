@@ -300,6 +300,18 @@ export async function materializeWorkspace(
 const DEFAULT_WS_DIR = 'default-workspace';
 const DEFAULT_WS_TOKEN = '(default)';
 
+/**
+ * Whether the cold-boot ladder may silently re-open `token` in the browser host: the default workspace
+ * and every OPFS-backed example dir minted by {@link materializeWorkspace} (token `example-*`), both of
+ * which re-acquire from IndexedDB with no permission prompt. A *picked* folder handle needs a
+ * user-gesture `requestPermission` re-grant boot can't supply, so it returns false and stays a manual
+ * Recents click. The token-scheme knowledge lives here, beside where the tokens are minted; the host
+ * exposes it via `Platform.isAutoRestorableToken` so the boot path never branches on platform identity.
+ */
+export function isAutoRestorableToken(token: string): boolean {
+  return token === DEFAULT_WS_TOKEN || token.startsWith('example-');
+}
+
 // The picked-once workspace root: a single directory handle (e.g. ~/koine) under which "Save to disk"
 // writes named projects. Persisted in IndexedDB under a reserved key (parens can't appear in a real
 // picked-folder name, so it never collides with a folder-name token — same trick as DEFAULT_WS_TOKEN).
