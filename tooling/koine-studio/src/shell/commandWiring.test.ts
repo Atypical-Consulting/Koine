@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCommandWiring, type CommandWiringDeps } from '@/shell/commandWiring';
+import { canStopCompile } from '@/host/browser/stopCompile';
+
+// Mock the runaway-compile gate so tests can flip stop-compile's when() predicate. Defaults to false
+// (Stop hidden), matching an idle editor; individual tests opt into true.
+vi.mock('@/host/browser/stopCompile', () => ({
+  canStopCompile: vi.fn(() => false),
+  stopRunawayCompile: vi.fn(),
+}));
 
 // The toolbar button ids commandWiring wires at construction (index.html owns these in the real shell).
 const TOOLBAR_IDS = [
@@ -80,6 +88,7 @@ describe('commandWiring', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
     mountToolbar();
+    vi.mocked(canStopCompile).mockReturnValue(false);
   });
 
   afterEach(() => {
@@ -148,6 +157,40 @@ describe('commandWiring', () => {
       expect(on.getCommands().map((c) => c.id)).toContain('toggle-store-inspector');
 
       vi.unstubAllEnvs();
+    });
+
+    it('registers the full static catalog in palette order (every command id, after boot)', () => {
+      // canSaveProjects + DEV + canStopCompile all on, no open buffers ⇒ getCommands() is exactly the
+      // static catalog. Locks the entry set AND order against drift through the registry migration (#758).
+      vi.stubEnv('DEV', true);
+      vi.mocked(canStopCompile).mockReturnValue(true);
+      const wiring = createCommandWiring(makeDeps({ canSaveProjects: true }));
+      dispose = wiring.dispose;
+
+      expect(wiring.getCommands().map((c) => c.id)).toEqual([
+        'undo', 'redo', 'format', 'home', 'open-folder', 'search', 'new-model', 'save-all', 'share',
+        'check', 'generate-project', 'export-source-zip', 'export-diagram-svg', 'export-diagram-png',
+        'export-diagram-plantuml', 'copy-diagram-mermaid', 'save-project-to-disk', 'toggle-theme',
+        'layout.panelSide', 'layout.sideRail', 'layout.toggleProperties', 'layout.toggleNavigator',
+        'prefs', 'help', 'about', 'toggle-store-inspector', 'view-preview', 'view-glossary',
+        'view-decisions', 'view-notes', 'view-diagrams', 'split-code-canvas', 'view-contextmap',
+        'view-check', 'view-scenarios', 'view-assistant', 'assistant-explain', 'add-comment',
+        'view-review', 'stop-compile',
+      ]);
+
+      vi.unstubAllEnvs();
+    });
+
+    it('gates stop-compile through when: () => canStopCompile() (absent when idle, present in flight)', () => {
+      vi.mocked(canStopCompile).mockReturnValue(false);
+      const idle = createCommandWiring(makeDeps());
+      expect(idle.getCommands().map((c) => c.id)).not.toContain('stop-compile');
+      idle.dispose();
+
+      vi.mocked(canStopCompile).mockReturnValue(true);
+      const inFlight = createCommandWiring(makeDeps());
+      dispose = inFlight.dispose;
+      expect(inFlight.getCommands().map((c) => c.id)).toContain('stop-compile');
     });
   });
 

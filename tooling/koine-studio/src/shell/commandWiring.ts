@@ -122,28 +122,21 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
       { id: 'assistant-explain', title: 'Explain this construct', group: 'Workspace', run: () => { deps.controller.selectRight('assistant'); deps.ensureAssistant().explainSelection(); } },
       { id: 'add-comment', title: 'Add review comment', group: 'Review', run: () => deps.editor.addCommentAtSelection() },
       { id: 'view-review', title: 'Show Review', group: 'Workspace', run: () => deps.controller.selectBottomTab('review') },
+      // Stop a runaway compile (#353): terminate the WASM worker and boot a fresh one. Gated by when()
+      // so it surfaces only while a compile is actually in flight (#469) — idle, it stays out of the
+      // palette and is a no-op if dispatched; the main-thread fallback has no worker to terminate, so
+      // canStopCompile() is false. getCommands() re-reads isEnabled on every open, so it appears and
+      // disappears with the live in-flight state exactly as the old conditional push did.
+      { id: 'stop-compile', title: 'Stop compilation (restart compiler)', group: 'Workspace', run: () => stopRunawayCompile(), when: () => canStopCompile() },
     ];
   }
   // Register the static catalog once at construction — registration order === palette order.
   for (const cmd of buildStaticCatalog()) registry.register(cmd);
 
   function getCommands(): Command[] {
-    // Read the static catalog back from the registry, hiding any command whose when() is currently
-    // false, then append the dynamic tail (still produced per-open: live in-flight + open buffers).
+    // The static catalog from the registry, hiding any command whose when() is currently false (the dev
+    // store-inspector and stop-compile), then the dynamic goto: quick-open rows on top.
     const cmds: Command[] = registry.all().filter((c) => registry.isEnabled(c.id));
-
-    // Stop a runaway compile: terminate the WASM worker and boot a fresh one (#353). Offered only while a
-    // compile is actually in flight on the worker boot path (#469) — in the main-thread fallback there is
-    // nothing to terminate, and an idle Stop would pointlessly restart the worker. getCommands() re-runs
-    // on every palette open, so the command appears and disappears with the live in-flight state.
-    if (canStopCompile()) {
-      cmds.push({
-        id: 'stop-compile',
-        title: 'Stop compilation (restart compiler)',
-        group: 'Workspace',
-        run: () => stopRunawayCompile(),
-      });
-    }
 
     // Surface every open file as a "Go to File" entry so the palette doubles as a
     // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open.
