@@ -218,7 +218,17 @@ fn parse_mcp_endpoint(line: &str) -> Option<String> {
 ///
 /// On **Windows** the path is unchanged: an explicit `$SHELL` (rare) is used verbatim, else `cmd`, and
 /// no login flag is added. (Empty strings are treated as "unset" so a stray `SHELL=` doesn't win.)
-fn resolve_shell_command(os_shell: Option<&str>, passwd_shell: Option<&str>) -> (String, Vec<String>) {
+///
+/// `args_override` lets the caller (the Studio `terminal.shellArgs` setting, #467) supply the shell's
+/// arguments: when it is `Some` and non-empty it is used verbatim on Unix in place of `-l`, so a bash
+/// user who keeps `PATH`/aliases only in `~/.bashrc` can opt into `["-l", "-i"]`. An absent or empty
+/// override keeps the default `["-l"]` login shell, so #462's fix is unchanged by default. Windows
+/// ignores the override (its spawn path adds no args regardless).
+fn resolve_shell_command(
+    os_shell: Option<&str>,
+    passwd_shell: Option<&str>,
+    args_override: Option<&[String]>,
+) -> (String, Vec<String>) {
     // Treat a blank entry as "unset" so a stray `SHELL=` doesn't win over the recovered shell.
     let os_shell = os_shell.filter(|s| !s.is_empty());
     let passwd_shell = passwd_shell.filter(|s| !s.is_empty());
@@ -231,8 +241,13 @@ fn resolve_shell_command(os_shell: Option<&str>, passwd_shell: Option<&str>) -> 
 
     // Unix: prefer `$SHELL`, then the passwd-recovered shell (the GUI-launch case), then `/bin/sh`.
     let program = os_shell.or(passwd_shell).unwrap_or("/bin/sh").to_string();
-    // `-l` makes it a login shell so the user's profile runs and `PATH` is populated.
-    (program, vec!["-l".to_string()])
+    // A caller-supplied override replaces the args verbatim when non-empty (#467); otherwise `-l` makes
+    // it a login shell so the user's profile runs and `PATH` is populated (#462) — the safe default.
+    let args = match args_override {
+        Some(over) if !over.is_empty() => over.to_vec(),
+        _ => vec!["-l".to_string()],
+    };
+    (program, args)
 }
 
 /// Recover the user's login shell from the password database (`getpwuid(getuid())->pw_shell`). Used
@@ -1383,11 +1398,16 @@ fn mcp_stop(state: State<'_, McpState>) -> Result<(), String> {
 /// thread that relays output as `pty://data`. Idempotent: holding the `child` lock across the whole
 /// check-spawn-store means two concurrent calls cannot both pass the guard and open duplicate
 /// terminals (the second blocks until the first stores `Some`, then returns early).
+///
+/// `shell_args` is the optional caller-supplied shell-args override (the Studio `terminal.shellArgs`
+/// setting, #467); the frontend sends it only when the user configured one, so `None`/empty keeps the
+/// default `["-l"]` login shell (#462). It is threaded into {@link resolve_shell_command} verbatim.
 #[tauri::command]
 fn pty_start(
     app: AppHandle,
     state: State<'_, PtyState>,
     cwd: Option<String>,
+    shell_args: Option<Vec<String>>,
 ) -> Result<(), String> {
     let mut child_guard = state.child.lock().map_err(|e| e.to_string())?;
     if child_guard.is_some() {
@@ -1411,11 +1431,14 @@ fn pty_start(
 
     // Resolve the shell: `$SHELL` first, then — for a Finder/Dock launch whose stripped GUI env has
     // no `$SHELL` — the user's shell recovered from the password database, then `/bin/sh`. On Unix the
-    // chosen shell is spawned as a login shell so `PATH` (Homebrew/user dirs) is populated; on Windows
-    // this yields `cmd` with no extra args.
+    // chosen shell is spawned as a login shell (`-l`) unless the caller overrode the args (#467); on
+    // Windows this yields `cmd` with no extra args.
     let passwd_shell = passwd_login_shell();
-    let (program, args) =
-        resolve_shell_command(std::env::var("SHELL").ok().as_deref(), passwd_shell.as_deref());
+    let (program, args) = resolve_shell_command(
+        std::env::var("SHELL").ok().as_deref(),
+        passwd_shell.as_deref(),
+        shell_args.as_deref(),
+    );
     let mut cmd = CommandBuilder::new(program);
     cmd.args(args);
     if let Some(dir) = cwd {
