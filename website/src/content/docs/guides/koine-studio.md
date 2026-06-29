@@ -138,6 +138,13 @@ Koine Studio surfaces the **enriched** language server, the same one the VS Code
 - **Export `.koi` source** — _Export .koi source (.zip)_ bundles every open `.koi` file into a zip. A
   very large workspace can overflow a URL, so when _Copy shareable link_ would produce an oversized
   link Studio declines to copy a broken one and steers you to this export instead.
+- **Settings (Visual + JSON)** — the **Settings** view edits your Studio preferences either through the
+  Visual controls or directly as `settings.json`. The JSON pane is **schema-aware**: it validates every
+  field against the settings schema and surfaces that schema's per-field documentation inline — **hover**
+  a field key for its title and description (e.g. `editor.tabSize` → **Tab size** · _Indent width in
+  spaces._), and **completion** inside a group lists each field with the same human-readable title (as
+  the option detail) and description (as the info panel). The secret API key is never part of the
+  document, so it can never appear in a hover or completion.
 
 :::note
 Studio is an MVP. The feature set above is what the shared language server provides and what the app
