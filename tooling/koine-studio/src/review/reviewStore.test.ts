@@ -175,6 +175,46 @@ describe('reviewStore — persistence', () => {
     expect([...files.keys()].filter((k) => k.endsWith(REVIEWS_FILE))).toHaveLength(1);
   });
 
+  it('recovers from a lost create race: createFile rejects, then re-locates and overwrites', async () => {
+    const { platform, files } = fakeFs();
+    const store = createReviewStore(platform, () => FOLDER);
+
+    // Simulate the file appearing between locate() and createFile(): a racer plants `.koine/reviews.json`
+    // and our createFile rejects, so the re-locate finds its token and writeTextFile lands our threads.
+    platform.createFile = ((folderToken: string, relPath: string) => {
+      files.set(`${folderToken}/${relPath}`, JSON.stringify({ version: 1, threads: [] }));
+      return Promise.reject(new Error('already exists (raced)'));
+    }) as Platform['createFile'];
+
+    const t = store.add('model.koi', span('model.koi'), 'raced', 'alice');
+    await flushPersist();
+
+    // Exactly one reviews.json, holding our thread (the racer's empty file was overwritten).
+    expect([...files.keys()].filter((k) => k.endsWith(REVIEWS_FILE))).toHaveLength(1);
+    const fresh = createReviewStore(platform, () => FOLDER);
+    await fresh.load();
+    expect(fresh.list().map((x) => x.id)).toEqual([t.id]);
+  });
+
+  it('re-opening a DIFFERENT folder re-discovers the file under the new root (no stale token)', async () => {
+    const { platform, files } = fakeFs();
+    // Two folders, each with its own one-thread reviews.json, addressed by a switching folder getter.
+    const seed = (id: string, file: string) =>
+      JSON.stringify({ version: 1, threads: [{ id, file, span: span(file), status: 'open', comments: [] }] });
+    files.set('A/.koine/reviews.json', seed('review-a', 'a.koi'));
+    files.set('B/.koine/reviews.json', seed('review-b', 'b.koi'));
+
+    let root = 'A';
+    const store = createReviewStore(platform, () => root);
+
+    await store.load();
+    expect(store.list().map((t) => t.id)).toEqual(['review-a']);
+
+    root = 'B'; // open a different folder
+    await store.load();
+    expect(store.list().map((t) => t.id)).toEqual(['review-b']); // re-discovered under B, not stuck on A
+  });
+
   it('loads as empty when the file is missing (no .koine yet) without throwing', async () => {
     const { platform } = fakeFs();
     const store = createReviewStore(platform, () => FOLDER);
