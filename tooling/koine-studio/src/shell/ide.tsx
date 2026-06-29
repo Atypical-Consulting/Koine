@@ -1887,6 +1887,9 @@ export function init(hooks: IdeHooks = {}): () => void {
       parent: el('panel-terminal'),
       platform,
       cwd: () => workspace.folderRootToken() || null,
+      // Read the override fresh at each (re)start (#467), so changing the setting takes effect on the
+      // next shell spawn; empty ⇒ the host's default `-l` login shell. It's a global, not workspace-scoped.
+      shellArgs: () => loadSettings().terminalShellArgs,
     });
     return terminal;
   }

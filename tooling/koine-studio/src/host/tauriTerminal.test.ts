@@ -37,6 +37,25 @@ describe('TauriTerminalTransport', () => {
     expect(invokeMock).toHaveBeenCalledWith('pty_start', { cwd: '/work' });
   });
 
+  it('forwards a configured shell-args override to pty_start (#467)', async () => {
+    const transport = new TauriPlatform().createTerminal!();
+    await transport.start('/work', ['-l', '-i']);
+
+    // camelCase `shellArgs` maps to the Rust `shell_args` param; the override reaches the invoke verbatim.
+    expect(invokeMock).toHaveBeenCalledWith('pty_start', { cwd: '/work', shellArgs: ['-l', '-i'] });
+  });
+
+  it('omits shell args from pty_start when none are configured — empty or null (#467)', async () => {
+    const transport = new TauriPlatform().createTerminal!();
+
+    // An empty list means "unset" — pty_start gets only the cwd, so the Rust default `["-l"]` wins.
+    await transport.start('/work', []);
+    expect(invokeMock).toHaveBeenLastCalledWith('pty_start', { cwd: '/work' });
+
+    await transport.start('/work', null);
+    expect(invokeMock).toHaveBeenLastCalledWith('pty_start', { cwd: '/work' });
+  });
+
   it('is idempotent: a restart detaches the prior listeners before re-subscribing (no leak)', async () => {
     const transport = new TauriPlatform().createTerminal!();
 
