@@ -229,15 +229,16 @@ internal sealed class ExpressionChecker
 
     /// <summary>
     /// Rejects scalar add/subtract against a value object (e.g. <c>5.0 + money</c>, <c>money - 1</c>).
-    /// A value object SCALES by a scalar (<c>money * 2</c>, handled by the multiply path) and ADDS to
-    /// another value object of its own type (<c>money + money</c>, via a <c>sum</c> fold), but there is
+    /// A value object SCALES by a scalar (<c>money * 2</c>, handled by the multiply path), but there is
     /// no <c>operator +/-(value-object, scalar)</c> in any target — the C# emitter would produce
     /// <c>5.0m + money</c> (CS0019) and the TypeScript emitter <c>new Decimal('5.0').add(money)</c>
-    /// (a <c>tsc</c> type error). <see cref="TypeResolver.VisitBinary"/> infers such an expression as
-    /// the value-object type, so without this check it slips through to the emitters as non-compiling
-    /// code. Rejecting it here keeps the reversed-additive path unreachable across every emitter
-    /// (#804, follow-up to the reversed-multiply fixes #788/#797). Multiplication is exempt: scalar
-    /// multiply is a first-class value-object operation.
+    /// (a <c>tsc</c> type error). <see cref="TypeResolver.Infer"/> infers such an expression as the
+    /// value-object type, so without this check it slips through to the emitters as non-compiling code.
+    /// Rejecting it here keeps the reversed-additive path unreachable across every emitter (#804,
+    /// follow-up to the reversed-multiply fixes #788/#797). Multiplication is exempt: scalar multiply
+    /// is a first-class value-object operation. (Scoped to <c>scalar +/- value-object</c>: sibling
+    /// value-object-arithmetic codegen gaps — <c>value / scalar</c> and direct same-type <c>+</c>/<c>-</c>
+    /// that no <c>sum</c> fold generated an operator for — are tracked separately, not here.)
     /// </summary>
     private void CheckValueObjectScalarArithmetic(BinaryExpr b, TypeScope scope)
     {
@@ -260,7 +261,7 @@ internal sealed class ExpressionChecker
         TypeRef vo = voOnLeft ? left! : right!;
         var verb = b.Op == BinaryOp.Add ? "add a scalar to" : "subtract a scalar from";
         Report(DiagnosticCodes.ValueObjectScalarArithmetic,
-            $"cannot {verb} value object '{vo.Name}'; a value object scales by a scalar with '*', but '+'/'-' apply only between two '{vo.Name}' values", b);
+            $"cannot {verb} value object '{vo.Name}'; a value object scales by a scalar with '*', not '+'/'-'", b);
     }
 
     private void CheckArithmeticNullSafety(BinaryExpr b, TypeScope scope)
