@@ -569,6 +569,51 @@ describe('saveProjectToRoot / workspace root', () => {
     expect(name).toBe('work');
     expect(await workspaceRootName()).toBe('work');
   });
+
+  it('re-prompts the picker and retries when the remembered root has vanished (NotFoundError)', async () => {
+    // A remembered root whose backing folder was deleted/moved on disk: creating the project dir under
+    // it throws the File System Access `NotFoundError` (its parent no longer exists). The save must
+    // forget that dead root, re-prompt for a fresh one, and write there — not dead-end.
+    const stale = new MockDir('gone');
+    stale.getDirectoryHandle = async () => {
+      throw new DOMException('A requested file or directory could not be found.', 'NotFoundError');
+    };
+    const fresh = new MockDir('koine');
+    let pick = 0;
+    (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = async () => {
+      pick++;
+      return (pick === 1 ? stale : fresh) as unknown;
+    };
+
+    const token = await saveProjectToRoot('proj', [{ relPath: 'a.koi', contents: 'context A {}' }]);
+
+    expect(token).toBe('proj');
+    expect(pick).toBe(2); // dead root forgotten, picker re-prompted once
+    const proj = fresh.entries.get('proj') as MockDir;
+    expect((proj.entries.get('a.koi') as MockFile).contents).toBe('context A {}');
+  });
+
+  it('propagates the error when the freshly picked root also fails (no infinite retry)', async () => {
+    // Two NotFoundError roots in a row: recovery retries exactly once, then surfaces the failure so the
+    // caller can report it — rather than looping forever.
+    const makeStale = (n: string) => {
+      const d = new MockDir(n);
+      d.getDirectoryHandle = async () => {
+        throw new DOMException('gone', 'NotFoundError');
+      };
+      return d;
+    };
+    let pick = 0;
+    (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = async () => {
+      pick++;
+      return makeStale('gone-' + pick) as unknown;
+    };
+
+    await expect(saveProjectToRoot('proj', [{ relPath: 'a.koi', contents: 'x' }])).rejects.toMatchObject({
+      name: 'NotFoundError',
+    });
+    expect(pick).toBe(2); // first pick + one recovery re-pick, then it gives up
+  });
 });
 
 // --- persisted-example IndexedDB reload round-trip (#535 follow-up, #544) -----
