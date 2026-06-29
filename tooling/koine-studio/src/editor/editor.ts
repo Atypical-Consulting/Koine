@@ -50,11 +50,20 @@ import { python } from '@codemirror/legacy-modes/mode/python';
 import { rust } from '@codemirror/legacy-modes/mode/rust';
 import { php } from '@codemirror/lang-php';
 import { tags as t } from '@lezer/highlight';
-import { lintGutter, setDiagnostics } from '@codemirror/lint';
-// Schema-aware JSON support for the editable settings.json editor (createJsonSettingsEditor). `jsonSchema()`
-// already bundles `@codemirror/lang-json`'s `json()` (the JSON language) plus the schema linter, hover and
-// autocomplete, so it is the single extension that lights up the whole editing surface.
-import { jsonSchema } from 'codemirror-json-schema';
+import { lintGutter, setDiagnostics, linter } from '@codemirror/lint';
+// Schema-aware JSON support for the editable settings.json editor (createJsonSettingsEditor). We use the
+// SAME pieces codemirror-json-schema's bundled `jsonSchema()` wires (JSON language + JSON-parse/schema
+// linters + schema-aware completion + hover + schema-in-state), but compose them ourselves so we can swap
+// in our own hover/completion sources — the bundled ones surface a field's schema `description` but drop
+// its `title`, and the bundled helper exposes no hook to add it (#765).
+import { json as cmJson, jsonLanguage, jsonParseLinter } from '@codemirror/lang-json';
+import {
+  jsonSchemaLinter,
+  jsonCompletion,
+  handleRefresh,
+  stateExtensions,
+  jsonPointerForPosition,
+} from 'codemirror-json-schema';
 import type {
   CallHierarchyIncomingCall,
   CallHierarchyItem,
@@ -80,7 +89,7 @@ import { inlineCompletionExtension, type EditorInlineContext } from '@/editor/in
 import { requestInline } from '@/ai/inlineCompletionClient';
 import { loadSettings, resolveKeybindings } from '@/settings/persistence';
 // The Draft 2020-12 schema for the settings.json document — drives the editable editor's lint/hover/completion.
-import { SETTINGS_JSON_SCHEMA } from '@/settings/settingsSchema';
+import { SETTINGS_JSON_SCHEMA, settingsFieldMeta } from '@/settings/settingsSchema';
 import { buildExtraKeys, type BindingId } from '@/editor/keybindings';
 // Review-comment rendering (#259): the StateField+gutter that paint review threads over the buffer, plus
 // the helper that repaints them after a store change. A Studio-only view concern — never touches the model.
@@ -1545,11 +1554,81 @@ export interface JsonSettingsEditor {
 }
 
 /**
+ * Hover tooltip for the editable settings.json editor: resolves the field under the cursor via the
+ * schema's JSON pointer and renders its `title` + `description` (from {@link settingsFieldMeta}) using
+ * the `.koi` editor's `koi-hover koi-md` styling. codemirror-json-schema's bundled hover surfaces only
+ * the `description`; this adds the human-readable title (#765). Degrades silently (returns null) for a
+ * group key, the document root, or an unknown/typo'd key. Exported for unit testing.
+ */
+export const settingsSchemaHover = (view: EditorView, pos: number, side: -1 | 1): Tooltip | null => {
+  // 'json4' is codemirror-json-schema's MODES.JSON token (not re-exported): selects JSON (vs json5/yaml)
+  // pointer resolution. The pointer is '' at the root, '/group' on a group key, '/group/docKey' on a leaf.
+  const pointer = jsonPointerForPosition(view.state, pos, side, 'json4');
+  const [group, docKey, ...rest] = pointer.split('/').filter(Boolean);
+  if (!group || !docKey || rest.length > 0) return null; // only leaf fields get a tooltip
+  const meta = settingsFieldMeta(group, docKey);
+  if (!meta) return null; // unknown/typo'd key — show nothing
+  const word = view.state.wordAt(pos);
+  return {
+    pos: word?.from ?? pos,
+    end: word?.to ?? pos,
+    above: true,
+    create() {
+      const dom = document.createElement('div');
+      dom.className = 'koi-hover koi-md';
+      dom.innerHTML = renderMarkdown(`**${meta.title}**\n\n${meta.description}`);
+      return { dom };
+    },
+  };
+};
+
+// codemirror-json-schema's property completion: built once, reused per request (it reads the schema
+// from the editor state, not from this closure).
+const baseJsonCompletion = jsonCompletion();
+
+/**
+ * Completion source for the editable settings.json editor: delegates to codemirror-json-schema's
+ * property completion, then overlays each field's schema `title` onto the option `detail`. The bundled
+ * source puts the JSON type there and carries the `description` only as the info panel, so the
+ * human-readable name was never visible in the picker (#765). Exported for unit testing.
+ */
+export const settingsCompletionSource = (ctx: CompletionContext): CompletionResult | null => {
+  const result = baseJsonCompletion(ctx);
+  if (!result || Array.isArray(result) || !('options' in result)) return null; // never[] → no completions
+  // The group the cursor sits in (`/editor/ta` → `editor`); option labels are that group's doc keys.
+  const [group] = jsonPointerForPosition(ctx.state, ctx.pos, -1, 'json4').split('/').filter(Boolean);
+  if (!group) return result;
+  const options = result.options.map((o) => {
+    const meta = settingsFieldMeta(group, String(o.label));
+    return meta?.title ? { ...o, detail: meta.title } : o;
+  });
+  return { ...result, options };
+};
+
+/**
+ * The schema-aware extensions for the editable settings.json editor. Mirrors codemirror-json-schema's
+ * bundled `jsonSchema()` (JSON language + JSON-parse/schema linters + schema-aware completion + hover +
+ * schema-in-state) but swaps in {@link settingsSchemaHover} and {@link settingsCompletionSource} so the
+ * per-field `title` reaches the user — the only behavioural change is the hover/completion content; the
+ * lint surface is preserved exactly (#765).
+ */
+function settingsSchemaExtensions(schema: Parameters<typeof stateExtensions>[0]): Extension[] {
+  return [
+    cmJson(),
+    linter(jsonParseLinter()),
+    linter(jsonSchemaLinter(), { needsRefresh: handleRefresh }),
+    jsonLanguage.data.of({ autocomplete: settingsCompletionSource }),
+    hoverTooltip(settingsSchemaHover),
+    stateExtensions(schema),
+  ];
+}
+
+/**
  * An EDITABLE settings.json editor: the JSON language plus schema-driven lint/completion/hover from
- * SETTINGS_JSON_SCHEMA (via codemirror-json-schema's `jsonSchema()`, which bundles `@codemirror/lang-json`),
- * reporting every document change through `onChange`. It reuses the same `koineHighlight` + `sharedTheme`
- * setup as the other editors so it looks native. The host (settingsPage) owns parse/validate/persist;
- * this factory is just the editing surface.
+ * SETTINGS_JSON_SCHEMA (via {@link settingsSchemaExtensions}, our composition of codemirror-json-schema's
+ * pieces), reporting every document change through `onChange`. It reuses the same `koineHighlight` +
+ * `sharedTheme` setup as the other editors so it looks native. The host (settingsPage) owns
+ * parse/validate/persist; this factory is just the editing surface.
  */
 export function createJsonSettingsEditor(
   parent: HTMLElement,
@@ -1569,9 +1648,9 @@ export function createJsonSettingsEditor(
       extensions: [
         contentAttributes.of(EditorView.contentAttributes.of({ ...ariaLabel })),
         lineNumbers(),
-        // `jsonSchema()` already wires the JSON language, the JSON-parse + schema linters, schema-aware
-        // autocomplete and hover — the whole schema-aware editing surface in one extension.
-        jsonSchema(SETTINGS_JSON_SCHEMA as unknown as Parameters<typeof jsonSchema>[0]),
+        // The JSON language, JSON-parse + schema linters, schema-aware completion and our title-aware
+        // hover — the whole schema-aware editing surface, composed so the hover can surface field titles.
+        ...settingsSchemaExtensions(SETTINGS_JSON_SCHEMA as unknown as Parameters<typeof stateExtensions>[0]),
         syntaxHighlighting(koineHighlight),
         syntaxHighlighting(defaultHighlightStyle),
         sharedTheme,

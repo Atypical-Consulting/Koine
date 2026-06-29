@@ -1,5 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createJsonSettingsEditor } from './editor';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { EditorView } from '@codemirror/view';
+import { EditorState } from '@codemirror/state';
+import { CompletionContext } from '@codemirror/autocomplete';
+import { jsonSchema } from 'codemirror-json-schema';
+import { createJsonSettingsEditor, settingsSchemaHover, settingsCompletionSource } from './editor';
+import { SETTINGS_JSON_SCHEMA, settingsToJsonDoc } from '@/settings/settingsSchema';
+import { DEFAULT_SETTINGS } from '@/settings/persistence';
 
 describe('createJsonSettingsEditor', () => {
   let host: HTMLElement;
@@ -71,5 +77,73 @@ describe('createJsonSettingsEditor', () => {
     expect(cm.hasAttribute('aria-invalid')).toBe(false);
     expect(cm.hasAttribute('aria-errormessage')).toBe(false);
     ed.destroy();
+  });
+});
+
+// The hover/completion surfaces (#765) drive title/description from SETTINGS_JSON_SCHEMA. They can't be
+// exercised through real mouse events in happy-dom (no layout → no posAtCoords), so we mount a view with
+// the same schema-aware extensions the editor installs and invoke the source at an explicit offset — the
+// document position is what the source resolves, exactly as a real hover would.
+describe('settings.json schema hover + completion (#765)', () => {
+  const views: EditorView[] = [];
+  const mount = (doc: string): EditorView => {
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const view = new EditorView({
+      parent,
+      state: EditorState.create({
+        doc,
+        extensions: [jsonSchema(SETTINGS_JSON_SCHEMA as unknown as Parameters<typeof jsonSchema>[0])],
+      }),
+    });
+    views.push(view);
+    return view;
+  };
+  afterEach(() => {
+    while (views.length) views.pop()!.destroy();
+    document.body.innerHTML = '';
+  });
+
+  it('a hover over a field key surfaces its schema title + description', async () => {
+    const doc = settingsToJsonDoc(DEFAULT_SETTINGS);
+    const view = mount(doc);
+    const pos = doc.indexOf('"tabSize"') + 3; // inside the `tabSize` key
+    const tip = await settingsSchemaHover(view, pos, 1);
+    expect(tip).not.toBeNull();
+    const dom = tip!.create(view).dom as HTMLElement;
+    expect(dom.className).toContain('koi-hover');
+    // The title (which the bundled extension never surfaces) and the description both reach the user.
+    expect(dom.textContent).toContain('Tab size');
+    expect(dom.textContent).toContain('Indent width in spaces.');
+    expect(dom.querySelector('strong')?.textContent).toBe('Tab size'); // title rendered bold
+  });
+
+  it('degrades silently (no tooltip) on a group key, the root, and an unknown key', async () => {
+    const doc = settingsToJsonDoc(DEFAULT_SETTINGS);
+    const view = mount(doc);
+    expect(await settingsSchemaHover(view, doc.indexOf('"editor"') + 3, 1)).toBeNull(); // group key
+    expect(await settingsSchemaHover(view, 1, 1)).toBeNull(); // document root
+
+    const typo = mount('{\n  "editor": {\n    "tabSiz": 2\n  }\n}');
+    expect(await settingsSchemaHover(typo, '{\n  "editor": {\n    "tabSiz'.length - 2, 1)).toBeNull();
+  });
+
+  it('a completion inside a group carries the field title as detail + description as info', async () => {
+    const doc = '{\n  "editor": {\n    "tab"\n  }\n}';
+    const view = mount(doc);
+    const caret = doc.indexOf('"tab"') + 4; // inside the partial key
+    const result = await settingsCompletionSource(new CompletionContext(view.state, caret, true));
+    expect(result).not.toBeNull();
+    const opt = result!.options.find((o) => o.label === 'tabSize');
+    expect(opt, 'tabSize completion offered').toBeDefined();
+    // The bundled source puts the JSON type ("integer") in detail; we overlay the human-readable title.
+    expect(opt!.detail).toBe('Tab size');
+    // The description is still carried as the info panel (unchanged from the bundled source).
+    const infoEl = typeof opt!.info === 'function' ? await opt!.info(opt!) : opt!.info;
+    const infoText =
+      infoEl && typeof infoEl === 'object' && 'textContent' in infoEl
+        ? (infoEl as HTMLElement).textContent
+        : String(infoEl);
+    expect(infoText).toContain('Indent width in spaces.');
   });
 });
