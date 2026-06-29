@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EditorView } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
+import { CompletionContext } from '@codemirror/autocomplete';
 import { jsonSchema } from 'codemirror-json-schema';
-import { createJsonSettingsEditor, settingsSchemaHover } from './editor';
+import { createJsonSettingsEditor, settingsSchemaHover, settingsCompletionSource } from './editor';
 import { SETTINGS_JSON_SCHEMA, settingsToJsonDoc } from '@/settings/settingsSchema';
 import { DEFAULT_SETTINGS } from '@/settings/persistence';
 
@@ -83,7 +84,7 @@ describe('createJsonSettingsEditor', () => {
 // exercised through real mouse events in happy-dom (no layout → no posAtCoords), so we mount a view with
 // the same schema-aware extensions the editor installs and invoke the source at an explicit offset — the
 // document position is what the source resolves, exactly as a real hover would.
-describe('settings.json schema hover (#765)', () => {
+describe('settings.json schema hover + completion (#765)', () => {
   const views: EditorView[] = [];
   const mount = (doc: string): EditorView => {
     const parent = document.createElement('div');
@@ -125,5 +126,24 @@ describe('settings.json schema hover (#765)', () => {
 
     const typo = mount('{\n  "editor": {\n    "tabSiz": 2\n  }\n}');
     expect(await settingsSchemaHover(typo, '{\n  "editor": {\n    "tabSiz'.length - 2, 1)).toBeNull();
+  });
+
+  it('a completion inside a group carries the field title as detail + description as info', async () => {
+    const doc = '{\n  "editor": {\n    "tab"\n  }\n}';
+    const view = mount(doc);
+    const caret = doc.indexOf('"tab"') + 4; // inside the partial key
+    const result = await settingsCompletionSource(new CompletionContext(view.state, caret, true));
+    expect(result).not.toBeNull();
+    const opt = result!.options.find((o) => o.label === 'tabSize');
+    expect(opt, 'tabSize completion offered').toBeDefined();
+    // The bundled source puts the JSON type ("integer") in detail; we overlay the human-readable title.
+    expect(opt!.detail).toBe('Tab size');
+    // The description is still carried as the info panel (unchanged from the bundled source).
+    const infoEl = typeof opt!.info === 'function' ? await opt!.info(opt!) : opt!.info;
+    const infoText =
+      infoEl && typeof infoEl === 'object' && 'textContent' in infoEl
+        ? (infoEl as HTMLElement).textContent
+        : String(infoEl);
+    expect(infoText).toContain('Indent width in spaces.');
   });
 });

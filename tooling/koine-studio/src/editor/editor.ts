@@ -1582,18 +1582,42 @@ export const settingsSchemaHover = (view: EditorView, pos: number, side: -1 | 1)
   };
 };
 
+// codemirror-json-schema's property completion: built once, reused per request (it reads the schema
+// from the editor state, not from this closure).
+const baseJsonCompletion = jsonCompletion();
+
+/**
+ * Completion source for the editable settings.json editor: delegates to codemirror-json-schema's
+ * property completion, then overlays each field's schema `title` onto the option `detail`. The bundled
+ * source puts the JSON type there and carries the `description` only as the info panel, so the
+ * human-readable name was never visible in the picker (#765). Exported for unit testing.
+ */
+export const settingsCompletionSource = (ctx: CompletionContext): CompletionResult | null => {
+  const result = baseJsonCompletion(ctx);
+  if (!result || Array.isArray(result) || !('options' in result)) return null; // never[] → no completions
+  // The group the cursor sits in (`/editor/ta` → `editor`); option labels are that group's doc keys.
+  const [group] = jsonPointerForPosition(ctx.state, ctx.pos, -1, 'json4').split('/').filter(Boolean);
+  if (!group) return result;
+  const options = result.options.map((o) => {
+    const meta = settingsFieldMeta(group, String(o.label));
+    return meta?.title ? { ...o, detail: meta.title } : o;
+  });
+  return { ...result, options };
+};
+
 /**
  * The schema-aware extensions for the editable settings.json editor. Mirrors codemirror-json-schema's
  * bundled `jsonSchema()` (JSON language + JSON-parse/schema linters + schema-aware completion + hover +
- * schema-in-state) but swaps in {@link settingsSchemaHover} so the per-field `title` reaches the user —
- * the only behavioural change is the hover content; the lint surface is preserved exactly (#765).
+ * schema-in-state) but swaps in {@link settingsSchemaHover} and {@link settingsCompletionSource} so the
+ * per-field `title` reaches the user — the only behavioural change is the hover/completion content; the
+ * lint surface is preserved exactly (#765).
  */
 function settingsSchemaExtensions(schema: Parameters<typeof stateExtensions>[0]): Extension[] {
   return [
     cmJson(),
     linter(jsonParseLinter()),
     linter(jsonSchemaLinter(), { needsRefresh: handleRefresh }),
-    jsonLanguage.data.of({ autocomplete: jsonCompletion() }),
+    jsonLanguage.data.of({ autocomplete: settingsCompletionSource }),
     hoverTooltip(settingsSchemaHover),
     stateExtensions(schema),
   ];
