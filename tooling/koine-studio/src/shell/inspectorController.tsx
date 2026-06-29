@@ -1721,9 +1721,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     selectOutput('compatibility');
     docMessage(checkView, 'Checking against baseline…');
     try {
-      // The browser has no server-side filesystem: read the baseline sources here and pass them to the
-      // in-process compiler. The desktop server reads the folder path itself.
-      const baselineSources = platform.kind === 'browser' ? await platform.readFolderSources(folder) : undefined;
+      // Hosts whose compat check runs in-process must be handed the baseline sources; others read the path.
+      const baselineSources = platform.compatNeedsInProcessSources
+        ? await platform.readFolderSources(folder)
+        : undefined;
       const res = await lsp.check(folder, baselineSources);
       if (res.error) {
         docMessage(checkView, 'Compatibility check failed: ' + res.error, 'error');

@@ -1707,8 +1707,8 @@ export function init(): () => void {
     // returns null, so Settings hides the MCP affordance there.
     mcpEndpoint: () => platform.mcpEndpoint(),
     mcpStop: () => platform.mcpStop(),
-    // Only the desktop shell can host the sidecar; the web build shows recipes but disables the toggle.
-    mcpHostable: platform.kind === 'tauri',
+    // Only a host that can serve the sidecar exposes the toggle; others show recipes but disable it.
+    mcpHostable: platform.canHostMcp,
     // Workspace root: only the browser (File System Access API) can save projects to a root dir.
     canSaveProjects: platform.canSaveProjects,
     workspaceRootName: () => platform.workspaceRootName(),
