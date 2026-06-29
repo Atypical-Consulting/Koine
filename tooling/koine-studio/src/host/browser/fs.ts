@@ -356,6 +356,17 @@ export async function pickWorkspaceRoot(): Promise<string | null> {
   return dir.name || null;
 }
 
+/** True for the File System Access `NotFoundError` raised when a handle's backing entry is gone. */
+function isNotFoundError(e: unknown): boolean {
+  return !!e && typeof e === 'object' && (e as { name?: string }).name === 'NotFoundError';
+}
+
+/** Forget the remembered workspace root (in-memory + IndexedDB) so the next save re-prompts the picker. */
+async function forgetWorkspaceRoot(): Promise<void> {
+  workspaceRoot = null;
+  await idbDelete(WORKSPACE_ROOT_KEY);
+}
+
 /**
  * Create `<root>/<name>/`, write `files` into it, and register it exactly like a folder opened via
  * the picker (token minted, handle persisted to IndexedDB) so it reopens through the normal
@@ -367,21 +378,36 @@ export async function saveProjectToRoot(
   files: { relPath: string; contents: string }[],
 ): Promise<string | null> {
   assertName(name);
-  const root = await resolveWorkspaceRoot();
-  if (!root) return null;
-  if (await entryExists(root, name)) throw new Error('already exists: ' + name);
-  const projectDir = await root.getDirectoryHandle(name, { create: true });
-  const token = await uniqueToken(name);
-  folders.set(token, projectDir);
-  folderNames.set(token, name);
-  dirHandles.set(token, projectDir);
-  // Registries are populated before the writes; a mid-loop createFile failure leaves a partial
-  // <root>/<name>/ dir on disk and a session-only token (no idbPut runs). By design there is no
-  // rollback — the caller reports the error and the user retries with a different name (collision
-  // then surfaces 'already exists'). See the spec's error-handling section.
-  for (const f of files) await createFile(token, f.relPath, f.contents);
-  await idbPut(token, projectDir);
-  return token;
+  // The remembered root can have been deleted or moved on disk since it was picked — getDirectoryHandle
+  // with { create: true } then throws NotFoundError (its parent is gone), which used to dead-end the
+  // save with an opaque "save to disk failed". Forget the dead root and re-prompt the picker ONCE so a
+  // vanished projects folder self-heals; a second failure (or any other error) propagates to the caller.
+  for (let attempt = 0; ; attempt++) {
+    const root = await resolveWorkspaceRoot();
+    if (!root) return null;
+    if (await entryExists(root, name)) throw new Error('already exists: ' + name);
+    let projectDir: FsDirHandle;
+    try {
+      projectDir = await root.getDirectoryHandle(name, { create: true });
+    } catch (e) {
+      if (attempt === 0 && isNotFoundError(e)) {
+        await forgetWorkspaceRoot();
+        continue; // re-resolve against a freshly picked root and retry
+      }
+      throw e;
+    }
+    const token = await uniqueToken(name);
+    folders.set(token, projectDir);
+    folderNames.set(token, name);
+    dirHandles.set(token, projectDir);
+    // Registries are populated before the writes; a mid-loop createFile failure leaves a partial
+    // <root>/<name>/ dir on disk and a session-only token (no idbPut runs). By design there is no
+    // rollback — the caller reports the error and the user retries with a different name (collision
+    // then surfaces 'already exists'). See the spec's error-handling section.
+    for (const f of files) await createFile(token, f.relPath, f.contents);
+    await idbPut(token, projectDir);
+    return token;
+  }
 }
 
 async function hasAnyKoi(dir: FsDirHandle): Promise<boolean> {
@@ -876,6 +902,20 @@ async function idbGet(key: string): Promise<FsDirHandle | null> {
     });
   } catch {
     return null;
+  }
+}
+
+async function idbDelete(key: string): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // best-effort, mirrors idbPut — a failed delete just means the dead root lingers until re-picked
   }
 }
 
