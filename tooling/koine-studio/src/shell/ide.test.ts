@@ -191,6 +191,9 @@ class FakePlatform implements Platform {
     if (this.files.size === 0) this.files.set('model.koi', seed);
     return Promise.resolve(ROOT);
   }
+  isAutoRestorableToken(token: string): Promise<boolean> {
+    return Promise.resolve(token === '(default)' || token.startsWith('example-'));
+  }
   folderName(): string {
     return 'workspace';
   }

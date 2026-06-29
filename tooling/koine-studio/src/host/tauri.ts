@@ -146,6 +146,11 @@ class TauriTerminalTransport implements TerminalTransport {
   }
 }
 
+// The app-data subdirectory under which materialized template/example workspaces live
+// (`<appData>/workspaces/<id>`). Shared by materializeWorkspace (which mints these tokens) and
+// isAutoRestorableToken (which recognizes them at boot) so the two never drift.
+const WORKSPACES_SUBDIR = 'workspaces';
+
 export class TauriPlatform implements Platform {
   readonly kind = 'tauri' as const;
   readonly canHostMcp = true;
@@ -265,7 +270,7 @@ export class TauriPlatform implements Platform {
     name: string,
     files: { relPath: string; contents: string }[],
   ): Promise<string | null> {
-    const dir = await join(await appDataDir(), 'workspaces', name);
+    const dir = await join(await appDataDir(), WORKSPACES_SUBDIR, name);
     try {
       await invoke('delete_entry', { token: dir }); // discard a previous copy
     } catch {
@@ -282,6 +287,17 @@ export class TauriPlatform implements Platform {
     const existing = await this.listKoiFiles(dir).catch(() => [] as KoiFile[]);
     if (existing.length === 0) await this.createFile(dir, 'model.koi', seed);
     return dir;
+  }
+
+  // Cold-boot may silently re-open a materialized template/example dir (`<appData>/workspaces/<id>`)
+  // because, unlike the browser's File System Access handles, a desktop path needs no permission
+  // gesture to read. The default workspace (`<appData>/Untitled`) is excluded — it has its own
+  // defaultWorkspace re-open flow — as is any externally *picked* folder, which stays a manual Recents
+  // click. Without this, a desktop template token (an absolute path, not a browser `example-*` slug)
+  // matched nothing and every reload reverted to the blank default.
+  async isAutoRestorableToken(token: string): Promise<boolean> {
+    const root = await join(await appDataDir(), WORKSPACES_SUBDIR);
+    return token === root || token.startsWith(`${root}/`) || token.startsWith(`${root}\\`);
   }
 
   folderName(token: string): string {

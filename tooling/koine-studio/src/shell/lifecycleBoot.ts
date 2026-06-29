@@ -17,13 +17,12 @@ import { type Template } from '@/welcome/templates';
 // after "New" / a default-workspace open (#535).
 const DEFAULT_WS_TOKEN = '(default)';
 
-// Which workspace tokens the cold-boot ladder is allowed to silently re-open (#535). OPFS-backed dirs —
-// the default workspace and every materialized `example-*` dir — re-acquire from IndexedDB with NO
-// permission prompt, so boot can restore them. A *picked* folder handle needs a `requestPermission`
-// re-grant that requires a user gesture boot can't supply, so it must stay a manual Recents click.
-function isOpfsInternalToken(token: string): boolean {
-  return token === DEFAULT_WS_TOKEN || token.startsWith('example-');
-}
+// Which workspace tokens the cold-boot ladder may silently re-open (#535) is a HOST capability, not a
+// token-shape guess made here: the browser mints `example-*` slugs, the desktop mints absolute
+// `<appData>/workspaces/*` paths, and only the host knows which of its own tokens re-acquire without a
+// permission gesture. The ladder asks `deps.isAutoRestorableToken`. (The desktop bug this fixes: its
+// path tokens matched the old browser-only `example-*` test nowhere, so every reload reverted a
+// just-opened template to the blank default.)
 
 export interface LifecycleBootDeps {
   lsp: {
@@ -40,6 +39,8 @@ export interface LifecycleBootDeps {
   importSharedWorkspace(files: { relPath: string; text: string }[], active?: string): Promise<void>;
   openWorkspaceWith1File(text: string): Promise<void>;
   openFolderPath(folder: string, opts?: { recent?: boolean }): Promise<{ ok: boolean }>;
+  /** Host capability: may the cold-boot ladder silently re-open this persisted last-workspace token? */
+  isAutoRestorableToken(token: string): Promise<boolean>;
   /** Open the host's persistent default workspace (workspace.openDefaultWorkspaceFlow). */
   openHostDefaultWorkspaceFlow(seed: string): Promise<{ opened: boolean }>;
   setStatus(text: string, kind: 'green' | 'error'): void;
@@ -152,18 +153,17 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
       } else {
         // A start action chosen on the Home route (#368) is queued as a one-shot intent and performed
         // here, once. A plain editor boot has no intent: restore the workspace it was last on (#535).
-        // Only an `example-*` dir is re-opened through openFolderPath here (re-acquires with NO prompt);
-        // a *picked* folder is never auto-restored, by design. The default workspace flows through
-        // openDefaultWorkspaceFlow below. On any restore failure we also fall through to the default.
+        // Only a host-internal materialized dir is re-opened here (browser `example-*` / desktop
+        // `<appData>/workspaces/*` — both re-acquire with NO prompt); a *picked* folder is never
+        // auto-restored, by design. The default workspace flows through openDefaultWorkspaceFlow below.
+        // On any restore failure we also fall through to the default.
         const intent = takeStartIntent();
         if (intent) {
           await runStartIntent(intent);
         } else {
           const last = getLastWorkspace();
-          const restoredExample =
-            !!last && last !== DEFAULT_WS_TOKEN && isOpfsInternalToken(last)
-              ? (await deps.openFolderPath(last, { recent: false })).ok
-              : false;
+          const restorable = !!last && last !== DEFAULT_WS_TOKEN && (await deps.isAutoRestorableToken(last));
+          const restoredExample = restorable ? (await deps.openFolderPath(last as string, { recent: false })).ok : false;
           // Legacy-scratch migration is deliberately NOT done on the example-restore path: the scratch
           // content is only ever preserved by being seeded into the default workspace.
           if (!restoredExample) await openDefaultWorkspaceFlow(legacyScratch ?? seed);

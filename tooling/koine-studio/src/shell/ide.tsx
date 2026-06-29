@@ -1254,6 +1254,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     importSharedWorkspace: (files, active) => exportShare.importSharedWorkspace(files, active),
     openWorkspaceWith1File: (text) => workspace.openWorkspaceWith1File(text),
     openFolderPath: (folder, opts) => workspace.openFolderPath(folder, opts),
+    isAutoRestorableToken: (token) => platform.isAutoRestorableToken(token),
     openHostDefaultWorkspaceFlow: (seed) => workspace.openDefaultWorkspaceFlow(seed),
     setStatus,
     setOutput: (content, lang) => output.setContent(content, lang),
