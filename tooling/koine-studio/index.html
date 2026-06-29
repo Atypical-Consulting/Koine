@@ -28,6 +28,11 @@
          the belt-and-braces half of the IDE→Home flash fix (#368) — even if a frame slips in before
          bootStudio runs, it can't be a frame of the wrong view. -->
     <div id="app" hidden>
+      <!-- Topbar. Per the single-home contract (docs/shell-bars-contract.md, #756) this bar owns
+           ACTIONS + transient action-feedback: the model-action buttons (New/Open/Generate/Save/Check),
+           theme/settings/palette, install/update affordances, and the #status action-feedback pill.
+           Persistent ambient state (connection, validity, problems, compiling, context, version,
+           unsaved) lives in #statusbar instead — one home per fact, nothing mirrored across both bars. -->
       <header id="toolbar">
         <button type="button" id="btn-home" class="brand" title="Back to the start screen" aria-label="Back to the start screen">
           <!-- Monogram injected from the shared koineMark() template at startup (see ide.ts) so the
@@ -143,7 +148,12 @@
               <circle cx="8" cy="12.8" r="1.15" fill="currentColor" stroke="none" />
             </svg>
           </button>
-          <div id="status" data-kind="connecting" role="status" aria-live="polite">connecting…</div>
+          <!-- The action-feedback pill: the topbar's transient last-action toast (Saved / Renamed X→Y /
+               errors), driven by setStatus(text, kind) — NOT a connection indicator (connection lives
+               solely in #sb-connection; see docs/shell-bars-contract.md). Boots neutral/empty (hidden via
+               `#status:empty`) so it can't impersonate the connection indicator at the first frame (#756);
+               role=status + aria-live=polite announce action feedback only. -->
+          <div id="status" role="status" aria-live="polite"></div>
         </div>
       </header>
 
@@ -272,8 +282,11 @@
         <div id="right-strip" class="pane" role="toolbar" aria-label="Tool windows" aria-orientation="vertical"><!-- injected at boot: rightStripMarkup() --></div>
       </main>
 
-      <!-- Bottom status bar: a pure projection of existing state (active context, model validity,
-           connection, version). #status stays in the toolbar; #sb-connection mirrors it here. -->
+      <!-- Bottom status bar. Per the single-home contract (docs/shell-bars-contract.md, #756) this bar
+           owns PERSISTENT AMBIENT STATE read passively: active context, model validity, workspace
+           problems, busy/compiling, connection, version, and unsaved work. #sb-connection is the SOLE
+           connection indicator (not a mirror of the topbar #status pill — that pill is transient
+           action-feedback). One home per fact; urgency escalates an item in place, never mirrored up. -->
       <footer id="statusbar" aria-label="Model status">
         <span class="sb-item" id="sb-context">Context: —</span>
         <span class="sb-item" id="sb-validity">No errors</span>

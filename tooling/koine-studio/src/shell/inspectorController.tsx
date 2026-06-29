@@ -165,8 +165,8 @@ export interface InspectorControllerDeps {
   saveAllDirty(): Promise<void>;
 
   // --- write-path callbacks ide.ts owns (the controller triggers, never owns, these) ---
-  /** Write the status pill (errors route here from the loaders that surface their own failures). */
-  setStatus(text: string, kind: 'connecting' | 'green' | 'error'): void;
+  /** Write the action-feedback pill (errors route here from the loaders that surface their own failures). */
+  setStatus(text: string, kind: 'green' | 'error'): void;
   /** Rename the selected element (LSP rename refactor, applied across ide.ts's buffers). */
   onRenameElement(element: InspectorElement, newName: string): void;
   /** Persist the selected element's `///` description (setDoc → apply across buffers). */

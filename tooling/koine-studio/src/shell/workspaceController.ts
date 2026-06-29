@@ -73,8 +73,8 @@ export interface WorkspaceControllerDeps {
   /** The file explorer view the tree renders into. */
   explorer: WorkspaceExplorer;
 
-  /** Status pill writer (ide.ts's editorSession.setStatus). */
-  setStatus(text: string, kind: 'connecting' | 'green' | 'error'): void;
+  /** Action-feedback pill writer (ide.ts's editorSession.setStatus). */
+  setStatus(text: string, kind: 'green' | 'error'): void;
   /** Refresh the global unsaved-indicator (title bullet + pill) from the current dirty count. */
   refreshDirtyIndicator(): void;
 

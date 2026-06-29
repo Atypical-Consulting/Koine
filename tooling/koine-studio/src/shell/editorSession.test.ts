@@ -7,6 +7,8 @@
 // id surface init() builds), mirroring explorer.test.ts / inspector.test.ts spy + DOM-seed idioms.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { act } from '@testing-library/preact';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { createEditorSession, type EditorSessionDeps } from '@/shell/editorSession';
 import type { CodeAction, CompletionItem, HoverResult, Location, LspDiagnostic, Range } from '@/lsp/lsp';
 
@@ -16,7 +18,7 @@ import type { CodeAction, CompletionItem, HoverResult, Location, LspDiagnostic, 
 // parent for the CodeMirror editor the session constructs.
 const SESSION_HTML = `
   <div id="editor-pane"></div>
-  <div id="status" data-kind="connecting">connecting…</div>
+  <div id="status" role="status" aria-live="polite"></div>
   <span id="diag-count"></span>
   <div id="diag-body"></div>
   <span id="sb-connection"></span>
@@ -272,8 +274,10 @@ describe('createEditorSession — status + server exit', () => {
     const lsp = makeLsp();
     const session = newSession(makeDeps(lsp));
 
-    session.setStatus('connecting…', 'connecting');
-    expect(el('status').textContent).toBe('connecting…');
+    // The pill is action feedback only — a success/error toast, never a connection state (#756).
+    session.setStatus('saved ✓', 'green');
+    expect(el('status').textContent).toBe('saved ✓');
+    expect(el('status').dataset.kind).toBe('green');
     // The connection indicator is independent of transient pill toasts — an error toast (e.g. "Rename
     // rejected") or a model with a warning must not read "Offline".
     session.setStatus('down', 'error');
@@ -300,6 +304,28 @@ describe('createEditorSession — status + server exit', () => {
 
     expect(el('status').dataset.kind).toBe('error');
     expect(el('status').textContent).toContain('137');
+  });
+});
+
+// The topbar `#status` pill is the transient ACTION-FEEDBACK toast (Saved / Renamed X→Y / errors),
+// NOT a connection indicator — connection is `#sb-connection` in the status bar, the single home for
+// that fact (#756). Its boot seed must therefore be neutral: if it shipped "connecting…" it would
+// impersonate the connection indicator for the first frame (two elements reading "connecting…"), the
+// exact overlap #756 removes. This reads the REAL index.html so a regression to a connection seed is
+// caught at the source, not in a hand-copied fixture.
+describe('#status boot seed is decoupled from connection (#756)', () => {
+  const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
+  const seed = new DOMParser().parseFromString(html, 'text/html').getElementById('status');
+
+  test('the index.html #status seed carries no connection text or kind', () => {
+    expect(seed).not.toBeNull();
+    expect(seed!.textContent?.trim()).toBe('');
+    expect(seed!.dataset.kind).not.toBe('connecting');
+  });
+
+  test('#status keeps its action-feedback a11y affordances (role=status, aria-live=polite)', () => {
+    expect(seed!.getAttribute('role')).toBe('status');
+    expect(seed!.getAttribute('aria-live')).toBe('polite');
   });
 });
 
