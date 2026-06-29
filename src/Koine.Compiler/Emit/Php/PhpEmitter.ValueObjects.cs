@@ -31,6 +31,10 @@ public sealed partial class PhpEmitter
             vo.Members,
             emit.EnumMemberToType);
 
+        // Classifies a field's type for `equals()`: a value object / id value object compares
+        // structurally (via its own `equals()`), a primitive/enum by value (`===`) — see #686.
+        var resolver = new TypeResolver(emit.Index);
+
         // A value object folded with `sum` implements the runtime `Summable` seam so the generic
         // `Decimal::sum(@template T of Summable)` helper preserves its type under phpstan --level max
         // (issue #692). `add()` is already emitted demand-driven (WriteAdditiveOp / WriteQuantityOps);
@@ -70,7 +74,7 @@ public sealed partial class PhpEmitter
 
         // Structural equals method.
         sb.Append('\n');
-        WriteEquals(sb, fields);
+        WriteEquals(sb, fields, resolver);
 
         // Quantity-specific arithmetic methods.
         if (vo.IsQuantity)
@@ -196,7 +200,7 @@ public sealed partial class PhpEmitter
     // Equals
     // -------------------------------------------------------------------------
 
-    private static void WriteEquals(StringBuilder sb, IReadOnlyList<Member> fields)
+    private static void WriteEquals(StringBuilder sb, IReadOnlyList<Member> fields, TypeResolver resolver)
     {
         sb.Append(Indent).Append("public function equals(self $other): bool\n");
         sb.Append(Indent).Append("{\n");
@@ -210,11 +214,31 @@ public sealed partial class PhpEmitter
             sb.Append(Indent).Append(Indent).Append("return ");
             for (int i = 0; i < fields.Count; i++)
             {
-                var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(fields[i].Name));
-                // Decimal uses its own equals(); everything else uses ===.
-                if (fields[i].Type.Name == "Decimal")
+                Member field = fields[i];
+                var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(field.Name));
+
+                // A field whose type carries a structural `equals()` — `Decimal` (a runtime class) or a
+                // value object / id value object — must be compared via that `equals()`, never PHP
+                // `===`, which is reference identity for objects (#686). Primitives/enums keep `===`
+                // (value equality). Nested recursion is automatic: each nested VO's own `equals()`
+                // applies the same rule, matching C# record equality.
+                bool structural = field.Type.Name == "Decimal" || resolver.IsValueLike(field.Type);
+                if (structural)
                 {
-                    sb.Append("$this->").Append(prop).Append("->equals($other->").Append(prop).Append(')');
+                    var lhs = "$this->" + prop;
+                    var rhs = "$other->" + prop;
+                    if (field.Type.IsOptional)
+                    {
+                        // The generated `equals(self $other)` is non-nullable, so guard nulls first:
+                        // two nulls are equal, a present-vs-null pair is unequal, two present values
+                        // compare structurally.
+                        sb.Append('(').Append(lhs).Append(" === null ? ").Append(rhs).Append(" === null : (")
+                          .Append(rhs).Append(" !== null && ").Append(lhs).Append("->equals(").Append(rhs).Append(")))");
+                    }
+                    else
+                    {
+                        sb.Append(lhs).Append("->equals(").Append(rhs).Append(')');
+                    }
                 }
                 else
                 {
