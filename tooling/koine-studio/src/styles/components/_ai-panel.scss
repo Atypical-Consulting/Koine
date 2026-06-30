@@ -4,8 +4,12 @@
   flex-direction: column;
   height: 100%;
 }
-/* `display: flex` above would otherwise beat the UA `[hidden] { display: none }`, so the panel
-   stays visible after a tab switch (its intro/controls leaking onto another view). */
+/* Defensive: `display: flex` above would beat the UA `[hidden] { display: none }` if `koi-assistant`
+   were itself the hidden-toggled node. Since #759 the AI-Chat host is the AssistantView mount node
+   (`.koi-assistant-mount.koi-assistant`) nested inside the `#view-assistant` `.rview` section, and the
+   controller toggles `hidden` on that OUTER section (a bare `.rview`, no `display` override) — so hiding
+   already works via the UA rule. This guard stays in case a future change toggles `hidden` directly on
+   the panel node. */
 .koi-assistant[hidden] {
   display: none;
 }

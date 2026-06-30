@@ -4,8 +4,10 @@
 // point: nothing here is constructed until first use (the Anthropic SDK, the PTY broker, etc. stay
 // unloaded until the user opens the panel). Pure structural lift: each ensure* keeps its exact config;
 // it just moves out of init() and reaches the editor / workspace / host through the injected `deps`.
+import { createElement, render } from 'preact';
 import { createSettingsPage, type SettingsPageHandle } from '@/settings/settingsPage';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
+import { AssistantView, ASSISTANT_MOUNT_CLASS } from '@/shell/AssistantView';
 import { createScenarioPanel, type ScenarioPanel } from '@/scenarios/scenarioPanel';
 import { createTerminalPanel, type TerminalPanel } from '@/shell/terminal/terminalPanel';
 import { createReviewPanel, type ReviewPanel } from '@/review/ReviewPanel';
@@ -110,8 +112,16 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
   let assistant: AssistantPanel | null = null;
   function ensureAssistant(): AssistantPanel {
     if (assistant) return assistant;
+    // The #view-assistant host content is owned by the AssistantView Preact island (#759): render it once
+    // (synchronously creating the mount node), then mount the imperative aiPanel into that node. Preact
+    // doesn't flush effects within render(), so we query the node and build the panel synchronously here —
+    // keeping ensureAssistant's synchronous, idempotent contract (the inspector controller + palette use
+    // the returned panel immediately). AssistantView never re-renders, so it never clobbers aiPanel's DOM.
+    render(createElement(AssistantView, null), assistantView);
+    const assistantMount = assistantView.querySelector<HTMLElement>(`.${ASSISTANT_MOUNT_CLASS}`);
+    if (!assistantMount) throw new Error('missing assistant mount node');
     assistant = createAssistantPanel({
-      container: assistantView,
+      container: assistantMount,
       getProvider: () => loadSettings().aiProvider,
       getBaseUrl: () => loadSettings().aiBaseUrl,
       getApiKey: () => loadSettings().aiApiKey,

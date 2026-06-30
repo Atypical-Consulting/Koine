@@ -14,8 +14,9 @@ import {
   type InspectorControllerDeps,
   type InspectorControllerLsp,
 } from '@/shell/inspectorController';
-import { leftRailMarkup } from '@/shell/leftRail';
-import { rightStripMarkup } from '@/shell/rightStrip';
+import { createElement, render } from 'preact';
+import { LeftRail } from '@/shell/LeftRail';
+import { RightStrip } from '@/shell/RightStrip';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
 import { createAppStore } from '@/store/index';
 import * as maxgraphRenderer from '@/diagrams/diagrams-maxgraph';
@@ -41,7 +42,7 @@ const APP_HTML = `
   <div id="app">
     <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
     <main id="split">
-      <aside id="leftrail" class="pane">${leftRailMarkup()}</aside>
+      <aside id="leftrail" class="pane"></aside>
       <section id="center" class="pane">
         <div id="deck-bar"></div>
         <div id="center-body">
@@ -101,13 +102,18 @@ const APP_HTML = `
           <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
         </div>
       </aside>
-      <div id="right-strip" class="pane" role="toolbar" aria-label="Tool windows" aria-orientation="vertical">${rightStripMarkup()}</div>
+      <div id="right-strip" class="pane" role="toolbar" aria-label="Tool windows" aria-orientation="vertical"></div>
     </main>
     <footer id="statusbar"><span class="sb-item" id="sb-context">Context: —</span></footer>
   </div>`;
 
 function seedDom(): void {
   document.body.innerHTML = APP_HTML;
+  // The left rail + right-strip buttons are Preact components now (#759, were leftRailMarkup /
+  // rightStripMarkup): render them into their thin shells so the controller's rail/`.rstrip-btn` lookups +
+  // wiring resolve, as the boot does.
+  render(createElement(LeftRail, null), document.getElementById('leftrail')!);
+  render(createElement(RightStrip, null), document.getElementById('right-strip')!);
 }
 
 function el<T extends HTMLElement>(id: string): T {
