@@ -16,7 +16,8 @@ internal sealed record TokenContext(
     string Partial,
     string? EnclosingKeyword,
     string? EnclosingTypeName,
-    bool InsideStringOrRegex);
+    bool InsideStringOrRegex,
+    string? EnclosingContextName = null);
 
 internal static class TokenLocator
 {
@@ -147,9 +148,9 @@ internal static class TokenLocator
             ? ""
             : current.Text.Substring(0, Math.Clamp(targetCol - current.Column, 0, current.Text.Length));
 
-        var (enclosingKeyword, enclosingType) = EnclosingScope(def, targetLine, targetCol);
+        var (enclosingKeyword, enclosingType, enclosingContext) = EnclosingScope(def, targetLine, targetCol);
         return new TokenContext(preceding, beforePreceding, current, partial,
-            enclosingKeyword, enclosingType, insideStringOrRegex);
+            enclosingKeyword, enclosingType, insideStringOrRegex, enclosingContext);
     }
 
     private static bool IsWord(IToken t)
@@ -201,13 +202,14 @@ internal static class TokenLocator
 
     /// <summary>
     /// The innermost <c>{ }</c> block enclosing the cursor: its introducing keyword
-    /// (e.g. <c>service</c>, <c>entity</c>), and the name of the nearest enclosing
+    /// (e.g. <c>service</c>, <c>entity</c>), the name of the nearest enclosing
     /// fielded type (value/entity/aggregate/quantity/event) whose fields are in scope — used
     /// to offer field-name completions inside invariant/command/create bodies and as the
-    /// field-rename scope. A forward
+    /// field-rename scope — and the name of the enclosing bounded <c>context</c> (#389), the
+    /// disambiguator for a type-name that is declared in more than one context. A forward
     /// scan pushes each block's (keyword, name) on <c>{</c> and pops on <c>}</c>.
     /// </summary>
-    private static (string? Keyword, string? FieldedType) EnclosingScope(List<IToken> def, int line, int col)
+    private static (string? Keyword, string? FieldedType, string? Context) EnclosingScope(List<IToken> def, int line, int col)
     {
         var stack = new Stack<(string Keyword, string? Name)>();
         string? pendingKeyword = null;
@@ -249,15 +251,21 @@ internal static class TokenLocator
         string? keyword = stack.Count == 0 ? null : (stack.Peek().Keyword.Length == 0 ? null : stack.Peek().Keyword);
 
         string? fieldedType = null;
+        string? enclosingContext = null;
         foreach ((string Keyword, string? Name) frame in stack) // Stack enumerates innermost-first
         {
-            if (FieldedTypeKeywords.Contains(frame.Keyword) && frame.Name is not null)
+            if (fieldedType is null && FieldedTypeKeywords.Contains(frame.Keyword) && frame.Name is not null)
             {
                 fieldedType = frame.Name;
-                break;
+            }
+
+            // The enclosing bounded context (outermost block keyword; contexts do not nest).
+            if (frame.Keyword == "context" && frame.Name is not null)
+            {
+                enclosingContext = frame.Name;
             }
         }
 
-        return (keyword, fieldedType);
+        return (keyword, fieldedType, enclosingContext);
     }
 }

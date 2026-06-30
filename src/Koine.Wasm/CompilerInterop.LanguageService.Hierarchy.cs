@@ -214,8 +214,9 @@ public static partial class CompilerInterop
     /// <summary>
     /// Maps a <see cref="TypeHierarchyItem"/> to the wire <see cref="WTypeHierarchyItem"/>: kind is an LSP
     /// SymbolKind number; range + selectionRange are both the declaration's 0-based name span; the
-    /// <c>data</c> blob carries the in-process kind (<c>thKind</c>) so a supertypes/subtypes request can
-    /// reconstruct the item. Mirrors LspServer's <c>TypeHierarchyItemJson</c>.
+    /// <c>data</c> blob carries the in-process kind (<c>thKind</c>) and the declaring bounded context
+    /// (<c>context</c>, #389) so a supertypes/subtypes request can reconstruct the same-named type against
+    /// the right context. Mirrors LspServer's <c>TypeHierarchyItemJson</c>.
     /// </summary>
     private static WTypeHierarchyItem MapTypeHierarchyItem(TypeHierarchyItem item)
     {
@@ -226,13 +227,14 @@ public static partial class CompilerInterop
             item.Uri,
             range,
             range,
-            new WTypeHierarchyData(item.Kind.ToString()));
+            new WTypeHierarchyData(item.Kind.ToString(), item.Context));
     }
 
     /// <summary>
-    /// Reconstructs a <see cref="TypeHierarchyItem"/> from an LSP TypeHierarchyItem JSON: only <c>name</c> +
-    /// <c>data.thKind</c> are read (the supertypes/subtypes resolution keys off the name; the span/uri are
-    /// placeholders). Returns <c>null</c> when malformed — the SAME empty result the stdio LSP produces.
+    /// Reconstructs a <see cref="TypeHierarchyItem"/> from an LSP TypeHierarchyItem JSON: <c>name</c> +
+    /// <c>data.thKind</c> + <c>data.context</c> are read (the supertypes/subtypes resolution keys off the
+    /// (context, name) identity; the span/uri are placeholders). Returns <c>null</c> when malformed — the
+    /// SAME empty result the stdio LSP produces.
     /// </summary>
     private static TypeHierarchyItem? DeserializeTypeHierarchyItem(string itemJson)
     {
@@ -243,7 +245,7 @@ public static partial class CompilerInterop
         }
 
         var kind = Enum.TryParse<TypeHierarchyItemKind>(dto.Data.ThKind, out var k) ? k : TypeHierarchyItemKind.Other;
-        return new TypeHierarchyItem(dto.Name, kind, "", SourceSpan.None);
+        return new TypeHierarchyItem(dto.Name, kind, "", SourceSpan.None) { Context = dto.Data.Context };
     }
 
     /// <summary>Maps a <see cref="TypeHierarchyItemKind"/> to the numeric LSP <c>SymbolKind</c> (mirrors LspServer).</summary>
