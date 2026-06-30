@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   mountPreferencesPane,
   startMcpSidecarIfEnabled,
+  wrapIndex,
   type PrefsCallbacks,
   type PrefsPaneHandle,
 } from '@/settings/prefs';
@@ -956,6 +957,29 @@ describe('mountPreferencesPane', () => {
     handle.destroy();
     expect(host.children.length).toBe(0);
     expect(document.querySelector('.koi-mcp-snippet .cm-editor')).toBeNull();
+  });
+});
+
+describe('wrapIndex — pure roving-tabindex wrap arithmetic', () => {
+  it('advances forward by 1 in a 3-element list', () => {
+    expect(wrapIndex(0, 1, 3)).toBe(1);
+  });
+
+  it('wraps forward past the last element', () => {
+    expect(wrapIndex(2, 1, 3)).toBe(0);
+  });
+
+  it('wraps backward past the first element', () => {
+    expect(wrapIndex(0, -1, 3)).toBe(2);
+  });
+
+  it('wraps a single-element list to itself in both directions', () => {
+    expect(wrapIndex(0, 1, 1)).toBe(0);
+    expect(wrapIndex(0, -1, 1)).toBe(0);
+  });
+
+  it('returns -1 when length is 0 (empty-guard)', () => {
+    expect(wrapIndex(0, 1, 0)).toBe(-1);
   });
 });
 
