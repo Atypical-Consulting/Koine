@@ -4,6 +4,7 @@ import {
   saveSettings,
   patchSettings,
   DEFAULT_SETTINGS,
+  isStartupView,
   initSecrets,
   saveApiKey,
   clearApiKey,
@@ -1025,5 +1026,46 @@ describe('keybinding overrides', () => {
     saveKeybindingOverride('rename', '');
     expect(loadKeybindingOverrides().rename).toBe('');
     expect(resolveKeybindings().rename).toBe('');
+  });
+});
+
+describe('startupView setting (#770)', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('isStartupView accepts the two valid values', () => {
+    expect(isStartupView('home')).toBe(true);
+    expect(isStartupView('lastWorkspace')).toBe(true);
+  });
+
+  it('isStartupView rejects anything else', () => {
+    expect(isStartupView('nonsense')).toBe(false);
+    expect(isStartupView(null)).toBe(false);
+    expect(isStartupView(undefined)).toBe(false);
+    expect(isStartupView(42)).toBe(false);
+  });
+
+  it('defaults to "home" when no settings are stored', () => {
+    expect(DEFAULT_SETTINGS.startupView).toBe('home');
+    expect(loadSettings().startupView).toBe('home');
+  });
+
+  it('round-trips "lastWorkspace" through localStorage', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, startupView: 'lastWorkspace' });
+    expect(loadSettings().startupView).toBe('lastWorkspace');
+  });
+
+  it('round-trips "home" explicitly through localStorage', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, startupView: 'home' });
+    expect(loadSettings().startupView).toBe('home');
+  });
+
+  it('coerces a corrupt persisted value back to "home"', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, startupView: 'nonsense' as never });
+    expect(loadSettings().startupView).toBe('home');
+  });
+
+  it('patchSettings persists startupView correctly', () => {
+    patchSettings({ startupView: 'lastWorkspace' });
+    expect(loadSettings().startupView).toBe('lastWorkspace');
   });
 });

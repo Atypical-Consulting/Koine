@@ -58,6 +58,10 @@ internal class BuildSettings : CommandSettings
     [Description("Application layer: DTO/read-model mapping strategy, plain (default) or mapperly.")]
     public string? AppMapping { get; init; }
 
+    [CommandOption("--regex-match-timeout-ms <MS>")]
+    [Description("Override the C# regex match timeout (ms) for this invocation; wins over targets.csharp.regexMatchTimeoutMs. Must be a positive integer.")]
+    public string? RegexMatchTimeoutMs { get; init; }
+
     /// <summary>
     /// Resolves the flags against a <c>koine.config</c> (explicit <c>--config</c>, or one
     /// discovered beside the input): an explicit flag wins, then <c>targets.&lt;t&gt;.out</c>,
@@ -89,10 +93,16 @@ internal class BuildSettings : CommandSettings
         var targetOptions = config.OptionsFor(resolvedTarget);
         var resolvedOut = Out ?? targetOptions.OutDir ?? config.OutDir;
 
-        // The C# matches-invariant ReDoS-guard match timeout (issues #794/#641): a present
-        // regexMatchTimeoutMs must be a positive integer. Validation lives on TargetOptions so the
-        // config-driven emitter entry points (build/coverage/LSP preview) all reject the same bad config
-        // identically — the same hard-error stance `--app-mapping` takes below.
+        // The C# matches-invariant ReDoS-guard match timeout (issues #794/#641/#811): the
+        // --regex-match-timeout-ms flag wins over the targets.csharp.regexMatchTimeoutMs config key
+        // (same flag-wins-over-config precedence as --target/--out/--layers/--app-mapping). Fold the
+        // flag value into the raw text slot BEFORE TryValidate so a present-but-invalid flag value
+        // goes through the existing validator and yields the existing diagnostic — no second code path.
+        if (RegexMatchTimeoutMs is not null)
+        {
+            targetOptions = targetOptions with { RegexMatchTimeoutMsText = RegexMatchTimeoutMs };
+        }
+
         if (!targetOptions.TryValidate(out error))
         {
             return false;
