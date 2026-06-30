@@ -409,6 +409,7 @@ export function loadedReservedChords(resolved: Record<BindingId, string>): Recor
       const key = b.key;
       if (!key) continue; // mac/win/linux-only variant — not cross-platform portable
       if (registryChords.has(key)) continue; // rebindable row — inter-row conflict logic owns this
+      if (key in result) continue; // first-wins: matches CodeMirror's keymap priority order
       const runName = b.run?.name ?? '';
       const label = BUILT_IN_CHORD_LABELS[runName] ?? (runName || 'Editor command');
       result[key] = label;
