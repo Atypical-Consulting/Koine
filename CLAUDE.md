@@ -16,6 +16,16 @@ Read `README.md` for the language overview and the full construct table, and `US
 roadmap (work is organized as releases **R1–R17**). The docs site source lives in `website/` (Astro
 Starlight). Current version is **0.17.x** (set in `Directory.Build.props`).
 
+## Architecture decisions (ADRs)
+
+Significant architecture or process decisions (a new emitter target, a change to the compiler
+pipeline layering, a new cross-cutting validator, CI/release-process changes, a dependency the whole
+repo will lean on) **must** be captured as an Architecture Decision Record under
+[`/adr/`](adr/README.md) before or alongside the implementing PR — copy `adr/template.md` to the
+next `NNNN-title.md`, fill in Context/Decision/Consequences, and add it to `adr/README.md`'s index.
+A change that contradicts an `Accepted` ADR needs a new ADR that supersedes it, not silent drift.
+Skip an ADR for routine bug fixes and refactors that don't change a decision already on record.
+
 ## Commit identity (important)
 
 Per the workspace rule, commit with the GitHub identity, not the work email:
@@ -23,6 +33,13 @@ Per the workspace rule, commit with the GitHub identity, not the work email:
 ```bash
 git -c user.email=phmatray@gmail.com -c user.name="Philippe Matray" commit -m "..."
 ```
+
+PR titles (which become the squash-merge commit message) **must** follow [Conventional
+Commits](https://www.conventionalcommits.org/) — `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`,
+`test:`, `ci:`, etc., optionally scoped (e.g. `fix(emit-cs): …`). This isn't just a style nit: CI
+(`pr-title-lint.yml`) rejects a non-conforming title, and `release-please` parses these commits to
+derive the next semantic version and changelog entry — see
+[ADR 0002](adr/0002-conventional-commits-and-automated-semver.md).
 
 ## Build, test, run
 
