@@ -264,13 +264,26 @@ export class TauriPlatform implements Platform {
     return Promise.resolve(null);
   }
 
-  // Materialize a synthetic workspace under the app-data dir, fresh each open (mirrors the browser's
-  // OPFS example semantics). Used by multi-file examples and shared-workspace links on the desktop.
+  // Materialize a synthetic workspace under the app-data dir (`<appData>/workspaces/<name>`), mirroring
+  // the browser's OPFS example semantics. `persist` (default false) controls the lifecycle, exactly as
+  // the Platform contract and the browser host declare it (#816):
+  //   • persist === true  → seed-once-and-preserve: seed the bundled files only when the folder holds no
+  //     `.koi` yet, otherwise leave it untouched, so a user's edits to an opened example survive a
+  //     re-open (and a cold boot, now that #807 restores the token). Reuses defaultWorkspace's seed-once
+  //     idiom so the two stay consistent.
+  //   • persist === false → wipe-and-rewrite: discard any prior copy and re-seed, so each open reflects
+  //     exactly its own payload (shared-workspace links / one-shot imports).
   async materializeWorkspace(
     name: string,
     files: { relPath: string; contents: string }[],
+    persist = false,
   ): Promise<string | null> {
     const dir = await join(await appDataDir(), WORKSPACES_SUBDIR, name);
+    if (persist) {
+      const existing = await this.listKoiFiles(dir).catch(() => [] as KoiFile[]);
+      if (existing.length === 0) for (const f of files) await this.createFile(dir, f.relPath, f.contents);
+      return dir;
+    }
     try {
       await invoke('delete_entry', { token: dir }); // discard a previous copy
     } catch {
