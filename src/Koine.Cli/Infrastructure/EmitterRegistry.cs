@@ -103,10 +103,16 @@ internal static class EmitterRegistry
     private static EmitterOptions ToEmitterOptions(TargetOptions options, bool emitSourceMaps = false, bool referenceOnly = false)
     {
         var hasLayers = options.Layers is { Count: > 0 };
+        // Mirror the ToCSharpOptions convention (issue #831): `regexMode = inline` is the default
+        // and must be treated as absent so an all-inline-explicit config still maps to
+        // EmitterOptions.Empty — same rule as ToCSharpOptions, which short-circuits on
+        // !isSourceGeneratedRegex rather than on RegexMode is null.
+        var isDefaultRegexMode = options.RegexModeText is null
+            || string.Equals(options.RegexModeText, "inline", StringComparison.OrdinalIgnoreCase);
         if (options.NamespaceMap.Count == 0 && options.InstantMode is null && options.Layout is null
             && !emitSourceMaps && !referenceOnly
             && !hasLayers && !options.ApplicationMediatr && options.ApplicationMapping is null
-            && options.RegexMatchTimeoutMs is null && options.RegexModeText is null)
+            && options.RegexMatchTimeoutMs is null && isDefaultRegexMode)
         {
             return EmitterOptions.Empty;
         }
