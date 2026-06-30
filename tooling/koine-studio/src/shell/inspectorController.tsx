@@ -1193,14 +1193,18 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // its own sheet — symmetric with the resize-path's instance setDetent('peek'), and split-brain-proof
     // if more than one sheet ever exists (#221).
     if (inspectorSheet && isNarrowViewport() && sel) inspectorSheet.setDetent('half');
-    // Desktop reveal-on-select (#533, #730): a fresh selection makes the Properties panel visible —
-    // switching to Properties if another tool window (Source Control / AI Chat) was open, AND expanding the
-    // rail if it was collapsed (the calm default) — so the just-selected element's inspector shows without a
-    // second click. It never auto-COLLAPSES: a deselect or a manual stripe-collapse is the user's, so
-    // nothing moves unbidden (the `&& sel` guard skips deselects). Skip the redundant repaint only when
-    // Properties is already the open, expanded view.
+    // Desktop reveal-on-select (#533): when an element is selected and the right rail is expanded but
+    // showing a different tool window (Source Control / AI Chat), switch to Properties so the inspector
+    // is visible without a second click. The `&& sel` guard skips deselects — nothing moves unbidden.
+    // Collapsed (#648, approach b): if the rail is collapsed, respect the user's explicit collapse
+    // rather than forcing it open. Instead, add a transient attention cue on the Properties stripe
+    // button so the user sees "something landed here" and can expand with one deliberate click.
     const ui = appStore.getState();
-    if (sel && (ui.right !== 'props' || ui.rightCollapsed)) selectRight('props');
+    if (sel && !ui.rightCollapsed && ui.right !== 'props') {
+      selectRightView('props');
+    } else if (sel && ui.rightCollapsed) {
+      notifyRstripProps();
+    }
     // Re-pass the current model index to the palette so its aggregate-scoped buttons (#254) re-gate against
     // the freshly-selected element — a diagram click rebuilds the index before setting the selection, so
     // resolving the selection's kind here uses the up-to-date index rather than a stale captured prop.
@@ -1588,6 +1592,25 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       }
     });
   }
+  // Transient attention cue on the Properties stripe button when a selection lands while the rail is
+  // collapsed (#648, approach b). A brief flash draws the eye to the affordance the user would click to
+  // reveal the inspector — without forcing the panel open against an explicit collapse.
+  let notifyTimer: ReturnType<typeof setTimeout> | undefined;
+  function notifyRstripProps(): void {
+    const btn = rstripButtons.find((b) => b.dataset.rview === 'props');
+    if (!btn) return;
+    // Remove then re-add so a repeated selection re-triggers the animation from the start, even if the
+    // previous cycle hasn't finished. `void btn.offsetWidth` forces a style recalc so CSS sees the
+    // removal before the re-add — harmless in happy-dom (returns 0) and load-bearing in a real browser.
+    btn.classList.remove('rstrip-notify');
+    void btn.offsetWidth;
+    btn.classList.add('rstrip-notify');
+    clearTimeout(notifyTimer);
+    // Remove the marker after the animation duration so the cue resets and can re-fire on the next
+    // selection without the animation-play-state sticking around.
+    notifyTimer = setTimeout(() => btn.classList.remove('rstrip-notify'), 800);
+  }
+
   // Keep the stripe's pressed state + the collapsed grid in sync however the state changes — a stripe
   // click, the palette command, or a selection auto-activating Properties all route
   // through the slice, so re-running applyRightCollapsed here is the single reconciliation point. Persist
