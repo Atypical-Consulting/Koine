@@ -1131,26 +1131,16 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   // Read-only canvases (context-map, event-flow): if a saved zoom exists restore it; otherwise fit the
   // content to the viewport (the default "see everything" experience). Domain canvas: saved ?? default.
   const applyInitialZoom = (): void => {
-    if (saved !== null) {
-      try {
-        graph.zoomTo(saved / 100, false);
-        (graph as unknown as { center?: (h?: boolean, v?: boolean) => void }).center?.(true, true);
-      } catch {
-        /* container not measurable yet — ignore; the readout still syncs to the real scale below */
-      }
-      syncPct();
-    } else if (readOnly) {
-      fit();
-    } else {
-      const target = getDefaultCanvasZoom();
-      try {
-        graph.zoomTo(target / 100, false);
-        (graph as unknown as { center?: (h?: boolean, v?: boolean) => void }).center?.(true, true);
-      } catch {
-        /* container not measurable yet */
-      }
-      syncPct();
+    // Read-only with no saved zoom: fall back to fit() so the content frames to the viewport.
+    if (saved === null && readOnly) { fit(); return; }
+    const target = saved ?? getDefaultCanvasZoom();
+    try {
+      graph.zoomTo(target / 100, false);
+      (graph as unknown as { center?: (h?: boolean, v?: boolean) => void }).center?.(true, true);
+    } catch {
+      /* container not measurable yet — ignore; the readout still syncs to the real scale below */
     }
+    syncPct();
   };
 
   const button = (glyph: string, label: string, onClick: () => void): HTMLButtonElement => {
