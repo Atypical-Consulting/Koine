@@ -246,9 +246,9 @@ the config key for that invocation. The value must be a **positive integer** num
 or any negative value is rejected at build time (`regexMatchTimeoutMs must be a positive integer
 (milliseconds); got '…'`), because it would otherwise flow into the generated
 `TimeSpan.FromMilliseconds(N)` and throw at the *generated* code's own runtime. Disabling the bound is
-intentionally not supported — the whole point of the guard is to *have* one. A non-integer value is
-ignored (the emitter keeps its `1000` ms default), matching how other malformed config keys are
-forward-compatibly skipped.
+intentionally not supported — the whole point of the guard is to *have* one. A non-integer value
+is likewise a hard error (the same diagnostic is raised) — unlike most config keys that are
+forward-compatibly skipped, a non-parseable timeout value would silently disarm the ReDoS guard.
 
 The generated TypeScript `regexMatch` helper is the seam to harden untrusted-input
 matching without touching every call site — replace its body with a linear-time engine (e.g. RE2)
