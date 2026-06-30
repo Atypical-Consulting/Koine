@@ -28,8 +28,9 @@ internal static class OperatorNeedsAnalyzer
     /// <c>value-object / scalar</c> and records, per value-object type, which scalar C# types
     /// ("int"/"decimal") it is divided by. Drives demand-driven <c>operator /</c> generation (#832) —
     /// the natural dual of scalar multiplication. Division is non-commutative, so only the
-    /// value-object-on-the-left form is recorded (<c>scalar / value-object</c> is not division of the
-    /// value object and is rejected upstream, so it never reaches here as a need).
+    /// value-object-on-the-left form is recorded; <c>scalar / value-object</c> would divide a scalar
+    /// <i>by</i> the value object, which is not a value-object operator, so it is deliberately not
+    /// recorded (its reversed-operand emission is a separate concern, out of scope here).
     /// </summary>
     public static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildScalarDivisionNeeds(KoineModel model, ModelIndex index) =>
         BuildScalarOpNeeds(model, index, BinaryOp.Div);
@@ -572,8 +573,8 @@ internal static class OperatorNeedsAnalyzer
     /// <para>Multiplication is commutative, so both <c>value-object * scalar</c> and
     /// <c>scalar * value-object</c> record the same need. Division is not: only
     /// <c>value-object / scalar</c> (the value object on the left) is a meaningful "scale down" and is
-    /// recorded; <c>scalar / value-object</c> is not division of the value object and is rejected
-    /// upstream, so it is never recorded here.</para>
+    /// recorded; <c>scalar / value-object</c> would divide a scalar <i>by</i> the value object, which is
+    /// not a value-object operator, so it is deliberately not recorded here.</para>
     /// </summary>
     private sealed class ScalarOpWalker : ExprWalker
     {
