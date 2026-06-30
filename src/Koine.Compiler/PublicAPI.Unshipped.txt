@@ -1,4 +1,10 @@
 #nullable enable
+Koine.Compiler.Services.KoineCompiler.Compile(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Emit.IEmitter! emitter) -> Koine.Compiler.Services.CompileResult!
+Koine.Compiler.Services.KoineCompiler.Compile(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Emit.IEmitter! emitter, Koine.Compiler.Diagnostics.DiagnosticFilterOptions! filterOptions) -> Koine.Compiler.Services.CompileResult!
+Koine.Compiler.Services.KoineLanguageService.WorkspaceSymbols(Koine.Compiler.Services.KoineCompilation! compilation, string! query) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.WorkspaceSymbol!>!
+Koine.Compiler.Services.KoineLanguageService.RefactorsAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int startLine, int startChar, int endLine, int endChar) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CodeActionEdit!>!
+static Koine.Compiler.Services.ModelRoundTripService.EmitKoine(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.StructuredEdit! edit) -> Koine.Compiler.Services.EmitResult!
+static Koine.Compiler.Services.ModelRoundTripService.ApplyEdit(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.StructuredEdit! edit) -> Koine.Compiler.Services.ModelEditResult!
 Koine.Compiler.Emit.CSharp.CSharpEmitter.CacheDiscriminator.get -> string!
 Koine.Compiler.Emit.IEmitter.CacheDiscriminator.get -> string!
 Koine.Compiler.Emit.Php.PhpEmitter.CacheDiscriminator.get -> string!
