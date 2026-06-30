@@ -222,10 +222,22 @@ public static Money operator /(Money left, int right) => new Money(left.Amount /
 It divides the numeric field, carries the rest, and routes through the validating constructor — `money / 2`
 scales a value *down*, exactly as `money * 2` scales it up.
 
+Same-type values combine **directly**, too — not only through a `sum` fold. A derived field such as
+`total: Money = fee + fee` or `diff: Money = fee - fee` demand-generates the matching same-type
+`operator +` / `operator -`:
+
+```csharp
+public static Money operator -(Money left, Money right) => new Money(left.Amount - right.Amount, left.Currency);
+```
+
+Like `+`, `-` subtracts each numeric field, carries the rest, guards that the non-numeric fields agree
+(`EUR - USD` throws), and routes through the validating constructor — so a difference that would be
+negative throws the `amount >= 0` invariant at construction, exactly as any other invalid value would.
+
 A value object **scales** by a scalar — multiply in either operand order (`money * 2`, `2 * money`) or
-divide it down (`money / 2`) — and values of the same type are combined through a `sum` fold
-(`lines.sum(...)`, which demand-generates its `operator +`). But a bare scalar is never a valid `+`/`-`
-operand: `5.0 + money` or `money - 1` is a type mismatch (`KOI0215`), because there is no
+divide it down (`money / 2`) — and combines with another value of its **own type** through `+`/`-`,
+whether written directly (`fee + fee`) or via a `sum` fold (`lines.sum(...)`). But a bare scalar is never
+a valid `+`/`-` operand: `5.0 + money` or `money - 1` is a type mismatch (`KOI0215`), because there is no
 `value-object ± scalar` operation in any target. Use `*` or `/` to scale.
 
 :::caution
