@@ -36,12 +36,17 @@ public sealed partial class PhpEmitter
         // structurally (via its own `equals()`), a primitive/enum by value (`===`) — see #686.
         var resolver = new TypeResolver(emit.Index);
 
+        // This value object's full operator demand, resolved once from the analyzer's single-pass model
+        // (#836): the scalar multiply factors, the `sum`-fold `Summable` flag, the plain binary `+`/`-`
+        // ops, and the precomputed `add`-need union. `null` = this VO needs no generated arithmetic.
+        var needs = emit.OperatorNeeds.GetValueOrDefault(vo.Name);
+
         // A value object folded with `sum` implements the runtime `Summable` seam so the generic
         // `Decimal::sum(@template T of Summable)` helper preserves its type under phpstan --level max
         // (issue #692). `add()` is already emitted demand-driven (WriteAdditiveOp / WriteQuantityOps);
         // implementing the interface only adds the `implements` clause and widens `add()`'s parameter
         // to the interface type (PHP forbids narrowing it to the concrete class on an implementer).
-        bool isSummable = emit.AdditiveNeeds.Contains(vo.Name);
+        bool isSummable = needs?.IsSummable ?? false;
 
         var sb = new StringBuilder();
 
@@ -84,26 +89,36 @@ public sealed partial class PhpEmitter
         }
         else
         {
-            // Demand-driven scalar multiply (only when the model actually uses it).
-            if (emit.ScalarNeeds.ContainsKey(vo.Name)
+            // Demand-driven scalar multiply (only when the model actually multiplies this VO by a scalar).
+            if (needs is { MultiplyFactors.Count: > 0 }
                 && fields.Any(m => m.Type.Name is "Int" or "Decimal"))
             {
                 WriteScalarOp(sb, fields);
             }
 
-            // Demand-driven additive (only when the model sums this VO). A summed VO is exactly a
-            // Summable VO (`isSummable`), and gets its `add` via the Summable seam here.
-            if (isSummable)
+            // Demand-driven `add`. The analyzer pre-computes the union of the two demands —
+            // `needs.NeedsAdd` = a `sum`-fold (issue #692) OR a plain binary `+` (issue #813) — so the
+            // emitter no longer recombines two maps itself (#836). `isSummable` (kept distinct by the
+            // analyzer) selects the SHAPE: a summed VO routes its `add` through the `Summable` seam (an
+            // interface-typed parameter, WriteAdditiveOp); a binary-only VO gets a concrete `add(self)`.
+            // Exactly one `add` is emitted, so the previous duplicate-`add` suppression is now structural.
+            if (needs?.NeedsAdd == true)
             {
-                WriteAdditiveOp(sb, fields);
+                if (isSummable)
+                {
+                    WriteAdditiveOp(sb, fields);
+                }
+                else
+                {
+                    WriteValueObjectAdditiveMethod(sb, fields, "add", "add", "+");
+                }
             }
 
-            // Demand-driven plain binary value-object arithmetic — `base + base` / `base - base`
-            // (issue #813). A summed VO already got its `add` from WriteAdditiveOp, so suppress the
-            // duplicate; `subtract` is never part of the Summable seam and is emitted on demand.
-            if (emit.BinaryArithmeticNeeds.TryGetValue(vo.Name, out IReadOnlySet<BinaryOp>? arithmeticOps))
+            // Demand-driven `subtract` — `base - base` (issue #813). Never part of the `Summable` seam, so
+            // it is emitted purely on the binary `-` demand.
+            if (needs is not null && needs.BinaryOps.Contains(BinaryOp.Sub))
             {
-                WriteBinaryArithmeticOps(sb, fields, arithmeticOps, isSummable);
+                WriteValueObjectAdditiveMethod(sb, fields, "subtract", "sub", "-");
             }
         }
 
@@ -417,29 +432,6 @@ public sealed partial class PhpEmitter
     // -------------------------------------------------------------------------
     // Demand-driven plain binary arithmetic (non-quantity value objects, used in `value + value`)
     // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Emits the concrete arithmetic methods a value object needs because the model uses it directly in
-    /// a plain <c>value + value</c> / <c>value - value</c> expression (issue #813) — as opposed to a
-    /// <c>sum</c> fold (<see cref="WriteAdditiveOp"/>) or a scalar scale (<see cref="WriteScalarOp"/>).
-    /// The lowered call site (<c>$vo-&gt;add(...)</c>) is produced by
-    /// <see cref="PhpExpressionTranslator"/>; without these methods it targets an undefined method.
-    /// <paramref name="hasSummableAdd"/> suppresses a duplicate <c>add</c> when the value object is also
-    /// summed (and so already implements <c>Summable</c> with its own <c>add</c>).
-    /// </summary>
-    private static void WriteBinaryArithmeticOps(
-        StringBuilder sb, IReadOnlyList<Member> fields, IReadOnlySet<BinaryOp> ops, bool hasSummableAdd)
-    {
-        if (ops.Contains(BinaryOp.Add) && !hasSummableAdd)
-        {
-            WriteValueObjectAdditiveMethod(sb, fields, "add", "add", "+");
-        }
-
-        if (ops.Contains(BinaryOp.Sub))
-        {
-            WriteValueObjectAdditiveMethod(sb, fields, "subtract", "sub", "-");
-        }
-    }
 
     /// <summary>
     /// Writes one concrete <c>methodName(self $other): self</c> that combines this value object with

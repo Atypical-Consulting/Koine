@@ -66,6 +66,19 @@ internal static class OperatorNeedsAnalyzer
             .ToDictionary(kv => kv.Key, kv => (IReadOnlySet<BinaryOp>)kv.Value.BinaryOps, StringComparer.Ordinal);
 
     /// <summary>
+    /// The whole per-value-object need model — the single-pass output the four scalar / additive /
+    /// binary projection methods derive from — exposed directly for an emitter that needs more than one
+    /// signal at once. The PHP emitter consumes it so the "does this value object need an <c>add</c>?"
+    /// decision (the union of the <c>sum</c>-fold and binary <c>+</c> demands, see
+    /// <see cref="ValueObjectOperatorNeeds.NeedsAdd"/>) lives in the analyzer rather than being
+    /// re-combined from <see cref="BuildAdditiveOperatorNeeds"/> and
+    /// <see cref="BuildValueObjectArithmeticNeeds"/> in the emitter (#836). Internal because it surfaces
+    /// the internal <see cref="ValueObjectOperatorNeeds"/> record.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, ValueObjectOperatorNeeds> BuildValueObjectOperatorNeeds(KoineModel model, ModelIndex index) =>
+        BuildOperatorNeeds(model, index);
+
+    /// <summary>
     /// The single demand-driven pass: walks every expression site (<see cref="ExpressionScanSites"/>)
     /// <b>once</b>, running the scalar-multiply, scalar-divide, <c>sum</c>-fold, and plain-binary
     /// walkers per <c>(Expr, TypeScope)</c> site and merging their signals into one
@@ -139,9 +152,10 @@ internal static class OperatorNeedsAnalyzer
     /// the scalar C# types it is multiplied / divided by, the plain binary additive operators it
     /// participates in, and whether it is folded by <c>sum</c>. One record replaces the separate per-pass
     /// maps the analyzer used to build, so "which operators does this value object need?" is answered in
-    /// one place (#836).
+    /// one place (#836). Exposed (via <see cref="BuildValueObjectOperatorNeeds"/>) to the PHP emitter,
+    /// which needs more than one signal at once.
     /// </summary>
-    private sealed class ValueObjectOperatorNeeds
+    internal sealed class ValueObjectOperatorNeeds
     {
         /// <summary>Scalar C# types ("int"/"decimal") this value object is multiplied by.</summary>
         public HashSet<string> MultiplyFactors { get; } = new(StringComparer.Ordinal);
@@ -154,6 +168,16 @@ internal static class OperatorNeedsAnalyzer
 
         /// <summary>Whether this value object is folded by a <c>sum(selector)</c> (set only by that fold).</summary>
         public bool IsSummable { get; set; }
+
+        /// <summary>
+        /// Whether this value object needs an <c>add</c> operation at all — the union of the <c>sum</c>-fold
+        /// demand (<see cref="IsSummable"/>) and a plain binary <c>+</c> demand. Computed here, in the
+        /// analyzer, so an emitter asks the question once instead of re-combining the sum-fold and binary
+        /// maps itself. <see cref="IsSummable"/> stays a separate flag because it also selects the
+        /// <c>add</c>'s <i>shape</i> (a <c>Summable</c>-typed parameter vs a concrete <c>self</c>), not
+        /// merely whether one is emitted (#836).
+        /// </summary>
+        public bool NeedsAdd => IsSummable || BinaryOps.Contains(BinaryOp.Add);
     }
 
     /// <summary>
