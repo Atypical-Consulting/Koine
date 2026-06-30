@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
 import { expect } from 'storybook/test';
-import { leftRailMarkup } from '@/shell/leftRail';
+import { LeftRail } from '@/shell/LeftRail';
 
 // Regression guard for the rail's Domain·Files axis (#485). The Files section (#rail-files) must be
 // VISUALLY hidden whenever it carries the `hidden` attribute — the state `applyAxis('domain')` puts it
@@ -10,15 +10,17 @@ import { leftRailMarkup } from '@/shell/leftRail';
 // structurally blind to this — it never applies the compiled SCSS — so the guard lives here, in the
 // Storybook/Chromium project, where getComputedStyle reflects the real cascade.
 //
-// The stories render the production markup verbatim (wrapped in the real `#leftrail` host so the scoped
-// rules apply). leftRailMarkup()'s default state — Files hidden, Domain shown — IS the Domain axis; the
-// Files story flips the same `hidden` attributes `applyAxis('files')` toggles, no controller needed.
+// The stories render the production LeftRail component (wrapped in the real `#leftrail` host so the scoped
+// rules apply). LeftRail's default state — Files hidden, Domain shown — IS the Domain axis; the Files
+// story flips the same `hidden` attributes `applyAxis('files')` toggles, no controller needed.
 
 const meta = {
   title: 'Shell/LeftRail',
   parameters: { layout: 'fullscreen' },
   render: () => (
-    <aside id="leftrail" class="pane" dangerouslySetInnerHTML={{ __html: leftRailMarkup() }} />
+    <aside id="leftrail" class="pane">
+      <LeftRail />
+    </aside>
   ),
 } satisfies Meta;
 
