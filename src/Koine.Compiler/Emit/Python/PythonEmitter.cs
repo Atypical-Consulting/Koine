@@ -99,7 +99,8 @@ public sealed partial class PythonEmitter : IEmitter
             // (where the model `sum`s it) or a scalar `__mul__` (where the model multiplies it by a
             // scalar) — shared with the C#/TS emitters so the three stay semantically aligned.
             OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
-            OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index));
+            OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
+            OperatorNeedsAnalyzer.BuildValueObjectArithmeticNeeds(model, index));
 
         var files = new List<EmittedFile>();
 
