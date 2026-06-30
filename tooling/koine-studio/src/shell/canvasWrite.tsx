@@ -9,6 +9,7 @@ import { render } from 'preact';
 import { appStore } from '@/store/index';
 import { openInspectorSheet } from '@/shell/inspectorSheet';
 import { isNarrowViewport } from '@/shared/breakpoint';
+import { domById } from '@/shared/domById';
 import { MobileZoneBar } from '@/shell/MobileZoneBar';
 import { type MobileZone } from '@/store/slices/uiChrome';
 import { createCommentComposer, type CommentComposer } from '@/review/CommentComposer';
@@ -163,17 +164,11 @@ export interface CanvasWrite {
   dispose(): void;
 }
 
-function el<T extends HTMLElement>(id: string): T {
-  const node = document.getElementById(id);
-  if (!node) throw new Error(`missing #${id}`);
-  return node as T;
-}
-
 export function createCanvasWrite(deps: CanvasWriteDeps): CanvasWrite {
   const { editor, workspace, lsp, controller, setStatus, splitEl } = deps;
   // The diagram canvas host — the controller renders into it, but ide.ts owns the authoring gesture
   // listeners (the diagram write-path), which are bound to this node below.
-  const diagramsView = el('center-visual');
+  const diagramsView = domById('center-visual');
 
   // The currently-open comment composer (#479), if any — only one at a time. Dismissing it (Add, Cancel,
   // Escape, or opening another) tears down its host element via the closure captured at mount.
@@ -487,7 +482,7 @@ export function createCanvasWrite(deps: CanvasWriteDeps): CanvasWrite {
       requestAnimationFrame(() => document.dispatchEvent(new Event(DIAGRAM_REFIT_EVENT)));
     } else if (zone === 'code') controller.selectCenter('technical');
   }
-  render(<MobileZoneBar store={appStore} onSelect={selectMobileZone} />, el('mobile-zone-bar-host'));
+  render(<MobileZoneBar store={appStore} onSelect={selectMobileZone} />, domById('mobile-zone-bar-host'));
   // Mirror the active zone onto #split[data-mobile-zone]. 'props' is the exception: the inspector is a
   // bottom-sheet OVERLAY, so selecting it must KEEP the underlying real zone visible — we only mirror REAL
   // zones, leaving the attribute on the last real zone beneath the sheet.

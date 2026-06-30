@@ -271,4 +271,37 @@ public class EmitterSnapshotTests
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
     }
+
+    /// <summary>
+    /// Issue #795: the opt-in <c>RegexMode.SourceGenerated</c> form, captured as a snapshot so the
+    /// <c>[GeneratedRegex]</c> partial-method shape, the <c>partial</c> stamp, and the deterministic
+    /// per-type method naming (one type with a single <c>matches</c>, one with several) stay reviewable and
+    /// locked. The default Inline snapshots above prove the default output is unchanged.
+    /// </summary>
+    [Fact]
+    public Task Source_generated_matches_form_emits_expected_csharp()
+    {
+        const string fixture = """
+            context C {
+              value Email {
+                raw: String
+                invariant raw matches /^[^@]+@[^@]+$/ "invalid email address"
+              }
+              value Code {
+                raw:   String
+                label: String
+                invariant raw   matches /^[A-Z]/     "must start with an uppercase letter"
+                invariant raw   matches /[0-9]$/     "must end with a digit"
+                invariant label matches /^[a-z]+$/   "label must be lowercase letters"
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(
+            fixture, new CSharpEmitter(CSharpEmitterOptions.Empty with { RegexMode = RegexMode.SourceGenerated }));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files))
+            .UseDirectory("Snapshots");
+    }
 }

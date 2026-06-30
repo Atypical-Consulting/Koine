@@ -247,4 +247,179 @@ public class GeneratedCodeTests
         var ex = Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(type, "not-an-email"));
         ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
     }
+
+    [Fact]
+    public void Multiple_matches_invariants_emit_distinctly_named_generated_regex_methods()
+    {
+        // Issue #795: a type may hold several `matches` invariants — including two on the SAME field — so the
+        // source-generated form names each [GeneratedRegex] method with a per-type counter
+        // (<PascalField>Regex<index>) to stay collision-free and deterministic. Here `raw` carries two
+        // matches and `label` one: three distinctly-named partial methods.
+        const string src =
+            "context C {\n  value Code {\n    raw: String\n    label: String\n" +
+            "    invariant raw matches /^[A-Z]/     \"must start with an uppercase letter\"\n" +
+            "    invariant raw matches /[0-9]$/     \"must end with a digit\"\n" +
+            "    invariant label matches /^[a-z]+$/ \"label must be lowercase letters\"\n  }\n}\n";
+        var result = new KoineCompiler().Compile(
+            src, new CSharpEmitter(CSharpEmitterOptions.Empty with { RegexMode = RegexMode.SourceGenerated }));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var code = result.Files.Single(f => f.RelativePath.EndsWith("Code.cs")).Contents;
+        code.ShouldContain("public sealed partial class Code");
+
+        // One [GeneratedRegex] partial method per `matches`, every name DISTINCT (the per-type counter keeps
+        // the two matches on `raw` from colliding).
+        var methodNames = System.Text.RegularExpressions.Regex
+            .Matches(code, @"private static partial Regex (\w+)\(\);")
+            .Select(m => m.Groups[1].Value)
+            .ToList();
+        methodNames.Count.ShouldBe(3);
+        methodNames.Distinct().Count().ShouldBe(3);
+
+        // Compiles + executes under the source generator: a value satisfying all three guards constructs;
+        // violating any one throws.
+        var (asm, errors) = TestSupport.Compile(result.Files, runRegexGenerator: true);
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+        var type = asm.GetType("C.Code")!;
+
+        Activator.CreateInstance(type, "A1", "abc").ShouldNotBeNull();
+        Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(type, "a1", "abc")) // bad raw
+            .InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
+        Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(type, "A1", "ABC")) // bad label
+            .InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
+    }
+
+    [Fact]
+    public void Matches_invariant_emits_a_source_generated_regex()
+    {
+        // Issue #795: under the opt-in RegexMode.SourceGenerated, a `matches` invariant lowers to a cached,
+        // allocation-free [GeneratedRegex] partial method instead of the inline Regex.IsMatch(...) — the
+        // SAME pattern, RegexOptions.None, and timeout, so match behavior is identical (only the evaluation
+        // strategy differs). The containing type gains the `partial` modifier so the source generator can
+        // supply the method body.
+        const string src =
+            "context C {\n  value Email {\n    raw: String\n" +
+            "    invariant raw matches /^[^@]+@[^@]+$/  \"invalid email address\"\n  }\n}\n";
+        var result = new KoineCompiler().Compile(
+            src, new CSharpEmitter(CSharpEmitterOptions.Empty with { RegexMode = RegexMode.SourceGenerated }));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var email = result.Files.Single(f => f.RelativePath.EndsWith("Email.cs")).Contents;
+        email.ShouldContain("[GeneratedRegex(");
+        email.ShouldContain("private static partial Regex");
+        email.ShouldContain("public sealed partial class Email");
+        email.ShouldContain("matchTimeoutMilliseconds: 1000");
+        email.ShouldContain(".IsMatch(");
+        // UsingCollector already pulls in the namespace from the `Regex` token (no collector change needed).
+        email.ShouldContain("using System.Text.RegularExpressions;");
+        // The inline static call must be gone — the guard now goes through the cached matcher.
+        email.ShouldNotContain("Regex.IsMatch(");
+
+        // Run the regex source generator so the partial method gets its body, then construct instances to
+        // prove the source-generated matcher accepts a valid value and rejects an invalid one — parity with
+        // the inline form. A missing generator body would fail this compile, which is what proves it ran.
+        var (asm, errors) = TestSupport.Compile(result.Files, runRegexGenerator: true);
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+        var type = asm.GetType("C.Email")!;
+
+        Activator.CreateInstance(type, "a@b.co").ShouldNotBeNull();
+        var ex = Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(type, "not-an-email"));
+        ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
+    }
+
+    [Fact]
+    public void Source_generated_matches_form_has_identical_semantics_to_the_inline_form()
+    {
+        // Issue #795: the source-generated form is a pure optimization — it must accept/reject EXACTLY what
+        // the inline form does AND keep the same ReDoS timeout. Compile the SAME model both ways and assert
+        // parity across a normal input matrix plus a catastrophic-backtracking input that must time out under
+        // both forms (surfacing RegexMatchTimeoutException, not hanging).
+        const string src =
+            "context C {\n  value Token {\n    raw: String\n" +
+            "    invariant raw matches /^(a+)+$/  \"must be all a's\"\n  }\n}\n";
+        // A small (but non-trivial) timeout: normal inputs match/fail in microseconds, while the catastrophic
+        // input below backtracks far past the budget under either evaluation strategy.
+        var baseOptions = CSharpEmitterOptions.Empty with { RegexMatchTimeoutMs = 100 };
+
+        var inline = CompileMatchType(src, baseOptions with { RegexMode = RegexMode.Inline }, "C.Token", runRegexGenerator: false);
+        var sourceGen = CompileMatchType(src, baseOptions with { RegexMode = RegexMode.SourceGenerated }, "C.Token", runRegexGenerator: true);
+
+        foreach ((var value, var valid) in new[] { ("a", true), ("aaaa", true), ("aaab", false), ("b", false), ("", false) })
+        {
+            Accepts(inline, value).ShouldBe(valid, $"inline rejected/accepted '{value}' unexpectedly");
+            Accepts(sourceGen, value).ShouldBe(valid, $"source-generated diverged from inline on '{value}'");
+        }
+
+        var evil = new string('a', 48) + "!"; // exponential backtracking on `(a+)+`
+        AssertTimesOut(inline, evil);
+        AssertTimesOut(sourceGen, evil);
+    }
+
+    [Fact]
+    public void Source_generated_mode_keeps_matches_in_specs_and_services_compiling()
+    {
+        // Issue #795 regression: the source-generated form (a `[GeneratedRegex]` partial-method CALL) is only
+        // safe where the emitter also DECLARES the method and stamps the type `partial` — i.e. value objects
+        // and entities. `matches` can also appear in a spec condition or a service operation, rendered through
+        // a different translator into a class that declares no partial methods. Those must keep emitting the
+        // (always-valid) inline `Regex.IsMatch` form under SourceGenerated, or the generated C# would call an
+        // undeclared method (CS0103) in a non-partial class.
+        const string src =
+            "context C {\n" +
+            "  value Code {\n    raw: String\n    invariant raw matches /^[A-Z]+$/ \"must be uppercase\"\n  }\n" +
+            "  spec LooksValid on Code = raw matches /^[A-Z]+$/\n" +
+            "  service Checker {\n    operation isCode(raw: String): Bool = raw matches /^[A-Z]+$/\n  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(
+            src, new CSharpEmitter(CSharpEmitterOptions.Empty with { RegexMode = RegexMode.SourceGenerated }));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // The value object gets the optimized [GeneratedRegex] form...
+        var code = result.Files.Single(f => f.RelativePath.EndsWith("Code.cs")).Contents;
+        code.ShouldContain("[GeneratedRegex(");
+        code.ShouldContain("public sealed partial class Code");
+
+        // ...while the spec and service keep the inline bounded form (no dangling generated-method call).
+        var spec = result.Files.Single(f => f.RelativePath.EndsWith("Specifications.cs")).Contents;
+        spec.ShouldContain("Regex.IsMatch(");
+        spec.ShouldNotContain("[GeneratedRegex(");
+        var service = result.Files.Single(f => f.RelativePath.EndsWith("Checker.cs")).Contents;
+        service.ShouldContain("Regex.IsMatch(");
+        service.ShouldNotContain("[GeneratedRegex(");
+
+        // The whole emission must compile (with the regex generator wired in for the VO's partial method).
+        var (asm, errors) = TestSupport.Compile(result.Files, runRegexGenerator: true);
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+    }
+
+    /// <summary>Emits <paramref name="src"/> with <paramref name="options"/>, Roslyn-compiles it (optionally running the regex source generator), and returns the named type.</summary>
+    private static Type CompileMatchType(string src, CSharpEmitterOptions options, string typeName, bool runRegexGenerator)
+    {
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter(options));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var (asm, errors) = TestSupport.Compile(result.Files, runRegexGenerator);
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+        return asm.GetType(typeName)!;
+    }
+
+    /// <summary>True when constructing <paramref name="type"/> with <paramref name="raw"/> succeeds; false when it throws the domain invariant violation (any other exception propagates).</summary>
+    private static bool Accepts(Type type, string raw)
+    {
+        try
+        {
+            Activator.CreateInstance(type, raw);
+            return true;
+        }
+        catch (TargetInvocationException e) when (e.InnerException?.GetType().Name == "DomainInvariantViolationException")
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Asserts that constructing <paramref name="type"/> with <paramref name="raw"/> surfaces a contained <c>RegexMatchTimeoutException</c> (the ReDoS budget tripped), not a hang.</summary>
+    private static void AssertTimesOut(Type type, string raw)
+    {
+        var ex = Should.Throw<TargetInvocationException>(() => Activator.CreateInstance(type, raw));
+        ex.InnerException!.GetType().Name.ShouldBe("RegexMatchTimeoutException");
+    }
 }

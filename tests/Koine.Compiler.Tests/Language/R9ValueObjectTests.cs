@@ -379,4 +379,84 @@ public class R9ValueObjectTests
         files.ShouldContain("operator +");
         files.ShouldContain("operator *");
     }
+
+    // ======================================================================
+    // Scalar add/subtract against a value object is a type mismatch (#804,
+    // follow-up to the reversed-multiply fixes #788/#797). A value object
+    // SCALES by a scalar (Money * 2) and adds to another value object of its
+    // OWN type (Money + Money, via a `sum` fold), but there is no
+    // `operator +/-(value-object, scalar)` in ANY target — so `5.0 + money`
+    // would emit non-compiling code (C# CS0019; a `tsc` type error). The
+    // validator rejects it so no emitter is ever asked to lower it.
+    // ======================================================================
+
+    [Fact]
+    public void Scalar_added_to_a_value_object_is_rejected()
+    {
+        // `5.0 + fee` — Decimal scalar on the LEFT, value object on the RIGHT
+        // (the reversed-additive path probed in #804).
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0
+              }
+              entity Cart identified by CartId {
+                fee: Money
+              }
+              readmodel CartSummary from Cart {
+                bumped: Money = 5.0 + fee
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectScalarArithmetic);
+    }
+
+    [Fact]
+    public void Scalar_subtracted_from_a_value_object_is_rejected()
+    {
+        // Canonical order too: value object on the LEFT, scalar on the RIGHT.
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0
+              }
+              entity Cart identified by CartId {
+                fee: Money
+              }
+              readmodel CartSummary from Cart {
+                docked: Money = fee - 1
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectScalarArithmetic);
+    }
+
+    [Fact]
+    public void Value_object_scalar_multiply_and_same_type_addition_remain_valid()
+    {
+        // The rejection must NOT catch the two SUPPORTED value-object arithmetic
+        // forms: scalar multiply (Money * 2) and same-type addition (sum -> Money + Money).
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0
+              }
+              value CartLine {
+                subtotal: Money
+              }
+              entity Cart identified by CartId {
+                lines: List<CartLine>
+                fee:   Money
+              }
+              readmodel CartSummary from Cart {
+                grandTotal: Money = lines.sum(l => l.subtotal)
+                doubleFee:  Money = fee * 2
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.ValueObjectScalarArithmetic);
+    }
 }

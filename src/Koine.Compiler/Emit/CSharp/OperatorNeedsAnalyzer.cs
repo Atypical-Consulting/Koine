@@ -125,6 +125,50 @@ internal static class OperatorNeedsAnalyzer
         var resolver = new TypeResolver(index);
         var needs = new HashSet<string>(StringComparer.Ordinal);
 
+        foreach ((Expr expr, TypeScope scope) in ExpressionScanSites(model, index))
+        {
+            ScanForValueObjectSum(expr, scope, resolver, needs);
+        }
+
+        return needs;
+    }
+
+    /// <summary>
+    /// Scans every member initializer (and the other expression sites) for a plain
+    /// <c>value-object <b>+</b>/<b>-</b> value-object</c> binary arithmetic — e.g.
+    /// <c>combined: Money = base + base</c> — and records, per value-object type, which additive
+    /// operators it participates in. This is the binary-operator sibling of
+    /// <see cref="BuildAdditiveOperatorNeeds"/> (which only fires on a <c>sum(selector)</c> fold): a
+    /// value object used directly in <c>+</c>/<c>-</c> needs an <c>add</c>/<c>subtract</c> method too,
+    /// otherwise the lowered call site (<c>$vo-&gt;add(...)</c>) targets a method that was never
+    /// generated. A guard-narrowed optional operand still infers as the same value type, so it is
+    /// recorded here as well (its emission need is identical; only the call-site routing differs).
+    /// Target-agnostic like the rest of this analyzer — currently consumed by the PHP emitter, which
+    /// (unlike C#/TS/Python today) generates these methods on demand.
+    /// </summary>
+    public static IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BuildValueObjectArithmeticNeeds(KoineModel model, ModelIndex index)
+    {
+        var resolver = new TypeResolver(index);
+        var needs = new Dictionary<string, HashSet<BinaryOp>>(StringComparer.Ordinal);
+
+        foreach ((Expr expr, TypeScope scope) in ExpressionScanSites(model, index))
+        {
+            new ValueObjectArithmeticWalker(scope, resolver, index, needs).Visit(expr);
+        }
+
+        return needs.ToDictionary(kv => kv.Key, kv => (IReadOnlySet<BinaryOp>)kv.Value, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Every expression the demand-driven value-object analyses scan, paired with the
+    /// <see cref="TypeScope"/> it is resolved in: member initializers, invariant conditions, command
+    /// and factory bodies, state-rule guards, service operation bodies, spec conditions, and
+    /// read-model field projections. Shared by <see cref="BuildAdditiveOperatorNeeds"/> and
+    /// <see cref="BuildValueObjectArithmeticNeeds"/> so the (otherwise identical) site enumeration
+    /// lives in one place.
+    /// </summary>
+    private static IEnumerable<(Expr Expr, TypeScope Scope)> ExpressionScanSites(KoineModel model, ModelIndex index)
+    {
         foreach (ContextNode ctx in model.Contexts)
         {
             foreach (TypeDecl type in ctx.AllTypeDecls())
@@ -146,17 +190,17 @@ internal static class OperatorNeedsAnalyzer
                 {
                     if (m.Initializer is not null)
                     {
-                        ScanForValueObjectSum(m.Initializer, scope, resolver, needs);
+                        yield return (m.Initializer, scope);
                     }
                 }
 
-                // Invariant conditions over the type's members can also fold value objects with sum.
+                // Invariant conditions over the type's members can also use value-object arithmetic.
                 foreach (Invariant inv in Invariants(type))
                 {
-                    ScanForValueObjectSum(inv.Condition, scope, resolver, needs);
+                    yield return (inv.Condition, scope);
                 }
 
-                // Command bodies and state-rule guards can also fold value objects with sum.
+                // Command bodies and state-rule guards can also use value-object arithmetic.
                 if (type is EntityDecl entity)
                 {
                     foreach (CommandDecl cmd in entity.Commands)
@@ -166,17 +210,17 @@ internal static class OperatorNeedsAnalyzer
                         {
                             if (stmt is RequiresClause req)
                             {
-                                ScanForValueObjectSum(req.Condition, cmdScope, resolver, needs);
+                                yield return (req.Condition, cmdScope);
                             }
                             else if (stmt is Transition tr)
                             {
-                                ScanForValueObjectSum(tr.Value, cmdScope, resolver, needs);
+                                yield return (tr.Value, cmdScope);
                             }
                             else if (stmt is EmitClause em)
                             {
                                 foreach (EmitArg arg in em.Args)
                                 {
-                                    ScanForValueObjectSum(arg.Value, cmdScope, resolver, needs);
+                                    yield return (arg.Value, cmdScope);
                                 }
                             }
                         }
@@ -188,30 +232,30 @@ internal static class OperatorNeedsAnalyzer
                         {
                             if (stmt is RequiresClause req)
                             {
-                                ScanForValueObjectSum(req.Condition, factScope, resolver, needs);
+                                yield return (req.Condition, factScope);
                             }
                             else if (stmt is Initialization ini)
                             {
-                                ScanForValueObjectSum(ini.Value, factScope, resolver, needs);
+                                yield return (ini.Value, factScope);
                             }
                             else if (stmt is EmitClause em)
                             {
                                 foreach (EmitArg arg in em.Args)
                                 {
-                                    ScanForValueObjectSum(arg.Value, factScope, resolver, needs);
+                                    yield return (arg.Value, factScope);
                                 }
                             }
                         }
                     }
                     foreach (Expr guard in StateGuards(entity))
                     {
-                        ScanForValueObjectSum(guard, scope, resolver, needs);
+                        yield return (guard, scope);
                     }
                 }
             }
         }
 
-        // Service operation bodies can also fold value objects with sum.
+        // Service operation bodies can also use value-object arithmetic.
         foreach (ContextNode ctx in model.Contexts)
         {
             foreach (ServiceDecl svc in ctx.Services)
@@ -220,20 +264,19 @@ internal static class OperatorNeedsAnalyzer
                 {
                     if (op.Body is not null)
                     {
-                        var scope = TypeScope.FromParams(op.Parameters, index);
-                        ScanForValueObjectSum(op.Body, scope, resolver, needs);
+                        yield return (op.Body, TypeScope.FromParams(op.Parameters, index));
                     }
                 }
             }
         }
 
-        // Spec conditions (rendered over the target type's members) can fold value objects too.
+        // Spec conditions (rendered over the target type's members) can use value-object arithmetic too.
         foreach (SpecDecl spec in AllSpecs(model))
         {
-            ScanForValueObjectSum(spec.Condition, TypeScope.FromMembers(SpecTargetMembers(spec.TargetType, index), index), resolver, needs);
+            yield return (spec.Condition, TypeScope.FromMembers(SpecTargetMembers(spec.TargetType, index), index));
         }
 
-        // Read-model derived-field projections (over the source type's members) can fold value objects with sum too.
+        // Read-model derived-field projections (over the source type's members) can use value-object arithmetic too.
         foreach ((ReadModelDecl rm, string context) in AllReadModels(model))
         {
             TypeScope scope = TypeScope.FromMembers(ReadModelSourceMembers(context, rm.SourceType, index), index);
@@ -241,16 +284,65 @@ internal static class OperatorNeedsAnalyzer
             {
                 if (f.Projection is not null)
                 {
-                    ScanForValueObjectSum(f.Projection, scope, resolver, needs);
+                    yield return (f.Projection, scope);
                 }
             }
         }
-
-        return needs;
     }
 
     private static void ScanForValueObjectSum(Expr expr, TypeScope scope, TypeResolver resolver, HashSet<string> needs) =>
         new ValueObjectSumWalker(scope, resolver, needs).Visit(expr);
+
+    /// <summary>
+    /// Records, per value-object type, which additive operators (<see cref="BinaryOp.Add"/> /
+    /// <see cref="BinaryOp.Sub"/>) it appears as an operand of in plain binary arithmetic. The scope is
+    /// constant for the whole walk; the operand's type is resolved at each binary node. Recurses into
+    /// every node, so an arithmetic op nested under <c>??</c>, <c>let</c>, or a guard is still found.
+    /// </summary>
+    private sealed class ValueObjectArithmeticWalker : ExprWalker
+    {
+        private readonly TypeScope _scope;
+        private readonly TypeResolver _resolver;
+        private readonly ModelIndex _index;
+        private readonly Dictionary<string, HashSet<BinaryOp>> _needs;
+
+        public ValueObjectArithmeticWalker(
+            TypeScope scope, TypeResolver resolver, ModelIndex index, Dictionary<string, HashSet<BinaryOp>> needs)
+        {
+            _scope = scope;
+            _resolver = resolver;
+            _index = index;
+            _needs = needs;
+        }
+
+        protected override void VisitBinary(BinaryExpr n)
+        {
+            if (n.Op is BinaryOp.Add or BinaryOp.Sub)
+            {
+                RecordValueObjectOperand(n.Left, n.Op);
+                RecordValueObjectOperand(n.Right, n.Op);
+            }
+
+            base.VisitBinary(n);
+        }
+
+        // A value-object operand of `+`/`-` needs the matching arithmetic method generated on its class.
+        // The same predicate the emitter routes on (`Classify == Value`) is used here so the recorded
+        // need and the lowered call site agree exactly. Optionality is intentionally ignored — a
+        // guard-narrowed optional operand infers as the same value type and needs the method just as much.
+        private void RecordValueObjectOperand(Expr operand, BinaryOp op)
+        {
+            if (_resolver.TypeOf(operand, _scope).Name is { } name && _index.Classify(name) == TypeKind.Value)
+            {
+                if (!_needs.TryGetValue(name, out HashSet<BinaryOp>? set))
+                {
+                    _needs[name] = set = new HashSet<BinaryOp>();
+                }
+
+                set.Add(op);
+            }
+        }
+    }
 
     /// <summary>
     /// Records the value-object type folded by any <c>sum(selector)</c> in an expression. The
