@@ -118,7 +118,7 @@ export function createSettingsPage(
   function schemaForScope(): Record<string, unknown> {
     return scope === 'workspace' ? WORKSPACE_SETTINGS_JSON_SCHEMA : SETTINGS_JSON_SCHEMA;
   }
-  let scopeToggle: { el: HTMLElement; set(value: JsonScope): void } | null = null;
+  let scopeToggle: { el: HTMLElement; set(value: JsonScope): void; setDisabled(disabled: boolean): void } | null = null;
 
   // The wsKey() value captured when the JSON body was last built, so refresh() can detect a
   // workspace-availability change and fully rebuild the body (toggle enabled-state + seed) instead
