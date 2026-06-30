@@ -20,6 +20,7 @@ import {
   type ViewUpdate,
   WidgetType,
   type Tooltip,
+  type KeyBinding,
 } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import {
@@ -353,6 +354,78 @@ const narrowTouchTheme = EditorView.theme({
 // renderMarkdown was extracted to ./markdown (imported at the top of this file) so it can be unit-tested
 // without a CodeMirror view; re-export it so `@/editor/editor` consumers keep resolving it here.
 export { renderMarkdown };
+
+// --- loaded-keymap accessor (for the Settings conflict check) ---------------
+
+// Small display-label table for the CodeMirror commands the editor's loaded keymaps bind.
+// Keyed by the run function's name; any unlabelled entry falls back to the function name (or
+// "Editor command" for anonymous functions).
+const BUILT_IN_CHORD_LABELS: Readonly<Record<string, string>> = {
+  openSearchPanel: 'Find',
+  closeSearchPanel: 'Close find panel',
+  selectNextOccurrence: 'Select next occurrence',
+  gotoLine: 'Go to line',
+  selectSelectionMatches: 'Select all occurrences',
+  selectAll: 'Select all',
+  moveLineUp: 'Move line up',
+  moveLineDown: 'Move line down',
+  copyLineUp: 'Copy line up',
+  copyLineDown: 'Copy line down',
+  addCursorAbove: 'Add cursor above',
+  addCursorBelow: 'Add cursor below',
+  simplifySelection: 'Collapse selection',
+  toggleComment: 'Toggle comment',
+  indentLess: 'Outdent',
+  indentMore: 'Indent',
+  indentSelection: 'Indent selection',
+  deleteLine: 'Delete line',
+  cursorMatchingBracket: 'Jump to matching bracket',
+  selectParentSyntax: 'Expand selection',
+};
+
+/**
+ * Returns the editor's reserved chord → display-label map derived from the keymaps the editor
+ * actually loads at runtime: `searchKeymap`, `defaultKeymap`, and the `callHierarchyKeys` literal
+ * (`Mod-Alt-h`).
+ *
+ * DOM-free (no `EditorView` required), matching the `keybindings.ts` testable-seam style.
+ * Only the cross-platform `key` property of each {@link KeyBinding} is surfaced — `mac`/`win`/`linux`
+ * platform variants are skipped, since chord recording via `chordFromEvent` always emits the
+ * portable `Mod-` form. `historyKeymap` is NOT loaded by the editor, so `Mod-z`/`Mod-y` are
+ * deliberately absent.
+ *
+ * @param resolved The currently resolved keybinding map. Registry chords are excluded from the
+ *   returned set because the inter-row conflict logic (the `otherId != null` path) already handles
+ *   them; only non-rebindable built-ins belong here.
+ */
+export function loadedReservedChords(resolved: Record<BindingId, string>): Record<string, string> {
+  // Registry chords handled by the inter-row conflict path — must not be double-counted here.
+  const registryChords = new Set(Object.values(resolved).filter((c) => c !== ''));
+
+  const result: Record<string, string> = {};
+
+  function addKeymap(bindings: readonly KeyBinding[]): void {
+    for (const b of bindings) {
+      const key = b.key;
+      if (!key) continue; // mac/win/linux-only variant — not cross-platform portable
+      if (registryChords.has(key)) continue; // rebindable row — inter-row conflict logic owns this
+      const runName = b.run?.name ?? '';
+      const label = BUILT_IN_CHORD_LABELS[runName] ?? (runName || 'Editor command');
+      result[key] = label;
+    }
+  }
+
+  addKeymap(searchKeymap);
+  addKeymap(defaultKeymap);
+
+  // The call-hierarchy shortcut is not part of CodeMirror's exported keymaps — add it explicitly.
+  // It is not user-rebindable yet (#266 scopes the expansion to the five LSP actions).
+  if (!registryChords.has('Mod-Alt-h')) {
+    result['Mod-Alt-h'] = 'Call hierarchy';
+  }
+
+  return result;
+}
 
 // --- hover tooltips ---------------------------------------------------------
 
