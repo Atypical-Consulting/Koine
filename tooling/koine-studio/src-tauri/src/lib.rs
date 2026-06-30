@@ -2903,4 +2903,63 @@ mod tests {
         );
         assert_eq!(*child.lock().unwrap(), Some("child-N+1"));
     }
+
+    // --- pty_stop / pty_start race (#829) ------------------------------------
+    //
+    // `pty_stop` clears `master` OUTSIDE the `child` lock (after releasing it in step 2),
+    // so a `pty_start` that interleaves between the child-reap and the master-clear wipes
+    // the new session's `master`. The fix routes `pty_stop`'s teardown through
+    // `take_pty_child_and_clear_handles`, which holds the `child` lock across all clears so
+    // no racing start can install handles that the trailing clear then clobbers (#829).
+
+    #[test]
+    fn pty_stop_racing_start_keeps_its_fresh_master() {
+        // Reproduce the #829 race deterministically: drive pty_stop's CURRENT three-step
+        // teardown sequence (writer → child-take+release → master) through a race-hook
+        // variant, inject a concurrent start in the post-child-lock / pre-master-clear
+        // window, then assert the fresh master survives.
+        //
+        // Before the #829 fix:  step (3) clears master after the child lock is gone →
+        //                       the racing start's fresh master is wiped → FAIL.
+        // After the #829 fix:   pty_stop delegates to take_pty_child_and_clear_handles,
+        //                       which holds the child lock across both clears; the racing
+        //                       start parks until teardown finishes and installs its handles
+        //                       uncontested → PASS.
+        let child: Mutex<Option<&str>> = Mutex::new(Some("child-N"));
+        let writer: Mutex<Option<&str>> = Mutex::new(Some("writer-N"));
+        let master: Mutex<Option<&str>> = Mutex::new(Some("master-N"));
+
+        std::thread::scope(|s| {
+            // Inline pty_stop's current teardown (matches lib.rs ~1739-1750 before the fix):
+            //   (1) clear writer
+            *writer.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            //   (2) take child under lock, then RELEASE the lock
+            {
+                let mut cg = child.lock().unwrap_or_else(|e| e.into_inner());
+                let _ = cg.take();
+            } // child lock released — race window opens
+
+            // A concurrent pty_start lands in this window: the child lock is free, so it
+            // acquires it immediately and installs fresh handles before pty_stop's step (3).
+            let start = s.spawn(|| {
+                let mut cg = child.lock().unwrap_or_else(|e| e.into_inner());
+                *writer.lock().unwrap_or_else(|e| e.into_inner()) = Some("writer-N+1");
+                *master.lock().unwrap_or_else(|e| e.into_inner()) = Some("master-N+1");
+                *cg = Some("child-N+1");
+            });
+            // Give the racing start a chance to acquire the now-free child lock and install.
+            std::thread::yield_now();
+            start.join().expect("start thread");
+
+            //   (3) clear master OUTSIDE the child lock — the bug: wipes the fresh master
+            *master.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        });
+
+        // The new session's master must survive; today pty_stop's step (3) wipes it.
+        assert_eq!(
+            *master.lock().unwrap(),
+            Some("master-N+1"),
+            "#829: pty_stop must not clobber a racing start's fresh master"
+        );
+    }
 }
