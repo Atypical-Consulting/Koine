@@ -46,7 +46,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           # Astro 7 / Starlight require Node >= 22.12 (matches deploy-docs.yml).
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: website/package-lock.json
 
