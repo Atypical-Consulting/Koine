@@ -15,15 +15,17 @@
        <Version> and <InformationalVersion> are bumped automatically by release-please from
        Conventional Commits (see adr/0002-conventional-commits-and-automated-semver.md) — don't
        hand-edit them, and don't remove the x-release-please-version markers.
-       0.0.0 here is a bootstrap-pending placeholder: the bootstrap-baseline job in
+       0.17.12 here is a transient pre-bootstrap value, not a target: the bootstrap-baseline job in
        release-please.yml overwrites it with the real history-derived version on the first push to
        main after this lands (nothing publishes off a bare push to main, only a v* tag does, so this
-       placeholder is never shipped). -->
+       value is never shipped). It deliberately isn't 0.0.0 — VersionInfoTests /
+       CapabilitiesTests guard against that exact value as the "informational version wasn't wired
+       up" sentinel. -->
   <PropertyGroup>
-    <Version>0.0.0</Version> <!-- x-release-please-version -->
+    <Version>0.17.12</Version> <!-- x-release-please-version -->
     <!-- Carries the real version into the assembly so the CLI version command can read it
          (the four-part AssemblyVersion otherwise reports 1.0.0.0). -->
-    <InformationalVersion>0.0.0</InformationalVersion> <!-- x-release-please-version -->
+    <InformationalVersion>0.17.12</InformationalVersion> <!-- x-release-please-version -->
     <Authors>Philippe Matray</Authors>
     <Company>Atypical Consulting</Company>
     <RepositoryUrl>https://github.com/Atypical-Consulting/Koine</RepositoryUrl>
