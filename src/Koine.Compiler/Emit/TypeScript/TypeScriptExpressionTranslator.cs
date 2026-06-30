@@ -295,13 +295,55 @@ internal sealed class TypeScriptExpressionTranslator
             sb.Append('(');
         }
 
-        WriteOperand(bin.Left, sb, EnumTypeName(bin.Right));
-        sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
-        WriteOperand(bin.Right, sb, EnumTypeName(bin.Left));
+        // A String-typed `+` (string concatenation) routes Bool operands through
+        // WriteStringConcatOperand so they are rendered as `String(boolExpr)` — an explicit
+        // conversion that makes the canonical cross-target "true"/"false" choice visible in
+        // the emitted code, matching PHP's ternary lowering and C#'s explicit ternary (#806).
+        if (IsStringConcat(bin))
+        {
+            WriteStringConcatOperand(bin.Left, sb);
+            sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
+            WriteStringConcatOperand(bin.Right, sb);
+        }
+        else
+        {
+            WriteOperand(bin.Left, sb, EnumTypeName(bin.Right));
+            sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
+            WriteOperand(bin.Right, sb, EnumTypeName(bin.Left));
+        }
+
         if (parenthesize)
         {
             sb.Append(')');
         }
+    }
+
+    /// <summary>
+    /// True when <paramref name="bin"/> is a <c>+</c> whose inferred type is <c>String</c> —
+    /// i.e. a string concatenation that may need Bool operand lowering (#806).
+    /// </summary>
+    private bool IsStringConcat(BinaryExpr bin)
+        => bin.Op == BinaryOp.Add
+        && _resolver.Infer(bin, EffectiveScope()) is { Name: "String" };
+
+    /// <summary>
+    /// Writes one operand of a String-typed <c>+</c>, lowering a non-optional <c>Bool</c>-typed
+    /// operand to <c>String(boolExpr)</c> so the canonical cross-target <c>"true"</c>/<c>"false"</c>
+    /// strings are produced explicitly (TypeScript's <c>+</c> already yields <c>"true"</c>/<c>"false"</c>
+    /// implicitly, but the explicit <c>String()</c> call makes the lowering visible and consistent
+    /// with PHP's ternary and C#'s ternary renderings) (#806).
+    /// </summary>
+    private void WriteStringConcatOperand(Expr expr, StringBuilder sb)
+    {
+        if (_resolver.Infer(expr, EffectiveScope()) is { Name: "Bool", IsOptional: false })
+        {
+            sb.Append("String(");
+            Write(expr, sb);
+            sb.Append(')');
+            return;
+        }
+
+        WriteOperand(expr, sb, enumHint: null);
     }
 
     /// <summary>

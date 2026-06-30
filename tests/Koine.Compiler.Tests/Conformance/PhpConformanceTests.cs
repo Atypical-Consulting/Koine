@@ -638,6 +638,49 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #806 acceptance: <c>String + Bool</c> (and <c>Bool + String</c>) concatenation must
+    /// type-check under <c>phpstan --level max</c> and produce the canonical cross-target
+    /// <c>"true"</c>/<c>"false"</c> strings. PR #800 (#786) routes <c>String + Int</c> to PHP's <c>.</c>
+    /// operator but deliberately excluded <c>Bool</c> from the stringable allow-list because PHP's native
+    /// bool→string coercion (<c>"1"</c>/<c>""</c>) diverges from C# (<c>"True"</c>/<c>"False"</c>) and
+    /// TypeScript (<c>"true"</c>/<c>"false"</c>). The fix admits non-optional <c>Bool</c> behind an
+    /// explicit <c>($expr ? 'true' : 'false')</c> ternary that yields the canonical cross-target strings
+    /// and is provably <c>string</c>-typed at the <c>.</c> site. Always-on guard: asserts the emitted
+    /// ternary shape regardless of the local phpstan toolchain so the lowering is locked end-to-end.
+    /// </summary>
+    [Fact]
+    public void String_plus_bool_concatenation_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Account {\n" +
+            "  value Membership {\n" +
+            "    isActive: Bool\n" +
+            // String-led: String + Bool
+            "    label: String = \"active: \" + isActive\n" +
+            // Bool-led: Bool + String
+            "    caption: String = isActive + \" status\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard: the Bool operand must be lowered to a ternary in both operand orders,
+        // so the emitted PHP is provably string-typed at the `.` site (not the raw bool, which
+        // phpstan --level max rejects as `binaryOp.invalid`).
+        var php = string.Join("\n", result.Files.Select(f => f.Contents));
+        php.ShouldContain("($this->isActive ? 'true' : 'false')");
+        php.ShouldNotContain("+ $this->isActive");
+        php.ShouldNotContain("$this->isActive +");
+        php.ShouldNotContain(". $this->isActive");
+        php.ShouldNotContain("$this->isActive .");
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Follow-up to #825 acceptance: a <c>value-object / scalar</c> division — <c>perUnit: Money = base / 4</c>
     /// — must type-check under <c>phpstan --level max</c>. The translator lowers it to
     /// <c>$this-&gt;base-&gt;dividedBy(...)</c>, but the PHP emitter's scalar-scaling emitter

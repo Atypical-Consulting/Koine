@@ -372,14 +372,77 @@ internal sealed class CSharpExpressionTranslator
     {
         if (expr is BinaryExpr bin)
         {
-            WriteBinaryChild(bin.Left, mode, sb, EnumTypeName(bin.Right), bin.Op, rightOperand: false);
-            sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
-            WriteBinaryChild(bin.Right, mode, sb, EnumTypeName(bin.Left), bin.Op, rightOperand: true);
+            // A String-typed Add routes through WriteStringConcatChild so any Bool-typed
+            // leaf gets the canonical (boolExpr ? "true" : "false") ternary (#806).
+            if (IsStringConcat(bin))
+            {
+                WriteStringConcatChild(bin.Left, mode, sb, bin.Op, rightOperand: false);
+                sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
+                WriteStringConcatChild(bin.Right, mode, sb, bin.Op, rightOperand: true);
+            }
+            else
+            {
+                WriteBinaryChild(bin.Left, mode, sb, EnumTypeName(bin.Right), bin.Op, rightOperand: false);
+                sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
+                WriteBinaryChild(bin.Right, mode, sb, EnumTypeName(bin.Left), bin.Op, rightOperand: true);
+            }
         }
         else
         {
             Write(expr, mode, sb);
         }
+    }
+
+    /// <summary>
+    /// True when <paramref name="bin"/> is a <c>+</c> whose inferred type is <c>String</c> —
+    /// i.e. a string concatenation. Used to route Bool-typed operands through
+    /// <see cref="WriteStringConcatChild"/> so they are lowered to the canonical
+    /// <c>(expr ? "true" : "false")</c> ternary instead of relying on <c>bool.ToString()</c>
+    /// (which yields <c>"True"</c>/<c>"False"</c>, diverging from the canonical cross-target
+    /// <c>"true"</c>/<c>"false"</c> strings) (#806).
+    /// </summary>
+    private bool IsStringConcat(BinaryExpr bin)
+        => bin.Op == BinaryOp.Add && InferType(bin) is { Name: "String" };
+
+    /// <summary>
+    /// Writes one operand of a String-typed <c>+</c> (string concatenation), lowering any
+    /// <c>Bool</c>-typed leaf to <c>(boolExpr ? "true" : "false")</c> so the emitted C# yields
+    /// the canonical lowercase strings rather than <c>bool.ToString()</c>'s
+    /// <c>"True"</c>/<c>"False"</c>. The String-concat context propagates into nested
+    /// associative <c>+</c> chains so every Bool leaf in a chain is lowered (#806).
+    /// </summary>
+    private void WriteStringConcatChild(Expr expr, NameMode mode, StringBuilder sb, BinaryOp parentOp, bool rightOperand)
+    {
+        // Propagate the String-concat context through nested associative chains.
+        if (expr is BinaryExpr child && !NeedsParens(child.Op, parentOp, rightOperand))
+        {
+            if (IsStringConcat(child))
+            {
+                WriteStringConcatChild(child.Left, mode, sb, child.Op, rightOperand: false);
+                sb.Append(' ').Append(OperatorOf(child.Op)).Append(' ');
+                WriteStringConcatChild(child.Right, mode, sb, child.Op, rightOperand: true);
+            }
+            else
+            {
+                // Non-concat nested binary: use regular precedence-aware rendering.
+                WriteBinaryChild(child.Left, mode, sb, EnumTypeName(child.Right), child.Op, rightOperand: false);
+                sb.Append(' ').Append(OperatorOf(child.Op)).Append(' ');
+                WriteBinaryChild(child.Right, mode, sb, EnumTypeName(child.Left), child.Op, rightOperand: true);
+            }
+            return;
+        }
+
+        // Bool leaf → canonical "true"/"false" ternary.
+        if (InferType(expr) is { Name: "Bool", IsOptional: false })
+        {
+            sb.Append('(');
+            Write(expr, mode, sb);
+            sb.Append(" ? \"true\" : \"false\")");
+            return;
+        }
+
+        // All other operand types: regular rendering (no enum hint needed in concat context).
+        WriteOperand(expr, mode, sb, enumHint: null);
     }
 
     /// <summary>
@@ -490,10 +553,23 @@ internal sealed class CSharpExpressionTranslator
             case BinaryExpr bin:
                 // Keep the outer parens (this node may be embedded in a unary/conditional
                 // operand) but elide redundant inner parens within associative chains.
+                // A String-typed Add routes through WriteStringConcatChild so any Bool-typed
+                // leaf is lowered to (boolExpr ? "true" : "false") — C#'s native bool.ToString()
+                // yields "True"/"False" which diverges from the canonical cross-target "true"/"false"
+                // (PHP lowers the same way; TypeScript's + already produces lowercase) (#806).
                 sb.Append('(');
-                WriteBinaryChild(bin.Left, mode, sb, EnumTypeName(bin.Right), bin.Op, rightOperand: false);
-                sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
-                WriteBinaryChild(bin.Right, mode, sb, EnumTypeName(bin.Left), bin.Op, rightOperand: true);
+                if (IsStringConcat(bin))
+                {
+                    WriteStringConcatChild(bin.Left, mode, sb, bin.Op, rightOperand: false);
+                    sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
+                    WriteStringConcatChild(bin.Right, mode, sb, bin.Op, rightOperand: true);
+                }
+                else
+                {
+                    WriteBinaryChild(bin.Left, mode, sb, EnumTypeName(bin.Right), bin.Op, rightOperand: false);
+                    sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
+                    WriteBinaryChild(bin.Right, mode, sb, EnumTypeName(bin.Left), bin.Op, rightOperand: true);
+                }
                 sb.Append(')');
                 break;
 

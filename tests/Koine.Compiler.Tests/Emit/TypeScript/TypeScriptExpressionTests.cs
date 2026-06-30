@@ -319,6 +319,35 @@ public class TypeScriptExpressionTests
     }
 
     [Fact]
+    public void String_plus_bool_concatenation_emits_canonical_String_conversion()
+    {
+        // Issue #806: `String + Bool` (and `Bool + String`) must render the Bool operand via
+        // `String(boolExpr)` so the canonical cross-target "true"/"false" strings are produced
+        // explicitly — TypeScript's native `+` operator already yields lowercase, but the explicit
+        // `String()` call makes the canonical choice visible and aligns with PHP's ternary and
+        // C#'s ternary renderings.
+        const string src =
+            "context Account {\n" +
+            "  value Membership {\n" +
+            "    isActive: Bool\n" +
+            // String-led: String + Bool
+            "    label: String = \"active: \" + isActive\n" +
+            // Bool-led: Bool + String
+            "    caption: String = isActive + \" status\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var membership = result.Files.Single(f => f.RelativePath.EndsWith("Membership.ts")).Contents;
+        // Bool operand must be wrapped in String() in both operand orders.
+        membership.ShouldContain("String(this.isActive)");
+        // The raw bool must not appear as a direct + operand.
+        membership.ShouldNotContain("+ this.isActive");
+        membership.ShouldNotContain("this.isActive +");
+    }
+
+    [Fact]
     public void Matches_with_timeout_threads_the_budget_into_the_regexMatch_call()
     {
         // Key set (#812) ⇒ the call site passes the author's ms budget as the seam's advisory third arg.

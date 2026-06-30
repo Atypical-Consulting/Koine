@@ -99,6 +99,42 @@ public class GeneratedCodeTests
     }
 
     [Fact]
+    public void String_plus_bool_concatenation_emits_canonical_lowercase_ternary()
+    {
+        // Issue #806: `String + Bool` (and `Bool + String`) must emit a `(boolExpr ? "true" : "false")`
+        // ternary rather than relying on `bool.ToString()` ("True"/"False"), so all three emitters
+        // produce the canonical cross-target "true"/"false" strings.
+        const string src =
+            "context Account {\n" +
+            "  value Membership {\n" +
+            "    isActive: Bool\n" +
+            // String-led: String + Bool
+            "    label: String = \"active: \" + isActive\n" +
+            // Bool-led: Bool + String
+            "    caption: String = isActive + \" status\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var file = result.Files.Single(f => f.RelativePath.EndsWith("Membership.cs"));
+        // The Bool operand is lowered to a ternary in both operand orders.
+        file.Contents.ShouldContain("(IsActive ? \"true\" : \"false\")");
+        // The native bool.ToString() path must not appear (would give "True"/"False").
+        file.Contents.ShouldNotContain("+ IsActive");
+        file.Contents.ShouldNotContain("IsActive +");
+
+        // The emitted C# must compile and yield "true"/"false" (not "True"/"False") at runtime.
+        var (asm, errors) = TestSupport.Compile(result.Files);
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+        var membershipType = asm!.GetType("Account.Membership")!;
+        // Explicit object[] to avoid ambiguity with Activator.CreateInstance(Type, bool nonPublic).
+        var instance = Activator.CreateInstance(membershipType, new object[] { true })!;
+        membershipType.GetProperty("Label")!.GetValue(instance)!.ToString().ShouldBe("active: true");
+        membershipType.GetProperty("Caption")!.GetValue(instance)!.ToString().ShouldBe("true status");
+    }
+
+    [Fact]
     public void Entity_equality_uses_only_identity()
     {
         var asm = CompileFixture();
