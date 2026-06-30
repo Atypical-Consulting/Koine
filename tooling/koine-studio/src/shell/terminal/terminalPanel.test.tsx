@@ -11,6 +11,9 @@ interface FakeTerminalTheme {
   background: string;
   foreground: string;
   cursor: string;
+  // ANSI palette entries added in #763 — allow arbitrary string keys so the fake can hold them without
+  // repeating all 16 names here.
+  [key: string]: string | undefined;
 }
 
 interface FakeTerminal {
@@ -83,6 +86,8 @@ import {
   resolveTerminalTheme,
   TERM_PAUSE_WATER,
   TERM_RESUME_WATER,
+  LIGHT_ANSI,
+  DARK_ANSI,
 } from '@/shell/terminal/terminalPanel';
 
 /** A fake terminal transport whose `onData`/`onExit` callbacks the test can drive. */
@@ -137,6 +142,54 @@ describe('resolveTerminalTheme', () => {
     expect(theme.background).toBe('#1e1e1e');
     expect(theme.foreground).toBe('#d4d4d4');
     expect(theme.cursor).toBe('#d4d4d4');
+    el.remove();
+  });
+
+  it('includes LIGHT_ANSI palette entries when the background resolves to a light colour (#763)', () => {
+    // A light --koi-paper-2 means the terminal is running on a light surface; several of xterm's
+    // dark-tuned defaults have poor contrast there, so the theme must swap to the curated light palette.
+    const el = document.createElement('div');
+    el.style.setProperty('--koi-paper-2', '#f4f6fa'); // perceived luminance ≫ 0.5 → light
+    el.style.setProperty('--koi-fg', '#1c2230');
+    document.body.appendChild(el);
+
+    const theme = resolveTerminalTheme(el);
+
+    // Spot-check a few ANSI keys that differ across the two palettes.
+    expect(theme.black).toBe(LIGHT_ANSI.black);
+    expect(theme.red).toBe(LIGHT_ANSI.red);
+    expect(theme.green).toBe(LIGHT_ANSI.green);
+    expect(theme.yellow).toBe(LIGHT_ANSI.yellow);
+    expect(theme.brightWhite).toBe(LIGHT_ANSI.brightWhite);
+    el.remove();
+  });
+
+  it('includes DARK_ANSI palette entries when the background resolves to a dark colour (#763)', () => {
+    // A dark --koi-paper-2 → keep the dark-tuned palette (xterm's defaults, made explicit).
+    const el = document.createElement('div');
+    el.style.setProperty('--koi-paper-2', '#1e1e1e'); // perceived luminance ≪ 0.5 → dark
+    el.style.setProperty('--koi-fg', '#d4d4d4');
+    document.body.appendChild(el);
+
+    const theme = resolveTerminalTheme(el);
+
+    expect(theme.black).toBe(DARK_ANSI.black);
+    expect(theme.red).toBe(DARK_ANSI.red);
+    expect(theme.green).toBe(DARK_ANSI.green);
+    expect(theme.yellow).toBe(DARK_ANSI.yellow);
+    expect(theme.brightWhite).toBe(DARK_ANSI.brightWhite);
+    el.remove();
+  });
+
+  it('falls back to DARK_ANSI when the background token is unset (#763)', () => {
+    // The fallback background (#1e1e1e) is dark, so the dark palette should be selected.
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+
+    const theme = resolveTerminalTheme(el);
+
+    expect(theme.black).toBe(DARK_ANSI.black);
+    expect(theme.brightWhite).toBe(DARK_ANSI.brightWhite);
     el.remove();
   });
 });
@@ -288,7 +341,11 @@ describe('createTerminalPanel', () => {
     host.style.setProperty('--koi-fg', '#1c2230');
     panel.applyTheme();
 
-    expect(term.options.theme).toEqual({ background: '#f4f6fa', foreground: '#1c2230', cursor: '#1c2230' });
+    // objectContaining: the theme now also carries 16 ANSI palette entries; we check the base surface
+    // tokens here and the palette coverage is handled by the resolveTerminalTheme suite above.
+    expect(term.options.theme).toEqual(
+      expect.objectContaining({ background: '#f4f6fa', foreground: '#1c2230', cursor: '#1c2230' }),
+    );
 
     panel.dispose();
     parent.remove();
