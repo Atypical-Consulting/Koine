@@ -1127,6 +1127,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     prefsCallbacks,
     settingsCategory: () => appStore.getState().settingsCategory ?? undefined,
     showSettings: (category) => controller.showSettings(category),
+    closeSettings: () => appStore.getState().closeSettings(),
     getSource: () => editor.getDoc(),
     getSelection: () => {
       const sel = editor.view.state.selection.main;

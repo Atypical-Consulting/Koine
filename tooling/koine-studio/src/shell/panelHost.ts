@@ -24,6 +24,8 @@ export interface PanelHostDeps {
   settingsCategory(): string | undefined;
   /** Record the Settings-open intent in the store (controller.showSettings) before building the page. */
   showSettings(category?: string): void;
+  /** Close the Settings overlay (appStore.closeSettings). Wired to the header close button (#746). */
+  closeSettings(): void;
   /** The active document's text (editor.getDoc) — the assistant's source context. */
   getSource(): string;
   /** The editor's current selection (or the cursor line; null → whole file) — the assistant's selection. */
@@ -93,6 +95,7 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
     settingsPage = createSettingsPage(
       { header: domById('settings-page-header'), body: domById('settings-page-body') },
       deps.prefsCallbacks,
+      () => deps.closeSettings(),
     );
     // A first build already paints from the live settings; only a deep-link needs the extra repaint to
     // land on its tab (a plain open keeps the pane's last-used category).
