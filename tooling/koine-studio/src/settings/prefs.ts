@@ -351,15 +351,13 @@ export function stringListInput(
             );
             removeBtn.textContent = "×";
 
-            // Capture `i` by value via an IIFE so the handler always references this token's index.
-            removeBtn.addEventListener(
-                "click",
-                ((idx: number) => () => {
-                    current = current.filter((_, j) => j !== idx);
-                    renderChips();
-                    onCommit([...current]);
-                })(i),
-            );
+            // `let i` in a for-loop creates a fresh binding per iteration, so the direct closure
+            // over `i` is safe — no IIFE needed.
+            removeBtn.addEventListener("click", () => {
+                current = current.filter((_, j) => j !== i);
+                renderChips();
+                onCommit([...current]);
+            });
 
             chip.append(label, removeBtn);
             chipArea.appendChild(chip);
