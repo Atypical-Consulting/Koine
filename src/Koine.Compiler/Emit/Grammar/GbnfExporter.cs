@@ -48,14 +48,18 @@ public static class GbnfExporter
         ("root", "ws program-member (ws program-member)* ws"),
         ("program-member", "context | contextmap"),
         // req_ws between keyword "context" and the identifier name (word→word boundary).
-        // Inside the optional "version" block: req_ws before the int so "version42" is rejected.
-        ("context", "\"context\" req_ws ident ws (\"version\" req_ws int ws)? \"{\" ws (context-member ws)* \"}\""),
+        // The optional "version" block uses req_ws before "version" (ident→keyword word→word boundary),
+        // and req_ws before int (keyword→int word→word boundary). ws before "{" covers both the
+        // no-version case (ident→"{") and the with-version case (int→"{"), both of which are
+        // word→punct and do not require a mandatory space.
+        ("context", "\"context\" req_ws ident (req_ws \"version\" req_ws int)? ws \"{\" ws (context-member ws)* \"}\""),
         ("context-member", "import-decl | module-decl | type-decl | spec-decl | service-decl | policy-decl | readmodel-decl | query-decl | publish-decl | subscribe-decl"),
 
         // ---- Context map & integration wiring (R14) -----------------------
         ("contextmap", "\"contextmap\" ws \"{\" ws (relation ws)* \"}\""),
-        // relation-role ends with a keyword; if the optional block follows, req_ws before it.
-        ("relation", "type-name ws relation-arrow ws type-name ws \":\" ws relation-role (req_ws shared-kernel-block | req_ws acl-block)?"),
+        // relation-role ends with a keyword; acl-block starts with keyword "acl" (word→word → req_ws);
+        // shared-kernel-block starts with "{" (punct, word→punct → ws is sufficient).
+        ("relation", "type-name ws relation-arrow ws type-name ws \":\" ws relation-role (ws shared-kernel-block | req_ws acl-block)?"),
         ("relation-arrow", "\"<->\" | \"->\""),
         ("relation-role", "\"partnership\" | \"shared-kernel\" | \"customer-supplier\" | \"conformist\" | \"anti-corruption-layer\" | \"open-host\" | \"published-language\""),
         ("shared-kernel-block", "\"{\" ws type-name (ws \",\" ws type-name)* (ws \",\")? ws \"}\""),
