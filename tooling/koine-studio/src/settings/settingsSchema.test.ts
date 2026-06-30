@@ -12,6 +12,17 @@ import {
 } from './settingsSchema';
 import { DEFAULT_SETTINGS, WORKSPACE_SCOPED_KEYS, type Settings } from './persistence';
 
+// Derived from the field map: which group names and docKeys appear for workspace-scoped keys.
+const WORKSPACE_SCOPED_KEY_SET = new Set(WORKSPACE_SCOPED_KEYS);
+const EXPECTED_WS_GROUPS: Record<string, string[]> = (() => {
+  const out: Record<string, string[]> = {};
+  for (const f of SETTINGS_FIELDS) {
+    if (!WORKSPACE_SCOPED_KEY_SET.has(f.runtimeKey)) continue;
+    (out[f.group] ??= []).push(f.docKey);
+  }
+  return out;
+})();
+
 const withKey: Settings = { ...DEFAULT_SETTINGS, aiApiKey: 'sk-SECRET' };
 
 describe('settingsSchema', () => {
@@ -285,8 +296,16 @@ describe('settingsSchema', () => {
 });
 
 describe('workspace settings schema (#736)', () => {
-  it('schema drift guard: WORKSPACE_SETTINGS_JSON_SCHEMA.properties keys match WORKSPACE_SCOPED_KEYS exactly', () => {
-    expect(Object.keys(WORKSPACE_SETTINGS_JSON_SCHEMA.properties)).toEqual([...WORKSPACE_SCOPED_KEYS]);
+  it('schema drift guard: WORKSPACE_SETTINGS_JSON_SCHEMA.properties are grouped by SETTINGS_FIELDS for WORKSPACE_SCOPED_KEYS (#792)', () => {
+    const schema = WORKSPACE_SETTINGS_JSON_SCHEMA.properties as Record<string, { properties: Record<string, unknown> }>;
+    // Same group names as derived from the field map for the workspace-scoped keys
+    expect(Object.keys(schema).sort()).toEqual(Object.keys(EXPECTED_WS_GROUPS).sort());
+    // Same docKeys per group
+    for (const [group, groupSchema] of Object.entries(schema)) {
+      expect(Object.keys(groupSchema.properties).sort()).toEqual(EXPECTED_WS_GROUPS[group].sort());
+    }
+    // Root is additionalProperties:false (unknown groups / flat runtime keys rejected)
+    expect(WORKSPACE_SETTINGS_JSON_SCHEMA.additionalProperties).toBe(false);
   });
 
   it('WORKSPACE_SETTINGS_JSON_SCHEMA is additionalProperties:false with the Draft 2020-12 dialect', () => {
@@ -320,10 +339,18 @@ describe('workspace settings schema (#736)', () => {
     expect(Object.keys(res.overrides!)).toEqual(['previewTarget']);
   });
 
-  it('workspaceOverridesToJsonDoc emits keys in WORKSPACE_SCOPED_KEYS order', () => {
+  it('workspaceOverridesToJsonDoc emits grouped keys in SETTINGS_FIELDS order (#792)', () => {
     const o: Partial<Settings> = { lspTrace: 'messages', wordWrap: true, previewTarget: 'python', formatOnSave: true };
-    const doc = JSON.parse(workspaceOverridesToJsonDoc(o)) as Record<string, unknown>;
-    expect(Object.keys(doc)).toEqual([...WORKSPACE_SCOPED_KEYS]);
+    const doc = JSON.parse(workspaceOverridesToJsonDoc(o)) as Record<string, Record<string, unknown>>;
+    // Top-level keys are group names (preview, editor, lsp) — NOT flat runtime keys
+    expect(doc).not.toHaveProperty('previewTarget');
+    expect(doc).not.toHaveProperty('lspTrace');
+    expect(doc).not.toHaveProperty('formatOnSave');
+    expect(doc).not.toHaveProperty('wordWrap');
+    expect(doc.preview.target).toBe('python');
+    expect(doc.editor.formatOnSave).toBe(true);
+    expect(doc.editor.wordWrap).toBe(true);
+    expect(doc.lsp.trace).toBe('messages');
   });
 
   it('rejects an unknown top-level key (e.g. theme) with errors and no overrides', () => {
@@ -368,11 +395,87 @@ describe('workspace settings schema (#736)', () => {
     expect(res.overrides?.previewTarget).toBe('csharp');
   });
 
-  it('non-scoped keys in the overrides object are silently dropped by workspaceOverridesToJsonDoc', () => {
-    // A full Settings object passed — only the four scoped keys should appear in the output
+  it('non-scoped keys in the overrides object are silently dropped by workspaceOverridesToJsonDoc (#792)', () => {
+    // A full Settings object passed — only the four scoped keys should appear in the output (as groups)
     const full = { ...DEFAULT_SETTINGS, theme: 'light' } as Partial<Settings>;
     const doc = JSON.parse(workspaceOverridesToJsonDoc(full)) as Record<string, unknown>;
-    expect(Object.keys(doc)).toEqual([...WORKSPACE_SCOPED_KEYS]);
+    // Only workspace-scoped groups appear — 'appearance' (theme) is not workspace-scoped
     expect(doc).not.toHaveProperty('theme');
+    expect(doc).not.toHaveProperty('appearance');
+    expect(doc).not.toHaveProperty('previewTarget'); // no flat runtime keys
+    // The scoped groups are present
+    expect(doc).toHaveProperty('preview');
+    expect(doc).toHaveProperty('editor');
+    expect(doc).toHaveProperty('lsp');
+  });
+
+  // --- cross-scope consistency (#792) ----------------------------------------
+
+  it('a field copied from the user settings doc validates in the workspace doc (#792)', () => {
+    // preview.target in user scope → accepted verbatim in workspace scope (no key-shape change needed)
+    const res = jsonDocToWorkspaceOverrides(JSON.stringify({ preview: { target: 'python' } }));
+    expect(res.errors).toBeUndefined();
+    expect(res.overrides?.previewTarget).toBe('python');
+  });
+
+  it('grouped workspace doc maps to flat runtime keys via SETTINGS_FIELDS table (#792)', () => {
+    const grouped = JSON.stringify({ preview: { target: 'typescript' }, lsp: { trace: 'verbose' }, editor: { formatOnSave: false, wordWrap: true } });
+    const res = jsonDocToWorkspaceOverrides(grouped);
+    expect(res.errors).toBeUndefined();
+    expect(res.overrides?.previewTarget).toBe('typescript');
+    expect(res.overrides?.lspTrace).toBe('verbose');
+    expect(res.overrides?.formatOnSave).toBe(false);
+    expect(res.overrides?.wordWrap).toBe(true);
+  });
+
+  it('rejects a bad enum in a grouped workspace doc (lsp.trace = "loud") (#792)', () => {
+    const res = jsonDocToWorkspaceOverrides(JSON.stringify({ lsp: { trace: 'loud' } }));
+    expect(res.overrides).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('rejects a bad type in a grouped workspace doc (editor.formatOnSave = "yes") (#792)', () => {
+    const res = jsonDocToWorkspaceOverrides(JSON.stringify({ editor: { formatOnSave: 'yes' } }));
+    expect(res.overrides).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('rejects an unknown key inside a group in the workspace doc (editor.bogus) (#792)', () => {
+    const res = jsonDocToWorkspaceOverrides(JSON.stringify({ editor: { bogus: true } }));
+    expect(res.overrides).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('rejects an unknown previewTarget in a grouped workspace doc ("cobol") with a previewTarget diagnostic (#792)', () => {
+    const res = jsonDocToWorkspaceOverrides(JSON.stringify({ preview: { target: 'cobol' } }));
+    expect(res.overrides).toBeUndefined();
+    expect(res.errors?.[0]?.message).toMatch(/previewTarget/i);
+  });
+
+  // --- legacy flat format (backward-compatibility, pre-#792) ------------------
+
+  it('still accepts a legacy flat workspace doc (previewTarget at top level) (#792)', () => {
+    // Pre-#792 flat format: runtime key at the top level — must still be accepted
+    const res = jsonDocToWorkspaceOverrides(JSON.stringify({ previewTarget: 'csharp' }));
+    expect(res.errors).toBeUndefined();
+    expect(res.overrides?.previewTarget).toBe('csharp');
+  });
+
+  it('still rejects a bad enum in a legacy flat workspace doc (lspTrace = "loud") (#792)', () => {
+    const res = jsonDocToWorkspaceOverrides(JSON.stringify({ lspTrace: 'loud' }));
+    expect(res.overrides).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('still rejects a bad type in a legacy flat workspace doc (formatOnSave = "yes") (#792)', () => {
+    const res = jsonDocToWorkspaceOverrides(JSON.stringify({ formatOnSave: 'yes' }));
+    expect(res.overrides).toBeUndefined();
+    expect(res.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('still rejects an unknown previewTarget in a legacy flat doc ("cobol") (#792)', () => {
+    const res = jsonDocToWorkspaceOverrides(JSON.stringify({ previewTarget: 'cobol' }));
+    expect(res.overrides).toBeUndefined();
+    expect(res.errors?.[0]?.message).toMatch(/previewTarget/i);
   });
 });
