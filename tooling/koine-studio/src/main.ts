@@ -11,6 +11,7 @@ import { mountHome, type WelcomeCallbacks, type HomeHandle } from '@/welcome/wel
 import { appStore } from '@/store';
 import { type Route, routeFromHash, hashFromRoute, resolveInitialRoute } from '@/store/slices/route';
 import { hasPersistedWorkspace, markWorkspaceOpened } from '@/shell/workspaceFlag';
+import { loadSettings } from '@/settings/persistence';
 import { setStartIntent, type StartIntent } from '@/shell/bootIntent';
 import { readModelFromHash } from '@/export/share';
 import { connectInstallAffordance, createInstallController } from '@/shell/pwaInstall';
@@ -118,11 +119,17 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
       : null;
   registerStudioServiceWorker({ onUpdateReady: () => updateController.markUpdateReady() });
 
-  // A shared playground link (`#model=…`) always opens the editor; otherwise the hash alone decides and
-  // a plain open (empty / `#/` / unknown hash) always lands on Home — the persisted-workspace flag no
-  // longer auto-skips it; the returning-user fast path is Resume on Home (#766). Resolved before paint.
+  // A shared playground link (`#model=…`) always opens the editor. Otherwise the startup policy
+  // decides: by default a plain open (``, `#/`, unknown hash) lands on Home (#766), but the user can
+  // opt into "Last workspace" via Settings → On startup, which auto-resumes the editor when a prior
+  // workspace exists (#770). Both inputs are read here (IO boundary) and passed pure to the resolver.
   const isShareLink = readModelFromHash() !== null;
-  const initial: Route = isShareLink ? 'editor' : resolveInitialRoute(location.hash);
+  const initial: Route = isShareLink
+    ? 'editor'
+    : resolveInitialRoute(location.hash, {
+        startupView: loadSettings().startupView,
+        hasWorkspace: hasPersistedWorkspace(),
+      });
   appStore.setState({ route: initial });
 
   // Canonicalise the URL hash to the resolved route so a refresh / bookmark lands on the same view —

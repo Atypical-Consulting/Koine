@@ -8,6 +8,19 @@ may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Koine Studio — "On startup" setting (Home vs Last workspace).** A new **Settings → Appearance → On
+  startup** dropdown lets power users opt into reopening the last workspace automatically on a cold
+  Studio boot, reversing the always-Home default introduced by #766 without affecting it for everyone
+  else. The default remains `Home screen` (no change in behaviour for users who don't touch the
+  setting). Choosing `Last workspace` auto-resumes the editor when a prior workspace exists; a pristine
+  first-load (no prior workspace) still lands on Home so the user is never stranded on a blank editor.
+  Explicit `#/editor` deep-links and `#model=…` share links continue to win regardless of the setting.
+  The boot resolver (`resolveInitialRoute`) stays pure / IO-free — the setting and the persisted-
+  workspace flag are passed in by `main.ts` at the only IO boundary, preserving the no-flash contract
+  from #368. The `startupView: 'home' | 'lastWorkspace'` field is persisted in Settings and exposed in
+  the Settings JSON editor for advanced users. (issue #770; follow-up to #766 / #768)
+
 ### Changed
 - **Koine Studio Web now always opens on Home.** Opening Studio (a cold load at the base URL / `#/`) lands
   on the Home start console every time instead of auto-skipping a returning user straight into the editor —
