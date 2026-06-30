@@ -674,7 +674,12 @@ internal sealed class PhpExpressionTranslator
 
         if (expr is LiteralExpr { Kind: LiteralKind.Int } lit)
         {
-            sb.Append(@"new \Koine\Runtime\Decimal('").Append(lit.Text).Append("')");
+            // Parenthesise the construction so `(new \Koine\Runtime\Decimal('n'))->method()`
+            // parses on the documented PHP 8.1+ floor. Without parentheses, bare
+            // `new X(...)->m()` is PHP 8.4+-only syntax. Wrapping uniformly (both receiver and
+            // argument positions) is harmless: extra parentheses around an argument are valid PHP
+            // and phpstan accepts them; the receiver case is the one that actually requires them.
+            sb.Append(@"(new \Koine\Runtime\Decimal('").Append(lit.Text).Append("'))");
             return;
         }
 
