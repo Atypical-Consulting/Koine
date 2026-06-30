@@ -746,6 +746,14 @@ final class Money
             $this->currency
         );
     }
+
+    public function dividedBy(\Koine\Runtime\Decimal $factor): self
+    {
+        return new self(
+            $this->amount->div($factor),
+            $this->currency
+        );
+    }
 }
 
 // ==== src/Sales/ValueObjects/OrderId.php ====

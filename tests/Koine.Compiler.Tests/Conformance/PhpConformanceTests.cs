@@ -638,6 +638,39 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Follow-up to #825 acceptance: a <c>value-object / scalar</c> division — <c>perUnit: Money = base / 4</c>
+    /// — must type-check under <c>phpstan --level max</c>. The translator lowers it to
+    /// <c>$this-&gt;base-&gt;dividedBy(...)</c>, but the PHP emitter's scalar-scaling emitter
+    /// (<c>WriteScalarOp</c>) emits only <c>multipliedBy</c>, so <c>dividedBy</c> is undefined and phpstan
+    /// reports <c>method.notFound</c>. The fix emits a <c>dividedBy(\Koine\Runtime\Decimal $factor): self</c>
+    /// method delegating to the runtime <c>Decimal::div</c>, mirroring the <c>multipliedBy</c> companion
+    /// (#717) and the quantity path. Skipped (not failed) only when no <c>phpstan</c> is present locally.
+    /// </summary>
+    [Fact]
+    public void Value_object_dividedBy_scalar_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  value Line {\n" +
+            "    base: Money\n" +
+            "    scaled: Money = base * 2\n" +
+            "    perUnit: Money = base / 4\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// The always-on syntax gate: a valid PHP snippet must pass <c>php -l</c>.
     /// Skipped (not failed) only when no interpreter is present; with one it MUST parse cleanly.
     /// </summary>
