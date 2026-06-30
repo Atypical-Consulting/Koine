@@ -1074,6 +1074,8 @@ export function init(hooks: IdeHooks = {}): () => void {
     mcpStop: () => platform.mcpStop(),
     // Only a host that can serve the sidecar exposes the toggle; others show recipes but disable it.
     mcpHostable: platform.canHostMcp,
+    // Terminal shell args row: only shown where the integrated terminal exists (Tauri desktop).
+    hasIntegratedTerminal: platform.canRunShell,
     // Workspace root: only the browser (File System Access API) can save projects to a root dir.
     canSaveProjects: platform.canSaveProjects,
     workspaceRootName: () => platform.workspaceRootName(),
