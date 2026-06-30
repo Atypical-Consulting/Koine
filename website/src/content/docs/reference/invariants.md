@@ -300,11 +300,20 @@ bounded form, so output always compiles. It requires **C# 11+ / .NET 7+** (the `
 generator), which a default `net8.0`+ target satisfies. The other emitter targets are unaffected — their
 bounded forms in the table above are unchanged.
 
-:::note
-The mode is currently selected through the emitter API (`CSharpEmitterOptions.RegexMode`); a
-`targets.csharp.regexMode` `koine.config` key to toggle it from the CLI is a planned follow-up. Until then
-the default CLI/`koine build` output is the inline form.
-:::
+**Selecting the mode via `koine.config`.** Add `targets.csharp.regexMode = sourceGenerated` to opt in
+from the command line or CI (see [`targets.csharp.regexMode`](/Koine/guides/cli/#koineconfig)):
+
+```toml
+# koine.config
+target = csharp
+out = ./generated
+
+# opt in to the cached [GeneratedRegex] form for `matches` invariants (default: inline)
+targets.csharp.regexMode = sourceGenerated
+```
+
+The default is `inline`, so an unconfigured `koine build` produces byte-identical output. Any value other
+than `inline` or `sourceGenerated` is rejected at build time with a friendly diagnostic.
 
 ## 10.7 Conditional invariants (`when`)
 

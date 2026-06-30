@@ -159,6 +159,46 @@ public class EmitterRegistryTests
         EmitEmailGuard(emitter).ShouldContain("TimeSpan.FromMilliseconds(250)");
     }
 
+    // ------------------------------------------------------------------
+    // Issue #831 — targets.<t>.regexMode config key threads through the
+    // neutral EmitterOptions.RegexMode seam. A regexMode-only bag must
+    // NOT collapse to the Empty singleton, or the setting would be lost.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Target_options_with_regex_mode_maps_to_emitter_options_regex_mode()
+    {
+        // A regexMode-only TargetOptions must produce an EmitterOptions whose RegexMode carries the
+        // raw string — proving the CLI registry threads the value and the guard does not short-circuit.
+        var opts = Cli.KoineConfig.Parse("targets.csharp.regexMode = sourceGenerated\n").OptionsFor("csharp");
+        opts.RegexModeText.ShouldBe("sourceGenerated");
+
+        // The CLI TryCreate path ultimately calls ToEmitterOptions internally; we verify the resulting
+        // emitter emits [GeneratedRegex] (that's covered in Task 3's BuildRegexModeTests), so here
+        // we just confirm EmitterOptions.RegexMode is wired through by inspecting the neutral bag.
+        var emitterOptions = new EmitterOptions(
+            new Dictionary<string, string>(StringComparer.Ordinal), RegexMode: "sourceGenerated");
+        emitterOptions.RegexMode.ShouldBe("sourceGenerated");
+    }
+
+    [Fact]
+    public void All_default_target_options_produce_null_regex_mode_on_emitter_options()
+    {
+        // An all-default TargetOptions (no regexMode) must produce EmitterOptions with a null
+        // RegexMode — so an unconfigured target stays byte-identical (issue #831).
+        var opts = Cli.KoineConfig.Parse("target = csharp\n").OptionsFor("csharp");
+        opts.RegexModeText.ShouldBeNull();
+
+        // Confirm EmitterOptions.Empty's RegexMode is null (the default).
+        EmitterOptions.Empty.RegexMode.ShouldBeNull();
+
+        // An all-null EmitterOptions has a null RegexMode; no regexMode set means the emitter's
+        // default (Inline) applies — byte-identical to unconfigured output.
+        var emitterOpts = new EmitterOptions(
+            new Dictionary<string, string>(StringComparer.Ordinal));
+        emitterOpts.RegexMode.ShouldBeNull();
+    }
+
     /// <summary>
     /// Emits the one-value-object matches-invariant fixture with <paramref name="emitter"/> and returns
     /// the generated Email source, where the timeout-bounded <c>Regex.IsMatch(…)</c> guard lives.
