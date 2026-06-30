@@ -249,6 +249,39 @@ describe('settingsSchema', () => {
     expect(res.settings?.previewTarget).toBe('rust');
     expect(res.settings?.aiBaseUrl).toBe('http://localhost:1234/v1');
   });
+
+  it('coerces an empty aiModel to the DEFAULT (not the current value), matching loadSettings (#744)', () => {
+    // current.aiModel is deliberately non-default so this proves the coercion targets DEFAULT_SETTINGS.aiModel,
+    // exactly as loadSettings() does on read — not "preserve the current value", which would diverge
+    // from a reload whenever the user's saved model is non-default.
+    const current: Settings = { ...withKey, aiModel: 'some-custom-model' };
+    const res = jsonDocToSettings(
+      JSON.stringify({ ...DEFAULT_SETTINGS, aiApiKey: undefined, aiModel: '' }),
+      current,
+    );
+    expect(res.errors).toBeUndefined();
+    expect(res.settings?.aiModel).toBe(DEFAULT_SETTINGS.aiModel);
+  });
+
+  it('applies a non-empty aiModel verbatim (no over-coercion) (#744)', () => {
+    const res = jsonDocToSettings(
+      JSON.stringify({ ...DEFAULT_SETTINGS, aiApiKey: undefined, aiModel: 'claude-3-7-sonnet' }),
+      withKey,
+    );
+    expect(res.errors).toBeUndefined();
+    expect(res.settings?.aiModel).toBe('claude-3-7-sonnet');
+  });
+
+  it('leaves aiModelOpenai empty when the doc sets it to "" — no coercion, matching loadSettings (#744)', () => {
+    // aiModelOpenai load path allows empty (typeof … === 'string' only, no .length > 0),
+    // so there is no divergence and coercing it would be wrong.
+    const res = jsonDocToSettings(
+      JSON.stringify({ ...DEFAULT_SETTINGS, aiApiKey: undefined, aiModelOpenai: '' }),
+      withKey,
+    );
+    expect(res.errors).toBeUndefined();
+    expect(res.settings?.aiModelOpenai).toBe('');
+  });
 });
 
 describe('workspace settings schema (#736)', () => {

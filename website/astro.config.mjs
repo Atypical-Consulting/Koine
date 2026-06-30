@@ -34,14 +34,10 @@ export default defineConfig({
 	// remark/rehype plugins (including astro-mermaid's) would silently stop on a
 	// future astro that drops the legacy path. Opt back into the `unified()`
 	// processor from `@astrojs/markdown-remark` (a direct dependency of both astro
-	// and @astrojs/starlight, so reliably resolvable): astro-mermaid and Starlight
-	// are both processor-aware and route their plugins onto this processor's
-	// options, and astro auto-migrates any integration still using the legacy
-	// arrays (today only starlight-blog's remark plugin) onto it too. This silences
-	// the satteri mismatch warning and keeps every plugin — mermaid included —
-	// running on the supported path. (A softer generic "legacy arrays are
-	// deprecated" notice still prints until starlight-blog adopts the processor API
-	// upstream; its plugin runs regardless via the auto-migration.)
+	// and @astrojs/starlight, so reliably resolvable): all three integrations
+	// (astro-mermaid, @astrojs/starlight, and starlight-blog ≥0.27.0) are now
+	// processor-aware and route their plugins onto this processor's options —
+	// no legacy-array notice prints.
 	markdown: {
 		processor: unified(),
 	},

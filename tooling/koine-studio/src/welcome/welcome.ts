@@ -11,6 +11,7 @@ import { getPlatform } from '@/host';
 import { registerOverlay, koiConfirm } from '@/shared/overlay';
 import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, fillVersionChip, wireExternalLink } from '@/shared/colophon';
 import { TEMPLATES, type Template } from '@/welcome/templates';
+import { wrapIndex } from '@/shared/wrapIndex';
 
 /** What the welcome actions delegate to; the host (ide.ts) performs the real work. */
 export interface WelcomeCallbacks {
@@ -645,8 +646,8 @@ function buildHome(
     if (!enabled.length) return;
     const here = Math.max(0, enabled.indexOf(state.level));
     let next = here;
-    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = (here + 1) % enabled.length;
-    else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = (here - 1 + enabled.length) % enabled.length;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = wrapIndex(here, +1, enabled.length); // shared wrap helper
+    else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = wrapIndex(here, -1, enabled.length); // shared wrap helper
     else if (e.key === 'Home') next = 0;
     else if (e.key === 'End') next = enabled.length - 1;
     else return;
