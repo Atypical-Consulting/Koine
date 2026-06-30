@@ -146,8 +146,8 @@ public static partial class CompilerInterop
     {
         try
         {
-            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
-            var symbols = LanguageService.WorkspaceSymbols(docs, query)
+            // Warm path (issue #464): reuse the reconciled snapshot's Documents map — no re-parse.
+            var symbols = LanguageService.WorkspaceSymbols(GetWarmCompilation(DeserializeFiles(filesJson)), query)
                 .Select(s => new WWorkspaceSymbol(s.Name, LspSymbolKind(s.Kind), s.Uri, SpanRange(s.Range), s.ContainerName))
                 .ToArray();
             return JsonSerializer.Serialize(symbols, LangJson.Default.WWorkspaceSymbolArray);

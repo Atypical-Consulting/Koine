@@ -1115,6 +1115,15 @@ public sealed class KoineLanguageService
         return results;
     }
 
+    /// <summary>
+    /// Snapshot-accepting overload of <see cref="WorkspaceSymbols(IReadOnlyDictionary{string,string},string)"/>
+    /// (issue #464): delegates via the compilation's <see cref="KoineCompilation.Documents"/> map so the
+    /// caller's already-reconciled snapshot is reused — no re-parse. Output is byte-identical to the
+    /// <c>documents</c>-based overload for the same sources.
+    /// </summary>
+    public IReadOnlyList<WorkspaceSymbol> WorkspaceSymbols(KoineCompilation compilation, string query) =>
+        WorkspaceSymbols(compilation.Documents, query);
+
     private static void FlattenSymbol(
         List<WorkspaceSymbol> results,
         string uri,
@@ -2393,6 +2402,47 @@ public sealed class KoineLanguageService
             (startOffset, endOffset) = (endOffset, startOffset);
         }
 
+        var (model, _) = _compiler.Parse(source);
+        if (model is null)
+        {
+            return [];
+        }
+
+        // Route through the unified code-fix provider set, adapting the editor-agnostic CodeFix back
+        // to the CodeActionEdit shape this overload's callers (e.g. the WASM bridge) consume.
+        return _codeFixes.RefactorsForSelection(source, model, startOffset, endOffset)
+            .Select(f => new CodeActionEdit(
+                f.Title, f.Kind, f.Edits.Select(e => new TextEditModel(e.Range, e.NewText)).ToList()))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Snapshot-accepting overload of
+    /// <see cref="RefactorsAt(IReadOnlyDictionary{string,string},string,int,int,int,int)"/>
+    /// (issue #464): reads the active document's source text from the already-reconciled
+    /// <see cref="KoineCompilation"/> snapshot's <see cref="KoineCompilation.Documents"/> map.
+    /// Uses a single-file parse (matching the <c>documents</c>-based overload exactly) so the
+    /// returned refactors are byte-identical to the stateless path for the same input text —
+    /// the warm/stateless invariant is preserved.
+    /// </summary>
+    public IReadOnlyList<CodeActionEdit> RefactorsAt(
+        KoineCompilation compilation, string activeUri,
+        int startLine, int startChar, int endLine, int endChar)
+    {
+        if (!compilation.Documents.TryGetValue(activeUri, out var source))
+        {
+            return [];
+        }
+
+        var startOffset = OffsetOf(source, startLine, startChar);
+        var endOffset = OffsetOf(source, endLine, endChar);
+        if (endOffset < startOffset)
+        {
+            (startOffset, endOffset) = (endOffset, startOffset);
+        }
+
+        // Parse only the active document — mirrors the dict-based overload's single-file parse
+        // so the code-fix result is byte-identical to the stateless path for the same source text.
         var (model, _) = _compiler.Parse(source);
         if (model is null)
         {
