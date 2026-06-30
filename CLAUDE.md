@@ -14,7 +14,9 @@ so a further emitter (e.g. Rust) is a new emitter, not a rewrite (`Emit/TypeScri
 
 Read `README.md` for the language overview and the full construct table, and `USER-STORIES.md` for the
 roadmap (work is organized as releases **R1–R17**). The docs site source lives in `website/` (Astro
-Starlight). Current version is **0.17.x** (set in `Directory.Build.props`).
+Starlight). The package version lives in `Directory.Build.props` and is bumped automatically by
+release-please from Conventional Commits — don't hand-edit it (see
+[ADR 0002](adr/0002-conventional-commits-and-automated-semver.md)).
 
 ## Architecture decisions (ADRs)
 

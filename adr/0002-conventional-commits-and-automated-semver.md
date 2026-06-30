@@ -55,9 +55,17 @@ project maintainer wanted full compliance: every commit on `main`, not just the 
 4. **`bump-minor-pre-major: true`** while the major version is `0`: a breaking change bumps `0.X.0`
    instead of jumping to `1.0.0`, matching the pre-1.0 policy `CHANGELOG.md` already documents.
    Flip this off in `release-please-config.json` deliberately when the project is ready for `1.0.0`.
-5. **Tag the current version (`v0.17.12`) at the new `main` tip once this lands**, so release-please's
-   first run has an explicit baseline to diff from instead of reasoning about the entire (now-clean)
-   624-commit history for its first release PR.
+5. **Bootstrap the baseline from history instead of hand-picking it.** `Directory.Build.props` had
+   been hand-bumped patch-only release after release (`0.17.3` → `0.17.12`) regardless of whether
+   the underlying commits were `feat:` or `fix:` — it never reflected real semver. Tagging that
+   number as the release-please baseline would have carried the same inaccuracy forward forever.
+   Instead, `bootstrap-baseline` (a job in `.github/workflows/release-please.yml`, gated on no `v*`
+   tag existing yet) runs `scripts/release/compute-historical-version.py` on the first push to
+   `main` after this PR merges: it replays all 624+ Conventional Commits from `0.0.0` using the
+   exact bump rule in `release-please-config.json` (`feat`/breaking → minor, reset patch; everything
+   else → patch), commits the result into the manifest and `Directory.Build.props`, and tags it.
+   That tag becomes release-please's first real baseline; with a tag in place the bootstrap job is a
+   permanent no-op from then on, and release-please's normal since-last-tag logic takes over.
 
 ## Consequences
 
