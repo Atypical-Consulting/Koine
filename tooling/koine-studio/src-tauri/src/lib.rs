@@ -1730,20 +1730,24 @@ fn pty_resume(state: State<'_, PtyState>) -> Result<(), String> {
 /// Intentional shutdown: arm the no-reap flag, drop the writer (so the shell sees stdin EOF), kill
 /// the child to be certain it exits, and drop the master. The reader thread then emits `pty://exit`
 /// (code 0). Idempotent and safe to call when nothing is running.
+///
+/// All three handles are cleared via [`take_pty_child_and_clear_handles`], which holds the `child`
+/// lock across the entire teardown so a concurrent [`pty_start`] (which takes `child` first) can
+/// never install fresh `writer`/`master` handles that this function then clobbers (#829). The
+/// returned child is reaped (kill + wait) **outside** the lock so a new shell isn't delayed.
 #[tauri::command]
 fn pty_stop(state: State<'_, PtyState>) -> Result<(), String> {
     state.shutting_down.store(true, Ordering::SeqCst);
     // Release a paused reader (#441) so it wakes, sees the killed child's EOF, and exits cleanly
     // instead of staying parked forever.
     set_pty_paused(&state.paused, false);
-    // Delegate to the serialized helper so the `child` lock is held continuously while
-    // `writer`/`master` are cleared (#830).  This serializes against `pty_start` (which also
-    // takes the `child` lock first), preventing a racing start from having its freshly installed
-    // `child` reaped here or its handles clobbered.  The old child (if any) is returned and
-    // reaped outside the lock so a new session is not blocked by the `wait()`.
-    let old_child =
-        take_pty_child_and_clear_handles(&state.child, &state.writer, &state.master);
-    if let Some(mut child) = old_child {
+    // Route teardown through the serialized helper so the `child` lock is held continuously
+    // while `writer`/`master` are cleared (#829, #830).  This serializes against `pty_start`
+    // (which takes the `child` lock first), preventing a racing start from having its freshly
+    // installed child reaped or its handles clobbered.  Reap the returned child outside the lock.
+    if let Some(mut child) =
+        take_pty_child_and_clear_handles(&state.child, &state.writer, &state.master)
+    {
         let _ = child.kill();
         let _ = child.wait();
     }
@@ -2903,12 +2907,12 @@ mod tests {
         assert_eq!(*child.lock().unwrap(), Some("child-N+1"));
     }
 
-    // --- pty_stop / pty_start race (#830) ------------------------------------
+    // --- pty_stop / pty_start race (#829, #830) ------------------------------------
     //
     // Before this fix `pty_stop` cleared `writer`, took+reaped `child`, and cleared `master`
     // in three *separate* lock blocks — none of them serialized against `pty_start`.  A
     // `pty_start` racing in the gap installed a fresh `child`; the stop then `take()`d it,
-    // `wait()`ed on a live shell (hang), and cleared the new session's handles.
+    // `wait()`ed on a live shell (hang), and/or cleared the new session's `master` (#829).
     //
     // The fix routes `pty_stop` through `take_pty_child_and_clear_handles` so the only
     // `child.take()` lives inside the helper's held-`child`-lock critical section — the same
@@ -2916,11 +2920,11 @@ mod tests {
     //
     // Testing strategy mirrors #810:
     //   • `pty_stop_teardown_with_race_hook` (non-Tauri, testable) mirrors `pty_stop`'s teardown
-    //     body and accepts an `on_race_window` hook.  Pre-fix it uses 3 separate lock blocks
-    //     (the buggy path); post-fix it delegates to `take_pty_child_and_clear_handles_with_race_hook`.
-    //   • `pty_stop_racing_start_does_not_take_new_child` drives `pty_stop_teardown_with_race_hook`
-    //     with a concurrent start installing session N+1 in the race window, then asserts the
-    //     new handles survived → FAILS before the fix (steals child-N+1), PASSES after.
+    //     body and accepts an `on_race_window` hook; post-fix it delegates to
+    //     `take_pty_child_and_clear_handles_with_race_hook`.
+    //   • `pty_stop_racing_start_does_not_take_new_child` drives it with a concurrent start
+    //     installing session N+1 in the race window, asserting the new handles survive and stop
+    //     reaps only the OLD child.
 
     /// Testable mirror of `pty_stop`'s teardown body (post-fix).
     ///
@@ -2936,20 +2940,17 @@ mod tests {
         master: &Mutex<Option<M>>,
         on_race_window: impl FnOnce(),
     ) -> Option<C> {
-        // POST-FIX: delegate to the serialized helper, which holds the `child` lock continuously
-        // while clearing `writer`/`master`.  The `on_race_window` hook fires inside the lock —
-        // a concurrent `pty_start` that contends for the `child` lock must wait, so it cannot
-        // install its handles in the gap and have them stolen or clobbered.
+        // Delegate to the serialized helper: child lock held across both clears, racing start
+        // must wait — its handles are never stolen or clobbered.
         take_pty_child_and_clear_handles_with_race_hook(child, writer, master, on_race_window)
     }
 
-    /// Regression guard for #830: a start racing `pty_stop` must never have its child stolen.
+    /// Regression guard for #829/#830: a start racing `pty_stop` must never have its handles
+    /// stolen or clobbered and `pty_stop` must reap only the OLD child.
     ///
-    /// A concurrent `pty_start` installs session N+1 in the window where the old out-of-band
-    /// `pty_stop` code would have taken and reaped the new child.  With the fix in place
-    /// (`pty_stop` delegates to the serialized helper), the `child` lock is held throughout the
-    /// clears, so the start must wait — the new session's child/writer/master are intact after
-    /// the stop completes and the stop reaps only the OLD child (session N).
+    /// A concurrent `pty_start` installs session N+1 while the helper holds the child lock;
+    /// it must park until teardown completes — the new session's child/writer/master are intact
+    /// after the stop completes and stop reaps only the OLD child (session N).
     #[test]
     fn pty_stop_racing_start_does_not_take_new_child() {
         let child: Mutex<Option<&str>> = Mutex::new(Some("child-N"));
@@ -2968,6 +2969,7 @@ mod tests {
                     *master.lock().unwrap_or_else(|e| e.into_inner()) = Some("master-N+1");
                     *cg = Some("child-N+1");
                 }));
+                // Give the racing start a chance to contend before we clear and release.
                 std::thread::yield_now();
             });
             start_handle
@@ -2985,17 +2987,17 @@ mod tests {
         assert_eq!(
             *child.lock().unwrap(),
             Some("child-N+1"),
-            "#830: pty_stop must not null the new session's child"
+            "#829/#830: pty_stop must not null the new session's child"
         );
         assert_eq!(
             *writer.lock().unwrap(),
             Some("writer-N+1"),
-            "#830: pty_stop must not clobber the new session's writer"
+            "#829/#830: pty_stop must not clobber the new session's writer"
         );
         assert_eq!(
             *master.lock().unwrap(),
             Some("master-N+1"),
-            "#830: pty_stop must not clobber the new session's master"
+            "#829/#830: pty_stop must not clobber the new session's master"
         );
     }
 }
