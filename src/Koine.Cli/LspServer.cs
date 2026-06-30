@@ -1232,8 +1232,9 @@ internal sealed class LspServer
     /// Prepare type hierarchy (<c>textDocument/prepareTypeHierarchy</c>) at a 0-based position: the
     /// declared type under the cursor, as a JSON array of LSP TypeHierarchyItem
     /// (<c>{ name, kind, uri, range, selectionRange, data }</c>). The <c>kind</c> is an LSP SymbolKind
-    /// number; the <c>data</c> blob carries <c>{ thKind }</c> so the supertypes/subtypes requests can
-    /// reconstruct the item. Parity with the WASM <c>PrepareTypeHierarchy</c> export.
+    /// number; the <c>data</c> blob carries <c>{ thKind, context }</c> (#389) so the supertypes/subtypes
+    /// requests can reconstruct the item against its declaring context. Parity with the WASM
+    /// <c>PrepareTypeHierarchy</c> export.
     /// </summary>
     private object? TypeHierarchyPrepareJson(JsonElement root)
     {
@@ -1284,8 +1285,9 @@ internal sealed class LspServer
     /// <summary>
     /// Serializes a <see cref="TypeHierarchyItem"/> to an LSP TypeHierarchyItem dict. <c>kind</c> is an LSP
     /// SymbolKind number; <c>range</c> + <c>selectionRange</c> are both the declaration's 0-based name
-    /// span; the <c>data</c> blob carries <c>thKind</c> so the client can echo it back and the shell can
-    /// reconstruct the item (mirrors the WASM <c>MapTypeHierarchyItem</c>).
+    /// span; the <c>data</c> blob carries <c>thKind</c> and the declaring bounded <c>context</c> (#389) so
+    /// the client can echo it back and the shell can reconstruct the same-named type against the right
+    /// context (mirrors the WASM <c>MapTypeHierarchyItem</c>).
     /// </summary>
     private static Dictionary<string, object?> TypeHierarchyItemJson(TypeHierarchyItem item)
     {
@@ -1300,14 +1302,16 @@ internal sealed class LspServer
             ["data"] = new Dictionary<string, object?>
             {
                 ["thKind"] = item.Kind.ToString(),
+                ["context"] = item.Context,
             },
         };
     }
 
     /// <summary>
-    /// Reconstructs a <see cref="TypeHierarchyItem"/> from an LSP TypeHierarchyItem element: only the
-    /// <c>name</c> and <c>data.thKind</c> are read (the supertypes/subtypes resolution keys off the name;
-    /// the span/uri are placeholders). Returns <c>null</c> when the element lacks a name or thKind.
+    /// Reconstructs a <see cref="TypeHierarchyItem"/> from an LSP TypeHierarchyItem element: the
+    /// <c>name</c>, <c>data.thKind</c> and <c>data.context</c> (#389) are read (the supertypes/subtypes
+    /// resolution keys off the (context, name) identity; the span/uri are placeholders). Returns
+    /// <c>null</c> when the element lacks a name or thKind.
     /// </summary>
     private static TypeHierarchyItem? ReadTypeHierarchyItem(JsonElement itemElement)
     {
@@ -1326,7 +1330,10 @@ internal sealed class LspServer
         var kind = Enum.TryParse<TypeHierarchyItemKind>(thKindEl.GetString(), out var k)
             ? k
             : TypeHierarchyItemKind.Other;
-        return new TypeHierarchyItem(name, kind, "", SourceSpan.None);
+        var context = data.TryGetProperty("context", out var ctxEl) && ctxEl.ValueKind == JsonValueKind.String
+            ? ctxEl.GetString()
+            : null;
+        return new TypeHierarchyItem(name, kind, "", SourceSpan.None) { Context = context };
     }
 
     /// <summary>Maps a <see cref="TypeHierarchyItemKind"/> to the numeric LSP <c>SymbolKind</c> (mirrors the WASM backend).</summary>

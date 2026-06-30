@@ -176,8 +176,10 @@ public sealed record WTypeHierarchyItem(
     string Name, int Kind, string Uri, WRange Range, WRange SelectionRange, WTypeHierarchyData Data);
 
 /// <summary>The opaque <c>data</c> blob on a TypeHierarchyItem: the language-service kind
-/// (<c>"Entity"</c>/<c>"Value"</c>/<c>"ReadModel"</c>/…) so the item can be reconstructed.</summary>
-public sealed record WTypeHierarchyData(string ThKind);
+/// (<c>"Entity"</c>/<c>"Value"</c>/<c>"ReadModel"</c>/…) plus the declaring bounded <c>Context</c> (#389,
+/// <c>null</c> when unknown) so a same-named type is reconstructed against the right context. Round-tripped
+/// field-for-field with the stdio LSP's hand-written <c>data</c> dict.</summary>
+public sealed record WTypeHierarchyData(string ThKind, string? Context);
 
 /// <summary>Input shape: one requested position for selection ranges (0-based LSP coordinates).</summary>
 public sealed record WInPosition(int Line, int Character);
