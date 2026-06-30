@@ -35,6 +35,47 @@ internal static class TsRuntime
     /// <summary>The emitted infrastructure-runtime file path (off by default; Infrastructure layer only).</summary>
     public const string InfrastructureFileName = "infrastructure-runtime.ts";
 
+    /// <summary>
+    /// The runtime module source for a given neutral <see cref="Koine.Compiler.Emit.EmitterOptions.RegexMatchTimeoutMs"/>
+    /// intent. When the key is unset (the default) this is <see cref="Source"/> verbatim — byte-identical
+    /// to the historical emitter. When set, the <c>regexMatch</c> seam gains an advisory
+    /// <c>timeoutMs?: number</c> parameter (and a doc note that stock <c>RegExp</c> ignores it) so the
+    /// documented RE2/linear-engine swap point can honor the author's bound (#794/#812). The default
+    /// engine's match behavior is unchanged either way.
+    /// </summary>
+    public static string SourceFor(int? regexMatchTimeoutMs) =>
+        regexMatchTimeoutMs is null
+            ? Source
+            : Source.Replace(DefaultRegexMatchSeam, AdvisoryRegexMatchSeam, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The historical <c>regexMatch</c> seam (doc tail + signature), as it appears verbatim in
+    /// <see cref="Source"/>. <see cref="SourceFor"/> swaps it for <see cref="AdvisoryRegexMatchSeam"/>
+    /// only when a match-timeout budget is configured.
+    /// </summary>
+    private const string DefaultRegexMatchSeam =
+        """
+         * untrusted input, and every generated `matches` invariant picks it up. (Koine #641.)
+         */
+        export function regexMatch(pattern: RegExp, input: string): boolean {
+        """;
+
+    /// <summary>
+    /// The <c>regexMatch</c> seam carrying the advisory <c>timeoutMs?</c> parameter (#794/#812): the
+    /// signature gains the budget the author set and the doc states it is advisory until a linear-time
+    /// engine honoring it is wired in. The body is unchanged, so default-engine matching is identical.
+    /// </summary>
+    private const string AdvisoryRegexMatchSeam =
+        """
+         * untrusted input, and every generated `matches` invariant picks it up. (Koine #641.)
+         *
+         * `timeoutMs` carries the author's `regexMatchTimeoutMs` budget (#794/#812) to that swap point.
+         * It is ADVISORY: stock `RegExp` ignores it, so matching is unchanged until a linear-time engine
+         * that honors the bound is wired in here.
+         */
+        export function regexMatch(pattern: RegExp, input: string, timeoutMs?: number): boolean {
+        """;
+
     /// <summary>The full source of the runtime module.</summary>
     public const string Source =
         """

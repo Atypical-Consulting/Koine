@@ -124,8 +124,10 @@ internal sealed class TypeScriptEmitterProvider : IEmitterProvider
     /// </summary>
     private static TsEmitterOptions ToTsOptions(EmitterOptions options)
     {
+        // A timeout-only neutral bag must NOT collapse to Empty (issue #812): the configured value has to
+        // reach the `regexMatch` seam, mirroring the C# provider's guard (issue #794).
         if (options.NamespaceMap.Count == 0 && !options.EmitSourceMaps && !options.ReferenceOnly
-            && options.Layers is null)
+            && options.Layers is null && options.RegexMatchTimeoutMs is null)
         {
             return TsEmitterOptions.Empty;
         }
@@ -136,6 +138,7 @@ internal sealed class TypeScriptEmitterProvider : IEmitterProvider
             ModuleMap = options.NamespaceMap,
             ReferenceOnly = options.ReferenceOnly,
             Layers = ParseLayers(options.Layers),
+            RegexMatchTimeoutMs = options.RegexMatchTimeoutMs,
         };
     }
 
