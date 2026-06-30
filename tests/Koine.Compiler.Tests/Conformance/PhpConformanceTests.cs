@@ -418,13 +418,17 @@ public class PhpConformanceTests
     /// <c>binaryOp.invalid</c>. The fix routes a guarded optional Decimal operand to <c>add</c>/… with a
     /// Decimal-non-null wrapper so the receiver/argument is never <c>Decimal|null</c>.
     /// <para>
-    /// This fixture is an <b>entity</b> (not a value object) deliberately: an entity's generated
-    /// <c>equals()</c> compares its <c>id</c> alone, whereas a value object's structural <c>equals()</c>
-    /// would call <c>$this-&gt;base-&gt;equals(...)</c> on the nullable <c>Decimal?</c> member — an
-    /// <em>independent</em> pre-existing emitter gap (<c>method.nonObject</c> on <c>Decimal|null</c>)
-    /// that is out of scope for #787 (which is contained to <c>PhpExpressionTranslator</c>). Using an
-    /// entity isolates the guarded-optional <em>arithmetic</em> path under test from that unrelated gap.
-    /// Skipped (not failed) only when no <c>phpstan</c> is present locally; CI runs it for real.
+    /// This fixture is an <b>entity</b> (not a value object) deliberately, to keep it focused on the
+    /// guarded-optional <em>arithmetic</em> path: an entity's generated <c>equals()</c> compares its
+    /// <c>id</c> alone, whereas a value object's structural <c>equals()</c> would <em>also</em> call
+    /// <c>$this-&gt;base-&gt;equals(...)</c> on the nullable <c>Decimal?</c> member, dragging an unrelated
+    /// concern into this fixture. When #787 landed, that structural-nullable-<c>equals()</c> concern was an
+    /// independent untested gap (<c>method.nonObject</c> on <c>Decimal|null</c>); it is <b>now closed and
+    /// locked</b> — the structural branch null-guards a nullable object member (shipped with #686 / PR
+    /// #802) and is covered by
+    /// <see cref="Value_object_nullable_member_equals_typechecks_at_phpstan_level_max"/> (#814). The entity
+    /// here is retained only to keep this test on the arithmetic path. Skipped (not failed) only when no
+    /// <c>phpstan</c> is present locally; CI runs it for real.
     /// </para>
     /// </summary>
     [Fact]
@@ -435,6 +439,50 @@ public class PhpConformanceTests
             "  entity Account identified by AccountId {\n" +
             "    base: Decimal?\n" +
             "    total: Decimal? = if base.isPresent then base + base else base\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #814 acceptance: a <c>value</c> with a nullable <em>object-typed</em> member — a
+    /// <c>Decimal?</c> or a value-object-typed optional — emits a structural <c>equals()</c> that must
+    /// type-check under <c>phpstan --level max</c>. An object-typed member compares via its own
+    /// <c>equals()</c> (#686), so a <em>nullable</em> one would, unguarded, call
+    /// <c>$this-&gt;low-&gt;equals(...)</c> on <c>Decimal|null</c> — <c>method.nonObject</c> at phpstan-max
+    /// and a <c>TypeError</c> at runtime when the member is actually <c>null</c>.
+    /// <para>
+    /// The guard that makes this clean shipped with #686 (PR #802): the structural branch wraps a
+    /// nullable member in a null-first ternary
+    /// (<c>$this-&gt;m === null ? $other-&gt;m === null : ($other-&gt;m !== null &amp;&amp; $this-&gt;m-&gt;equals($other-&gt;m))</c>)
+    /// — both-null equal, one-null unequal, both-present structural. This fixture is the regression lock
+    /// that was missing: it lets a <c>Decimal?</c> member live on a <c>value</c> rather than forcing the
+    /// entity workaround #799 used (see <see cref="Guarded_optional_Decimal_arithmetic_typechecks_at_phpstan_level_max"/>).
+    /// It covers both object-typed nullable kinds at once — the scalar <c>Decimal?</c> and a value-object
+    /// optional (<c>Money?</c>) — since both route through the same structural-nullable branch. Skipped
+    /// (not failed) only when no <c>phpstan</c> is present locally; CI installs the toolchain and runs it
+    /// for real.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Value_object_nullable_member_equals_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Catalog {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  value PriceRange {\n" +
+            "    low:  Decimal?\n" +   // the issue's exact repro: a nullable scalar-runtime object member
+            "    high: Decimal\n" +
+            "    cap:  Money?\n" +     // a value-object-typed optional — same structural-nullable branch
             "  }\n" +
             "}\n";
         var result = new KoineCompiler().Compile(src, new PhpEmitter());
