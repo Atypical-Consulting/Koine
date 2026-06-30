@@ -150,6 +150,43 @@ jobs:
         shell: bash
         run: npx playwright install --with-deps chromium
 
+      # Issue #400: the Windows runner intermittently exhausts disk during the Vite module-transform
+      # phase for the wasm.fallback suite, crashing vitest workers with "Error: disk full". Prune
+      # large toolchains the studio job does not need (Android SDK, Java, Go, etc.) before the
+      # test step to reclaim several GB of headroom. The before/after log lines confirm how much
+      # space was freed and how much margin remains for the vitest run.
+      - name: Free disk space and log headroom (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host "=== disk headroom BEFORE cleanup ==="
+          Get-PSDrive -PSProvider FileSystem |
+            Select-Object Name,
+              @{N='Used(GB)';E={[Math]::Round($_.Used/1GB,2)}},
+              @{N='Free(GB)';E={[Math]::Round($_.Free/1GB,2)}} |
+            Format-Table -AutoSize
+          $remove = @(
+            $env:JAVA_HOME_8_X64, $env:JAVA_HOME_11_X64,
+            $env:JAVA_HOME_17_X64, $env:JAVA_HOME_21_X64,
+            'C:\Program Files (x86)\Android',
+            'C:\Program Files\MongoDB',
+            'C:\hostedtoolcache\windows\go',
+            'C:\hostedtoolcache\windows\Python',
+            'C:\hostedtoolcache\windows\Ruby'
+          )
+          foreach ($p in $remove) {
+            if ($p -and (Test-Path $p)) {
+              Write-Host "  Removing: $p"
+              Remove-Item -Recurse -Force $p -ErrorAction SilentlyContinue
+            }
+          }
+          Write-Host "=== disk headroom AFTER cleanup ==="
+          Get-PSDrive -PSProvider FileSystem |
+            Select-Object Name,
+              @{N='Used(GB)';E={[Math]::Round($_.Used/1GB,2)}},
+              @{N='Free(GB)';E={[Math]::Round($_.Free/1GB,2)}} |
+            Format-Table -AutoSize
+
       # Frontend tests: happy-dom unit/DOM logic (project-name/zip helpers, the wizard flow)
       # plus the Storybook story + a11y checks running headless in Chromium.
       #

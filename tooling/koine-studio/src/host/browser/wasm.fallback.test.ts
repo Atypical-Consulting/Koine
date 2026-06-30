@@ -2,6 +2,8 @@
 // main-thread boot when the worker boot rejects (boot-failure OR timeout), and getWasmBootMode()
 // reports which path won. Happy-dom has no real Worker and no real .NET runtime, so we mock the
 // worker client and inject a fake dotnet module loader (the __setDotnetModuleLoaderForTests seam).
+import { statfsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { describe, expect, test, vi, beforeEach, afterEach } from 'vitest';
 import { HOST_DECLARED_EXPORTS } from '@/host/browser/wasm';
 
@@ -36,7 +38,31 @@ function fakeDotnetModule(interop: Record<string, unknown>) {
   return async () => dotnetModuleValue(interop);
 }
 
-describe('loadWasmApi — main-thread fallback (issue #357)', () => {
+// Guard: if the runner's disk is nearly full, the Vite transform-cache writes that happen when
+// this suite imports @/host/browser/wasm can exhaust the remaining space and crash the vitest
+// worker with "Error: disk full" (issue #400). Check available space at module-load time and
+// skip the whole suite visibly — vitest reports it as "skipped" rather than an unhandled worker
+// exit, which would fail an otherwise-green run. A normal runner has many GB free; the threshold
+// is a conservative floor that only triggers when the runner is genuinely constrained.
+// `bavail` (not `bfree`) is the blocks available to the calling process — on Linux, ext4 reserves
+// ~5% for root so `bfree` overestimates what vitest can actually use; on Windows they are equal.
+const DISK_FLOOR_MB = 512;
+let _diskFreeMB: number;
+try {
+  const { bavail, bsize } = statfsSync(tmpdir());
+  _diskFreeMB = (bavail * bsize) / (1024 * 1024);
+} catch {
+  _diskFreeMB = Infinity; // cannot query — assume adequate space and run the tests
+}
+const diskConstrained = _diskFreeMB < DISK_FLOOR_MB;
+if (diskConstrained) {
+  console.warn(
+    `[wasm.fallback] Skipping suite — disk is nearly full (${_diskFreeMB.toFixed(0)} MB available, ` +
+      `floor is ${DISK_FLOOR_MB} MB). See issue #400.`,
+  );
+}
+
+describe.skipIf(diskConstrained)('loadWasmApi — main-thread fallback (issue #357)', () => {
   beforeEach(() => {
     vi.resetModules();
   });

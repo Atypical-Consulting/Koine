@@ -17,7 +17,9 @@ import { resolve } from 'node:path';
 // the end-state LOC plus a small headroom margin so a trivial edit doesn't trip the guard, while the next
 // feature that bloats init() (instead of extending a controller — see ide.tsx's composition-root contract)
 // fails CI. Lower it again only if ide.tsx is deliberately shrunk further.
-const IDE_TSX_MAX_LINES = 1320;
+// Raised 1320 → 1330: #746 added the Settings Esc-dismiss handler (legitimate composition-root wiring)
+// and #789 named it (+ onSaveKey + onHistoryKey) for proper teardown, together adding ~5 LOC net.
+const IDE_TSX_MAX_LINES = 1330;
 
 describe('ide.tsx line-budget guard', () => {
   it(`keeps ide.tsx under ${IDE_TSX_MAX_LINES} lines (the composition root must stay thin)`, () => {
