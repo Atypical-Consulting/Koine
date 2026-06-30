@@ -229,27 +229,33 @@ catastrophic-backtracking pattern could otherwise turn the constructor into a
 [ReDoS](https://owasp.org/www-community/attacks/Regular_expression_Denial_of_Service_-_ReDoS)
 sink, so Koine bounds the emitted match per target:
 
-| Target | Emitted form | Bound |
-| --- | --- | --- |
-| **C#** | `Regex.IsMatch(raw, @"…", RegexOptions.None, TimeSpan.FromMilliseconds(1000))` | A real **per-call match timeout** (1000 ms). A timed-out match throws a *contained* `RegexMatchTimeoutException` from the constructor — it never hangs. |
-| **TypeScript** | `regexMatch(/…/, raw)` (a runtime helper) | JS has **no** synchronous per-call regex timeout, so the host can't bound a match without changing its result. Every match routes through one `regexMatch` seam that preserves semantics exactly (it *is* `.test`) and is the single place to swap in a linear-time engine (e.g. RE2) for a hard guarantee on untrusted input. |
-| **Python** | `re.search(r"…", raw) is not None` | CPython's stdlib `re` has **no** per-call timeout; the form is unchanged. For untrusted input, cap input length or use the third-party `regex` module's `timeout=`. |
-| **PHP** | `(bool)preg_match('/…/', $raw)` | PCRE is **already bounded** by `pcre.backtrack_limit` / `pcre.recursion_limit` (set by default), so a catastrophic pattern fails the match instead of hanging. |
-| **Rust** | `koine_runtime::regex_is_match(r"…", &raw)` | The `regex` crate is a **linear-time** automaton with no catastrophic backtracking — no timeout is needed by construction. |
+The same neutral `regexMatchTimeoutMs` intent (a millisecond budget) reaches **every code target**, but
+each runtime can honor it differently — so a target either **honors** the bound, **plumbs** it toward the
+one seam that could enforce it, or **substitutes** the nearest mechanism it has. No target silently
+discards it:
 
-The C# timeout is configurable via the `koine.config` key
-[`targets.csharp.regexMatchTimeoutMs`](/Koine/guides/cli/#koineconfig) (default `1000`): set a tighter bound
-for hostile-input value objects, or a looser one for a legitimately expensive pattern on trusted batch
-input. The value must be a **positive integer** number of milliseconds — `0` or any negative value is
-rejected at build time (`regexMatchTimeoutMs must be a positive integer (milliseconds); got '…'`),
-because it would otherwise flow into the generated `TimeSpan.FromMilliseconds(N)` and throw at the
-*generated* code's own runtime. Disabling the bound is intentionally not supported — the whole point of
-the guard is to *have* one. A non-integer value is ignored (the emitter keeps its `1000` ms default),
-matching how other malformed config keys are forward-compatibly skipped.
+| Target | Policy | Emitted form (default → when the key is set) | Notes |
+| --- | --- | --- | --- |
+| **C#** | **honors** | `Regex.IsMatch(raw, @"…", RegexOptions.None, TimeSpan.FromMilliseconds(1000))` | A real **per-call match timeout** (default 1000 ms). A timed-out match throws a *contained* `RegexMatchTimeoutException` — it never hangs. |
+| **Python** | **honors** | `re.search(r"…", raw) is not None` → `regex.search(r"…", raw, timeout=<ms/1000>) is not None` | When set, lowers to the third-party [`regex`](https://pypi.org/project/regex/) module's `timeout=` (seconds) — the one Python path with a real per-call bound — and adds an `import regex`. Unset keeps stdlib `re`, so users who don't opt in take on **no new dependency**. |
+| **TypeScript** | **plumbs** | `regexMatch(/…/, raw)` → `regexMatch(/…/, raw, <ms>)` | JS `RegExp` has **no** synchronous per-call timeout, so the bound is **advisory**: the value is threaded into the `regexMatch` seam's `timeoutMs?` parameter — the single place to swap in a linear-time engine (e.g. RE2) that *can* enforce it. Default-engine matching is unchanged. |
+| **PHP** | **substitutes** | `(bool)preg_match('/…/', $raw)` → same, annotated with the budget | PHP has no per-call wall-clock timeout; PCRE is **already bounded** by `pcre.backtrack_limit` / `pcre.recursion_limit` (set by default), so a catastrophic pattern fails the match instead of hanging. When the key is set the emitted `preg_match` is annotated with that PCRE-limit substitute and the author's budget rather than dropping it. |
+| **Rust** | n/a | `koine_runtime::regex_is_match(r"…", &raw)` | The `regex` crate is a **linear-time** automaton with no catastrophic backtracking — no timeout is needed by construction. |
 
-The generated TypeScript `regexMatch` helper is the seam to harden untrusted-input
-matching without touching every call site — replace its body with a linear-time engine (e.g. RE2)
-and every `matches` invariant inherits the bound.
+The bound is configurable via the `koine.config` key
+[`targets.<target>.regexMatchTimeoutMs`](/Koine/guides/cli/#koineconfig) (default `1000` for C#): set a
+tighter bound for hostile-input value objects, or a looser one for a legitimately expensive pattern on
+trusted batch input. The value must be a **positive integer** number of milliseconds — `0` or any
+negative value is rejected at build time (`regexMatchTimeoutMs must be a positive integer (milliseconds);
+got '…'`), because for C# it would otherwise flow into the generated `TimeSpan.FromMilliseconds(N)` and
+throw at the *generated* code's own runtime. Disabling the bound is intentionally not supported — the
+whole point of the guard is to *have* one. A non-integer value is ignored (the emitter keeps its `1000`
+ms default for C#), matching how other malformed config keys are forward-compatibly skipped.
+
+The generated TypeScript `regexMatch` helper is the seam to harden untrusted-input matching without
+touching every call site — replace its body with a linear-time engine (e.g. RE2) and every `matches`
+invariant inherits the bound; when `regexMatchTimeoutMs` is set, the author's budget is already threaded
+in as the helper's advisory `timeoutMs?` argument for that engine to honor.
 
 ### Source-generated form (opt-in, C#)
 
