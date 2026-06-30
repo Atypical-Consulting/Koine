@@ -89,7 +89,9 @@ public static partial class CompilerInterop
     {
         try
         {
-            var docs = DeserializeFiles(filesJson).ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
+            // Warm path (issue #464): reuse the reconciled snapshot for selection-driven refactors —
+            // no re-parse. The quickfix path reads client-supplied diagnostics, never the compilation.
+            var comp = GetWarmCompilation(DeserializeFiles(filesJson));
             var actions = new List<WCodeAction>();
 
             // 1. Diagnostic quickfixes: a "… — did you mean 'X'?" message yields a one-edit fix.
@@ -117,7 +119,7 @@ public static partial class CompilerInterop
             }
 
             // 2. Selection-driven refactors (Extract value object, …).
-            foreach (var refactor in LanguageService.RefactorsAt(docs, activeUri, startLine, startChar, endLine, endChar))
+            foreach (var refactor in LanguageService.RefactorsAt(comp, activeUri, startLine, startChar, endLine, endChar))
             {
                 var edits = refactor.Edits.Select(e => new WTextEdit(SpanRange(e.Range), e.NewText)).ToArray();
                 var changes = new Dictionary<string, WTextEdit[]>(StringComparer.Ordinal) { [activeUri] = edits };

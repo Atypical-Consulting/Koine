@@ -35,6 +35,18 @@ public static partial class ModelRoundTripService
     }
 
     /// <summary>
+    /// Snapshot-accepting overload of <see cref="EmitKoine(IReadOnlyList{SourceFile},StructuredEdit)"/>
+    /// (issue #464): skips the initial parse step by reusing the already-built
+    /// <see cref="KoineCompilation.Model"/> from <paramref name="compilation"/>.
+    /// Output is byte-identical to the <c>files</c>-based overload for the same workspace content.
+    /// </summary>
+    public static EmitResult EmitKoine(KoineCompilation compilation, StructuredEdit edit)
+    {
+        EditComputation c = Compute(compilation, edit);
+        return new EmitResult(c.Koine, c.Diagnostics);
+    }
+
+    /// <summary>
     /// Applies <paramref name="edit"/> and returns a span-minimal patch: a single
     /// <see cref="TextEditModel"/> replacing the affected declaration's original range with its
     /// re-emitted text, so the editor patches only the touched declaration and every other byte of the
@@ -43,6 +55,24 @@ public static partial class ModelRoundTripService
     public static ModelEditResult ApplyEdit(IReadOnlyList<SourceFile> files, StructuredEdit edit)
     {
         EditComputation c = Compute(files, edit);
+        if (c.Koine is null || c.OriginalDeclSpan.IsNone)
+        {
+            return new ModelEditResult(c.Uri, [], c.Diagnostics);
+        }
+
+        var patch = new TextEditModel(c.OriginalDeclSpan, c.Koine);
+        return new ModelEditResult(c.Uri, [patch], c.Diagnostics);
+    }
+
+    /// <summary>
+    /// Snapshot-accepting overload of <see cref="ApplyEdit(IReadOnlyList{SourceFile},StructuredEdit)"/>
+    /// (issue #464): skips the initial parse step by reusing the already-built
+    /// <see cref="KoineCompilation.Model"/> from <paramref name="compilation"/>.
+    /// Output is byte-identical to the <c>files</c>-based overload for the same workspace content.
+    /// </summary>
+    public static ModelEditResult ApplyEdit(KoineCompilation compilation, StructuredEdit edit)
+    {
+        EditComputation c = Compute(compilation, edit);
         if (c.Koine is null || c.OriginalDeclSpan.IsNone)
         {
             return new ModelEditResult(c.Uri, [], c.Diagnostics);
@@ -66,7 +96,16 @@ public static partial class ModelRoundTripService
         // both backends fail symmetrically (the WASM JSExports catch identically).
         try
         {
-            return ComputeCore(files, edit);
+            var compiler = new KoineCompiler();
+            var (model, parseDiags) = compiler.Parse(files);
+            var parseErrors = parseDiags.Where(IsError).ToList();
+            if (model is null || parseErrors.Count > 0)
+            {
+                // No usable model to edit against — no-op with the parse errors (mirrors the read-path guard).
+                return new EditComputation(null, SourceSpan.None, null, parseErrors);
+            }
+
+            return ComputeCore(model, files, edit, compiler);
         }
         catch
         {
@@ -74,17 +113,34 @@ public static partial class ModelRoundTripService
         }
     }
 
-    private static EditComputation ComputeCore(IReadOnlyList<SourceFile> files, StructuredEdit edit)
+    private static EditComputation Compute(KoineCompilation compilation, StructuredEdit edit)
     {
-        var compiler = new KoineCompiler();
-        var (model, parseDiags) = compiler.Parse(files);
-        var parseErrors = parseDiags.Where(IsError).ToList();
-        if (model is null || parseErrors.Count > 0)
+        // Warm/snapshot path (issue #464): reuse the already-parsed model from the caller's
+        // reconciled snapshot, skipping the cold parse step for unchanged files.
+        try
         {
-            // No usable model to edit against — no-op with the parse errors (mirrors the read-path guard).
-            return new EditComputation(null, SourceSpan.None, null, parseErrors);
-        }
+            // Derive the ordered file list from the snapshot so the rest of the pipeline can read
+            // source text by URI — same order as a cold Compute(files, edit) for the same inputs.
+            var files = compilation.Uris
+                .Select(uri => new SourceFile(uri, compilation.Documents[uri]))
+                .ToList();
 
+            var parseErrors = compilation.SyntaxDiagnostics.Where(IsError).ToList();
+            if (parseErrors.Count > 0)
+            {
+                return new EditComputation(null, SourceSpan.None, null, parseErrors);
+            }
+
+            return ComputeCore(compilation.Model, files, edit, new KoineCompiler());
+        }
+        catch
+        {
+            return new EditComputation(null, SourceSpan.None, null, []);
+        }
+    }
+
+    private static EditComputation ComputeCore(KoineModel model, IReadOnlyList<SourceFile> files, StructuredEdit edit, KoineCompiler compiler)
+    {
         // Resolve the affected declaration (the type or state machine) and the precise text edit.
         if (!TryResolveDeclaration(model, edit, out DeclTarget decl)
             || !TryComputeTextEdit(model, files, edit, out TextOp op))
