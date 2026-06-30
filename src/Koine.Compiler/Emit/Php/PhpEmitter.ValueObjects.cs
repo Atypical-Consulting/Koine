@@ -372,6 +372,26 @@ public sealed partial class PhpEmitter
         });
 
         sb.Append(Indent).Append("}\n");
+
+        sb.Append('\n');
+        sb.Append(Indent).Append(@"public function dividedBy(\Koine\Runtime\Decimal $factor): self").Append('\n');
+        sb.Append(Indent).Append("{\n");
+
+        WriteFieldwiseSelf(sb, fields, m =>
+        {
+            var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
+            if (!numeric.Contains(m.Name))
+            {
+                return "$this->" + prop;
+            }
+
+            // Decimal: use ->div(); Int: cast to Decimal via runtime for consistency, then divide.
+            return m.Type.Name == "Decimal"
+                ? "$this->" + prop + "->div($factor)"
+                : "(new \\Koine\\Runtime\\Decimal($this->" + prop + "))->div($factor)";
+        });
+
+        sb.Append(Indent).Append("}\n");
     }
 
     // -------------------------------------------------------------------------
