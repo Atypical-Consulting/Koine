@@ -10,6 +10,7 @@
 // where the declarative registry composes in, with no change to init().
 import { createCommandPalette, type Command } from '@/shared/palette';
 import { createCommandRegistry } from '@/shared/commandRegistry';
+import { domById } from '@/shared/domById';
 import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
 import { devCommands } from '@/shell/devCommands';
 import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
@@ -76,12 +77,6 @@ export interface CommandWiring {
 // keybindings registry — can address "open/close the command palette" by id through run(). Deliberately
 // excluded from the palette's own list (the palette never lists the command that opens itself).
 export const PALETTE_COMMAND_ID = 'command-palette';
-
-function el<T extends HTMLElement>(id: string): T {
-  const node = document.getElementById(id);
-  if (!node) throw new Error(`missing #${id}`);
-  return node as T;
-}
 
 export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
   // --- command palette command set ------------------------------------------
@@ -182,29 +177,29 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
   }
   // Each toolbar button dispatches its command by id (#758) so it can never drift from the palette entry
   // or re-derive the action — the registry's run() owns the effect (and its enablement guard).
-  el<HTMLButtonElement>('btn-home').addEventListener('click', () => registry.run('home'));
-  el<HTMLButtonElement>('btn-new').addEventListener('click', () => registry.run('new-model'));
-  el<HTMLButtonElement>('btn-generate-project').addEventListener('click', () => registry.run('generate-project'));
-  const saveProjectBtn = el<HTMLButtonElement>('btn-save-project');
+  domById<HTMLButtonElement>('btn-home').addEventListener('click', () => registry.run('home'));
+  domById<HTMLButtonElement>('btn-new').addEventListener('click', () => registry.run('new-model'));
+  domById<HTMLButtonElement>('btn-generate-project').addEventListener('click', () => registry.run('generate-project'));
+  const saveProjectBtn = domById<HTMLButtonElement>('btn-save-project');
   saveProjectBtn.addEventListener('click', () => registry.run('save-project-to-disk'));
   if (!deps.canSaveProjects) saveProjectBtn.hidden = true;
-  el<HTMLButtonElement>('btn-theme').addEventListener('click', () => registry.run('toggle-theme'));
+  domById<HTMLButtonElement>('btn-theme').addEventListener('click', () => registry.run('toggle-theme'));
   // The toolbar gear opens the transient Settings overlay over the deck (#center-panel-settings) — now the
   // single Settings surface every entry point shares (#731), via the prefs command.
-  el<HTMLButtonElement>('btn-prefs').addEventListener('click', () => registry.run('prefs'));
+  domById<HTMLButtonElement>('btn-prefs').addEventListener('click', () => registry.run('prefs'));
 
   // Mobile overflow "More" (⋮) menu (#528): at ≤ $bp-narrow the toolbar hides its secondary actions
   // (Save/Check/Install/⌘K/theme/Settings) and reveals this kebab, which collects them into a floating
   // menu. Items reuse the command-palette handlers (getCommands) so they never drift; Install is gated
   // on its affordance being revealed (#442) and reuses the #btn-install handler.
-  const overflowBtn = el<HTMLButtonElement>('btn-toolbar-overflow');
+  const overflowBtn = domById<HTMLButtonElement>('btn-toolbar-overflow');
   overflowBtn.addEventListener('click', () =>
     toggleOverflowMenu(overflowBtn, () =>
       buildOverflowItems({
         commands: getCommands(),
         openPalette: () => palette.open(),
-        installAvailable: !el<HTMLElement>('install-affordance').hidden,
-        install: () => el<HTMLButtonElement>('btn-install').click(),
+        installAvailable: !domById<HTMLElement>('install-affordance').hidden,
+        install: () => domById<HTMLButtonElement>('btn-install').click(),
       }),
     ),
   );

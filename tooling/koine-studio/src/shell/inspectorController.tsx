@@ -42,6 +42,7 @@ import type {
 import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/settings/persistence';
 import { renderDiagrams } from '@/diagrams/diagrams';
+import { domById } from '@/shared/domById';
 import { renderContextMapGraph, type ContextMapGraphHandle } from '@/diagrams/diagrams-maxgraph';
 import { buildContextMapGraph, type ContextMapEdge } from '@/diagrams/contextMapGraph';
 import { NODE_NAVIGATE_EVENT, setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
@@ -313,16 +314,10 @@ export interface InspectorController {
   dispose(): void;
 }
 
-function el<T extends HTMLElement>(id: string): T {
-  const node = document.getElementById(id);
-  if (!node) throw new Error(`missing #${id}`);
-  return node as T;
-}
-
 export function createInspectorController(deps: InspectorControllerDeps): InspectorController {
   const { lsp, editor, output, platform, store: appStore } = deps;
 
-  // --- DOM hosts (looked up once; the same id surface init() builds, so a drift throws via el()) ---
+  // --- DOM hosts (looked up once; the same id surface init() builds, so a drift throws via domById()) ---
   // A copy affordance overlaid on the emitted-preview pane (auto-hidden with the pane). Tracks the
   // most recent generated output; disabled until there is some.
   let lastPreview = '';
@@ -344,34 +339,34 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         copyResetTimer = setTimeout(() => (copyBtn.textContent = 'Copy'), 1600);
       });
   });
-  el('view-preview').appendChild(copyBtn);
+  domById('view-preview').appendChild(copyBtn);
 
   // Left-rail host: the Domain axis's strategic/tactical navigator (#453). mountDomainNavigator owns this
   // node — it self-fetches its strategic data and reads the store for altitude + scope — so loadModel
   // mounts it once and thereafter just reloads it. (The former Overview counts surface was removed with
   // the section stack.)
-  const domainPane = el('rail-domain-pane');
+  const domainPane = domById('rail-domain-pane');
   // The mounted Domain navigator (#453), created lazily on the first loadModel and reused thereafter — so
   // a model reload re-fetches its strategic data rather than re-mounting (which would drop its store
   // subscription + breadcrumb state). Disposed on tear-down to drop that subscription.
   let domainNavigator: DomainNavigatorHandle | null = null;
   // The Documentation center tab's three sub-views: Glossary (the ubiquitous language), Decisions (the
   // ADR list) and Notes — the latter two split from the former combined "Decisions & Notes" surface.
-  const glossaryView = el('view-glossary');
-  const adrView = el('view-docs');
-  const notesView = el('view-notes');
+  const glossaryView = domById('view-glossary');
+  const adrView = domById('view-docs');
+  const notesView = domById('view-notes');
   // Center hosts: the diagram canvas (Visual) and the code editor's companion sub-views.
-  const diagramsView = el('diagram-host');
-  const assistantView = el('view-assistant');
-  const checkView = el('view-check');
-  const scenariosView = el('view-scenarios');
+  const diagramsView = domById('diagram-host');
+  const assistantView = domById('view-assistant');
+  const checkView = domById('view-check');
+  const scenariosView = domById('view-scenarios');
   // The transient Settings overlay (#482): a gear-launched page that covers the deck body while
   // `settingsOpen`, NOT a deck surface. OPTIONAL like the bottom-sheet host — absent from the desktop-only
   // test fixtures — so look it up defensively; without it applyCenterChrome simply skips the overlay
   // toggle. The page body is populated by the settings page host (ide.tsx).
   const settingsPanelEl = document.getElementById('center-panel-settings');
   // Right-rail host: the element inspector (Properties). Fixed — never torn down on a model reload.
-  const inspectorHost = el('inspector-host');
+  const inspectorHost = domById('inspector-host');
   // Below $bp-narrow the inspector lives in a bottom sheet instead of the fixed #right rail (#221). The
   // sheet host is OPTIONAL: it's absent from the desktop-only test fixtures, and without it the
   // controller keeps the original right-rail behaviour untouched (no sheet, no resize listener). When it
@@ -406,18 +401,18 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   window.addEventListener('resize', onViewportResize);
   // Top-bar "scope path" host (the ContextBreadcrumb Preact panel — the scope selector + selected
   // element) and its status-bar context mirror.
-  const breadcrumbHost = el('breadcrumb-host');
-  const sbContextEl = el('sb-context');
+  const breadcrumbHost = domById('breadcrumb-host');
+  const sbContextEl = domById('sb-context');
 
   // Bottom-panel refs.
-  const diagEl = el('diagnostics');
-  const diagBodyEl = el('diag-body');
-  const diagCountEl = el('diag-count');
-  const eventsPanel = el('panel-events');
-  const relationshipsPanel = el('panel-relationships');
-  const contextMapView = el('panel-contextmap');
-  const terminalPanel = el('panel-terminal');
-  const reviewPanel = el('panel-review');
+  const diagEl = domById('diagnostics');
+  const diagBodyEl = domById('diag-body');
+  const diagCountEl = domById('diag-count');
+  const eventsPanel = domById('panel-events');
+  const relationshipsPanel = domById('panel-relationships');
+  const contextMapView = domById('panel-contextmap');
+  const terminalPanel = domById('panel-terminal');
+  const reviewPanel = domById('panel-review');
 
   // --- center pane restore ---------------------------------------------------
   // Restore the persisted center pane, defaulting to Visual when absent/invalid.
@@ -811,7 +806,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // draft survives the in-place refresh), and re-mounted against the new folder on a workspace switch.
   // The panel self-gates on `platform.canUseGit` and catches a non-repo `gitStatus` reject, so the
   // controller can mount it unconditionally and let it paint the right empty state.
-  const sourceControlRightView = el('rview-source-control');
+  const sourceControlRightView = domById('rview-source-control');
   let sourceControlLoaded = false;
   let sourceControlRefresh = 0;
   // Paint the panel with the live commit-guard inputs (#470): the current unsaved-buffer count and a
@@ -1275,7 +1270,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const activeDocs = (): DocsView => appStore.getState().docs as DocsView;
   const activeOutput = (): OutputTab => appStore.getState().output as OutputTab;
 
-  const centerVisualEl = el('center-visual');
+  const centerVisualEl = domById('center-visual');
 
   // The construct palette mounts once here; it re-renders itself on the store slices it subscribes to
   // (active context, selection). It also reads the model `index` to resolve whether the selection is an
@@ -1294,18 +1289,18 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         onExport={(format) => deps.onExportDiagram(format)}
         onCopyMermaid={() => deps.onCopyDiagramMermaid()}
       />,
-      el('canvas-palette-host'),
+      domById('canvas-palette-host'),
     );
   }
   renderCanvasPalette();
 
-  const centerBodyEl = el('center-body');
-  const deckBarEl = el('deck-bar');
-  const centerTechnicalEl = el('center-technical');
-  const centerOutputEl = el('center-output');
-  const centerDocsEl = el('center-docs');
-  const editorPaneEl = el('editor-pane');
-  const previewEl = el('view-preview');
+  const centerBodyEl = domById('center-body');
+  const deckBarEl = domById('deck-bar');
+  const centerTechnicalEl = domById('center-technical');
+  const centerOutputEl = domById('center-output');
+  const centerDocsEl = domById('center-docs');
+  const editorPaneEl = domById('editor-pane');
+  const previewEl = domById('view-preview');
   // The four center surfaces, handed to the DeckStage which hosts each in its card body (the deck owns
   // their layout now — no per-pane re-parenting; the FLIP positions the cards instead).
   const centerHosts: Record<CenterView, HTMLElement> = {
@@ -1557,7 +1552,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // (runtime, #193) and mirrored to layoutStore (persistence) — the same split the diagnostics strip uses
   // (applyDiagCollapsed). The active view stays owned by uiChrome.right / selectRightView; collapse is a
   // SEPARATE, independent flag, so re-expanding always restores the last view rather than a blank panel.
-  const rstripSplitEl = el('split');
+  const rstripSplitEl = domById('split');
   const rstripButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('#right-strip .rstrip-btn'));
   function applyRightCollapsed(collapsed: boolean): void {
     // DOM/ARIA only — persistence happens once per actual collapse transition (in the subscription
@@ -1822,15 +1817,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
 
   deps.initEdgeResizer({
     target: diagEl,
-    handle: el('diag-resizer'),
-    container: el('center'),
+    handle: domById('diag-resizer'),
+    container: domById('center'),
     cssVar: '--koi-diag-h',
     anchor: 'bottom',
     storageKey: 'koine.studio.diagHeight',
     min: 80,
     max: (h) => h * 0.5,
   });
-  const diagCollapse = el('diag-collapse');
+  const diagCollapse = domById('diag-collapse');
   const DIAG_COLLAPSED_KEY = 'koine.studio.diagCollapsed';
   function applyDiagCollapsed(collapsed: boolean): void {
     diagEl.classList.toggle('collapsed', collapsed);
