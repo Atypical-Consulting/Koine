@@ -888,13 +888,6 @@ export function init(hooks: IdeHooks = {}): () => void {
   };
   window.addEventListener('keydown', onHistoryKey);
 
-  // Paired disposer for the two named listeners above. Folded into lifecycleBoot's disposers so the
-  // aggregate teardown leaves no ide.tsx-owned global keydown listener attached. (#789)
-  const disposeEditorKeys = (): void => {
-    window.removeEventListener('keydown', onSaveKey);
-    window.removeEventListener('keydown', onHistoryKey);
-  };
-
   // Guard against closing/reloading with unsaved work: when any open buffer is dirty, the browser
   // shows its native "Leave site?" prompt. Dirty buffers live only in memory, so without this a tab
   // close silently drops them. On the desktop host this covers reloads; the window-close confirm is
@@ -1131,6 +1124,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     prefsCallbacks,
     settingsCategory: () => appStore.getState().settingsCategory ?? undefined,
     showSettings: (category) => controller.showSettings(category),
+    closeSettings: () => appStore.getState().closeSettings(),
     getSource: () => editor.getDoc(),
     getSelection: () => {
       const sel = editor.view.state.selection.main;
@@ -1197,6 +1191,28 @@ export function init(hooks: IdeHooks = {}): () => void {
       editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())),
     promptDialog: overlays.prompt,
   });
+
+  // Esc-to-dismiss the Settings overlay (#746). Registered AFTER panelHost so it can call
+  // panelHost.closeSettings() which restores focus to the opener. Only active while Settings is open,
+  // so it cannot interfere with other Esc semantics (palette, modals). The handler runs independently
+  // of overlayOpen() — the mod-key listeners are the ones gated on it.
+  //
+  // Named for the same removability reason as onSaveKey / onHistoryKey above. (#789)
+  const onSettingsEscKey = (e: KeyboardEvent): void => {
+    if (e.key !== 'Escape') return;
+    if (!appStore.getState().settingsOpen) return;
+    panelHost.closeSettings();
+  };
+  window.addEventListener('keydown', onSettingsEscKey);
+
+  // Paired disposer for all three named keydown listeners above. Folded into lifecycleBoot's
+  // disposers so the aggregate teardown leaves no ide.tsx-owned global keydown listener attached
+  // to window. (#789)
+  const disposeEditorKeys = (): void => {
+    window.removeEventListener('keydown', onSaveKey);
+    window.removeEventListener('keydown', onHistoryKey);
+    window.removeEventListener('keydown', onSettingsEscKey);
+  };
 
   // --- view layout: editor split + repositionable panels (issue #265) -------
   // The #split data-* mirror, the inspector + left-rail edge resizers (and their live re-wiring on a

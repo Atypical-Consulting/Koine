@@ -350,7 +350,7 @@ const APP_HTML = `
           </div>
           <!-- The gear-launched Settings overlay (#482/#731): a sibling of #center-body, populated by
                createSettingsPage on first route into Settings. -->
-          <section id="center-panel-settings" class="settings-page" aria-label="Settings" hidden>
+          <section id="center-panel-settings" class="settings-page" role="dialog" aria-modal="true" aria-label="Settings" hidden>
             <header id="settings-page-header" class="settings-page-header">
               <h2 class="settings-page-title">Settings</h2>
               <div class="settings-page-header-controls">
@@ -1158,5 +1158,58 @@ describe('ide init() — editor keydown listeners are disposed on teardown (#789
     for (const listener of keydownListeners) {
       expect(removedListeners).toContain(listener);
     }
+  });
+});
+
+// #746: Settings overlay keyboard-dismiss, shortcut suppression, and focus management.
+describe('ide init() — Settings overlay a11y (#746)', () => {
+  const overlayShown = () => document.getElementById('center-panel-settings')!.hidden === false;
+
+  test('Esc while Settings is open closes the overlay', async () => {
+    await boot();
+    // Open Settings via the gear.
+    document.getElementById('btn-prefs')!.click();
+    expect(overlayShown()).toBe(true);
+
+    // Esc should close it.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(overlayShown()).toBe(false);
+  });
+
+  test('Esc while Settings is closed is a no-op for Settings', async () => {
+    await boot();
+    // Settings is closed at boot.
+    expect(overlayShown()).toBe(false);
+    // Esc — should not throw, should not open Settings.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(overlayShown()).toBe(false);
+  });
+
+  test('opening Settings moves focus into the panel (close button); closing restores it to the opener', async () => {
+    await boot();
+
+    // Place focus on the gear button (the opener).
+    const gear = document.getElementById('btn-prefs')!;
+    gear.focus();
+    expect(document.activeElement).toBe(gear);
+
+    // Open Settings — should move focus into the panel.
+    gear.click();
+    expect(overlayShown()).toBe(true);
+    const closeBtn = document.querySelector<HTMLButtonElement>('#settings-page-header button[aria-label="Close settings"]')!;
+    expect(closeBtn).not.toBeNull();
+    expect(document.activeElement).toBe(closeBtn);
+
+    // Close via Esc — focus should return to the gear.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(overlayShown()).toBe(false);
+    expect(document.activeElement).toBe(gear);
+  });
+
+  test('Settings panel has role="dialog" and aria-modal="true"', async () => {
+    await boot();
+    const panel = document.getElementById('center-panel-settings')!;
+    expect(panel.getAttribute('role')).toBe('dialog');
+    expect(panel.getAttribute('aria-modal')).toBe('true');
   });
 });

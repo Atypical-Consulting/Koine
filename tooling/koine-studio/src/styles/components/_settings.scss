@@ -57,6 +57,35 @@
   font-weight: 600;
 }
 
+/* Close button — appears at the trailing edge of the Settings header (#746). Sized to meet the
+   minimum 24 × 24 px touch / keyboard hit area; focus ring on :focus-visible. */
+.settings-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--koi-radius-sm, 4px);
+  background: transparent;
+  color: var(--koi-fg-2);
+  font-size: var(--koi-text-sm);
+  cursor: pointer;
+  margin-left: auto; /* push to the far right even when the controls cluster is absent */
+
+  &:hover {
+    background: var(--koi-hover);
+    color: var(--koi-fg);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 2px;
+  }
+}
+
 .settings-page-body {
   flex: 1 1 auto;
   min-height: 0;
