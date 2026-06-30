@@ -42,9 +42,17 @@ describe('default uriLabel behaviour (basename parity)', () => {
     expect(basename(uri)).toBe(expected);
   });
 
-  it('explicit uriLabel wins over the default (contract preserved)', () => {
+  it('the default label falls back to basename when uriLabel is not provided', () => {
+    // Mirrors the production expression: opts.uriLabel ?? basename
+    const opts: { uriLabel?: (uri: string) => string } = {};
+    const label = opts.uriLabel ?? basename;
+    expect(label('any/path/file.koi')).toBe('file.koi');
+  });
+
+  it('explicit uriLabel wins over the default when provided', () => {
     const explicitLabel = (_uri: string) => 'custom-label';
-    const label = explicitLabel ?? basename;
+    const opts: { uriLabel?: (uri: string) => string } = { uriLabel: explicitLabel };
+    const label = opts.uriLabel ?? basename;
     expect(label('any/path/file.koi')).toBe('custom-label');
   });
 });
