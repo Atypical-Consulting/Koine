@@ -406,5 +406,10 @@ export function jsonDocToSettings(
   if (typeof next.aiBaseUrl !== 'string' || next.aiBaseUrl.length === 0) {
     next.aiBaseUrl = DEFAULT_SETTINGS.aiBaseUrl;
   }
+  // aiModel: COERCE empty → default, exactly as loadSettings() does on read (`.length > 0`),
+  // so a blank model id applies live as the same default a reload would restore (#744, #734 follow-up).
+  if (typeof next.aiModel !== 'string' || next.aiModel.length === 0) {
+    next.aiModel = DEFAULT_SETTINGS.aiModel;
+  }
   return { settings: next };
 }
