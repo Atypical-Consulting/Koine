@@ -12,6 +12,7 @@ import { registerOverlay, koiConfirm } from '@/shared/overlay';
 import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, fillVersionChip, wireExternalLink } from '@/shared/colophon';
 import { TEMPLATES, type Template } from '@/welcome/templates';
 import { wrapIndex } from '@/shared/wrapIndex';
+import { basename } from '@/shared/path';
 
 /** What the welcome actions delegate to; the host (ide.ts) performs the real work. */
 export interface WelcomeCallbacks {
@@ -28,11 +29,6 @@ export interface WelcomeCallbacks {
    * Optional: callers that don't offer a resume path can omit it.
    */
   onResume?(): void;
-}
-
-/** Shorten an absolute path to its last segment for a compact recent-item label. */
-function baseName(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
 /** Canonical difficulty ordering — starters first, advanced last. Drives grouping and chip order. */
@@ -427,7 +423,7 @@ function buildHome(
 
     const q = recentQuery.trim().toLowerCase();
     const folders = q
-      ? all.filter((r) => r.path.toLowerCase().includes(q) || baseName(r.path).toLowerCase().includes(q))
+      ? all.filter((r) => r.path.toLowerCase().includes(q) || basename(r.path).toLowerCase().includes(q))
       : all;
 
     const list = document.createElement('div');
@@ -444,7 +440,7 @@ function buildHome(
       open.title = path; // full path on hover
       const name = document.createElement('span');
       name.className = 'koi-welcome-recent-item-name';
-      name.textContent = baseName(path);
+      name.textContent = basename(path);
       const full = document.createElement('span');
       full.className = 'koi-welcome-recent-item-path';
       full.textContent = path;
@@ -458,7 +454,7 @@ function buildHome(
       pin.type = 'button';
       pin.className = 'koi-welcome-recent-pin';
       pin.setAttribute('aria-pressed', String(!!entry.pinned));
-      pin.setAttribute('aria-label', `${entry.pinned ? 'Unpin' : 'Pin'} ${baseName(path)}`);
+      pin.setAttribute('aria-label', `${entry.pinned ? 'Unpin' : 'Pin'} ${basename(path)}`);
       pin.title = entry.pinned ? 'Unpin' : 'Pin';
       pin.textContent = '★';
       pin.addEventListener('click', () => {
@@ -470,7 +466,7 @@ function buildHome(
       const copy = document.createElement('button');
       copy.type = 'button';
       copy.className = 'koi-welcome-recent-copy';
-      copy.setAttribute('aria-label', `Copy path of ${baseName(path)}`);
+      copy.setAttribute('aria-label', `Copy path of ${basename(path)}`);
       copy.title = 'Copy path';
       copy.textContent = '⧉';
       copy.addEventListener('click', () => {
@@ -481,7 +477,7 @@ function buildHome(
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.className = 'koi-welcome-recent-remove';
-      remove.setAttribute('aria-label', `Remove ${baseName(path)} from recent folders`);
+      remove.setAttribute('aria-label', `Remove ${basename(path)} from recent folders`);
       remove.title = 'Remove from recent folders';
       remove.textContent = '✕';
       remove.addEventListener('click', () => {
@@ -830,11 +826,11 @@ function buildHome(
   // Dead-recent recovery (#391): surface the "Remove from Recent?" confirm on this view and, on accept,
   // forget the entry then rebuild the recents list in place. The routed Home calls this when an
   // open-recent start-intent failed because the folder is gone — recovery now lives here, on Home,
-  // rather than as an overlay painted over the editor. The folder is named with baseName() so the
+  // rather than as an overlay painted over the editor. The folder is named with basename() so the
   // prompt labels it exactly as its recents row does.
   async function recover(path: string): Promise<void> {
     const forget = await koiConfirm({
-      title: `"${baseName(path)}" is no longer available`,
+      title: `"${basename(path)}" is no longer available`,
       message: 'Its folder may have moved, been deleted, or had its permission revoked. Remove it from Recent?',
       confirmLabel: 'Remove from Recent',
       danger: true,
