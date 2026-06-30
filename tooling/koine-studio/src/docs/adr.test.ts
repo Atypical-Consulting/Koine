@@ -176,3 +176,20 @@ describe('adrTemplate', () => {
     expect(adrTemplate('First')).toContain('# 1. First');
   });
 });
+
+// Characterization tests for parseAdrNumberFromFilename's path-stripping step (issue #793).
+// The first line `const base = name.split('/').pop() ?? name` is replaced with `basename(name)`.
+// These pin the expected outputs so the migration can be verified as zero-change.
+describe('parseAdrNumberFromFilename — basename characterization (issue #793)', () => {
+  it('bare filename parses the numeric prefix', () => {
+    expect(parseAdrNumberFromFilename('0007-foo.md')).toBe(7);
+  });
+
+  it('directory-prefixed filename strips the dir and parses the prefix', () => {
+    expect(parseAdrNumberFromFilename('dir/0007-foo.md')).toBe(7);
+  });
+
+  it('filename without a numeric prefix returns null', () => {
+    expect(parseAdrNumberFromFilename('no-number.md')).toBeNull();
+  });
+});

@@ -33,7 +33,8 @@ public sealed partial class PhpEmitter
                 ? ev.Members
                 : Array.Empty<Member>();
         var translator = new PhpExpressionTranslator(
-            emit.Index, eventMembers, emit.EnumMemberToType, context: contextName, memberReceiver: "event");
+            emit.Index, eventMembers, emit.EnumMemberToType, context: contextName, memberReceiver: "event",
+            regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         PolicyReaction r = policy.Reaction;
         var argText = string.Join(", ", r.Args.Select(a =>
