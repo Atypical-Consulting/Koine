@@ -16,6 +16,7 @@ import {
   type InspectorControllerLsp,
 } from '@/shell/inspectorController';
 import { createAppStore } from '@/store/index';
+import { domById } from '@/shared/domById';
 import type {
   CheckResult,
   ContextMapResult,
@@ -215,7 +216,7 @@ describe('createInspectorSheet — accessibility', () => {
 });
 
 // --- inspectorController wiring on a narrow viewport --------------------------
-// A trimmed mirror of inspectorController.test.ts's seed (the id surface the controller's el() looks up)
+// A trimmed mirror of inspectorController.test.ts's seed (the id surface the controller's domById() looks up)
 // plus the #inspector-sheet-host mount node Task 2 adds to index.html. Lets the real controller build
 // its sheet so we can assert the selection → sheet wiring end to end.
 const APP_HTML = `
@@ -277,10 +278,6 @@ const APP_HTML = `
     <footer id="statusbar"><span class="sb-item" id="sb-context">Context: —</span></footer>
     <div id="inspector-sheet-host"></div>
   </div>`;
-
-function el<T extends HTMLElement>(id: string): T {
-  return document.getElementById(id) as T;
-}
 
 function glossaryFixture(): GlossaryModel {
   const entries: GlossaryEntry[] = [
@@ -388,7 +385,7 @@ describe('inspectorController — bottom sheet on a narrow viewport', () => {
   beforeEach(() => {
     document.body.innerHTML = APP_HTML;
     // The left rail is a Preact component now (#759, was leftRailMarkup): render it into the thin shell so
-    // the controller's rail el() lookups resolve, as the boot does.
+    // the controller's rail domById() lookups resolve, as the boot does.
     render(<LeftRail />, document.getElementById('leftrail')!);
     setViewport(500); // below $bp-narrow (640)
   });
@@ -403,14 +400,14 @@ describe('inspectorController — bottom sheet on a narrow viewport', () => {
 
     ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
 
-    const sheet = el('inspector-sheet-host').querySelector<HTMLElement>('[role="dialog"]')!;
+    const sheet = domById('inspector-sheet-host').querySelector<HTMLElement>('[role="dialog"]')!;
     expect(sheet.dataset.detent).toBe('half');
     expect(sheet.getAttribute('aria-modal')).toBe('true');
 
     const body = sheet.querySelector<HTMLElement>('.koi-sheet-body')!;
     expect(body.querySelector('[data-qname]')?.getAttribute('data-qname')).toBe('Billing.Money');
     // The desktop right-rail host is NOT used for the Properties panel on a narrow viewport.
-    expect(el('inspector-host').querySelector('[data-qname]')).toBeNull();
+    expect(domById('inspector-host').querySelector('[data-qname]')).toBeNull();
 
     ctl.dispose();
   });
@@ -423,7 +420,7 @@ describe('inspectorController — bottom sheet on a narrow viewport', () => {
     await flush();
     ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
 
-    const sheetBody = el('inspector-sheet-host').querySelector<HTMLElement>('.koi-sheet-body')!;
+    const sheetBody = domById('inspector-sheet-host').querySelector<HTMLElement>('.koi-sheet-body')!;
     expect(sheetBody.querySelector('[data-qname]')).not.toBeNull(); // mounted into the sheet on narrow
 
     // Widen past the breakpoint and fire a resize. The controller re-mounts Properties into the fixed
@@ -434,7 +431,7 @@ describe('inspectorController — bottom sheet on a narrow viewport', () => {
     await flush();
 
     expect(sheetBody.querySelector('[data-qname]')).toBeNull(); // sheet body emptied (panel unmounted)
-    expect(el('inspector-host').querySelector('[data-qname]')).not.toBeNull(); // the single live mount
+    expect(domById('inspector-host').querySelector('[data-qname]')).not.toBeNull(); // the single live mount
 
     ctl.dispose();
   });
@@ -446,7 +443,7 @@ describe('inspectorController — bottom sheet on a narrow viewport', () => {
     await flush();
 
     openInspectorSheet('full');
-    const sheet = el('inspector-sheet-host').querySelector<HTMLElement>('[role="dialog"]')!;
+    const sheet = domById('inspector-sheet-host').querySelector<HTMLElement>('[role="dialog"]')!;
     expect(sheet.dataset.detent).toBe('full');
 
     ctl.dispose();
