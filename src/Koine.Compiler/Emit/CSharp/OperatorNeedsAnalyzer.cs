@@ -36,120 +36,23 @@ internal static class OperatorNeedsAnalyzer
         BuildScalarOpNeeds(model, index, BinaryOp.Div);
 
     /// <summary>
-    /// Shared core for the scalar <c>*</c> / <c>/</c> demand analyses: walks every scalar-scan site
-    /// (<see cref="ScalarScanSites"/>) recording, per value-object type, the scalar C# types it is
+    /// Shared core for the scalar <c>*</c> / <c>/</c> demand analyses: walks every expression site
+    /// (<see cref="ExpressionScanSites"/>) recording, per value-object type, the scalar C# types it is
     /// combined with under <paramref name="op"/>. Mul and Div run the identical site enumeration; only
-    /// the operator (and division's left-only operand rule) differs, so the enumeration lives in one place.
+    /// the operator (and division's left-only operand rule) differs, so the enumeration lives in one
+    /// place — the same enumerator the additive/binary analyses use, so all the demand analyses scan one
+    /// shared site list rather than two parallel copies (#836).
     /// </summary>
     private static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildScalarOpNeeds(KoineModel model, ModelIndex index, BinaryOp op)
     {
         var needs = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
 
-        foreach ((Expr expr, IReadOnlyDictionary<string, TypeRef> scope) in ScalarScanSites(model, index))
+        foreach ((Expr expr, TypeScope scope) in ExpressionScanSites(model, index))
         {
             new ScalarOpWalker(op, scope, index, needs).Visit(expr);
         }
 
         return needs.ToDictionary(kv => kv.Key, kv => (IReadOnlySet<string>)kv.Value, StringComparer.Ordinal);
-    }
-
-    /// <summary>
-    /// Every expression the scalar <c>*</c>/<c>/</c> demand analyses scan, paired with the
-    /// member-type scope it is resolved in: member initializers, invariant conditions, command and
-    /// factory bodies, state-rule guards, service operation bodies, spec conditions, and read-model
-    /// field projections. Shared by the multiply and divide passes so the (otherwise identical) site
-    /// enumeration lives in one place — the sibling of <see cref="ExpressionScanSites"/>, which serves
-    /// the additive analyses over a richer <see cref="TypeScope"/>.
-    /// </summary>
-    private static IEnumerable<(Expr Expr, IReadOnlyDictionary<string, TypeRef> Scope)> ScalarScanSites(KoineModel model, ModelIndex index)
-    {
-        foreach (ContextNode ctx in model.Contexts)
-        {
-            foreach (TypeDecl type in ctx.AllTypeDecls())
-            {
-                IReadOnlyList<Member>? members = type switch
-                {
-                    ValueObjectDecl v => v.Members,
-                    EntityDecl e => e.Members,
-                    EventDecl ev => ev.Members,
-                    _ => null
-                };
-                if (members is null)
-                {
-                    continue;
-                }
-
-                var memberTypes = members.ToDictionary(m => m.Name, m => m.Type, StringComparer.Ordinal);
-                foreach (Member m in members)
-                {
-                    if (m.Initializer is not null)
-                    {
-                        yield return (m.Initializer, memberTypes);
-                    }
-                }
-
-                // Invariant conditions over the type's members can also use value-object arithmetic.
-                foreach (Invariant inv in Invariants(type))
-                {
-                    yield return (inv.Condition, memberTypes);
-                }
-
-                // Command bodies and state-rule guards can also use value-object arithmetic.
-                if (type is EntityDecl entity)
-                {
-                    foreach ((Expr Expr, IReadOnlyDictionary<string, TypeRef> Scope) pair in CommandExpressions(entity, memberTypes))
-                    {
-                        yield return pair;
-                    }
-
-                    foreach ((Expr Expr, IReadOnlyDictionary<string, TypeRef> Scope) pair in FactoryExpressions(entity, memberTypes))
-                    {
-                        yield return pair;
-                    }
-
-                    foreach (Expr guard in StateGuards(entity))
-                    {
-                        yield return (guard, memberTypes);
-                    }
-                }
-            }
-        }
-
-        // Service operation bodies can use value-object scalar arithmetic.
-        foreach (ContextNode ctx in model.Contexts)
-        {
-            foreach (ServiceDecl svc in ctx.Services)
-            {
-                foreach (OperationDecl op in svc.Operations)
-                {
-                    if (op.Body is not null)
-                    {
-                        var scope = op.Parameters.ToDictionary(p => p.Name, p => p.Type, StringComparer.Ordinal);
-                        yield return (op.Body, scope);
-                    }
-                }
-            }
-        }
-
-        // Spec conditions over their target type's members can use value-object arithmetic.
-        foreach (SpecDecl spec in AllSpecs(model))
-        {
-            var scope = SpecTargetMembers(spec.TargetType, index).ToDictionary(m => m.Name, m => m.Type, StringComparer.Ordinal);
-            yield return (spec.Condition, scope);
-        }
-
-        // Read-model derived-field projections (over the source type's members) can combine a value object with a scalar.
-        foreach ((ReadModelDecl rm, string context) in AllReadModels(model))
-        {
-            var scope = ReadModelSourceMembers(context, rm.SourceType, index).ToDictionary(m => m.Name, m => m.Type, StringComparer.Ordinal);
-            foreach (ReadModelField f in rm.Fields)
-            {
-                if (f.Projection is not null)
-                {
-                    yield return (f.Projection, scope);
-                }
-            }
-        }
     }
 
     /// <summary>
@@ -201,9 +104,11 @@ internal static class OperatorNeedsAnalyzer
     /// Every expression the demand-driven value-object analyses scan, paired with the
     /// <see cref="TypeScope"/> it is resolved in: member initializers, invariant conditions, command
     /// and factory bodies, state-rule guards, service operation bodies, spec conditions, and
-    /// read-model field projections. Shared by <see cref="BuildAdditiveOperatorNeeds"/> and
-    /// <see cref="BuildValueObjectArithmeticNeeds"/> so the (otherwise identical) site enumeration
-    /// lives in one place.
+    /// read-model field projections. The <b>single</b> site enumerator — the scalar
+    /// <c>*</c>/<c>/</c> analyses (<see cref="BuildScalarOpNeeds"/>), the <c>sum</c> fold
+    /// (<see cref="BuildAdditiveOperatorNeeds"/>), and the plain binary <c>+</c>/<c>-</c> analysis
+    /// (<see cref="BuildValueObjectArithmeticNeeds"/>) all walk it, so the site list lives in one place
+    /// and cannot drift between passes (#836).
     /// </summary>
     private static IEnumerable<(Expr Expr, TypeScope Scope)> ExpressionScanSites(KoineModel model, ModelIndex index)
     {
@@ -492,80 +397,6 @@ internal static class OperatorNeedsAnalyzer
         entity.States.SelectMany(s => s.Rules).Where(r => r.Guard is not null).Select(r => r.Guard!);
 
     /// <summary>
-    /// Every expression appearing in an entity's commands (requires conditions and
-    /// transition values), paired with a member-type map extended by that command's
-    /// parameters — for the operator-need scans.
-    /// </summary>
-    private static IEnumerable<(Expr Expr, IReadOnlyDictionary<string, TypeRef> Scope)> CommandExpressions(
-        EntityDecl entity, IReadOnlyDictionary<string, TypeRef> memberTypes)
-    {
-        foreach (CommandDecl cmd in entity.Commands)
-        {
-            var scope = new Dictionary<string, TypeRef>(memberTypes, StringComparer.Ordinal);
-            foreach (Param p in cmd.Parameters)
-            {
-                scope[p.Name] = p.Type;
-            }
-
-            foreach (CommandStmt stmt in cmd.Body)
-            {
-                if (stmt is RequiresClause req)
-                {
-                    yield return (req.Condition, scope);
-                }
-                else if (stmt is Transition tr)
-                {
-                    yield return (tr.Value, scope);
-                }
-                else if (stmt is EmitClause em)
-                {
-                    foreach (EmitArg arg in em.Args)
-                    {
-                        yield return (arg.Value, scope);
-                    }
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Every expression in an entity's factories (requires conditions, initialization
-    /// values, and emit payloads), paired with a member-type map extended by that
-    /// factory's parameters — for the operator-need scans.
-    /// </summary>
-    private static IEnumerable<(Expr Expr, IReadOnlyDictionary<string, TypeRef> Scope)> FactoryExpressions(
-        EntityDecl entity, IReadOnlyDictionary<string, TypeRef> memberTypes)
-    {
-        foreach (FactoryDecl factory in entity.Factories)
-        {
-            var scope = new Dictionary<string, TypeRef>(memberTypes, StringComparer.Ordinal);
-            foreach (Param p in factory.Parameters)
-            {
-                scope[p.Name] = p.Type;
-            }
-
-            foreach (CommandStmt stmt in factory.Body)
-            {
-                if (stmt is RequiresClause req)
-                {
-                    yield return (req.Condition, scope);
-                }
-                else if (stmt is Initialization ini)
-                {
-                    yield return (ini.Value, scope);
-                }
-                else if (stmt is EmitClause em)
-                {
-                    foreach (EmitArg arg in em.Args)
-                    {
-                        yield return (arg.Value, scope);
-                    }
-                }
-            }
-        }
-    }
-
-    /// <summary>
     /// Records, per value-object type, the scalar C# types it is combined with under a single binary
     /// operator (<see cref="BinaryOp.Mul"/> or <see cref="BinaryOp.Div"/>) anywhere in an expression.
     /// The member-type scope is constant for the whole walk. Recurses into every node, so an operation
@@ -580,18 +411,18 @@ internal static class OperatorNeedsAnalyzer
     private sealed class ScalarOpWalker : ExprWalker
     {
         private readonly BinaryOp _op;
-        private readonly IReadOnlyDictionary<string, TypeRef> _memberTypes;
+        private readonly TypeScope _scope;
         private readonly ModelIndex _index;
         private readonly Dictionary<string, HashSet<string>> _needs;
 
         public ScalarOpWalker(
             BinaryOp op,
-            IReadOnlyDictionary<string, TypeRef> memberTypes,
+            TypeScope scope,
             ModelIndex index,
             Dictionary<string, HashSet<string>> needs)
         {
             _op = op;
-            _memberTypes = memberTypes;
+            _scope = scope;
             _index = index;
             _needs = needs;
         }
@@ -600,8 +431,8 @@ internal static class OperatorNeedsAnalyzer
         {
             if (n.Op == _op)
             {
-                var (lValue, lScalar) = InferOperand(n.Left, _memberTypes, _index);
-                var (rValue, rScalar) = InferOperand(n.Right, _memberTypes, _index);
+                var (lValue, lScalar) = InferOperand(n.Left, _scope, _index);
+                var (rValue, rScalar) = InferOperand(n.Right, _scope, _index);
 
                 // Canonical order `value-object op scalar` is recorded for both `*` and `/`.
                 if (lValue is not null && rScalar is not null)
@@ -621,24 +452,31 @@ internal static class OperatorNeedsAnalyzer
         }
     }
 
-    /// <summary>Shallowly infers whether an operand is a value object or a numeric scalar.</summary>
+    /// <summary>
+    /// Shallowly infers whether an operand is a value object or a numeric scalar. The operand's type is
+    /// read straight from the lexical <see cref="TypeScope"/> by name (identifiers) — deliberately
+    /// shallow, NOT the full <see cref="TypeResolver.TypeOf"/>: only a bare identifier or a numeric
+    /// literal is classified, matching the original member-type-map inference exactly. A collection or
+    /// otherwise un-named scope entry (whose <see cref="KoineType.Name"/> is <c>null</c>) is neither a
+    /// value object nor a scalar, so it falls through unrecorded — as before.
+    /// </summary>
     private static (string? ValueObject, string? Scalar) InferOperand(
-        Expr expr, IReadOnlyDictionary<string, TypeRef> memberTypes, ModelIndex index)
+        Expr expr, TypeScope scope, ModelIndex index)
     {
         switch (expr)
         {
-            case IdentifierExpr id when memberTypes.TryGetValue(id.Name, out TypeRef? t):
-                if (index.Classify(t.Name) == TypeKind.Value)
+            case IdentifierExpr id when scope.TryGet(id.Name, out KoineType t) && t.Name is { } typeName:
+                if (index.Classify(typeName) == TypeKind.Value)
                 {
-                    return (t.Name, null);
+                    return (typeName, null);
                 }
 
-                if (t.Name == "Int")
+                if (typeName == "Int")
                 {
                     return (null, "int");
                 }
 
-                if (t.Name == "Decimal")
+                if (typeName == "Decimal")
                 {
                     return (null, "decimal");
                 }
