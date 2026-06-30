@@ -240,12 +240,15 @@ sink, so Koine bounds the emitted match per target:
 The C# timeout is configurable via the `koine.config` key
 [`targets.csharp.regexMatchTimeoutMs`](/Koine/guides/cli/#koineconfig) (default `1000`): set a tighter bound
 for hostile-input value objects, or a looser one for a legitimately expensive pattern on trusted batch
-input. The value must be a **positive integer** number of milliseconds — `0` or any negative value is
-rejected at build time (`regexMatchTimeoutMs must be a positive integer (milliseconds); got '…'`),
-because it would otherwise flow into the generated `TimeSpan.FromMilliseconds(N)` and throw at the
-*generated* code's own runtime. Disabling the bound is intentionally not supported — the whole point of
-the guard is to *have* one. A non-integer value is ignored (the emitter keeps its `1000` ms default),
-matching how other malformed config keys are forward-compatibly skipped.
+input. For a one-off override without editing the config, pass
+[`--regex-match-timeout-ms <ms>`](/Koine/guides/cli/#koine-build) on the command line — the flag wins over
+the config key for that invocation. The value must be a **positive integer** number of milliseconds — `0`
+or any negative value is rejected at build time (`regexMatchTimeoutMs must be a positive integer
+(milliseconds); got '…'`), because it would otherwise flow into the generated
+`TimeSpan.FromMilliseconds(N)` and throw at the *generated* code's own runtime. Disabling the bound is
+intentionally not supported — the whole point of the guard is to *have* one. A non-integer value is
+ignored (the emitter keeps its `1000` ms default), matching how other malformed config keys are
+forward-compatibly skipped.
 
 The generated TypeScript `regexMatch` helper is the seam to harden untrusted-input
 matching without touching every call site — replace its body with a linear-time engine (e.g. RE2)
