@@ -219,12 +219,19 @@ public class PhpExpressionTests
     [Fact]
     public void Int_literal_left_of_Decimal_arithmetic_parenthesises_new_chaining()
     {
-        // `5 + price` where price: Decimal — the int literal on the LEFT becomes the method
-        // receiver after WriteAsDecimal wraps it in `new \Koine\Runtime\Decimal('5')`.
-        // Without surrounding parentheses, `new X(...)->m()` is PHP 8.4+-only syntax;
+        // When an int literal is on the LEFT of Decimal arithmetic, WriteAsDecimal wraps it in
+        // `new \Koine\Runtime\Decimal('n')` which then becomes the method RECEIVER.
+        // Without surrounding parentheses, bare `new X(...)->m()` is PHP 8.4+-only syntax;
         // the emitter targets PHP 8.1+, so the construction must be parenthesised.
-        var expr = new BinaryExpr(BinaryOp.Add, Int("5"), Id("price"));
-        Translate(expr).ShouldBe("(new \\Koine\\Runtime\\Decimal('5'))->add($this->price)");
+        // All four arithmetic operators go through the same code path — verify all.
+        Translate(new BinaryExpr(BinaryOp.Add, Int("5"), Id("price")))
+            .ShouldBe("(new \\Koine\\Runtime\\Decimal('5'))->add($this->price)");
+        Translate(new BinaryExpr(BinaryOp.Sub, Int("5"), Id("price")))
+            .ShouldBe("(new \\Koine\\Runtime\\Decimal('5'))->sub($this->price)");
+        Translate(new BinaryExpr(BinaryOp.Mul, Int("5"), Id("price")))
+            .ShouldBe("(new \\Koine\\Runtime\\Decimal('5'))->mul($this->price)");
+        Translate(new BinaryExpr(BinaryOp.Div, Int("5"), Id("price")))
+            .ShouldBe("(new \\Koine\\Runtime\\Decimal('5'))->div($this->price)");
     }
 
     [Fact]
