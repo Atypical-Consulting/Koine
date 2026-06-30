@@ -556,3 +556,43 @@ function setSearch(root: HTMLElement, value: string): void {
   vi.advanceTimersByTime(200);
   vi.useRealTimers();
 }
+
+// Characterization tests for the baseName helper used in recent-item labels (issue #793).
+// baseName is a private function; these tests pin its behaviour via the rendered DOM so the
+// migration to shared basename can be verified as zero-change.
+describe('welcome baseName characterization (issue #793)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = '';
+  });
+
+  function itemNames(el: HTMLElement): string[] {
+    return [...el.querySelectorAll<HTMLElement>('.koi-welcome-recent-item-name')].map(
+      (n) => n.textContent ?? '',
+    );
+  }
+
+  test('unix path: shows last segment as item name', () => {
+    localStorage.setItem(KEY, JSON.stringify(['a/b/billing.koi']));
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    mountHome(el, makeCallbacks());
+    expect(itemNames(el)).toEqual(['billing.koi']);
+  });
+
+  test('windows-style path: backslash separator splits correctly', () => {
+    localStorage.setItem(KEY, JSON.stringify(['C:\\Users\\me\\project']));
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    mountHome(el, makeCallbacks());
+    expect(itemNames(el)).toEqual(['project']);
+  });
+
+  test('trailing slash is stripped — last non-empty segment is returned', () => {
+    localStorage.setItem(KEY, JSON.stringify(['a/b/project/']));
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    mountHome(el, makeCallbacks());
+    expect(itemNames(el)).toEqual(['project']);
+  });
+});
