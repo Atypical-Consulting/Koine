@@ -2232,6 +2232,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     clearTimeout(copyResetTimer);
     clearTimeout(editDebounce);
     clearTimeout(bottomPanelDebounce);
+    clearTimeout(notifyTimer); // #648: clear the stripe-flash timer so it can't touch a torn-down DOM node
     // Drop the Domain navigator's store subscription so a deferred store change can't repaint a torn-down
     // host (the same hazard the debounce clears, for the navigator's #453 subscription).
     domainNavigator?.unmount();
