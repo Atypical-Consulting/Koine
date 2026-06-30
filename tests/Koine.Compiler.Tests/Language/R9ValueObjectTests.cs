@@ -406,6 +406,37 @@ public class R9ValueObjectTests
         files.ShouldContain("operator /");
     }
 
+    [Fact]
+    public void Direct_same_type_value_object_add_and_subtract_get_their_operators()
+    {
+        // #833: direct same-type `VO + VO` / `VO - VO` written DIRECTLY (not via a `sum` fold) must
+        // demand-generate `operator +` AND `operator -`. Before the fix the read-model mapper emits
+        // `src.Fee + src.Fee` / `src.Fee - src.Fee` while Money defines NEITHER operator, so the
+        // emitted C# fails with two CS0019s. `+` was generated only by a `sum` fold and `-` was never
+        // generated for plain VOs at all. Compile() asserts the emitted C# compiles, so this test
+        // fails until both needs are recorded AND emitted. Both fields fail independently — drop one
+        // and the other still breaks — so asserting both operators exist pins down the fix.
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0
+              }
+              entity Order identified by OrderId {
+                fee: Money
+              }
+              readmodel Totals from Order {
+                total: Money = fee + fee
+                diff:  Money = fee - fee
+              }
+            }
+            """;
+        var (asm, files) = Compile(src);
+        asm.GetType("Shop.Money").ShouldNotBeNull();
+        files.ShouldContain("operator +");
+        files.ShouldContain("operator -");
+    }
+
     // ======================================================================
     // Scalar add/subtract against a value object is a type mismatch (#804,
     // follow-up to the reversed-multiply fixes #788/#797). A value object

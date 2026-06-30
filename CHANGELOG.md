@@ -41,6 +41,16 @@ may include breaking changes.
   single-view boot is unchanged.
 
 ### Fixed
+- **C# emitter: direct same-type `value + value` / `value - value` validated but emitted CS0019.** A plain
+  (non-`quantity`) value object combined with another of its own type *directly* — `total: Money = fee + fee`
+  or `diff: Money = fee - fee`, written outside a `sum` fold — passed validation but emitted C# that called
+  operators the emitter never generated (two CS0019s): `operator +` was demand-generated only by a `sum`
+  fold, and `operator -` was never generated for plain value objects at all. The C# emitter now records the
+  direct-binary additive/subtractive need (reusing the existing `BuildValueObjectArithmeticNeeds` analysis,
+  the same map the PHP emitter consumes) and demand-generates `operator +`/`operator -` for plain value
+  objects, mirroring scalar `*`/`/` (#832) and the `sum`-fold `+`. Both route through the validating
+  constructor, so e.g. a negative difference still throws the declared `invariant` at construction. The fix
+  is C#-emitter-only; no grammar, parser, or `Ast/` change, and no change to other targets (issue #833).
 - **Live Playground compiler failed to boot ("Koine worker timed out after 30s").** The marketing-site
   Playground's in-browser compiler hung at boot: its wasm Web Worker installed the message loop with a
   top-level `self.onmessage = …`, which clobbers the `message` channel the .NET WebAssembly runtime

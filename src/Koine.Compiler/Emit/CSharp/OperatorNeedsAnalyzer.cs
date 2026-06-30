@@ -180,8 +180,9 @@ internal static class OperatorNeedsAnalyzer
     /// otherwise the lowered call site (<c>$vo-&gt;add(...)</c>) targets a method that was never
     /// generated. A guard-narrowed optional operand still infers as the same value type, so it is
     /// recorded here as well (its emission need is identical; only the call-site routing differs).
-    /// Target-agnostic like the rest of this analyzer — currently consumed by the PHP emitter, which
-    /// (unlike C#/TS/Python today) generates these methods on demand.
+    /// Target-agnostic like the rest of this analyzer: the PHP emitter generates its <c>add</c>/<c>subtract</c>
+    /// methods from this map, and the C# emitter consumes it (alongside <see cref="BuildAdditiveOperatorNeeds"/>)
+    /// to demand-generate direct <c>operator +</c>/<c>operator -</c> for plain value objects (#833).
     /// </summary>
     public static IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BuildValueObjectArithmeticNeeds(KoineModel model, ModelIndex index)
     {
