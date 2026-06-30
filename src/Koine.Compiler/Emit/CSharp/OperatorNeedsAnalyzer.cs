@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Koine.Compiler.Ast;
 
 namespace Koine.Compiler.Emit.CSharp;
@@ -79,14 +80,44 @@ internal static class OperatorNeedsAnalyzer
         BuildOperatorNeeds(model, index);
 
     /// <summary>
+    /// Per-<see cref="KoineModel"/>, per-<see cref="ModelIndex"/> cache for <see cref="BuildOperatorNeeds"/>
+    /// keyed by reference identity (both are immutable per compile — <see cref="KoineModel"/> is a record
+    /// over <see cref="IReadOnlyList{T}"/> contexts, <see cref="ModelIndex"/> is built once and treated
+    /// read-only by every consumer). Without this, every public <c>Build*</c> caller (the C#, TypeScript,
+    /// Python, and Rust emitters each call several of them per emit) would re-run the full single pass —
+    /// the exact "each re-walking the model" cost the single-pass design was meant to retire (#836).
+    /// <see cref="ConditionalWeakTable{TKey,TValue}"/> uses reference identity for its keys regardless of
+    /// any value-equality a key type defines, so this is safe even though <see cref="KoineModel"/> is a
+    /// record.
+    /// </summary>
+    private static readonly ConditionalWeakTable<KoineModel, Dictionary<ModelIndex, IReadOnlyDictionary<string, ValueObjectOperatorNeeds>>> OperatorNeedsCache = new();
+
+    /// <summary>
     /// The single demand-driven pass: walks every expression site (<see cref="ExpressionScanSites"/>)
     /// <b>once</b>, running the scalar-multiply, scalar-divide, <c>sum</c>-fold, and plain-binary
     /// walkers per <c>(Expr, TypeScope)</c> site and merging their signals into one
     /// <see cref="ValueObjectOperatorNeeds"/> per value-object name. The public <c>Build*</c> methods are
     /// thin projections over this map, so they share one site enumeration and one per-VO need model
-    /// rather than each re-walking the model (#836).
+    /// rather than each re-walking the model (#836) — memoized per (model, index) via
+    /// <see cref="OperatorNeedsCache"/> so that sharing holds across separate <c>Build*</c> calls too, not
+    /// just within one.
     /// </summary>
     private static IReadOnlyDictionary<string, ValueObjectOperatorNeeds> BuildOperatorNeeds(KoineModel model, ModelIndex index)
+    {
+        Dictionary<ModelIndex, IReadOnlyDictionary<string, ValueObjectOperatorNeeds>> byIndex =
+            OperatorNeedsCache.GetValue(model, static _ => new Dictionary<ModelIndex, IReadOnlyDictionary<string, ValueObjectOperatorNeeds>>());
+
+        if (byIndex.TryGetValue(index, out IReadOnlyDictionary<string, ValueObjectOperatorNeeds>? cached))
+        {
+            return cached;
+        }
+
+        IReadOnlyDictionary<string, ValueObjectOperatorNeeds> needs = ComputeOperatorNeeds(model, index);
+        byIndex[index] = needs;
+        return needs;
+    }
+
+    private static IReadOnlyDictionary<string, ValueObjectOperatorNeeds> ComputeOperatorNeeds(KoineModel model, ModelIndex index)
     {
         var resolver = new TypeResolver(index);
         var multiply = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -115,22 +146,22 @@ internal static class OperatorNeedsAnalyzer
 
         foreach ((string vo, HashSet<string> factors) in multiply)
         {
-            Entry(vo).MultiplyFactors.UnionWith(factors);
+            Entry(vo).UnionMultiplyFactors(factors);
         }
 
         foreach ((string vo, HashSet<string> factors) in divide)
         {
-            Entry(vo).DivideFactors.UnionWith(factors);
+            Entry(vo).UnionDivideFactors(factors);
         }
 
         foreach ((string vo, HashSet<BinaryOp> ops) in binary)
         {
-            Entry(vo).BinaryOps.UnionWith(ops);
+            Entry(vo).UnionBinaryOps(ops);
         }
 
         foreach (string vo in summable)
         {
-            Entry(vo).IsSummable = true;
+            Entry(vo).MarkSummable();
         }
 
         return needs;
@@ -143,9 +174,9 @@ internal static class OperatorNeedsAnalyzer
     /// </summary>
     private static IReadOnlyDictionary<string, IReadOnlySet<string>> ProjectScalarFactors(
         IReadOnlyDictionary<string, ValueObjectOperatorNeeds> needs,
-        Func<ValueObjectOperatorNeeds, HashSet<string>> select) =>
+        Func<ValueObjectOperatorNeeds, IReadOnlySet<string>> select) =>
         needs.Where(kv => select(kv.Value).Count > 0)
-             .ToDictionary(kv => kv.Key, kv => (IReadOnlySet<string>)select(kv.Value), StringComparer.Ordinal);
+             .ToDictionary(kv => kv.Key, kv => select(kv.Value), StringComparer.Ordinal);
 
     /// <summary>
     /// The per-value-object operator demand accumulated by <see cref="BuildOperatorNeeds"/> in one pass:
@@ -157,17 +188,21 @@ internal static class OperatorNeedsAnalyzer
     /// </summary>
     internal sealed class ValueObjectOperatorNeeds
     {
+        private readonly HashSet<string> _multiplyFactors = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _divideFactors = new(StringComparer.Ordinal);
+        private readonly HashSet<BinaryOp> _binaryOps = new();
+
         /// <summary>Scalar C# types ("int"/"decimal") this value object is multiplied by.</summary>
-        public HashSet<string> MultiplyFactors { get; } = new(StringComparer.Ordinal);
+        public IReadOnlySet<string> MultiplyFactors => _multiplyFactors;
 
         /// <summary>Scalar C# types ("int"/"decimal") this value object is divided by.</summary>
-        public HashSet<string> DivideFactors { get; } = new(StringComparer.Ordinal);
+        public IReadOnlySet<string> DivideFactors => _divideFactors;
 
         /// <summary>The plain binary additive operators (<c>+</c>/<c>-</c>) this value object participates in.</summary>
-        public HashSet<BinaryOp> BinaryOps { get; } = new();
+        public IReadOnlySet<BinaryOp> BinaryOps => _binaryOps;
 
         /// <summary>Whether this value object is folded by a <c>sum(selector)</c> (set only by that fold).</summary>
-        public bool IsSummable { get; set; }
+        public bool IsSummable { get; private set; }
 
         /// <summary>
         /// Whether this value object needs an <c>add</c> operation at all — the union of the <c>sum</c>-fold
@@ -178,6 +213,20 @@ internal static class OperatorNeedsAnalyzer
         /// merely whether one is emitted (#836).
         /// </summary>
         public bool NeedsAdd => IsSummable || BinaryOps.Contains(BinaryOp.Add);
+
+        /// <summary>
+        /// Mutators are internal and exposed only as named operations (not a writable property/collection)
+        /// because <see cref="BuildOperatorNeeds"/> now caches and shares each instance across every
+        /// <c>Build*</c> caller within a compile — a writable public surface would let one consumer
+        /// corrupt the result every other consumer of the same cached instance sees.
+        /// </summary>
+        internal void UnionMultiplyFactors(IEnumerable<string> factors) => _multiplyFactors.UnionWith(factors);
+
+        internal void UnionDivideFactors(IEnumerable<string> factors) => _divideFactors.UnionWith(factors);
+
+        internal void UnionBinaryOps(IEnumerable<BinaryOp> ops) => _binaryOps.UnionWith(ops);
+
+        internal void MarkSummable() => IsSummable = true;
     }
 
     /// <summary>
@@ -185,10 +234,10 @@ internal static class OperatorNeedsAnalyzer
     /// <see cref="TypeScope"/> it is resolved in: member initializers, invariant conditions, command
     /// and factory bodies, state-rule guards, service operation bodies, spec conditions, and
     /// read-model field projections. The <b>single</b> site enumerator — the scalar
-    /// <c>*</c>/<c>/</c> analyses (<see cref="BuildScalarOpNeeds"/>), the <c>sum</c> fold
-    /// (<see cref="BuildAdditiveOperatorNeeds"/>), and the plain binary <c>+</c>/<c>-</c> analysis
-    /// (<see cref="BuildValueObjectArithmeticNeeds"/>) all walk it, so the site list lives in one place
-    /// and cannot drift between passes (#836).
+    /// <c>*</c>/<c>/</c> analyses (<see cref="BuildScalarOperatorNeeds"/>, <see cref="BuildScalarDivisionNeeds"/>),
+    /// the <c>sum</c> fold (<see cref="BuildAdditiveOperatorNeeds"/>), and the plain binary <c>+</c>/<c>-</c>
+    /// analysis (<see cref="BuildValueObjectArithmeticNeeds"/>) all walk it, so the site list lives in one
+    /// place and cannot drift between passes (#836).
     /// </summary>
     private static IEnumerable<(Expr Expr, TypeScope Scope)> ExpressionScanSites(KoineModel model, ModelIndex index)
     {

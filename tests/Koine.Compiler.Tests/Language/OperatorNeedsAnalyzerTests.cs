@@ -109,4 +109,48 @@ public class OperatorNeedsAnalyzerTests
         needs.Keys.ShouldBe(new[] { "Length" });
         needs["Length"].ShouldBe(new[] { BinaryOp.Add, BinaryOp.Sub }, ignoreOrder: true);
     }
+
+    /// <summary>
+    /// Direct coverage for the unified per-VO model and its <see cref="OperatorNeedsAnalyzer.ValueObjectOperatorNeeds.NeedsAdd"/>
+    /// reconciliation (#836 Task 4) — the actual new surface this PR adds, previously only exercised
+    /// indirectly through the PHP emitter's snapshot tests. Checks both ways <c>NeedsAdd</c> can become
+    /// true (a <c>sum</c>-fold and a plain binary <c>+</c>) and the negative case (scalar-only).
+    /// </summary>
+    [Fact]
+    public void Unified_model_computes_NeedsAdd_from_either_the_sum_fold_or_a_binary_plus()
+    {
+        var (model, index) = Build();
+
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> needs =
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index);
+
+        needs["Price"].IsSummable.ShouldBeFalse();
+        needs["Price"].NeedsAdd.ShouldBeFalse();
+
+        needs["Weight"].IsSummable.ShouldBeTrue();
+        needs["Weight"].NeedsAdd.ShouldBeTrue();
+
+        needs["Length"].IsSummable.ShouldBeFalse();
+        needs["Length"].BinaryOps.ShouldContain(BinaryOp.Add);
+        needs["Length"].NeedsAdd.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// <see cref="OperatorNeedsAnalyzer.BuildOperatorNeeds"/> is cached per (model, index) so that the
+    /// four public projections and <see cref="OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds"/> share
+    /// one site enumeration across separate calls, not just within one (#836) — a repeat call with the
+    /// same model/index must return the identical cached instance rather than re-running the pass.
+    /// </summary>
+    [Fact]
+    public void Repeat_calls_for_the_same_model_and_index_return_the_same_cached_instance()
+    {
+        var (model, index) = Build();
+
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> first =
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index);
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> second =
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index);
+
+        ReferenceEquals(first, second).ShouldBeTrue();
+    }
 }
