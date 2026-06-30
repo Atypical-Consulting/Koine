@@ -19,7 +19,8 @@ public sealed partial class PythonEmitter
         IReadOnlyList<PyTypeLocation> TypeLocations,
         IReadOnlyList<string> ContextNames,
         IReadOnlySet<string> AdditiveNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds);
+        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
+        IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BinaryArithmeticNeeds);
 
     /// <summary>
     /// Where an emitted user type lives: its bounded context, the dotted import module

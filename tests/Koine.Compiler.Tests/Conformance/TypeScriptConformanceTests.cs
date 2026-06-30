@@ -259,6 +259,42 @@ public class TypeScriptConformanceTests
     }
 
     /// <summary>
+    /// Issue #834: a plain (non-quantity) value object used directly in binary arithmetic —
+    /// <c>combined: Money = base + base</c> / <c>diff: Money = base - base</c> — must emit a real
+    /// <c>add</c>/<c>subtract</c> method so the derived members type-check under <c>tsc --strict</c>.
+    /// The translator already lowers <c>value + value</c> / <c>value - value</c> to
+    /// <c>.add(...)</c>/<c>.subtract(...)</c>; before the fix the emitter only generated <c>add</c>
+    /// (and only when the VO was <c>sum</c>-folded), so <c>subtract</c> was a call to an undefined
+    /// method (TS2339). Brings TS to parity with PHP/C#.
+    /// </summary>
+    [Fact]
+    public void Value_object_plain_arithmetic_typechecks_under_tsc()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  value Line {\n" +
+            "    base: Money\n" +
+            "    combined: Money = base + base\n" +
+            "    diff: Money = base - base\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("subtract");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue("plain value-object +/- should type-check under --strict:\n" + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
     /// The outcome contract <see cref="TestSupport.RequireOrSkip"/> relies on: a missing toolchain
     /// yields a <see cref="TestSupport.TypeScriptCheck.Skipped"/> result whose <c>ToolchainAvailable</c>
     /// and <c>Ok</c> are both <c>false</c> — so it can never be mistaken for a real pass.

@@ -133,6 +133,7 @@ public sealed partial class TypeScriptEmitter : IEmitter
             index,
             OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
             OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
+            OperatorNeedsAnalyzer.BuildValueObjectArithmeticNeeds(model, index),
             model.Contexts.Select(c => c.Name).ToList(),
             BuildTypeNamespaces(model),
             enumMemberToType);
