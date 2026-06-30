@@ -427,9 +427,21 @@ internal sealed class PhpExpressionTranslator
         // regardless of operand order (#717, Bug 2). A value-object-vs-raw-Decimal *comparison* never
         // reaches here — the semantic checker rejects it as IncomparableTypes — so the only VO
         // comparisons that arrive are VO-vs-same-VO, which the comparison arm already handles.
-        if (IsArithmeticValueObject(left) || IsArithmeticValueObject(right))
+        // For ARITHMETIC (`+`/`-`/`*`/`/`) a guard-narrowed optional value-object operand still infers as
+        // optional (narrowing is validator-only and never reaches TypeResolver), so it is admitted via
+        // IsArithmeticValueObjectOperand — the validator GUARANTEES it is guarded (an unguarded optional
+        // dereference in arithmetic is a compile error), so the lowered `$vo->add(...)` receiver is
+        // provably non-null at the call site (phpstan narrows it from the enclosing `!== null` guard,
+        // exactly as the native ternary did) (#813, the #787 deferred half). EQUALITY and COMPARISON keep
+        // the strict non-optional gate: equality does NOT require a guard, so an optional operand may be
+        // genuinely null and must NOT route to `$vo->equals(...)` (a `method.nonObject`); it stays on its
+        // pre-existing path.
+        bool routeValueObject = bin.Op is BinaryOp.Add or BinaryOp.Sub or BinaryOp.Mul or BinaryOp.Div
+            ? IsArithmeticValueObjectOperand(left) || IsArithmeticValueObjectOperand(right)
+            : IsArithmeticValueObject(left) || IsArithmeticValueObject(right);
+        if (routeValueObject)
         {
-            WriteValueObjectBinary(bin, left, sb, parenthesize);
+            WriteValueObjectBinary(bin, left, right, sb, parenthesize);
             return true;
         }
 
@@ -521,9 +533,14 @@ internal sealed class PhpExpressionTranslator
     /// underlying <c>amount</c> accessor (no comparison method is generated on the VO).
     /// </summary>
     private void WriteValueObjectBinary(
-        BinaryExpr bin, TypeRef? left, StringBuilder sb, bool parenthesize)
+        BinaryExpr bin, TypeRef? left, TypeRef? right, StringBuilder sb, bool parenthesize)
     {
-        bool leftIsVo = IsArithmeticValueObject(left);
+        // Prefer a strict (non-optional) value object as the receiver; only when neither side is a strict
+        // VO (the both-guarded-optional arithmetic case) does an optional VO operand become the receiver.
+        // This keeps the equality/comparison arms — only ever reached with a strict VO present — emitting
+        // exactly as before, while letting `optionalMoney + optionalMoney` pick a (narrowed) receiver.
+        bool leftIsVo = IsArithmeticValueObject(left)
+            || (!IsArithmeticValueObject(right) && IsArithmeticValueObjectOperand(left));
         Expr vo = leftIsVo ? bin.Left : bin.Right;
         Expr other = leftIsVo ? bin.Right : bin.Left;
 
@@ -707,6 +724,18 @@ internal sealed class PhpExpressionTranslator
 
         return _index.Classify(t.Name) == TypeKind.Value;
     }
+
+    /// <summary>
+    /// True when the type is a value object that exposes arithmetic methods, <b>regardless of
+    /// optionality</b> — the operand-shaped sibling of <see cref="IsArithmeticValueObject"/>. A
+    /// guard-narrowed optional value object still infers as optional (narrowing is validator-only), but
+    /// in an arithmetic position the validator guarantees it is guarded, so it must still route to the
+    /// VO method path; the non-null guarantee at the <c>add</c>/<c>subtract</c>/… site comes from the
+    /// enclosing guard (phpstan narrows it), not from this predicate. Used only for the arithmetic
+    /// operators — equality/comparison stay on the strict non-optional predicate (#813).
+    /// </summary>
+    private bool IsArithmeticValueObjectOperand(TypeRef? t) =>
+        t is not null && _index.Classify(t.Name) == TypeKind.Value;
 
     /// <summary>The comparison operator to place after <c>compareTo(...)</c>, oriented to the receiver.</summary>
     private static string CompareOperator(BinaryOp op, bool receiverIsLeft)

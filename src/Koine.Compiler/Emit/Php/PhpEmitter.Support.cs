@@ -19,7 +19,8 @@ public sealed partial class PhpEmitter
         ModelIndex Index,
         IReadOnlyDictionary<string, string> EnumMemberToType,
         IReadOnlySet<string> AdditiveNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds);
+        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
+        IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BinaryArithmeticNeeds);
 
     /// <summary>
     /// Short class name → every <c>(FQN, declaring context)</c> that name resolves to — e.g.
