@@ -1308,3 +1308,109 @@ describe('createInspectorController — deck center layout', () => {
   });
 });
 
+// #648 — When an element is selected while the desktop Properties panel is collapsed, the panel must
+// STAY collapsed (respect the user's explicit collapse) and add a transient attention cue on the
+// Properties stripe button (approach b). This is distinct from the expanded case (#533) where
+// selecting switches the active right view to Properties.
+describe('createInspectorController — collapsed Properties panel + selection feedback (#648)', () => {
+  const LAYOUT_KEY = 'koine.studio.layout';
+
+  beforeEach(() => localStorage.removeItem(LAYOUT_KEY));
+
+  test('selecting an element while Properties is collapsed keeps the panel collapsed and flashes the stripe button', async () => {
+    // Start with an explicitly collapsed right rail (approach b: respect the explicit collapse).
+    saveLayout({ rightCollapsed: true });
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    // Pre-condition: panel is collapsed and no button is pressed.
+    expect(el('split').classList.contains('right-collapsed')).toBe(true);
+    expect(deps.store.getState().rightCollapsed).toBe(true);
+    for (const v of ['props', 'assistant', 'source-control']) {
+      expect(stripBtn(v).getAttribute('aria-pressed')).toBe('false');
+    }
+
+    // Fire a selection while the panel is collapsed.
+    ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
+
+    // Approach (b): the panel must STAY collapsed — the user's explicit collapse is honoured.
+    expect(el('split').classList.contains('right-collapsed')).toBe(true);
+    expect(deps.store.getState().rightCollapsed).toBe(true);
+
+    // The Properties stripe button acquires the attention cue (the flash class).
+    expect(stripBtn('props').classList.contains('rstrip-notify')).toBe(true);
+
+    // None of the stripe buttons should be pressed (collapsed → all false).
+    for (const v of ['props', 'assistant', 'source-control']) {
+      expect(stripBtn(v).getAttribute('aria-pressed')).toBe('false');
+    }
+
+    ctl.dispose();
+  });
+
+  test('the flash cue class is removed after the animation timeout', async () => {
+    vi.useFakeTimers();
+    saveLayout({ rightCollapsed: true });
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    // Select while collapsed → flash the Properties stripe button.
+    ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
+    expect(stripBtn('props').classList.contains('rstrip-notify')).toBe(true);
+
+    // After the animation window elapses (~800 ms), the class is removed so the cue resets.
+    await vi.advanceTimersByTimeAsync(900);
+    expect(stripBtn('props').classList.contains('rstrip-notify')).toBe(false);
+
+    ctl.dispose();
+  });
+
+  test('a repeated selection re-fires the flash on the Properties stripe button', async () => {
+    vi.useFakeTimers();
+    saveLayout({ rightCollapsed: true });
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    // First selection flashes the button.
+    ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
+    expect(stripBtn('props').classList.contains('rstrip-notify')).toBe(true);
+
+    // A second selection on a DIFFERENT element while still collapsed re-fires the flash.
+    ctl.selection.set({ qualifiedName: 'Billing', context: 'Billing' });
+    expect(stripBtn('props').classList.contains('rstrip-notify')).toBe(true);
+
+    ctl.dispose();
+  });
+
+  test('expanding the panel by clicking the stripe clears the flash and presses the button', async () => {
+    saveLayout({ rightCollapsed: true });
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    // Select while collapsed → flash the button.
+    ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
+    expect(stripBtn('props').classList.contains('rstrip-notify')).toBe(true);
+    expect(el('split').classList.contains('right-collapsed')).toBe(true);
+
+    // User clicks the Properties stripe icon → expands to Properties.
+    stripBtn('props').click();
+    expect(el('split').classList.contains('right-collapsed')).toBe(false);
+    expect(deps.store.getState().rightCollapsed).toBe(false);
+    expect(stripBtn('props').getAttribute('aria-pressed')).toBe('true');
+
+    ctl.dispose();
+  });
+});
+

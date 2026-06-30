@@ -179,7 +179,9 @@ export const CHAT_HISTORY_CAP = 100;
 // Per-workspace settings overrides: a small Partial<Settings> blob keyed by a stable workspace hash.
 // Only the four scoped fields (previewTarget, formatOnSave, wordWrap, lspTrace) can be stored here;
 // all other settings are global and ignored in this store.
-const WORKSPACE_OVERRIDE_KEY_PREFIX = 'koine.studio.wsOverrides.';
+/** localStorage key prefix for per-workspace settings overrides (workspace key is appended).
+ *  Exported so callers (e.g. the Storybook story) can build storage keys without hardcoding the literal. */
+export const WORKSPACE_OVERRIDE_KEY_PREFIX = 'koine.studio.wsOverrides.';
 
 /** The settings fields that can be overridden per workspace. */
 export const WORKSPACE_SCOPED_KEYS: readonly (keyof Settings)[] = [
