@@ -160,7 +160,7 @@ public sealed partial class PythonEmitter
         WriteDoc(sb, svc.Doc ?? "A stateless domain service.", Indent);
         sb.Append('\n');
 
-        var translator = new PythonExpressionTranslator(emit.Index, Array.Empty<Member>(), emit.EnumMemberToType, typeMapper, context);
+        var translator = new PythonExpressionTranslator(emit.Index, Array.Empty<Member>(), emit.EnumMemberToType, typeMapper, context, regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
         var first = true;
         foreach (OperationDecl op in svc.Operations)
         {

@@ -83,6 +83,26 @@ public class PhpExpressionTests
         return t.Translate(expr);
     }
 
+    // A translator carrying the neutral RegexMatchTimeoutMs author intent (#812). PHP can't honor a
+    // wall-clock timeout, so a `matches` guard annotates the emitted preg_match with the PCRE substitute.
+    private static PhpExpressionTranslator MakeWithTimeout(int milliseconds)
+    {
+        var result = new KoineCompiler().Compile(Source, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var model = result.Model!;
+        var semantic = new SemanticModel(model);
+        ModelIndex index = semantic.Index;
+
+        var order = model.Contexts
+            .SelectMany(c => c.AllTypeDecls())
+            .OfType<ValueObjectDecl>()
+            .First(v => v.Name == "Order");
+
+        return new PhpExpressionTranslator(
+            index, order.Members, index.EnumMemberToType, context: "Shop", regexMatchTimeoutMs: milliseconds);
+    }
+
     // A translator whose member scope is an entity (rather than the Order value object), so a
     // selector projecting to an entity type — e.g. distinctBy(i => i) over List<CartLine> — is
     // reachable. CartLine/Basket are child/root entities of the Cart aggregate above.
@@ -588,6 +608,35 @@ public class PhpExpressionTests
     {
         var expr = new MatchExpr(Id("code"), "[A-Z]{3}");
         Translate(expr).ShouldBe("(bool)preg_match('/[A-Z]{3}/', $this->code)");
+    }
+
+    [Fact]
+    public void Matches_with_timeout_annotates_the_pcre_limit_substitute()
+    {
+        // Key set (#812): PHP has no per-call wall-clock timeout, so the budget is surfaced as a PCRE-limit
+        // note on the preg_match (no silent drop). Match behavior — the `(bool)preg_match(...)` — is unchanged.
+        var expr = new MatchExpr(Id("code"), "[A-Z]{3}");
+        MakeWithTimeout(250).Translate(expr).ShouldBe(
+            "(bool)preg_match('/[A-Z]{3}/', $this->code /* regexMatchTimeoutMs=250ms: PHP has no per-call "
+            + "wall-clock match timeout; matching is bounded via PCRE pcre.backtrack_limit/pcre.recursion_limit */)");
+    }
+
+    [Fact]
+    public void Matches_invariant_with_timeout_keeps_the_match_call_unchanged_aside_from_the_note()
+    {
+        // End-to-end through PhpEmitterOptions: the emitted Email class still calls preg_match exactly;
+        // only the PCRE-substitute note is added, surfacing the author's budget.
+        const string src =
+            "context C {\n  value Email {\n    raw: String\n" +
+            "    invariant raw matches /^[^@]+@[^@]+$/  \"invalid email address\"\n  }\n}\n";
+        var emitter = new PhpEmitter(PhpEmitterOptions.Empty with { RegexMatchTimeoutMs = 250 });
+        var result = new KoineCompiler().Compile(src, emitter);
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var email = result.Files.Single(f => f.RelativePath.EndsWith("Email.php")).Contents;
+        email.ShouldContain("preg_match('/^[^@]+@[^@]+$/'");
+        email.ShouldContain("regexMatchTimeoutMs=250ms");
+        email.ShouldContain("pcre.backtrack_limit");
     }
 
     [Fact]

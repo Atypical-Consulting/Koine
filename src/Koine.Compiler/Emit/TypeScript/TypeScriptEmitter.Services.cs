@@ -66,7 +66,8 @@ public sealed partial class TypeScriptEmitter
 
             IReadOnlyList<Member> members = SpecTargetMembers(context, spec.TargetType, index);
             var translator = new TypeScriptExpressionTranslator(
-                index, members, emit.EnumMemberToType, typeMapper, context, memberReceiver: "target");
+                index, members, emit.EnumMemberToType, typeMapper, context, memberReceiver: "target",
+                regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
             var body = translator.Translate(spec.Condition, TypeScriptExpressionTranslator.NameMode.Property);
             sb.Append(Indent).Append("return ").Append(body).Append(";\n");
             sb.Append("}\n");
@@ -133,7 +134,8 @@ public sealed partial class TypeScriptEmitter
         sb.Append("export ").Append(isAbstract ? "abstract " : "").Append("class ").Append(name).Append(" {\n");
 
         var translator = new TypeScriptExpressionTranslator(
-            index, Array.Empty<Member>(), emit.EnumMemberToType, typeMapper, context);
+            index, Array.Empty<Member>(), emit.EnumMemberToType, typeMapper, context,
+            regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var first = true;
         foreach (OperationDecl op in svc.Operations)

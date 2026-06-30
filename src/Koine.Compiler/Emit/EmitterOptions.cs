@@ -21,8 +21,11 @@ namespace Koine.Compiler.Emit;
 /// per-call match-timeout budget (milliseconds) for the <c>matches</c>-invariant ReDoS guard (#641);
 /// <c>null</c> ⇒ the emitter's historical <c>1000</c> ms default. It is spiritually target-agnostic
 /// (a generic "regex match timeout"); targets with no per-call timeout (TypeScript/Python/PHP/Rust
-/// today) simply ignore it. <see cref="Empty"/> applies no
-/// configuration, so a provider given it produces output byte-identical to a parameterless emitter.</para>
+/// today) simply ignore it. <see cref="RegexMode"/> is a neutral forward key (issue #831) the C#
+/// provider interprets as <c>inline</c> | <c>sourceGenerated</c> (case-insensitive) to select how a
+/// <c>matches</c>-invariant regex guard is evaluated; other targets carry but ignore it (like
+/// <see cref="RegexMatchTimeoutMs"/>). <see cref="Empty"/> applies no configuration, so a provider
+/// given it produces output byte-identical to a parameterless emitter.</para>
 /// </summary>
 public sealed record EmitterOptions(
     IReadOnlyDictionary<string, string> NamespaceMap,
@@ -33,7 +36,8 @@ public sealed record EmitterOptions(
     string? Layers = null,
     bool ApplicationMediatr = false,
     string? ApplicationMapping = null,
-    int? RegexMatchTimeoutMs = null)
+    int? RegexMatchTimeoutMs = null,
+    string? RegexMode = null)
 {
     /// <summary>An options bag with no remapping and all defaults — the parameterless path.</summary>
     public static readonly EmitterOptions Empty =

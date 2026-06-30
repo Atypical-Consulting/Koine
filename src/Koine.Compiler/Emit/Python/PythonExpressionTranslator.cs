@@ -61,6 +61,11 @@ internal sealed class PythonExpressionTranslator
     // or a supplied parameter name (e.g. `src`) for a read-model projection rooted at the source.
     private readonly string _memberReceiver;
 
+    // The neutral RegexMatchTimeoutMs author intent (#794/#812). null ⇒ stdlib `re.search` (today,
+    // unbounded — CPython's `re` has no per-call timeout); set ⇒ the third-party `regex` module's
+    // `regex.search(..., timeout=<ms/1000>)`, the one Python path that can honor a per-call bound.
+    private readonly int? _regexMatchTimeoutMs;
+
     public PythonExpressionTranslator(
         ModelIndex index,
         IReadOnlyList<Member> members,
@@ -70,7 +75,8 @@ internal sealed class PythonExpressionTranslator
         // not retain the mapper.
         PythonTypeMapper typeMapper,
         string? context = null,
-        string memberReceiver = "self")
+        string memberReceiver = "self",
+        int? regexMatchTimeoutMs = null)
     {
         _ = typeMapper;
         _index = index;
@@ -79,6 +85,7 @@ internal sealed class PythonExpressionTranslator
         _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         _enumMemberToType = enumMemberToType;
         _memberReceiver = memberReceiver;
+        _regexMatchTimeoutMs = regexMatchTimeoutMs;
     }
 
     public void PushLocal(string name, TypeRef? type = null)
@@ -245,12 +252,24 @@ internal sealed class PythonExpressionTranslator
             case MatchExpr m:
                 // `raw matches /pat/` -> `(re.search(r"pat", raw) is not None)`. Unanchored search,
                 // the same semantics as the other targets. The per-file header (Task 5) imports `re`.
-                // ReDoS note (#641): CPython's stdlib `re` has NO per-call match timeout, so there is no
-                // bounded form to emit here — the limitation is documented in the `matches` reference
-                // (re is backtracking; validate input length / prefer `regex`'s timeout for untrusted input).
-                sb.Append("(re.search(").Append(RawRegexLiteral(m.Pattern)).Append(", ");
-                Write(m.Target, sb);
-                sb.Append(") is not None)");
+                // ReDoS note (#641): CPython's stdlib `re` has NO per-call match timeout, so the default
+                // form is unbounded. When the neutral RegexMatchTimeoutMs key is set (#794/#812) we instead
+                // lower to the third-party `regex` module's `regex.search(..., timeout=<ms/1000>)` — the one
+                // Python path that honors a per-call bound (the import header adds `import regex`). The key
+                // is opt-in, so users who never set it take on no new dependency.
+                if (_regexMatchTimeoutMs is { } ms)
+                {
+                    sb.Append("(regex.search(").Append(RawRegexLiteral(m.Pattern)).Append(", ");
+                    Write(m.Target, sb);
+                    sb.Append(", timeout=").Append(FormatTimeoutSeconds(ms)).Append(") is not None)");
+                }
+                else
+                {
+                    sb.Append("(re.search(").Append(RawRegexLiteral(m.Pattern)).Append(", ");
+                    Write(m.Target, sb);
+                    sb.Append(") is not None)");
+                }
+
                 break;
             case GuardExpr g:
                 // The `when` condition is applied at the invariant/emit level; emit the body only.
@@ -670,6 +689,16 @@ internal sealed class PythonExpressionTranslator
         }
         return count % 2 == 1;
     }
+
+    /// <summary>
+    /// Renders a millisecond match-timeout budget as the seconds-float literal the <c>regex</c> module's
+    /// <c>timeout=</c> keyword expects (e.g. <c>250 → "0.25"</c>, <c>1000 → "1"</c>, <c>1500 → "1.5"</c>).
+    /// The division is exact <see cref="decimal"/> arithmetic (ms is a small integer, 1000 a power of ten)
+    /// rendered with the invariant culture, so there is no lossy float truncation and the output is
+    /// deterministic across machines.
+    /// </summary>
+    private static string FormatTimeoutSeconds(int milliseconds) =>
+        (milliseconds / 1000m).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private static string EscapeString(string s)
     {

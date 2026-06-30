@@ -22,7 +22,7 @@ public sealed partial class TypeScriptEmitter
         var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
         var ctorMembers = vo.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var derived = vo.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
-        var translator = new TypeScriptExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, typeMapper, ContextOf(ns));
+        var translator = new TypeScriptExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, typeMapper, ContextOf(ns), regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var sb = new StringBuilder();
         WriteDoc(sb, vo.Doc, "");
@@ -308,7 +308,7 @@ public sealed partial class TypeScriptEmitter
         var idName = TypeScriptNaming.ToPascalCase(entity.IdentityName);
         var memberNames = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.Ordinal);
         var scopeMembers = entity.Members.Append(new Member("id", new TypeRef(entity.IdentityName), null)).ToList();
-        var translator = new TypeScriptExpressionTranslator(emit.Index, scopeMembers, emit.EnumMemberToType, typeMapper, ContextOf(ns));
+        var translator = new TypeScriptExpressionTranslator(emit.Index, scopeMembers, emit.EnumMemberToType, typeMapper, ContextOf(ns), regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var ctorMembers = entity.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var derived = entity.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();

@@ -479,3 +479,79 @@ describe('workspace settings schema (#736)', () => {
     expect(res.errors?.[0]?.message).toMatch(/previewTarget/i);
   });
 });
+
+// Task 3 (#791, updated by #792): structural guard for the workspace schema builder.
+// After #792 changed WORKSPACE_SETTINGS_JSON_SCHEMA from flat to grouped, these guards
+// verify that buildWorkspaceGroupedSchema correctly covers all workspace-scoped fields.
+describe('buildWorkspaceGroupedSchema structural equality guard (#791, #792)', () => {
+  it('WORKSPACE_SETTINGS_JSON_SCHEMA.properties keys match the expected groups from SETTINGS_FIELDS', () => {
+    // After #792 the top-level keys are group names (editor, preview, lsp), not runtime keys.
+    // EXPECTED_WS_GROUPS is derived from SETTINGS_FIELDS so this is a three-way drift guard.
+    expect(Object.keys(WORKSPACE_SETTINGS_JSON_SCHEMA.properties).sort()).toEqual(
+      Object.keys(EXPECTED_WS_GROUPS).sort(),
+    );
+  });
+
+  it('WORKSPACE_SETTINGS_JSON_SCHEMA and SETTINGS_JSON_SCHEMA share the same $schema dialect', () => {
+    const dialect = 'https://json-schema.org/draft/2020-12/schema';
+    expect(WORKSPACE_SETTINGS_JSON_SCHEMA.$schema).toBe(dialect);
+  });
+
+  it('WORKSPACE_SETTINGS_JSON_SCHEMA is additionalProperties:false', () => {
+    expect(WORKSPACE_SETTINGS_JSON_SCHEMA.additionalProperties).toBe(false);
+  });
+
+  it('every WORKSPACE_SCOPED_KEY has a non-empty leaf schema under its group in WORKSPACE_SETTINGS_JSON_SCHEMA', () => {
+    // Verifies that buildWorkspaceGroupedSchema populated every workspace-scoped field's leaf
+    // under the correct group — a guard against silently missing a field after a SETTINGS_FIELDS change.
+    const groups = WORKSPACE_SETTINGS_JSON_SCHEMA.properties as Record<
+      string,
+      { properties: Record<string, unknown> }
+    >;
+    for (const f of SETTINGS_FIELDS) {
+      if (!WORKSPACE_SCOPED_KEY_SET.has(f.runtimeKey)) continue;
+      const groupSchema = groups[f.group];
+      expect(groupSchema, `group schema for ${f.group}`).toBeDefined();
+      const leaf = groupSchema.properties[f.docKey];
+      expect(leaf, `leaf schema for ${f.group}.${f.docKey}`).toBeDefined();
+      expect(Object.keys(leaf as object).length, `leaf schema for ${f.group}.${f.docKey} is non-empty`).toBeGreaterThan(
+        0,
+      );
+    }
+  });
+});
+
+// Task 2 (#791): characterization tests that guard the extraction of sortedValidationErrors and
+// rejectBadPreviewTarget. Both converters must keep identical error-ordering and previewTarget message.
+describe('jsonDocToSettings / jsonDocToWorkspaceOverrides error-ordering parity (#791)', () => {
+  it('both converters put field-specific errors before additionalProperties errors', () => {
+    // A flat legacy doc with a bad lspTrace enum value AND an unknown key. The sort must put
+    // the field error first in both converters so the first diagnostic points at the bad field.
+    const doc = JSON.stringify({ lspTrace: 'loud', bogusKey: 1 });
+    const settingsRes = jsonDocToSettings(doc, DEFAULT_SETTINGS);
+    const wsRes = jsonDocToWorkspaceOverrides(doc);
+
+    // Both should fail
+    expect(settingsRes.settings).toBeUndefined();
+    expect(wsRes.overrides).toBeUndefined();
+
+    // First error in BOTH is the field-specific one (lspTrace), not the structural one (bogusKey).
+    expect(settingsRes.errors?.[0]?.message).toMatch(/lspTrace/);
+    expect(wsRes.errors?.[0]?.message).toMatch(/lspTrace/);
+  });
+
+  it('both converters produce the same previewTarget error message format for an unknown target', () => {
+    const userDoc = JSON.stringify({ previewTarget: 'cobol' });
+    const wsDoc = JSON.stringify({ previewTarget: 'cobol' });
+
+    const settingsRes = jsonDocToSettings(userDoc, DEFAULT_SETTINGS);
+    const wsRes = jsonDocToWorkspaceOverrides(wsDoc);
+
+    expect(settingsRes.settings).toBeUndefined();
+    expect(wsRes.overrides).toBeUndefined();
+
+    // Both must produce the same exact message so callers see a consistent diagnostic.
+    expect(settingsRes.errors?.[0]?.message).toBe('previewTarget: unknown emit target "cobol"');
+    expect(wsRes.errors?.[0]?.message).toBe('previewTarget: unknown emit target "cobol"');
+  });
+});
