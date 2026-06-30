@@ -25,6 +25,14 @@ import { DEFAULT_DECK_STATE, isValidCenter, isValidDeckState, type CenterView, t
 
 export type ThemeName = 'dark' | 'light';
 
+/** Which view to land on when Studio opens cold (no explicit hash / share link). Default 'home'. */
+export type StartupView = 'home' | 'lastWorkspace';
+
+/** Type-guard for {@link StartupView}. */
+export function isStartupView(v: unknown): v is StartupView {
+  return v === 'home' || v === 'lastWorkspace';
+}
+
 /** Accent presets selectable in Settings → Appearance. 'blue' is the theme default (no override). */
 export type AccentName = 'blue' | 'teal' | 'violet' | 'amber';
 
@@ -99,6 +107,11 @@ export interface Settings {
    *  keeps PATH/aliases only in `~/.bashrc` can set `["-l", "-i"]` so an interactive shell sources it.
    *  Desktop-only — the browser host has no shell; the user owns the value (we don't validate args). */
   terminalShellArgs: string[];
+  /** Which view to open on a cold start (no explicit `#/editor` hash or share link). Default `'home'`
+   *  preserves the #766 always-Home behaviour for everyone who doesn't change it. `'lastWorkspace'` re-
+   *  enables the old auto-resume: opens the editor immediately when a workspace was opened previously.
+   *  This is a user-level (not workspace-scoped) setting, applied on the next cold load only. (#770) */
+  startupView: StartupView;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -129,6 +142,7 @@ export const DEFAULT_SETTINGS: Settings = {
   previewTarget: 'csharp',
   displayName: '',
   terminalShellArgs: [],
+  startupView: 'home',
 };
 
 // --- storage keys ------------------------------------------------------------
@@ -323,6 +337,11 @@ function coercePreviewTarget(v: unknown): PreviewTarget {
   return isEmitTarget(v) ? (v as PreviewTarget) : DEFAULT_SETTINGS.previewTarget;
 }
 
+/** A valid {@link StartupView} value, else the default ('home'). */
+function coerceStartupView(v: unknown): StartupView {
+  return isStartupView(v) ? v : DEFAULT_SETTINGS.startupView;
+}
+
 /** A list of shell-arg tokens (#467): an array filtered to its NON-BLANK string entries (always a fresh
  *  array, never the shared default reference). A blank token would spawn e.g. `bash ""`, which bash reads
  *  as a missing script path and exits — killing the terminal on every (re)start — so empty tokens are
@@ -382,6 +401,7 @@ export function loadSettings(): Settings {
       previewTarget: coercePreviewTarget(parsed.previewTarget),
       displayName: typeof parsed.displayName === 'string' ? parsed.displayName : DEFAULT_SETTINGS.displayName,
       terminalShellArgs: coerceShellArgs(parsed.terminalShellArgs),
+      startupView: coerceStartupView(parsed.startupView),
     };
   } catch {
     return { ...DEFAULT_SETTINGS, aiApiKey: secretCache };
