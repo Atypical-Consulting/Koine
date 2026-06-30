@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Emit.CSharp;
+using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Services;
 
@@ -48,6 +49,11 @@ public class CrossEmitterConformanceTests
         "No Node/TypeScript toolchain (tsc + node) available locally; the TypeScript " +
         "half of the cross-emitter comparison was not run. The C#-vs-expected outcomes were still " +
         "asserted. Install Node + TypeScript (or set KOINE_TSC) — CI runs the full comparison.";
+
+    private const string NoPythonToolchainNotice =
+        "No mypy toolchain available locally; the Python half of the cross-emitter comparison was not " +
+        "run. The C# (and, where available, TypeScript) outcomes were still asserted. Install mypy " +
+        "(or set KOINE_MYPY) — CI runs the full comparison.";
 
     // ---- The corpus -----------------------------------------------------------------------------
 
@@ -411,6 +417,66 @@ public class CrossEmitterConformanceTests
         // toolchain reports the test as Skipped (or, under KOINE_REQUIRE_CONFORMANCE, fails) without
         // ever weakening the C# guarantee.
         TestSupport.RequireOrSkip(ts.ToolchainAvailable, NoToolchainNotice);
+    }
+
+    /// <summary>
+    /// Issue #834 regression net: the canonical plain value-object arithmetic case —
+    /// <c>combined: Money = base + base</c> and <c>diff: Money = base - base</c> over a non-quantity
+    /// <c>Money</c> — must emit compiling / type-checking code on C#, TypeScript, AND Python in one
+    /// place (PHP already proves this in <c>PhpConformanceTests</c>). The C# half always runs (Roslyn
+    /// ships with the test host); the TS (<c>tsc</c>) and Python (<c>mypy --strict</c>) halves assert
+    /// when their toolchain is present and are otherwise skipped — never a false pass on a missing
+    /// toolchain, always a real assertion where one exists (as in CI). A regression on any of the
+    /// three demand-driven operators (<c>operator +/-</c>, <c>add/subtract</c>, <c>__add__/__sub__</c>)
+    /// is caught here.
+    /// </summary>
+    [Fact]
+    public void Plain_value_object_arithmetic_compiles_across_targets()
+    {
+        const string koi = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0 "an amount cannot be negative"
+              }
+              value Line {
+                base: Money
+                combined: Money = base + base
+                diff: Money = base - base
+              }
+            }
+            """;
+
+        // C#: emit + Roslyn compile. Always runs and always asserts (the strongest guarantee).
+        CompileResult cs = new KoineCompiler().Compile(koi, new CSharpEmitter());
+        cs.Success.ShouldBeTrue("C# emit failed:\n" + string.Join("\n", cs.Diagnostics.Select(d => d.ToString())));
+        var (asm, csErrors) = TestSupport.Compile(cs.Files.ToList());
+        (asm is not null).ShouldBeTrue("generated C# (plain VO arithmetic) failed to compile:\n" + string.Join("\n", csErrors));
+
+        // TypeScript: emit + tsc --strict, asserted when the Node/tsc toolchain is present.
+        CompileResult ts = new KoineCompiler().Compile(koi, new TypeScriptEmitter());
+        ts.Success.ShouldBeTrue("TS emit failed:\n" + string.Join("\n", ts.Diagnostics.Select(d => d.ToString())));
+        TestSupport.TypeScriptCheck tsCheck = TestSupport.TypeCheckTypeScript(ts.Files);
+        if (tsCheck.ToolchainAvailable)
+        {
+            tsCheck.Ok.ShouldBeTrue("plain VO arithmetic should type-check under tsc --strict:\n" + string.Join("\n", tsCheck.Errors));
+        }
+
+        // Python: emit + mypy --strict, asserted when the mypy toolchain is present.
+        CompileResult py = new KoineCompiler().Compile(koi, new PythonEmitter());
+        py.Success.ShouldBeTrue("Python emit failed:\n" + string.Join("\n", py.Diagnostics.Select(d => d.ToString())));
+        TestSupport.PythonCheck pyCheck = TestSupport.TypeCheckPython(py.Files);
+        if (pyCheck.ToolchainAvailable)
+        {
+            pyCheck.Ok.ShouldBeTrue("plain VO arithmetic should type-check under mypy --strict:\n" + string.Join("\n", pyCheck.Errors));
+        }
+
+        // The C# half always asserts above; the TS and Python halves only assert when their toolchain
+        // ran. Funnel each absence through RequireOrSkip AFTER the assertions (mirrors the Theory and
+        // satisfies the NoSilentToolchainGate meta-test) so a missing toolchain reports Skipped — or, under
+        // KOINE_REQUIRE_CONFORMANCE, Failed — instead of silently passing.
+        TestSupport.RequireOrSkip(tsCheck.ToolchainAvailable, NoToolchainNotice);
+        TestSupport.RequireOrSkip(pyCheck.ToolchainAvailable, NoPythonToolchainNotice);
     }
 
     private static string Verb(bool accepted) => accepted ? "ACCEPTED" : "REJECTED";

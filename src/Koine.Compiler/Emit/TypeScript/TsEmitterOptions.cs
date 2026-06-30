@@ -65,6 +65,16 @@ internal sealed record TsEmitterOptions
     public IReadOnlySet<TsLayer>? Layers { get; init; }
 
     /// <summary>
+    /// Carries the neutral <see cref="Koine.Compiler.Emit.EmitterOptions.RegexMatchTimeoutMs"/> author
+    /// intent (#794/#812). JavaScript's stock <c>RegExp</c> has NO synchronous per-call timeout, so this
+    /// value is ADVISORY: when set, the translator threads it into the runtime <c>regexMatch</c> seam's
+    /// <c>timeoutMs?</c> parameter — the documented swap point for a linear-time engine (RE2) — but match
+    /// behavior with the default engine is unchanged. <c>null</c> (the default) keeps the call site and
+    /// runtime byte-identical to the historical emitter.
+    /// </summary>
+    public int? RegexMatchTimeoutMs { get; init; }
+
+    /// <summary>
     /// True when the opt-in Infrastructure layer (issue #241) is requested. The Domain layer is always
     /// emitted, so a null/empty <see cref="Layers"/> set means Domain-only — output byte-identical to the
     /// historical emitter.

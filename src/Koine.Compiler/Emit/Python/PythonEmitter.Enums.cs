@@ -38,7 +38,7 @@ public sealed partial class PythonEmitter
         // Associated-data args are literal expressions; reuse the translator so string escaping and
         // the Decimal-safe rendering match the rest of the emitted code. No members are in scope —
         // an enum's data values are constants.
-        var translator = new PythonExpressionTranslator(emit.Index, Array.Empty<Member>(), emit.EnumMemberToType, typeMapper, ContextOf(ns));
+        var translator = new PythonExpressionTranslator(emit.Index, Array.Empty<Member>(), emit.EnumMemberToType, typeMapper, ContextOf(ns), regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         // The per-member callable parameters / dispatch arms (snake_case, keyword-escaped).
         var arms = @enum.Members.Select(m => PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(m.Name))).ToList();

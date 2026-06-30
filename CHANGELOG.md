@@ -8,6 +8,29 @@ may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Koine Studio — workspace settings.json now uses the same grouped key shape as user settings.json.**
+  The workspace scope of the Settings JSON editor (User / Workspace scope toggle introduced in #736) now
+  uses the same `group.docKey` key shape as the user scope: `preview.target`, `editor.formatOnSave`,
+  `editor.wordWrap`, and `lsp.trace` instead of the previous flat runtime keys (`previewTarget`, etc.).
+  This means a field can be copy-pasted between the User and Workspace editors without any key-shape
+  change — the cross-scope consistency wart flagged by a reviewer on #781 is resolved. The internal
+  `koine.studio.wsOverrides.*` localStorage blobs keep their flat runtime-key format and are unaffected;
+  the `jsonDocToWorkspaceOverrides` parser accepts both the new grouped format and the old flat format, so
+  existing saved workspace-override documents continue to load without data loss. (issue #792;
+  follow-up to #736 and #750)
+- **Koine Studio — "On startup" setting (Home vs Last workspace).** A new **Settings → Appearance → On
+  startup** dropdown lets power users opt into reopening the last workspace automatically on a cold
+  Studio boot, reversing the always-Home default introduced by #766 without affecting it for everyone
+  else. The default remains `Home screen` (no change in behaviour for users who don't touch the
+  setting). Choosing `Last workspace` auto-resumes the editor when a prior workspace exists; a pristine
+  first-load (no prior workspace) still lands on Home so the user is never stranded on a blank editor.
+  Explicit `#/editor` deep-links and `#model=…` share links continue to win regardless of the setting.
+  The boot resolver (`resolveInitialRoute`) stays pure / IO-free — the setting and the persisted-
+  workspace flag are passed in by `main.ts` at the only IO boundary, preserving the no-flash contract
+  from #368. The `startupView: 'home' | 'lastWorkspace'` field is persisted in Settings and exposed in
+  the Settings JSON editor for advanced users. (issue #770; follow-up to #766 / #768)
+
 ### Changed
 - **Koine Studio Web now always opens on Home.** Opening Studio (a cold load at the base URL / `#/`) lands
   on the Home start console every time instead of auto-skipping a returning user straight into the editor —
@@ -18,6 +41,16 @@ may include breaking changes.
   single-view boot is unchanged.
 
 ### Fixed
+- **C# emitter: direct same-type `value + value` / `value - value` validated but emitted CS0019.** A plain
+  (non-`quantity`) value object combined with another of its own type *directly* — `total: Money = fee + fee`
+  or `diff: Money = fee - fee`, written outside a `sum` fold — passed validation but emitted C# that called
+  operators the emitter never generated (two CS0019s): `operator +` was demand-generated only by a `sum`
+  fold, and `operator -` was never generated for plain value objects at all. The C# emitter now records the
+  direct-binary additive/subtractive need (reusing the existing `BuildValueObjectArithmeticNeeds` analysis,
+  the same map the PHP emitter consumes) and demand-generates `operator +`/`operator -` for plain value
+  objects, mirroring scalar `*`/`/` (#832) and the `sum`-fold `+`. Both route through the validating
+  constructor, so e.g. a negative difference still throws the declared `invariant` at construction. The fix
+  is C#-emitter-only; no grammar, parser, or `Ast/` change, and no change to other targets (issue #833).
 - **Live Playground compiler failed to boot ("Koine worker timed out after 30s").** The marketing-site
   Playground's in-browser compiler hung at boot: its wasm Web Worker installed the message loop with a
   top-level `self.onmessage = …`, which clobbers the `message` channel the .NET WebAssembly runtime

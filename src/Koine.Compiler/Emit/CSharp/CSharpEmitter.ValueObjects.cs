@@ -124,23 +124,48 @@ public sealed partial class CSharpEmitter
             // arithmetic above. If a VO needs guaranteed operators, model it as a quantity.
 
             // Scalar arithmetic operators: emitted only when this value object is actually
-            // multiplied by a scalar in a derived expression.
-            if (emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? scalarTypes))
+            // multiplied (`*`) or divided (`/`, #832) by a scalar in a derived expression.
+            bool needsMul = emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? mulScalars);
+            bool needsDiv = emit.ScalarDivNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? divScalars);
+            if (needsMul || needsDiv)
             {
                 IReadOnlyList<Member> numericFields = NumericFields(bound);
                 if (numericFields.Count > 0)
                 {
-                    WriteScalarOperators(sb, vo, bound, numericFields, scalarTypes, typeMapper);
+                    if (needsMul)
+                    {
+                        WriteScalarOperators(sb, vo, bound, numericFields, mulScalars!, typeMapper, "*");
+                    }
+
+                    if (needsDiv)
+                    {
+                        WriteScalarOperators(sb, vo, bound, numericFields, divScalars!, typeMapper, "/");
+                    }
                 }
             }
 
-            // Additive operator for value objects that are summed (e.g. lines.sum(l => l.subtotal)).
-            if (emit.AdditiveNeeds.Contains(vo.Name))
+            // Additive (`+`) / subtractive (`-`) operators for a value object combined with its OWN
+            // type. `+` is demand-generated when the VO is folded with `sum` (emit.AdditiveNeeds) OR
+            // appears in a direct `fee + fee` (#833); `-` is demand-generated for a direct `fee - fee`
+            // (#833 — never generated for plain VOs before). Both route through the validating
+            // constructor, so e.g. a negative difference still throws the declared `invariant`.
+            emit.DirectArithmeticNeeds.TryGetValue(vo.Name, out IReadOnlySet<BinaryOp>? directOps);
+            bool needsAdd = emit.AdditiveNeeds.Contains(vo.Name) || (directOps?.Contains(BinaryOp.Add) ?? false);
+            bool needsSub = directOps?.Contains(BinaryOp.Sub) ?? false;
+            if (needsAdd || needsSub)
             {
                 IReadOnlyList<Member> numericFields = NumericFields(bound);
                 if (numericFields.Count > 0)
                 {
-                    WriteAdditiveOperator(sb, vo, bound, numericFields);
+                    if (needsAdd)
+                    {
+                        WriteAdditiveOperator(sb, vo, bound, numericFields, "+");
+                    }
+
+                    if (needsSub)
+                    {
+                        WriteAdditiveOperator(sb, vo, bound, numericFields, "-");
+                    }
                 }
             }
         }
@@ -249,11 +274,12 @@ public sealed partial class CSharpEmitter
     }
 
     /// <summary>
-    /// Generates scalar multiply operators so value-object * scalar arithmetic
-    /// compiles (e.g. <c>Money * int</c> for <c>subtotal = unitPrice * quantity</c>).
-    /// Deliberate v0 codegen rule: scale every numeric field and carry the rest
-    /// unchanged. The product is cast back to a narrower field type when needed
-    /// (e.g. an <c>int</c> field multiplied by a <c>decimal</c> scalar).
+    /// Generates scalar <c>*</c>/<c>/</c> operators so value-object &lt;op&gt; scalar arithmetic
+    /// compiles (e.g. <c>Money * int</c> for <c>subtotal = unitPrice * quantity</c>, or <c>Money / int</c>
+    /// for <c>half = fee / 2</c>, #832). Deliberate v0 codegen rule: apply the operator to every numeric
+    /// field and carry the rest unchanged. The result is cast back to a narrower field type when needed
+    /// (e.g. an <c>int</c> field divided by a <c>decimal</c> scalar yields <c>decimal</c>). Both operators
+    /// share this shape; <paramref name="op"/> is the C# operator token (<c>"*"</c> or <c>"/"</c>).
     /// </summary>
     private void WriteScalarOperators(
         StringBuilder sb,
@@ -261,7 +287,8 @@ public sealed partial class CSharpEmitter
         BoundValueObject bound,
         IReadOnlyList<Member> numericFields,
         IReadOnlySet<string> scalarTypes,
-        CSharpTypeMapper typeMapper)
+        CSharpTypeMapper typeMapper,
+        string op)
     {
         // Constructor args must be passed in the SAME order the constructor declares its
         // parameters — the projection's CtorParams owns that order (defaulted/optional last).
@@ -279,15 +306,15 @@ public sealed partial class CSharpEmitter
                     return prop;
                 }
 
-                var product = $"{prop} * right";
-                // int field * decimal scalar yields decimal -> cast back to int.
+                var scaled = $"{prop} {op} right";
+                // int field <op> decimal scalar yields decimal -> cast back to int.
                 return typeMapper.Map(m.Type) == "int" && scalar == "decimal"
-                    ? $"(int)({product})"
-                    : product;
+                    ? $"(int)({scaled})"
+                    : scaled;
             }));
 
             sb.Append('\n').Append(Indent)
-              .Append("public static ").Append(vo.Name).Append(" operator *(")
+              .Append("public static ").Append(vo.Name).Append(" operator ").Append(op).Append('(')
               .Append(vo.Name).Append(" left, ").Append(scalar).Append(" right)\n");
             if (RefOnly)
             {
@@ -381,12 +408,15 @@ public sealed partial class CSharpEmitter
             .ToList();
 
     /// <summary>
-    /// Generates a structural <c>+</c> operator so a value object can be folded by
-    /// <c>sum</c> (e.g. <c>lines.sum(l =&gt; l.subtotal)</c> over <c>Money</c>). Adds
-    /// every numeric field pairwise and carries the rest from the left operand,
-    /// mirroring the scalar-operator heuristic.
+    /// Generates a structural <c>+</c>/<c>-</c> operator so a value object can combine with another of
+    /// its OWN type — folded by <c>sum</c> (e.g. <c>lines.sum(l =&gt; l.subtotal)</c> over <c>Money</c>)
+    /// or used directly (<c>fee + fee</c>, <c>fee - fee</c>, #833). Applies <paramref name="op"/> to every
+    /// numeric field pairwise and carries the rest from the left operand, mirroring the scalar-operator
+    /// heuristic. The result routes through the validating constructor, so e.g. a negative difference from
+    /// <c>-</c> throws the declared <c>invariant</c> exactly as construction would. <paramref name="op"/>
+    /// is the C# operator token (<c>"+"</c> or <c>"-"</c>).
     /// </summary>
-    private void WriteAdditiveOperator(StringBuilder sb, ValueObjectDecl vo, BoundValueObject bound, IReadOnlyList<Member> numericFields)
+    private void WriteAdditiveOperator(StringBuilder sb, ValueObjectDecl vo, BoundValueObject bound, IReadOnlyList<Member> numericFields, string op)
     {
         // Same ordering rule as the constructor (the projection's CtorParams: defaulted/optional last).
         var ctorMembers = bound.CtorParams.Select(f => (Member)f.Syntax).ToList();
@@ -396,17 +426,17 @@ public sealed partial class CSharpEmitter
         {
             var prop = CSharpNaming.ToPascalCase(m.Name);
             return numericNames.Contains(m.Name)
-                ? $"left.{prop} + right.{prop}"
+                ? $"left.{prop} {op} right.{prop}"
                 : $"left.{prop}";
         }));
 
         // Non-numeric fields (e.g. a Money's Currency) are carried from the left operand.
-        // The operands must agree on them, else the fold would silently coerce one
+        // The operands must agree on them, else the combination would silently coerce one
         // (EUR + USD -> EUR). Guard each, mirroring unit-checked quantity arithmetic.
         var carried = ctorMembers.Where(m => !numericNames.Contains(m.Name)).ToList();
 
         sb.Append('\n').Append(Indent)
-          .Append("public static ").Append(vo.Name).Append(" operator +(")
+          .Append("public static ").Append(vo.Name).Append(" operator ").Append(op).Append('(')
           .Append(vo.Name).Append(" left, ").Append(vo.Name).Append(" right)");
 
         if (RefOnly)

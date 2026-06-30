@@ -34,11 +34,20 @@ internal enum PythonLayer
 /// (generating <c>to_dict</c>/<c>from_dict</c> serialisation helpers on dataclasses). It has
 /// no effect in Phase 1 and defaults to <c>false</c>.
 /// </para>
+/// <para>
+/// <see cref="RegexMatchTimeoutMs"/> carries the neutral
+/// <see cref="Koine.Compiler.Emit.EmitterOptions.RegexMatchTimeoutMs"/> author intent (#794/#812). When
+/// set, a <c>matches</c> guard lowers to the third-party <c>regex</c> module's
+/// <c>regex.search(..., timeout=&lt;ms/1000&gt;)</c> (the one Python path with a real per-call timeout)
+/// instead of the stdlib <c>re.search(...)</c>; <c>null</c> (the default) keeps stdlib <c>re</c> so users
+/// who never set the key take on no new dependency and emit byte-identical output.
+/// </para>
 /// </summary>
 internal sealed record PythonEmitterOptions(
     IReadOnlyDictionary<string, string> PackageMap,
     bool EmitDictHelpers = false,
-    IReadOnlySet<PythonLayer>? Layers = null)
+    IReadOnlySet<PythonLayer>? Layers = null,
+    int? RegexMatchTimeoutMs = null)
 {
     /// <summary>An options bag that applies no remapping and uses all defaults.</summary>
     public static readonly PythonEmitterOptions Empty =

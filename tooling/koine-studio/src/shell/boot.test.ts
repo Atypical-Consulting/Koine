@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { saveSettings, DEFAULT_SETTINGS } from '@/settings/persistence';
 
 // Stub the IDE shell so booting doesn't pull the whole editor module graph, and so we can assert
 // whether init() runs per route. The real init() is exercised exhaustively in ide.test.ts.
@@ -193,6 +194,66 @@ describe('bootStudio — a single routed view (no IDE→Home flash)', () => {
     // The dead recent is forgotten and the recents list rebuilt to its empty state on Home.
     expect(localStorage.getItem('koine.studio.recentFolders')).not.toContain('ghost');
     expect(root.querySelector('.koi-welcome-empty')).not.toBeNull();
+  });
+});
+
+describe('bootStudio — On startup setting (#770)', () => {
+  it('startupView:lastWorkspace + persisted workspace boots straight to the editor', () => {
+    // Set the "last workspace opened" flag (hasPersistedWorkspace) and the setting.
+    localStorage.setItem('koine.studio.workspace-opened', '1');
+    saveSettings({ ...DEFAULT_SETTINGS, startupView: 'lastWorkspace' });
+
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+
+    dispose = bootStudio(root);
+
+    // Should boot straight into the editor (opt-in auto-resume).
+    expect(ideInit).toHaveBeenCalledTimes(1);
+    expect(root.querySelector('.koi-welcome')).toBeNull();
+  });
+
+  it('startupView:home + persisted workspace still lands on Home (default unchanged)', () => {
+    localStorage.setItem('koine.studio.workspace-opened', '1');
+    saveSettings({ ...DEFAULT_SETTINGS, startupView: 'home' });
+
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+
+    dispose = bootStudio(root);
+
+    // Home remains the default — the #766 behaviour is unchanged.
+    expect(root.querySelector('.koi-welcome')).not.toBeNull();
+    expect(ideInit).not.toHaveBeenCalled();
+  });
+
+  it('startupView:lastWorkspace + NO workspace still lands on Home (never blank-editor strand)', () => {
+    // No workspace-opened flag and no workspace token.
+    saveSettings({ ...DEFAULT_SETTINGS, startupView: 'lastWorkspace' });
+
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+
+    dispose = bootStudio(root);
+
+    // Without a prior workspace, the opt-in falls back to Home.
+    expect(root.querySelector('.koi-welcome')).not.toBeNull();
+    expect(ideInit).not.toHaveBeenCalled();
+  });
+
+  it('a share link always boots to the editor regardless of startupView', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, startupView: 'lastWorkspace' });
+    // No workspace flag — but a share link wins everything.
+    const url = buildShareUrl('context Demo {}');
+    location.hash = url.slice(url.indexOf('#'));
+
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+
+    dispose = bootStudio(root);
+
+    expect(ideInit).toHaveBeenCalledTimes(1);
+    expect(root.querySelector('.koi-welcome')).toBeNull();
   });
 });
 

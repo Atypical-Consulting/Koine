@@ -4,7 +4,7 @@
 // stale-token + lazy-load-once + debounce contracts are pinned here.
 //
 // We drive the real controller with a small seeded DOM (the same id surface init() builds, lifted from
-// ide.test.ts's APP_HTML so a drift throws via el()) and a spied `lsp` content stub. happy-dom renders
+// ide.test.ts's APP_HTML so a drift throws via domById()) and a spied `lsp` content stub. happy-dom renders
 // the real panel DOM; fake timers cover the 350ms edit/bottom debounce.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { waitFor } from '@testing-library/preact';
@@ -19,6 +19,7 @@ import { LeftRail } from '@/shell/LeftRail';
 import { RightStrip } from '@/shell/RightStrip';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
 import { createAppStore } from '@/store/index';
+import { domById } from '@/shared/domById';
 import * as maxgraphRenderer from '@/diagrams/diagrams-maxgraph';
 import type { ContextMapGraphHooks } from '@/diagrams/diagrams-maxgraph';
 import type {
@@ -37,7 +38,7 @@ import type {
 
 // --- DOM seed ----------------------------------------------------------------
 // The center / docs / bottom-strip / right-rail / left-rail / context-switcher subset of index.html the
-// controller looks up via el(...). Kept equivalent to ide.test.ts's APP_HTML.
+// controller looks up via domById(...). Kept equivalent to ide.test.ts's APP_HTML.
 const APP_HTML = `
   <div id="app">
     <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
@@ -114,10 +115,6 @@ function seedDom(): void {
   // wiring resolve, as the boot does.
   render(createElement(LeftRail, null), document.getElementById('leftrail')!);
   render(createElement(RightStrip, null), document.getElementById('right-strip')!);
-}
-
-function el<T extends HTMLElement>(id: string): T {
-  return document.getElementById(id) as T;
 }
 
 // The right-view switcher is the icon stripe (#right-strip), one button per RightView (#500). Tests drive
@@ -284,11 +281,11 @@ describe('createInspectorController — center switching', () => {
     const ctl = createInspectorController(makeDeps(lsp));
     ctl.init(); // boots Visual
 
-    expect(el('diagnostics').hidden).toBe(false); // Visual
+    expect(domById('diagnostics').hidden).toBe(false); // Visual
     ctl.selectCenter('technical');
-    expect(el('diagnostics').hidden).toBe(false); // Code
+    expect(domById('diagnostics').hidden).toBe(false); // Code
     ctl.selectDocsTab('glossary'); // brings up Docs
-    expect(el('diagnostics').hidden).toBe(false); // Documentation
+    expect(domById('diagnostics').hidden).toBe(false); // Documentation
     ctl.dispose();
   });
 
@@ -302,7 +299,7 @@ describe('createInspectorController — center switching', () => {
     expect(deps.store.getState().deck.primary).toBe('technical');
     await waitFor(() => expect(shownCenter('technical')).toBe(true));
     expect(shownCenter('visual')).toBe(false);
-    expect(el('editor-pane').hidden).toBe(false); // the technical surface lands on the editor facet
+    expect(domById('editor-pane').hidden).toBe(false); // the technical surface lands on the editor facet
     ctl.dispose();
   });
 
@@ -315,8 +312,8 @@ describe('createInspectorController — center switching', () => {
 
     expect(deps.store.getState().deck.primary).toBe('docs');
     await waitFor(() => expect(shownCenter('docs')).toBe(true));
-    expect(el('view-glossary').hidden).toBe(false);
-    expect(el('view-docs').hidden).toBe(true);
+    expect(domById('view-glossary').hidden).toBe(false);
+    expect(domById('view-docs').hidden).toBe(true);
     ctl.dispose();
   });
 
@@ -350,8 +347,8 @@ describe('createInspectorController — center switching', () => {
   test('the Settings overlay covers the deck body and reveals the panel; focusing a surface restores it (#482)', () => {
     const ctl = createInspectorController(makeDeps(makeLsp()));
     ctl.init();
-    const body = el('center-body');
-    const panel = el('center-panel-settings');
+    const body = domById('center-body');
+    const panel = domById('center-panel-settings');
     // Resting: deck body shown, Settings overlay hidden.
     expect(panel.hidden).toBe(true);
     expect(body.hidden).toBe(false);
@@ -474,9 +471,9 @@ describe('createInspectorController — lazy view loading (load exactly once)', 
     ctl.selectRight('assistant');
     expect(assistant.syncWorkspace).toHaveBeenCalledTimes(1);
     expect(assistant.focusInput).toHaveBeenCalledTimes(1);
-    expect(el('view-assistant').hidden).toBe(false);
+    expect(domById('view-assistant').hidden).toBe(false);
     // The stripe is the sole right-view switcher (#726): the title header names the active tool window.
-    expect(el('right-title').textContent).toBe('AI Chat');
+    expect(domById('right-title').textContent).toBe('AI Chat');
   });
 });
 
@@ -553,7 +550,7 @@ describe('createInspectorController — bottom strip lazy loading', () => {
     await flush();
     const afterEvents = lsp.livingDocs.mock.calls.length;
     expect(afterEvents).toBeGreaterThanOrEqual(1);
-    expect(el('panel-events').hidden).toBe(false);
+    expect(domById('panel-events').hidden).toBe(false);
 
     // Re-show Events without an edit — cached, so no extra livingDocs fetch.
     ctl.selectBottomTab('problems');
@@ -572,7 +569,7 @@ describe('createInspectorController — bottom strip lazy loading', () => {
     await flush();
 
     expect(lsp.contextMap).toHaveBeenCalledTimes(1);
-    const panel = el('panel-contextmap');
+    const panel = domById('panel-contextmap');
     expect(panel.hidden).toBe(false);
     // the interactive view: a Graph | Table toggle, with Graph the default selected view
     const tabs = panel.querySelectorAll<HTMLButtonElement>('.ctxmap-tab');
@@ -589,7 +586,7 @@ describe('createInspectorController — bottom strip lazy loading', () => {
 
     ctl.selectOutput('contextmap');
     await flush();
-    const panel = el('panel-contextmap');
+    const panel = domById('panel-contextmap');
 
     // Switch to the Table view — synchronous, renders renderContextMapHtml's `koi-md` markup.
     panel.querySelector<HTMLButtonElement>('[data-ctxmap-view="table"]')!.click();
@@ -654,8 +651,8 @@ describe('createInspectorController — rail axis switch (#453)', () => {
     const ctl = createInspectorController(makeDeps(makeLsp()));
     ctl.init();
 
-    const domainPane = el('rail-domain-pane');
-    const filesPane = el('rail-files');
+    const domainPane = domById('rail-domain-pane');
+    const filesPane = domById('rail-files');
     // Domain is the default axis.
     expect(domainPane.hidden).toBe(false);
     expect(filesPane.hidden).toBe(true);
@@ -687,13 +684,13 @@ describe('createInspectorController — Domain navigator doorways + cross-axis g
     // Drive the REAL strategic Context Map doorway → modelOutlineHandlers.onOpenContextMap →
     // focusContextMap() → selectOutput('contextmap'): the Context Map is the contextmap sub-view of the
     // Output center pane now, so the doorway switches the center to Output and shows the map.
-    const doorway = el('rail-domain-pane').querySelector<HTMLButtonElement>('[data-door="contextmap"]')!;
+    const doorway = domById('rail-domain-pane').querySelector<HTMLButtonElement>('[data-door="contextmap"]')!;
     doorway.click();
     await flush();
 
     await waitFor(() => expect(shownCenter('output')).toBe(true)); // switched to the Output surface…
     expect(shownCenter('docs')).toBe(false); // …left Documentation…
-    expect(el('panel-contextmap').hidden).toBe(false); // …showing the Context Map.
+    expect(domById('panel-contextmap').hidden).toBe(false); // …showing the Context Map.
   });
 
   test('a tactical leaf: selecting jumps via goto; "Reveal in Files" calls revealInFiles with the leaf context', async () => {
@@ -730,11 +727,11 @@ describe('createInspectorController — Domain navigator doorways + cross-axis g
     await flush();
 
     // Drill into Billing → tactical, exposing its aggregate's leaf rows.
-    (el('rail-domain-pane').querySelector('[data-ctx="Billing"]') as HTMLButtonElement).click();
+    (domById('rail-domain-pane').querySelector('[data-ctx="Billing"]') as HTMLButtonElement).click();
     await flush();
 
     // Selecting the Money leaf resolves through nodeContext/resolveInspectableQn and jumps to source.
-    const leaf = el('rail-domain-pane').querySelector<HTMLButtonElement>('.koi-tactical-leaf[data-name="Money"]')!;
+    const leaf = domById('rail-domain-pane').querySelector<HTMLButtonElement>('.koi-tactical-leaf[data-name="Money"]')!;
     leaf.click();
     expect(deps.editor.goto).toHaveBeenCalled();
     expect(deps.store.getState().selection?.qualifiedName).toBe('Billing.Money');
@@ -763,7 +760,7 @@ describe('createInspectorController — loading states clear on success', () => 
 
     // The Domain pane now shows the STRATEGIC context list (a row per bounded context, #453), not the old
     // per-construct outline — so the glossaryFixture's 'Billing' context appears…
-    const domainPane = el('rail-domain-pane');
+    const domainPane = domById('rail-domain-pane');
     expect(domainPane.querySelector('[data-ctx="Billing"]')).not.toBeNull();
     expect(domainPane.textContent).toContain('Billing');
     // …and neither the navigator's loading placeholder nor any stale loading line is left behind.
@@ -778,7 +775,7 @@ describe('createInspectorController — loading states clear on success', () => 
     ctl.selectDocsTab('glossary');
     await flush();
 
-    const glossary = el('view-glossary');
+    const glossary = domById('view-glossary');
     expect(glossary.textContent).toContain('Money'); // the glossary rendered
     expect(glossary.textContent).not.toContain('Loading glossary');
   });
@@ -791,7 +788,7 @@ describe('createInspectorController — loading states clear on success', () => 
     ctl.selectBottomTab('events');
     await flush();
 
-    expect(el('panel-events').textContent).not.toContain('Loading events');
+    expect(domById('panel-events').textContent).not.toContain('Loading events');
   });
 
   test('the Relationships panel replaces its "Loading relationships…" line on success', async () => {
@@ -802,7 +799,7 @@ describe('createInspectorController — loading states clear on success', () => 
     ctl.selectBottomTab('relationships');
     await flush();
 
-    expect(el('panel-relationships').textContent).not.toContain('Loading relationships');
+    expect(domById('panel-relationships').textContent).not.toContain('Loading relationships');
   });
 });
 
@@ -818,7 +815,7 @@ describe('createInspectorController — Properties inspector tracks the selectio
     ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
 
     // The Properties host renders the resolved element (its name appears in the panel).
-    const host = el('inspector-host');
+    const host = domById('inspector-host');
     expect(host.textContent).toContain('Money');
   });
 
@@ -852,7 +849,7 @@ describe('createInspectorController — selecting an element focuses the Propert
     expect(deps.store.getState().right).toBe('source-control');
     expect(stripBtn('source-control').getAttribute('aria-pressed')).toBe('true');
     expect(stripBtn('props').getAttribute('aria-pressed')).toBe('false');
-    expect(el('right-title').textContent).toBe('Source Control');
+    expect(domById('right-title').textContent).toBe('Source Control');
 
     // Selecting an element (canvas / Domain navigator) must bring the user back to Properties.
     ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
@@ -860,7 +857,7 @@ describe('createInspectorController — selecting an element focuses the Propert
     expect(deps.store.getState().right).toBe('props');
     expect(stripBtn('props').getAttribute('aria-pressed')).toBe('true');
     expect(stripBtn('source-control').getAttribute('aria-pressed')).toBe('false');
-    expect(el('right-title').textContent).toBe('Properties');
+    expect(domById('right-title').textContent).toBe('Properties');
   });
 
   test('clearing the selection leaves the current right view untouched (no auto-switch on deselect)', async () => {
@@ -895,7 +892,7 @@ describe('createInspectorController — bounded-context scope', () => {
     const select = document.querySelector<HTMLSelectElement>('#breadcrumb-host select')!;
     // "All contexts" sentinel + the one model context.
     expect(Array.from(select.options).map((o) => o.value)).toEqual(['all', 'Billing']);
-    expect(el('breadcrumb-host').hidden).toBe(false);
+    expect(domById('breadcrumb-host').hidden).toBe(false);
   });
 
   test('getCachedDomainIndex builds once then reuses until invalidateDocViews clears it', async () => {
@@ -934,7 +931,7 @@ describe('createInspectorController — Domain-navigator drill syncs the status 
     await flush();
 
     // Baseline: nothing drilled yet — the status bar reads the unscoped label.
-    expect(el('sb-context').textContent).toBe('Context: All contexts');
+    expect(domById('sb-context').textContent).toBe('Context: All contexts');
     const diagramsBefore = lsp.livingDocs.mock.calls.length;
 
     // Simulate the Domain-navigator drill: write the slice DIRECTLY (NOT via the dropdown / applyScope),
@@ -943,7 +940,7 @@ describe('createInspectorController — Domain-navigator drill syncs the status 
     await flush();
 
     // (a) the status bar mirrors the drilled context…
-    expect(el('sb-context').textContent).toBe('Context: Billing');
+    expect(domById('sb-context').textContent).toBe('Context: Billing');
     // (b) …and the scoped-surface re-filter ran — the Visual canvas re-fetched its (now-scoped) diagrams.
     expect(lsp.livingDocs.mock.calls.length).toBeGreaterThan(diagramsBefore);
   });
@@ -1000,7 +997,7 @@ describe('createInspectorController — construct palette', () => {
     // (no async re-render to await — the initial useStore read sees 'Ordering').
     deps.store.getState().setActiveContext('Ordering');
     createInspectorController(deps);
-    const btn = el('canvas-palette-host').querySelector<HTMLButtonElement>('[data-kind="entity"]')!;
+    const btn = domById('canvas-palette-host').querySelector<HTMLButtonElement>('[data-kind="entity"]')!;
     expect(btn.disabled).toBe(false);
     btn.click();
     expect(onAddConstruct).toHaveBeenCalledWith('entity');
@@ -1009,7 +1006,7 @@ describe('createInspectorController — construct palette', () => {
   test('palette construct buttons are disabled under "All contexts"', () => {
     const deps = makeDeps(makeLsp()); // createAppStore() defaults to ALL_CONTEXTS
     createInspectorController(deps);
-    const btn = el('canvas-palette-host').querySelector<HTMLButtonElement>('[data-kind="entity"]')!;
+    const btn = domById('canvas-palette-host').querySelector<HTMLButtonElement>('[data-kind="entity"]')!;
     expect(btn.disabled).toBe(true);
   });
 });
@@ -1024,7 +1021,7 @@ describe('createInspectorController — narrow-viewport bottom-strip default (#4
   const origWidth = window.innerWidth;
   const setWidth = (value: number) =>
     Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value });
-  const collapsed = () => el('diagnostics').classList.contains('collapsed');
+  const collapsed = () => domById('diagnostics').classList.contains('collapsed');
 
   afterEach(() => {
     setWidth(origWidth);
@@ -1040,7 +1037,7 @@ describe('createInspectorController — narrow-viewport bottom-strip default (#4
 
     ctl.selectDocsTab('glossary'); // → Documentation
     expect(collapsed()).toBe(true);
-    expect(el('diagnostics').hidden).toBe(false); // GLOBAL per #458 — only collapsed, never hidden
+    expect(domById('diagnostics').hidden).toBe(false); // GLOBAL per #458 — only collapsed, never hidden
     ctl.dispose();
   });
 
@@ -1101,7 +1098,7 @@ describe('createInspectorController — narrow-viewport bottom-strip default (#4
 
 describe('createInspectorController — right-edge tool-window stripe (#500)', () => {
   const LAYOUT_KEY = 'koine.studio.layout';
-  const splitEl = () => el('split');
+  const splitEl = () => domById('split');
 
   beforeEach(() => localStorage.removeItem(LAYOUT_KEY));
 
@@ -1168,7 +1165,7 @@ describe('createInspectorController — right-edge tool-window stripe (#500)', (
 describe('createInspectorController — left navigator morph-collapse (#730)', () => {
   const LAYOUT_KEY = 'koine.studio.layout';
   const RAIL_AXIS_KEY = 'koine.studio.railAxis';
-  const splitEl = () => el('split');
+  const splitEl = () => domById('split');
   const railCollapse = () => document.getElementById('rail-collapse')!;
   const lspineBtn = (sel: string) => document.querySelector<HTMLButtonElement>(`#left-strip ${sel}`)!;
   const axisSelected = (axis: string) =>
@@ -1304,6 +1301,112 @@ describe('createInspectorController — deck center layout', () => {
         expect(shownCenter(id)).toBe(true);
       }
     });
+    ctl.dispose();
+  });
+});
+
+// #648 — When an element is selected while the desktop Properties panel is collapsed, the panel must
+// STAY collapsed (respect the user's explicit collapse) and add a transient attention cue on the
+// Properties stripe button (approach b). This is distinct from the expanded case (#533) where
+// selecting switches the active right view to Properties.
+describe('createInspectorController — collapsed Properties panel + selection feedback (#648)', () => {
+  const LAYOUT_KEY = 'koine.studio.layout';
+
+  beforeEach(() => localStorage.removeItem(LAYOUT_KEY));
+
+  test('selecting an element while Properties is collapsed keeps the panel collapsed and flashes the stripe button', async () => {
+    // Start with an explicitly collapsed right rail (approach b: respect the explicit collapse).
+    saveLayout({ rightCollapsed: true });
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    // Pre-condition: panel is collapsed and no button is pressed.
+    expect(domById('split').classList.contains('right-collapsed')).toBe(true);
+    expect(deps.store.getState().rightCollapsed).toBe(true);
+    for (const v of ['props', 'assistant', 'source-control']) {
+      expect(stripBtn(v).getAttribute('aria-pressed')).toBe('false');
+    }
+
+    // Fire a selection while the panel is collapsed.
+    ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
+
+    // Approach (b): the panel must STAY collapsed — the user's explicit collapse is honoured.
+    expect(domById('split').classList.contains('right-collapsed')).toBe(true);
+    expect(deps.store.getState().rightCollapsed).toBe(true);
+
+    // The Properties stripe button acquires the attention cue (the flash class).
+    expect(stripBtn('props').classList.contains('rstrip-notify')).toBe(true);
+
+    // None of the stripe buttons should be pressed (collapsed → all false).
+    for (const v of ['props', 'assistant', 'source-control']) {
+      expect(stripBtn(v).getAttribute('aria-pressed')).toBe('false');
+    }
+
+    ctl.dispose();
+  });
+
+  test('the flash cue class is removed after the animation timeout', async () => {
+    vi.useFakeTimers();
+    saveLayout({ rightCollapsed: true });
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    // Select while collapsed → flash the Properties stripe button.
+    ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
+    expect(stripBtn('props').classList.contains('rstrip-notify')).toBe(true);
+
+    // After the animation window elapses (~800 ms), the class is removed so the cue resets.
+    await vi.advanceTimersByTimeAsync(900);
+    expect(stripBtn('props').classList.contains('rstrip-notify')).toBe(false);
+
+    ctl.dispose();
+  });
+
+  test('a repeated selection re-fires the flash on the Properties stripe button', async () => {
+    vi.useFakeTimers();
+    saveLayout({ rightCollapsed: true });
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    // First selection flashes the button.
+    ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
+    expect(stripBtn('props').classList.contains('rstrip-notify')).toBe(true);
+
+    // A second selection on a DIFFERENT element while still collapsed re-fires the flash.
+    ctl.selection.set({ qualifiedName: 'Billing', context: 'Billing' });
+    expect(stripBtn('props').classList.contains('rstrip-notify')).toBe(true);
+
+    ctl.dispose();
+  });
+
+  test('expanding the panel by clicking the stripe clears the flash and presses the button', async () => {
+    saveLayout({ rightCollapsed: true });
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    // Select while collapsed → flash the button.
+    ctl.selection.set({ qualifiedName: 'Billing.Money', context: 'Billing' });
+    expect(stripBtn('props').classList.contains('rstrip-notify')).toBe(true);
+    expect(domById('split').classList.contains('right-collapsed')).toBe(true);
+
+    // User clicks the Properties stripe icon → expands to Properties.
+    stripBtn('props').click();
+    expect(domById('split').classList.contains('right-collapsed')).toBe(false);
+    expect(deps.store.getState().rightCollapsed).toBe(false);
+    expect(stripBtn('props').getAttribute('aria-pressed')).toBe('true');
+
     ctl.dispose();
   });
 });

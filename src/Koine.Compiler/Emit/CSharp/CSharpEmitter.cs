@@ -176,7 +176,9 @@ public sealed partial class CSharpEmitter : IEmitter
         var emit = new EmitContext(
             Index: index,
             ScalarNeeds: OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
+            ScalarDivNeeds: OperatorNeedsAnalyzer.BuildScalarDivisionNeeds(model, index),
             AdditiveNeeds: OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
+            DirectArithmeticNeeds: OperatorNeedsAnalyzer.BuildValueObjectArithmeticNeeds(model, index),
             ContextNames: model.Contexts.Select(c => c.Name).ToList(),
             IdStrategies: BuildIdentityStrategies(model),
             Options: _options,

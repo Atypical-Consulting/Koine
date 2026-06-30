@@ -19,7 +19,8 @@ public sealed partial class PythonEmitter
         IReadOnlyList<PyTypeLocation> TypeLocations,
         IReadOnlyList<string> ContextNames,
         IReadOnlySet<string> AdditiveNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds);
+        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
+        IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BinaryArithmeticNeeds);
 
     /// <summary>
     /// Where an emitted user type lives: its bounded context, the dotted import module
@@ -243,6 +244,15 @@ public sealed partial class PythonEmitter
         if (codeView.Contains("re.") && present.Contains("re"))
         {
             stdlib.Add("import re");
+        }
+
+        // The third-party `regex` module is emitted only when a `matches` guard opted into the
+        // RegexMatchTimeoutMs bound (#794/#812): its `regex.search(..., timeout=…)` is the one Python
+        // path with a per-call match timeout. The trailing note flags the opt-in dependency; it appears
+        // only in modules that actually use the bounded form, so output stays byte-identical when unset.
+        if (codeView.Contains("regex.") && present.Contains("regex"))
+        {
+            stdlib.Add("import regex  # third-party: `pip install regex` (required for the matches timeout)");
         }
 
         if (present.Contains("uuid"))

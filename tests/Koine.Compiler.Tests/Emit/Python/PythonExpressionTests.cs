@@ -99,6 +99,28 @@ public class PythonExpressionTests
             index, entity.Members, index.EnumMemberToType, typeMapper, context: "Shop");
     }
 
+    // A translator carrying the neutral RegexMatchTimeoutMs author intent (#812), so a `matches`
+    // guard lowers to the third-party `regex` module's bounded `regex.search(..., timeout=…)`.
+    private static PythonExpressionTranslator MakeWithTimeout(int milliseconds)
+    {
+        var result = new KoineCompiler().Compile(Source, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var model = result.Model!;
+        var semantic = new SemanticModel(model);
+        ModelIndex index = semantic.Index;
+
+        var order = model.Contexts
+            .SelectMany(c => c.AllTypeDecls())
+            .OfType<ValueObjectDecl>()
+            .First(v => v.Name == "Order");
+
+        var typeMapper = new PythonTypeMapper(index);
+        return new PythonExpressionTranslator(
+            index, order.Members, index.EnumMemberToType, typeMapper, context: "Shop",
+            regexMatchTimeoutMs: milliseconds);
+    }
+
     private static IdentifierExpr Id(string name) => new(name);
     private static MemberAccessExpr Member(string target, string member) => new(Id(target), member);
     private static LiteralExpr Int(string text) => new(LiteralKind.Int, text);
@@ -436,6 +458,66 @@ public class PythonExpressionTests
     {
         var expr = new MatchExpr(Id("code"), "[A-Z]{3}");
         Translate(expr).ShouldBe("(re.search(r\"[A-Z]{3}\", self.code) is not None)");
+    }
+
+    [Fact]
+    public void Matches_with_timeout_lowers_to_regex_search_with_timeout()
+    {
+        // The neutral RegexMatchTimeoutMs key set (#812) ⇒ the bounded `regex` module form: 250 ms
+        // renders as the seconds-float `timeout=0.25`; stdlib `re` is left behind (it has no timeout).
+        var expr = new MatchExpr(Id("code"), "[A-Z]{3}");
+        MakeWithTimeout(250).Translate(expr)
+            .ShouldBe("(regex.search(r\"[A-Z]{3}\", self.code, timeout=0.25) is not None)");
+    }
+
+    [Theory]
+    [InlineData(1000, "1")]
+    [InlineData(1500, "1.5")]
+    [InlineData(100, "0.1")]
+    [InlineData(1, "0.001")]
+    public void Matches_timeout_renders_milliseconds_as_an_exact_seconds_float(int ms, string seconds)
+    {
+        // ms/1000 is exact decimal arithmetic (no lossy truncation) rendered with the invariant culture.
+        var expr = new MatchExpr(Id("code"), "[A-Z]{3}");
+        MakeWithTimeout(ms).Translate(expr)
+            .ShouldBe($"(regex.search(r\"[A-Z]{{3}}\", self.code, timeout={seconds}) is not None)");
+    }
+
+    [Fact]
+    public void Matches_invariant_unset_emits_stdlib_re_and_no_regex_dependency()
+    {
+        // Key unset ⇒ byte-identical to today: stdlib `re`, `import re`, and NO third-party `regex`.
+        const string src =
+            "context C {\n  value Email {\n    raw: String\n" +
+            "    invariant raw matches /^[^@]+@[^@]+$/  \"invalid email address\"\n  }\n}\n";
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var email = result.Files.Single(f => f.RelativePath.EndsWith("email.py")).Contents;
+        email.ShouldContain("re.search(");
+        email.ShouldContain("import re\n");
+        email.ShouldNotContain("regex.search(");
+        email.ShouldNotContain("import regex");
+    }
+
+    [Fact]
+    public void Matches_invariant_with_timeout_emits_regex_module_and_its_import()
+    {
+        // Key set ⇒ the emitter threads the bound through PythonEmitterOptions to the `matches` guard:
+        // the bounded `regex.search(..., timeout=…)` form AND an `import regex` (with the opt-in note),
+        // and the stdlib `re.search` is gone.
+        const string src =
+            "context C {\n  value Email {\n    raw: String\n" +
+            "    invariant raw matches /^[^@]+@[^@]+$/  \"invalid email address\"\n  }\n}\n";
+        var emitter = new PythonEmitter(PythonEmitterOptions.Empty with { RegexMatchTimeoutMs = 250 });
+        var result = new KoineCompiler().Compile(src, emitter);
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var email = result.Files.Single(f => f.RelativePath.EndsWith("email.py")).Contents;
+        email.ShouldContain("regex.search(");
+        email.ShouldContain("timeout=0.25");
+        email.ShouldContain("import regex");
+        email.ShouldNotContain("re.search(");
     }
 
     // =========================================================================

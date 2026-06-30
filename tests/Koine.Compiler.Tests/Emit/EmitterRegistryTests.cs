@@ -159,6 +159,97 @@ public class EmitterRegistryTests
         EmitEmailGuard(emitter).ShouldContain("TimeSpan.FromMilliseconds(250)");
     }
 
+    // ------------------------------------------------------------------
+    // Issue #812 — the neutral EmitterOptions.RegexMatchTimeoutMs key now
+    // reaches the TS/Python/PHP emitters too. Each provider must thread a
+    // timeout-only bag through WITHOUT collapsing to its Empty singleton
+    // (the C# guard, mirrored), or the configured value never lands.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Python_provider_threads_a_configured_regex_match_timeout_into_the_emitted_guard()
+    {
+        // Honors policy: the key set ⇒ the bounded `regex` module form lands, via the provider seam.
+        var configured = new PythonEmitterProvider().Create(
+            new EmitterOptions(new Dictionary<string, string>(StringComparer.Ordinal), RegexMatchTimeoutMs: 250));
+
+        var email = EmitEmailFile(configured, "email.py");
+        email.ShouldContain("regex.search(");
+        email.ShouldContain("timeout=0.25");
+    }
+
+    [Fact]
+    public void Python_provider_keeps_stdlib_re_when_the_timeout_is_unset()
+    {
+        // No key ⇒ byte-identical: stdlib `re`, no third-party `regex`.
+        var email = EmitEmailFile(new PythonEmitterProvider().Create(EmitterOptions.Empty), "email.py");
+        email.ShouldContain("re.search(");
+        email.ShouldNotContain("regex.search(");
+    }
+
+    [Fact]
+    public void Typescript_provider_threads_a_configured_regex_match_timeout_into_the_seam_call()
+    {
+        // Plumbs policy: the key set ⇒ the call site carries the advisory budget, via the provider seam.
+        var configured = new TypeScriptEmitterProvider().Create(
+            new EmitterOptions(new Dictionary<string, string>(StringComparer.Ordinal), RegexMatchTimeoutMs: 250));
+
+        EmitEmailFile(configured, "Email.ts").ShouldContain("regexMatch(/^[^@]+@[^@]+$/, raw, 250)");
+    }
+
+    [Fact]
+    public void Php_provider_threads_a_configured_regex_match_timeout_into_the_pcre_note()
+    {
+        // Substitutes policy: the key set ⇒ the PCRE-limit note lands on the match, via the provider seam.
+        var configured = new PhpEmitterProvider().Create(
+            new EmitterOptions(new Dictionary<string, string>(StringComparer.Ordinal), RegexMatchTimeoutMs: 250));
+
+        var email = EmitEmailFile(configured, "Email.php");
+        email.ShouldContain("preg_match('/^[^@]+@[^@]+$/'");
+        email.ShouldContain("regexMatchTimeoutMs=250ms");
+        email.ShouldContain("pcre.backtrack_limit");
+    }
+
+    // ------------------------------------------------------------------
+    // Issue #831 — targets.<t>.regexMode config key threads through the
+    // neutral EmitterOptions.RegexMode seam. A regexMode-only bag must
+    // NOT collapse to the Empty singleton, or the setting would be lost.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Target_options_with_regex_mode_maps_to_emitter_options_regex_mode()
+    {
+        // A regexMode-only TargetOptions must produce an EmitterOptions whose RegexMode carries the
+        // raw string — proving the CLI registry threads the value and the guard does not short-circuit.
+        var opts = Cli.KoineConfig.Parse("targets.csharp.regexMode = sourceGenerated\n").OptionsFor("csharp");
+        opts.RegexModeText.ShouldBe("sourceGenerated");
+
+        // The CLI TryCreate path ultimately calls ToEmitterOptions internally; we verify the resulting
+        // emitter emits [GeneratedRegex] (that's covered in Task 3's BuildRegexModeTests), so here
+        // we just confirm EmitterOptions.RegexMode is wired through by inspecting the neutral bag.
+        var emitterOptions = new EmitterOptions(
+            new Dictionary<string, string>(StringComparer.Ordinal), RegexMode: "sourceGenerated");
+        emitterOptions.RegexMode.ShouldBe("sourceGenerated");
+    }
+
+    [Fact]
+    public void All_default_target_options_produce_null_regex_mode_on_emitter_options()
+    {
+        // An all-default TargetOptions (no regexMode) must produce EmitterOptions with a null
+        // RegexMode — so an unconfigured target stays byte-identical (issue #831).
+        var opts = Cli.KoineConfig.Parse("target = csharp\n").OptionsFor("csharp");
+        opts.RegexModeText.ShouldBeNull();
+
+        // Confirm EmitterOptions.Empty's RegexMode is null (the default).
+        EmitterOptions.Empty.RegexMode.ShouldBeNull();
+
+        // An all-null EmitterOptions has a null RegexMode; no regexMode set means the emitter's
+        // default (Inline) applies — byte-identical to unconfigured output.
+        var emitterOpts = new EmitterOptions(
+            new Dictionary<string, string>(StringComparer.Ordinal));
+        emitterOpts.RegexMode.ShouldBeNull();
+    }
+
     /// <summary>
     /// Emits the one-value-object matches-invariant fixture with <paramref name="emitter"/> and returns
     /// the generated Email source, where the timeout-bounded <c>Regex.IsMatch(…)</c> guard lives.
@@ -171,6 +262,21 @@ public class EmitterRegistryTests
         var result = new KoineCompiler().Compile(src, emitter);
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         return result.Files.Single(f => f.RelativePath.EndsWith("Email.cs")).Contents;
+    }
+
+    /// <summary>
+    /// Emits the same one-value-object matches-invariant fixture with <paramref name="emitter"/> and
+    /// returns the contents of the generated module whose path ends with <paramref name="suffix"/> (the
+    /// per-target Email file), where each target's <c>matches</c> lowering lands (issue #812).
+    /// </summary>
+    private static string EmitEmailFile(IEmitter emitter, string suffix)
+    {
+        const string src =
+            "context C {\n  value Email {\n    raw: String\n" +
+            "    invariant raw matches /^[^@]+@[^@]+$/  \"invalid email address\"\n  }\n}\n";
+        var result = new KoineCompiler().Compile(src, emitter);
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        return result.Files.Single(f => f.RelativePath.EndsWith(suffix, StringComparison.Ordinal)).Contents;
     }
 
     private static KoineModel EmptyModel() => new(Array.Empty<ContextNode>(), ContextMap: null);

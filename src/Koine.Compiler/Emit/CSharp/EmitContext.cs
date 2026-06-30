@@ -16,10 +16,22 @@ namespace Koine.Compiler.Emit.CSharp;
 /// Value-object name -> scalar C# types ("int"/"decimal") it is multiplied by in some
 /// derived expression. Drives demand-driven scalar operator generation (R9).
 /// </param>
+/// <param name="ScalarDivNeeds">
+/// Value-object name -> scalar C# types ("int"/"decimal") it is divided by in some derived
+/// expression. The division dual of <see cref="ScalarNeeds"/>; drives demand-driven
+/// <c>operator /</c> generation (#832), so <c>value-object / scalar</c> compiles.
+/// </param>
 /// <param name="AdditiveNeeds">
 /// Value-object names that are folded with <c>+</c> somewhere (e.g.
 /// <c>lines.sum(l =&gt; l.subtotal)</c> over a Money field). Drives generation of an
 /// additive operator (R9).
+/// </param>
+/// <param name="DirectArithmeticNeeds">
+/// Value-object name -> the additive operators (<see cref="BinaryOp.Add"/>/<see cref="BinaryOp.Sub"/>)
+/// it appears as an operand of in a DIRECT same-type binary expression (e.g. <c>fee + fee</c>,
+/// <c>fee - fee</c> — not a <c>sum</c> fold). Drives demand-driven generation of <c>operator +</c>
+/// (in addition to <see cref="AdditiveNeeds"/>) and <c>operator -</c> for plain value objects (#833),
+/// so direct same-type arithmetic compiles instead of emitting CS0019.
 /// </param>
 /// <param name="ContextNames">
 /// All context (namespace) names in the model. Every type in a context shares the single
@@ -41,7 +53,9 @@ namespace Koine.Compiler.Emit.CSharp;
 internal sealed record EmitContext(
     ModelIndex Index,
     IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
+    IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarDivNeeds,
     IReadOnlySet<string> AdditiveNeeds,
+    IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> DirectArithmeticNeeds,
     IReadOnlyList<string> ContextNames,
     IReadOnlyDictionary<string, (IdentityStrategy Strategy, string? Backing)> IdStrategies,
     CSharpEmitterOptions Options,

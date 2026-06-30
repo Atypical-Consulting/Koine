@@ -499,6 +499,38 @@ describe('renderContextMapGraph', () => {
     }
   });
 
+  test('saves its zoom under its own key koi-context-map, not the shared domain key (#769)', async () => {
+    const graph: DiagramGraph = {
+      nodes: [ctx('A'), ctx('B')],
+      edges: [{ from: 'A', to: 'B', label: 'Customer/Supplier', arrowKind: 'association' }],
+    };
+    const container = makeContainer();
+    const handle = await renderContextMapGraph(container, graph, () => true);
+    try {
+      container.querySelector<HTMLButtonElement>('[aria-label="Zoom in"]')!.click();
+      // Must persist to its own key, never to the domain canvas's key
+      expect(loadDiagramZoom('koi-context-map')).not.toBeNull();
+      expect(loadDiagramZoom('koi-domain-diagram')).toBeNull();
+    } finally {
+      handle?.dispose();
+    }
+  });
+
+  test('restores its own saved zoom from koi-context-map on mount (#769)', async () => {
+    saveDiagramZoom('koi-context-map', 150);
+    const graph: DiagramGraph = {
+      nodes: [ctx('A'), ctx('B')],
+      edges: [{ from: 'A', to: 'B', label: 'Customer/Supplier', arrowKind: 'association' }],
+    };
+    const container = makeContainer();
+    const handle = await renderContextMapGraph(container, graph, () => true);
+    try {
+      expect(container.querySelector('.koi-canvas-zoom-pct')?.textContent).toBe('150%');
+    } finally {
+      handle?.dispose();
+    }
+  });
+
   test('renders READ-ONLY even when global editing is ON, without mutating the editing flag', async () => {
     setDiagramEditing(true);
     const graph: DiagramGraph = {
@@ -1174,6 +1206,30 @@ describe('renderEventFlowGraph', () => {
     expect(handle).toBeNull();
     expect(container.querySelector('.koi-eventflow-graph')).toBeNull();
     expect(container.textContent).toContain('sentinel');
+  });
+
+  test('saves its zoom under its own key koi-event-flow, not the shared domain key (#769)', async () => {
+    const container = makeContainer();
+    const handle = await renderEventFlowGraph(container, EVENT_FLOW, () => true);
+    try {
+      container.querySelector<HTMLButtonElement>('[aria-label="Zoom in"]')!.click();
+      // Must persist to its own key, never to the domain canvas's key
+      expect(loadDiagramZoom('koi-event-flow')).not.toBeNull();
+      expect(loadDiagramZoom('koi-domain-diagram')).toBeNull();
+    } finally {
+      handle?.dispose();
+    }
+  });
+
+  test('restores its own saved zoom from koi-event-flow on mount (#769)', async () => {
+    saveDiagramZoom('koi-event-flow', 150);
+    const container = makeContainer();
+    const handle = await renderEventFlowGraph(container, EVENT_FLOW, () => true);
+    try {
+      expect(container.querySelector('.koi-canvas-zoom-pct')?.textContent).toBe('150%');
+    } finally {
+      handle?.dispose();
+    }
   });
 });
 

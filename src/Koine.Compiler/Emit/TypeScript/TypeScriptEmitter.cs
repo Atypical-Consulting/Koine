@@ -133,14 +133,17 @@ public sealed partial class TypeScriptEmitter : IEmitter
             index,
             OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
             OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
+            OperatorNeedsAnalyzer.BuildValueObjectArithmeticNeeds(model, index),
             model.Contexts.Select(c => c.Name).ToList(),
             BuildTypeNamespaces(model),
             enumMemberToType);
 
         var files = new List<EmittedFile>();
 
-        // 1. Runtime support, emitted once at the output root.
-        files.Add(new EmittedFile(TsRuntime.FileName, TsRuntime.Source + "\n"));
+        // 1. Runtime support, emitted once at the output root. The `regexMatch` seam gains an advisory
+        //    `timeoutMs?` parameter only when the neutral RegexMatchTimeoutMs key is set (#794/#812);
+        //    unset ⇒ byte-identical to the historical runtime.
+        files.Add(new EmittedFile(TsRuntime.FileName, TsRuntime.SourceFor(_options.RegexMatchTimeoutMs) + "\n"));
 
         // A tsconfig so the emitted tree type-checks AS SHIPPED: the runtime and enums use
         // Set/Map/iterables/Array.find, which need a modern lib/target — a bare `tsc` (ES5 default)
@@ -425,7 +428,7 @@ public sealed partial class TypeScriptEmitter : IEmitter
         sb.Append("}\n\n");
 
         // The const object: one frozen member per declaration, plus the helpers.
-        var translator = new TypeScriptExpressionTranslator(emit.Index, Array.Empty<Member>(), emit.EnumMemberToType, typeMapper, ContextOf(ns));
+        var translator = new TypeScriptExpressionTranslator(emit.Index, Array.Empty<Member>(), emit.EnumMemberToType, typeMapper, ContextOf(ns), regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
         sb.Append("export const ").Append(name).Append(" = {\n");
         for (var i = 0; i < @enum.Members.Count; i++)
         {

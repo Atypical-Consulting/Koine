@@ -84,7 +84,8 @@ public sealed partial class TypeScriptEmitter
         // The translator renders source-member references as `src.<camelCase>` (the parameter name),
         // so the read model's projections read directly off the projected-from instance.
         var translator = new TypeScriptExpressionTranslator(
-            index, sourceMembers, emit.EnumMemberToType, typeMapper, context, memberReceiver: "src");
+            index, sourceMembers, emit.EnumMemberToType, typeMapper, context, memberReceiver: "src",
+            regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var fields = new List<(string TsType, string Prop, string Rhs)>();
         foreach (ReadModelField f in rm.Fields)

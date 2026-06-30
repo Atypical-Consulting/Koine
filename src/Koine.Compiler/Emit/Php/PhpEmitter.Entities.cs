@@ -69,7 +69,8 @@ public sealed partial class PhpEmitter
         var translator = new PhpExpressionTranslator(
             emit.Index,
             scopeMembers,
-            emit.EnumMemberToType);
+            emit.EnumMemberToType,
+            regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var sb = new StringBuilder();
 

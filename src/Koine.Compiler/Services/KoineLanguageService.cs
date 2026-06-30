@@ -173,7 +173,19 @@ public enum TypeHierarchyItemKind { Aggregate, Entity, Value, ReadModel, Enum, E
 /// types, a read model's <c>from</c> source, an aggregate's root), <i>subtypes</i> the inverse — not OO
 /// inheritance (Koine has none). Editor-agnostic; the LSP/WASM shells map it to an LSP TypeHierarchyItem.
 /// </summary>
-public sealed record TypeHierarchyItem(string Name, TypeHierarchyItemKind Kind, string Uri, SourceSpan Span);
+public sealed record TypeHierarchyItem(string Name, TypeHierarchyItemKind Kind, string Uri, SourceSpan Span)
+{
+    /// <summary>
+    /// The bounded context that declares this type (#389): a type's identity is <b>(context, name)</b>,
+    /// since the same name may be declared in two contexts. The resolver fills it from the cursor's
+    /// enclosing context on <c>prepare</c> and from the resolved declaration on the super/sub walks; the
+    /// wire shells round-trip it through the opaque <c>data</c> blob so a request reconstructs <i>which</i>
+    /// same-named type the item refers to. <c>null</c> when the context can't be determined (a recovered
+    /// or partial parse), in which case resolution falls back to first-wins-by-name — never a regression
+    /// for single-context models.
+    /// </summary>
+    public string? Context { get; init; }
+}
 
 /// <summary>
 /// Editor-agnostic language services for <c>.koi</c>. <see cref="CompleteAt"/> is
@@ -1763,7 +1775,11 @@ public sealed class KoineLanguageService
 
         var model = compilation.SemanticModel.Model;
         var index = compilation.SemanticModel.Index;
-        return FindTypeDecl(model, name) is { } decl && ItemFor(index, decl) is { } item ? [item] : [];
+        // Resolve the type in the cursor's enclosing context (#389): a name declared in two contexts
+        // resolves to the one the cursor sits in, so the prepared item carries the right (context, name).
+        return ResolveDecl(model, name, ctx.EnclosingContextName) is (var decl, var context) && ItemFor(index, decl, context) is { } item
+            ? [item]
+            : [];
     }
 
     /// <summary>
@@ -1777,21 +1793,33 @@ public sealed class KoineLanguageService
     {
         var model = compilation.SemanticModel.Model;
         var index = compilation.SemanticModel.Index;
-        if (FindTypeDecl(model, item.Name) is not { } decl)
+        if (ResolveDecl(model, item.Name, item.Context) is not (var decl, var declContext))
         {
             return [];
         }
 
         var results = new List<TypeHierarchyItem>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var targetName in DeclaredTargets(decl))
+        foreach (var (targetName, targetRef) in DeclaredTargets(decl))
         {
+            // Resolve the edge target in the SAME context first, then by the model's cross-context
+            // visibility rules (#389) — so an entity's `Money` member resolves to its own context's Money.
+            var targetContext = ResolveTargetContext(index, declContext, targetName, targetRef);
+            if (ResolveDecl(model, targetName, targetContext) is not (var target, var resolvedContext))
+            {
+                continue;
+            }
+
             // Skip a self-edge (a recursive type — e.g. `entity Tree { parent: Tree }`): a type is not
             // its own supertype, and a self-loop would make a client's hierarchy tree expand forever.
-            if (!string.Equals(targetName, item.Name, StringComparison.Ordinal)
-                && seen.Add(targetName)
-                && FindTypeDecl(model, targetName) is { } target
-                && ItemFor(index, target) is { } ti)
+            // Identity is (context, name): compared against the context the edge actually resolves to.
+            if (string.Equals(target.Name, item.Name, StringComparison.Ordinal)
+                && string.Equals(resolvedContext, declContext, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (seen.Add(QualifiedKey(resolvedContext, target.Name)) && ItemFor(index, target, resolvedContext) is { } ti)
             {
                 results.Add(ti);
             }
@@ -1811,101 +1839,222 @@ public sealed class KoineLanguageService
         var model = compilation.SemanticModel.Model;
         var index = compilation.SemanticModel.Index;
 
+        // Identify the target precisely as (context, name): prefer the item's carried context. When it is
+        // unknown (a recovered parse), targetContext stays null and the walk matches by name only — today's
+        // behavior, so single-context models never regress.
+        var targetContext = ResolveDecl(model, item.Name, item.Context) is (_, var resolved) ? resolved : item.Context;
+
         var results = new List<TypeHierarchyItem>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var decl in model.Contexts.SelectMany(c => c.AllTypeDecls()))
+        foreach (var c in model.Contexts)
         {
-            // Skip the self-edge of a recursive type (it is not its own subtype), mirroring Supertypes.
-            if (!string.Equals(decl.Name, item.Name, StringComparison.Ordinal)
-                && DeclaredTargets(decl).Contains(item.Name, StringComparer.Ordinal)
-                && seen.Add(decl.Name)
-                && ItemFor(index, decl) is { } ti)
+            foreach (var decl in c.AllTypeDecls())
             {
-                results.Add(ti);
+                // Skip the self-edge of a recursive type (it is not its own subtype), mirroring Supertypes.
+                if (string.Equals(decl.Name, item.Name, StringComparison.Ordinal)
+                    && string.Equals(c.Name, targetContext, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                // A subtype is any decl with an edge to a type named `item.Name` that resolves — from its
+                // own context — to the SAME (context, name) as the item (#389), not merely any same-named one.
+                var pointsAtTarget = false;
+                foreach (var (targetName, targetRef) in DeclaredTargets(decl))
+                {
+                    if (!string.Equals(targetName, item.Name, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    if (targetContext is null
+                        || string.Equals(ResolveTargetContext(index, c.Name, targetName, targetRef), targetContext, StringComparison.Ordinal))
+                    {
+                        pointsAtTarget = true;
+                        break;
+                    }
+                }
+
+                if (pointsAtTarget && seen.Add(QualifiedKey(c.Name, decl.Name)) && ItemFor(index, decl, c.Name) is { } ti)
+                {
+                    results.Add(ti);
+                }
             }
         }
 
         return results;
     }
 
-    /// <summary>The first declared type named <paramref name="name"/> across all contexts (aggregates
-    /// flattened), or <c>null</c>. First-wins on a duplicate name, deterministically on both backends.</summary>
-    private static TypeDecl? FindTypeDecl(KoineModel model, string name) =>
-        model.Contexts
-            .SelectMany(c => c.AllTypeDecls())
-            .FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.Ordinal));
+    /// <summary>
+    /// Resolves the declared type named <paramref name="name"/> together with its declaring context
+    /// (#389). When <paramref name="preferredContext"/> (the cursor's enclosing bounded context) declares
+    /// the name, that same-context declaration wins; otherwise the first declaration across all contexts
+    /// is taken — the deterministic first-wins fallback that keeps single-context (and recovered-parse)
+    /// models behaving exactly as before. Returns <c>null</c> when no context declares the name.
+    /// </summary>
+    private static (TypeDecl Decl, string Context)? ResolveDecl(KoineModel model, string name, string? preferredContext)
+    {
+        // Same-context-first: the cursor's enclosing context wins when it declares the name.
+        if (preferredContext is not null)
+        {
+            foreach (var c in model.Contexts)
+            {
+                if (!string.Equals(c.Name, preferredContext, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var local = c.AllTypeDecls().FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.Ordinal));
+                if (local is not null)
+                {
+                    return (local, c.Name);
+                }
+
+                break;
+            }
+        }
+
+        // Fallback: the first context that declares the name (deterministic on both backends).
+        foreach (var c in model.Contexts)
+        {
+            var decl = c.AllTypeDecls().FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.Ordinal));
+            if (decl is not null)
+            {
+                return (decl, c.Name);
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
-    /// The declared type names <paramref name="decl"/> points at (its supertype edges): identity + member
-    /// types for an entity, member types for a value/event, the <c>from</c> source for a read model, the
-    /// root for an aggregate. Names only — the caller filters to those that resolve to a declared type.
+    /// The bounded context an edge to <paramref name="targetName"/> resolves to when referenced from
+    /// <paramref name="fromContext"/> (#389), following Koine's name-resolution rules (R13.2/R14.1): an
+    /// explicit <c>Context.Type</c> qualifier wins; else the same context when it declares the name; else
+    /// the shared-kernel owner, a single import owner, or a context-map-permitted upstream. Falls back to
+    /// the first declaring context (today's name-only behavior) when no rule applies, or <c>null</c> when
+    /// the name is undeclared. Reuses <see cref="ModelIndex"/>'s existing cross-context queries — no new
+    /// context-map semantics, and <c>Ast/</c> stays untouched.
     /// </summary>
-    private static IEnumerable<string> DeclaredTargets(TypeDecl decl)
+    private static string? ResolveTargetContext(ModelIndex index, string fromContext, string targetName, TypeRef? targetRef)
+    {
+        // An explicit Context.Type qualifier resolves directly to that context.
+        if (targetRef?.Qualifier is { } qualifier && index.DeclaresType(qualifier, targetName))
+        {
+            return qualifier;
+        }
+
+        // Same-context-first: a bare name resolves to the enclosing context's own declaration.
+        if (index.DeclaresType(fromContext, targetName))
+        {
+            return fromContext;
+        }
+
+        // A shared-kernel type visible to this partner resolves to its kernel owner (R14.2).
+        if (index.IsKernelVisibleFrom(fromContext, targetName) && index.KernelOwnerOfType(targetName) is { } kernelOwner)
+        {
+            return kernelOwner;
+        }
+
+        // A single import owner (R13.2).
+        var importOwners = index.ImportOwnersOf(fromContext, targetName);
+        if (importOwners.Count == 1)
+        {
+            return importOwners[0];
+        }
+
+        // A context-map-permitted upstream that declares the name (conformist/open-host/… — R14.1).
+        var declaringContexts = index.DeclaringContextsOf(targetName);
+        foreach (var upstream in declaringContexts)
+        {
+            if (!string.Equals(upstream, fromContext, StringComparison.Ordinal) && index.MapPermitsReference(fromContext, upstream))
+            {
+                return upstream;
+            }
+        }
+
+        // Fallback: the first context that declares the name (deterministic first-wins).
+        return declaringContexts.Count > 0 ? declaringContexts[0] : null;
+    }
+
+    /// <summary>A stable key for deduping a type-hierarchy node by its <b>(context, name)</b> identity.</summary>
+    private static string QualifiedKey(string? context, string name) => $"{context} {name}";
+
+    /// <summary>
+    /// The declared types <paramref name="decl"/> points at (its supertype edges): identity + member
+    /// types for an entity, member types for a value/event, the <c>from</c> source for a read model, the
+    /// root for an aggregate. Each edge is a (name, ref) pair — the <see cref="TypeRef"/> is present for a
+    /// member edge (so its optional <c>Context.Type</c> qualifier is available) and <c>null</c> for a bare
+    /// identity/source/root name. The caller filters to those that resolve to a declared type.
+    /// </summary>
+    private static IEnumerable<(string Name, TypeRef? Ref)> DeclaredTargets(TypeDecl decl)
     {
         switch (decl)
         {
             case EntityDecl e:
-                yield return e.IdentityName;
-                foreach (var n in e.Members.SelectMany(m => TypeRefNames(m.Type)))
+                yield return (e.IdentityName, null);
+                foreach (var t in e.Members.SelectMany(m => TypeRefTargets(m.Type)))
                 {
-                    yield return n;
+                    yield return t;
                 }
 
                 break;
             case ValueObjectDecl v:
-                foreach (var n in v.Members.SelectMany(m => TypeRefNames(m.Type)))
+                foreach (var t in v.Members.SelectMany(m => TypeRefTargets(m.Type)))
                 {
-                    yield return n;
+                    yield return t;
                 }
 
                 break;
             case EventDecl ev:
-                foreach (var n in ev.Members.SelectMany(m => TypeRefNames(m.Type)))
+                foreach (var t in ev.Members.SelectMany(m => TypeRefTargets(m.Type)))
                 {
-                    yield return n;
+                    yield return t;
                 }
 
                 break;
             case IntegrationEventDecl ie:
-                foreach (var n in ie.Members.SelectMany(m => TypeRefNames(m.Type)))
+                foreach (var t in ie.Members.SelectMany(m => TypeRefTargets(m.Type)))
                 {
-                    yield return n;
+                    yield return t;
                 }
 
                 break;
             case ReadModelDecl rm:
-                yield return rm.SourceType;
+                yield return (rm.SourceType, null);
                 break;
             case AggregateDecl agg:
-                yield return agg.RootName;
+                yield return (agg.RootName, null);
                 break;
         }
     }
 
-    /// <summary>Every simple type name a <see cref="TypeRef"/> references, unwrapping generic
-    /// collections (<c>List&lt;X&gt;</c>, <c>Set&lt;X&gt;</c>, <c>Map&lt;K,V&gt;</c>) to their element/value names.</summary>
-    private static IEnumerable<string> TypeRefNames(TypeRef? type)
+    /// <summary>Every type a <see cref="TypeRef"/> references, unwrapping generic collections
+    /// (<c>List&lt;X&gt;</c>, <c>Set&lt;X&gt;</c>, <c>Map&lt;K,V&gt;</c>) to their element/value types.
+    /// Each is a (name, ref) pair so the element's <c>Context.Type</c> qualifier (if any) is preserved.</summary>
+    private static IEnumerable<(string Name, TypeRef? Ref)> TypeRefTargets(TypeRef? type)
     {
         if (type is null)
         {
             yield break;
         }
 
-        yield return type.Name;
-        foreach (var n in TypeRefNames(type.Element))
+        yield return (type.Name, type);
+        foreach (var t in TypeRefTargets(type.Element))
         {
-            yield return n;
+            yield return t;
         }
 
-        foreach (var n in TypeRefNames(type.Value))
+        foreach (var t in TypeRefTargets(type.Value))
         {
-            yield return n;
+            yield return t;
         }
     }
 
     /// <summary>Builds a type-hierarchy item pointing at the declaration's <c>NameSpan</c> (its <c>File</c>
-    /// is the declaring document's URI), or <c>null</c> when the declaration has no source location.</summary>
-    private static TypeHierarchyItem? ItemFor(ModelIndex index, TypeDecl decl)
+    /// is the declaring document's URI), carrying its declaring <paramref name="context"/> (#389), or
+    /// <c>null</c> when the declaration has no source location.</summary>
+    private static TypeHierarchyItem? ItemFor(ModelIndex index, TypeDecl decl, string? context)
     {
         var span = decl.NameSpan.IsNone ? decl.Span : decl.NameSpan;
         if (span.IsNone)
@@ -1913,7 +2062,10 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        return new TypeHierarchyItem(decl.Name, TypeHierarchyKindOf(index.Classify(decl.Name)), span.File ?? "", span);
+        return new TypeHierarchyItem(decl.Name, TypeHierarchyKindOf(index.Classify(decl.Name)), span.File ?? "", span)
+        {
+            Context = context,
+        };
     }
 
     /// <summary>Maps the model's <see cref="TypeKind"/> to the editor-facing <see cref="TypeHierarchyItemKind"/>.</summary>

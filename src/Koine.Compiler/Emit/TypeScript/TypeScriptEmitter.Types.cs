@@ -22,7 +22,7 @@ public sealed partial class TypeScriptEmitter
         var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
         var ctorMembers = vo.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var derived = vo.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
-        var translator = new TypeScriptExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, typeMapper, ContextOf(ns));
+        var translator = new TypeScriptExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, typeMapper, ContextOf(ns), regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var sb = new StringBuilder();
         WriteDoc(sb, vo.Doc, "");
@@ -72,9 +72,21 @@ public sealed partial class TypeScriptEmitter
             {
                 WriteScalarOp(sb, name, ctorMembers);
             }
-            if (emit.AdditiveNeeds.Contains(vo.Name))
+
+            // `add` is demand-generated when the VO is folded with `sum` (AdditiveNeeds) OR appears in a
+            // plain binary `value + value` (#834); `subtract` is demand-generated for a plain
+            // `value - value` (#834 — never generated for plain VOs before). The translator already
+            // lowers both call sites to `.add(...)` / `.subtract(...)`; this emits the definitions.
+            emit.BinaryArithmeticNeeds.TryGetValue(vo.Name, out IReadOnlySet<BinaryOp>? arithmeticOps);
+            bool needsAdd = emit.AdditiveNeeds.Contains(vo.Name) || (arithmeticOps?.Contains(BinaryOp.Add) ?? false);
+            bool needsSub = arithmeticOps?.Contains(BinaryOp.Sub) ?? false;
+            if (needsAdd)
             {
-                WriteAdditiveOp(sb, name, ctorMembers);
+                WriteValueObjectAdditiveMethod(sb, name, ctorMembers, "add", "+");
+            }
+            if (needsSub)
+            {
+                WriteValueObjectAdditiveMethod(sb, name, ctorMembers, "subtract", "-");
             }
         }
 
@@ -222,12 +234,19 @@ public sealed partial class TypeScriptEmitter
         sb.Append(Indent).Append("}\n");
     }
 
-    /// <summary>A value object's additive <c>add</c> method (for <c>sum</c> folds): adds numeric fields, carries the rest.</summary>
-    private void WriteAdditiveOp(StringBuilder sb, string name, IReadOnlyList<Member> ctorMembers)
+    /// <summary>
+    /// A value object's additive <c>add</c> / subtractive <c>subtract</c> method: combines numeric
+    /// fields pairwise (a <c>Decimal</c> via its runtime <c>.add</c>/<c>.subtract</c>, an <c>Int</c> via
+    /// the native <c>+</c>/<c>-</c>) and carries the rest from <c>this</c>. Shared by the <c>sum</c>-fold
+    /// path (<c>add</c>) and the plain binary <c>value + value</c> / <c>value - value</c> path (#834).
+    /// <paramref name="method"/> is both the emitted TS method name and the runtime <c>Decimal</c>
+    /// method; <paramref name="op"/> is the native <c>Int</c> operator.
+    /// </summary>
+    private void WriteValueObjectAdditiveMethod(StringBuilder sb, string name, IReadOnlyList<Member> ctorMembers, string method, string op)
     {
         if (RefOnly)
         {
-            WriteRefStubMethod(sb, $"add(other: {name}): {name}");
+            WriteRefStubMethod(sb, $"{method}(other: {name}): {name}");
             return;
         }
 
@@ -242,11 +261,11 @@ public sealed partial class TypeScriptEmitter
             {
                 return field;
             }
-            return m.Type.Name == "Decimal" ? $"{field}.add({rightField})" : $"{field} + {rightField}";
+            return m.Type.Name == "Decimal" ? $"{field}.{method}({rightField})" : $"{field} {op} {rightField}";
         }
 
         sb.Append('\n');
-        sb.Append(Indent).Append("add(other: ").Append(name).Append("): ").Append(name).Append(" {\n");
+        sb.Append(Indent).Append(method).Append("(other: ").Append(name).Append("): ").Append(name).Append(" {\n");
         sb.Append(Indent).Append(Indent).Append("return new ").Append(name).Append('(')
           .Append(string.Join(", ", ordered.Select(Arg))).Append(");\n");
         sb.Append(Indent).Append("}\n");
@@ -308,7 +327,7 @@ public sealed partial class TypeScriptEmitter
         var idName = TypeScriptNaming.ToPascalCase(entity.IdentityName);
         var memberNames = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.Ordinal);
         var scopeMembers = entity.Members.Append(new Member("id", new TypeRef(entity.IdentityName), null)).ToList();
-        var translator = new TypeScriptExpressionTranslator(emit.Index, scopeMembers, emit.EnumMemberToType, typeMapper, ContextOf(ns));
+        var translator = new TypeScriptExpressionTranslator(emit.Index, scopeMembers, emit.EnumMemberToType, typeMapper, ContextOf(ns), regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var ctorMembers = entity.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var derived = entity.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();

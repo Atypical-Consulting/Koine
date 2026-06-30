@@ -695,7 +695,7 @@ export function init(hooks: IdeHooks = {}): () => void {
       return;
     }
     if (!folder) return; // cancelled
-    await workspace.openFolderPath(folder);
+    await workspace.openFolderPath(folder, { userInitiated: true });
   }
 
   // ADDITIVE multi-root open (the explorer's "Add folder" affordance): pick a folder and union its
@@ -733,6 +733,13 @@ export function init(hooks: IdeHooks = {}): () => void {
     editor,
     explorer,
     setStatus,
+    // Non-clobbering notification for a user-initiated open of an empty folder (#817): flash the
+    // message transiently then restore the status back to the current diagnostics so the healthy
+    // compiled status is not permanently overwritten (unlike the global red setStatus path).
+    notify: (text) => {
+      setStatus(text, 'error');
+      setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 2000);
+    },
     refreshDirtyIndicator,
     showDiagnostics: (uri) => editorSession.showDiagnostics(uri),
     invalidateDocViews: () => controller.invalidateDocViews(),
@@ -844,7 +851,10 @@ export function init(hooks: IdeHooks = {}): () => void {
   // active buffer to disk. To run AFTER the format edits land, save is also wired here on the
   // window so it can read the post-format editor text. The editor's own format keymap already
   // ran preventDefault, so this listener only persists. The save/dirty machinery lives in workspace.
-  window.addEventListener('keydown', (e) => {
+  //
+  // Named (not anonymous) so disposeEditorKeys() can removeEventListener them — anonymous functions
+  // have no stable identity and cannot be removed from window. (#789)
+  const onSaveKey = (e: KeyboardEvent): void => {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod) return;
     if (overlays.overlayOpen()) return; // don't act on the editor under an open overlay
@@ -860,14 +870,17 @@ export function init(hooks: IdeHooks = {}): () => void {
       e.preventDefault();
       void workspace.saveActive();
     }
-  });
+  };
+  window.addEventListener('keydown', onSaveKey);
 
   // Undo/redo drive the single workspace history (CodeMirror's own history was removed). Match on
   // e.code (physical Z/Y) so macOS Option-composed glyphs don't slip past. These chords stay a direct
   // history call — like every global chord other than Cmd-K and Save-all, they are folded through the
   // command registry wholesale by #432 (the HistoryControls *buttons* already dispatch run('undo'/'redo'),
   // so today the chord and button reach the same effect since undo/redo carry no when() gate).
-  window.addEventListener('keydown', (e) => {
+  //
+  // Named for the same removability reason as onSaveKey above. (#789)
+  const onHistoryKey = (e: KeyboardEvent): void => {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod) return;
     if (overlays.overlayOpen()) return;
@@ -879,7 +892,8 @@ export function init(hooks: IdeHooks = {}): () => void {
       e.preventDefault();
       history.redo();
     }
-  });
+  };
+  window.addEventListener('keydown', onHistoryKey);
 
   // Guard against closing/reloading with unsaved work: when any open buffer is dirty, the browser
   // shows its native "Leave site?" prompt. Dirty buffers live only in memory, so without this a tab
@@ -957,7 +971,7 @@ export function init(hooks: IdeHooks = {}): () => void {
   // layer returns to Home (never stranding the user) and, for a vanished folder/handle, offers to
   // forget the entry there.
   async function openRecentFolder(path: string): Promise<void> {
-    const result = await workspace.openFolderPath(path);
+    const result = await workspace.openFolderPath(path, { userInitiated: true });
     if (result.ok) return;
     hooks.onOpenRecentFailed?.(path, result.reason);
   }
@@ -1074,6 +1088,8 @@ export function init(hooks: IdeHooks = {}): () => void {
     mcpStop: () => platform.mcpStop(),
     // Only a host that can serve the sidecar exposes the toggle; others show recipes but disable it.
     mcpHostable: platform.canHostMcp,
+    // Terminal shell args row: only shown where the integrated terminal exists (Tauri desktop).
+    hasIntegratedTerminal: platform.canRunShell,
     // Workspace root: only the browser (File System Access API) can save projects to a root dir.
     canSaveProjects: platform.canSaveProjects,
     workspaceRootName: () => platform.workspaceRootName(),
@@ -1189,11 +1205,23 @@ export function init(hooks: IdeHooks = {}): () => void {
   // panelHost.closeSettings() which restores focus to the opener. Only active while Settings is open,
   // so it cannot interfere with other Esc semantics (palette, modals). The handler runs independently
   // of overlayOpen() — the mod-key listeners are the ones gated on it.
-  window.addEventListener('keydown', (e) => {
+  //
+  // Named for the same removability reason as onSaveKey / onHistoryKey above. (#789)
+  const onSettingsEscKey = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape') return;
     if (!appStore.getState().settingsOpen) return;
     panelHost.closeSettings();
-  });
+  };
+  window.addEventListener('keydown', onSettingsEscKey);
+
+  // Paired disposer for all three named keydown listeners above. Folded into lifecycleBoot's
+  // disposers so the aggregate teardown leaves no ide.tsx-owned global keydown listener attached
+  // to window. (#789)
+  const disposeEditorKeys = (): void => {
+    window.removeEventListener('keydown', onSaveKey);
+    window.removeEventListener('keydown', onHistoryKey);
+    window.removeEventListener('keydown', onSettingsEscKey);
+  };
 
   // --- view layout: editor split + repositionable panels (issue #265) -------
   // The #split data-* mirror, the inspector + left-rail edge resizers (and their live re-wiring on a
@@ -1296,6 +1324,7 @@ export function init(hooks: IdeHooks = {}): () => void {
       reviewStoreSub: () => unsubReviewStore(),
       autoSave: () => workspace.setAutoSave(false),
       exportMenuDismiss: () => teardownExportMenuDismiss(),
+      editorKeys: () => disposeEditorKeys(),
     },
   });
 

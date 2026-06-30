@@ -29,7 +29,8 @@ public sealed partial class PhpEmitter
         var translator = new PhpExpressionTranslator(
             emit.Index,
             vo.Members,
-            emit.EnumMemberToType);
+            emit.EnumMemberToType,
+            regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         // Classifies a field's type for `equals()`: a value object / id value object compares
         // structurally (via its own `equals()`), a primitive/enum by value (`===`) — see #686.
