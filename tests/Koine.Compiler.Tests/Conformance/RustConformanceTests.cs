@@ -1,4 +1,6 @@
 using Koine.Compiler.Emit;
+using Koine.Compiler.Emit.Rust;
+using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests.Conformance;
 
@@ -66,5 +68,45 @@ public class RustConformanceTests
         TestSupport.RustCheck skipped = TestSupport.RustCheck.Skipped;
         skipped.ToolchainAvailable.ShouldBeFalse();
         skipped.Ok.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// Int-led chained mixed concatenation must emit compiling Rust (issue #837, follows up #819).
+    /// <c>display: String = hours + ":" + minutes</c> (<c>hours</c>, <c>minutes</c> both <c>Int</c>)
+    /// is a left-associative chain where the inner join <c>hours + ":"</c> produces a <c>String</c>,
+    /// and the outer join appends <c>minutes</c> (an <c>Int</c>) on the right.
+    /// <see cref="RustExpressionTranslator"/> must stringify the non-<c>String</c> right operand,
+    /// emitting <c>(self.hours.to_string() + ":") + &amp;self.minutes.to_string()</c>
+    /// (<c>String + &amp;String</c>, which coerces to <c>&amp;str</c>) rather than the invalid
+    /// <c>String + &amp;i64</c> that <c>cargo check</c> would reject.
+    /// Mirrors the PHP fixture added in PR #819. Skipped (not failed) when no Rust toolchain is
+    /// present; CI installs the toolchain and runs it for real.
+    /// </summary>
+    [Fact]
+    public void Int_led_chained_mixed_concatenation_emits_compiling_rust()
+    {
+        const string src =
+            "context Scheduling {\n" +
+            "  value TimeOfDay {\n" +
+            "    hours: Int\n" +
+            "    minutes: Int\n" +
+            // Int-led chain: (hours + ":") + minutes — the outer join's right operand is non-String.
+            "    display: String = hours + \":\" + minutes\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the non-String right operand of the outer
+        // join must be stringified. Assert the emitted accessor uses `.to_string()` on `minutes`
+        // and does NOT emit the bare `&self.minutes)` that caused `String + &i64` (E0369).
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.minutes.to_string()");
+        rust.ShouldNotContain("+ &self.minutes)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 }
