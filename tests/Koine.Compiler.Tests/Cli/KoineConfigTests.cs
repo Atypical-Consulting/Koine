@@ -83,4 +83,55 @@ public class KoineConfigTests
             "targets.csharp.out = generated/cs\n");
         cfg.OptionsFor("csharp").OutDir.ShouldBe("generated/cs");
     }
+
+    // ------------------------------------------------------------------
+    // Issue #831 — targets.<t>.regexMode config key
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Parses_regex_mode()
+    {
+        // Issue #831: the per-target C# regex-evaluation mode is now config-settable.
+        var cfg = KoineConfig.Parse("targets.csharp.regexMode = sourceGenerated\n");
+        cfg.OptionsFor("csharp").RegexModeText.ShouldBe("sourceGenerated");
+    }
+
+    [Fact]
+    public void Unset_regex_mode_is_null()
+    {
+        // Absent ⇒ null ⇒ emitter keeps its Inline default ⇒ byte-identical output.
+        KoineConfig.Parse("target = csharp\n").OptionsFor("csharp").RegexModeText.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("inline")]
+    [InlineData("sourceGenerated")]
+    [InlineData("INLINE")]
+    [InlineData("SourceGenerated")]
+    [InlineData("SOURCEGENERATED")]
+    public void TryValidate_accepts_valid_regex_mode_values(string value)
+    {
+        // Valid values (case-insensitive) must pass validation.
+        var cfg = KoineConfig.Parse($"targets.csharp.regexMode = {value}\n");
+        cfg.OptionsFor("csharp").TryValidate(out var error).ShouldBeTrue(error);
+        error.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("sourcegen")]
+    [InlineData("source_generated")]
+    [InlineData("generated")]
+    [InlineData("1")]
+    public void TryValidate_rejects_unknown_regex_mode(string value)
+    {
+        // A present but unrecognized value is a hard error — a typo must not silently
+        // fall back to the Inline default and disarm the user's explicit opt-in.
+        var cfg = KoineConfig.Parse($"targets.csharp.regexMode = {value}\n");
+        cfg.OptionsFor("csharp").TryValidate(out var error).ShouldBeFalse();
+        error.ShouldNotBeNull();
+        error.ShouldContain("regexMode");
+        error.ShouldContain("inline");
+        error.ShouldContain("sourceGenerated");
+        error.ShouldContain($"'{value}'");
+    }
 }
