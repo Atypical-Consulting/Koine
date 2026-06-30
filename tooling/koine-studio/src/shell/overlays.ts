@@ -43,12 +43,17 @@ export function createOverlays(deps: OverlaysDeps): Overlays {
   // Single-field text prompts (name a new construct, a field, a project) — Koine's own modal, not the browser's.
   const prompt = createPromptDialog();
 
-  // True when the command palette or a modal dialog (help, confirm/prompt, generate) is open, so global
-  // shortcuts don't fire 'through' an overlay at the editor underneath. The gear-launched Settings overlay
-  // is a center panel, not a modal backdrop, so it's intentionally not counted. The welcome screen is
+  // True when the command palette, a modal dialog (help, confirm/prompt, generate), or the gear-launched
+  // Settings center overlay is open, so global shortcuts don't fire 'through' an overlay at the editor
+  // underneath. The Settings panel (#center-panel-settings) is a center view driven by the store's
+  // `settingsOpen` flag; its hidden attribute is toggled by inspectorController. The welcome screen is
   // deliberately excluded — its own actions own that surface.
   function overlayOpen(): boolean {
-    return document.querySelector('.koi-palette-backdrop:not([hidden]), .koi-modal-backdrop:not([hidden])') !== null;
+    return (
+      document.querySelector(
+        '.koi-palette-backdrop:not([hidden]), .koi-modal-backdrop:not([hidden]), #center-panel-settings:not([hidden])',
+      ) !== null
+    );
   }
 
   // A one-time, dismissible top banner shown when the workspace is memory-only (no OPFS) — so work

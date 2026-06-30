@@ -31,11 +31,13 @@ import { createPanelHost } from '@/shell/panelHost';
 const PANEL_IDS = ['view-assistant', 'view-scenarios', 'panel-terminal', 'panel-review', 'settings-page-header', 'settings-page-body'];
 
 const showSettings = vi.fn();
+const closeSettings = vi.fn();
 function makeDeps(): PanelHostDeps {
   return {
     prefsCallbacks: {} as PanelHostDeps['prefsCallbacks'],
     settingsCategory: () => undefined,
     showSettings,
+    closeSettings,
     getSource: () => '',
     getSelection: () => null,
     applyModel: vi.fn(),

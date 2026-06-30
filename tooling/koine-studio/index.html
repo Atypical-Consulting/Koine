@@ -213,7 +213,7 @@
                not restorable. A SIBLING of #center-body (which the DeckStage renders into and owns), so it
                survives the stage render. The toolbar gear shows it via the store's `settingsOpen`; the
                chrome hides #center-body while it's up, leaving the deck-bar as the way back. -->
-          <section id="center-panel-settings" class="settings-page" aria-label="Settings" hidden>
+          <section id="center-panel-settings" class="settings-page" role="dialog" aria-modal="true" aria-label="Settings" hidden>
             <header id="settings-page-header" class="settings-page-header">
               <h2 class="settings-page-title">Settings</h2>
               <div class="settings-page-header-controls">
