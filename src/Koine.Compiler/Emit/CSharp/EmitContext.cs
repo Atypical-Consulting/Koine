@@ -16,6 +16,11 @@ namespace Koine.Compiler.Emit.CSharp;
 /// Value-object name -> scalar C# types ("int"/"decimal") it is multiplied by in some
 /// derived expression. Drives demand-driven scalar operator generation (R9).
 /// </param>
+/// <param name="ScalarDivNeeds">
+/// Value-object name -> scalar C# types ("int"/"decimal") it is divided by in some derived
+/// expression. The division dual of <see cref="ScalarNeeds"/>; drives demand-driven
+/// <c>operator /</c> generation (#832), so <c>value-object / scalar</c> compiles.
+/// </param>
 /// <param name="AdditiveNeeds">
 /// Value-object names that are folded with <c>+</c> somewhere (e.g.
 /// <c>lines.sum(l =&gt; l.subtotal)</c> over a Money field). Drives generation of an
@@ -41,6 +46,7 @@ namespace Koine.Compiler.Emit.CSharp;
 internal sealed record EmitContext(
     ModelIndex Index,
     IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
+    IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarDivNeeds,
     IReadOnlySet<string> AdditiveNeeds,
     IReadOnlyList<string> ContextNames,
     IReadOnlyDictionary<string, (IdentityStrategy Strategy, string? Backing)> IdStrategies,

@@ -124,13 +124,23 @@ public sealed partial class CSharpEmitter
             // arithmetic above. If a VO needs guaranteed operators, model it as a quantity.
 
             // Scalar arithmetic operators: emitted only when this value object is actually
-            // multiplied by a scalar in a derived expression.
-            if (emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? scalarTypes))
+            // multiplied (`*`) or divided (`/`, #832) by a scalar in a derived expression.
+            bool needsMul = emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? mulScalars);
+            bool needsDiv = emit.ScalarDivNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? divScalars);
+            if (needsMul || needsDiv)
             {
                 IReadOnlyList<Member> numericFields = NumericFields(bound);
                 if (numericFields.Count > 0)
                 {
-                    WriteScalarOperators(sb, vo, bound, numericFields, scalarTypes, typeMapper);
+                    if (needsMul)
+                    {
+                        WriteScalarOperators(sb, vo, bound, numericFields, mulScalars!, typeMapper, "*");
+                    }
+
+                    if (needsDiv)
+                    {
+                        WriteScalarOperators(sb, vo, bound, numericFields, divScalars!, typeMapper, "/");
+                    }
                 }
             }
 
@@ -249,11 +259,12 @@ public sealed partial class CSharpEmitter
     }
 
     /// <summary>
-    /// Generates scalar multiply operators so value-object * scalar arithmetic
-    /// compiles (e.g. <c>Money * int</c> for <c>subtotal = unitPrice * quantity</c>).
-    /// Deliberate v0 codegen rule: scale every numeric field and carry the rest
-    /// unchanged. The product is cast back to a narrower field type when needed
-    /// (e.g. an <c>int</c> field multiplied by a <c>decimal</c> scalar).
+    /// Generates scalar <c>*</c>/<c>/</c> operators so value-object &lt;op&gt; scalar arithmetic
+    /// compiles (e.g. <c>Money * int</c> for <c>subtotal = unitPrice * quantity</c>, or <c>Money / int</c>
+    /// for <c>half = fee / 2</c>, #832). Deliberate v0 codegen rule: apply the operator to every numeric
+    /// field and carry the rest unchanged. The result is cast back to a narrower field type when needed
+    /// (e.g. an <c>int</c> field divided by a <c>decimal</c> scalar yields <c>decimal</c>). Both operators
+    /// share this shape; <paramref name="op"/> is the C# operator token (<c>"*"</c> or <c>"/"</c>).
     /// </summary>
     private void WriteScalarOperators(
         StringBuilder sb,
@@ -261,7 +272,8 @@ public sealed partial class CSharpEmitter
         BoundValueObject bound,
         IReadOnlyList<Member> numericFields,
         IReadOnlySet<string> scalarTypes,
-        CSharpTypeMapper typeMapper)
+        CSharpTypeMapper typeMapper,
+        string op)
     {
         // Constructor args must be passed in the SAME order the constructor declares its
         // parameters — the projection's CtorParams owns that order (defaulted/optional last).
@@ -279,15 +291,15 @@ public sealed partial class CSharpEmitter
                     return prop;
                 }
 
-                var product = $"{prop} * right";
-                // int field * decimal scalar yields decimal -> cast back to int.
+                var scaled = $"{prop} {op} right";
+                // int field <op> decimal scalar yields decimal -> cast back to int.
                 return typeMapper.Map(m.Type) == "int" && scalar == "decimal"
-                    ? $"(int)({product})"
-                    : product;
+                    ? $"(int)({scaled})"
+                    : scaled;
             }));
 
             sb.Append('\n').Append(Indent)
-              .Append("public static ").Append(vo.Name).Append(" operator *(")
+              .Append("public static ").Append(vo.Name).Append(" operator ").Append(op).Append('(')
               .Append(vo.Name).Append(" left, ").Append(scalar).Append(" right)\n");
             if (RefOnly)
             {
