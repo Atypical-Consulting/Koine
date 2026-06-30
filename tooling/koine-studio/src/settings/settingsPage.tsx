@@ -439,6 +439,7 @@ export function createSettingsPage(
     destroy(): void {
       teardownBody();
       modeToggle.el.remove(); // clear the header toggle
+      closeBtn.remove(); // clear the header close button (#746)
     },
   };
 }

@@ -134,12 +134,11 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
     const opener = settingsOpener;
     settingsOpener = null; // clear before calling closeSettings so a re-entrant call is a no-op
     deps.closeSettings();
-    // Restore focus: prefer the captured opener; fall back to the gear button, then body.
-    const target =
-      (opener instanceof HTMLElement && typeof opener.focus === 'function' && document.contains(opener) ? opener : null) ??
-      document.getElementById('btn-prefs') ??
-      document.body;
-    (target as HTMLElement).focus();
+    // Restore focus: prefer the captured opener (if still in the DOM); fall back to the gear
+    // button, then body. `settingsOpener` is typed `HTMLElement | null` so the instanceof guard
+    // is redundant — only the DOM-presence check is needed.
+    const target = (opener !== null && document.contains(opener) ? opener : null) ?? document.getElementById('btn-prefs') ?? document.body;
+    target.focus();
   }
 
   // The AI assistant panel is created lazily the first time its center pane is shown (the Anthropic SDK
