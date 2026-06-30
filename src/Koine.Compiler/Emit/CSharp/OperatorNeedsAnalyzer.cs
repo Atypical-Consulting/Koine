@@ -14,70 +14,42 @@ namespace Koine.Compiler.Emit.CSharp;
 internal static class OperatorNeedsAnalyzer
 {
     /// <summary>
-    /// Scans every derived member initializer in the model for
-    /// <c>value-object * scalar</c> multiplications and records, per value-object
-    /// type, which scalar C# types ("int"/"decimal") it is multiplied by. Only
-    /// those operators are generated, so we never emit spurious (or non-compiling)
-    /// operators on value objects that are never multiplied.
+    /// Records, per value-object type, which scalar C# types ("int"/"decimal") it is multiplied by in a
+    /// <c>value-object * scalar</c> multiplication. Only those operators are generated, so we never emit
+    /// spurious (or non-compiling) operators on value objects that are never multiplied. A thin
+    /// projection over the single-pass <see cref="BuildOperatorNeeds"/>.
     /// </summary>
     public static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildScalarOperatorNeeds(KoineModel model, ModelIndex index) =>
-        BuildScalarOpNeeds(model, index, BinaryOp.Mul);
+        ProjectScalarFactors(BuildOperatorNeeds(model, index), static n => n.MultiplyFactors);
 
     /// <summary>
-    /// The division sibling of <see cref="BuildScalarOperatorNeeds"/>: scans the same sites for
-    /// <c>value-object / scalar</c> and records, per value-object type, which scalar C# types
-    /// ("int"/"decimal") it is divided by. Drives demand-driven <c>operator /</c> generation (#832) —
-    /// the natural dual of scalar multiplication. Division is non-commutative, so only the
-    /// value-object-on-the-left form is recorded; <c>scalar / value-object</c> would divide a scalar
-    /// <i>by</i> the value object, which is not a value-object operator, so it is deliberately not
-    /// recorded (its reversed-operand emission is a separate concern, out of scope here).
+    /// The division sibling of <see cref="BuildScalarOperatorNeeds"/>: records, per value-object type,
+    /// which scalar C# types ("int"/"decimal") it is divided by. Drives demand-driven <c>operator /</c>
+    /// generation (#832) — the natural dual of scalar multiplication. Division is non-commutative, so
+    /// only the value-object-on-the-left form is recorded; <c>scalar / value-object</c> would divide a
+    /// scalar <i>by</i> the value object, which is not a value-object operator, so it is deliberately not
+    /// recorded (its reversed-operand emission is a separate concern, out of scope here). A thin
+    /// projection over the single-pass <see cref="BuildOperatorNeeds"/>.
     /// </summary>
     public static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildScalarDivisionNeeds(KoineModel model, ModelIndex index) =>
-        BuildScalarOpNeeds(model, index, BinaryOp.Div);
+        ProjectScalarFactors(BuildOperatorNeeds(model, index), static n => n.DivideFactors);
 
     /// <summary>
-    /// Shared core for the scalar <c>*</c> / <c>/</c> demand analyses: walks every expression site
-    /// (<see cref="ExpressionScanSites"/>) recording, per value-object type, the scalar C# types it is
-    /// combined with under <paramref name="op"/>. Mul and Div run the identical site enumeration; only
-    /// the operator (and division's left-only operand rule) differs, so the enumeration lives in one
-    /// place — the same enumerator the additive/binary analyses use, so all the demand analyses scan one
-    /// shared site list rather than two parallel copies (#836).
+    /// The value-object types folded by a <c>sum</c> selector (e.g. <c>lines.sum(l =&gt; l.subtotal)</c>
+    /// producing a <c>Money</c>) and therefore needing an additive operator. A thin projection over the
+    /// single-pass <see cref="BuildOperatorNeeds"/> (its <see cref="ValueObjectOperatorNeeds.IsSummable"/>
+    /// flag).
     /// </summary>
-    private static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildScalarOpNeeds(KoineModel model, ModelIndex index, BinaryOp op)
-    {
-        var needs = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-
-        foreach ((Expr expr, TypeScope scope) in ExpressionScanSites(model, index))
-        {
-            new ScalarOpWalker(op, scope, index, needs).Visit(expr);
-        }
-
-        return needs.ToDictionary(kv => kv.Key, kv => (IReadOnlySet<string>)kv.Value, StringComparer.Ordinal);
-    }
+    public static IReadOnlySet<string> BuildAdditiveOperatorNeeds(KoineModel model, ModelIndex index) =>
+        BuildOperatorNeeds(model, index)
+            .Where(kv => kv.Value.IsSummable)
+            .Select(kv => kv.Key)
+            .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
-    /// Scans every member initializer for a value-object <c>sum</c> selector (e.g.
-    /// <c>lines.sum(l =&gt; l.subtotal)</c> producing a <c>Money</c>) and records the
-    /// value-object types that therefore need an additive operator.
-    /// </summary>
-    public static IReadOnlySet<string> BuildAdditiveOperatorNeeds(KoineModel model, ModelIndex index)
-    {
-        var resolver = new TypeResolver(index);
-        var needs = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach ((Expr expr, TypeScope scope) in ExpressionScanSites(model, index))
-        {
-            ScanForValueObjectSum(expr, scope, resolver, needs);
-        }
-
-        return needs;
-    }
-
-    /// <summary>
-    /// Scans every member initializer (and the other expression sites) for a plain
+    /// Records, per value-object type, which additive operators it participates in via plain
     /// <c>value-object <b>+</b>/<b>-</b> value-object</c> binary arithmetic — e.g.
-    /// <c>combined: Money = base + base</c> — and records, per value-object type, which additive
-    /// operators it participates in. This is the binary-operator sibling of
+    /// <c>combined: Money = base + base</c>. This is the binary-operator sibling of
     /// <see cref="BuildAdditiveOperatorNeeds"/> (which only fires on a <c>sum(selector)</c> fold): a
     /// value object used directly in <c>+</c>/<c>-</c> needs an <c>add</c>/<c>subtract</c> method too,
     /// otherwise the lowered call site (<c>$vo-&gt;add(...)</c>) targets a method that was never
@@ -85,19 +57,103 @@ internal static class OperatorNeedsAnalyzer
     /// recorded here as well (its emission need is identical; only the call-site routing differs).
     /// Target-agnostic like the rest of this analyzer: the PHP emitter generates its <c>add</c>/<c>subtract</c>
     /// methods from this map, and the C# emitter consumes it (alongside <see cref="BuildAdditiveOperatorNeeds"/>)
-    /// to demand-generate direct <c>operator +</c>/<c>operator -</c> for plain value objects (#833).
+    /// to demand-generate direct <c>operator +</c>/<c>operator -</c> for plain value objects (#833). A thin
+    /// projection over the single-pass <see cref="BuildOperatorNeeds"/>.
     /// </summary>
-    public static IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BuildValueObjectArithmeticNeeds(KoineModel model, ModelIndex index)
+    public static IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BuildValueObjectArithmeticNeeds(KoineModel model, ModelIndex index) =>
+        BuildOperatorNeeds(model, index)
+            .Where(kv => kv.Value.BinaryOps.Count > 0)
+            .ToDictionary(kv => kv.Key, kv => (IReadOnlySet<BinaryOp>)kv.Value.BinaryOps, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The single demand-driven pass: walks every expression site (<see cref="ExpressionScanSites"/>)
+    /// <b>once</b>, running the scalar-multiply, scalar-divide, <c>sum</c>-fold, and plain-binary
+    /// walkers per <c>(Expr, TypeScope)</c> site and merging their signals into one
+    /// <see cref="ValueObjectOperatorNeeds"/> per value-object name. The public <c>Build*</c> methods are
+    /// thin projections over this map, so they share one site enumeration and one per-VO need model
+    /// rather than each re-walking the model (#836).
+    /// </summary>
+    private static IReadOnlyDictionary<string, ValueObjectOperatorNeeds> BuildOperatorNeeds(KoineModel model, ModelIndex index)
     {
         var resolver = new TypeResolver(index);
-        var needs = new Dictionary<string, HashSet<BinaryOp>>(StringComparer.Ordinal);
+        var multiply = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var divide = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var binary = new Dictionary<string, HashSet<BinaryOp>>(StringComparer.Ordinal);
+        var summable = new HashSet<string>(StringComparer.Ordinal);
 
         foreach ((Expr expr, TypeScope scope) in ExpressionScanSites(model, index))
         {
-            new ValueObjectArithmeticWalker(scope, resolver, index, needs).Visit(expr);
+            new ScalarOpWalker(BinaryOp.Mul, scope, index, multiply).Visit(expr);
+            new ScalarOpWalker(BinaryOp.Div, scope, index, divide).Visit(expr);
+            new ValueObjectSumWalker(scope, resolver, summable).Visit(expr);
+            new ValueObjectArithmeticWalker(scope, resolver, index, binary).Visit(expr);
         }
 
-        return needs.ToDictionary(kv => kv.Key, kv => (IReadOnlySet<BinaryOp>)kv.Value, StringComparer.Ordinal);
+        var needs = new Dictionary<string, ValueObjectOperatorNeeds>(StringComparer.Ordinal);
+        ValueObjectOperatorNeeds Entry(string vo)
+        {
+            if (!needs.TryGetValue(vo, out ValueObjectOperatorNeeds? n))
+            {
+                needs[vo] = n = new ValueObjectOperatorNeeds();
+            }
+
+            return n;
+        }
+
+        foreach ((string vo, HashSet<string> factors) in multiply)
+        {
+            Entry(vo).MultiplyFactors.UnionWith(factors);
+        }
+
+        foreach ((string vo, HashSet<string> factors) in divide)
+        {
+            Entry(vo).DivideFactors.UnionWith(factors);
+        }
+
+        foreach ((string vo, HashSet<BinaryOp> ops) in binary)
+        {
+            Entry(vo).BinaryOps.UnionWith(ops);
+        }
+
+        foreach (string vo in summable)
+        {
+            Entry(vo).IsSummable = true;
+        }
+
+        return needs;
+    }
+
+    /// <summary>
+    /// Projects one scalar factor set (multiply or divide) out of the per-VO need model, keeping only
+    /// value objects that actually carry a factor under that operator — so the result is byte-identical
+    /// to the pre-unification per-operator map (which only ever held keys it recorded a factor for).
+    /// </summary>
+    private static IReadOnlyDictionary<string, IReadOnlySet<string>> ProjectScalarFactors(
+        IReadOnlyDictionary<string, ValueObjectOperatorNeeds> needs,
+        Func<ValueObjectOperatorNeeds, HashSet<string>> select) =>
+        needs.Where(kv => select(kv.Value).Count > 0)
+             .ToDictionary(kv => kv.Key, kv => (IReadOnlySet<string>)select(kv.Value), StringComparer.Ordinal);
+
+    /// <summary>
+    /// The per-value-object operator demand accumulated by <see cref="BuildOperatorNeeds"/> in one pass:
+    /// the scalar C# types it is multiplied / divided by, the plain binary additive operators it
+    /// participates in, and whether it is folded by <c>sum</c>. One record replaces the separate per-pass
+    /// maps the analyzer used to build, so "which operators does this value object need?" is answered in
+    /// one place (#836).
+    /// </summary>
+    private sealed class ValueObjectOperatorNeeds
+    {
+        /// <summary>Scalar C# types ("int"/"decimal") this value object is multiplied by.</summary>
+        public HashSet<string> MultiplyFactors { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Scalar C# types ("int"/"decimal") this value object is divided by.</summary>
+        public HashSet<string> DivideFactors { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>The plain binary additive operators (<c>+</c>/<c>-</c>) this value object participates in.</summary>
+        public HashSet<BinaryOp> BinaryOps { get; } = new();
+
+        /// <summary>Whether this value object is folded by a <c>sum(selector)</c> (set only by that fold).</summary>
+        public bool IsSummable { get; set; }
     }
 
     /// <summary>
@@ -232,9 +288,6 @@ internal static class OperatorNeedsAnalyzer
             }
         }
     }
-
-    private static void ScanForValueObjectSum(Expr expr, TypeScope scope, TypeResolver resolver, HashSet<string> needs) =>
-        new ValueObjectSumWalker(scope, resolver, needs).Visit(expr);
 
     /// <summary>
     /// Records, per value-object type, which additive operators (<see cref="BinaryOp.Add"/> /
