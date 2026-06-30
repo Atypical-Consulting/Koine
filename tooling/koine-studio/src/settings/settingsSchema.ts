@@ -219,52 +219,97 @@ function buildNestedSchema() {
   return { $schema: SCHEMA_DIALECT, type: 'object', additionalProperties: false, properties: groups };
 }
 
-/** Build the retained FLAT schema (top-level runtime keys) so an old/hand-saved flat document still
- *  validates and applies. Also derived from the field map, keyed by runtime key, so it stays in lockstep. */
-function buildFlatSchema() {
+/**
+ * Build a flat Draft 2020-12 JSON schema from an explicit key list. Every key must be a
+ * `FieldDef['runtimeKey']` so TypeScript rejects unknown or non-existent settings keys at author
+ * time. The result is `additionalProperties:false`, so any key not in `keys` is rejected by AJV.
+ *
+ * Callers:
+ * - `LEGACY_FLAT_SCHEMA` — every runtime key in `SETTINGS_FIELDS` order.
+ * - `WORKSPACE_SETTINGS_JSON_SCHEMA` — only the four `WORKSPACE_SCOPED_KEYS`.
+ */
+function buildFlatSchema(keys: readonly FieldDef['runtimeKey'][]) {
   const properties: Record<string, LeafSchema> = {};
-  for (const f of SETTINGS_FIELDS) properties[f.runtimeKey] = LEAF_SCHEMAS[f.runtimeKey];
-  return { $schema: SCHEMA_DIALECT, type: 'object', additionalProperties: false, properties };
+  for (const k of keys) properties[k] = LEAF_SCHEMAS[k];
+  return { $schema: SCHEMA_DIALECT, type: 'object', additionalProperties: false as const, properties };
 }
 
 /** The nested, namespaced settings document schema (#750) — the source the JSON editor validates against. */
 export const SETTINGS_JSON_SCHEMA = buildNestedSchema();
 
 /** The pre-#750 flat schema, retained only to validate a legacy/hand-saved flat document. */
-const LEGACY_FLAT_SCHEMA = buildFlatSchema();
+const LEGACY_FLAT_SCHEMA = buildFlatSchema(SETTINGS_FIELDS.map((f) => f.runtimeKey));
 
 const ajv = new Ajv2020({ allErrors: true, strict: false });
 const validateNested = ajv.compile(SETTINGS_JSON_SCHEMA);
 const validateFlat = ajv.compile(LEGACY_FLAT_SCHEMA);
 
-// --- workspace-scoped settings document schema (#736) -----------------------
-// A FLAT Draft 2020-12 schema whose properties cover ONLY the four WORKSPACE_SCOPED_KEYS.
-// Derived from WORKSPACE_SCOPED_KEYS + LEAF_SCHEMAS so it can never drift from the field map.
+// --- workspace-scoped settings document schema (#736, #792) ------------------
+// The workspace JSON document now uses the SAME grouped-key shape as the user document (#792):
+// `preview.target`, `editor.formatOnSave`, `editor.wordWrap`, `lsp.trace` — a subset of the
+// full user-scope groups. This makes copy-paste of fields between the two scopes work out of
+// the box (no key-shape change needed). The schema is derived from SETTINGS_FIELDS restricted
+// to WORKSPACE_SCOPED_KEYS, so it can never drift from the field map.
+//
+// The pre-#792 flat schema (runtime keys at the top level: `previewTarget`, `formatOnSave`, …)
+// is retained as LEGACY_WORKSPACE_FLAT_SCHEMA so jsonDocToWorkspaceOverrides can still accept
+// an old hand-saved or tool-generated document without rejecting it.
 
-/** The Draft 2020-12 JSON schema for the workspace-level settings.json document.
- *  Properties are exactly the four {@link WORKSPACE_SCOPED_KEYS}; `additionalProperties:false`
- *  rejects any other key, including non-scoped user-level settings. */
-export const WORKSPACE_SETTINGS_JSON_SCHEMA = (() => {
-  const properties: Record<string, LeafSchema> = {};
-  for (const k of WORKSPACE_SCOPED_KEYS) {
-    properties[k as string] = LEAF_SCHEMAS[k as FieldDef['runtimeKey']];
+/** Set of workspace-scoped runtime keys; used to detect a legacy flat workspace document. */
+const WORKSPACE_SCOPED_KEY_SET = new Set<string>(WORKSPACE_SCOPED_KEYS as unknown as string[]);
+
+/** Build the grouped workspace schema: one object group per namespace (preview, editor, lsp),
+ *  each `additionalProperties:false`, covering only the {@link WORKSPACE_SCOPED_KEYS} subset.
+ *  Derived from {@link SETTINGS_FIELDS} restricted to workspace-scoped keys so it can never
+ *  drift from the field map. Mirrors the user-scope nested schema shape, enabling copy-paste
+ *  of fields between the two scopes without key-shape errors (#792). */
+function buildWorkspaceGroupedSchema() {
+  const groups: Record<string, { type: 'object'; additionalProperties: false; properties: Record<string, LeafSchema> }> = {};
+  for (const f of SETTINGS_FIELDS) {
+    if (!WORKSPACE_SCOPED_KEY_SET.has(f.runtimeKey as string)) continue;
+    (groups[f.group] ??= { type: 'object', additionalProperties: false, properties: {} }).properties[f.docKey] =
+      LEAF_SCHEMAS[f.runtimeKey];
   }
-  return { $schema: SCHEMA_DIALECT, type: 'object', additionalProperties: false as const, properties };
-})();
+  return { $schema: SCHEMA_DIALECT, type: 'object', additionalProperties: false as const, properties: groups };
+}
+
+/** The Draft 2020-12 JSON schema for the workspace-level settings.json document (#792).
+ *  Grouped by namespace (preview / editor / lsp) with the same `group.docKey` shape as the
+ *  user-scope settings document, so fields copy-paste cleanly between scopes. Properties are
+ *  the workspace-scoped subset of {@link SETTINGS_FIELDS}; `additionalProperties:false` rejects
+ *  any other group or key, including non-scoped user-level settings. */
+export const WORKSPACE_SETTINGS_JSON_SCHEMA = buildWorkspaceGroupedSchema();
+
+/** Pre-#792 flat workspace schema: retained to accept a legacy flat workspace document in
+ *  {@link jsonDocToWorkspaceOverrides}. Properties are the four {@link WORKSPACE_SCOPED_KEYS}
+ *  (runtime key names); `additionalProperties:false` rejects other keys. */
+const LEGACY_WORKSPACE_FLAT_SCHEMA = buildFlatSchema(WORKSPACE_SCOPED_KEYS as readonly FieldDef['runtimeKey'][]);
 
 const validateWorkspace = ajv.compile(WORKSPACE_SETTINGS_JSON_SCHEMA);
+/** Validates a legacy flat workspace document (pre-#792 format with runtime keys at root). */
+const validateWorkspaceFlat = ajv.compile(LEGACY_WORKSPACE_FLAT_SCHEMA);
+
+/** Detect a legacy flat workspace doc: a non-null, non-array object with at least one
+ *  workspace-scoped runtime key at the top level (e.g. `previewTarget`). The grouped doc's
+ *  top-level keys are group names (`preview`, `editor`, `lsp`) — never runtime keys — so
+ *  the two shapes are unambiguous; `{}` is treated as grouped (valid, empty partial). */
+function isWorkspaceLegacyFlat(parsed: unknown): boolean {
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  return Object.keys(parsed as Record<string, unknown>).some((k) => WORKSPACE_SCOPED_KEY_SET.has(k));
+}
 
 /**
- * Serialize a `Partial<Settings>` of workspace overrides to a pretty-printed JSON string.
- * Only the four {@link WORKSPACE_SCOPED_KEYS} are emitted, in their canonical order; keys not
- * present in `overrides` are omitted. An object with no scoped keys serializes to `{}`.
+ * Serialize a `Partial<Settings>` of workspace overrides to a pretty-printed JSON string
+ * using the grouped `group.docKey` shape (#792). Only the four {@link WORKSPACE_SCOPED_KEYS}
+ * are emitted, grouped by their {@link SETTINGS_FIELDS} namespace; keys not present in
+ * `overrides` are omitted. An object with no scoped keys serializes to `{}`.
  */
 export function workspaceOverridesToJsonDoc(overrides: Partial<Settings>): string {
-  const out: Record<string, unknown> = {};
-  for (const k of WORKSPACE_SCOPED_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(overrides, k)) {
-      out[k as string] = overrides[k as keyof Settings];
-    }
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const f of SETTINGS_FIELDS) {
+    if (!WORKSPACE_SCOPED_KEY_SET.has(f.runtimeKey as string)) continue;
+    if (!Object.prototype.hasOwnProperty.call(overrides, f.runtimeKey)) continue;
+    (out[f.group] ??= {})[f.docKey] = overrides[f.runtimeKey as keyof Settings];
   }
   return JSON.stringify(out, null, 2);
 }
@@ -273,6 +318,8 @@ export function workspaceOverridesToJsonDoc(overrides: Partial<Settings>): strin
  * Parse and schema-validate a workspace settings.json document, returning either a
  * `Partial<Settings>` of only the recognized scoped keys present, or structured diagnostics.
  *
+ * Accepts both the grouped `group.docKey` shape (#792) and the legacy flat runtime-key shape
+ * (pre-#792), so an old hand-saved or tool-generated document is never silently broken.
  * Mirrors `jsonDocToSettings` in error-ordering and the `previewTarget`/`isEmitTarget` guard.
  */
 export function jsonDocToWorkspaceOverrides(
@@ -284,27 +331,49 @@ export function jsonDocToWorkspaceOverrides(
   } catch (err) {
     return { errors: [{ message: (err as Error).message }] };
   }
-  if (!validateWorkspace(parsed)) {
-    // Surface field-specific errors before structural root errors (additionalProperties),
-    // exactly as jsonDocToSettings does.
-    const ordered = [...(validateWorkspace.errors ?? [])].sort(
-      (a, b) => (a.instancePath ? 0 : 1) - (b.instancePath ? 0 : 1),
-    );
-    return { errors: ordered.map((e) => ({ message: formatError(e) })) };
-  }
-  // Extract only the recognized scoped keys present in the validated document.
-  const obj = parsed as Record<string, unknown>;
-  const out: Partial<Settings> = {};
-  for (const k of WORKSPACE_SCOPED_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(obj, k)) {
-      (out as Record<string, unknown>)[k as string] = obj[k as string];
+
+  // Detect and handle a legacy flat workspace document (pre-#792: runtime keys at the top level).
+  // A grouped document's top-level keys are group names (preview, editor, lsp) — never runtime
+  // keys — so the two shapes are unambiguous (same approach as isLegacyFlat for user settings).
+  if (isWorkspaceLegacyFlat(parsed)) {
+    if (!validateWorkspaceFlat(parsed)) {
+      const ordered = [...(validateWorkspaceFlat.errors ?? [])].sort(
+        (a, b) => (a.instancePath ? 0 : 1) - (b.instancePath ? 0 : 1),
+      );
+      return { errors: ordered.map((e) => ({ message: formatError(e) })) };
     }
+    const obj = parsed as Record<string, unknown>;
+    const out: Partial<Settings> = {};
+    for (const k of WORKSPACE_SCOPED_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(obj, k)) {
+        (out as Record<string, unknown>)[k as string] = obj[k as string];
+      }
+    }
+    if ('previewTarget' in out && !isEmitTarget(out.previewTarget)) {
+      return { errors: [{ message: `previewTarget: unknown emit target "${String(out.previewTarget)}"` }] };
+    }
+    return { overrides: out };
   }
-  // previewTarget guard: mirror the user-scope path — open string in the leaf schema so validate
-  // against the live emit-target registry (same predicate coercePreviewTarget uses).
-  if ('previewTarget' in out && !isEmitTarget(out.previewTarget)) {
-    return { errors: [{ message: `previewTarget: unknown emit target "${String(out.previewTarget)}"` }] };
+
+  // New grouped format (#792): validate with the grouped workspace schema.
+  if (!validateWorkspace(parsed)) {
+    return { errors: sortedValidationErrors(validateWorkspace.errors ?? []) };
   }
+  // Extract recognized scoped keys from the grouped document using the SETTINGS_FIELDS table,
+  // translating group.docKey → runtimeKey so the output is always flat runtime keys.
+  const obj = parsed as Record<string, Record<string, unknown>>;
+  const out: Partial<Settings> = {};
+  for (const f of SETTINGS_FIELDS) {
+    if (!WORKSPACE_SCOPED_KEY_SET.has(f.runtimeKey as string)) continue;
+    const group = obj[f.group];
+    if (group === undefined || group === null || typeof group !== 'object') continue;
+    if (!Object.prototype.hasOwnProperty.call(group, f.docKey)) continue;
+    (out as Record<string, unknown>)[f.runtimeKey] = group[f.docKey];
+  }
+  // previewTarget guard: open string in the leaf schema, so validate against the live emit-target
+  // registry (same predicate coercePreviewTarget uses) via the shared helper.
+  const ptErrors = rejectBadPreviewTarget(out);
+  if (ptErrors) return { errors: ptErrors };
   return { overrides: out };
 }
 
@@ -337,6 +406,31 @@ function formatError(e: ErrorObject): string {
     ? e.instancePath.replace(/^\//, '')
     : (e.params as { additionalProperty?: string }).additionalProperty ?? '';
   return where ? `${where}: ${e.message}` : (e.message ?? 'invalid value');
+}
+
+/**
+ * Sort AJV errors so field-specific errors (instancePath set) surface before structural root errors
+ * (additionalProperties, whose instancePath is empty) and format them into diagnostic objects. This
+ * ordering is shared by `jsonDocToSettings` and `jsonDocToWorkspaceOverrides`; extracting it here
+ * guarantees the two converters can never drift.
+ */
+function sortedValidationErrors(ajvErrors: ErrorObject[]): Array<{ message: string; line?: number }> {
+  return [...ajvErrors]
+    .sort((a, b) => (a.instancePath ? 0 : 1) - (b.instancePath ? 0 : 1))
+    .map((e) => ({ message: formatError(e) }));
+}
+
+/**
+ * Reject a validated partial settings object whose `previewTarget` is not in the live emit-target
+ * registry. Returns a one-item diagnostics array when the value is invalid, `null` when it's absent
+ * or valid. Shared by `jsonDocToSettings` and `jsonDocToWorkspaceOverrides` so the message text is
+ * guaranteed identical across both paths and the predicate (`isEmitTarget`) is applied once.
+ */
+function rejectBadPreviewTarget(out: Partial<Settings>): Array<{ message: string }> | null {
+  if ('previewTarget' in out && !isEmitTarget(out.previewTarget)) {
+    return [{ message: `previewTarget: unknown emit target "${String(out.previewTarget)}"` }];
+  }
+  return null;
 }
 
 /** Detect a legacy FLAT document: a plain object with at least one top-level key that is a runtime
@@ -390,22 +484,18 @@ export function jsonDocToSettings(
   if (!validate(parsed)) {
     // Surface field-specific errors (a bad enum/range on `theme`, `fontSize`, …) before structural
     // root errors (additionalProperties), so the first diagnostic points at the offending field.
-    const ordered = [...(validate.errors ?? [])].sort(
-      (a, b) => (a.instancePath ? 0 : 1) - (b.instancePath ? 0 : 1),
-    );
-    return { errors: ordered.map((e) => ({ message: formatError(e) })) };
+    return { errors: sortedValidationErrors(validate.errors ?? []) };
   }
   const doc = flattenDoc(parsed, flat);
   // previewTarget and aiBaseUrl are deliberately open `string`s in the schema (a dynamic, backend-seeded
   // target must validate), so the schema gate alone lets through values loadSettings() would later drop —
   // the live↔reload divergence (#734). Re-apply the load path's accept-set here so what applies == what survives.
   //
-  // previewTarget: VALIDATE against the LIVE EMIT_TARGETS (the same predicate coercePreviewTarget uses).
-  // An out-of-registry target is a typo or a removed target; reject it with a diagnostic rather than
-  // applying a value that the next reload silently snaps back to csharp.
-  if ('previewTarget' in doc && !isEmitTarget(doc.previewTarget)) {
-    return { errors: [{ message: `previewTarget: unknown emit target "${String(doc.previewTarget)}"` }] };
-  }
+  // previewTarget: VALIDATE against the LIVE EMIT_TARGETS via the shared helper (same predicate
+  // coercePreviewTarget uses). An out-of-registry target is a typo or a removed target; reject it with
+  // a diagnostic rather than applying a value that the next reload silently snaps back to csharp.
+  const ptErrors = rejectBadPreviewTarget(doc);
+  if (ptErrors) return { errors: ptErrors };
   // Re-inject the live secret so a JSON edit can never clear or overwrite the encrypted key.
   const next: Settings = { ...current, ...doc, aiApiKey: current.aiApiKey };
   // aiBaseUrl: COERCE empty → default, exactly as loadSettings() does on read (`.length > 0`, no trim),

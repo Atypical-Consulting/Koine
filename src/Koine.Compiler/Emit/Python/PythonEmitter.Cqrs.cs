@@ -30,7 +30,8 @@ public sealed partial class PythonEmitter
         var context = ContextOf(ns);
         IReadOnlyList<Member> sourceMembers = ReadModelSourceMembers(context, rm.SourceType, emit.Index);
         var translator = new PythonExpressionTranslator(
-            emit.Index, sourceMembers, emit.EnumMemberToType, typeMapper, context, memberReceiver: "src");
+            emit.Index, sourceMembers, emit.EnumMemberToType, typeMapper, context, memberReceiver: "src",
+            regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var name = PythonNaming.ToPascalCase(rm.Name);
         var sourceName = PythonNaming.ToPascalCase(rm.SourceType);

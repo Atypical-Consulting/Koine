@@ -695,7 +695,7 @@ export function init(hooks: IdeHooks = {}): () => void {
       return;
     }
     if (!folder) return; // cancelled
-    await workspace.openFolderPath(folder);
+    await workspace.openFolderPath(folder, { userInitiated: true });
   }
 
   // ADDITIVE multi-root open (the explorer's "Add folder" affordance): pick a folder and union its
@@ -733,6 +733,13 @@ export function init(hooks: IdeHooks = {}): () => void {
     editor,
     explorer,
     setStatus,
+    // Non-clobbering notification for a user-initiated open of an empty folder (#817): flash the
+    // message transiently then restore the status back to the current diagnostics so the healthy
+    // compiled status is not permanently overwritten (unlike the global red setStatus path).
+    notify: (text) => {
+      setStatus(text, 'error');
+      setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 2000);
+    },
     refreshDirtyIndicator,
     showDiagnostics: (uri) => editorSession.showDiagnostics(uri),
     invalidateDocViews: () => controller.invalidateDocViews(),
@@ -957,7 +964,7 @@ export function init(hooks: IdeHooks = {}): () => void {
   // layer returns to Home (never stranding the user) and, for a vanished folder/handle, offers to
   // forget the entry there.
   async function openRecentFolder(path: string): Promise<void> {
-    const result = await workspace.openFolderPath(path);
+    const result = await workspace.openFolderPath(path, { userInitiated: true });
     if (result.ok) return;
     hooks.onOpenRecentFailed?.(path, result.reason);
   }

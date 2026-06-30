@@ -44,7 +44,7 @@ public sealed partial class PythonEmitter
         // The translator sees the members plus the synthetic `id` field (so an invariant or computed
         // member referencing the identity resolves), mirroring the TS emitter's scope augmentation.
         var scopeMembers = entity.Members.Append(new Member("id", new TypeRef(entity.IdentityName), null)).ToList();
-        var translator = new PythonExpressionTranslator(emit.Index, scopeMembers, emit.EnumMemberToType, typeMapper, ContextOf(ns));
+        var translator = new PythonExpressionTranslator(emit.Index, scopeMembers, emit.EnumMemberToType, typeMapper, ContextOf(ns), regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var sb = new StringBuilder();
         sb.Append("@dataclass(eq=False)\n");

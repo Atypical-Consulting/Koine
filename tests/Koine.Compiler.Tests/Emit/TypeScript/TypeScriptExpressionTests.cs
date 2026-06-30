@@ -65,6 +65,28 @@ public class TypeScriptExpressionTests
 
     private static string Translate(Expr expr) => Make().Translate(expr);
 
+    // A translator carrying the neutral RegexMatchTimeoutMs author intent (#812), so a `matches`
+    // guard threads the budget into the runtime `regexMatch` seam's advisory `timeoutMs?` argument.
+    private static TypeScriptExpressionTranslator MakeWithTimeout(int milliseconds)
+    {
+        var result = new KoineCompiler().Compile(Source, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var model = result.Model!;
+        var semantic = new SemanticModel(model);
+        ModelIndex index = semantic.Index;
+
+        var order = model.Contexts
+            .SelectMany(c => c.AllTypeDecls())
+            .OfType<ValueObjectDecl>()
+            .First(v => v.Name == "Order");
+
+        var typeMapper = new TypeScriptTypeMapper(index);
+        return new TypeScriptExpressionTranslator(
+            index, order.Members, index.EnumMemberToType, typeMapper, context: "Shop",
+            regexMatchTimeoutMs: milliseconds);
+    }
+
     // A translator whose member scope is an entity (rather than the Order value object), so a
     // selector projecting to an entity type — e.g. distinctBy(i => i) over List<CartLine> — is
     // reachable. CartLine/Basket are child/root entities of the Cart aggregate above (issue #712).
@@ -294,5 +316,58 @@ public class TypeScriptExpressionTests
         email.ShouldContain("regexMatch(/^[^@]+@[^@]+$/, raw)");
         email.ShouldMatch(@"import \{[^}]*\bregexMatch\b[^}]*\} from '[^']*runtime'");
         email.ShouldNotContain("/^[^@]+@[^@]+$/.test(");
+    }
+
+    [Fact]
+    public void Matches_with_timeout_threads_the_budget_into_the_regexMatch_call()
+    {
+        // Key set (#812) ⇒ the call site passes the author's ms budget as the seam's advisory third arg.
+        var expr = new MatchExpr(Id("code"), "[A-Z]{3}");
+        MakeWithTimeout(250).Translate(expr).ShouldBe("regexMatch(/[A-Z]{3}/, code, 250)");
+    }
+
+    [Fact]
+    public void Runtime_regexMatch_seam_is_byte_identical_when_the_timeout_is_unset()
+    {
+        // Key unset ⇒ the runtime is the historical two-arg seam, byte-for-byte.
+        TsRuntime.SourceFor(null).ShouldBe(TsRuntime.Source);
+        TsRuntime.SourceFor(null).ShouldContain("export function regexMatch(pattern: RegExp, input: string): boolean {");
+    }
+
+    [Fact]
+    public void Runtime_regexMatch_seam_gains_an_advisory_timeout_param_when_the_key_is_set()
+    {
+        // Key set ⇒ the seam carries `timeoutMs?` and documents that stock RegExp ignores it (advisory),
+        // while the two-arg historical signature is gone.
+        var runtime = TsRuntime.SourceFor(250);
+        runtime.ShouldContain("export function regexMatch(pattern: RegExp, input: string, timeoutMs?: number): boolean {");
+        runtime.ShouldContain("ADVISORY");
+        runtime.ShouldContain("regexMatchTimeoutMs");
+        runtime.ShouldNotContain("export function regexMatch(pattern: RegExp, input: string): boolean {");
+    }
+
+    [Fact]
+    public void Matches_invariant_with_timeout_emits_the_bounded_call_and_runtime_seam()
+    {
+        // End-to-end through TsEmitterOptions: the call site passes the budget and the once-emitted
+        // runtime exposes the advisory `timeoutMs?` parameter.
+        const string src =
+            """
+            context C {
+              value Email {
+                raw: String
+                invariant raw matches /^[^@]+@[^@]+$/  "invalid email address"
+              }
+            }
+            """;
+        var emitter = new TypeScriptEmitter(TsEmitterOptions.Empty with { RegexMatchTimeoutMs = 250 });
+        var result = new KoineCompiler().Compile(src, emitter);
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var email = result.Files.Single(f => f.RelativePath.EndsWith("Email.ts")).Contents;
+        email.ShouldContain("regexMatch(/^[^@]+@[^@]+$/, raw, 250)");
+
+        var runtime = result.Files.Single(f => f.RelativePath.EndsWith("runtime.ts")).Contents;
+        runtime.ShouldContain("timeoutMs?: number");
     }
 }

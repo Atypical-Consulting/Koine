@@ -551,7 +551,7 @@ describe('createSettingsPage', () => {
     expect(cbWs.onChange).not.toHaveBeenCalled();
   });
 
-  it('switching to Workspace scope re-seeds the editor with the flat workspace doc', () => {
+  it('switching to Workspace scope re-seeds the editor with the grouped workspace doc (#792)', () => {
     const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
     // Pre-seed an override so the workspace doc is non-empty.
     localStorage.setItem(WS_OVERRIDES_KEY, JSON.stringify({ previewTarget: 'typescript' }));
@@ -564,10 +564,14 @@ describe('createSettingsPage', () => {
     // Switch to Workspace scope.
     scopeBtn(header, 'workspace')!.click();
 
-    // Editor now shows the flat workspace override doc.
+    // Editor now shows the GROUPED workspace override doc (#792: same key shape as user scope).
     const wsText = EditorView.findFromDOM(body.querySelector('.cm-editor') as HTMLElement)!.state.doc.toString();
-    expect(wsText).toContain('"previewTarget"');
+    // Grouped format: group name at the top level, docKey nested inside.
+    expect(wsText).toContain('"preview"');
+    expect(wsText).toContain('"target"');
     expect(wsText).toContain('"typescript"');
+    // Flat runtime keys must NOT appear (no 'previewTarget' at top level).
+    expect(wsText).not.toContain('"previewTarget"');
     expect(wsText).not.toContain('appearance');
     // A scope switch alone must NOT persist anything.
     vi.advanceTimersByTime(500);

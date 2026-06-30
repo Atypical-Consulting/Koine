@@ -103,21 +103,28 @@ internal static class EmitterRegistry
     private static EmitterOptions ToEmitterOptions(TargetOptions options, bool emitSourceMaps = false, bool referenceOnly = false)
     {
         var hasLayers = options.Layers is { Count: > 0 };
+        // Mirror the ToCSharpOptions convention (issue #831): `regexMode = inline` is the default
+        // and must be treated as absent so an all-inline-explicit config still maps to
+        // EmitterOptions.Empty — same rule as ToCSharpOptions, which short-circuits on
+        // !isSourceGeneratedRegex rather than on RegexMode is null.
+        var isDefaultRegexMode = options.RegexModeText is null
+            || string.Equals(options.RegexModeText, "inline", StringComparison.OrdinalIgnoreCase);
         if (options.NamespaceMap.Count == 0 && options.InstantMode is null && options.Layout is null
             && !emitSourceMaps && !referenceOnly
             && !hasLayers && !options.ApplicationMediatr && options.ApplicationMapping is null
-            && options.RegexMatchTimeoutMs is null)
+            && options.RegexMatchTimeoutMs is null && isDefaultRegexMode)
         {
             return EmitterOptions.Empty;
         }
 
         // The layer selector (issues #128/#129) is carried as a comma-separated string on the neutral
         // bag, mirroring instantMode/layout; the C# provider parses it back into a layer set. The
-        // Application sub-options (MediatR shape, mapping mode) and the regex match-timeout budget
-        // (issue #794/#641) ride alongside.
+        // Application sub-options (MediatR shape, mapping mode), the regex match-timeout budget
+        // (issue #794/#641), and the regex-evaluation mode (issue #831) ride alongside.
         var layers = hasLayers ? string.Join(",", options.Layers!) : null;
         return new EmitterOptions(
             options.NamespaceMap, options.InstantMode, options.Layout, emitSourceMaps, referenceOnly,
-            layers, options.ApplicationMediatr, options.ApplicationMapping, options.RegexMatchTimeoutMs);
+            layers, options.ApplicationMediatr, options.ApplicationMapping, options.RegexMatchTimeoutMs,
+            options.RegexModeText);
     }
 }

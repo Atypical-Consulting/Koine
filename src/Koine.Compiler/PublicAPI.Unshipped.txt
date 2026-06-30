@@ -20,7 +20,10 @@ Koine.Compiler.Emit.EmitterOptions.ReferenceOnly.get -> bool
 Koine.Compiler.Emit.EmitterOptions.ReferenceOnly.init -> void
 *REMOVED*Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false) -> void
 *REMOVED*Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null) -> void
-Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null, int? RegexMatchTimeoutMs = null) -> void
+*REMOVED*Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null, int? RegexMatchTimeoutMs = null) -> void
+Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null, int? RegexMatchTimeoutMs = null, string? RegexMode = null) -> void
+Koine.Compiler.Emit.EmitterOptions.RegexMode.get -> string?
+Koine.Compiler.Emit.EmitterOptions.RegexMode.init -> void
 Koine.Compiler.Emit.EmitterOptions.Layers.get -> string?
 Koine.Compiler.Emit.EmitterOptions.Layers.init -> void
 Koine.Compiler.Emit.EmitterOptions.ApplicationMediatr.get -> bool
