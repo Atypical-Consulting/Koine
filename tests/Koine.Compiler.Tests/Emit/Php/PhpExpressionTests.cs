@@ -180,14 +180,14 @@ public class PhpExpressionTests
     {
         // `price >= 0` where price is Decimal -> price->compareTo(new Decimal('0')) >= 0
         var expr = new BinaryExpr(BinaryOp.Ge, Id("price"), Int("0"));
-        Translate(expr).ShouldBe("($this->price->compareTo(new \\Koine\\Runtime\\Decimal('0')) >= 0)");
+        Translate(expr).ShouldBe("($this->price->compareTo((new \\Koine\\Runtime\\Decimal('0'))) >= 0)");
     }
 
     [Fact]
     public void Decimal_less_than_lowers_to_compareTo()
     {
         var expr = new BinaryExpr(BinaryOp.Lt, Id("price"), Int("0"));
-        Translate(expr).ShouldBe("($this->price->compareTo(new \\Koine\\Runtime\\Decimal('0')) < 0)");
+        Translate(expr).ShouldBe("($this->price->compareTo((new \\Koine\\Runtime\\Decimal('0'))) < 0)");
     }
 
     [Fact]
@@ -217,6 +217,24 @@ public class PhpExpressionTests
     }
 
     [Fact]
+    public void Int_literal_left_of_Decimal_arithmetic_parenthesises_new_chaining()
+    {
+        // When an int literal is on the LEFT of Decimal arithmetic, WriteAsDecimal wraps it in
+        // `new \Koine\Runtime\Decimal('n')` which then becomes the method RECEIVER.
+        // Without surrounding parentheses, bare `new X(...)->m()` is PHP 8.4+-only syntax;
+        // the emitter targets PHP 8.1+, so the construction must be parenthesised.
+        // All four arithmetic operators go through the same code path — verify all.
+        Translate(new BinaryExpr(BinaryOp.Add, Int("5"), Id("price")))
+            .ShouldBe("(new \\Koine\\Runtime\\Decimal('5'))->add($this->price)");
+        Translate(new BinaryExpr(BinaryOp.Sub, Int("5"), Id("price")))
+            .ShouldBe("(new \\Koine\\Runtime\\Decimal('5'))->sub($this->price)");
+        Translate(new BinaryExpr(BinaryOp.Mul, Int("5"), Id("price")))
+            .ShouldBe("(new \\Koine\\Runtime\\Decimal('5'))->mul($this->price)");
+        Translate(new BinaryExpr(BinaryOp.Div, Int("5"), Id("price")))
+            .ShouldBe("(new \\Koine\\Runtime\\Decimal('5'))->div($this->price)");
+    }
+
+    [Fact]
     public void Decimal_arithmetic_wraps_int_operand_in_decimal()
     {
         // `price * quantity` (Decimal * Int) -> wrap the Int operand as a Decimal expression.
@@ -230,7 +248,7 @@ public class PhpExpressionTests
         // The invariant-guard path: `price >= 0` negated must still use compareTo, not `<`.
         var t = Make();
         var expr = new BinaryExpr(BinaryOp.Ge, Id("price"), Int("0"));
-        t.TranslateNegated(expr).ShouldBe("$this->price->compareTo(new \\Koine\\Runtime\\Decimal('0')) < 0");
+        t.TranslateNegated(expr).ShouldBe("$this->price->compareTo((new \\Koine\\Runtime\\Decimal('0'))) < 0");
     }
 
     // =========================================================================
@@ -421,7 +439,7 @@ public class PhpExpressionTests
         var all = new CallExpr(Id("lines"), "all", new Expr[] { new LambdaExpr("m", pred) });
         var any = new CallExpr(Id("lines"), "any", new Expr[] { new LambdaExpr("m", pred) });
         var none = new CallExpr(Id("lines"), "none", new Expr[] { new LambdaExpr("m", pred) });
-        const string cmp = "($m->amount->compareTo(new \\Koine\\Runtime\\Decimal('0')) > 0)";
+        const string cmp = "($m->amount->compareTo((new \\Koine\\Runtime\\Decimal('0'))) > 0)";
         Translate(all).ShouldBe($"array_reduce($this->lines, fn($carry, $m) => $carry && {cmp}, true)");
         Translate(any).ShouldBe($"array_reduce($this->lines, fn($carry, $m) => $carry || {cmp}, false)");
         Translate(none).ShouldBe($"!array_reduce($this->lines, fn($carry, $m) => $carry || {cmp}, false)");
