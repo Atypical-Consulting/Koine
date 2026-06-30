@@ -76,6 +76,14 @@ export interface WorkspaceControllerDeps {
 
   /** Action-feedback pill writer (ide.ts's editorSession.setStatus). */
   setStatus(text: string, kind: 'green' | 'error'): void;
+  /**
+   * Non-clobbering notification for a user-initiated open of an empty folder (#817). Unlike
+   * `setStatus('…', 'error')`, which permanently overwrites a healthy compiled status, this channel
+   * is transient — ide.ts implements it as a brief flash that restores the current diagnostics, so
+   * the "no .koi files in folder" message surfaces without clobbering the workspace that is already
+   * loaded. Optional: when absent the user-initiated path stays silent (same as the boot path).
+   */
+  notify?(text: string): void;
   /** Refresh the global unsaved-indicator (title bullet + pill) from the current dirty count. */
   refreshDirtyIndicator(): void;
 
@@ -134,8 +142,17 @@ export interface WorkspaceController {
   entriesCache(): FsEntry[];
 
   // --- open paths ---
-  /** Load + open every .koi under `folder` as one workspace; activate the first by relPath. */
-  openFolderPath(folder: string, opts?: { recent?: boolean }): Promise<OpenResult>;
+  /**
+   * Load + open every .koi under `folder` as one workspace; activate the first by relPath.
+   *
+   * `opts.userInitiated` — set to `true` when a user gesture (folder picker / Recent click)
+   * directly caused this call. When the folder turns out to be empty AND a workspace is already
+   * loaded, the controller emits a non-clobbering notification (via `deps.notify`) instead of
+   * staying silent, so the user understands why the open appeared to be a no-op. Leaving it
+   * absent/`false` preserves the #627 silent path (boot/late re-scans must not clobber a healthy
+   * compiled status).
+   */
+  openFolderPath(folder: string, opts?: { recent?: boolean; userInitiated?: boolean }): Promise<OpenResult>;
   /**
    * ADDITIVE: union a second folder's .koi files into the current workspace as a new root (appended to
    * {@link rootsList}), WITHOUT closing existing buffers or changing the active one. An already-present
@@ -501,7 +518,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   // Load + open every .koi file under `folder` as one workspace. Shared by the toolbar
   // button (which picks a folder first) and the welcome screen's recent-folder items
   // (which pass a known path directly).
-  async function openFolderPath(folder: string, opts: { recent?: boolean } = {}): Promise<OpenResult> {
+  async function openFolderPath(folder: string, opts: { recent?: boolean; userInitiated?: boolean } = {}): Promise<OpenResult> {
     let files: KoiFile[];
     try {
       files = await platform.listKoiFiles(folder);
@@ -511,12 +528,28 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       return { ok: false, reason: 'unreadable' };
     }
     if (!files.length) {
-      // Only surface the global red error when no model is currently loaded. A populated workspace
-      // means this empty listing is a spurious/late re-scan (e.g. the materialized-example race in
-      // #627, where compile-green renders first and an empty folder scan arrives after); raising the
-      // error here would clobber the healthy status with a false "no .koi files in folder". The
-      // emptiness is checked BEFORE the reset below, so `buffers` still reflects the loaded workspace.
-      if (buffers.size === 0) deps.setStatus('no .koi files in folder', 'error');
+      // Three cases for an empty listing (#817 / #627):
+      //
+      //  1. No workspace loaded (buffers.size === 0): the user (or boot) opened a genuinely empty
+      //     folder and there is nothing to clobber — use the global red status so the empty-folder
+      //     condition is unmissable. This is unchanged from before.
+      //
+      //  2. Workspace loaded + user-initiated call: the user explicitly picked a folder (toolbar
+      //     button / Recent click) that turned out to be empty. Surface a non-clobbering notification
+      //     via deps.notify so the open does NOT look like a silent no-op, while the healthy compiled
+      //     status of the already-loaded workspace is preserved (#817).
+      //
+      //  3. Workspace loaded + NOT user-initiated: a boot/late automatic re-scan (e.g. the
+      //     materialized-example race in #627 where compile-green renders first and an empty folder
+      //     scan arrives after). Stay completely silent so the false "no .koi files in folder" error
+      //     never clobbers the healthy status. This is the original #627 guard, preserved exactly.
+      //
+      // The check runs BEFORE the reset below so `buffers` still reflects the loaded workspace.
+      if (buffers.size === 0) {
+        deps.setStatus('no .koi files in folder', 'error');
+      } else if (opts.userInitiated) {
+        deps.notify?.('no .koi files in folder');
+      }
       return { ok: false, reason: 'empty' };
     }
 

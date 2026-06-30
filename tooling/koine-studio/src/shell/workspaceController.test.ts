@@ -403,6 +403,49 @@ describe('createWorkspaceController — opening a folder', () => {
     expect(ws.buffers.size).toBe(1);
   });
 
+  it('user-initiated open of an empty folder with a workspace loaded calls the notify dep and returns reason:empty (#817)', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    const notify = vi.fn();
+    const setStatus = vi.fn();
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { setStatus, notify }));
+    await ws.openFolderPath(ROOT_A, { recent: false }); // load a healthy workspace (buffers.size === 1)
+    expect(ws.buffers.size).toBe(1);
+    setStatus.mockClear();
+
+    // The user explicitly picks a folder that happens to contain no .koi files.
+    platform.listKoiFiles = vi.fn(async () => []);
+    const result = await ws.openFolderPath(ROOT, { recent: false, userInitiated: true });
+
+    expect(result).toEqual({ ok: false, reason: 'empty' });
+    // The notify dep was called so the user gets non-clobbering feedback.
+    expect(notify).toHaveBeenCalledWith('no .koi files in folder');
+    // The global red setStatus must NOT fire (it would clobber the healthy compiled status).
+    expect(setStatus).not.toHaveBeenCalledWith('no .koi files in folder', 'error');
+    // The loaded workspace is untouched — the empty branch returns before the reset/clear.
+    expect(ws.buffers.size).toBe(1);
+  });
+
+  it('non-user-initiated empty open with a workspace loaded emits NO notification (the #627 silent path preserved, #817)', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    const notify = vi.fn();
+    const setStatus = vi.fn();
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { setStatus, notify }));
+    await ws.openFolderPath(ROOT_A, { recent: false }); // load a healthy workspace
+    setStatus.mockClear();
+
+    // A boot/late re-scan calls openFolderPath WITHOUT userInitiated (the #627 path).
+    platform.listKoiFiles = vi.fn(async () => []);
+    const result = await ws.openFolderPath(ROOT, { recent: false }); // userInitiated absent/false
+
+    expect(result).toEqual({ ok: false, reason: 'empty' });
+    // Neither notify NOR the global red setStatus should fire — stay silent, as today (#627 guard).
+    expect(notify).not.toHaveBeenCalled();
+    expect(setStatus).not.toHaveBeenCalledWith('no .koi files in folder', 'error');
+    expect(ws.buffers.size).toBe(1);
+  });
+
   test('openWorkspaceWith1File materializes a 1-file workspace and opens it', async () => {
     const platform = new FakePlatform();
     const trace: string[] = [];

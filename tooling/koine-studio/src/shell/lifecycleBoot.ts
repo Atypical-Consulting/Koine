@@ -38,7 +38,7 @@ export interface LifecycleBootDeps {
   seed: string;
   importSharedWorkspace(files: { relPath: string; text: string }[], active?: string): Promise<void>;
   openWorkspaceWith1File(text: string): Promise<void>;
-  openFolderPath(folder: string, opts?: { recent?: boolean }): Promise<{ ok: boolean }>;
+  openFolderPath(folder: string, opts?: { recent?: boolean; userInitiated?: boolean }): Promise<{ ok: boolean }>;
   /** Host capability: may the cold-boot ladder silently re-open this persisted last-workspace token? */
   isAutoRestorableToken(token: string): Promise<boolean>;
   /** Open the host's persistent default workspace (workspace.openDefaultWorkspaceFlow). */
