@@ -11,12 +11,21 @@
     <Deterministic>true</Deterministic>
   </PropertyGroup>
 
-  <!-- Version / packaging metadata, shared so the CLI tool packs consistently. -->
+  <!-- Version / packaging metadata, shared so the CLI tool packs consistently.
+       <Version> and <InformationalVersion> are bumped automatically by release-please from
+       Conventional Commits (see adr/0002-conventional-commits-and-automated-semver.md) — don't
+       hand-edit them, and don't remove the x-release-please-version markers.
+       0.17.12 here is a transient pre-bootstrap value, not a target: the bootstrap-baseline job in
+       release-please.yml overwrites it with the real history-derived version on the first push to
+       main after this lands (nothing publishes off a bare push to main, only a v* tag does, so this
+       value is never shipped). It deliberately isn't 0.0.0 — VersionInfoTests /
+       CapabilitiesTests guard against that exact value as the "informational version wasn't wired
+       up" sentinel. -->
   <PropertyGroup>
-    <Version>0.17.12</Version>
+    <Version>0.17.12</Version> <!-- x-release-please-version -->
     <!-- Carries the real version into the assembly so the CLI version command can read it
          (the four-part AssemblyVersion otherwise reports 1.0.0.0). -->
-    <InformationalVersion>0.17.12</InformationalVersion>
+    <InformationalVersion>0.17.12</InformationalVersion> <!-- x-release-please-version -->
     <Authors>Philippe Matray</Authors>
     <Company>Atypical Consulting</Company>
     <RepositoryUrl>https://github.com/Atypical-Consulting/Koine</RepositoryUrl>
