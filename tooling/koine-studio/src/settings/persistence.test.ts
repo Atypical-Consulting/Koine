@@ -903,6 +903,37 @@ describe('workspace-scoped settings overrides', () => {
     effectiveSettings(user, key);
     expect(user.wordWrap).toBe(false);
   });
+
+  // --- migration proof: pre-#792 flat localStorage blobs load cleanly (#792) --
+  // The internal koine.studio.wsOverrides.* blob format is always flat runtime keys (previewTarget,
+  // formatOnSave, wordWrap, lspTrace). The #792 change only touches the JSON façade (the editor UI);
+  // the storage format is intentionally unchanged, so legacy blobs written before #792 continue to
+  // load correctly via loadWorkspaceOverrides without any storage migration.
+
+  test('pre-#792 flat blob (all four scoped fields) loads correctly after the grouped JSON façade change (#792)', () => {
+    const key = workspaceKeyOf(['/work/legacy']);
+    // Simulate a blob that was written by any pre-#792 code path (always flat runtime keys).
+    localStorage.setItem(
+      `koine.studio.wsOverrides.${key}`,
+      JSON.stringify({ previewTarget: 'typescript', formatOnSave: false, wordWrap: true, lspTrace: 'verbose' }),
+    );
+    const overrides = loadWorkspaceOverrides(key);
+    expect(overrides.previewTarget).toBe('typescript');
+    expect(overrides.formatOnSave).toBe(false);
+    expect(overrides.wordWrap).toBe(true);
+    expect(overrides.lspTrace).toBe('verbose');
+  });
+
+  test('a partial pre-#792 flat blob (only previewTarget) loads correctly (#792)', () => {
+    const key = workspaceKeyOf(['/work/legacy-partial']);
+    localStorage.setItem(`koine.studio.wsOverrides.${key}`, JSON.stringify({ previewTarget: 'python' }));
+    const overrides = loadWorkspaceOverrides(key);
+    expect(overrides.previewTarget).toBe('python');
+    // The absent fields must not appear — no phantom overrides injected.
+    expect(overrides.formatOnSave).toBeUndefined();
+    expect(overrides.wordWrap).toBeUndefined();
+    expect(overrides.lspTrace).toBeUndefined();
+  });
 });
 
 describe('replaceWorkspaceOverrides', () => {
