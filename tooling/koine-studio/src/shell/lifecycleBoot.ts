@@ -67,6 +67,10 @@ export interface LifecycleBootDeps {
     reviewStoreSub(): void;
     autoSave(): void;
     exportMenuDismiss(): void;
+    /** Remove the global keydown listeners for Save (⌘S/Ctrl-S) and Undo/Redo registered
+     *  directly in ide.tsx init(). Without this, repeated init()/teardown cycles in vitest
+     *  accumulate stale window listeners. (#789) */
+    editorKeys(): void;
   };
 }
 
@@ -203,6 +207,7 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
       deps.disposers.autoSave();
       unsubRouteIntent();
       deps.disposers.exportMenuDismiss();
+      deps.disposers.editorKeys();
     },
   };
 }
