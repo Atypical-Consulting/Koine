@@ -10,6 +10,7 @@
 import { initEdgeResizer } from '@/shell/resize';
 import { loadLayout, saveLayout, type LayoutState } from '@/shell/layoutStore';
 import { type LayoutActions } from '@/shell/layoutCommands';
+import { domById } from '@/shared/domById';
 
 export interface LayoutControllerDeps {
   /** The #split grid host whose data-* attributes drive the layout reflow + the resizers' target. */
@@ -31,15 +32,9 @@ export interface LayoutController {
   dispose(): void;
 }
 
-function el<T extends HTMLElement>(id: string): T {
-  const node = document.getElementById(id);
-  if (!node) throw new Error(`missing #${id}`);
-  return node as T;
-}
-
 export function createLayoutController(deps: LayoutControllerDeps): LayoutController {
   const { splitEl } = deps;
-  const filesSect = el<HTMLElement>('rail-files');
+  const filesSect = domById<HTMLElement>('rail-files');
 
   // View-only state (orientation / panel side / side-rail side / whether the split is open and on which
   // uri), persisted in localStorage via layoutStore — it NEVER round-trips into the .koi model. On boot
@@ -74,7 +69,7 @@ export function createLayoutController(deps: LayoutControllerDeps): LayoutContro
     const inspectorOnRight = sideRail === 'right';
     disposeInspectorResizer = initEdgeResizer({
       target: splitEl,
-      handle: el('split-resizer'),
+      handle: domById('split-resizer'),
       cssVar: '--koi-inspector-w',
       anchor: inspectorOnRight ? 'right' : 'left',
       storageKey: 'koine.studio.splitWidth',
@@ -83,7 +78,7 @@ export function createLayoutController(deps: LayoutControllerDeps): LayoutContro
     // Left sidebar width — the single rail (Files / Explorer / Overview / Documentation).
     disposeLeftRailResizer = initEdgeResizer({
       target: splitEl,
-      handle: el('leftrail-resizer'),
+      handle: domById('leftrail-resizer'),
       cssVar: '--koi-leftrail-w',
       anchor: inspectorOnRight ? 'left' : 'right',
       storageKey: 'koine.studio.leftrailWidth',

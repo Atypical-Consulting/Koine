@@ -48,6 +48,14 @@ internal static class CSharpNaming
     /// </summary>
     public static string EscapeIdentifier(string name) => Escape(name);
 
+    /// <summary>
+    /// Escapes <paramref name="content"/> for placement inside a C# verbatim string (<c>@"…"</c>) by
+    /// doubling each <c>"</c>. Shared by the two emit sites for a <c>matches</c> pattern — the inline
+    /// <c>Regex.IsMatch(@"…")</c> guard and the <c>[GeneratedRegex(@"…")]</c> attribute — so the two regex
+    /// modes always carry the byte-identical literal (issue #795).
+    /// </summary>
+    public static string VerbatimContent(string content) => content.Replace("\"", "\"\"");
+
     /// <summary>Prefixes a C# reserved keyword with <c>@</c> so it is a valid identifier.</summary>
     private static string Escape(string identifier) =>
         Keywords.Contains(identifier) ? "@" + identifier : identifier;

@@ -199,6 +199,39 @@ internal sealed class CSharpExpressionTranslator
     // binding name (`__sum0`, `__sum1`, …), so sibling folds in one expression never collide.
     private int _sumCounter;
 
+    // Issue #795: under RegexMode.SourceGenerated, each `matches` guard rendered for the current type is
+    // lowered to a cached `[GeneratedRegex]` partial-method call (`<Name>().IsMatch(target)`) instead of the
+    // inline `Regex.IsMatch(...)`. The translator collects the (method name, pattern, timeout) of every such
+    // method so the value-object / entity emitter can append the partial-method declarations and stamp the
+    // containing type `partial`. The index that names each method (`<PascalField>Regex<i>`) is just the
+    // collection count, so multiple `matches` in one type get distinct, deterministic names; the translator is
+    // constructed once per type, so the collection naturally resets per type.
+    private readonly List<(string MethodName, string Pattern, int TimeoutMs)> _generatedRegexMethods = new();
+
+    // Only the value-object and entity emitters DECLARE the collected methods and stamp the type `partial`, so
+    // only they opt this translator into the source-generated form (via EnableGeneratedRegexForm). A `matches`
+    // rendered through any other translator (specs, services, application validators, …) keeps the inline form,
+    // which is always valid — otherwise it would call a partial method nothing ever declares (issue #795).
+    private bool _emitGeneratedRegexForm;
+
+    /// <summary>
+    /// The cached <c>[GeneratedRegex]</c> methods collected while rendering the current type's guards under
+    /// <see cref="RegexMode.SourceGenerated"/> (issue #795). Empty under the default <see cref="RegexMode.Inline"/>
+    /// — and when <see cref="EnableGeneratedRegexForm"/> was never called — so the value-object / entity emitter
+    /// emits no partial methods and stamps no <c>partial</c> modifier.
+    /// </summary>
+    public IReadOnlyList<(string MethodName, string Pattern, int TimeoutMs)> GeneratedRegexMethods => _generatedRegexMethods;
+
+    /// <summary>
+    /// Opts this translator into the source-generated <c>matches</c> form (issue #795): when
+    /// <see cref="RegexMode.SourceGenerated"/> is active, a <c>matches</c> guard lowers to a cached
+    /// <c>[GeneratedRegex]</c> partial-method call and the method is collected in <see cref="GeneratedRegexMethods"/>
+    /// for the emitter to declare. ONLY the value-object and entity emitters call this, because only they emit the
+    /// partial-method declarations and stamp the containing type <c>partial</c>; every other translator keeps the
+    /// always-valid inline form.
+    /// </summary>
+    public void EnableGeneratedRegexForm() => _emitGeneratedRegexForm = true;
+
     /// <param name="index">The model index, used to classify/resolve type references.</param>
     /// <param name="members">The members of the type being emitted.</param>
     /// <param name="enumMemberToType">Map from an enum member name to its owning enum type name.</param>
@@ -523,15 +556,7 @@ internal sealed class CSharpExpressionTranslator
                 break;
 
             case MatchExpr m:
-                // raw matches /pat/  ->  Regex.IsMatch(raw, @"pat", RegexOptions.None, TimeSpan.FromMilliseconds(N))
-                // The match timeout bounds catastrophic backtracking so an author-supplied pattern in a
-                // value-object/entity guard cannot run unbounded on adversarial input (a ReDoS sink, #641);
-                // a timed-out match throws a contained RegexMatchTimeoutException rather than hanging.
-                sb.Append("Regex.IsMatch(");
-                Write(m.Target, mode, sb);
-                sb.Append(", @\"").Append(m.Pattern.Replace("\"", "\"\""))
-                    .Append("\", RegexOptions.None, TimeSpan.FromMilliseconds(")
-                    .Append(_options.RegexMatchTimeoutMs).Append("))");
+                WriteMatch(m, mode, sb);
                 break;
 
             case GuardExpr g:
@@ -694,6 +719,48 @@ internal sealed class CSharpExpressionTranslator
         // Unknown identifier: emit as-is (best effort).
         sb.Append(name);
     }
+
+    /// <summary>
+    /// Renders a <c>matches</c> guard. Under the default <see cref="RegexMode.Inline"/> this is the bounded
+    /// <c>Regex.IsMatch(target, @"pat", RegexOptions.None, TimeSpan.FromMilliseconds(N))</c>: the match
+    /// timeout bounds catastrophic backtracking so an author-supplied pattern in a value-object/entity guard
+    /// cannot run unbounded on adversarial input (a ReDoS sink, #641); a timed-out match throws a contained
+    /// <c>RegexMatchTimeoutException</c> rather than hanging. Under the opt-in
+    /// <see cref="RegexMode.SourceGenerated"/> AND on a translator opted in via
+    /// <see cref="EnableGeneratedRegexForm"/> (the value-object / entity emitters), it instead calls a cached,
+    /// allocation-free <c>[GeneratedRegex]</c> partial method (<c>&lt;Name&gt;().IsMatch(target)</c>) compiled
+    /// once ahead of time — the SAME pattern, <c>RegexOptions.None</c> and timeout, so match behavior is
+    /// identical; only the evaluation strategy differs (issue #795). The collected method is recorded for the
+    /// emitter to declare and to stamp the containing type <c>partial</c>. Every other translator keeps the
+    /// inline form, so a <c>matches</c> in a spec/service/validator never calls an undeclared method.
+    /// </summary>
+    private void WriteMatch(MatchExpr m, NameMode mode, StringBuilder sb)
+    {
+        if (_emitGeneratedRegexForm && _options.RegexMode == RegexMode.SourceGenerated)
+        {
+            var methodName = CSharpNaming.EscapeIdentifier(MatchBaseName(m.Target) + "Regex" + _generatedRegexMethods.Count);
+            _generatedRegexMethods.Add((methodName, m.Pattern, _options.RegexMatchTimeoutMs));
+            sb.Append(methodName).Append("().IsMatch(");
+            Write(m.Target, mode, sb);
+            sb.Append(')');
+            return;
+        }
+
+        sb.Append("Regex.IsMatch(");
+        Write(m.Target, mode, sb);
+        sb.Append(", @\"").Append(CSharpNaming.VerbatimContent(m.Pattern))
+            .Append("\", RegexOptions.None, TimeSpan.FromMilliseconds(")
+            .Append(_options.RegexMatchTimeoutMs).Append("))");
+    }
+
+    /// <summary>
+    /// The PascalCase base for a generated regex method name, taken from the matched target: the field name
+    /// when the target is a bare identifier (<c>raw matches /…/</c> → <c>Raw</c>), else a generic
+    /// <c>Match</c> fallback for a compound target. Combined with the per-type counter and run through
+    /// <see cref="CSharpNaming.EscapeIdentifier"/>, this yields a deterministic, collision-free method name.
+    /// </summary>
+    private static string MatchBaseName(Expr target) =>
+        target is IdentifierExpr id ? CSharpNaming.ToPascalCase(id.Name) : "Match";
 
     private void WriteMemberAccess(MemberAccessExpr ma, NameMode mode, StringBuilder sb)
     {
