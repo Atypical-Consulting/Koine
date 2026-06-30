@@ -4,12 +4,13 @@ using Koine.Compiler.Emit.CSharp;
 namespace Koine.Compiler.Tests;
 
 /// <summary>
-/// Issue #794: the C# <c>matches</c>-invariant ReDoS-guard match timeout (#641) is user-settable via
-/// <c>targets.csharp.regexMatchTimeoutMs</c>, so a present-but-invalid value must be rejected before it
-/// reaches the generated <c>TimeSpan.FromMilliseconds(N)</c> — a non-integer would silently disarm the
-/// guard (falling back to 1000 ms), and <c>0</c> / <c>&lt; -1</c> would throw at the generated code's
-/// OWN runtime. Validation is two-layered: a friendly hard-error in <see cref="BuildSettings.TryResolve"/>
-/// via <c>TargetOptions.TryValidate</c> (the same check coverage and the LSP preview share), plus a
+/// Issue #794/#811: the C# <c>matches</c>-invariant ReDoS-guard match timeout (#641) is user-settable
+/// via <c>targets.csharp.regexMatchTimeoutMs</c> (config) or <c>--regex-match-timeout-ms</c> (CLI flag,
+/// #811). A present-but-invalid value must be rejected before it reaches the generated
+/// <c>TimeSpan.FromMilliseconds(N)</c> — a non-integer would silently disarm the guard (falling back to
+/// 1000 ms), and <c>0</c> / <c>&lt; -1</c> would throw at the generated code's OWN runtime. Validation
+/// is two-layered: a friendly hard-error in <see cref="BuildSettings.TryResolve"/> via
+/// <c>TargetOptions.TryValidate</c> (the same check coverage and the LSP preview share), plus a
 /// defensive guard in the C# emitter for a programmatically-supplied value (MCP / Studio / tests).
 /// </summary>
 public sealed class BuildRegexTimeoutTests : IDisposable
@@ -77,6 +78,48 @@ public sealed class BuildRegexTimeoutTests : IDisposable
         error.ShouldContain("regexMatchTimeoutMs");
         error.ShouldContain("positive");
         error.ShouldContain("'soon'");
+    }
+
+    // ── Issue #811: --regex-match-timeout-ms CLI flag ──────────────────────────────────────────
+
+    [Fact]
+    public void Flag_timeout_resolves_when_no_config_present()
+    {
+        // Flag-only: no koine.config, --regex-match-timeout-ms 250 → the plan carries 250.
+        new BuildSettings { Path = "x.koi", RegexMatchTimeoutMs = "250" }
+            .TryResolve(out var plan, out var error)
+            .ShouldBeTrue(error);
+        plan.Options.RegexMatchTimeoutMs.ShouldBe(250);
+    }
+
+    [Fact]
+    public void Flag_wins_over_config_key()
+    {
+        // Flag 5000 + config 1000 → 5000 (flag wins per the flag ?? config precedence).
+        var configPath = Path.Combine(Path.GetTempPath(), $"koine-{Guid.NewGuid():N}.config");
+        File.WriteAllText(configPath, "targets.csharp.regexMatchTimeoutMs = 1000\n");
+        _tempFiles.Add(configPath);
+
+        new BuildSettings { Path = "x.koi", Config = configPath, RegexMatchTimeoutMs = "5000" }
+            .TryResolve(out var plan, out var error)
+            .ShouldBeTrue(error);
+        plan.Options.RegexMatchTimeoutMs.ShouldBe(5000);
+    }
+
+    [Theory]
+    [InlineData("0", "'0'")]
+    [InlineData("abc", "'abc'")]
+    public void Invalid_flag_value_is_a_hard_error(string flagValue, string expectedSnippet)
+    {
+        // Invalid flag value goes through the same TargetOptions.TryValidate path and yields the
+        // same friendly diagnostic as an invalid config value — no second validation code path.
+        new BuildSettings { Path = "x.koi", RegexMatchTimeoutMs = flagValue }
+            .TryResolve(out _, out var error)
+            .ShouldBeFalse();
+        error.ShouldNotBeNull();
+        error.ShouldContain("regexMatchTimeoutMs");
+        error.ShouldContain("positive");
+        error.ShouldContain(expectedSnippet);
     }
 
     [Fact]

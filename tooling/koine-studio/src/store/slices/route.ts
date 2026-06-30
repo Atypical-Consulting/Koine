@@ -1,4 +1,5 @@
 import type { StoreApi } from 'zustand/vanilla';
+import type { StartupView } from '@/settings/persistence';
 
 // Studio's two top-level destinations. Home is the start console; Editor is the IDE proper. They are
 // distinct, hash-backed routes so exactly one view mounts on load — which is what removes the historic
@@ -28,24 +29,36 @@ export function hashFromRoute(route: Route): string {
 }
 
 /**
- * Decide which view to mount on a cold load — **synchronously**, from the URL hash alone. This is
- * deliberately pure and IO-free: it must NOT await `openDefaultWorkspaceFlow` (or any probe). That
- * async gate is exactly what made the home overlay fade in over an already-painted editor (#368);
- * resolving the route up front, before first paint, is what removes the race rather than patching it.
+ * Decide which view to mount on a cold load — **synchronously**, pure and IO-free. The resolver must
+ * NOT read storage directly; its inputs are passed in so it remains trivially testable and the
+ * IO-free contract (what removed the #368 home-over-editor flash) is preserved.
  *
- * **Opening Studio always lands on Home.** Only an explicit `#/editor` deep-link (or a same-tab refresh
- * while in the editor) opens the editor; a `#model=…` share link also opens the editor but is
- * short-circuited upstream in `main.ts`, before this resolver. A previously-opened workspace no longer
- * auto-skips Home — the returning-user fast path is the one-click Resume control on Home, not an
- * automatic jump into the editor (#766). Everything else (``, `#/`, an unknown hash) → Home.
+ * Priority (highest first):
+ * 1. An explicit `#/editor` deep-link (or a same-tab refresh while in the editor) → editor.
+ * 2. A `#model=…` share link is short-circuited **upstream** in `main.ts` before this resolver runs.
+ * 3. If `opts.startupView === 'lastWorkspace'` AND `opts.hasWorkspace` → editor (opt-in auto-resume,
+ *    #770 "approach B"). Never opens the editor when there is no workspace to restore — that would
+ *    strand the user on a blank editor.
+ * 4. Everything else (`''`, `#/`, unknown hashes, or the default `'home'` setting) → home.
  *
- * Since #766 dropped the persisted-workspace input, the body now delegates straight to
- * {@link routeFromHash}. It is deliberately kept as the named boot-time seam — distinct from the
- * hash-vocabulary helper — so `main.ts` reads as "resolve the initial route" and any future startup
- * policy (e.g. an "On startup: Home vs Last workspace" setting, #766 approach B) has one obvious home.
+ * Callers that omit `opts` get the same always-Home behaviour as before #770, so existing callers
+ * and tests are unaffected.
+ *
+ * @param hash      The current `location.hash` value.
+ * @param opts      Optional startup-policy inputs. Omit to reproduce the always-Home behaviour.
+ * @param opts.startupView   The persisted preference (`loadSettings().startupView`).
+ * @param opts.hasWorkspace  Whether a workspace was previously opened (`hasPersistedWorkspace()`).
  */
-export function resolveInitialRoute(hash: string): Route {
-  return routeFromHash(hash);
+export function resolveInitialRoute(
+  hash: string,
+  opts?: { startupView?: StartupView; hasWorkspace?: boolean },
+): Route {
+  // Rule 1: an explicit #/editor deep-link always wins.
+  if (routeFromHash(hash) === 'editor') return 'editor';
+  // Rule 3: opt-in auto-resume — only when a workspace exists (never strand on a blank editor).
+  if (opts?.startupView === 'lastWorkspace' && opts.hasWorkspace) return 'editor';
+  // Rule 4: default → home.
+  return 'home';
 }
 
 export function createRouteSlice(

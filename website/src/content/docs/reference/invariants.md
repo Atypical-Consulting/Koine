@@ -245,12 +245,15 @@ discards it:
 The bound is configurable via the `koine.config` key
 [`targets.<target>.regexMatchTimeoutMs`](/Koine/guides/cli/#koineconfig) (default `1000` for C#): set a
 tighter bound for hostile-input value objects, or a looser one for a legitimately expensive pattern on
-trusted batch input. The value must be a **positive integer** number of milliseconds — `0` or any
-negative value is rejected at build time (`regexMatchTimeoutMs must be a positive integer (milliseconds);
-got '…'`), because for C# it would otherwise flow into the generated `TimeSpan.FromMilliseconds(N)` and
-throw at the *generated* code's own runtime. Disabling the bound is intentionally not supported — the
-whole point of the guard is to *have* one. A non-integer value is ignored (the emitter keeps its `1000`
-ms default for C#), matching how other malformed config keys are forward-compatibly skipped.
+trusted batch input. For a one-off override without editing the config, pass
+[`--regex-match-timeout-ms <ms>`](/Koine/guides/cli/#koine-build) on the command line — the flag wins over
+the config key for that invocation. The value must be a **positive integer** number of milliseconds — `0`
+or any negative value is rejected at build time (`regexMatchTimeoutMs must be a positive integer
+(milliseconds); got '…'`), because for C# it would otherwise flow into the generated
+`TimeSpan.FromMilliseconds(N)` and throw at the *generated* code's own runtime. Disabling the bound is
+intentionally not supported — the whole point of the guard is to *have* one. A non-integer value is
+likewise a hard error (the same diagnostic is raised) — unlike most config keys that are
+forward-compatibly skipped, a non-parseable timeout value would silently disarm the ReDoS guard.
 
 The generated TypeScript `regexMatch` helper is the seam to harden untrusted-input matching without
 touching every call site — replace its body with a linear-time engine (e.g. RE2) and every `matches`
@@ -303,11 +306,20 @@ bounded form, so output always compiles. It requires **C# 11+ / .NET 7+** (the `
 generator), which a default `net8.0`+ target satisfies. The other emitter targets are unaffected — their
 bounded forms in the table above are unchanged.
 
-:::note
-The mode is currently selected through the emitter API (`CSharpEmitterOptions.RegexMode`); a
-`targets.csharp.regexMode` `koine.config` key to toggle it from the CLI is a planned follow-up. Until then
-the default CLI/`koine build` output is the inline form.
-:::
+**Selecting the mode via `koine.config`.** Add `targets.csharp.regexMode = sourceGenerated` to opt in
+from the command line or CI (see [`targets.csharp.regexMode`](/Koine/guides/cli/#koineconfig)):
+
+```toml
+# koine.config
+target = csharp
+out = ./generated
+
+# opt in to the cached [GeneratedRegex] form for `matches` invariants (default: inline)
+targets.csharp.regexMode = sourceGenerated
+```
+
+The default is `inline`, so an unconfigured `koine build` produces byte-identical output. Any value other
+than `inline` or `sourceGenerated` is rejected at build time with a friendly diagnostic.
 
 ## 10.7 Conditional invariants (`when`)
 

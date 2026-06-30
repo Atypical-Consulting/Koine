@@ -50,13 +50,20 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
     /// byte-identical output. <c>instantMode = nodaTime</c> (case-insensitive) selects the NodaTime
     /// mode; anything else (incl. <c>dateTimeOffset</c> and absent) keeps the DateTimeOffset default.
     /// The <c>layout</c> key is accepted and currently a no-op (file-per-type is the only layout).
+    /// <c>regexMode = sourceGenerated</c> (case-insensitive) selects the <c>[GeneratedRegex]</c> form
+    /// (issue #831); anything else (incl. <c>inline</c> and absent) keeps the inline default. Both
+    /// absent/inline treat <see cref="EmitterOptions.RegexMode"/> as unset, so an unconfigured target
+    /// still maps to <see cref="CSharpEmitterOptions.Empty"/> when no other option is set.
     /// </summary>
     private static CSharpEmitterOptions ToCSharpOptions(EmitterOptions options)
     {
+        var isSourceGeneratedRegex = string.Equals(
+            options.RegexMode, "sourceGenerated", StringComparison.OrdinalIgnoreCase);
+
         if (options.NamespaceMap.Count == 0 && options.InstantMode is null && !options.EmitSourceMaps
             && !options.ReferenceOnly && options.Layers is null
             && !options.ApplicationMediatr && options.ApplicationMapping is null
-            && options.RegexMatchTimeoutMs is null)
+            && options.RegexMatchTimeoutMs is null && !isSourceGeneratedRegex)
         {
             return CSharpEmitterOptions.Empty;
         }
@@ -67,10 +74,11 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
         var mapping = string.Equals(options.ApplicationMapping, "mapperly", StringComparison.OrdinalIgnoreCase)
             ? CSharpMappingMode.Mapperly
             : CSharpMappingMode.Plain;
+        var regexMode = isSourceGeneratedRegex ? RegexMode.SourceGenerated : RegexMode.Inline;
         return new CSharpEmitterOptions(
             options.NamespaceMap, instant, options.EmitSourceMaps, options.ReferenceOnly,
             ParseLayers(options.Layers), options.ApplicationMediatr, mapping,
-            options.RegexMatchTimeoutMs ?? 1000);
+            options.RegexMatchTimeoutMs ?? 1000, regexMode);
     }
 
     /// <summary>

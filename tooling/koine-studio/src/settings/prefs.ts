@@ -24,6 +24,7 @@ import {
   type Settings,
   type AccentName,
   type PreviewTarget,
+  type StartupView,
 } from '@/settings/persistence';
 import { DIAGRAM_ZOOM_MIN, DIAGRAM_ZOOM_MAX } from '@/diagrams/diagramContract';
 import { setTheme } from '@/settings/theme';
@@ -640,6 +641,18 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     commit({ fontFamily: fontFamilyInput.value.trim() });
   });
 
+  // “On startup” (#770): which view to open on a cold boot (no explicit hash / share link). The
+  // default ‘home’ preserves the #766 always-Home behaviour; ‘lastWorkspace’ opts in to auto-resume.
+  // Applying on the next cold load only — no live re-route needed.
+  const startupViewSelect = select<StartupView>([
+    { value: 'home', label: 'Home screen' },
+    { value: 'lastWorkspace', label: 'Last workspace' },
+  ]);
+  startupViewSelect.addEventListener('change', () => {
+    const value = startupViewSelect.value as StartupView;
+    commit({ startupView: value });
+  });
+
   const appearancePanel = panel(
     'appearance',
     row('Theme', 'Light or dark surfaces across the whole studio.', themeSeg.el),
@@ -648,8 +661,13 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     row('Editor font', 'A CSS font-family for the editor. Blank uses the theme’s default monospace font.', fontFamilyInput),
     row(
       'Display name',
-      'The name your review comments are attributed to. Leave blank to show as “You”.',
+      'The name your review comments are attributed to. Leave blank to show as "You".',
       displayNameInput,
+    ),
+    row(
+      'On startup',
+      'Which view to open when Studio starts. "Last workspace" re-opens the editor automatically if a prior workspace exists.',
+      startupViewSelect,
     ),
   );
 
@@ -1614,6 +1632,7 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     reduceMotion.set(s.reduceMotion);
     displayNameInput.value = s.displayName;
     fontFamilyInput.value = s.fontFamily;
+    startupViewSelect.value = s.startupView;
     fontInput.value = String(s.fontSize);
     lineHeightInput.value = String(s.lineHeight);
     tabSizeInput.value = String(s.tabSize);
