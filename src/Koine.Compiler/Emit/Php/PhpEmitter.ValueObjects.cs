@@ -353,45 +353,30 @@ public sealed partial class PhpEmitter
             fields.Where(m => m.Type.Name is "Int" or "Decimal").Select(m => m.Name),
             StringComparer.Ordinal);
 
-        sb.Append('\n');
-        sb.Append(Indent).Append(@"public function multipliedBy(\Koine\Runtime\Decimal $factor): self").Append('\n');
-        sb.Append(Indent).Append("{\n");
-
-        WriteFieldwiseSelf(sb, fields, m =>
+        // multipliedBy() and dividedBy() — scalar scaling (mirrors the WriteQuantityOps pattern).
+        foreach (var (methodName, decimalOp) in new[] { ("multipliedBy", "mul"), ("dividedBy", "div") })
         {
-            var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
-            if (!numeric.Contains(m.Name))
+            sb.Append('\n');
+            sb.Append(Indent).Append("public function ").Append(methodName)
+              .Append(@"(\Koine\Runtime\Decimal $factor): self").Append('\n');
+            sb.Append(Indent).Append("{\n");
+
+            WriteFieldwiseSelf(sb, fields, m =>
             {
-                return "$this->" + prop;
-            }
+                var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
+                if (!numeric.Contains(m.Name))
+                {
+                    return "$this->" + prop;
+                }
 
-            // Decimal: use ->mul(); Int: cast to Decimal via runtime for consistency, then multiply.
-            return m.Type.Name == "Decimal"
-                ? "$this->" + prop + "->mul($factor)"
-                : "(new \\Koine\\Runtime\\Decimal($this->" + prop + "))->mul($factor)";
-        });
+                // Decimal: use the runtime op directly; Int: cast to Decimal via runtime for consistency.
+                return m.Type.Name == "Decimal"
+                    ? "$this->" + prop + "->" + decimalOp + "($factor)"
+                    : "(new \\Koine\\Runtime\\Decimal($this->" + prop + "))->" + decimalOp + "($factor)";
+            });
 
-        sb.Append(Indent).Append("}\n");
-
-        sb.Append('\n');
-        sb.Append(Indent).Append(@"public function dividedBy(\Koine\Runtime\Decimal $factor): self").Append('\n');
-        sb.Append(Indent).Append("{\n");
-
-        WriteFieldwiseSelf(sb, fields, m =>
-        {
-            var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
-            if (!numeric.Contains(m.Name))
-            {
-                return "$this->" + prop;
-            }
-
-            // Decimal: use ->div(); Int: cast to Decimal via runtime for consistency, then divide.
-            return m.Type.Name == "Decimal"
-                ? "$this->" + prop + "->div($factor)"
-                : "(new \\Koine\\Runtime\\Decimal($this->" + prop + "))->div($factor)";
-        });
-
-        sb.Append(Indent).Append("}\n");
+            sb.Append(Indent).Append("}\n");
+        }
     }
 
     // -------------------------------------------------------------------------
