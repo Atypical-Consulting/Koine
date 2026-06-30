@@ -1042,15 +1042,17 @@ export function buildCanvas(
   };
 }
 
-/** The localStorage key for the domain canvas zoom level (not workspace-scoped — matches the old renderer). */
-const ZOOM_PERSIST_KEY = 'koi-domain-diagram';
+/** Per-canvas-type localStorage keys for persisted zoom levels (not workspace-scoped). */
+const DOMAIN_ZOOM_KEY = 'koi-domain-diagram';
+const CONTEXT_MAP_ZOOM_KEY = 'koi-context-map';
+const EVENT_FLOW_ZOOM_KEY = 'koi-event-flow';
 
 /**
  * Mount the interactive chrome around a built canvas: left-drag panning, a zoom control bar (−/%/+/fit),
  * Ctrl/⌘+wheel zoom, and the Outline minimap. Returns a teardown that detaches them. Kept out of
  * buildCanvas so the model stays unit-testable; the visual chrome is verified in the running studio.
  */
-function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly = false): { dispose: () => void; fit: () => void; refit: () => void; applyInitialZoom: () => void } {
+function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly = false, zoomKey: string = DOMAIN_ZOOM_KEY): { dispose: () => void; fit: () => void; refit: () => void; applyInitialZoom: () => void } {
   const { Outline } = mx;
   const graph = handle.graph;
   // `readOnly` (the context-map canvas) is never an authoring surface regardless of the global editing
@@ -1099,7 +1101,7 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   // not to whatever scale the readout happened to save first. We don't zoom-to it here: the domain canvas
   // applies it via `applyInitialZoom()` and the read-only canvases auto-fit, so a construction-time
   // restore would be immediately overwritten either way.
-  const saved = loadDiagramZoom(ZOOM_PERSIST_KEY);
+  const saved = loadDiagramZoom(zoomKey);
 
   // --- control bar -----------------------------------------------------------
   const controls = document.createElement('div');
@@ -1113,11 +1115,10 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   const syncPct = (): void => {
     const p = Math.round(graph.getView().scale * 100);
     pct.textContent = `${p}%`;
-    // Persist ONLY for the authoring (domain) canvas. ZOOM_PERSIST_KEY is a single shared key, and the
-    // read-only context-map / event-flow canvases auto-fit on open (they never restore a saved zoom) — so
-    // letting them write here would pollute the domain canvas's remembered zoom and override its default
-    // (#762). They still paint their readout above; they just don't save.
-    if (!readOnly) saveDiagramZoom(ZOOM_PERSIST_KEY, p);
+    // Each canvas type persists zoom under its own key (zoomKey). The readOnly save-guard that was here
+    // before was only needed because all canvases shared one key ('koi-domain-diagram'); now that every
+    // canvas gets its own key, every canvas can save and restore its zoom independently (#769).
+    saveDiagramZoom(zoomKey, p);
   };
 
   // Open the domain canvas at a PREDICTABLE zoom (#762): the per-diagram saved zoom if there is one, else
@@ -1127,15 +1128,29 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   // pizzeria). `syncPct()` runs LAST so the `%` readout always equals the resulting `graph.getView().scale`,
   // making `+`/`−`/wheel monotonic from a known starting point. Guarded like `fit()` against a
   // not-yet-measurable DOM. `render()` calls this where it used to call `chrome.fit()`.
+  // Read-only canvases (context-map, event-flow): if a saved zoom exists restore it; otherwise fit the
+  // content to the viewport (the default "see everything" experience). Domain canvas: saved ?? default.
   const applyInitialZoom = (): void => {
-    const target = saved ?? getDefaultCanvasZoom();
-    try {
-      graph.zoomTo(target / 100, false);
-      (graph as unknown as { center?: (h?: boolean, v?: boolean) => void }).center?.(true, true);
-    } catch {
-      /* container not measurable yet — ignore; the readout still syncs to the real scale below */
+    if (saved !== null) {
+      try {
+        graph.zoomTo(saved / 100, false);
+        (graph as unknown as { center?: (h?: boolean, v?: boolean) => void }).center?.(true, true);
+      } catch {
+        /* container not measurable yet — ignore; the readout still syncs to the real scale below */
+      }
+      syncPct();
+    } else if (readOnly) {
+      fit();
+    } else {
+      const target = getDefaultCanvasZoom();
+      try {
+        graph.zoomTo(target / 100, false);
+        (graph as unknown as { center?: (h?: boolean, v?: boolean) => void }).center?.(true, true);
+      } catch {
+        /* container not measurable yet */
+      }
+      syncPct();
     }
-    syncPct();
   };
 
   const button = (glyph: string, label: string, onClick: () => void): HTMLButtonElement => {
@@ -1338,7 +1353,7 @@ export function createMaxGraphRenderer(): DiagramRenderer {
       // panGraph reparents every non-SVG child of its container into a shifted preview div while panning
       // (e.g. dragging the minimap), which would yank the controls/minimap to the top-left. Keeping them on
       // the outer wrapper makes them immune. `root` is position:relative (scss) so they still anchor to it.
-      const chrome = mountChrome(mx, handle, root);
+      const chrome = mountChrome(mx, handle, root, false, DOMAIN_ZOOM_KEY);
       const dispose = (): void => {
         chrome.dispose();
         handle.dispose();
@@ -1445,7 +1460,7 @@ export async function renderContextMapGraph(
 
   const handle = buildCanvas(mx, surface, graph, undefined, { readOnly: true });
   if (graph.edges.length > 0) runContextMapLayout(mx, handle.graph); // override buildCanvas's row with a topology rank
-  const chrome = mountChrome(mx, handle, root, true);
+  const chrome = mountChrome(mx, handle, root, true, CONTEXT_MAP_ZOOM_KEY);
 
   // Hover tooltips (kind + shared types / ACL) — best-effort chrome; a measure-less headless DOM may skip it.
   if (hooks.tooltip) {
@@ -1475,7 +1490,8 @@ export async function renderContextMapGraph(
   if (isCurrent()) {
     container.replaceChildren(root);
     handle.graph.getView().revalidate(); // re-render now that the surface is in the live DOM
-    chrome.fit(); // frame the laid-out content into the viewport
+    // Restore saved zoom when available; fall back to fit() when nothing is saved (#769).
+    chrome.applyInitialZoom();
     return { dispose };
   }
   dispose();
@@ -1743,7 +1759,7 @@ export async function renderEventFlowGraph(
   // Read-only chrome (zoom bar + minimap, no domain authoring controls), but the cards themselves ARE
   // movable: let a drag that starts on a card MOVE it while a drag on empty space pans (the read-only chrome
   // would otherwise pan over a card and the card could never be dragged).
-  const chrome = mountChrome(mx, handle, root, true);
+  const chrome = mountChrome(mx, handle, root, true, EVENT_FLOW_ZOOM_KEY);
   const panning = handle.graph.getPlugin('PanningHandler') as unknown as { ignoreCell?: boolean } | undefined;
   if (panning) panning.ignoreCell = false;
 
@@ -1755,7 +1771,8 @@ export async function renderEventFlowGraph(
   if (isCurrent()) {
     container.replaceChildren(root);
     handle.graph.getView().revalidate(); // re-render now that the surface is in the live DOM
-    chrome.fit(); // frame the laid-out content into the viewport
+    // Restore saved zoom when available; fall back to fit() when nothing is saved (#769).
+    chrome.applyInitialZoom();
     return { dispose };
   }
   dispose();
