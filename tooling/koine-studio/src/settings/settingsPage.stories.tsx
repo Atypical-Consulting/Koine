@@ -3,6 +3,7 @@ import { expect, waitFor } from 'storybook/test';
 import { EditorView } from '@codemirror/view';
 import { createSettingsPage, type SettingsPageHandle, type SettingsEditorMode } from '@/settings/settingsPage';
 import type { PrefsCallbacks } from '@/settings/prefs';
+import { WORKSPACE_OVERRIDE_KEY_PREFIX } from '@/settings/persistence';
 
 // The gear-launched Settings center PAGE (#center-panel-settings) — a transient center view, NOT a modal.
 // createSettingsPage is a vanilla DOM factory: it mounts a Visual/JSON segmented toggle into the page
@@ -45,7 +46,7 @@ function mountSettingsPage(mode: SettingsEditorMode, cb: PrefsCallbacks = callba
         // If this is a workspace-capable story, clear any stale workspace overrides blob too.
         if (cb.workspaceKey) {
           const wsKey = cb.workspaceKey();
-          if (wsKey) localStorage.removeItem(`koine.studio.wsOverrides.${wsKey}`);
+          if (wsKey) localStorage.removeItem(WORKSPACE_OVERRIDE_KEY_PREFIX + wsKey);
         }
       } catch {
         // private-mode / quota: the factory simply falls back to its default representation.

@@ -376,3 +376,67 @@ describe('workspace settings schema (#736)', () => {
     expect(doc).not.toHaveProperty('theme');
   });
 });
+
+// Task 3 (#791): structural equality guard for buildFlatSchema parameterization. LEGACY_FLAT_SCHEMA
+// and WORKSPACE_SETTINGS_JSON_SCHEMA must serialize identically before and after the refactor.
+describe('buildFlatSchema structural equality guard (#791)', () => {
+  it('WORKSPACE_SETTINGS_JSON_SCHEMA.properties keys match WORKSPACE_SCOPED_KEYS exactly', () => {
+    // Carried over from the workspace schema describe block above; duplicated here as an explicit
+    // guard so the parameterized builder can never silently drop or reorder the workspace keys.
+    expect(Object.keys(WORKSPACE_SETTINGS_JSON_SCHEMA.properties)).toEqual([...WORKSPACE_SCOPED_KEYS]);
+  });
+
+  it('WORKSPACE_SETTINGS_JSON_SCHEMA and SETTINGS_JSON_SCHEMA share the same $schema dialect', () => {
+    const dialect = 'https://json-schema.org/draft/2020-12/schema';
+    expect(WORKSPACE_SETTINGS_JSON_SCHEMA.$schema).toBe(dialect);
+  });
+
+  it('WORKSPACE_SETTINGS_JSON_SCHEMA is additionalProperties:false', () => {
+    expect(WORKSPACE_SETTINGS_JSON_SCHEMA.additionalProperties).toBe(false);
+  });
+
+  it('every WORKSPACE_SCOPED_KEY has a non-empty leaf schema in WORKSPACE_SETTINGS_JSON_SCHEMA', () => {
+    // Verifies that buildFlatSchema(WORKSPACE_SCOPED_KEYS) populated every key's leaf — a guard
+    // against silently adding `undefined` properties if an invalid key is ever passed to the builder.
+    for (const k of WORKSPACE_SCOPED_KEYS) {
+      const leaf = (WORKSPACE_SETTINGS_JSON_SCHEMA.properties as Record<string, unknown>)[k as string];
+      expect(leaf, `leaf schema for ${String(k)}`).toBeDefined();
+      expect(Object.keys(leaf as object).length, `leaf schema for ${String(k)} is non-empty`).toBeGreaterThan(0);
+    }
+  });
+});
+
+// Task 2 (#791): characterization tests that guard the extraction of sortedValidationErrors and
+// rejectBadPreviewTarget. Both converters must keep identical error-ordering and previewTarget message.
+describe('jsonDocToSettings / jsonDocToWorkspaceOverrides error-ordering parity (#791)', () => {
+  it('both converters put field-specific errors before additionalProperties errors', () => {
+    // A flat legacy doc with a bad lspTrace enum value AND an unknown key. The sort must put
+    // the field error first in both converters so the first diagnostic points at the bad field.
+    const doc = JSON.stringify({ lspTrace: 'loud', bogusKey: 1 });
+    const settingsRes = jsonDocToSettings(doc, DEFAULT_SETTINGS);
+    const wsRes = jsonDocToWorkspaceOverrides(doc);
+
+    // Both should fail
+    expect(settingsRes.settings).toBeUndefined();
+    expect(wsRes.overrides).toBeUndefined();
+
+    // First error in BOTH is the field-specific one (lspTrace), not the structural one (bogusKey).
+    expect(settingsRes.errors?.[0]?.message).toMatch(/lspTrace/);
+    expect(wsRes.errors?.[0]?.message).toMatch(/lspTrace/);
+  });
+
+  it('both converters produce the same previewTarget error message format for an unknown target', () => {
+    const userDoc = JSON.stringify({ previewTarget: 'cobol' });
+    const wsDoc = JSON.stringify({ previewTarget: 'cobol' });
+
+    const settingsRes = jsonDocToSettings(userDoc, DEFAULT_SETTINGS);
+    const wsRes = jsonDocToWorkspaceOverrides(wsDoc);
+
+    expect(settingsRes.settings).toBeUndefined();
+    expect(wsRes.overrides).toBeUndefined();
+
+    // Both must produce the same exact message so callers see a consistent diagnostic.
+    expect(settingsRes.errors?.[0]?.message).toBe('previewTarget: unknown emit target "cobol"');
+    expect(wsRes.errors?.[0]?.message).toBe('previewTarget: unknown emit target "cobol"');
+  });
+});

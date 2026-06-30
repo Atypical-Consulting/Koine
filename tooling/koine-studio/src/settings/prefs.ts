@@ -198,7 +198,7 @@ export function segmented<T extends string>(
   ariaLabel: string,
   options: readonly { value: T; label: string }[],
   onSelect: (value: T) => void,
-): { el: HTMLElement; set(value: T): void } {
+): { el: HTMLElement; set(value: T): void; setDisabled(disabled: boolean): void } {
   const group = document.createElement('div');
   group.className = 'koi-segmented';
   group.setAttribute('role', 'radiogroup');
@@ -227,6 +227,18 @@ export function segmented<T extends string>(
       b.setAttribute('aria-checked', String(checked));
       b.tabIndex = checked ? 0 : -1;
     }
+  };
+
+  // setDisabled enables/disables the WHOLE group at once: aria-disabled on the group wrapper signals
+  // that every option is inert, is-disabled styles it visually, and per-button disabled blocks clicks so
+  // aria-disabled isn't the only guard. All three mirror the browser's built-in disabled affordances for
+  // a group — arrow nav already skips .disabled buttons, so a fully-disabled group stays keyboard-inert.
+  // This replaces the previously open-coded 3-line block in makeScopeBinding.applyEnabled and in the
+  // JSON scope toggle (settingsPage.tsx), centralizing the single shared concern here.
+  const setDisabled = (disabled: boolean): void => {
+    group.setAttribute('aria-disabled', String(disabled));
+    group.classList.toggle('is-disabled', disabled);
+    for (const b of buttons) b.disabled = disabled;
   };
 
   // Move selection (and focus) to `target` and commit it — the shared path for both a click and an arrow
@@ -258,7 +270,7 @@ export function segmented<T extends string>(
   // real selection during populate); the first option carries the roving tabindex until then.
   if (buttons.length > 0) buttons[0].tabIndex = 0;
 
-  return { el: group, set };
+  return { el: group, set, setDisabled };
 }
 
 /**
@@ -429,10 +441,7 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     // Reflect "no workspace" unambiguously: disable the toggle's buttons and mark the group, so the
     // control keeps its place in the layout while clearly inert (and the state stays testable).
     function applyEnabled(): void {
-      const enabled = wsKey() !== null;
-      scopeSeg.el.setAttribute('aria-disabled', String(!enabled));
-      scopeSeg.el.classList.toggle('is-disabled', !enabled);
-      for (const b of scopeSeg.el.querySelectorAll<HTMLButtonElement>('.koi-seg')) b.disabled = !enabled;
+      scopeSeg.setDisabled(wsKey() === null);
     }
 
     scopedControls.push({
