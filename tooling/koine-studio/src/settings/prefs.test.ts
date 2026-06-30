@@ -1029,3 +1029,60 @@ describe('Settings → Editor: default canvas zoom (#762)', () => {
     expect(loadSettings().defaultCanvasZoom).toBe(10);
   });
 });
+
+describe('Settings → Appearance: "On startup" control (#770)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  const startupSelect = () =>
+    document.querySelector<HTMLSelectElement>('#koi-set-on-startup')!;
+
+  it('renders a select in the Appearance panel defaulting to "home"', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, startupView: 'home' });
+    openPrefs();
+    const sel = startupSelect();
+    expect(sel).not.toBeNull();
+    expect(sel.closest('#koi-settings-panel-appearance')).not.toBeNull();
+    expect(sel.value).toBe('home');
+  });
+
+  it('reflects a stored "lastWorkspace" on open', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, startupView: 'lastWorkspace' });
+    openPrefs();
+    expect(startupSelect().value).toBe('lastWorkspace');
+  });
+
+  it('has an associated <label> for accessibility', () => {
+    openPrefs();
+    const sel = startupSelect();
+    const label = document.querySelector<HTMLLabelElement>(`label[for="${sel.id}"]`);
+    expect(label?.textContent).toContain('On startup');
+  });
+
+  it('persists "lastWorkspace" and fires onChange when selecting Last workspace', () => {
+    const onChange = vi.fn();
+    openPrefs({ onChange });
+    const sel = startupSelect();
+    sel.value = 'lastWorkspace';
+    sel.dispatchEvent(new Event('change'));
+    expect(loadSettings().startupView).toBe('lastWorkspace');
+    expect(onChange).toHaveBeenCalled();
+  });
+
+  it('persists "home" when switching back to Home screen', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, startupView: 'lastWorkspace' });
+    const onChange = vi.fn();
+    openPrefs({ onChange });
+    const sel = startupSelect();
+    sel.value = 'home';
+    sel.dispatchEvent(new Event('change'));
+    expect(loadSettings().startupView).toBe('home');
+    expect(onChange).toHaveBeenCalled();
+  });
+});
