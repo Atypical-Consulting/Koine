@@ -11,10 +11,11 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createEditorSession, type EditorSessionDeps } from '@/shell/editorSession';
 import type { CodeAction, CompletionItem, HoverResult, Location, LspDiagnostic, Range } from '@/lsp/lsp';
+import { domById } from '@/shared/domById';
 
 // --- DOM seed ----------------------------------------------------------------
 // Exactly the ids editorSession looks up via document.getElementById, inlined so a drift from
-// index.html surfaces as a thrown "missing #id" (the same el() contract init() relies on), plus a
+// index.html surfaces as a thrown "missing #id" (the same domById() contract init() relies on), plus a
 // parent for the CodeMirror editor the session constructs.
 const SESSION_HTML = `
   <div id="editor-pane"></div>
@@ -26,10 +27,6 @@ const SESSION_HTML = `
 
 function seedDom(): void {
   document.body.innerHTML = SESSION_HTML;
-}
-
-function el<T extends HTMLElement>(id: string): T {
-  return document.getElementById(id) as T;
 }
 
 // --- LSP stub ----------------------------------------------------------------
@@ -79,16 +76,16 @@ const DOCS: Record<string, string> = {
 
 function makeDeps(lsp: Lsp, overrides: Partial<EditorSessionDeps> = {}): EditorSessionDeps {
   return {
-    parent: el('editor-pane'),
+    parent: domById('editor-pane'),
     doc: DOCS[ACTIVE],
     lineWrap: false,
     minimap: false,
     lsp: lsp as unknown as EditorSessionDeps['lsp'],
-    status: el('status'),
-    diagCount: el('diag-count'),
-    diagBody: el('diag-body'),
-    sbConnection: el('sb-connection'),
-    sbValidity: el('sb-validity'),
+    status: domById('status'),
+    diagCount: domById('diag-count'),
+    diagBody: domById('diag-body'),
+    sbConnection: domById('sb-connection'),
+    sbValidity: domById('sb-validity'),
     activeUri: () => ACTIVE,
     uriLabel: (uri) => uri.split('/').pop() ?? uri,
     onNavigate: vi.fn(),
@@ -145,19 +142,19 @@ describe('createEditorSession — diagnostics for the active uri', () => {
     act(() => lsp.firePublish(ACTIVE, [err(0, 'no good'), warn(2, 'meh')]));
 
     // Strip count summarises errors + warnings.
-    expect(el('diag-count').textContent).toBe('1 error · 1 warning');
-    expect(el('diag-count').dataset.kind).toBe('error');
+    expect(domById('diag-count').textContent).toBe('1 error · 1 warning');
+    expect(domById('diag-count').dataset.kind).toBe('error');
     // Strip body has one row per diagnostic, with the 1-based line:col + message.
-    const rows = el('diag-body').querySelectorAll('button.diag');
+    const rows = domById('diag-body').querySelectorAll('button.diag');
     expect(rows.length).toBe(2);
     expect(rows[0].textContent).toContain('error 1:1');
     expect(rows[0].textContent).toContain('no good');
     // Status pill goes red with the error/warning summary.
-    expect(el('status').dataset.kind).toBe('error');
-    expect(el('status').textContent).toBe('1 error / 1 warning');
+    expect(domById('status').dataset.kind).toBe('error');
+    expect(domById('status').textContent).toBe('1 error / 1 warning');
     // Status-bar mirrors track the same counts.
-    expect(el('sb-validity').textContent).toBe('1 error');
-    expect(el('sb-validity').dataset.kind).toBe('error');
+    expect(domById('sb-validity').textContent).toBe('1 error');
+    expect(domById('sb-validity').dataset.kind).toBe('error');
 
     // diagnosticsFor exposes the cached active diagnostics for downstream readers.
     expect(session.diagnosticsFor(ACTIVE).length).toBe(2);
@@ -170,13 +167,13 @@ describe('createEditorSession — diagnostics for the active uri', () => {
     // act() flushes the strip panel's re-render so its empty-state span is in the DOM before we assert.
     act(() => lsp.firePublish(ACTIVE, []));
 
-    expect(el('diag-count').textContent).toBe('clean');
-    expect(el('diag-count').dataset.kind).toBe('clean');
-    expect(el('status').textContent).toBe('green ✓');
-    expect(el('status').dataset.kind).toBe('green');
-    expect(el('sb-validity').textContent).toBe('No errors');
-    expect(el('sb-validity').dataset.kind).toBe('ok');
-    expect(el('diag-body').querySelector('.diag-empty')!.textContent).toBe('No diagnostics.');
+    expect(domById('diag-count').textContent).toBe('clean');
+    expect(domById('diag-count').dataset.kind).toBe('clean');
+    expect(domById('status').textContent).toBe('green ✓');
+    expect(domById('status').dataset.kind).toBe('green');
+    expect(domById('sb-validity').textContent).toBe('No errors');
+    expect(domById('sb-validity').dataset.kind).toBe('ok');
+    expect(domById('diag-body').querySelector('.diag-empty')!.textContent).toBe('No diagnostics.');
   });
 });
 
@@ -187,13 +184,13 @@ describe('createEditorSession — diagnostics for a non-active uri', () => {
 
     // Seed a known active strip first so we can prove a non-active push leaves it untouched.
     lsp.firePublish(ACTIVE, []);
-    expect(el('diag-count').textContent).toBe('clean');
+    expect(domById('diag-count').textContent).toBe('clean');
 
     lsp.firePublish(OTHER, [err(5, 'elsewhere')]);
 
     // Strip + pill still reflect the ACTIVE file's (clean) state — the non-active push did not paint.
-    expect(el('diag-count').textContent).toBe('clean');
-    expect(el('status').textContent).toBe('green ✓');
+    expect(domById('diag-count').textContent).toBe('clean');
+    expect(domById('status').textContent).toBe('green ✓');
     // …but the non-active file's diagnostics are cached and readable.
     expect(session.diagnosticsFor(OTHER).length).toBe(1);
     expect(session.diagnosticsFor(OTHER)[0].message).toBe('elsewhere');
@@ -276,12 +273,12 @@ describe('createEditorSession — status + server exit', () => {
 
     // The pill is action feedback only — a success/error toast, never a connection state (#756).
     session.setStatus('saved ✓', 'green');
-    expect(el('status').textContent).toBe('saved ✓');
-    expect(el('status').dataset.kind).toBe('green');
+    expect(domById('status').textContent).toBe('saved ✓');
+    expect(domById('status').dataset.kind).toBe('green');
     // The connection indicator is independent of transient pill toasts — an error toast (e.g. "Rename
     // rejected") or a model with a warning must not read "Offline".
     session.setStatus('down', 'error');
-    expect(el('sb-connection').textContent).toBe('');
+    expect(domById('sb-connection').textContent).toBe('');
   });
 
   test('the connection mirror tracks the LSP lifecycle: a server push reads Local, an exit reads Offline', () => {
@@ -290,10 +287,10 @@ describe('createEditorSession — status + server exit', () => {
 
     // A diagnostics push WITH a warning still proves the service is live → "Local" (not "Offline").
     act(() => lsp.firePublish(ACTIVE, [warn(0, 'meh')]));
-    expect(el('sb-connection').textContent).toBe('Local');
+    expect(domById('sb-connection').textContent).toBe('Local');
 
     act(() => lsp.fireExit(1));
-    expect(el('sb-connection').textContent).toBe('Offline');
+    expect(domById('sb-connection').textContent).toBe('Offline');
   });
 
   test('a server exit surfaces an error in the pill', () => {
@@ -302,8 +299,8 @@ describe('createEditorSession — status + server exit', () => {
 
     lsp.fireExit(137);
 
-    expect(el('status').dataset.kind).toBe('error');
-    expect(el('status').textContent).toContain('137');
+    expect(domById('status').dataset.kind).toBe('error');
+    expect(domById('status').textContent).toContain('137');
   });
 });
 
@@ -333,7 +330,7 @@ describe('createEditorSession — destroy() tears the session down (#221)', () =
   test('destroy() removes the symbol-row host + the editor and a later window resize is inert', () => {
     const lsp = makeLsp();
     const session = newSession(makeDeps(lsp));
-    const pane = el('editor-pane');
+    const pane = domById('editor-pane');
     // The session mounted the mobile DSL-symbol accessory row + a CodeMirror editor into its pane.
     expect(pane.querySelector('.koi-symbol-row-host')).not.toBeNull();
     expect(pane.querySelector('.cm-editor')).not.toBeNull();
