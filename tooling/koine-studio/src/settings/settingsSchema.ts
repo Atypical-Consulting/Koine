@@ -219,19 +219,26 @@ function buildNestedSchema() {
   return { $schema: SCHEMA_DIALECT, type: 'object', additionalProperties: false, properties: groups };
 }
 
-/** Build the retained FLAT schema (top-level runtime keys) so an old/hand-saved flat document still
- *  validates and applies. Also derived from the field map, keyed by runtime key, so it stays in lockstep. */
-function buildFlatSchema() {
+/**
+ * Build a flat Draft 2020-12 JSON schema from an explicit key list. Every key must be a
+ * `FieldDef['runtimeKey']` so TypeScript rejects unknown or non-existent settings keys at author
+ * time. The result is `additionalProperties:false`, so any key not in `keys` is rejected by AJV.
+ *
+ * Callers:
+ * - `LEGACY_FLAT_SCHEMA` — every runtime key in `SETTINGS_FIELDS` order.
+ * - `WORKSPACE_SETTINGS_JSON_SCHEMA` — only the four `WORKSPACE_SCOPED_KEYS`.
+ */
+function buildFlatSchema(keys: readonly FieldDef['runtimeKey'][]) {
   const properties: Record<string, LeafSchema> = {};
-  for (const f of SETTINGS_FIELDS) properties[f.runtimeKey] = LEAF_SCHEMAS[f.runtimeKey];
-  return { $schema: SCHEMA_DIALECT, type: 'object', additionalProperties: false, properties };
+  for (const k of keys) properties[k] = LEAF_SCHEMAS[k];
+  return { $schema: SCHEMA_DIALECT, type: 'object', additionalProperties: false as const, properties };
 }
 
 /** The nested, namespaced settings document schema (#750) — the source the JSON editor validates against. */
 export const SETTINGS_JSON_SCHEMA = buildNestedSchema();
 
 /** The pre-#750 flat schema, retained only to validate a legacy/hand-saved flat document. */
-const LEGACY_FLAT_SCHEMA = buildFlatSchema();
+const LEGACY_FLAT_SCHEMA = buildFlatSchema(SETTINGS_FIELDS.map((f) => f.runtimeKey));
 
 const ajv = new Ajv2020({ allErrors: true, strict: false });
 const validateNested = ajv.compile(SETTINGS_JSON_SCHEMA);
@@ -239,18 +246,14 @@ const validateFlat = ajv.compile(LEGACY_FLAT_SCHEMA);
 
 // --- workspace-scoped settings document schema (#736) -----------------------
 // A FLAT Draft 2020-12 schema whose properties cover ONLY the four WORKSPACE_SCOPED_KEYS.
-// Derived from WORKSPACE_SCOPED_KEYS + LEAF_SCHEMAS so it can never drift from the field map.
+// Built by the shared buildFlatSchema so the structure is guaranteed identical to LEGACY_FLAT_SCHEMA.
 
 /** The Draft 2020-12 JSON schema for the workspace-level settings.json document.
  *  Properties are exactly the four {@link WORKSPACE_SCOPED_KEYS}; `additionalProperties:false`
  *  rejects any other key, including non-scoped user-level settings. */
-export const WORKSPACE_SETTINGS_JSON_SCHEMA = (() => {
-  const properties: Record<string, LeafSchema> = {};
-  for (const k of WORKSPACE_SCOPED_KEYS) {
-    properties[k as string] = LEAF_SCHEMAS[k as FieldDef['runtimeKey']];
-  }
-  return { $schema: SCHEMA_DIALECT, type: 'object', additionalProperties: false as const, properties };
-})();
+export const WORKSPACE_SETTINGS_JSON_SCHEMA = buildFlatSchema(
+  WORKSPACE_SCOPED_KEYS as readonly FieldDef['runtimeKey'][],
+);
 
 const validateWorkspace = ajv.compile(WORKSPACE_SETTINGS_JSON_SCHEMA);
 

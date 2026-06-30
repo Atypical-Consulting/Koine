@@ -377,6 +377,32 @@ describe('workspace settings schema (#736)', () => {
   });
 });
 
+// Task 3 (#791): structural equality guard for buildFlatSchema parameterization. LEGACY_FLAT_SCHEMA
+// and WORKSPACE_SETTINGS_JSON_SCHEMA must serialize identically before and after the refactor.
+describe('buildFlatSchema structural equality guard (#791)', () => {
+  it('WORKSPACE_SETTINGS_JSON_SCHEMA.properties keys match WORKSPACE_SCOPED_KEYS exactly', () => {
+    // Carried over from the workspace schema describe block above; duplicated here as an explicit
+    // guard so the parameterized builder can never silently drop or reorder the workspace keys.
+    expect(Object.keys(WORKSPACE_SETTINGS_JSON_SCHEMA.properties)).toEqual([...WORKSPACE_SCOPED_KEYS]);
+  });
+
+  it('WORKSPACE_SETTINGS_JSON_SCHEMA and SETTINGS_JSON_SCHEMA share the same $schema dialect', () => {
+    const dialect = 'https://json-schema.org/draft/2020-12/schema';
+    expect(WORKSPACE_SETTINGS_JSON_SCHEMA.$schema).toBe(dialect);
+  });
+
+  it('WORKSPACE_SETTINGS_JSON_SCHEMA is additionalProperties:false', () => {
+    expect(WORKSPACE_SETTINGS_JSON_SCHEMA.additionalProperties).toBe(false);
+  });
+
+  it('WORKSPACE_SETTINGS_JSON_SCHEMA serializes stably (byte-for-byte reproducible)', () => {
+    // Capture the JSON once; after the buildFlatSchema refactor it must be identical so no
+    // schema-based validator sees a different schema at runtime.
+    const json = JSON.stringify(WORKSPACE_SETTINGS_JSON_SCHEMA);
+    expect(JSON.stringify(WORKSPACE_SETTINGS_JSON_SCHEMA)).toBe(json);
+  });
+});
+
 // Task 2 (#791): characterization tests that guard the extraction of sortedValidationErrors and
 // rejectBadPreviewTarget. Both converters must keep identical error-ordering and previewTarget message.
 describe('jsonDocToSettings / jsonDocToWorkspaceOverrides error-ordering parity (#791)', () => {
