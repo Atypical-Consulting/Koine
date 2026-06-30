@@ -192,7 +192,9 @@ internal sealed class PythonEmitterProvider : IEmitterProvider
     /// </summary>
     private static PythonEmitterOptions ToPythonOptions(EmitterOptions options)
     {
-        if (options.NamespaceMap.Count == 0 && options.Layers is null)
+        // A timeout-only neutral bag must NOT collapse to Empty (issue #812): the configured value has to
+        // reach the Python `matches` lowering, mirroring the C# provider's guard (issue #794).
+        if (options.NamespaceMap.Count == 0 && options.Layers is null && options.RegexMatchTimeoutMs is null)
         {
             return PythonEmitterOptions.Empty;
         }
@@ -203,7 +205,8 @@ internal sealed class PythonEmitterProvider : IEmitterProvider
             packageMap[PythonNaming.ToSnakeCase(context)] = package;
         }
 
-        return new PythonEmitterOptions(packageMap, EmitDictHelpers: false, ParseLayers(options.Layers));
+        return new PythonEmitterOptions(
+            packageMap, EmitDictHelpers: false, ParseLayers(options.Layers), options.RegexMatchTimeoutMs);
     }
 
     /// <summary>
