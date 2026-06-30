@@ -16,6 +16,7 @@ public sealed partial class TypeScriptEmitter
         ModelIndex Index,
         IReadOnlySet<string> AdditiveNeeds,
         IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
+        IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BinaryArithmeticNeeds,
         IReadOnlyList<string> ContextNames,
         IReadOnlyList<TsTypeLocation> TypeLocations,
         IReadOnlyDictionary<string, string> EnumMemberToType)
