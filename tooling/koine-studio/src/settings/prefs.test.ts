@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   mountPreferencesPane,
+  segmented,
   startMcpSidecarIfEnabled,
   wrapIndex,
   type PrefsCallbacks,
@@ -562,6 +563,63 @@ describe('Settings → segmented() keyboard navigation (#732)', () => {
     expect(workspace.getAttribute('aria-checked')).toBe('false');
     expect(workspace.getAttribute('tabindex')).toBe('-1');
     expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+// Task 1 (#791): the shared segmented() control now exposes a group-level setDisabled so
+// callers (makeScopeBinding.applyEnabled and the JSON scope toggle) share a single implementation.
+describe('segmented().setDisabled (#791)', () => {
+  it('setDisabled(true) sets aria-disabled on the group, adds is-disabled class, disables every button', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const seg = segmented<'a' | 'b'>(
+      'Test scope',
+      [
+        { value: 'a', label: 'A' },
+        { value: 'b', label: 'B' },
+      ],
+      () => {},
+    );
+    container.appendChild(seg.el);
+
+    seg.setDisabled(true);
+
+    expect(seg.el.getAttribute('aria-disabled')).toBe('true');
+    expect(seg.el.classList.contains('is-disabled')).toBe(true);
+    for (const b of seg.el.querySelectorAll<HTMLButtonElement>('.koi-seg')) {
+      expect(b.disabled).toBe(true);
+    }
+  });
+
+  it('setDisabled(false) reverses aria-disabled, is-disabled class, and re-enables every button', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const seg = segmented<'a' | 'b'>(
+      'Test scope',
+      [
+        { value: 'a', label: 'A' },
+        { value: 'b', label: 'B' },
+      ],
+      () => {},
+    );
+    container.appendChild(seg.el);
+
+    // First disable, then re-enable.
+    seg.setDisabled(true);
+    seg.setDisabled(false);
+
+    expect(seg.el.getAttribute('aria-disabled')).toBe('false');
+    expect(seg.el.classList.contains('is-disabled')).toBe(false);
+    for (const b of seg.el.querySelectorAll<HTMLButtonElement>('.koi-seg')) {
+      expect(b.disabled).toBe(false);
+    }
+  });
+
+  it('setDisabled is safe to call before any set() selection', () => {
+    const seg = segmented<'x'>('Label', [{ value: 'x', label: 'X' }], () => {});
+    // Should not throw even though no set() has been called.
+    expect(() => seg.setDisabled(true)).not.toThrow();
+    expect(() => seg.setDisabled(false)).not.toThrow();
   });
 });
 

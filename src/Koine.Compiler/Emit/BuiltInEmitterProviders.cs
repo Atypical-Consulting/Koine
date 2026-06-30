@@ -50,13 +50,20 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
     /// byte-identical output. <c>instantMode = nodaTime</c> (case-insensitive) selects the NodaTime
     /// mode; anything else (incl. <c>dateTimeOffset</c> and absent) keeps the DateTimeOffset default.
     /// The <c>layout</c> key is accepted and currently a no-op (file-per-type is the only layout).
+    /// <c>regexMode = sourceGenerated</c> (case-insensitive) selects the <c>[GeneratedRegex]</c> form
+    /// (issue #831); anything else (incl. <c>inline</c> and absent) keeps the inline default. Both
+    /// absent/inline treat <see cref="EmitterOptions.RegexMode"/> as unset, so an unconfigured target
+    /// still maps to <see cref="CSharpEmitterOptions.Empty"/> when no other option is set.
     /// </summary>
     private static CSharpEmitterOptions ToCSharpOptions(EmitterOptions options)
     {
+        var isSourceGeneratedRegex = string.Equals(
+            options.RegexMode, "sourceGenerated", StringComparison.OrdinalIgnoreCase);
+
         if (options.NamespaceMap.Count == 0 && options.InstantMode is null && !options.EmitSourceMaps
             && !options.ReferenceOnly && options.Layers is null
             && !options.ApplicationMediatr && options.ApplicationMapping is null
-            && options.RegexMatchTimeoutMs is null)
+            && options.RegexMatchTimeoutMs is null && !isSourceGeneratedRegex)
         {
             return CSharpEmitterOptions.Empty;
         }
@@ -67,10 +74,11 @@ internal sealed class CSharpEmitterProvider : IEmitterProvider
         var mapping = string.Equals(options.ApplicationMapping, "mapperly", StringComparison.OrdinalIgnoreCase)
             ? CSharpMappingMode.Mapperly
             : CSharpMappingMode.Plain;
+        var regexMode = isSourceGeneratedRegex ? RegexMode.SourceGenerated : RegexMode.Inline;
         return new CSharpEmitterOptions(
             options.NamespaceMap, instant, options.EmitSourceMaps, options.ReferenceOnly,
             ParseLayers(options.Layers), options.ApplicationMediatr, mapping,
-            options.RegexMatchTimeoutMs ?? 1000);
+            options.RegexMatchTimeoutMs ?? 1000, regexMode);
     }
 
     /// <summary>
@@ -124,8 +132,10 @@ internal sealed class TypeScriptEmitterProvider : IEmitterProvider
     /// </summary>
     private static TsEmitterOptions ToTsOptions(EmitterOptions options)
     {
+        // A timeout-only neutral bag must NOT collapse to Empty (issue #812): the configured value has to
+        // reach the `regexMatch` seam, mirroring the C# provider's guard (issue #794).
         if (options.NamespaceMap.Count == 0 && !options.EmitSourceMaps && !options.ReferenceOnly
-            && options.Layers is null)
+            && options.Layers is null && options.RegexMatchTimeoutMs is null)
         {
             return TsEmitterOptions.Empty;
         }
@@ -136,6 +146,7 @@ internal sealed class TypeScriptEmitterProvider : IEmitterProvider
             ModuleMap = options.NamespaceMap,
             ReferenceOnly = options.ReferenceOnly,
             Layers = ParseLayers(options.Layers),
+            RegexMatchTimeoutMs = options.RegexMatchTimeoutMs,
         };
     }
 
@@ -192,7 +203,9 @@ internal sealed class PythonEmitterProvider : IEmitterProvider
     /// </summary>
     private static PythonEmitterOptions ToPythonOptions(EmitterOptions options)
     {
-        if (options.NamespaceMap.Count == 0 && options.Layers is null)
+        // A timeout-only neutral bag must NOT collapse to Empty (issue #812): the configured value has to
+        // reach the Python `matches` lowering, mirroring the C# provider's guard (issue #794).
+        if (options.NamespaceMap.Count == 0 && options.Layers is null && options.RegexMatchTimeoutMs is null)
         {
             return PythonEmitterOptions.Empty;
         }
@@ -203,7 +216,8 @@ internal sealed class PythonEmitterProvider : IEmitterProvider
             packageMap[PythonNaming.ToSnakeCase(context)] = package;
         }
 
-        return new PythonEmitterOptions(packageMap, EmitDictHelpers: false, ParseLayers(options.Layers));
+        return new PythonEmitterOptions(
+            packageMap, EmitDictHelpers: false, ParseLayers(options.Layers), options.RegexMatchTimeoutMs);
     }
 
     /// <summary>
@@ -252,12 +266,14 @@ internal sealed class PhpEmitterProvider : IEmitterProvider
     /// </summary>
     private static PhpEmitterOptions ToPhpOptions(EmitterOptions options)
     {
-        if (options.NamespaceMap.Count == 0)
+        // A timeout-only neutral bag must NOT collapse to Empty (issue #812): the configured value has to
+        // reach the PHP `matches` lowering, mirroring the C# provider's guard (issue #794).
+        if (options.NamespaceMap.Count == 0 && options.RegexMatchTimeoutMs is null)
         {
             return PhpEmitterOptions.Empty;
         }
 
-        return new PhpEmitterOptions(options.NamespaceMap);
+        return new PhpEmitterOptions(options.NamespaceMap, options.RegexMatchTimeoutMs);
     }
 }
 

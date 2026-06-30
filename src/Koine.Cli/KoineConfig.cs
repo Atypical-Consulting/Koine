@@ -8,8 +8,10 @@ namespace Koine.Cli;
 /// keys the emitters consume as they gain support. <see cref="RegexMatchTimeoutMsText"/> is the raw
 /// <c>regexMatchTimeoutMs</c> value (issue #794/#641); <see cref="RegexMatchTimeoutMs"/> parses it to
 /// the C# <c>matches</c>-invariant ReDoS-guard match timeout in milliseconds (<c>null</c> ⇒ unset or
-/// non-integer ⇒ the emitter's <c>1000</c> ms default). Absent keys are <c>null</c>/empty so a
-/// target with no block behaves exactly as before.
+/// non-integer ⇒ the emitter's <c>1000</c> ms default). <see cref="RegexModeText"/> is the raw
+/// <c>regexMode</c> value (issue #831): one of <c>inline</c> | <c>sourceGenerated</c>
+/// (case-insensitive); <c>null</c> ⇒ the emitter's <c>inline</c> default. Absent keys are
+/// <c>null</c>/empty so a target with no block behaves exactly as before.
 /// </summary>
 internal sealed record TargetOptions(
     string? OutDir,
@@ -19,7 +21,8 @@ internal sealed record TargetOptions(
     IReadOnlyList<string>? Layers = null,
     bool ApplicationMediatr = false,
     string? ApplicationMapping = null,
-    string? RegexMatchTimeoutMsText = null)
+    string? RegexMatchTimeoutMsText = null,
+    string? RegexModeText = null)
 {
     public static readonly TargetOptions Empty =
         new(null, new Dictionary<string, string>(StringComparer.Ordinal), null, null);
@@ -33,14 +36,16 @@ internal sealed record TargetOptions(
     public int? RegexMatchTimeoutMs => KoineConfig.ParseTimeout(RegexMatchTimeoutMsText);
 
     /// <summary>
-    /// Validates the user-supplied per-target options the emitter cannot recover from (issue #794): a
-    /// present <c>regexMatchTimeoutMs</c> must parse to a <em>positive</em> integer — a non-integer would
-    /// silently disarm the ReDoS guard (falling back to 1000 ms), and a non-positive value would flow
-    /// into the generated <c>TimeSpan.FromMilliseconds(N)</c> and throw at the generated code's own
-    /// runtime. Returns <c>false</c> with a friendly <paramref name="error"/>. Every config-driven
-    /// emitter entry point (<c>build</c>, <c>coverage</c>, the LSP <c>emitPreview</c>) runs this before
-    /// constructing the C# emitter, so they all reject the same bad config identically rather than
-    /// letting the emitter's last-resort guard throw.
+    /// Validates the user-supplied per-target options the emitter cannot recover from (issues #794, #831):
+    /// a present <c>regexMatchTimeoutMs</c> must parse to a <em>positive</em> integer — a non-integer
+    /// would silently disarm the ReDoS guard (falling back to 1000 ms), and a non-positive value would
+    /// flow into the generated <c>TimeSpan.FromMilliseconds(N)</c> and throw at the generated code's own
+    /// runtime; a present <c>regexMode</c> must be <c>inline</c> or <c>sourceGenerated</c>
+    /// (case-insensitive) — any other value (e.g. a typo like <c>sourcegen</c>) is a hard error so it
+    /// cannot silently disarm an explicit opt-in. Returns <c>false</c> with a friendly
+    /// <paramref name="error"/>. Every config-driven emitter entry point (<c>build</c>, <c>coverage</c>,
+    /// the LSP <c>emitPreview</c>) runs this before constructing the C# emitter, so they all reject the
+    /// same bad config identically rather than letting the emitter's last-resort guard throw.
     /// </summary>
     public bool TryValidate(out string? error)
     {
@@ -48,6 +53,14 @@ internal sealed record TargetOptions(
         if (RegexMatchTimeoutMsText is { } raw && (RegexMatchTimeoutMs is not { } ms || ms <= 0))
         {
             error = $"regexMatchTimeoutMs must be a positive integer (milliseconds); got '{raw}'";
+            return false;
+        }
+
+        if (RegexModeText is { } mode &&
+            !string.Equals(mode, "inline", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(mode, "sourceGenerated", StringComparison.OrdinalIgnoreCase))
+        {
+            error = $"regexMode must be 'inline' or 'sourceGenerated'; got '{mode}'";
             return false;
         }
 
@@ -194,8 +207,8 @@ internal sealed record KoineConfig(
     /// <summary>
     /// Applies one <c>targets.&lt;name&gt;.&lt;rest&gt;</c> key. Recognized <c>rest</c>: <c>out</c>,
     /// <c>instantMode</c>, <c>layout</c>, <c>layers</c>, <c>application.{mediatr,mapping}</c>,
-    /// <c>regexMatchTimeoutMs</c>, and <c>namespaces.&lt;Context&gt;</c>. Malformed/partial
-    /// keys are ignored (forward-compatible).
+    /// <c>regexMatchTimeoutMs</c>, <c>regexMode</c>, and <c>namespaces.&lt;Context&gt;</c>.
+    /// Malformed/partial keys are ignored (forward-compatible).
     /// </summary>
     private static void ApplyTargetKey(Dictionary<string, TargetBuilder> targets, string key, string value)
     {
@@ -246,6 +259,13 @@ internal sealed record KoineConfig(
                 // hard error via TargetOptions.TryValidate, since silently keeping 1000 ms would disarm a
                 // hardening knob the user explicitly set.
                 builder.RegexMatchTimeoutMs = value;
+                break;
+            case "regexMode" when parts.Length == 3:
+                // The C# matches-invariant regex-evaluation mode (issue #831): stored raw and validated
+                // by TargetOptions.TryValidate (inline | sourceGenerated, case-insensitive). A
+                // present-but-unknown value is a hard error — a typo must not silently disarm the
+                // explicit opt-in to the [GeneratedRegex] form.
+                builder.RegexMode = value;
                 break;
             case "namespaces" when parts.Length == 4 && parts[3].Length > 0:
                 builder.NamespaceMap[parts[3]] = value;
@@ -298,6 +318,7 @@ internal sealed record KoineConfig(
         public string? ApplicationMediatr;
         public string? ApplicationMapping;
         public string? RegexMatchTimeoutMs;
+        public string? RegexMode;
         public readonly Dictionary<string, string> NamespaceMap = new(StringComparer.Ordinal);
 
         public TargetOptions Build() => new(
@@ -305,7 +326,8 @@ internal sealed record KoineConfig(
             ParseLayers(Layers),
             string.Equals(ApplicationMediatr, "true", StringComparison.OrdinalIgnoreCase),
             ApplicationMapping,
-            RegexMatchTimeoutMs);
+            RegexMatchTimeoutMs,
+            RegexMode);
     }
 
     /// <summary>

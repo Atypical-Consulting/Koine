@@ -521,7 +521,7 @@ public sealed partial class PythonEmitter
         var derived = members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var ordered = fields.OrderBy(m => HasDefault(m) ? 1 : 0).ToList();
 
-        var translator = new PythonExpressionTranslator(emit.Index, members, emit.EnumMemberToType, typeMapper, ContextOf(ns));
+        var translator = new PythonExpressionTranslator(emit.Index, members, emit.EnumMemberToType, typeMapper, ContextOf(ns), regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var sb = new StringBuilder();
         sb.Append("@dataclass(frozen=True)\n");

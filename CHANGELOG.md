@@ -9,6 +9,16 @@ may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Koine Studio — workspace settings.json now uses the same grouped key shape as user settings.json.**
+  The workspace scope of the Settings JSON editor (User / Workspace scope toggle introduced in #736) now
+  uses the same `group.docKey` key shape as the user scope: `preview.target`, `editor.formatOnSave`,
+  `editor.wordWrap`, and `lsp.trace` instead of the previous flat runtime keys (`previewTarget`, etc.).
+  This means a field can be copy-pasted between the User and Workspace editors without any key-shape
+  change — the cross-scope consistency wart flagged by a reviewer on #781 is resolved. The internal
+  `koine.studio.wsOverrides.*` localStorage blobs keep their flat runtime-key format and are unaffected;
+  the `jsonDocToWorkspaceOverrides` parser accepts both the new grouped format and the old flat format, so
+  existing saved workspace-override documents continue to load without data loss. (issue #792;
+  follow-up to #736 and #750)
 - **Koine Studio — "On startup" setting (Home vs Last workspace).** A new **Settings → Appearance → On
   startup** dropdown lets power users opt into reopening the last workspace automatically on a cold
   Studio boot, reversing the always-Home default introduced by #766 without affecting it for everyone

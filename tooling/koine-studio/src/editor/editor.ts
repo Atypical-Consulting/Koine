@@ -107,6 +107,7 @@ import { editsToChanges, lspPosToOffset, lspToCm } from '@/editor/positions';
 // here for the touch theme's media query and the keyboard-occlusion gate so the editor agrees with the
 // shell about what "narrow" means (do NOT re-derive 640 anywhere).
 import { BP_NARROW } from '@/shared/breakpoint';
+import { basename } from '@/shared/path';
 
 // --- .koi token highlighter -------------------------------------------------
 
@@ -1068,7 +1069,7 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     } catch {
       return;
     }
-    const label = opts.uriLabel ?? ((uri: string) => uri.split('/').pop() ?? uri);
+    const label = opts.uriLabel ?? basename;
     showActionMenu(
       view,
       pos,

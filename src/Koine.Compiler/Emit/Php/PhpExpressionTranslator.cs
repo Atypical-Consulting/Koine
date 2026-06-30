@@ -67,12 +67,18 @@ internal sealed class PhpExpressionTranslator
     // or a supplied parameter name (e.g. `src`) for a read-model projection rooted at the source.
     private readonly string _memberReceiver;
 
+    // The neutral RegexMatchTimeoutMs author intent (#794/#812). PHP has no per-call wall-clock match
+    // timeout, so when set the `matches` lowering annotates the emitted `preg_match` with the PCRE-limit
+    // substitute note rather than honoring a literal timeout; null ⇒ today's plain `preg_match`.
+    private readonly int? _regexMatchTimeoutMs;
+
     public PhpExpressionTranslator(
         ModelIndex index,
         IReadOnlyList<Member> members,
         IReadOnlyDictionary<string, string> enumMemberToType,
         string? context = null,
-        string memberReceiver = "this")
+        string memberReceiver = "this",
+        int? regexMatchTimeoutMs = null)
     {
         _index = index;
         _resolver = new TypeResolver(index, context);
@@ -89,6 +95,7 @@ internal sealed class PhpExpressionTranslator
         _membersByName = byName;
         _enumMemberToType = enumMemberToType;
         _memberReceiver = memberReceiver;
+        _regexMatchTimeoutMs = regexMatchTimeoutMs;
     }
 
     public void PushLocal(string name, TypeRef? type = null)
@@ -259,8 +266,19 @@ internal sealed class PhpExpressionTranslator
                 // `pcre.recursion_limit` (set by default in PHP), so a catastrophic pattern fails the
                 // match (preg_match returns false) rather than hanging — no extra guard is emitted; the
                 // default-bounded behavior is documented in the `matches` reference.
+                // When the neutral RegexMatchTimeoutMs key is set (#794/#812), PHP cannot honor a literal
+                // per-call wall-clock timeout, so we annotate the match with the PCRE-limit substitute
+                // (surfacing the author's budget) rather than silently dropping the key. Match semantics
+                // are unchanged.
                 sb.Append("(bool)preg_match('/").Append(EscapeRegex(m.Pattern)).Append("/', ");
                 Write(m.Target, sb);
+                if (_regexMatchTimeoutMs is { } ms)
+                {
+                    sb.Append(" /* regexMatchTimeoutMs=")
+                      .Append(ms.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                      .Append("ms: PHP has no per-call wall-clock match timeout; matching is bounded via PCRE pcre.backtrack_limit/pcre.recursion_limit */");
+                }
+
                 sb.Append(')');
                 break;
             case GuardExpr g:
