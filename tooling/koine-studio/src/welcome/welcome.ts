@@ -24,7 +24,7 @@ export interface WelcomeCallbacks {
    * there is something to resume ({@link BuildWelcomeOpts.canResume}). Unlike the start actions it sets
    * no template/folder intent; what it resolves to is the caller's concern (issues #392 / #766): a pure
    * route swap back into a still-live session, or a cold boot that restores the last workspace. Optional:
-   * the legacy body overlay never wires it.
+   * Optional: callers that don't offer a resume path can omit it.
    */
   onResume?(): void;
 }
@@ -260,7 +260,7 @@ function buildHome(
   // previously-opened workspace to return to — the "Resume editing" control aligned on its right (issue
   // #490). The control is the purpose-built return-to-session affordance (issues #392 / #766); rendered
   // only when `canResume`, so a pristine first-load Home stays clean. On embedded Home the card's own top bar is gone, so this row
-  // is the only place the control can live; the legacy overlay shows it here too for consistency.
+  // is the only place the control can live.
   const launchHead = document.createElement('div');
   launchHead.className = 'koi-welcome-rail-head';
 
@@ -297,7 +297,7 @@ function buildHome(
     }),
   );
   // Opens the example gallery as a second view layered over this console (it does not leave the
-  // welcome screen, so it doesn't call hide()). Kept as a handle so focus can return here on close.
+  // welcome screen). Kept as a handle so focus can return here on close.
   const exampleAction = makeAction({
     icon: ICON_GALLERY,
     label: 'Start from an example',
@@ -322,7 +322,7 @@ function buildHome(
   );
   launch.appendChild(actions);
 
-  // Recent folders — populated on each show().
+  // Recent folders — populated immediately on mount via refreshRecent().
   const recent = document.createElement('div');
   recent.className = 'koi-welcome-recent';
   launch.appendChild(recent);
@@ -376,7 +376,7 @@ function buildHome(
     credit.append(author, '.');
 
     footer.append(colophonChip, links, credit);
-    // Fill the chip on build so a slow/absent version command never blocks construction; show() retries.
+    // Fill the chip on build so a slow/absent version command never blocks construction.
     fillVersionChip(colophonChip, platform);
     return footer;
   }
@@ -756,7 +756,7 @@ function buildHome(
   // Lifting the gallery off the start screen lets the hero snippet own the first frame; the catalogue
   // then gets a full, scrollable canvas of its own, reached on demand via the "Start from an example"
   // action. It lives inside the same card as the console (only one view shows at a time), and carries
-  // its own bar: a back affordance (to the console) and the same dismiss (to the editor).
+  // its own bar: a back affordance (to the console).
   const galleryView = document.createElement('div');
   galleryView.className = 'koi-welcome-view koi-gallery-view';
   galleryView.hidden = true;
@@ -840,7 +840,7 @@ function buildHome(
     });
     if (forget) {
       removeRecentFolder(path);
-      renderRecent(); // rebuild the list in place — show()'s `if (shown) return` would swallow a re-render
+      renderRecent(); // rebuild the list in place
     }
   }
 
