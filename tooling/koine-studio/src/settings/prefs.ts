@@ -175,18 +175,10 @@ export async function startMcpSidecarIfEnabled(cb: PrefsCallbacks, s: Settings =
   }
 }
 
-/**
- * Wrap `current` by `delta` steps within `[0, length)`, handling both forward and backward wrap.
- * Returns `-1` when `length <= 0` (empty-guard — neither existing caller reaches this, but the
- * helper is safe to call unconditionally).
- *
- * Used by both roving-tabindex call sites in this module: the `segmented()` radiogroup arrow-nav
- * and the Settings category tablist arrow-nav. Keeping the formula here prevents a one-sided fix.
- */
-export function wrapIndex(current: number, delta: number, length: number): number {
-  if (length <= 0) return -1;
-  return (current + delta + length) % length;
-}
+// Import for use in this module; re-export so callers importing from here (e.g. prefs.test.ts)
+// keep working without an import-path change. Canonical definition: @/shared/wrapIndex (#745).
+export { wrapIndex } from '@/shared/wrapIndex';
+import { wrapIndex } from '@/shared/wrapIndex';
 
 /**
  * A segmented radio group (e.g. Dark / Light): a row of role=radio buttons under a role=radiogroup, with
