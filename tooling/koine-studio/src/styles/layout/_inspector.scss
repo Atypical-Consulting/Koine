@@ -138,3 +138,39 @@
     }
   }
 }
+
+/* Attention cue on the Properties stripe button when a selection arrives while the right rail is
+   collapsed (#648, approach b). The `rstrip-notify` class is toggled by `notifyRstripProps()` in
+   inspectorController for one animation cycle, then removed so the cue resets for the next
+   selection. Desktop-only (the stripe itself is hidden below $bp-narrow, so this never fires mobile).
+
+   Motion-ok: a brief flash-and-settle animation draws the eye without forcing the panel open.
+   Reduced-motion: a static tinted border is used instead of the keyframe animation — same affordance
+   cue, zero motion (#648 spec: honour prefers-reduced-motion). */
+@keyframes rstrip-flash {
+  0% {
+    background: color-mix(in srgb, var(--koi-accent) 28%, transparent);
+    color: var(--koi-fg);
+  }
+  60% {
+    background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
+    color: var(--koi-fg);
+  }
+  100% {
+    background: transparent;
+    color: var(--koi-muted);
+  }
+}
+
+.rstrip-btn.rstrip-notify {
+  @media (prefers-reduced-motion: no-preference) {
+    animation: rstrip-flash 0.8s ease-out 1 forwards;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    /* Static substitute: a coloured border signals "something landed here" without any motion. */
+    border-color: var(--koi-accent);
+    background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
+    color: var(--koi-fg);
+  }
+}
