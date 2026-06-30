@@ -379,35 +379,57 @@ internal sealed class PhpExpressionTranslator
     }
 
     /// <summary>
-    /// Writes one operand of a PHP string concatenation (<c>.</c>). A nested concatenation is already a
-    /// non-null PHP string, so it is emitted directly — wrapping it would produce a redundant <c>??</c>
-    /// that <c>phpstan --level max</c> rejects (<c>nullCoalesce.expr</c>). A <c>Bool</c>-typed operand
-    /// is lowered to a ternary <c>($expr ? 'true' : 'false')</c> — PHP's native bool→string coercion
-    /// produces <c>"1"</c>/<c>""</c> for <c>true</c>/<c>false</c>, which diverges from C#
-    /// (<c>"True"</c>/<c>"False"</c>) and TypeScript (<c>"true"</c>/<c>"false"</c>); the explicit
-    /// ternary yields the canonical cross-target <c>"true"</c>/<c>"false"</c> strings (#806).
+    /// Writes one operand of a PHP string concatenation (<c>.</c>).
+    ///
+    /// <para>
+    /// <b>Order of checks matters.</b> A <c>Bool</c>-typed operand is checked <em>first</em>,
+    /// before the <c>BinaryExpr</c> guard, because a compound Boolean expression (e.g.
+    /// <c>a &amp;&amp; b</c>) is both a <c>BinaryExpr</c> and a <c>Bool</c>. Routing it through
+    /// <see cref="WriteBinary"/> would emit a raw PHP <c>bool</c> on the <c>.</c> site, which
+    /// phpstan <c>--level max</c> rejects as <c>binaryOp.invalid</c>. The Bool case must win.
+    /// </para>
+    ///
+    /// <para>
+    /// A <c>Bool</c>-typed operand is lowered to a ternary <c>($expr ? 'true' : 'false')</c> —
+    /// PHP's native bool→string coercion produces <c>"1"</c>/<c>""</c> for <c>true</c>/<c>false</c>,
+    /// which diverges from C# (<c>"True"</c>/<c>"False"</c>) and TypeScript (<c>"true"</c>/<c>"false"</c>);
+    /// the explicit ternary yields the canonical cross-target <c>"true"</c>/<c>"false"</c> strings (#806).
+    /// <see cref="Write(Expr,StringBuilder)"/> adds inner parentheses when <paramref name="expr"/> is
+    /// itself a composite, so the ternary condition is always correctly bounded.
+    /// </para>
+    ///
+    /// <para>
+    /// A nested string concatenation is already a non-null PHP string, so it is emitted via
+    /// <see cref="WriteBinary"/> directly — wrapping it would produce a redundant <c>??</c>
+    /// that phpstan rejects (<c>nullCoalesce.expr</c>).
+    /// </para>
+    ///
+    /// <para>
     /// A guard-narrowed optional operand still infers as optional, so it is wrapped as
     /// <c>($expr ?? '')</c> to make the <c>.</c> site provably non-null. The validator's
-    /// <c>OptionalDereference</c> check has already rejected any UNGUARDED optional in <c>+</c>, so the
-    /// coalesce is a runtime no-op present only to satisfy phpstan (#787).
+    /// <c>OptionalDereference</c> check has already rejected any UNGUARDED optional in <c>+</c>,
+    /// so the coalesce is a runtime no-op present only to satisfy phpstan (#787).
+    /// </para>
     /// </summary>
     private void WriteStringConcatOperand(Expr expr, StringBuilder sb)
     {
-        if (expr is BinaryExpr nested)
-        {
-            WriteBinary(nested, sb, parenthesize: true);
-            return;
-        }
-
-        // A Bool operand is lowered to a ternary that renders the canonical cross-target
-        // "true"/"false" strings (matching TypeScript's native + behaviour and differing from PHP's
-        // native bool→string coercion ("1"/"") and C#'s bool.ToString() ("True"/"False")). Optional
-        // Bool? is out of scope — it is excluded from IsStringableOperand and never reaches here.
+        // Bool check MUST precede the BinaryExpr check: a compound Bool expression (e.g. `a && b`)
+        // is a BinaryExpr, but routing it through WriteBinary yields a raw PHP bool on the `.` site
+        // (phpstan binaryOp.invalid). Write(expr) wraps a BinaryExpr in parens, so the ternary
+        // condition is always properly bounded regardless of the expr shape.
+        // Optional Bool? is out of scope — it is excluded from IsStringableOperand and never reaches here.
         if (InferType(expr) is { Name: "Bool", IsOptional: false })
         {
             sb.Append('(');
             Write(expr, sb);
             sb.Append(" ? 'true' : 'false')");
+            return;
+        }
+
+        // A nested string concatenation is already a non-null PHP string; emit it directly.
+        if (expr is BinaryExpr nested)
+        {
+            WriteBinary(nested, sb, parenthesize: true);
             return;
         }
 
