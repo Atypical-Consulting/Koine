@@ -180,14 +180,14 @@ public class PhpExpressionTests
     {
         // `price >= 0` where price is Decimal -> price->compareTo(new Decimal('0')) >= 0
         var expr = new BinaryExpr(BinaryOp.Ge, Id("price"), Int("0"));
-        Translate(expr).ShouldBe("($this->price->compareTo(new \\Koine\\Runtime\\Decimal('0')) >= 0)");
+        Translate(expr).ShouldBe("($this->price->compareTo((new \\Koine\\Runtime\\Decimal('0'))) >= 0)");
     }
 
     [Fact]
     public void Decimal_less_than_lowers_to_compareTo()
     {
         var expr = new BinaryExpr(BinaryOp.Lt, Id("price"), Int("0"));
-        Translate(expr).ShouldBe("($this->price->compareTo(new \\Koine\\Runtime\\Decimal('0')) < 0)");
+        Translate(expr).ShouldBe("($this->price->compareTo((new \\Koine\\Runtime\\Decimal('0'))) < 0)");
     }
 
     [Fact]
@@ -241,7 +241,7 @@ public class PhpExpressionTests
         // The invariant-guard path: `price >= 0` negated must still use compareTo, not `<`.
         var t = Make();
         var expr = new BinaryExpr(BinaryOp.Ge, Id("price"), Int("0"));
-        t.TranslateNegated(expr).ShouldBe("$this->price->compareTo(new \\Koine\\Runtime\\Decimal('0')) < 0");
+        t.TranslateNegated(expr).ShouldBe("$this->price->compareTo((new \\Koine\\Runtime\\Decimal('0'))) < 0");
     }
 
     // =========================================================================
@@ -432,7 +432,7 @@ public class PhpExpressionTests
         var all = new CallExpr(Id("lines"), "all", new Expr[] { new LambdaExpr("m", pred) });
         var any = new CallExpr(Id("lines"), "any", new Expr[] { new LambdaExpr("m", pred) });
         var none = new CallExpr(Id("lines"), "none", new Expr[] { new LambdaExpr("m", pred) });
-        const string cmp = "($m->amount->compareTo(new \\Koine\\Runtime\\Decimal('0')) > 0)";
+        const string cmp = "($m->amount->compareTo((new \\Koine\\Runtime\\Decimal('0'))) > 0)";
         Translate(all).ShouldBe($"array_reduce($this->lines, fn($carry, $m) => $carry && {cmp}, true)");
         Translate(any).ShouldBe($"array_reduce($this->lines, fn($carry, $m) => $carry || {cmp}, false)");
         Translate(none).ShouldBe($"!array_reduce($this->lines, fn($carry, $m) => $carry || {cmp}, false)");
