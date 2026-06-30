@@ -51,6 +51,27 @@ internal enum CSharpLayer
 }
 
 /// <summary>
+/// How a Koine <c>matches</c> invariant's regex guard is evaluated in emitted C# (issue #795).
+/// <see cref="Inline"/> (the default) emits the bounded
+/// <c>Regex.IsMatch(raw, @"…", RegexOptions.None, TimeSpan.FromMilliseconds(N))</c> call — byte-identical
+/// to today. <see cref="SourceGenerated"/> instead emits a cached, allocation-free
+/// <c>[GeneratedRegex(@"…", RegexOptions.None, matchTimeoutMilliseconds: N)]</c> partial method (the .NET
+/// <c>System.Text.RegularExpressions.Generator</c> source generator), compiling the pattern once ahead of
+/// time. Both modes carry the SAME pattern, <c>RegexOptions.None</c>, and timeout, so match behavior —
+/// including a timed-out match surfacing as a contained <c>RegexMatchTimeoutException</c> — is identical;
+/// only the evaluation strategy differs. Requires C# 11+/.NET 7+ (the repo is on <c>net10.0</c> with
+/// <c>LangVersion latest</c>, so it is satisfied).
+/// </summary>
+internal enum RegexMode
+{
+    /// <summary>Inline <c>Regex.IsMatch(raw, @"…", RegexOptions.None, TimeSpan.FromMilliseconds(N))</c> — the default, byte-identical to today.</summary>
+    Inline,
+
+    /// <summary>A cached, allocation-free <c>[GeneratedRegex]</c> partial method (the .NET source generator).</summary>
+    SourceGenerated,
+}
+
+/// <summary>
 /// Per-emit configuration for the C# backend (R16.1), mapped from the CLI's
 /// <c>targets.csharp.*</c> block. <see cref="NamespaceMap"/> remaps a bounded context's
 /// emitted namespace (e.g. <c>Catalog → Acme.Catalog</c>): the mapped value replaces the
@@ -77,6 +98,12 @@ internal enum CSharpLayer
 /// so an author-supplied catastrophic-backtracking pattern in a value-object constructor cannot run
 /// unbounded and become a ReDoS sink (issue #641). A timed-out match surfaces as a contained
 /// <c>RegexMatchTimeoutException</c> from the constructor, not a hang.</para>
+/// <para><see cref="RegexMode"/> selects how a <c>matches</c> invariant's regex guard is evaluated:
+/// <see cref="CSharp.RegexMode.Inline"/> (the default) emits the inline <c>Regex.IsMatch(…)</c> call,
+/// byte-identical to today; <see cref="CSharp.RegexMode.SourceGenerated"/> emits the opt-in cached,
+/// allocation-free <c>[GeneratedRegex]</c> partial-method form (issue #795). The same
+/// <see cref="RegexMatchTimeoutMs"/> flows into both, so match semantics are identical — only the
+/// evaluation strategy differs.</para>
 /// </remarks>
 internal sealed record CSharpEmitterOptions(
     IReadOnlyDictionary<string, string> NamespaceMap,
@@ -86,7 +113,8 @@ internal sealed record CSharpEmitterOptions(
     IReadOnlySet<CSharpLayer>? Layers = null,
     bool ApplicationMediatr = false,
     CSharpMappingMode Mapping = CSharpMappingMode.Plain,
-    int RegexMatchTimeoutMs = 1000)
+    int RegexMatchTimeoutMs = 1000,
+    RegexMode RegexMode = RegexMode.Inline)
 {
     public static readonly CSharpEmitterOptions Empty =
         new(new Dictionary<string, string>(StringComparer.Ordinal));

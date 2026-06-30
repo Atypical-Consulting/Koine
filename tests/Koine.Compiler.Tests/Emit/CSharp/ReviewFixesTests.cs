@@ -121,6 +121,29 @@ public class ReviewFixesTests
         b.CacheDiscriminator.ShouldNotBe(c.CacheDiscriminator);
     }
 
+    [Fact]
+    public void Csharp_emitter_options_default_to_inline_regex_mode()
+    {
+        // Issue #795: the opt-in [GeneratedRegex] form is gated on a RegexMode option that defaults to
+        // Inline, so Empty (and every unconfigured caller) keeps emitting the inline Regex.IsMatch form —
+        // byte-identical to today. The option can carry SourceGenerated when explicitly requested.
+        CSharpEmitterOptions.Empty.RegexMode.ShouldBe(RegexMode.Inline);
+        (CSharpEmitterOptions.Empty with { RegexMode = RegexMode.SourceGenerated })
+            .RegexMode.ShouldBe(RegexMode.SourceGenerated);
+    }
+
+    [Fact]
+    public void Csharp_cache_discriminator_reflects_the_regex_mode()
+    {
+        // RegexMode.SourceGenerated changes emitted bytes (the [GeneratedRegex] partial form), so it MUST
+        // participate in the emit-cache fingerprint — otherwise two emits of the same model differing only
+        // in mode collide and the second returns the first's stale bytes (mirrors the #794 timeout fix).
+        IEmitter inline = new CSharpEmitter(CSharpEmitterOptions.Empty); // default RegexMode.Inline
+        IEmitter sourceGen = new CSharpEmitter(CSharpEmitterOptions.Empty with { RegexMode = RegexMode.SourceGenerated });
+
+        inline.CacheDiscriminator.ShouldNotBe(sourceGen.CacheDiscriminator);
+    }
+
     /// <summary>A context with an <c>Is…</c>-named spec and a plain one, to exercise the predicate de-doubling.</summary>
     private const string SpecPrefixFixture = """
         context Loans {
