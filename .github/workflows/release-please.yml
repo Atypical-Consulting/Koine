@@ -1,0 +1,54 @@
+name: release-please
+
+# Derives the next semantic version from Conventional Commits on every push to main and keeps a
+# release PR up to date (bumping Directory.Build.props + CHANGELOG.md). Merging that PR tags
+# vX.Y.Z, which triggers release.yml's pack-and-publish job. See
+# adr/0002-conventional-commits-and-automated-semver.md.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # One-time bootstrap: the first push to main with no v* tag yet replays the full Conventional
+  # Commits history (scripts/release/compute-historical-version.py) to seed the real baseline
+  # version instead of a hand-picked one, tags it, and updates the manifest/props to match. Once a
+  # tag exists this is a permanent no-op and release-please's normal since-last-tag logic takes
+  # over. See adr/0002-conventional-commits-and-automated-semver.md, decision 5.
+  bootstrap-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: |
+          set -euo pipefail
+          if [ -n "$(git tag -l 'v*')" ]; then
+            echo "a v* tag already exists — baseline already bootstrapped, skipping"
+            exit 0
+          fi
+
+          version="$(python3 scripts/release/compute-historical-version.py HEAD)"
+          echo "computed baseline version: $version"
+
+          python3 scripts/release/set-baseline-version.py "$version"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .release-please-manifest.json Directory.Build.props
+          git commit -m "chore(release): bootstrap baseline version $version from Conventional Commits history"
+          git tag "v$version"
+          git push origin HEAD:main
+          git push origin "v$version"
+
+  release-please:
+    needs: bootstrap-baseline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          target-branch: main

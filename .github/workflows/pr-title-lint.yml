@@ -1,0 +1,20 @@
+name: PR title lint
+
+# PRs are squash-merged, so the PR title becomes the commit message on main. release-please parses
+# that message to derive the next semantic version (adr/0002-conventional-commits-and-automated-semver.md),
+# so a non-conforming title is rejected here before merge rather than silently producing no release.
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  lint-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
