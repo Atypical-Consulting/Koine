@@ -2922,11 +2922,13 @@ mod tests {
     //     with a concurrent start installing session N+1 in the race window, then asserts the
     //     new handles survived → FAILS before the fix (steals child-N+1), PASSES after.
 
-    /// Testable mirror of `pty_stop`'s teardown body.
+    /// Testable mirror of `pty_stop`'s teardown body (post-fix).
     ///
-    /// Pre-fix: three separate lock blocks (writer / child / master) — the buggy path that
-    /// the test catches.  Task 2 replaces the body below with a single call to
-    /// `take_pty_child_and_clear_handles_with_race_hook`, eliminating the out-of-band take.
+    /// Delegates to `take_pty_child_and_clear_handles_with_race_hook` so the `child` lock is
+    /// held continuously while `writer`/`master` are cleared — the same serialized path used by
+    /// the coalescer-exit teardown (#810).  Accepts an `on_race_window` hook (fired while the
+    /// `child` lock is held) so the test can drive a concurrent `pty_start` at the exact point
+    /// the old out-of-band code was vulnerable, and assert the new session's handles survive.
     #[cfg(test)]
     fn pty_stop_teardown_with_race_hook<C, W, M>(
         child: &Mutex<Option<C>>,
@@ -2943,13 +2945,11 @@ mod tests {
 
     /// Regression guard for #830: a start racing `pty_stop` must never have its child stolen.
     ///
-    /// A concurrent `pty_start` installs session N+1 in the window between `pty_stop`'s
-    /// writer-clear and child-take.  Asserts:
-    ///  - stop reaps only the OLD child (session N)
-    ///  - the new session's child/writer/master are intact after stop completes
-    ///
-    /// FAILS before the fix (the pre-fix `pty_stop_teardown_with_race_hook` body takes child-N+1
-    /// and nulls master-N+1).  PASSES after Task 2 routes the body through the serialized helper.
+    /// A concurrent `pty_start` installs session N+1 in the window where the old out-of-band
+    /// `pty_stop` code would have taken and reaped the new child.  With the fix in place
+    /// (`pty_stop` delegates to the serialized helper), the `child` lock is held throughout the
+    /// clears, so the start must wait — the new session's child/writer/master are intact after
+    /// the stop completes and the stop reaps only the OLD child (session N).
     #[test]
     fn pty_stop_racing_start_does_not_take_new_child() {
         let child: Mutex<Option<&str>> = Mutex::new(Some("child-N"));
@@ -2959,8 +2959,9 @@ mod tests {
         let reaped = std::thread::scope(|s| {
             let mut start_handle = None;
             let reaped = pty_stop_teardown_with_race_hook(&child, &writer, &master, || {
-                // Race window (between writer-clear and child-take in the pre-fix code):
-                // a concurrent `pty_start` installs session N+1's handles.
+                // Race window (fired while the child lock is held by the serialized helper):
+                // a concurrent `pty_start` tries to install session N+1's handles but must
+                // wait for the lock — its handles are never stolen or clobbered.
                 start_handle = Some(s.spawn(|| {
                     let mut cg = child.lock().unwrap_or_else(|e| e.into_inner());
                     *writer.lock().unwrap_or_else(|e| e.into_inner()) = Some("writer-N+1");
