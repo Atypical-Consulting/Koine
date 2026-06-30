@@ -376,3 +376,38 @@ describe('workspace settings schema (#736)', () => {
     expect(doc).not.toHaveProperty('theme');
   });
 });
+
+// Task 2 (#791): characterization tests that guard the extraction of sortedValidationErrors and
+// rejectBadPreviewTarget. Both converters must keep identical error-ordering and previewTarget message.
+describe('jsonDocToSettings / jsonDocToWorkspaceOverrides error-ordering parity (#791)', () => {
+  it('both converters put field-specific errors before additionalProperties errors', () => {
+    // A flat legacy doc with a bad lspTrace enum value AND an unknown key. The sort must put
+    // the field error first in both converters so the first diagnostic points at the bad field.
+    const doc = JSON.stringify({ lspTrace: 'loud', bogusKey: 1 });
+    const settingsRes = jsonDocToSettings(doc, DEFAULT_SETTINGS);
+    const wsRes = jsonDocToWorkspaceOverrides(doc);
+
+    // Both should fail
+    expect(settingsRes.settings).toBeUndefined();
+    expect(wsRes.overrides).toBeUndefined();
+
+    // First error in BOTH is the field-specific one (lspTrace), not the structural one (bogusKey).
+    expect(settingsRes.errors?.[0]?.message).toMatch(/lspTrace/);
+    expect(wsRes.errors?.[0]?.message).toMatch(/lspTrace/);
+  });
+
+  it('both converters produce the same previewTarget error message format for an unknown target', () => {
+    const userDoc = JSON.stringify({ previewTarget: 'cobol' });
+    const wsDoc = JSON.stringify({ previewTarget: 'cobol' });
+
+    const settingsRes = jsonDocToSettings(userDoc, DEFAULT_SETTINGS);
+    const wsRes = jsonDocToWorkspaceOverrides(wsDoc);
+
+    expect(settingsRes.settings).toBeUndefined();
+    expect(wsRes.overrides).toBeUndefined();
+
+    // Both must produce the same exact message so callers see a consistent diagnostic.
+    expect(settingsRes.errors?.[0]?.message).toBe('previewTarget: unknown emit target "cobol"');
+    expect(wsRes.errors?.[0]?.message).toBe('previewTarget: unknown emit target "cobol"');
+  });
+});

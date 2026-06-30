@@ -285,12 +285,7 @@ export function jsonDocToWorkspaceOverrides(
     return { errors: [{ message: (err as Error).message }] };
   }
   if (!validateWorkspace(parsed)) {
-    // Surface field-specific errors before structural root errors (additionalProperties),
-    // exactly as jsonDocToSettings does.
-    const ordered = [...(validateWorkspace.errors ?? [])].sort(
-      (a, b) => (a.instancePath ? 0 : 1) - (b.instancePath ? 0 : 1),
-    );
-    return { errors: ordered.map((e) => ({ message: formatError(e) })) };
+    return { errors: sortedValidationErrors(validateWorkspace.errors ?? []) };
   }
   // Extract only the recognized scoped keys present in the validated document.
   const obj = parsed as Record<string, unknown>;
@@ -300,11 +295,10 @@ export function jsonDocToWorkspaceOverrides(
       (out as Record<string, unknown>)[k as string] = obj[k as string];
     }
   }
-  // previewTarget guard: mirror the user-scope path — open string in the leaf schema so validate
-  // against the live emit-target registry (same predicate coercePreviewTarget uses).
-  if ('previewTarget' in out && !isEmitTarget(out.previewTarget)) {
-    return { errors: [{ message: `previewTarget: unknown emit target "${String(out.previewTarget)}"` }] };
-  }
+  // previewTarget guard: open string in the leaf schema, so validate against the live emit-target
+  // registry (same predicate coercePreviewTarget uses) via the shared helper.
+  const ptErrors = rejectBadPreviewTarget(out);
+  if (ptErrors) return { errors: ptErrors };
   return { overrides: out };
 }
 
@@ -337,6 +331,31 @@ function formatError(e: ErrorObject): string {
     ? e.instancePath.replace(/^\//, '')
     : (e.params as { additionalProperty?: string }).additionalProperty ?? '';
   return where ? `${where}: ${e.message}` : (e.message ?? 'invalid value');
+}
+
+/**
+ * Sort AJV errors so field-specific errors (instancePath set) surface before structural root errors
+ * (additionalProperties, whose instancePath is empty) and format them into diagnostic objects. This
+ * ordering is shared by `jsonDocToSettings` and `jsonDocToWorkspaceOverrides`; extracting it here
+ * guarantees the two converters can never drift.
+ */
+function sortedValidationErrors(ajvErrors: ErrorObject[]): Array<{ message: string; line?: number }> {
+  return [...ajvErrors]
+    .sort((a, b) => (a.instancePath ? 0 : 1) - (b.instancePath ? 0 : 1))
+    .map((e) => ({ message: formatError(e) }));
+}
+
+/**
+ * Reject a validated partial settings object whose `previewTarget` is not in the live emit-target
+ * registry. Returns a one-item diagnostics array when the value is invalid, `null` when it's absent
+ * or valid. Shared by `jsonDocToSettings` and `jsonDocToWorkspaceOverrides` so the message text is
+ * guaranteed identical across both paths and the predicate (`isEmitTarget`) is applied once.
+ */
+function rejectBadPreviewTarget(out: Partial<Settings>): Array<{ message: string }> | null {
+  if ('previewTarget' in out && !isEmitTarget(out.previewTarget)) {
+    return [{ message: `previewTarget: unknown emit target "${String(out.previewTarget)}"` }];
+  }
+  return null;
 }
 
 /** Detect a legacy FLAT document: a plain object with at least one top-level key that is a runtime
@@ -390,22 +409,18 @@ export function jsonDocToSettings(
   if (!validate(parsed)) {
     // Surface field-specific errors (a bad enum/range on `theme`, `fontSize`, …) before structural
     // root errors (additionalProperties), so the first diagnostic points at the offending field.
-    const ordered = [...(validate.errors ?? [])].sort(
-      (a, b) => (a.instancePath ? 0 : 1) - (b.instancePath ? 0 : 1),
-    );
-    return { errors: ordered.map((e) => ({ message: formatError(e) })) };
+    return { errors: sortedValidationErrors(validate.errors ?? []) };
   }
   const doc = flattenDoc(parsed, flat);
   // previewTarget and aiBaseUrl are deliberately open `string`s in the schema (a dynamic, backend-seeded
   // target must validate), so the schema gate alone lets through values loadSettings() would later drop —
   // the live↔reload divergence (#734). Re-apply the load path's accept-set here so what applies == what survives.
   //
-  // previewTarget: VALIDATE against the LIVE EMIT_TARGETS (the same predicate coercePreviewTarget uses).
-  // An out-of-registry target is a typo or a removed target; reject it with a diagnostic rather than
-  // applying a value that the next reload silently snaps back to csharp.
-  if ('previewTarget' in doc && !isEmitTarget(doc.previewTarget)) {
-    return { errors: [{ message: `previewTarget: unknown emit target "${String(doc.previewTarget)}"` }] };
-  }
+  // previewTarget: VALIDATE against the LIVE EMIT_TARGETS via the shared helper (same predicate
+  // coercePreviewTarget uses). An out-of-registry target is a typo or a removed target; reject it with
+  // a diagnostic rather than applying a value that the next reload silently snaps back to csharp.
+  const ptErrors = rejectBadPreviewTarget(doc);
+  if (ptErrors) return { errors: ptErrors };
   // Re-inject the live secret so a JSON edit can never clear or overwrite the encrypted key.
   const next: Settings = { ...current, ...doc, aiApiKey: current.aiApiKey };
   // aiBaseUrl: COERCE empty → default, exactly as loadSettings() does on read (`.length > 0`, no trim),
