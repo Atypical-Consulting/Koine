@@ -395,11 +395,14 @@ describe('buildFlatSchema structural equality guard (#791)', () => {
     expect(WORKSPACE_SETTINGS_JSON_SCHEMA.additionalProperties).toBe(false);
   });
 
-  it('WORKSPACE_SETTINGS_JSON_SCHEMA serializes stably (byte-for-byte reproducible)', () => {
-    // Capture the JSON once; after the buildFlatSchema refactor it must be identical so no
-    // schema-based validator sees a different schema at runtime.
-    const json = JSON.stringify(WORKSPACE_SETTINGS_JSON_SCHEMA);
-    expect(JSON.stringify(WORKSPACE_SETTINGS_JSON_SCHEMA)).toBe(json);
+  it('every WORKSPACE_SCOPED_KEY has a non-empty leaf schema in WORKSPACE_SETTINGS_JSON_SCHEMA', () => {
+    // Verifies that buildFlatSchema(WORKSPACE_SCOPED_KEYS) populated every key's leaf — a guard
+    // against silently adding `undefined` properties if an invalid key is ever passed to the builder.
+    for (const k of WORKSPACE_SCOPED_KEYS) {
+      const leaf = (WORKSPACE_SETTINGS_JSON_SCHEMA.properties as Record<string, unknown>)[k as string];
+      expect(leaf, `leaf schema for ${String(k)}`).toBeDefined();
+      expect(Object.keys(leaf as object).length, `leaf schema for ${String(k)} is non-empty`).toBeGreaterThan(0);
+    }
   });
 });
 
