@@ -1,25 +1,19 @@
-/* --- welcome / start console (above #app, below modals) ---
-   A full-bleed start page: a wordmark bar, a two-column hero (the live `.koi` artifact + the
-   get-to-work rail), then the searchable example gallery. Everything derives from the --koi-* tokens
-   so light/dark adapt for free; the editor's own syntax hues colour the hero snippet. */
+/* --- welcome / start console (routed Home view) ---
+   A full-bleed start page: a two-column hero (the live `.koi` artifact + the get-to-work rail), then
+   the searchable example gallery. Mounted inside #home-root (a fixed full-window container) via
+   mountHome(); fills it with position:absolute so it stays in normal stacking. Everything derives from
+   the --koi-* tokens so light/dark adapt for free; the editor's own syntax hues colour the hero snippet. */
 .koi-welcome {
-  position: fixed;
+  position: absolute; /* fill #home-root (the fixed full-window container) */
   inset: 0;
-  z-index: var(--koi-z-overlay);
+  z-index: auto; /* not an overlay — drop the overlay stacking context */
   display: flex;
   overflow-y: auto;
   background: var(--koi-paper);
   padding: clamp(12px, 3vw, 32px);
-
-  &[hidden] {
-    display: none;
-  }
 }
 
-/* The routed Home view (#368): the same start console, but mounted as a full-page route inside
-   #home-root rather than the fixed, z-stacked overlay #app sits beneath. The boot switch shows exactly
-   one of #app / #home-root, so Home no longer needs to float above the editor — it fills its own route
-   container in normal stacking. */
+/* #home-root is the fixed full-window container the router switches between #app and Home. */
 #home-root {
   position: fixed;
   inset: 0;
@@ -27,11 +21,6 @@
   &[hidden] {
     display: none;
   }
-}
-
-.koi-welcome.koi-welcome-embedded {
-  position: absolute; /* fill #home-root (which is the fixed full-window container) */
-  z-index: auto; /* not an overlay anymore — drop the overlay stacking context */
 }
 
 /* margin:auto centers the card; a FIXED height keeps the modal the same size across both views (console
@@ -88,78 +77,6 @@
   justify-content: space-between;
   gap: var(--koi-space-3);
   margin-bottom: clamp(20px, 3vw, 32px);
-}
-
-.koi-welcome-brand {
-  display: flex;
-  align-items: center;
-  gap: var(--koi-space-2-75);
-  color: var(--koi-fg);
-}
-
-.koi-welcome-logo {
-  display: inline-flex;
-
-  svg {
-    height: 34px;
-    width: 34px;
-    display: block;
-    border-radius: 9px;
-    box-shadow: 0 6px 18px color-mix(in srgb, var(--koi-accent) 34%, transparent);
-  }
-}
-
-.koi-welcome-wordmark {
-  display: flex;
-  flex-direction: column;
-  line-height: 1;
-  gap: var(--koi-space-0-75);
-}
-
-.koi-welcome-wordmark-name {
-  font-family: var(--koi-font-display);
-  font-size: 1.18rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: var(--koi-fg);
-}
-
-.koi-welcome-wordmark-kicker {
-  font-family: var(--koi-font-mono);
-  font-size: 0.6rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.28em;
-  color: var(--koi-muted);
-}
-
-/* Dismiss back to the editor. */
-.koi-welcome-close {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border: 1px solid transparent;
-  border-radius: var(--koi-radius-sm);
-  background: transparent;
-  color: var(--koi-muted);
-  font-size: 0.85rem;
-  line-height: 1;
-  cursor: pointer;
-  transition: background var(--koi-dur-mid) ease, color var(--koi-dur-mid) ease, border-color var(--koi-dur-mid) ease;
-
-  &:hover {
-    background: var(--koi-surface);
-    border-color: var(--koi-line);
-    color: var(--koi-fg);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--koi-accent);
-    outline-offset: 1px;
-  }
 }
 
 /* Resume editing — return to a live editor session (#392). A labelled pill, shown only when a session
