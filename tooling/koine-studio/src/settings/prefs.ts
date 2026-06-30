@@ -176,6 +176,19 @@ export async function startMcpSidecarIfEnabled(cb: PrefsCallbacks, s: Settings =
 }
 
 /**
+ * Wrap `current` by `delta` steps within `[0, length)`, handling both forward and backward wrap.
+ * Returns `-1` when `length <= 0` (empty-guard — neither existing caller reaches this, but the
+ * helper is safe to call unconditionally).
+ *
+ * Used by both roving-tabindex call sites in this module: the `segmented()` radiogroup arrow-nav
+ * and the Settings category tablist arrow-nav. Keeping the formula here prevents a one-sided fix.
+ */
+export function wrapIndex(current: number, delta: number, length: number): number {
+  if (length <= 0) return -1;
+  return (current + delta + length) % length;
+}
+
+/**
  * A segmented radio group (e.g. Dark / Light): a row of role=radio buttons under a role=radiogroup, with
  * exactly one option checked at a time. Keyboard-navigable per the WAI-ARIA radiogroup pattern — a roving
  * tabindex (only the checked option is in the tab order) plus Arrow/Home/End navigation where focus
