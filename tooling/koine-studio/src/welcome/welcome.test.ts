@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { createWelcome, mountHome, filterTemplates, DIFFICULTY_ORDER, type WelcomeCallbacks } from '@/welcome/welcome';
+import { mountHome, filterTemplates, DIFFICULTY_ORDER, type WelcomeCallbacks } from '@/welcome/welcome';
 import type { Template } from '@/welcome/templates';
 
-// Each test mounts a fresh welcome overlay on document.body; clear it between tests so stale
-// roots/handlers don't leak across cases.
+// Each test mounts a fresh welcome root into a container appended to document.body; the global
+// afterEach wipes the body so roots/handlers don't leak across cases.
 afterEach(() => {
   document.body.innerHTML = '';
   vi.useRealTimers();
@@ -95,14 +95,17 @@ describe('DIFFICULTY_ORDER', () => {
 });
 
 describe('welcome gallery', () => {
+  let container: HTMLElement;
+
   beforeEach(() => {
     document.body.innerHTML = '';
+    container = document.createElement('div');
+    document.body.appendChild(container);
   });
 
   test("renders the active level's cards and opens a template on click", () => {
     const cb = makeCallbacks();
-    const handle = createWelcome(cb, SAMPLE);
-    handle.show();
+    mountHome(container, cb, SAMPLE);
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
     // The first present level (Starter) is active by default; only its cards are in the panel.
@@ -113,13 +116,11 @@ describe('welcome gallery', () => {
     )!;
     billing.click();
     expect((cb.onOpenExample as ReturnType<typeof vi.fn>).mock.calls[0][0].id).toBe('billing');
-    expect(handle.visible).toBe(false);
   });
 
   test('the title sits beside the icon, with a tagline and an open chevron — no badges', () => {
     const cb = makeCallbacks();
-    const handle = createWelcome(cb, SAMPLE);
-    handle.show();
+    mountHome(container, cb, SAMPLE);
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
     const billing = Array.from(root.querySelectorAll<HTMLButtonElement>('button.koi-welcome-example')).find(
@@ -141,7 +142,7 @@ describe('welcome gallery', () => {
 
   test('draws a vertical tab per present level, each with a live count', () => {
     const cb = makeCallbacks();
-    createWelcome(cb, SAMPLE).show();
+    mountHome(container, cb, SAMPLE);
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
     const list = root.querySelector('.koi-welcome-tablist')!;
@@ -157,7 +158,7 @@ describe('welcome gallery', () => {
 
   test('selecting a level tab swaps the panel to that level', () => {
     const cb = makeCallbacks();
-    createWelcome(cb, SAMPLE).show();
+    mountHome(container, cb, SAMPLE);
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
     tabFor(root, 'intermediate').click();
@@ -171,7 +172,7 @@ describe('welcome gallery', () => {
 
   test('exposes no filter chips — search + level tabs are the only controls', () => {
     const cb = makeCallbacks();
-    createWelcome(cb, SAMPLE).show();
+    mountHome(container, cb, SAMPLE);
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
     expect(root.querySelector('.koi-welcome-chip')).toBeNull();
     expect(root.querySelector('.koi-welcome-filters')).toBeNull();
@@ -180,7 +181,7 @@ describe('welcome gallery', () => {
 
   test('search narrows the active level and updates the tab counts (matching tags too)', () => {
     const cb = makeCallbacks();
-    createWelcome(cb, SAMPLE).show();
+    mountHome(container, cb, SAMPLE);
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
     setSearch(root, 'state-machine'); // a tag: ordering (starter) + library (intermediate)
@@ -192,7 +193,7 @@ describe('welcome gallery', () => {
 
   test('when a search empties the active level, the panel jumps to the first level with matches', () => {
     const cb = makeCallbacks();
-    createWelcome(cb, SAMPLE).show();
+    mountHome(container, cb, SAMPLE);
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
     setSearch(root, 'ddd'); // a tag on library (intermediate) + saas (advanced); no starter match
@@ -204,8 +205,7 @@ describe('welcome gallery', () => {
 
   test('shows an empty-state message when nothing matches', () => {
     const cb = makeCallbacks();
-    const handle = createWelcome(cb, SAMPLE);
-    handle.show();
+    mountHome(container, cb, SAMPLE);
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
     setSearch(root, 'zzz-nothing-matches');
@@ -219,8 +219,12 @@ describe('welcome gallery', () => {
 });
 
 describe('welcome start actions ↔ gallery', () => {
+  let container: HTMLElement;
+
   beforeEach(() => {
     document.body.innerHTML = '';
+    container = document.createElement('div');
+    document.body.appendChild(container);
   });
 
   /** The start action whose label matches `label`, e.g. "Start from an example". */
@@ -235,7 +239,7 @@ describe('welcome start actions ↔ gallery', () => {
 
   test('opens on the console with the gallery hidden behind a "Start from an example" action', () => {
     const cb = makeCallbacks();
-    createWelcome(cb, SAMPLE).show();
+    mountHome(container, cb, SAMPLE);
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
     expect(consoleView(root).hidden).toBe(false);
@@ -245,7 +249,7 @@ describe('welcome start actions ↔ gallery', () => {
 
   test('both views live inside the one card, swapped in place (no second card)', () => {
     const cb = makeCallbacks();
-    createWelcome(cb, SAMPLE).show();
+    mountHome(container, cb, SAMPLE);
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
     // A single persistent card frame holds both views — the modal never tears down on a view switch.
@@ -257,7 +261,7 @@ describe('welcome start actions ↔ gallery', () => {
 
   test('the action swaps in the gallery; "Back to start" swaps back', () => {
     const cb = makeCallbacks();
-    createWelcome(cb, SAMPLE).show();
+    mountHome(container, cb, SAMPLE);
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
     action(root, 'Start from an example').click();
@@ -271,42 +275,31 @@ describe('welcome start actions ↔ gallery', () => {
 
   test('opening the gallery does not leave the welcome screen (no callback, still visible)', () => {
     const cb = makeCallbacks();
-    const handle = createWelcome(cb, SAMPLE);
-    handle.show();
+    mountHome(container, cb, SAMPLE);
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
     action(root, 'Start from an example').click();
-    expect(handle.visible).toBe(true);
+    // No navigation callback fired — the gallery is a sub-view of the same surface.
     expect(cb.onNewModel).not.toHaveBeenCalled();
     expect(cb.onOpenFolder).not.toHaveBeenCalled();
-  });
-
-  test('re-showing after the gallery was open returns to the console', () => {
-    const cb = makeCallbacks();
-    const handle = createWelcome(cb, SAMPLE);
-    handle.show();
-    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
-
-    action(root, 'Start from an example').click();
-    handle.hide();
-    handle.show();
-
-    expect(consoleView(root).hidden).toBe(false);
-    expect(galleryView(root).hidden).toBe(true);
   });
 });
 
 const KEY = 'koine.studio.recentFolders';
 
 describe('welcome recent rows', () => {
+  let container: HTMLElement;
+
   beforeEach(() => {
     localStorage.clear();
     document.body.innerHTML = '';
+    container = document.createElement('div');
+    document.body.appendChild(container);
   });
 
   test('renders one row per recent with open/remove/pin controls', () => {
     localStorage.setItem(KEY, JSON.stringify(['/a/one', '/b/two']));
-    createWelcome(makeCallbacks()).show();
+    mountHome(container, makeCallbacks());
     expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(2);
     expect(document.querySelector('.koi-welcome-recent-remove')).not.toBeNull();
     expect(document.querySelector('.koi-welcome-recent-pin')).not.toBeNull();
@@ -315,14 +308,14 @@ describe('welcome recent rows', () => {
   test('open control invokes onOpenRecent with the path', () => {
     localStorage.setItem(KEY, JSON.stringify(['/a/one']));
     const cb = makeCallbacks();
-    createWelcome(cb).show();
+    mountHome(container, cb);
     (document.querySelector('.koi-welcome-recent-open') as HTMLElement).click();
     expect(cb.onOpenRecent).toHaveBeenCalledWith('/a/one');
   });
 
   test('remove deletes the row and updates storage', () => {
     localStorage.setItem(KEY, JSON.stringify(['/a/one', '/b/two']));
-    createWelcome(makeCallbacks()).show();
+    mountHome(container, makeCallbacks());
     (document.querySelector('.koi-welcome-recent-remove') as HTMLElement).click();
     expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(1);
     expect(JSON.parse(localStorage.getItem(KEY)!).length).toBe(1);
@@ -330,7 +323,7 @@ describe('welcome recent rows', () => {
 
   test('keeps recent rows inside the scroll list wrapper', () => {
     localStorage.setItem(KEY, JSON.stringify(['/a', '/b']));
-    createWelcome(makeCallbacks()).show();
+    mountHome(container, makeCallbacks());
     const list = document.querySelector('.koi-welcome-recent-list');
     expect(list).not.toBeNull();
     expect(list!.querySelectorAll('.koi-welcome-recent-item').length).toBe(2);
@@ -338,9 +331,13 @@ describe('welcome recent rows', () => {
 });
 
 describe('welcome recent management', () => {
+  let container: HTMLElement;
+
   beforeEach(() => {
     localStorage.clear();
     document.body.innerHTML = '';
+    container = document.createElement('div');
+    document.body.appendChild(container);
   });
 
   afterEach(() => {
@@ -350,7 +347,7 @@ describe('welcome recent management', () => {
   test('shows a filter only when the list is long, and filters by text', () => {
     const many = Array.from({ length: 10 }, (_, i) => `/proj/folder-${i}`);
     localStorage.setItem(KEY, JSON.stringify(many));
-    createWelcome(makeCallbacks()).show();
+    mountHome(container, makeCallbacks());
     const filter = document.querySelector('.koi-welcome-recent-filter') as HTMLInputElement;
     expect(filter).not.toBeNull();
     filter.value = 'folder-3';
@@ -360,7 +357,7 @@ describe('welcome recent management', () => {
 
   test('clear-all empties the list', async () => {
     localStorage.setItem(KEY, JSON.stringify(['/a', '/b']));
-    createWelcome(makeCallbacks()).show();
+    mountHome(container, makeCallbacks());
     (document.querySelector('.koi-welcome-recent-clear') as HTMLElement).click();
 
     // Clearing now routes through Koine's confirm modal (not window.confirm); approve it.
@@ -462,26 +459,20 @@ describe('Home colophon footer', () => {
     return Array.from(footer.querySelectorAll<HTMLElement>('.koi-home-colophon-link')).map((a) => a.textContent?.trim());
   }
 
-  test('the overlay Home (createWelcome) carries the four links, byline and a hidden version chip', () => {
-    createWelcome(makeCallbacks(), SAMPLE);
-    const footer = footerOf(document.querySelector<HTMLElement>('.koi-welcome')!);
+  test('the routed Home (mountHome) carries the four links, byline and a hidden version chip', () => {
+    const el = document.createElement('div');
+    mountHome(el, makeCallbacks(), SAMPLE);
+    const footer = footerOf(el.querySelector<HTMLElement>('.koi-welcome')!);
     expect(linkLabels(footer)).toEqual(['GitHub', 'Home', 'Docs', 'Blog']);
     expect(footer.querySelector('.koi-home-colophon-credit')?.textContent).toContain('Philippe Matray');
     // The chip stays hidden until the async version fetch resolves (mirrors the About chip).
     expect(footer.querySelector<HTMLElement>('.koi-home-colophon-chip')!.hidden).toBe(true);
   });
 
-  test('the routed Home (mountHome) carries the same colophon footer', () => {
+  test('each colophon link is a real external anchor (href + target + rel)', () => {
     const el = document.createElement('div');
     mountHome(el, makeCallbacks(), SAMPLE);
     const footer = footerOf(el.querySelector<HTMLElement>('.koi-welcome')!);
-    expect(linkLabels(footer)).toEqual(['GitHub', 'Home', 'Docs', 'Blog']);
-    expect(footer.querySelector('.koi-home-colophon-credit')?.textContent).toContain('Philippe Matray');
-  });
-
-  test('each colophon link is a real external anchor (href + target + rel)', () => {
-    createWelcome(makeCallbacks(), SAMPLE);
-    const footer = footerOf(document.querySelector<HTMLElement>('.koi-welcome')!);
     const links = Array.from(footer.querySelectorAll<HTMLAnchorElement>('a.koi-home-colophon-link'));
     expect(links.length).toBe(4);
     for (const a of links) {
@@ -541,13 +532,6 @@ describe('mountHome — embedded chrome suppression', () => {
     expect(el.querySelector('.koi-welcome-brand')).toBeNull();
     // No overlay to dismiss on the routed Home — the close ✕ (console and gallery) is gone entirely.
     expect(el.querySelector('.koi-welcome-close')).toBeNull();
-  });
-
-  test('the legacy overlay (createWelcome) keeps its brand and ✕', () => {
-    createWelcome(makeCallbacks(), SAMPLE);
-    const root = document.body.querySelector<HTMLElement>('.koi-welcome')!;
-    expect(root.querySelector('.koi-welcome-brand')).not.toBeNull();
-    expect(root.querySelector('.koi-welcome-close')).not.toBeNull();
   });
 });
 
