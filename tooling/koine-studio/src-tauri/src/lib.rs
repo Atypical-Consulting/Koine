@@ -1736,17 +1736,16 @@ fn pty_stop(state: State<'_, PtyState>) -> Result<(), String> {
     // Release a paused reader (#441) so it wakes, sees the killed child's EOF, and exits cleanly
     // instead of staying parked forever.
     set_pty_paused(&state.paused, false);
-    if let Ok(mut g) = state.writer.lock() {
-        *g = None;
-    }
-    if let Ok(mut g) = state.child.lock() {
-        if let Some(mut child) = g.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-    if let Ok(mut g) = state.master.lock() {
-        *g = None;
+    // Delegate to the serialized helper so the `child` lock is held continuously while
+    // `writer`/`master` are cleared (#830).  This serializes against `pty_start` (which also
+    // takes the `child` lock first), preventing a racing start from having its freshly installed
+    // `child` reaped here or its handles clobbered.  The old child (if any) is returned and
+    // reaped outside the lock so a new session is not blocked by the `wait()`.
+    let old_child =
+        take_pty_child_and_clear_handles(&state.child, &state.writer, &state.master);
+    if let Some(mut child) = old_child {
+        let _ = child.kill();
+        let _ = child.wait();
     }
     Ok(())
 }
@@ -2935,21 +2934,11 @@ mod tests {
         master: &Mutex<Option<M>>,
         on_race_window: impl FnOnce(),
     ) -> Option<C> {
-        // PRE-FIX (buggy): each handle cleared in its own separate lock block.
-        // A concurrent `pty_start` can interleave here and install session N+1.
-        if let Ok(mut g) = writer.lock() {
-            *g = None;
-        }
-        on_race_window(); // <-- race window: start installs new handles here
-        let reaped = if let Ok(mut g) = child.lock() {
-            g.take() // steals child-N+1 if start already installed it
-        } else {
-            None
-        };
-        if let Ok(mut g) = master.lock() {
-            *g = None; // clobbers master-N+1
-        }
-        reaped
+        // POST-FIX: delegate to the serialized helper, which holds the `child` lock continuously
+        // while clearing `writer`/`master`.  The `on_race_window` hook fires inside the lock —
+        // a concurrent `pty_start` that contends for the `child` lock must wait, so it cannot
+        // install its handles in the gap and have them stolen or clobbered.
+        take_pty_child_and_clear_handles_with_race_hook(child, writer, master, on_race_window)
     }
 
     /// Regression guard for #830: a start racing `pty_stop` must never have its child stolen.
