@@ -45,6 +45,28 @@ describe('overlays', () => {
       document.body.appendChild(modal);
       expect(overlays.overlayOpen()).toBe(true);
     });
+
+    it('counts a visible Settings center panel (#center-panel-settings)', () => {
+      const overlays = createOverlays(makeDeps());
+      // No overlay open initially.
+      expect(overlays.overlayOpen()).toBe(false);
+
+      // Add the Settings center panel (hidden by default, as in index.html).
+      const panel = document.createElement('section');
+      panel.id = 'center-panel-settings';
+      panel.hidden = true;
+      document.body.appendChild(panel);
+      // Still hidden — should not count.
+      expect(overlays.overlayOpen()).toBe(false);
+
+      // Reveal the panel (simulating the store driving settingsOpen → hidden=false in inspectorController).
+      panel.hidden = false;
+      expect(overlays.overlayOpen()).toBe(true);
+
+      // Hiding again clears it.
+      panel.hidden = true;
+      expect(overlays.overlayOpen()).toBe(false);
+    });
   });
 
   describe('requestNewModel (unsaved-work guard)', () => {

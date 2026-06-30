@@ -1117,6 +1117,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     prefsCallbacks,
     settingsCategory: () => appStore.getState().settingsCategory ?? undefined,
     showSettings: (category) => controller.showSettings(category),
+    closeSettings: () => appStore.getState().closeSettings(),
     getSource: () => editor.getDoc(),
     getSelection: () => {
       const sel = editor.view.state.selection.main;
@@ -1182,6 +1183,16 @@ export function init(hooks: IdeHooks = {}): () => void {
     refreshStatusFromDiagnostics: () =>
       editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())),
     promptDialog: overlays.prompt,
+  });
+
+  // Esc-to-dismiss the Settings overlay (#746). Registered AFTER panelHost so it can call
+  // panelHost.closeSettings() which restores focus to the opener. Only active while Settings is open,
+  // so it cannot interfere with other Esc semantics (palette, modals). The handler runs independently
+  // of overlayOpen() — the mod-key listeners are the ones gated on it.
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!appStore.getState().settingsOpen) return;
+    panelHost.closeSettings();
   });
 
   // --- view layout: editor split + repositionable panels (issue #265) -------

@@ -71,7 +71,7 @@ const APP_HTML = `
             </div>
           </section>
         </div>
-        <section id="center-panel-settings" class="settings-page" aria-label="Settings" hidden>
+        <section id="center-panel-settings" class="settings-page" role="dialog" aria-modal="true" aria-label="Settings" hidden>
           <header id="settings-page-header"><h2 class="settings-page-title">Settings</h2><div class="settings-page-header-controls"><div id="settings-scope-toggle"></div><div id="settings-mode-toggle"></div></div></header>
           <div id="settings-page-body"></div>
         </section>
