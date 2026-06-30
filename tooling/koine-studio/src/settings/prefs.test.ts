@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   mountPreferencesPane,
   startMcpSidecarIfEnabled,
+  stringListInput,
   wrapIndex,
   type PrefsCallbacks,
   type PrefsPaneHandle,
@@ -1084,5 +1085,238 @@ describe('Settings → Appearance: "On startup" control (#770)', () => {
     sel.dispatchEvent(new Event('change'));
     expect(loadSettings().startupView).toBe('home');
     expect(onChange).toHaveBeenCalled();
+  });
+});
+
+// --- stringListInput (#785) --------------------------------------------------
+// Reusable chip/token-list control: removable chips + an add-field. Trims and
+// rejects blank tokens (mirroring coerceShellArgs). Calls onCommit with the
+// full array on add/remove.
+
+describe('stringListInput — reusable string-list control (#785)', () => {
+  let container: HTMLElement;
+  let onCommit: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    onCommit = vi.fn();
+  });
+
+  afterEach(() => {
+    container.remove();
+  });
+
+  function mountControl(initial: string[] = []) {
+    const ctrl = stringListInput('Shell arguments', onCommit);
+    ctrl.set(initial);
+    container.appendChild(ctrl.el);
+    return ctrl;
+  }
+
+  // Returns the remove buttons for each chip.
+  const removeButtons = () =>
+    [...container.querySelectorAll<HTMLButtonElement>('.koi-string-list-remove')];
+  // Returns the text input for adding a new token.
+  const addInput = () => container.querySelector<HTMLInputElement>('.koi-string-list-input')!;
+  // Returns the add button.
+  const addButton = () => container.querySelector<HTMLButtonElement>('.koi-string-list-add')!;
+  // Returns all chip label spans.
+  const chipLabels = () =>
+    [...container.querySelectorAll<HTMLElement>('.koi-string-list-chip-label')].map(
+      (s) => s.textContent,
+    );
+
+  it('set(["-l", "-i"]) renders two removable chips', () => {
+    mountControl(['-l', '-i']);
+    expect(chipLabels()).toEqual(['-l', '-i']);
+    expect(removeButtons()).toHaveLength(2);
+  });
+
+  it('set([]) renders no chips', () => {
+    mountControl([]);
+    expect(chipLabels()).toEqual([]);
+    expect(removeButtons()).toHaveLength(0);
+  });
+
+  it('set() replaces the previous list of chips', () => {
+    const ctrl = mountControl(['-l']);
+    expect(chipLabels()).toEqual(['-l']);
+    ctrl.set(['-x', '-y']);
+    expect(chipLabels()).toEqual(['-x', '-y']);
+  });
+
+  it('adding a blank/whitespace token is a no-op: no commit and no empty string pushed', () => {
+    mountControl(['-l']);
+    const input = addInput();
+    const btn = addButton();
+    input.value = '   ';
+    btn.click();
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(chipLabels()).toEqual(['-l']); // unchanged
+  });
+
+  it('adding an empty string token is a no-op', () => {
+    mountControl(['-l']);
+    addInput().value = '';
+    addButton().click();
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it('adding "-x" commits ["-l", "-i", "-x"] and clears the input', () => {
+    mountControl(['-l', '-i']);
+    const input = addInput();
+    input.value = '-x';
+    addButton().click();
+    expect(onCommit).toHaveBeenCalledWith(['-l', '-i', '-x']);
+    expect(input.value).toBe('');
+  });
+
+  it('adding a token trims surrounding whitespace before committing', () => {
+    mountControl([]);
+    addInput().value = '  -l  ';
+    addButton().click();
+    expect(onCommit).toHaveBeenCalledWith(['-l']);
+  });
+
+  it('removing a chip commits the remaining array', () => {
+    mountControl(['-l', '-i', '-x']);
+    removeButtons()[1].click(); // remove '-i'
+    expect(onCommit).toHaveBeenCalledWith(['-l', '-x']);
+  });
+
+  it('removing the only chip commits an empty array', () => {
+    mountControl(['-l']);
+    removeButtons()[0].click();
+    expect(onCommit).toHaveBeenCalledWith([]);
+  });
+
+  it('each chip has an accessible remove button with aria-label containing the token', () => {
+    mountControl(['-l', '-i']);
+    const btns = removeButtons();
+    expect(btns[0].getAttribute('aria-label')).toContain('-l');
+    expect(btns[1].getAttribute('aria-label')).toContain('-i');
+  });
+
+  it('the add input has the provided ariaLabel', () => {
+    mountControl([]);
+    const input = addInput();
+    // The aria-label (or label) must tie back to the control's ariaLabel parameter.
+    const hasLabel =
+      input.getAttribute('aria-label')?.includes('Shell arguments') ||
+      !!document.querySelector(`label[for="${input.id}"]`);
+    expect(hasLabel).toBe(true);
+  });
+
+  it('pressing Enter in the input adds the token', () => {
+    mountControl([]);
+    const input = addInput();
+    input.value = '-x';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(onCommit).toHaveBeenCalledWith(['-x']);
+  });
+});
+
+// --- Settings → Advanced: terminalShellArgs row (#785) ----------------------
+
+describe('Settings → Advanced: terminal shell args row (#785)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+    saveSettings({ ...DEFAULT_SETTINGS });
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  const advancedPanel = () => document.querySelector<HTMLElement>('#koi-settings-panel-advanced')!;
+  const shellArgsRow = () =>
+    advancedPanel()?.querySelector<HTMLElement>('.koi-string-list-control');
+  const chips = () =>
+    [...(advancedPanel()?.querySelectorAll<HTMLElement>('.koi-string-list-chip-label') ?? [])].map(
+      (s) => s.textContent,
+    );
+  const addInput = () => advancedPanel()?.querySelector<HTMLInputElement>('.koi-string-list-input');
+  const addButton = () =>
+    advancedPanel()?.querySelector<HTMLButtonElement>('.koi-string-list-add');
+  const removeButtons = () =>
+    [...(advancedPanel()?.querySelectorAll<HTMLButtonElement>('.koi-string-list-remove') ?? [])];
+
+  it('renders the Terminal shell args row when hasIntegratedTerminal is true', () => {
+    openPrefs({ hasIntegratedTerminal: true });
+    expect(shellArgsRow()).not.toBeNull();
+  });
+
+  it('hides (or omits) the Terminal shell args row when hasIntegratedTerminal is false', () => {
+    openPrefs({ hasIntegratedTerminal: false });
+    const row = shellArgsRow();
+    // The row may be omitted entirely or hidden; both are acceptable.
+    expect(row === null || (row as HTMLElement).closest('[hidden]') !== null || row.hidden).toBe(true);
+  });
+
+  it('hides (or omits) the Terminal shell args row when hasIntegratedTerminal is omitted (defaults hidden)', () => {
+    // Default behaviour: undefined → the row is NOT shown (desktop-only, not a web feature).
+    openPrefs(); // no hasIntegratedTerminal → should hide the row
+    const row = shellArgsRow();
+    expect(row === null || (row as HTMLElement).closest('[hidden]') !== null || row.hidden).toBe(true);
+  });
+
+  it('populates chips from the persisted terminalShellArgs on open', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, terminalShellArgs: ['-l', '-i'] });
+    openPrefs({ hasIntegratedTerminal: true });
+    expect(chips()).toEqual(['-l', '-i']);
+  });
+
+  it('adding a token commits via patchSettings and fires onChange', () => {
+    const onChange = vi.fn();
+    openPrefs({ hasIntegratedTerminal: true, onChange });
+    const input = addInput()!;
+    const btn = addButton()!;
+    input.value = '-x';
+    btn.click();
+    expect(loadSettings().terminalShellArgs).toEqual(['-x']);
+    expect(onChange).toHaveBeenCalled();
+    const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0];
+    expect(last.terminalShellArgs).toEqual(['-x']);
+  });
+
+  it('removing a chip commits the remaining array via patchSettings', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, terminalShellArgs: ['-l', '-i'] });
+    const onChange = vi.fn();
+    openPrefs({ hasIntegratedTerminal: true, onChange });
+    removeButtons()[0].click(); // remove '-l'
+    expect(loadSettings().terminalShellArgs).toEqual(['-i']);
+    expect(onChange).toHaveBeenCalled();
+  });
+
+  it('blank token add is a no-op: patchSettings not called', () => {
+    const onChange = vi.fn();
+    openPrefs({ hasIntegratedTerminal: true, onChange });
+    onChange.mockClear();
+    addInput()!.value = '   ';
+    addButton()!.click();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(loadSettings().terminalShellArgs).toEqual([]);
+  });
+
+  it('populate() re-syncs chips from settings on refresh', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, terminalShellArgs: ['-l'] });
+    const pane = openPrefs({ hasIntegratedTerminal: true });
+    expect(chips()).toEqual(['-l']);
+    saveSettings({ ...DEFAULT_SETTINGS, terminalShellArgs: ['-l', '-x'] });
+    pane.refresh();
+    expect(chips()).toEqual(['-l', '-x']);
+  });
+
+  it('Advanced "Reset to defaults" clears terminalShellArgs and repaints empty chips', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, terminalShellArgs: ['-l'] });
+    openPrefs({ hasIntegratedTerminal: true });
+    expect(chips()).toEqual(['-l']);
+    const danger = advancedPanel().querySelector<HTMLButtonElement>('.koi-set-danger')!;
+    danger.click(); // arm
+    danger.click(); // confirm
+    expect(loadSettings().terminalShellArgs).toEqual([]);
+    expect(chips()).toEqual([]);
   });
 });

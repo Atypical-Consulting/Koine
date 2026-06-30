@@ -67,6 +67,13 @@ export interface PrefsCallbacks {
    */
   canSaveProjects?: boolean;
 
+  /**
+   * Whether this host has an integrated terminal (the Tauri desktop shell does; the browser host does
+   * not). When false or omitted the Terminal shell args row is hidden from the Advanced settings panel.
+   * Maps to `Platform.canRunShell` at the call site in ide.tsx.
+   */
+  hasIntegratedTerminal?: boolean;
+
   /** Return the remembered workspace root's display name (for Settings), or null if not yet set. */
   workspaceRootName?(): Promise<string | null>;
 
@@ -259,6 +266,114 @@ export function segmented<T extends string>(
   if (buttons.length > 0) buttons[0].tabIndex = 0;
 
   return { el: group, set };
+}
+
+/**
+ * A reusable string-list editor: renders each current token as a removable chip and provides a text
+ * input + Add button to append new tokens. Trims input and rejects blank tokens (mirroring
+ * `coerceShellArgs`'s blank-drop and the JSON schema's `items.minLength: 1`), so what the UI
+ * commits equals what survives a reload.
+ *
+ * `ariaLabel` names the add input accessibly. `onCommit` is called with the full updated array on
+ * every add or remove; it is NOT called for a blank/whitespace add (no-op). `set(values)` repaints
+ * the chip list from a fresh array (used by `populate()` on every pane open).
+ *
+ * The control root carries class `koi-string-list-control`; chips have
+ * `koi-string-list-chip-label` (token text) and `koi-string-list-remove` (remove button); the
+ * add input has `koi-string-list-input` and the add button has `koi-string-list-add`.
+ */
+export function stringListInput(
+  ariaLabel: string,
+  onCommit: (values: string[]) => void,
+): { el: HTMLElement; set(values: string[]): void } {
+  let current: string[] = [];
+
+  const root = document.createElement('div');
+  root.className = 'koi-string-list-control';
+
+  // Chip area: one <span> per token, each with a labelled remove button.
+  const chipArea = document.createElement('div');
+  chipArea.className = 'koi-string-list-chips';
+  chipArea.setAttribute('aria-label', `${ariaLabel} tokens`);
+
+  // Add row: text input + Add button.
+  const addRow = document.createElement('div');
+  addRow.className = 'koi-string-list-add-row';
+
+  const addInputId = `koi-sl-${ariaLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`;
+  const addInputEl = document.createElement('input');
+  addInputEl.type = 'text';
+  addInputEl.className = 'koi-string-list-input';
+  addInputEl.id = addInputId;
+  addInputEl.setAttribute('name', addInputId);
+  addInputEl.setAttribute('aria-label', ariaLabel);
+  addInputEl.spellcheck = false;
+  addInputEl.autocomplete = 'off';
+  addInputEl.placeholder = 'Add argument…';
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'koi-string-list-add koi-set-action';
+  addBtn.textContent = 'Add';
+  addBtn.setAttribute('aria-label', `Add ${ariaLabel} token`);
+
+  addRow.append(addInputEl, addBtn);
+  root.append(chipArea, addRow);
+
+  // Rebuild the chip area from `current`.
+  function renderChips(): void {
+    chipArea.replaceChildren();
+    for (let i = 0; i < current.length; i++) {
+      const token = current[i];
+      const chip = document.createElement('span');
+      chip.className = 'koi-string-list-chip';
+
+      const label = document.createElement('span');
+      label.className = 'koi-string-list-chip-label';
+      label.textContent = token;
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'koi-string-list-remove';
+      removeBtn.setAttribute('aria-label', `Remove ${ariaLabel} token ${token}`);
+      removeBtn.textContent = '×';
+
+      // Capture `i` by value via an IIFE so the handler always references this token's index.
+      removeBtn.addEventListener('click', ((idx: number) => () => {
+        current = current.filter((_, j) => j !== idx);
+        renderChips();
+        onCommit([...current]);
+      })(i));
+
+      chip.append(label, removeBtn);
+      chipArea.appendChild(chip);
+    }
+  }
+
+  function addToken(): void {
+    const trimmed = addInputEl.value.trim();
+    if (!trimmed) return; // blank/whitespace → no-op
+    current = [...current, trimmed];
+    addInputEl.value = '';
+    renderChips();
+    onCommit([...current]);
+  }
+
+  addBtn.addEventListener('click', addToken);
+  addInputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addToken();
+    }
+  });
+
+  function set(values: string[]): void {
+    current = [...values];
+    renderChips();
+  }
+
+  renderChips();
+  return { el: root, set };
 }
 
 /**
@@ -1537,10 +1652,24 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     cb.onKeybindingsChanged?.(); // live-apply the restored default keymap to the editor
   });
 
+  // Terminal shell args — desktop-only (the integrated terminal exists only on the Tauri host).
+  // Reuses the reusable `stringListInput` factory; commits via patchSettings like every other control.
+  // The row is hidden when `hasIntegratedTerminal` is false/omitted (browser host).
+  const shellArgsControl = stringListInput('Terminal shell arguments', (values) => {
+    commit({ terminalShellArgs: values });
+  });
+  const shellArgsRow = row(
+    'Terminal shell args',
+    'Arguments passed to the login shell when the integrated terminal opens. Empty uses the shell default (`-l`).',
+    shellArgsControl.el,
+  );
+  shellArgsRow.hidden = !cb.hasIntegratedTerminal;
+
   const advancedPanel = panel(
     'advanced',
     wsRootRow,
     traceRow,
+    shellArgsRow,
     row('Reset', 'Restore every setting — including the assistant — to its default.', resetBtn),
   );
 
@@ -1670,6 +1799,8 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     // Repaint the Keyboard panel from the current overrides (and cancel any armed recording / open
     // conflict) so a reopen — including the one the Advanced reset triggers — shows fresh chords.
     refreshKeyboard();
+    // Terminal shell args (desktop-only): re-sync the chip list from the current settings array.
+    shellArgsControl.set(s.terminalShellArgs);
   }
 
   // The pane's "open" state: repaint every control from the current Settings, refresh the About card,
