@@ -588,6 +588,55 @@ public class PythonConformanceTests
             "reversed scalar * value-object should evaluate without TypeError:\n" + string.Join("\n", run.Errors));
     }
 
+    /// <summary>
+    /// Issue #834: a plain (non-quantity) value object used directly in binary arithmetic —
+    /// <c>combined: Money = base + base</c> / <c>diff: Money = base - base</c> — must emit real
+    /// <c>__add__</c> / <c>__sub__</c> dunders so the native <c>+</c>/<c>-</c> the translator lowers to
+    /// resolve. Before the fix the emitter only generated <c>__add__</c> (and only when the VO was
+    /// <c>sum</c>-folded), so <c>base - base</c> had no <c>__sub__</c> (a runtime <c>TypeError</c> /
+    /// mypy error). Brings Python to parity with PHP/C#. The dunders must also <c>--strict</c>-check;
+    /// a runtime driver proves <c>10 + 10 == 20</c> and <c>10 - 10 == 0</c>.
+    /// </summary>
+    [Fact]
+    public void Value_object_plain_arithmetic_typechecks_under_mypy_strict()
+    {
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0 "an amount cannot be negative"
+              }
+              value Line {
+                base: Money
+                combined: Money = base + base
+                diff: Money = base - base
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("__sub__");
+
+        AssertStrictlyTypeChecks(result.Files);
+
+        const string driver = """
+            from decimal import Decimal
+            from shop.value_objects.money import Money
+            from shop.value_objects.line import Line
+
+            line = Line(Money(Decimal("10")))
+            assert line.combined.amount == Decimal("20"), line.combined.amount
+            assert line.diff.amount == Decimal("0"), line.diff.amount
+            """;
+
+        TestSupport.PythonCheck run = TestSupport.RunPython(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+        run.Ok.ShouldBeTrue(
+            "plain value-object +/- should evaluate (10+10==20, 10-10==0):\n" + string.Join("\n", run.Errors));
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {

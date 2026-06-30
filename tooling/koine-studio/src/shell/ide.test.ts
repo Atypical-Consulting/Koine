@@ -1077,6 +1077,90 @@ describe('ide init() — Settings entry points unify on the center overlay (#731
   });
 });
 
+// #789: the save (Ctrl+S / ⌘S) and undo/redo (Ctrl+Z / ⌘Z / ⌘⇧Z) global keydown listeners
+// registered directly in init() were never paired with a removeEventListener in the aggregate
+// teardown. This suite pins the fix: after teardown, both listeners must be gone so repeated
+// init()/teardown cycles in vitest don't accumulate stale global handlers.
+describe('ide init() — editor keydown listeners are disposed on teardown (#789)', () => {
+  test('Ctrl+S does not trigger a disk write after teardown (save listener removed)', async () => {
+    // Disable format-on-save so saveActive() reaches writeTextFile without hanging on an LSP
+    // format request (FakeLspTransport only responds to `initialize`, not `formatting`).
+    saveSettings({ ...loadSettings(), formatOnSave: false });
+    const { platform } = await boot();
+
+    // Dirty the active buffer so a fired save handler calls writeTextFile.
+    typeIntoEditor('\n// save-test edit\n');
+    await settleBoot();
+
+    const writeSpy = vi.spyOn(platform, 'writeTextFile');
+
+    // Confirm the listener fires BEFORE teardown: Ctrl+S must trigger a write now.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }));
+    await settleBoot();
+    expect(writeSpy).toHaveBeenCalled(); // pre-teardown baseline — listener IS registered
+    writeSpy.mockClear();
+
+    // Teardown — must remove the global save keydown listener.
+    disposeIde?.();
+    disposeIde = undefined;
+
+    // Ctrl+S after teardown. Without the fix the listener is still registered and calls
+    // workspace.saveActive() → platform.writeTextFile(). With the fix it is gone.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }));
+    await settleBoot();
+
+    expect(writeSpy).not.toHaveBeenCalled();
+  });
+
+  test('init() removes all window keydown listeners it registered on teardown (undo/redo listener removed)', async () => {
+    // Capture every keydown listener init() synchronously registers on window.
+    const keydownListeners: EventListener[] = [];
+    const realAdd = window.addEventListener.bind(window);
+    const addSpy = vi.spyOn(window, 'addEventListener').mockImplementation(
+      (type: string, listener: EventListenerOrEventListenerObject | null, opts?: boolean | AddEventListenerOptions) => {
+        if (type === 'keydown' && typeof listener === 'function') {
+          keydownListeners.push(listener as EventListener);
+        }
+        return realAdd(type as never, listener as never, opts as never);
+      },
+    );
+
+    // Boot manually (without the boot() helper) to keep the addSpy active for the synchronous
+    // part of init().
+    seedIdeDom();
+    installPlatform();
+    const { init: initIde } = await import('@/shell/ide');
+    disposeIde = initIde();
+    addSpy.mockRestore();
+    await settleBoot();
+
+    // Now capture which listeners are removed when the aggregate teardown runs.
+    const removedListeners: EventListener[] = [];
+    const realRemove = window.removeEventListener.bind(window);
+    const removeSpy = vi.spyOn(window, 'removeEventListener').mockImplementation(
+      (type: string, listener: EventListenerOrEventListenerObject | null, opts?: boolean | EventListenerOptions) => {
+        if (type === 'keydown' && typeof listener === 'function') {
+          removedListeners.push(listener as EventListener);
+        }
+        return realRemove(type as never, listener as never, opts as never);
+      },
+    );
+
+    disposeIde?.();
+    disposeIde = undefined;
+    removeSpy.mockRestore();
+
+    // Every keydown listener init() added must appear in the removed set after teardown.
+    // Without the fix: saveFn and undoFn are anonymous — removeEventListener is never called for
+    // them, so removedListeners is missing them and the assertion below fails (RED).
+    // With the fix: all registered listeners are named and removed (GREEN).
+    expect(keydownListeners.length).toBeGreaterThanOrEqual(2); // at minimum: save + undo/redo
+    for (const listener of keydownListeners) {
+      expect(removedListeners).toContain(listener);
+    }
+  });
+});
+
 // #746: Settings overlay keyboard-dismiss, shortcut suppression, and focus management.
 describe('ide init() — Settings overlay a11y (#746)', () => {
   const overlayShown = () => document.getElementById('center-panel-settings')!.hidden === false;

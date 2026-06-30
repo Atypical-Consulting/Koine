@@ -111,9 +111,20 @@ public sealed partial class PythonEmitter
             {
                 WriteScalarOp(sb, name, ordered, scalars);
             }
-            if (emit.AdditiveNeeds.Contains(vo.Name))
+            // `__add__` is demand-generated when the VO is folded with `sum` (AdditiveNeeds) OR appears
+            // in a plain binary `base + base` (#834); `__sub__` is demand-generated for a plain
+            // `base - base` (#834 — never generated for plain VOs before). Python lowers both call sites
+            // to the native `+`/`-`, i.e. `__add__`/`__sub__`; this emits the dunder definitions.
+            emit.BinaryArithmeticNeeds.TryGetValue(vo.Name, out IReadOnlySet<BinaryOp>? arithmeticOps);
+            bool needsAdd = emit.AdditiveNeeds.Contains(vo.Name) || (arithmeticOps?.Contains(BinaryOp.Add) ?? false);
+            bool needsSub = arithmeticOps?.Contains(BinaryOp.Sub) ?? false;
+            if (needsAdd)
             {
-                WriteAdditiveOp(sb, name, ordered);
+                WriteValueObjectAdditiveOp(sb, name, ordered, "__add__", "+");
+            }
+            if (needsSub)
+            {
+                WriteValueObjectAdditiveOp(sb, name, ordered, "__sub__", "-");
             }
         }
 
@@ -382,22 +393,24 @@ public sealed partial class PythonEmitter
     }
 
     /// <summary>
-    /// A value object's additive <c>__add__(other)</c> (for <c>sum</c> folds): adds each numeric
-    /// field pairwise, carrying the rest from <c>self</c>. Used where the model <c>sum</c>s the value
-    /// object (e.g. <c>lines.sum(l =&gt; l.subtotal)</c> producing a <c>Money</c> total).
+    /// A value object's additive <c>__add__(other)</c> / subtractive <c>__sub__(other)</c> dunder:
+    /// combines each numeric field pairwise with <paramref name="op"/> (<c>+</c>/<c>-</c>), carrying the
+    /// rest from <c>self</c>. Shared by the <c>sum</c>-fold path (<c>__add__</c>, e.g.
+    /// <c>lines.sum(l =&gt; l.subtotal)</c>) and the plain binary <c>base + base</c> / <c>base - base</c>
+    /// path (#834).
     /// </summary>
-    private void WriteAdditiveOp(StringBuilder sb, string name, IReadOnlyList<Member> fields)
+    private void WriteValueObjectAdditiveOp(StringBuilder sb, string name, IReadOnlyList<Member> fields, string dunder, string op)
     {
         var numeric = new HashSet<string>(fields.Where(m => m.Type.Name is "Int" or "Decimal").Select(m => m.Name), StringComparer.Ordinal);
 
         string Arg(Member m)
         {
             var snake = PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(m.Name));
-            return numeric.Contains(m.Name) ? $"self.{snake} + other.{snake}" : "self." + snake;
+            return numeric.Contains(m.Name) ? $"self.{snake} {op} other.{snake}" : "self." + snake;
         }
 
         sb.Append('\n');
-        sb.Append(Indent).Append("def __add__(self, other: ").Append(name).Append(") -> ").Append(name).Append(":\n");
+        sb.Append(Indent).Append("def ").Append(dunder).Append("(self, other: ").Append(name).Append(") -> ").Append(name).Append(":\n");
         sb.Append(Indent).Append(Indent).Append("return ").Append(name).Append('(')
           .Append(string.Join(", ", fields.Select(Arg))).Append(")\n");
     }
