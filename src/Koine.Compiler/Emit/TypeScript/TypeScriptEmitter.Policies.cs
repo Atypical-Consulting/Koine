@@ -45,7 +45,8 @@ public sealed partial class TypeScriptEmitter
                     : Array.Empty<Member>();
 
         var translator = new TypeScriptExpressionTranslator(
-            index, eventMembers, emit.EnumMemberToType, typeMapper, context, memberReceiver: "event");
+            index, eventMembers, emit.EnumMemberToType, typeMapper, context, memberReceiver: "event",
+            regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         PolicyReaction r = policy.Reaction;
         // Reference-only emit must not leak business logic: the translated argument expressions are

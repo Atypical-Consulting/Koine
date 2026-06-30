@@ -50,13 +50,19 @@ internal sealed class TypeScriptExpressionTranslator
 
     private int _sumCounter;
 
+    // The neutral RegexMatchTimeoutMs author intent (#794/#812). JS `RegExp` has no synchronous per-call
+    // timeout, so this is ADVISORY: when set, the call site passes it to the runtime `regexMatch` seam's
+    // `timeoutMs?` parameter (the documented RE2/linear-engine swap point); null ⇒ today's two-arg call.
+    private readonly int? _regexMatchTimeoutMs;
+
     public TypeScriptExpressionTranslator(
         ModelIndex index,
         IReadOnlyList<Member> members,
         IReadOnlyDictionary<string, string> enumMemberToType,
         TypeScriptTypeMapper typeMapper,
         string? context = null,
-        string? memberReceiver = null)
+        string? memberReceiver = null,
+        int? regexMatchTimeoutMs = null)
     {
         _index = index;
         _resolver = new TypeResolver(index, context);
@@ -65,6 +71,7 @@ internal sealed class TypeScriptExpressionTranslator
         _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         _enumMemberToType = enumMemberToType;
         _memberReceiver = memberReceiver;
+        _regexMatchTimeoutMs = regexMatchTimeoutMs;
     }
 
     public void PushLocal(string name, TypeRef? type = null)
@@ -238,13 +245,21 @@ internal sealed class TypeScriptExpressionTranslator
                 WriteCall(call, sb);
                 break;
             case MatchExpr m:
-                // raw matches /pat/  ->  regexMatch(/pat/, raw)
+                // raw matches /pat/  ->  regexMatch(/pat/, raw)   (or `…, raw, <ms>)` when the key is set)
                 // Routed through the runtime `regexMatch` seam (not an inline `/pat/.test(...)`) so an
                 // author-supplied pattern over untrusted input has a single ReDoS chokepoint (#641).
                 // The seam preserves `matches` semantics exactly (it IS `.test`) — JS has no synchronous
                 // per-call regex timeout — and is the one place to swap in a linear-time engine (RE2).
+                // When the neutral RegexMatchTimeoutMs key is set (#794/#812) the author's intent is
+                // threaded into the seam's advisory `timeoutMs?` parameter so the future RE2 swap can honor
+                // it; the default engine ignores it, so matching behavior is unchanged.
                 sb.Append("regexMatch(/").Append(m.Pattern).Append("/, ");
                 Write(m.Target, sb);
+                if (_regexMatchTimeoutMs is { } ms)
+                {
+                    sb.Append(", ").Append(ms.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+
                 sb.Append(')');
                 break;
             case GuardExpr g:

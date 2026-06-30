@@ -80,7 +80,8 @@ public sealed partial class PhpEmitter
             emit.Index,
             Array.Empty<Member>(),
             emit.EnumMemberToType,
-            ctxName);
+            ctxName,
+            regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var first = true;
         foreach (OperationDecl op in svc.Operations)
@@ -236,7 +237,8 @@ public sealed partial class PhpEmitter
                 members,
                 emit.EnumMemberToType,
                 ctxName,
-                memberReceiver: "target");
+                memberReceiver: "target",
+                regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
             var body = translator.Translate(spec.Condition, PhpExpressionTranslator.NameMode.Property);
 
