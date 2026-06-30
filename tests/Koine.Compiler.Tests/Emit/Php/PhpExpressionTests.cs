@@ -217,6 +217,17 @@ public class PhpExpressionTests
     }
 
     [Fact]
+    public void Int_literal_left_of_Decimal_arithmetic_parenthesises_new_chaining()
+    {
+        // `5 + price` where price: Decimal — the int literal on the LEFT becomes the method
+        // receiver after WriteAsDecimal wraps it in `new \Koine\Runtime\Decimal('5')`.
+        // Without surrounding parentheses, `new X(...)->m()` is PHP 8.4+-only syntax;
+        // the emitter targets PHP 8.1+, so the construction must be parenthesised.
+        var expr = new BinaryExpr(BinaryOp.Add, Int("5"), Id("price"));
+        Translate(expr).ShouldBe("(new \\Koine\\Runtime\\Decimal('5'))->add($this->price)");
+    }
+
+    [Fact]
     public void Decimal_arithmetic_wraps_int_operand_in_decimal()
     {
         // `price * quantity` (Decimal * Int) -> wrap the Int operand as a Decimal expression.
