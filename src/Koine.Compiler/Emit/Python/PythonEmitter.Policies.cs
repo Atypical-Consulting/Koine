@@ -33,7 +33,8 @@ public sealed partial class PythonEmitter
                 ? ev.Members
                 : Array.Empty<Member>();
         var translator = new PythonExpressionTranslator(
-            emit.Index, eventMembers, emit.EnumMemberToType, typeMapper, ContextOf(ns), memberReceiver: "event");
+            emit.Index, eventMembers, emit.EnumMemberToType, typeMapper, ContextOf(ns), memberReceiver: "event",
+            regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         PolicyReaction r = policy.Reaction;
         var argText = string.Join(", ", r.Args.Select(a =>

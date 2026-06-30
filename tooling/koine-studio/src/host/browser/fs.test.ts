@@ -19,6 +19,7 @@ import {
   saveProjectToRoot,
   workspaceRootName,
   pickWorkspaceRoot,
+  folderName,
 } from '@/host/browser/fs';
 
 // --- in-memory mock of the File System Access handle surface -----------------
@@ -750,5 +751,30 @@ describe('materializeWorkspace persisted-example IndexedDB reload round-trip (#5
     // OPFS silent-restore: the re-acquired handle carries no permission API, so resolveFolder never
     // reached its prompt branch (see the requestPermissionSpy note above for what this does/doesn't guard).
     expect(requestPermissionSpy).not.toHaveBeenCalled();
+  });
+});
+
+// --- characterization tests for folderName (issue #793) ----------------------
+describe('folderName', () => {
+  beforeEach(() => {
+    __resetFsForTest();
+  });
+
+  it('returns the cached display name for a registered token', () => {
+    __setFolderForTest('my-folder', new MockDir('My Workspace') as never);
+    expect(folderName('my-folder')).toBe('My Workspace');
+  });
+
+  it('returns the last path segment for an uncached token', () => {
+    expect(folderName('a/b/project')).toBe('project');
+  });
+
+  it('returns the token unchanged when there is no path segment (all separators)', () => {
+    expect(folderName('///')).toBe('///');
+  });
+
+  it('cached name wins over path-segment fallback', () => {
+    __setFolderForTest('a/b/project', new MockDir('Custom Name') as never);
+    expect(folderName('a/b/project')).toBe('Custom Name');
   });
 });

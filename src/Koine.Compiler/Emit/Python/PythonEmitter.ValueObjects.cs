@@ -43,7 +43,7 @@ public sealed partial class PythonEmitter
         // WriteValueObjectHashableDunders). Value objects with no reachable Map are unchanged.
         var hasMapField = ordered.Any(m => ContainsMap(m.Type));
 
-        var translator = new PythonExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, typeMapper, ContextOf(ns));
+        var translator = new PythonExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, typeMapper, ContextOf(ns), regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var sb = new StringBuilder();
         sb.Append(hasMapField ? "@dataclass(frozen=True, eq=False)\n" : "@dataclass(frozen=True)\n");

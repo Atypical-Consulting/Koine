@@ -16,6 +16,8 @@
 //   ## Consequences
 //   …
 
+import { basename } from '@/shared/path';
+
 /** The lifecycle states an ADR can carry. Drives the status badge in the docs panel. */
 export const ADR_STATUSES = ['proposed', 'accepted', 'superseded', 'deprecated', 'rejected'] as const;
 export type AdrStatus = (typeof ADR_STATUSES)[number];
@@ -118,7 +120,7 @@ export function adrFilename(number: number, title: string): string {
 
 /** The `NNNN` sequence number encoded in an ADR filename, or null when it has no numeric prefix. */
 export function parseAdrNumberFromFilename(name: string): number | null {
-  const base = name.split('/').pop() ?? name;
+  const base = basename(name);
   const m = base.match(/^(\d+)[-.]/);
   return m ? Number(m[1]) : null;
 }
