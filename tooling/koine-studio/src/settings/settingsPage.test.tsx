@@ -632,3 +632,48 @@ describe('createSettingsPage', () => {
     expect(effectiveAfterOne.lspTrace).toBe('verbose'); // still overridden
   });
 });
+
+// #746: header close control
+describe('createSettingsPage — header close control (#746)', () => {
+  let header: HTMLElement;
+  let body: HTMLElement;
+  let handle: SettingsPageHandle | undefined;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '';
+    header = makeHeader();
+    body = document.createElement('div');
+    const main = document.createElement('main');
+    main.append(header, body);
+    document.body.append(main);
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    handle?.destroy();
+    handle = undefined;
+    vi.useRealTimers();
+  });
+
+  it('renders a button with aria-label="Close settings" in the header', () => {
+    handle = createSettingsPage({ header, body }, cb);
+    const btn = header.querySelector<HTMLButtonElement>('button[aria-label="Close settings"]');
+    expect(btn).not.toBeNull();
+  });
+
+  it('clicking the close button invokes the onClose callback', () => {
+    const onClose = vi.fn();
+    handle = createSettingsPage({ header, body }, cb, onClose);
+    const btn = header.querySelector<HTMLButtonElement>('button[aria-label="Close settings"]')!;
+    btn.click();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('close button is present but clicking is a no-op when no onClose is provided', () => {
+    handle = createSettingsPage({ header, body }, cb);
+    const btn = header.querySelector<HTMLButtonElement>('button[aria-label="Close settings"]')!;
+    // Should not throw when clicked without an onClose.
+    expect(() => btn.click()).not.toThrow();
+  });
+});

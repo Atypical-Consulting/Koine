@@ -89,10 +89,14 @@ const MODES: { value: SettingsEditorMode; label: string }[] = [
  * The Visual pane is the same form the modal embeds; the JSON editor is the schema-aware settings.json
  * surface. The page owns the representation toggle, the visual↔json swap, and the JSON validate-and-apply
  * loop.
+ *
+ * @param onClose Optional callback invoked when the user clicks the header close control or presses Esc.
+ *   Pass `appStore.getState().closeSettings` from the IDE host to close the Settings overlay (#746).
  */
 export function createSettingsPage(
   hosts: { header: HTMLElement; body: HTMLElement },
   cb: PrefsCallbacks,
+  onClose?: () => void,
 ): SettingsPageHandle {
   let mode: SettingsEditorMode = loadMode();
 
@@ -134,6 +138,22 @@ export function createSettingsPage(
   // header working).
   const toggleHost = hosts.header.querySelector('#settings-mode-toggle') ?? hosts.header;
   toggleHost.append(modeToggle.el);
+
+  // --- header: close control (#746) -----------------------------------------
+  // A visible ✕ button in the header (#settings-page-header) so pointer/touch users can dismiss the
+  // Settings overlay without a keyboard. Calls the same `onClose` path as Esc. Always rendered so
+  // keyboard and assistive-tech users can discover it; clicking is a no-op when no onClose is wired
+  // (defensive — the host always wires it, but tests/callers that omit it must not throw).
+  const closeBtn = el('button', {
+    class: 'settings-close-btn',
+    attrs: {
+      type: 'button',
+      'aria-label': 'Close settings',
+    },
+    text: '✕',
+  });
+  closeBtn.addEventListener('click', () => onClose?.());
+  hosts.header.append(closeBtn);
 
   // --- body: the active representation ---------------------------------------
 
@@ -419,6 +439,7 @@ export function createSettingsPage(
     destroy(): void {
       teardownBody();
       modeToggle.el.remove(); // clear the header toggle
+      closeBtn.remove(); // clear the header close button (#746)
     },
   };
 }
