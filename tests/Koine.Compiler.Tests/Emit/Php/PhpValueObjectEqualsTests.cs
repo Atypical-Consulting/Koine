@@ -86,6 +86,40 @@ public class PhpValueObjectEqualsTests
         php.ShouldNotContain("$this->money === $other->money");
     }
 
+    /// <summary>
+    /// Issue #814: a nullable <c>Decimal?</c> member — the runtime <c>Decimal</c> is object-typed, so it
+    /// compares structurally (#686) — must be null-guarded in <c>equals()</c>. Unguarded, the emitted
+    /// <c>$this-&gt;low-&gt;equals($other-&gt;low)</c> dereferences <c>Decimal|null</c> (phpstan
+    /// <c>method.nonObject</c>, runtime <c>TypeError</c>). The guard (shipped with #686 / PR #802) makes
+    /// two nulls equal, a present-vs-null pair unequal, and two present values compare structurally — the
+    /// scalar-runtime sibling of <see cref="Optional_nested_value_object_field_compares_null_safely"/>'s
+    /// value-object case, and the exact repro from the issue.
+    /// </summary>
+    [Fact]
+    public void Optional_Decimal_field_compares_null_safely()
+    {
+        const string src =
+            """
+            context Catalog {
+              value PriceRange {
+                low:  Decimal?
+                high: Decimal
+              }
+            }
+            """;
+
+        var php = EmitVo(src, "PriceRange");
+
+        // both-null equal · one-null unequal · both-present structural.
+        php.ShouldContain(
+            "($this->low === null ? $other->low === null "
+            + ": ($other->low !== null && $this->low->equals($other->low)))");
+        // the non-nullable member keeps the plain structural comparison.
+        php.ShouldContain("$this->high->equals($other->high)");
+        // the bug form — an unguarded dereference of the nullable member — must never be emitted.
+        php.ShouldNotContain("return $this->low->equals(");
+    }
+
     [Fact]
     public void Mixed_fields_chain_each_with_the_right_operator()
     {
