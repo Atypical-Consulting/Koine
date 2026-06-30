@@ -118,7 +118,7 @@ export function createSettingsPage(
   function schemaForScope(): Record<string, unknown> {
     return scope === 'workspace' ? WORKSPACE_SETTINGS_JSON_SCHEMA : SETTINGS_JSON_SCHEMA;
   }
-  let scopeToggle: { el: HTMLElement; set(value: JsonScope): void } | null = null;
+  let scopeToggle: { el: HTMLElement; set(value: JsonScope): void; setDisabled(disabled: boolean): void } | null = null;
 
   // The wsKey() value captured when the JSON body was last built, so refresh() can detect a
   // workspace-availability change and fully rebuild the body (toggle enabled-state + seed) instead
@@ -312,11 +312,9 @@ export function createSettingsPage(
         setScope,
       );
       scopeToggle.set(scope);
-      // Reflect "no workspace": disable the Workspace pill (mirrors makeScopeBinding.applyEnabled).
+      // Reflect "no workspace": disable the Workspace pill via the shared group-level helper.
       const wsOpen = currentWsKey !== null;
-      scopeToggle.el.setAttribute('aria-disabled', String(!wsOpen));
-      scopeToggle.el.classList.toggle('is-disabled', !wsOpen);
-      for (const b of scopeToggle.el.querySelectorAll<HTMLButtonElement>('.koi-seg')) b.disabled = !wsOpen;
+      scopeToggle.setDisabled(!wsOpen);
       // Mount the scope toggle into the header's #settings-scope-toggle slot so User/Workspace sits on the
       // SAME row as the Visual/JSON representation toggle (next to it). Fall back to the header itself when
       // the slot is absent (keeps tests/callers that pass a bare header working). teardownBody() removes it.
