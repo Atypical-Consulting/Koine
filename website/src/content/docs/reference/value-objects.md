@@ -185,7 +185,7 @@ generated type only contributes the ordered list of components.
 
 ### 5.4.1 Scalar arithmetic operators
 
-A value object with a numeric field can be multiplied (or otherwise combined) by a scalar, and Koine
+A value object with a numeric field can be multiplied or divided by a scalar, and Koine
 generates the corresponding operator — but **only for the operations your model actually uses**. The
 emitter scans derived fields, factories, and commands; each scalar operation it sees on a value object
 produces exactly one operator overload, carrying the remaining fields unchanged.
@@ -212,10 +212,21 @@ public static Money operator +(Money left, Money right) => new Money(left.Amount
 Notice the operators preserve `Currency` and route the result back through the validating constructor, so
 the arithmetic can never produce an invalid value object.
 
-A value object **scales** by a scalar (`money * 2`, either operand order), and values of the same type
-are combined through a `sum` fold (`lines.sum(...)`, which demand-generates its `operator +`). But a
-bare scalar is never a valid `+`/`-` operand: `5.0 + money` or `money - 1` is a type mismatch (`KOI0215`),
-because there is no `value-object ± scalar` operation in any target. Use `*` to scale.
+Division is the dual of multiplication and is demand-generated the same way. A derived field such as
+`half: Money = fee / 2` makes the emitter generate the matching `operator /`:
+
+```csharp
+public static Money operator /(Money left, int right) => new Money(left.Amount / right, left.Currency);
+```
+
+It divides the numeric field, carries the rest, and routes through the validating constructor — `money / 2`
+scales a value *down*, exactly as `money * 2` scales it up.
+
+A value object **scales** by a scalar — multiply in either operand order (`money * 2`, `2 * money`) or
+divide it down (`money / 2`) — and values of the same type are combined through a `sum` fold
+(`lines.sum(...)`, which demand-generates its `operator +`). But a bare scalar is never a valid `+`/`-`
+operand: `5.0 + money` or `money - 1` is a type mismatch (`KOI0215`), because there is no
+`value-object ± scalar` operation in any target. Use `*` or `/` to scale.
 
 :::caution
 Operators are demand-driven, not exhaustive. If you want `Money / int` available to hand-written code, use
