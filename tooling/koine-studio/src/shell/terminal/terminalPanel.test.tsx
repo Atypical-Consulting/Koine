@@ -361,4 +361,40 @@ describe('createTerminalPanel', () => {
     expect(termInstances).toHaveLength(0);
     panel.dispose();
   });
+
+  it('applyTheme() swaps the ANSI palette live on a dark→light flip (#763)', () => {
+    // The host element must be in the document so getComputedStyle can read custom properties.
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const transport = makeTransport();
+    const platform = { canRunShell: true, createTerminal: () => transport } as unknown as Platform;
+
+    // Start on a dark surface.
+    const panel = createTerminalPanel({ parent, platform, cwd: () => null });
+    const term = termInstances[0];
+    const host = parent.querySelector('.terminal-host') as HTMLElement;
+
+    host.style.setProperty('--koi-paper-2', '#1e1e1e');
+    host.style.setProperty('--koi-fg', '#d4d4d4');
+    panel.applyTheme();
+    // Initial dark: palette should be DARK_ANSI.
+    expect(term.options.theme?.black).toBe(DARK_ANSI.black);
+    expect(term.options.theme?.yellow).toBe(DARK_ANSI.yellow);
+
+    // Flip to light: app toggles its CSS tokens.
+    host.style.setProperty('--koi-paper-2', '#f4f6fa');
+    host.style.setProperty('--koi-fg', '#1c2230');
+    panel.applyTheme();
+
+    // After the flip, xterm's live theme must carry the light palette.
+    expect(term.options.theme).toEqual(
+      expect.objectContaining({ background: '#f4f6fa', foreground: '#1c2230', cursor: '#1c2230' }),
+    );
+    expect(term.options.theme?.black).toBe(LIGHT_ANSI.black);
+    expect(term.options.theme?.yellow).toBe(LIGHT_ANSI.yellow);
+    expect(term.options.theme?.brightWhite).toBe(LIGHT_ANSI.brightWhite);
+
+    panel.dispose();
+    parent.remove();
+  });
 });
