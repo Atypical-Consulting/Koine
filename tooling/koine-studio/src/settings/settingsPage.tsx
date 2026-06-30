@@ -312,11 +312,9 @@ export function createSettingsPage(
         setScope,
       );
       scopeToggle.set(scope);
-      // Reflect "no workspace": disable the Workspace pill (mirrors makeScopeBinding.applyEnabled).
+      // Reflect "no workspace": disable the Workspace pill via the shared group-level helper.
       const wsOpen = currentWsKey !== null;
-      scopeToggle.el.setAttribute('aria-disabled', String(!wsOpen));
-      scopeToggle.el.classList.toggle('is-disabled', !wsOpen);
-      for (const b of scopeToggle.el.querySelectorAll<HTMLButtonElement>('.koi-seg')) b.disabled = !wsOpen;
+      scopeToggle.setDisabled(!wsOpen);
       // Mount the scope toggle into the header's #settings-scope-toggle slot so User/Workspace sits on the
       // SAME row as the Visual/JSON representation toggle (next to it). Fall back to the header itself when
       // the slot is absent (keeps tests/callers that pass a bare header working). teardownBody() removes it.
