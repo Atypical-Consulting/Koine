@@ -1250,7 +1250,7 @@ describe('Settings → Advanced: terminal shell args row (#785)', () => {
       hasIntegratedTerminal,
       ...extra,
     });
-    pane.open();
+    pane.refresh();
     return pane;
   }
 
@@ -1258,46 +1258,37 @@ describe('Settings → Advanced: terminal shell args row (#785)', () => {
     container?.remove();
   });
 
-  function shellArgsRow(): HTMLElement | null {
-    return container.querySelector<HTMLElement>('[data-label="Terminal shell args"]') ??
-      // fallback: find by text content in a row label
-      Array.from(container.querySelectorAll<HTMLElement>('.koi-pref-row')).find(
-        (el) => el.querySelector('.koi-pref-label')?.textContent === 'Terminal shell args',
-      ) ?? null;
+  function shellArgsListEl(): HTMLElement | null {
+    return container.querySelector<HTMLElement>('.koi-string-list');
+  }
+
+  function shellArgsParentRow(): HTMLElement | null {
+    return shellArgsListEl()?.closest<HTMLElement>('.koi-set-row') ?? null;
   }
 
   it('renders the Terminal shell args row when hasIntegratedTerminal is true', () => {
     openPrefsWithTerminal({}, true);
-    // Navigate to Advanced panel
-    const advTab = Array.from(container.querySelectorAll<HTMLElement>('[role="tab"]')).find(
-      (t) => t.textContent?.toLowerCase().includes('advanced'),
-    );
-    advTab?.click();
-    // Check that shellArgsControl el exists (the .koi-string-list element)
-    expect(container.querySelector('.koi-string-list')).not.toBeNull();
+    expect(shellArgsListEl()).not.toBeNull();
+    expect(shellArgsParentRow()?.hidden).toBeFalsy();
   });
 
   it('shell args row is hidden when hasIntegratedTerminal is false', () => {
     openPrefsWithTerminal({}, false);
-    const advTab = Array.from(container.querySelectorAll<HTMLElement>('[role="tab"]')).find(
-      (t) => t.textContent?.toLowerCase().includes('advanced'),
-    );
-    advTab?.click();
-    // The .koi-string-list wrapper may or may not exist, but the row must be hidden
-    const stringListEl = container.querySelector<HTMLElement>('.koi-string-list');
-    if (stringListEl) {
-      const parentRow = stringListEl.closest<HTMLElement>('.koi-pref-row');
-      expect(parentRow?.hidden).toBe(true);
-    }
+    const row = shellArgsParentRow();
+    expect(row).not.toBeNull();
+    expect(row?.hidden).toBe(true);
   });
 
   it('shell args row is hidden when hasIntegratedTerminal is omitted', () => {
-    openPrefsWithTerminal({ hasIntegratedTerminal: undefined }, false);
-    const stringListEl = container.querySelector<HTMLElement>('.koi-string-list');
-    if (stringListEl) {
-      const parentRow = stringListEl.closest<HTMLElement>('.koi-pref-row');
-      expect(parentRow?.hidden).toBeTruthy();
-    }
+    // omit hasIntegratedTerminal entirely — defaults to hidden
+    container = document.createElement('div');
+    document.body.append(container);
+    const pane = mountPreferencesPane(container, { onChange: vi.fn() });
+    pane.refresh();
+    const row = container.querySelector<HTMLElement>('.koi-string-list')?.closest<HTMLElement>('.koi-set-row');
+    // row exists (in the DOM) but is hidden
+    expect(row).not.toBeNull();
+    expect(row?.hidden).toBe(true);
   });
 
   it('populate() repaints the chip list from persisted terminalShellArgs', () => {
@@ -1343,7 +1334,7 @@ describe('Settings → Advanced: terminal shell args row (#785)', () => {
 
     // Change backing store and re-open
     saveSettings({ ...DEFAULT_SETTINGS, terminalShellArgs: ['-x', '-y'] });
-    pane.open();
+    pane.refresh();
 
     const chips = container.querySelectorAll('.koi-chip');
     const texts = Array.from(chips).map((c) => c.querySelector('span')!.textContent);
