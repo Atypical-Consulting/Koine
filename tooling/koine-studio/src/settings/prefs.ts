@@ -30,7 +30,7 @@ import { DIAGRAM_ZOOM_MIN, DIAGRAM_ZOOM_MAX } from '@/diagrams/diagramContract';
 import { setTheme } from '@/settings/theme';
 import { ACCENTS, ACCENT_ORDER } from '@/settings/appearance';
 import { createAboutPanel } from '@/settings/about';
-import { createJsonView } from '@/editor/editor';
+import { createJsonView, loadedReservedChords } from '@/editor/editor';
 import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from '@/mcp/mcp';
 import { EMIT_TARGETS } from '@/shared/emitTargets';
 import { KEYBINDINGS, DEFAULT_BINDINGS, type BindingId } from '@/editor/keybindings';
@@ -796,18 +796,11 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
   // command's chord — surfaces a confirmable conflict. Every committed change persists through the
   // Task-2 override store and live-applies via cb.onKeybindingsChanged.
 
-  // Editor shortcuts OUTSIDE the rebindable registry that a remap would silently shadow: the registry
-  // keymap compartment is registered at higher precedence than the editor's own Mod-Alt-h (call
-  // hierarchy) and the loaded CodeMirror keymaps (search → Mod-f / Mod-d, default → Mod-a). We can't
-  // unbind these, but we warn before letting a remap mask one. Verified against editor.ts's loaded
-  // keymaps (note: historyKeymap is NOT loaded, so Mod-z is free); not exhaustive — built-in coverage
-  // can grow as more commands enter scope.
-  const RESERVED_CHORDS: Record<string, string> = {
-    'Mod-Alt-h': 'Call hierarchy',
-    'Mod-f': 'Find',
-    'Mod-d': 'Select next occurrence',
-    'Mod-a': 'Select all',
-  };
+  // Editor shortcuts OUTSIDE the rebindable registry that a remap would silently shadow: derived
+  // from the keymaps the editor actually loads (searchKeymap, defaultKeymap, callHierarchyKeys) via
+  // loadedReservedChords() in editor.ts. The registry rows themselves are excluded (inter-row conflict
+  // logic handles those); only non-rebindable built-ins appear here. Re-derived on each
+  // applyRecordedChord call so the snapshot always matches the editor's actual keymaps.
 
   interface KbdRowState {
     chord: HTMLElement;
@@ -898,7 +891,7 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
       showKbdConflict(id, chord, kbdLabel(otherId), otherId); // clashes with another rebindable command
       return; // wait for the user to confirm the reassignment
     }
-    const reserved = RESERVED_CHORDS[chord];
+    const reserved = loadedReservedChords(resolved)[chord];
     if (reserved) {
       showKbdConflict(id, chord, reserved, null); // would shadow a built-in / call-hierarchy shortcut
       return;

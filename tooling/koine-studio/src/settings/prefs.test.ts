@@ -697,6 +697,22 @@ describe('keyboard settings', () => {
     expect(onKeybindingsChanged).toHaveBeenCalled();
   });
 
+  it(`warns before letting a remap shadow a loaded-but-previously-unlisted built-in (Mod-/ = toggleComment)`, () => {
+    // Mod-/ (toggleComment) was NOT in the old hand-maintained RESERVED_CHORDS but IS in defaultKeymap.
+    // The exhaustive accessor must catch it — this is the regression the fix targets.
+    const onKeybindingsChanged = vi.fn();
+    openPrefs({ onKeybindingsChanged });
+    record('format', { key: '/', ctrlKey: true }); // Mod-/
+    const conflict = conflictOf('format');
+    expect(conflict.hidden).toBe(false);
+    expect(conflict.textContent).toContain('Toggle comment');
+    expect(loadKeybindingOverrides().format).toBeUndefined(); // deferred until confirmed
+
+    reassignBtn('format').click();
+    expect(loadKeybindingOverrides().format).toBe('Mod-/');
+    expect(onKeybindingsChanged).toHaveBeenCalled();
+  });
+
   it('recording a command’s own default drops the override instead of persisting a redundant one', () => {
     openPrefs();
     record('format', { key: 'j', ctrlKey: true }); // override away from the default
