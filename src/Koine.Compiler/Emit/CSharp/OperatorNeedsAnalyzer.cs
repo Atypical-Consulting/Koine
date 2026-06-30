@@ -20,10 +20,48 @@ internal static class OperatorNeedsAnalyzer
     /// those operators are generated, so we never emit spurious (or non-compiling)
     /// operators on value objects that are never multiplied.
     /// </summary>
-    public static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildScalarOperatorNeeds(KoineModel model, ModelIndex index)
+    public static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildScalarOperatorNeeds(KoineModel model, ModelIndex index) =>
+        BuildScalarOpNeeds(model, index, BinaryOp.Mul);
+
+    /// <summary>
+    /// The division sibling of <see cref="BuildScalarOperatorNeeds"/>: scans the same sites for
+    /// <c>value-object / scalar</c> and records, per value-object type, which scalar C# types
+    /// ("int"/"decimal") it is divided by. Drives demand-driven <c>operator /</c> generation (#832) —
+    /// the natural dual of scalar multiplication. Division is non-commutative, so only the
+    /// value-object-on-the-left form is recorded (<c>scalar / value-object</c> is not division of the
+    /// value object and is rejected upstream, so it never reaches here as a need).
+    /// </summary>
+    public static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildScalarDivisionNeeds(KoineModel model, ModelIndex index) =>
+        BuildScalarOpNeeds(model, index, BinaryOp.Div);
+
+    /// <summary>
+    /// Shared core for the scalar <c>*</c> / <c>/</c> demand analyses: walks every scalar-scan site
+    /// (<see cref="ScalarScanSites"/>) recording, per value-object type, the scalar C# types it is
+    /// combined with under <paramref name="op"/>. Mul and Div run the identical site enumeration; only
+    /// the operator (and division's left-only operand rule) differs, so the enumeration lives in one place.
+    /// </summary>
+    private static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildScalarOpNeeds(KoineModel model, ModelIndex index, BinaryOp op)
     {
         var needs = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
 
+        foreach ((Expr expr, IReadOnlyDictionary<string, TypeRef> scope) in ScalarScanSites(model, index))
+        {
+            new ScalarOpWalker(op, scope, index, needs).Visit(expr);
+        }
+
+        return needs.ToDictionary(kv => kv.Key, kv => (IReadOnlySet<string>)kv.Value, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Every expression the scalar <c>*</c>/<c>/</c> demand analyses scan, paired with the
+    /// member-type scope it is resolved in: member initializers, invariant conditions, command and
+    /// factory bodies, state-rule guards, service operation bodies, spec conditions, and read-model
+    /// field projections. Shared by the multiply and divide passes so the (otherwise identical) site
+    /// enumeration lives in one place — the sibling of <see cref="ExpressionScanSites"/>, which serves
+    /// the additive analyses over a richer <see cref="TypeScope"/>.
+    /// </summary>
+    private static IEnumerable<(Expr Expr, IReadOnlyDictionary<string, TypeRef> Scope)> ScalarScanSites(KoineModel model, ModelIndex index)
+    {
         foreach (ContextNode ctx in model.Contexts)
         {
             foreach (TypeDecl type in ctx.AllTypeDecls())
@@ -45,38 +83,38 @@ internal static class OperatorNeedsAnalyzer
                 {
                     if (m.Initializer is not null)
                     {
-                        ScanForScalarMul(m.Initializer, memberTypes, index, needs);
+                        yield return (m.Initializer, memberTypes);
                     }
                 }
 
                 // Invariant conditions over the type's members can also use value-object arithmetic.
                 foreach (Invariant inv in Invariants(type))
                 {
-                    ScanForScalarMul(inv.Condition, memberTypes, index, needs);
+                    yield return (inv.Condition, memberTypes);
                 }
 
                 // Command bodies and state-rule guards can also use value-object arithmetic.
                 if (type is EntityDecl entity)
                 {
-                    foreach ((Expr expr, IReadOnlyDictionary<string, TypeRef> scope) in CommandExpressions(entity, memberTypes))
+                    foreach ((Expr Expr, IReadOnlyDictionary<string, TypeRef> Scope) pair in CommandExpressions(entity, memberTypes))
                     {
-                        ScanForScalarMul(expr, scope, index, needs);
+                        yield return pair;
                     }
 
-                    foreach ((Expr expr, IReadOnlyDictionary<string, TypeRef> scope) in FactoryExpressions(entity, memberTypes))
+                    foreach ((Expr Expr, IReadOnlyDictionary<string, TypeRef> Scope) pair in FactoryExpressions(entity, memberTypes))
                     {
-                        ScanForScalarMul(expr, scope, index, needs);
+                        yield return pair;
                     }
 
                     foreach (Expr guard in StateGuards(entity))
                     {
-                        ScanForScalarMul(guard, memberTypes, index, needs);
+                        yield return (guard, memberTypes);
                     }
                 }
             }
         }
 
-        // Service operation bodies can use value-object * scalar arithmetic.
+        // Service operation bodies can use value-object scalar arithmetic.
         foreach (ContextNode ctx in model.Contexts)
         {
             foreach (ServiceDecl svc in ctx.Services)
@@ -86,7 +124,7 @@ internal static class OperatorNeedsAnalyzer
                     if (op.Body is not null)
                     {
                         var scope = op.Parameters.ToDictionary(p => p.Name, p => p.Type, StringComparer.Ordinal);
-                        ScanForScalarMul(op.Body, scope, index, needs);
+                        yield return (op.Body, scope);
                     }
                 }
             }
@@ -96,10 +134,10 @@ internal static class OperatorNeedsAnalyzer
         foreach (SpecDecl spec in AllSpecs(model))
         {
             var scope = SpecTargetMembers(spec.TargetType, index).ToDictionary(m => m.Name, m => m.Type, StringComparer.Ordinal);
-            ScanForScalarMul(spec.Condition, scope, index, needs);
+            yield return (spec.Condition, scope);
         }
 
-        // Read-model derived-field projections (over the source type's members) can multiply a value object by a scalar.
+        // Read-model derived-field projections (over the source type's members) can combine a value object with a scalar.
         foreach ((ReadModelDecl rm, string context) in AllReadModels(model))
         {
             var scope = ReadModelSourceMembers(context, rm.SourceType, index).ToDictionary(m => m.Name, m => m.Type, StringComparer.Ordinal);
@@ -107,12 +145,10 @@ internal static class OperatorNeedsAnalyzer
             {
                 if (f.Projection is not null)
                 {
-                    ScanForScalarMul(f.Projection, scope, index, needs);
+                    yield return (f.Projection, scope);
                 }
             }
         }
-
-        return needs.ToDictionary(kv => kv.Key, kv => (IReadOnlySet<string>)kv.Value, StringComparer.Ordinal);
     }
 
     /// <summary>
@@ -527,29 +563,32 @@ internal static class OperatorNeedsAnalyzer
         }
     }
 
-    private static void ScanForScalarMul(
-        Expr expr,
-        IReadOnlyDictionary<string, TypeRef> memberTypes,
-        ModelIndex index,
-        Dictionary<string, HashSet<string>> needs) =>
-        new ScalarMulWalker(memberTypes, index, needs).Visit(expr);
-
     /// <summary>
-    /// Records, per value-object type, the scalar C# types it is multiplied by anywhere in an
-    /// expression. The member-type scope is constant for the whole walk. Recurses into every
-    /// node, so a multiplication nested under <c>??</c> or <c>let</c> is still found.
+    /// Records, per value-object type, the scalar C# types it is combined with under a single binary
+    /// operator (<see cref="BinaryOp.Mul"/> or <see cref="BinaryOp.Div"/>) anywhere in an expression.
+    /// The member-type scope is constant for the whole walk. Recurses into every node, so an operation
+    /// nested under <c>??</c> or <c>let</c> is still found.
+    ///
+    /// <para>Multiplication is commutative, so both <c>value-object * scalar</c> and
+    /// <c>scalar * value-object</c> record the same need. Division is not: only
+    /// <c>value-object / scalar</c> (the value object on the left) is a meaningful "scale down" and is
+    /// recorded; <c>scalar / value-object</c> is not division of the value object and is rejected
+    /// upstream, so it is never recorded here.</para>
     /// </summary>
-    private sealed class ScalarMulWalker : ExprWalker
+    private sealed class ScalarOpWalker : ExprWalker
     {
+        private readonly BinaryOp _op;
         private readonly IReadOnlyDictionary<string, TypeRef> _memberTypes;
         private readonly ModelIndex _index;
         private readonly Dictionary<string, HashSet<string>> _needs;
 
-        public ScalarMulWalker(
+        public ScalarOpWalker(
+            BinaryOp op,
             IReadOnlyDictionary<string, TypeRef> memberTypes,
             ModelIndex index,
             Dictionary<string, HashSet<string>> needs)
         {
+            _op = op;
             _memberTypes = memberTypes;
             _index = index;
             _needs = needs;
@@ -557,16 +596,20 @@ internal static class OperatorNeedsAnalyzer
 
         protected override void VisitBinary(BinaryExpr n)
         {
-            if (n.Op == BinaryOp.Mul)
+            if (n.Op == _op)
             {
                 var (lValue, lScalar) = InferOperand(n.Left, _memberTypes, _index);
                 var (rValue, rScalar) = InferOperand(n.Right, _memberTypes, _index);
+
+                // Canonical order `value-object op scalar` is recorded for both `*` and `/`.
                 if (lValue is not null && rScalar is not null)
                 {
                     Record(_needs, lValue, rScalar);
                 }
 
-                if (rValue is not null && lScalar is not null)
+                // Reversed order `scalar op value-object` only makes sense for the commutative `*`
+                // (same product); `scalar / value-object` is not division of the value object.
+                if (_op == BinaryOp.Mul && rValue is not null && lScalar is not null)
                 {
                     Record(_needs, rValue, lScalar);
                 }

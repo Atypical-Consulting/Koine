@@ -380,6 +380,32 @@ public class R9ValueObjectTests
         files.ShouldContain("operator *");
     }
 
+    [Fact]
+    public void Value_object_divided_by_a_scalar_gets_a_division_operator()
+    {
+        // #832: a plain value object divided by a numeric scalar (fee / 2) must demand-generate
+        // `operator /`, the natural dual of scalar `*`. Without it the emitted projection mapper
+        // references an operator that was never generated (CS0019). Compile() asserts the emitted
+        // C# compiles, so this test fails until the division need is recorded AND emitted.
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0
+              }
+              entity Order identified by OrderId {
+                fee: Money
+              }
+              readmodel FeeSplit from Order {
+                half: Money = fee / 2
+              }
+            }
+            """;
+        var (asm, files) = Compile(src);
+        asm.GetType("Shop.Money").ShouldNotBeNull();
+        files.ShouldContain("operator /");
+    }
+
     // ======================================================================
     // Scalar add/subtract against a value object is a type mismatch (#804,
     // follow-up to the reversed-multiply fixes #788/#797). A value object
