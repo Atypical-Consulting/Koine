@@ -358,12 +358,11 @@ internal sealed class PhpExpressionTranslator
     /// before reaching here.
     /// <para>
     /// Decided per binary node from each operand's <em>inferred</em> type, so a single mixed op in either
-    /// order routes to <c>.</c>. An <b>Int-led</b> multi-op chain (e.g. <c>hours + ":" + minutes</c>) is
-    /// only partially covered: the inner <c>Int + String</c> routes to <c>.</c>, but
-    /// <see cref="TypeResolver"/> infers that sub-expression as <c>Int</c> (left-biased arithmetic
-    /// fallback), so the outer <c>(…) + minutes</c> sees <c>Int + Int</c> and stays numeric. Fixing that
-    /// needs a String-wins rule in the target-agnostic <see cref="TypeResolver"/> (tracked separately); a
-    /// String-led chain already routes to <c>.</c> throughout.
+    /// order routes to <c>.</c>. A multi-op chain routes to <c>.</c> at every join regardless of which
+    /// operand leads it: <see cref="TypeResolver"/>'s "String wins" rule infers any <c>+</c> with a String
+    /// operand as <c>String</c> (#805), so an <b>Int-led</b> chain (e.g. <c>hours + ":" + minutes</c>)
+    /// carries <c>String</c> forward — the inner <c>Int + String</c> infers <c>String</c>, so the outer
+    /// <c>(…) + minutes</c> sees a String operand and stays on <c>.</c> too — matching the String-led chain.
     /// </para>
     /// </summary>
     private bool IsStringConcat(BinaryExpr bin)
