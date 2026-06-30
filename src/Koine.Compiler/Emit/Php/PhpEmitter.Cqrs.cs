@@ -29,7 +29,8 @@ public sealed partial class PhpEmitter
     {
         IReadOnlyList<Member> sourceMembers = ReadModelSourceMembers(contextName, rm.SourceType, emit.Index);
         var translator = new PhpExpressionTranslator(
-            emit.Index, sourceMembers, emit.EnumMemberToType, context: contextName, memberReceiver: "src");
+            emit.Index, sourceMembers, emit.EnumMemberToType, context: contextName, memberReceiver: "src",
+            regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         // Sibling names, so a directly-projected source member can be classified stored-vs-derived
         // the same way PhpExpressionTranslator does (ordinal, like its own `_memberNames`).

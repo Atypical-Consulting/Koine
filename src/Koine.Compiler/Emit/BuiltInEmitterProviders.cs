@@ -258,12 +258,14 @@ internal sealed class PhpEmitterProvider : IEmitterProvider
     /// </summary>
     private static PhpEmitterOptions ToPhpOptions(EmitterOptions options)
     {
-        if (options.NamespaceMap.Count == 0)
+        // A timeout-only neutral bag must NOT collapse to Empty (issue #812): the configured value has to
+        // reach the PHP `matches` lowering, mirroring the C# provider's guard (issue #794).
+        if (options.NamespaceMap.Count == 0 && options.RegexMatchTimeoutMs is null)
         {
             return PhpEmitterOptions.Empty;
         }
 
-        return new PhpEmitterOptions(options.NamespaceMap);
+        return new PhpEmitterOptions(options.NamespaceMap, options.RegexMatchTimeoutMs);
     }
 }
 

@@ -47,7 +47,8 @@ public sealed partial class PhpEmitter
         var translator = new PhpExpressionTranslator(
             emit.Index,
             Array.Empty<Member>(),
-            emit.EnumMemberToType);
+            emit.EnumMemberToType,
+            regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         // PHP enum case names: UPPER_SNAKE, so they align with the expression translator's
         // PhpNaming.ConstName references (e.g. `OrderStatus::CANCELLED`).
