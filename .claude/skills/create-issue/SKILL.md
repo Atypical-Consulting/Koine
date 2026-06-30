@@ -58,9 +58,10 @@ Create a task per item and complete in order. For a batch of ideas, run steps 2-
 ## Step 1 — Preconditions
 
 **Load the repo profile first.** Every repo-specific fact — label taxonomy, issue-template defaults,
-architecture grain — lives there, not inline. Run **`get-repo-profile`**; it returns
-`.claude/skills/repo-profile.md` (generating it on first use), and the steps below cite its sections
-(*Labels*, *Issue templates*, *Architecture grain*). If you genuinely can't generate one, say so in the
+architecture grain — lives in the committed file **`.claude/skills/repo-profile.md`**, not inline. Read it
+directly — `cat .claude/skills/repo-profile.md` — and the steps below cite its sections (*Labels*, *Issue
+templates*, *Architecture grain*). Only if that file is **missing** (or the user asks to refresh it) run
+**`get-repo-profile`** to generate it first, then read it. If you genuinely can't get one, say so in the
 report rather than inventing repo specifics.
 
 ```bash

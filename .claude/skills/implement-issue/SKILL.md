@@ -76,12 +76,14 @@ Resume-safe: re-running mid-flight is fine. A task is "done" when **all** its st
 
 ## Step 1 — Preconditions
 
-**Load the repo profile first.** This skill reads every repo-specific fact from it: commit identity,
-build/test/format commands and CI gates, conflict hot-spots, architecture grain. Run **`get-repo-profile`**;
-it returns `.claude/skills/repo-profile.md` (generating it on first use), and the steps below cite its
-sections. Throughout, **`git <commit-identity>`** stands for the author line from the profile's *Commit
-identity* (its `-c user.email=… -c user.name="…"` flags) — substitute it in every commit/merge command.
-If you genuinely can't generate a profile, say so in the report rather than guessing repo specifics.
+**Load the repo profile first.** This skill reads every repo-specific fact from the committed file
+**`.claude/skills/repo-profile.md`**: commit identity, build/test/format commands and CI gates, conflict
+hot-spots, architecture grain. Read it directly — `cat .claude/skills/repo-profile.md` — and the steps
+below cite its sections. Only if that file is **missing** (or the user asks to refresh it) run
+**`get-repo-profile`** to generate it first, then read it. Throughout, **`git <commit-identity>`** stands
+for the author line from the profile's *Commit identity* (its `-c user.email=… -c user.name="…"` flags) —
+substitute it in every commit/merge command. If you genuinely can't get a profile, say so in the report
+rather than guessing repo specifics.
 
 ```bash
 gh api user --jq .login                       # prints a login, or 401 → not authed
