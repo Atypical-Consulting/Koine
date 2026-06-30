@@ -728,7 +728,7 @@ final class Money
         public readonly \Koine\Runtime\Decimal $amount,
         public readonly string $currency
     ) {
-        if ($amount->compareTo(new \Koine\Runtime\Decimal('0')) < 0) {
+        if ($amount->compareTo((new \Koine\Runtime\Decimal('0'))) < 0) {
             throw new \Koine\Runtime\DomainInvariantViolationException("Money", 'an amount cannot be negative');
         }
     }

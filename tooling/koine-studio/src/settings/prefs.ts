@@ -175,6 +175,11 @@ export async function startMcpSidecarIfEnabled(cb: PrefsCallbacks, s: Settings =
   }
 }
 
+// Import for use in this module; re-export so callers importing from here (e.g. prefs.test.ts)
+// keep working without an import-path change. Canonical definition: @/shared/wrapIndex (#745).
+export { wrapIndex } from '@/shared/wrapIndex';
+import { wrapIndex } from '@/shared/wrapIndex';
+
 /**
  * A segmented radio group (e.g. Dark / Light): a row of role=radio buttons under a role=radiogroup, with
  * exactly one option checked at a time. Keyboard-navigable per the WAI-ARIA radiogroup pattern — a roving
@@ -239,8 +244,8 @@ export function segmented<T extends string>(
     const i = enabled.indexOf(e.target as HTMLButtonElement);
     if (i < 0) return; // the focused option isn't navigable (e.g. all disabled) — leave the group be
     let next: HTMLButtonElement;
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = enabled[(i + 1) % enabled.length];
-    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = enabled[(i - 1 + enabled.length) % enabled.length];
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = enabled[wrapIndex(i, +1, enabled.length)]; // shared wrap helper
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = enabled[wrapIndex(i, -1, enabled.length)]; // shared wrap helper
     else if (e.key === 'Home') next = enabled[0];
     else if (e.key === 'End') next = enabled[enabled.length - 1];
     else return;
@@ -1593,7 +1598,7 @@ export function mountPreferencesPane(container: HTMLElement, cb: PrefsCallbacks)
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     e.preventDefault();
     const delta = e.key === 'ArrowDown' ? 1 : -1;
-    selectCategory((activeIndex + delta + categories.length) % categories.length, true);
+    selectCategory(wrapIndex(activeIndex, delta, categories.length), true); // shared wrap helper
   });
 
   const layout = document.createElement('div');
