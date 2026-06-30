@@ -10,9 +10,19 @@ namespace Koine.Compiler.Emit.Php;
 /// with a plain ordinal lookup.
 /// <see cref="Empty"/> applies no remapping, so emitted output is byte-identical to the
 /// unconfigured emitter.
+/// <para>
+/// <see cref="RegexMatchTimeoutMs"/> carries the neutral
+/// <see cref="Koine.Compiler.Emit.EmitterOptions.RegexMatchTimeoutMs"/> author intent (#794/#812). PHP
+/// has no per-call wall-clock match timeout, so the value cannot be honored literally; when set, the
+/// <c>matches</c> lowering instead annotates the emitted <c>preg_match</c> with a note that PHP bounds
+/// matching via PCRE's <c>pcre.backtrack_limit</c>/<c>pcre.recursion_limit</c> (the documented
+/// substitute), surfacing the author's budget rather than silently discarding it. <c>null</c> (the
+/// default) keeps output byte-identical to the historical emitter.
+/// </para>
 /// </summary>
 internal sealed record PhpEmitterOptions(
-    IReadOnlyDictionary<string, string> NamespaceMap)
+    IReadOnlyDictionary<string, string> NamespaceMap,
+    int? RegexMatchTimeoutMs = null)
 {
     /// <summary>An options bag that applies no remapping and uses all defaults.</summary>
     public static readonly PhpEmitterOptions Empty =
