@@ -44,15 +44,23 @@ function fakeDotnetModule(interop: Record<string, unknown>) {
 // skip the whole suite visibly — vitest reports it as "skipped" rather than an unhandled worker
 // exit, which would fail an otherwise-green run. A normal runner has many GB free; the threshold
 // is a conservative floor that only triggers when the runner is genuinely constrained.
+// `bavail` (not `bfree`) is the blocks available to the calling process — on Linux, ext4 reserves
+// ~5% for root so `bfree` overestimates what vitest can actually use; on Windows they are equal.
 const DISK_FLOOR_MB = 512;
 let _diskFreeMB: number;
 try {
-  const { bfree, bsize } = statfsSync(tmpdir());
-  _diskFreeMB = (Number(bfree) * Number(bsize)) / (1024 * 1024);
+  const { bavail, bsize } = statfsSync(tmpdir());
+  _diskFreeMB = (bavail * bsize) / (1024 * 1024);
 } catch {
   _diskFreeMB = Infinity; // cannot query — assume adequate space and run the tests
 }
 const diskConstrained = _diskFreeMB < DISK_FLOOR_MB;
+if (diskConstrained) {
+  console.warn(
+    `[wasm.fallback] Skipping suite — disk is nearly full (${_diskFreeMB.toFixed(0)} MB available, ` +
+      `floor is ${DISK_FLOOR_MB} MB). See issue #400.`,
+  );
+}
 
 describe.skipIf(diskConstrained)('loadWasmApi — main-thread fallback (issue #357)', () => {
   beforeEach(() => {
