@@ -59,6 +59,7 @@ export const SETTINGS_FIELDS: readonly FieldDef[] = [
   { runtimeKey: 'lspTrace', group: 'lsp', docKey: 'trace' },
   { runtimeKey: 'displayName', group: 'account', docKey: 'displayName' },
   { runtimeKey: 'terminalShellArgs', group: 'terminal', docKey: 'shellArgs' },
+  { runtimeKey: 'startupView', group: 'appearance', docKey: 'startupView' },
 ];
 
 // --- per-field leaf schemas -------------------------------------------------
@@ -163,6 +164,12 @@ const LEAF_SCHEMAS: Record<FieldDef['runtimeKey'], LeafSchema> = {
     items: { type: 'string', minLength: 1 },
     title: 'Terminal shell args',
     description: 'Arguments for the integrated terminal shell (desktop). Empty uses the default login shell (["-l"]).',
+  },
+  startupView: {
+    type: 'string',
+    enum: ['home', 'lastWorkspace'],
+    title: 'On startup',
+    description: 'Which view to open on a cold start: home screen (default) or last workspace (auto-resume).',
   },
 };
 
