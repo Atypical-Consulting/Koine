@@ -1076,3 +1076,28 @@ describe('ide init() — Settings entry points unify on the center overlay (#731
     expect(settingsModalExists()).toBe(false);
   });
 });
+
+// #746: Settings overlay keyboard-dismiss and shortcut suppression.
+describe('ide init() — Settings overlay a11y (#746)', () => {
+  const overlayShown = () => document.getElementById('center-panel-settings')!.hidden === false;
+
+  test('Esc while Settings is open closes the overlay', async () => {
+    await boot();
+    // Open Settings via the gear.
+    document.getElementById('btn-prefs')!.click();
+    expect(overlayShown()).toBe(true);
+
+    // Esc should close it.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(overlayShown()).toBe(false);
+  });
+
+  test('Esc while Settings is closed is a no-op for Settings', async () => {
+    await boot();
+    // Settings is closed at boot.
+    expect(overlayShown()).toBe(false);
+    // Esc — should not throw, should not open Settings.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(overlayShown()).toBe(false);
+  });
+});

@@ -881,6 +881,16 @@ export function init(hooks: IdeHooks = {}): () => void {
     }
   });
 
+  // Esc-to-dismiss the Settings overlay (#746). The handler fires before the mod-key listeners'
+  // overlayOpen() gate, since Esc is not a modifier chord and the gate would otherwise suppress it
+  // once the Settings panel is counted in overlayOpen(). Only active while Settings is open, so it
+  // cannot interfere with other Esc semantics (palette, modals) when Settings is closed.
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!appStore.getState().settingsOpen) return;
+    appStore.getState().closeSettings();
+  });
+
   // Guard against closing/reloading with unsaved work: when any open buffer is dirty, the browser
   // shows its native "Leave site?" prompt. Dirty buffers live only in memory, so without this a tab
   // close silently drops them. On the desktop host this covers reloads; the window-close confirm is
