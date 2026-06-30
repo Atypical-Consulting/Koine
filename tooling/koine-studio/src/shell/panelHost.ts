@@ -53,6 +53,11 @@ export interface PanelHostDeps {
 export interface PanelHost {
   /** The ONE entry every Settings affordance routes through: record intent in the store, build/refresh the page. */
   openSettings(category?: string): void;
+  /**
+   * Close the Settings overlay and restore focus to the element that opened it. Use this instead of
+   * calling `deps.closeSettings()` directly so the focus lifecycle is managed in one place (#746).
+   */
+  closeSettings(): void;
   /** The AI assistant panel (built lazily; the SDK loads only on send). */
   ensureAssistant(): AssistantPanel;
   /** The scenario-runner panel (built lazily). */
@@ -80,6 +85,9 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
   // the on-show MCP sidecar (re)start when enabled (issue #735) — so constructing it IS showing it, and an
   // eager build would spawn that background process before the user ever opens Settings.
   let settingsPage: SettingsPageHandle | null = null;
+  // The element that had focus before Settings was opened (#746). Cleared on close so a second close
+  // (no-op for the store) doesn't re-focus the wrong element.
+  let settingsOpener: HTMLElement | null = null;
   function ensureSettingsPage(): void {
     // The landing category is the store's `settingsCategory` (set by controller.showSettings) — the single
     // source of truth, so this host reads it back rather than threading a parallel argument. Null ⇒ keep
@@ -95,7 +103,7 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
     settingsPage = createSettingsPage(
       { header: domById('settings-page-header'), body: domById('settings-page-body') },
       deps.prefsCallbacks,
-      () => deps.closeSettings(),
+      () => closeSettings(), // use the focus-restoring wrapper, not the raw store action
     );
     // A first build already paints from the live settings; only a deep-link needs the extra repaint to
     // land on its tab (a plain open keeps the pane's last-used category).
@@ -106,8 +114,32 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
   // "Settings…" / "About", the mod+, chord, and the Assistant's "Open Settings". Record the intent in the
   // store FIRST, then build/refresh the center page from that store state.
   function openSettings(category?: string): void {
+    // Capture the focused element BEFORE the store update so we have the right opener even if the
+    // update synchronously causes a re-render that moves focus. A non-focusable (or null) element is
+    // replaced by the toolbar gear as the fallback restore target.
+    const active = document.activeElement;
+    settingsOpener = active instanceof HTMLElement ? active : null;
     deps.showSettings(category);
     ensureSettingsPage();
+    // Move focus into the panel after the page is built / refreshed. The close button is the first
+    // interactive element in the header (#746), and its presence is guaranteed by createSettingsPage.
+    const closeBtn = document.querySelector<HTMLElement>('#settings-page-header button[aria-label="Close settings"]');
+    closeBtn?.focus();
+  }
+
+  // Close the Settings overlay and restore focus to the element that opened it (#746). This is the
+  // single canonical close path for ALL dismiss triggers (Esc handler in ide.tsx, the header close
+  // button) so the focus lifecycle is managed here, not scattered across callers.
+  function closeSettings(): void {
+    const opener = settingsOpener;
+    settingsOpener = null; // clear before calling closeSettings so a re-entrant call is a no-op
+    deps.closeSettings();
+    // Restore focus: prefer the captured opener; fall back to the gear button, then body.
+    const target =
+      (opener instanceof HTMLElement && typeof opener.focus === 'function' && document.contains(opener) ? opener : null) ??
+      document.getElementById('btn-prefs') ??
+      document.body;
+    (target as HTMLElement).focus();
   }
 
   // The AI assistant panel is created lazily the first time its center pane is shown (the Anthropic SDK
@@ -240,6 +272,7 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
 
   return {
     openSettings,
+    closeSettings,
     ensureAssistant,
     ensureScenarios,
     ensureTerminal,
