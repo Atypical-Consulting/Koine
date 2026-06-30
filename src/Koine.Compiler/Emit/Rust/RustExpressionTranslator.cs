@@ -603,12 +603,38 @@ internal sealed class RustExpressionTranslator
         return clone ? rendered + ".clone()" : rendered;
     }
 
-    /// <summary>Writes a string-typed argument as a <c>&amp;str</c> reference for std string methods.</summary>
+    /// <summary>
+    /// Writes a string-typed argument as a <c>&amp;str</c> reference for the right side of Rust's
+    /// string-concat <c>+</c> operator (<c>String + &amp;str</c>).
+    /// <list type="bullet">
+    ///   <item>A <c>String</c> literal is written as a <c>&amp;str</c> literal (<c>"…"</c>) — already
+    ///   a <c>&amp;str</c>, no borrow needed.</item>
+    ///   <item>An operand whose inferred type is <c>String</c> is written as <c>&amp;&lt;expr&gt;</c> —
+    ///   <c>&amp;String</c> coerces to <c>&amp;str</c>.</item>
+    ///   <item>Any other operand (e.g. <c>Int</c>, <c>Decimal</c>, <c>Bool</c>, an enum) is stringified
+    ///   first: <c>&amp;&lt;expr&gt;.to_string()</c>.  Emitting a bare <c>&amp;&lt;expr&gt;</c> for a
+    ///   non-<c>String</c> operand would produce e.g. <c>&amp;i64</c>, for which Rust has no
+    ///   <c>Add&lt;String&gt;</c> impl — <c>cargo check</c> error E0369 (issue #837).</item>
+    /// </list>
+    /// Symmetric with <see cref="WriteStringOwned"/> (the left side), which already calls
+    /// <c>.to_string()</c> on every non-<c>BinaryExpr</c> left operand.
+    /// </summary>
     private void WriteStrRef(Expr expr, StringBuilder sb)
     {
         if (expr is LiteralExpr { Kind: LiteralKind.String } lit)
         {
             WriteLiteral(lit, sb, null);
+            return;
+        }
+
+        TypeRef? type = _resolver.Infer(expr, EffectiveScope());
+        if (type?.Name != "String")
+        {
+            // Non-String operand (e.g. Int, Decimal, Bool, enum): stringify it first.
+            // &<expr>.to_string() gives a &String that coerces to &str, satisfying String + &str.
+            sb.Append('&');
+            Write(expr, sb, null);
+            sb.Append(".to_string()");
             return;
         }
 
