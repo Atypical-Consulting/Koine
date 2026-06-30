@@ -1441,7 +1441,7 @@ describe("Settings → Advanced: terminal shell args row (#785)", () => {
     function openPrefsWithTerminal(
         extra: Partial<PrefsCallbacks> = {},
         hasIntegratedTerminal = true,
-    ): PrefsPaneHandle {
+    ): ReturnType<typeof mountPreferencesPane> {
         container = document.createElement("div");
         document.body.append(container);
         const onChange = vi.fn();
