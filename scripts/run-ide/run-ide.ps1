@@ -9,7 +9,10 @@
 # published `koine` binary before running; the Rust host prefers it over the DLL.
 $ErrorActionPreference = "Stop"
 # This script lives in scripts/run-ide/; run from the repo root so the paths below resolve.
-Set-Location (Join-Path $PSScriptRoot "../..")
+# Push/Pop (in a finally) so the caller's working directory is restored on exit — a bare
+# Set-Location would leak into the caller's session.
+Push-Location (Join-Path $PSScriptRoot "../..")
+try {
 
 $studio = "tooling/koine-studio"
 
@@ -56,3 +59,7 @@ npm run tauri dev -- @args
 $code = $LASTEXITCODE
 Pop-Location
 exit $code
+
+} finally {
+    Pop-Location
+}

@@ -5,15 +5,20 @@
 # e.g. `./run-benchmarks.ps1 --filter '*Compile*'` or `... --job short`.
 $ErrorActionPreference = "Stop"
 # This script lives in scripts/run-benchmarks/; run from the repo root so the
-# --project path below resolves.
-Set-Location (Join-Path $PSScriptRoot "../..")
+# --project path below resolves. Push/Pop (in a finally) so the caller's working
+# directory is restored on exit — a bare Set-Location would leak into the
+# caller's session.
+Push-Location (Join-Path $PSScriptRoot "../..")
+try {
+    $project = "benchmarks/Koine.Compiler.Benchmarks"
 
-$project = "benchmarks/Koine.Compiler.Benchmarks"
-
-if ($args.Count -eq 0) {
-    # Canonical command: full run that splices the result table back into the README.
-    dotnet run -c Release --project $project -- --filter '*' --update-docs
-} else {
-    dotnet run -c Release --project $project -- @args
+    if ($args.Count -eq 0) {
+        # Canonical command: full run that splices the result table back into the README.
+        dotnet run -c Release --project $project -- --filter '*' --update-docs
+    } else {
+        dotnet run -c Release --project $project -- @args
+    }
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+} finally {
+    Pop-Location
 }
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

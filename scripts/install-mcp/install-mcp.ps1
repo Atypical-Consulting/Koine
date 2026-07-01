@@ -4,8 +4,11 @@
 # (koine-mcp), then merges a `koine` entry into claude_desktop_config.json.
 $ErrorActionPreference = "Stop"
 # This script lives in scripts/install-mcp/; run from the repo root so the
-# relative paths below (Directory.Build.props, src/Koine.Mcp) resolve.
-Set-Location (Join-Path $PSScriptRoot "../..")
+# relative paths below (Directory.Build.props, src/Koine.Mcp) resolve. Push/Pop
+# (in a finally) so the caller's working directory is restored on exit — a bare
+# Set-Location would leak into the caller's session.
+Push-Location (Join-Path $PSScriptRoot "../..")
+try {
 
 # Version to pin, read straight from Directory.Build.props so the install
 # resolves the package we just packed rather than something off nuget.org.
@@ -62,3 +65,7 @@ Write-Host ""
 Write-Host "Done. koine-mcp $version installed and registered."
 Write-Host "Quit Claude Desktop completely and reopen it to load the server."
 Write-Host "Config: $config"
+
+} finally {
+    Pop-Location
+}
