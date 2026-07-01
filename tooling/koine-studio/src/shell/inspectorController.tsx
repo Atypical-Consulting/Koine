@@ -54,7 +54,7 @@ import type {
 } from '@/diagrams/diagramContract';
 import { createLayoutStore } from '@/diagrams/layoutStore';
 import { mergeDiagramGraphs } from '@/model/modelTables';
-import { type GlossaryHandlers } from '@/model/glossary';
+import { coverage, type GlossaryHandlers } from '@/model/glossary';
 import { createDocsStore } from '@/docs/docsStore';
 import { renderAdrPanel, renderNotesPanel, type DocsPanelHandlers } from '@/docs/docsPanel';
 import {
@@ -72,7 +72,6 @@ import { type InspectorElement, type InspectorHandlers } from '@/model/inspector
 import { buildModelIndex, lookupElement, resolveInspectableQn, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
 import { SourceControlPanel } from '@/model/SourceControlPanel';
-import { ContextBreadcrumb } from '@/model/ContextBreadcrumb';
 import { EventsPanel } from '@/model/EventsPanel';
 import { RelationshipsPanel } from '@/model/RelationshipsPanel';
 import { GlossaryPanel } from '@/model/GlossaryPanel';
@@ -399,9 +398,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     renderSelectedInspector(); // re-mount into the now-correct host (sheet body vs #inspector-host)
   }
   window.addEventListener('resize', onViewportResize);
-  // Top-bar "scope path" host (the ContextBreadcrumb Preact panel — the scope selector + selected
-  // element) and its status-bar context mirror.
-  const breadcrumbHost = domById('breadcrumb-host');
+  // The active bounded-context scope is surfaced in the status-bar "Context" segment (chrome v2, #923
+  // removed the redundant top-bar breadcrumb strip; the left Domain navigator drives scope switching).
   const sbContextEl = domById('sb-context');
 
   // Bottom-panel refs.
@@ -482,29 +480,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     get: () => appStore.getState().activeContext,
     set: (scope) => appStore.getState().setActiveContext(scope),
   };
-  // The model's bounded contexts (the scope selector's options after "All contexts"), kept here so the
-  // breadcrumb can be re-rendered whenever they change. Empty in a cold/scratch model → the host hides.
-  let contexts: string[] = [];
-
-  // Render (or re-render) the top-bar "scope path": the ContextBreadcrumb Preact panel. It subscribes to
-  // the activeContext + selection slices itself (so a scope/selection change repaints it without a call
-  // here), and takes the contexts list + model index as props — so a re-render is needed only when those
-  // change (setContextOptions / a model-index rebuild). Hidden while the model has no contexts. Picking a
-  // context routes through setActiveContext — the same persist-and-repaint choke point the old <select>
-  // used — so the scoped surfaces stay consistent.
-  function renderBreadcrumb(): void {
-    breadcrumbHost.hidden = contexts.length === 0;
-    render(
-      <ContextBreadcrumb
-        store={appStore}
-        contexts={contexts}
-        index={modelIndex}
-        onScopeChange={setActiveContext}
-      />,
-      breadcrumbHost,
-    );
-  }
-
   /** The per-workspace storage key for the active scope (folder identity, or 'scratch'). */
   function contextWorkspaceKey(): string {
     return deps.folderRootToken() || 'scratch';
@@ -548,13 +523,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     applyScope(scope, true);
   }
 
-  // Adopt the current model's contexts as the scope selector's options ("All contexts" is always first,
-  // rendered by the breadcrumb itself). Re-renders the breadcrumb (which hides itself when the list is
-  // empty — an empty/scratch model).
+  // Adopt the current model's contexts as the scope options (the Domain navigator + construct palette
+  // read them from the store). "All contexts" is the unscoped sentinel.
   function setContextOptions(list: string[]): void {
-    contexts = list;
     appStore.getState().setContexts(list); // mirror into the store so the construct palette can react
-    renderBreadcrumb();
     // Fall back to "All contexts" ONLY when we positively know the model's contexts (a non-empty list)
     // and the active scope isn't among them — a genuine rename/removal. An EMPTY list is a transient or
     // cold state (the LSP still warming up right after open, or a momentarily-unparseable model mid-edit),
@@ -575,10 +547,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     try {
       const model = await lsp.glossaryModel();
       setContextOptions(listContexts(model));
+      // Publish glossary documentation coverage for the status-bar docs ring (#923) — the model is
+      // already in hand here, and this runs on folder open + every (debounced) edit, so the ring tracks
+      // the live glossary. coverage() returns { documented, total, pct }; the ring needs the raw counts.
+      const cov = coverage(model.entries);
+      appStore.getState().setDocsCoverage({ documented: cov.documented, total: cov.total });
     } catch (e) {
       // Best-effort: empty the picker, but log so a failing glossary model isn't a silent dead end.
       console.warn('Context list refresh failed; clearing the context picker.', e);
       setContextOptions([]);
+      appStore.getState().setDocsCoverage({ documented: 0, total: 0 });
     }
   }
 
@@ -1150,10 +1128,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     }
     try {
       await ensureModelIndex();
-      // The model index just (re)built — re-pass it to the breadcrumb so the selected element's type icon
-      // resolves (the panel tracks selection itself, but reads the construct off the index prop). The
-      // palette likewise reads the index to gate its aggregate-scoped buttons (#254), so re-pass it too.
-      renderBreadcrumb();
+      // The model index just (re)built — the canvas palette reads it to gate its aggregate-scoped buttons
+      // (#254), so re-render it.
       renderCanvasPalette();
       renderSelectedInspector();
       applySelectionHighlight();
@@ -2092,7 +2068,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         // reachable navigate channel for the map: the canvas's own NODE_NAVIGATE_EVENT bubbles within
         // the bottom strip, which is not under the diagrams container ide.tsx listens on.
         onContextClick: (n) => {
-          if (contexts.includes(n.qualifiedName)) setActiveContext(n.qualifiedName);
+          if (appStore.getState().contexts.includes(n.qualifiedName)) setActiveContext(n.qualifiedName);
           if (n.sourceSpan) deps.gotoSourceSpan(n.sourceSpan);
         },
         onRelationSelect: (edge) => showRelationDetails(details, edge as ContextMapEdge | null),
@@ -2197,10 +2173,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       // no persistence available — fall back to the Domain default
     }
     applyAxis(storedAxis);
-    // Mount the top-bar scope path once at boot (hidden until refreshContextList finds a context). It
-    // tracks scope/selection via the store thereafter; setContextOptions + loadModel re-render it when
-    // the contexts list or model index changes.
-    renderBreadcrumb();
     // Mount the Deck: detach the four center-host sections first so rendering the stage into #center-body
     // doesn't destroy them, then let the DeckStage re-parent each into its card body (via a ref). The
     // DeckBar (Overview + filmstrip) renders into #deck-bar. Both are store-bound — the deck/facet

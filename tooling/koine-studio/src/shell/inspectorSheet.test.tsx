@@ -221,7 +221,6 @@ describe('createInspectorSheet — accessibility', () => {
 // its sheet so we can assert the selection → sheet wiring end to end.
 const APP_HTML = `
   <div id="app">
-    <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
     <main id="split">
       <aside id="leftrail" class="pane"></aside>
       <section id="center" class="pane">

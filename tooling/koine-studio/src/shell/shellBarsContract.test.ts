@@ -4,8 +4,8 @@
 // fact so a new indicator can't silently drift into the wrong one (or get mirrored into both), the
 // failure mode #756 was opened to prevent:
 //
-//   • Status bar (#statusbar) owns PERSISTENT AMBIENT STATE read passively — context, validity,
-//     problems, compiling/busy, connection, version.
+//   • Status bar (#statusbar) owns PERSISTENT AMBIENT STATE read passively — branch, problems (split
+//     ✕/⚠), context, docs coverage, compiling/busy, emit echo, cursor, encoding, connection, version.
 //   • Topbar (#toolbar) owns ACTIONS + the transient #status action-feedback pill (the last-action
 //     toast: Saved / Renamed X→Y / errors). #status is NOT a connection indicator.
 //   • One home per fact — nothing is mirrored across both bars.
@@ -28,23 +28,29 @@ beforeAll(() => {
 // from the toolbar): no other suite asserts its bar membership, so this guard is the single home for
 // that invariant too.
 const STATUS_BAR_ITEMS = [
+  'sb-branch',
+  'sb-problems',
   'sb-context',
-  'sb-validity',
+  'sb-docs-ring',
   'sb-problems-host',
   'sb-compiling-host',
+  'sb-emit',
+  'sb-cursor',
+  'sb-encoding',
   'sb-connection',
   'sb-version',
   'unsaved-indicator',
 ];
 
-// Model actions + the transient action-feedback pill → the topbar.
+// Model actions + the transient action-feedback pill → the topbar. Chrome v2 (#923) trimmed the bar to a
+// calm set: Save-to-disk / Check / theme toggle left the topbar for the ⌘K palette (+ mobile overflow),
+// so they're no longer pinned here; the command bar (#palette-hint) is the new centered hero.
 const TOOLBAR_ITEMS = [
   'status',
   'btn-new',
   'btn-open-folder',
   'btn-generate-project',
-  'btn-save-project',
-  'btn-check',
+  'palette-hint',
 ];
 
 /** An element's OWN text (direct text nodes only), so a container isn't credited with a child's text. */
@@ -82,6 +88,13 @@ describe('shell bars single-home contract (#756)', () => {
       expect(toolbar!.contains(elt!), `#${id} must live in #toolbar`).toBe(true);
       expect(statusbar!.contains(elt!), `#${id} must NOT also be in #statusbar (no mirroring)`).toBe(false);
     }
+  });
+
+  test('the second-tier context breadcrumb strip is gone (chrome v2, #923) — context lives in the status bar', () => {
+    // The old #breadcrumb-host strip duplicated the bounded-context scope already carried by the left
+    // Domain navigator + the #sb-context status segment. Chrome v2 removed it; guard against its return.
+    expect(doc.getElementById('breadcrumb-host'), '#breadcrumb-host must not exist').toBeNull();
+    expect(doc.getElementById('sb-context'), '#sb-context must carry the active context').not.toBeNull();
   });
 
   test('connection text has a single home — only #sb-connection reads as connection across both bars', () => {

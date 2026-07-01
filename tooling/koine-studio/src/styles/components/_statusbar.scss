@@ -1,35 +1,133 @@
-/* --- bottom status bar ---
-   A thin projection of existing workspace state: active context, model validity, connection and
-   version. All values are written by ide.ts from state it already computes (no new data). */
+/* --- bottom status bar (chrome v2, #923) ---
+   A paper-toned, monospaced bar carrying the full IDE information set: branch · problems (split ✕/⚠) ·
+   context · docs-coverage ring · rollup · compiling · emit echo · cursor · encoding · Ready · version.
+   All values are written from state the app already computes (no new data sources). Segments (.sb-seg)
+   abut and hover-highlight; static readouts (.sb-seg.static) don't. */
 #statusbar {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: var(--koi-space-2-5);
+  gap: 0;
   height: 26px;
-  padding: 0 var(--koi-space-3);
+  padding: 0 var(--koi-space-1);
   background: var(--koi-paper-2);
   border-top: 1px solid var(--koi-line);
   color: var(--koi-muted);
-  font-family: var(--koi-font-body);
+  font-family: var(--koi-font-mono);
   font-size: var(--koi-text-2xs);
   white-space: nowrap;
   overflow: hidden;
 }
 
+/* An interactive status segment: full-height, padded, hover-highlighted. Buttons (branch, problems)
+   reset their native chrome through it, so they read as plain segments. */
+.sb-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1-5);
+  height: 100%;
+  padding: 0 var(--koi-space-2-5);
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background var(--koi-dur-fast) ease,
+    color var(--koi-dur-fast) ease;
+
+  &:hover {
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: -2px;
+  }
+
+  /* Honour the hidden attribute over the inline-flex above (e.g. #sb-branch before a git folder opens). */
+  &[hidden] {
+    display: none;
+  }
+}
+
+/* A passive readout — no pointer affordance, no hover lift. */
+.sb-seg.static {
+  cursor: default;
+
+  &:hover {
+    background: transparent;
+    color: var(--koi-muted);
+  }
+}
+
+/* The 1.5px-stroke status glyphs (git branch) pick up the segment's text colour. */
+.sb-ico {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Problems split: ✕ errors stay muted until any exist (then the error hue); ⚠ warnings are always amber. */
+.sb-err {
+  color: var(--koi-muted);
+}
+.sb-err.has {
+  color: var(--koi-error);
+}
+.sb-warn {
+  color: var(--koi-hl-number);
+}
+
+/* Docs-coverage ring host is transparent to layout (display:contents) like the other panel hosts, so it
+   adds no segment box of its own — the <DocsCoverageRing> panel renders the real .sb-ring segment inside
+   it (avoiding a segment-within-a-segment: double padding + nested hover). */
+#sb-docs-ring {
+  display: contents;
+}
+
+/* Docs-coverage ring: the panel's own segment — a 15px donut whose cyan arc is the documented fraction
+   (see DocsCoverageRing) beside its `Docs n/m` label. */
+.sb-ring svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+/* Ready / connection dot: green when the compiler/LSP is up, muted while connecting, error when offline. */
+.sb-ready::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: var(--koi-radius-pill);
+  background: var(--koi-muted);
+}
+.sb-ready[data-state='online']::before {
+  background: var(--koi-hl-string);
+}
+.sb-ready[data-state='offline']::before {
+  background: var(--koi-error);
+}
+
+/* The two panel-mounted hosts (workspace-problems rollup + compiling indicator) ride as inline items;
+   give them the segment's horizontal breathing room since they aren't .sb-seg. */
 .sb-item {
   display: inline-flex;
   align-items: center;
   gap: var(--koi-space-1);
+  padding: 0 var(--koi-space-2);
 }
 
 .sb-spacer {
   margin-left: auto;
-}
-
-/* Validity flips to the error colour when the model has diagnostics. */
-#sb-validity[data-kind='error'] {
-  color: var(--koi-error);
 }
 
 /* The badge host is transparent to layout (display:contents) so it adds no status-bar gap while the

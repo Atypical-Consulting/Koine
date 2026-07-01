@@ -23,7 +23,12 @@ import { resolve } from 'node:path';
 // at 1334 lines (4 over the ceiling it set in the same PR) — the squashed snapshot grew past the one CI
 // tested, so the guard has failed on main ever since. The 1334 lines are legitimate #789 teardown wiring,
 // so ratchet the ceiling to its real end-state plus headroom rather than re-trimming working code.
-const IDE_TSX_MAX_LINES = 1340;
+// Raised 1340 → 1365: #923's chrome-v2 shell wires two new controls into init() — the emit-target
+// selector and the status-bar reactive panels. Both keep their logic in their own modules per the
+// contract (emitTargetControl.tsx, statusBar.tsx); only the composition-root wiring grew init() — the two
+// createX deps calls, the emit lookups, and the one-line store mirror in applyEffectiveScoped, ~18 LOC
+// net. Ratchet to the real end-state plus a little headroom.
+const IDE_TSX_MAX_LINES = 1365;
 
 describe('ide.tsx line-budget guard', () => {
   it(`keeps ide.tsx under ${IDE_TSX_MAX_LINES} lines (the composition root must stay thin)`, () => {

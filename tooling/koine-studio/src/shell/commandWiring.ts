@@ -163,27 +163,31 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
   registry.register({ id: PALETTE_COMMAND_ID, title: 'Command palette', run: () => palette.toggle() });
 
   // --- toolbar buttons unique to this phase ---------------------------------
-  const hintEl = document.querySelector('.palette-hint');
-  if (hintEl) {
-    // Render the chord into an aria-hidden span: the visible "⌘+K" is decorative chrome, while the
-    // button's accessible name stays "Open command palette" (aria-label). Setting textContent directly
-    // would make the chord the visible label and break WCAG 2.5.3 (Label in Name).
-    hintEl.replaceChildren();
-    const chord = document.createElement('span');
-    chord.setAttribute('aria-hidden', 'true');
-    chord.textContent = formatChord('mod+K'); // ⌘+K / Ctrl+K per platform
-    hintEl.appendChild(chord);
-    hintEl.addEventListener('click', () => registry.run(PALETTE_COMMAND_ID));
+  // The command bar (chrome v2, #923): a full command field (search glyph + placeholder + keycap) that
+  // opens the palette. Its markup is static in index.html, so we DON'T wipe its children — we only fill
+  // the keycap with the platform chord (⌘K / Ctrl+K) and wire the click. The button's accessible name
+  // stays "Open command palette" (aria-label); the visible keycap is aria-hidden decorative chrome, so
+  // this can't break WCAG 2.5.3 (Label in Name).
+  const cmdBar = document.querySelector('.palette-hint');
+  if (cmdBar) {
+    const kbd = cmdBar.querySelector('[data-role="cmd-kbd"]');
+    if (kbd) kbd.textContent = formatChord('mod+K');
+    else {
+      // Fallback for a bare hint (e.g. a minimal test fixture with no keycap span): render the chord.
+      const chord = document.createElement('span');
+      chord.setAttribute('aria-hidden', 'true');
+      chord.textContent = formatChord('mod+K');
+      cmdBar.appendChild(chord);
+    }
+    cmdBar.addEventListener('click', () => registry.run(PALETTE_COMMAND_ID));
   }
   // Each toolbar button dispatches its command by id (#758) so it can never drift from the palette entry
-  // or re-derive the action — the registry's run() owns the effect (and its enablement guard).
+  // or re-derive the action — the registry's run() owns the effect (and its enablement guard). Save-to-disk,
+  // Check and the theme toggle left the bar in chrome v2 (#923); they remain reachable via the palette /
+  // mobile overflow through their catalog commands (save-project-to-disk / check / toggle-theme).
   domById<HTMLButtonElement>('btn-home').addEventListener('click', () => registry.run('home'));
   domById<HTMLButtonElement>('btn-new').addEventListener('click', () => registry.run('new-model'));
   domById<HTMLButtonElement>('btn-generate-project').addEventListener('click', () => registry.run('generate-project'));
-  const saveProjectBtn = domById<HTMLButtonElement>('btn-save-project');
-  saveProjectBtn.addEventListener('click', () => registry.run('save-project-to-disk'));
-  if (!deps.canSaveProjects) saveProjectBtn.hidden = true;
-  domById<HTMLButtonElement>('btn-theme').addEventListener('click', () => registry.run('toggle-theme'));
   // The toolbar gear opens the transient Settings overlay over the deck (#center-panel-settings) — now the
   // single Settings surface every entry point shares (#731), via the prefs command.
   domById<HTMLButtonElement>('btn-prefs').addEventListener('click', () => registry.run('prefs'));

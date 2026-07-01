@@ -65,6 +65,8 @@ import { installExportMenuDismiss } from '@/shell/exportMenuDismiss';
 import { HistoryControls } from '@/shell/HistoryControls';
 import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { CompilingIndicator } from '@/shell/CompilingIndicator';
+import { createEmitTargetControl } from '@/shell/emitTargetControl';
+import { createStatusBar } from '@/shell/statusBar';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
 import { createWorkspaceController, type WorkspaceController } from '@/shell/workspaceController';
 import { createSearchPanel } from '@/shell/searchController';
@@ -215,11 +217,13 @@ export function init(hooks: IdeHooks = {}): () => void {
   // Bottom status-bar fields — a pure projection of existing state (no new data sources). Per the
   // single-home contract (docs/shell-bars-contract.md, #756): #sb-connection is the SOLE connection
   // indicator (driven by setConnection over the LSP lifecycle), NOT a mirror of the topbar #status pill
-  // — that pill is transient action-feedback only. #sb-validity by the diagnostics strip, and
-  // #sb-version once at boot from the build-time define. (#sb-context is written by the inspector
-  // controller's bounded-context switcher.)
+  // — that pill is transient action-feedback only. The #sb-problems split + #sb-cursor are driven by the
+  // diagnostics strip / editor (chrome v2, #923), and #sb-version once at boot from the build-time define.
+  // (#sb-context is written by the inspector controller's bounded-context switcher.)
   const sbConnEl = domById('sb-connection');
-  const sbValidityEl = domById('sb-validity');
+  const sbProblemsErrEl = domById('sb-problems-errors');
+  const sbProblemsWarnEl = domById('sb-problems-warnings');
+  const sbCursorEl = domById('sb-cursor');
   domById('sb-version').textContent = `v${__APP_VERSION__}`;
 
   // Global unsaved-work surfacing: the document title gains a `•` and a clickable "N unsaved" pill
@@ -250,8 +254,8 @@ export function init(hooks: IdeHooks = {}): () => void {
     appStore.getState().setActiveUri(workspace.activeUri());
   }
 
-  // Workspace-wide problems rollup beside #sb-validity (which is active-file only): a status-bar badge
-  // summarising every file's diagnostics, hidden while the workspace is clean. Subscribes to the
+  // Workspace-wide problems rollup beside the #sb-problems split (which is active-file only): a status-bar
+  // badge summarising every file's diagnostics, hidden while the workspace is clean. Subscribes to the
   // diagnostics slice, so the LSP publish path keeps it current with no extra wiring.
   render(<WorkspaceProblemsBadge store={appStore} />, domById('sb-problems-host'));
 
@@ -260,9 +264,9 @@ export function init(hooks: IdeHooks = {}): () => void {
   // doesn't flash it. Subscribes to compileActivity's onCompileActivityChange seam — no store wiring.
   render(<CompilingIndicator />, domById('sb-compiling-host'));
 
-  // The top-bar "scope path" breadcrumb (the bounded-context selector + the selected element) is owned by
-  // the inspector controller — it holds the contexts list + model index the breadcrumb needs, and routes
-  // a scope pick through its persist-and-repaint choke point. It renders into #breadcrumb-host from init().
+  // The bounded-context scope is surfaced in the status-bar "Context" segment and switched via the left
+  // Domain navigator (chrome v2, #923 retired the redundant top-bar breadcrumb strip). The inspector
+  // controller owns the scope choke point (persist + repaint of every scoped surface).
 
   // Dev-facing live store inspector (#193 follow-up): a read-only overlay of what the app store thinks
   // right now, toggled from the command palette. Registered only in dev builds (see devCommands), and
@@ -327,6 +331,10 @@ export function init(hooks: IdeHooks = {}): () => void {
     output.setLineWrap(eff.wordWrap);
     controller.onPreviewTargetChanged(eff.previewTarget);
     lsp.setTrace(eff.lspTrace);
+    // Mirror the effective emit target into the store (#923) so the top-bar selector + status-bar echo
+    // reflect it, whichever control changed it (the selector, the Settings Output picker, or a folder/
+    // root switch that brought a different workspace override into effect).
+    appStore.getState().setEmitTarget(eff.previewTarget);
   }
 
   // Adding or removing a workspace root changes the workspace identity: folderRootToken() may now point
@@ -370,7 +378,9 @@ export function init(hooks: IdeHooks = {}): () => void {
     diagCount: diagCountEl,
     diagBody: diagBodyEl,
     sbConnection: sbConnEl,
-    sbValidity: sbValidityEl,
+    sbProblemsErrors: sbProblemsErrEl,
+    sbProblemsWarnings: sbProblemsWarnEl,
+    sbCursor: sbCursorEl,
     activeUri: () => workspace.activeUri(),
     uriLabel: (uri) => workspace.buffers.get(uri)?.relPath ?? basename(uri),
     onNavigate: (loc) => navigateToDefinition(loc),
@@ -662,8 +672,8 @@ export function init(hooks: IdeHooks = {}): () => void {
   }
 
   // Check… — pick a baseline folder and diff the current buffer against it. Owned by the controller
-  // (it surfaces in the Code tab's Compatibility sub-view); the button + palette just trigger it.
-  domById<HTMLButtonElement>('btn-check').addEventListener('click', () => void controller.runCheck());
+  // (it surfaces in the Code tab's Compatibility sub-view). Chrome v2 (#923) dropped the top-bar Check
+  // button; it is triggered solely through the `check` command (palette / mobile overflow) now.
 
   // Boot the center chrome into the restored mode + label the Generated sub-tab (no fetch — the boot
   // flow's refreshActiveSurfaces loads everything once the workspace document is open).
@@ -821,6 +831,25 @@ export function init(hooks: IdeHooks = {}): () => void {
     />,
     domById('history-controls-host'),
   );
+
+  // The top-bar emit-target selector (#923), wired by its own module so init() stays thin (#757).
+  createEmitTargetControl({
+    store: appStore,
+    host: domById('emit-target-host'),
+    wsKey,
+    getSettings: () => settings,
+    setSettings: (s) => void (settings = s),
+    applyEffectiveScoped,
+  });
+
+  // The status-bar reactive wiring (#923): the docs-coverage ring + emit echo panels, the Problems-tab
+  // click, and the git-branch segment. Extracted to keep init() thin (#757).
+  createStatusBar({
+    store: appStore,
+    platform,
+    folderRootToken: () => workspace.folderRootToken(),
+    onOpenProblems: () => controller.selectBottomTab('problems'),
+  });
 
   // Switching files: repaint the active file's diagnostics, invalidate the doc views so they re-fetch,
   // and follow the new file's bounded context. Preserves the exact effect order of the old activateFile.

@@ -26,19 +26,29 @@
   }
 }
 
-.toolbar-actions {
+/* Chrome v2 (#923): the left icon-action cluster — New · Open · Undo · Redo, flat ghost icon buttons
+   (no auto margin: the centered command bar does the centering). Undo/Redo render as a <HistoryControls>
+   .tb-group here; flatten that group's segmented chrome so all four icons read as one calm row. */
+.iconset {
   display: flex;
   align-items: center;
-  gap: var(--koi-space-2);
-  margin: 0 auto 0 var(--koi-space-1);
+  gap: var(--koi-space-0-5);
+  flex: 0 0 auto;
+
+  .tb-group {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    gap: var(--koi-space-0-5);
+  }
 }
 
 /* On the Home route the editor's #toolbar still paints — it shares #app, kept visible by #368's
-   [hidden] override — but the model-action group (New / Open / Generate / Save to disk / Check) does
-   nothing before a model is open, so trim it there. The .brand (logo) and .toolbar-right (theme,
-   prefs, ⌘K, status) stay: the controls that make sense on Home. The body[data-route] flag is set in
-   main.ts apply() so this is deliberate route-aware chrome, not an accident (issue #490). */
-body[data-route='home'] #toolbar .toolbar-actions {
+   [hidden] override — but the model actions (New / Open / Undo / Redo) and the emit/Generate cluster do
+   nothing before a model is open, so trim them there. The .brand (logo), the ⌘K command bar, and
+   Settings stay: the controls that make sense on Home. The body[data-route] flag is set in main.ts
+   apply() so this is deliberate route-aware chrome, not an accident (issue #490). */
+body[data-route='home'] #toolbar :is(.iconset, #emit-target-host, .generate) {
   display: none;
 }
 
@@ -65,19 +75,40 @@ body[data-route='home'] #toolbar .toolbar-actions {
   background: var(--koi-line);
 }
 
-.toolbar-actions button,
-#btn-check {
-  @include a.ghost-button;
-}
+/* Icon-only ghost buttons in the left cluster: New / Open (.t-ico) and the Undo/Redo <HistoryControls>
+   buttons (.icon-btn). 30×30 square, transparent → surface on hover — all four read as one calm row. */
+.iconset .t-ico,
+.iconset button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: transparent;
+  color: var(--koi-muted);
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
+  cursor: pointer;
+  transition:
+    background var(--koi-dur-fast) ease,
+    color var(--koi-dur-fast) ease,
+    border-color var(--koi-dur-fast) ease;
 
-#btn-check {
-  background: color-mix(in srgb, var(--koi-paper) 55%, transparent);
-  border-color: var(--koi-line);
-}
+  &:hover:not(:disabled) {
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+  }
 
-.toolbar-actions button:disabled {
-  opacity: 0.45;
-  cursor: default;
+  &:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
 }
 
 /* The .tb-ico glyphs are drawn as 1px strokes that pick up the button's text color. */
@@ -92,13 +123,38 @@ body[data-route='home'] #toolbar .toolbar-actions {
   stroke-linejoin: round;
 }
 
-/* Primary (emit) actions read as the headline verbs: accent text + ghost-accent surface. */
-.tb-primary {
-  color: var(--koi-accent) !important;
+/* Generate — the primary emit action in the right cluster (chrome v2, #923): an accent-filled pill with
+   on-accent text and glyph. The headline verb of the bar. */
+.generate {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1-75);
+  height: 30px;
+  padding: 0 var(--koi-space-3-5);
+  border: 0;
+  border-radius: var(--koi-radius-sm);
+  background: var(--koi-accent);
+  color: var(--koi-on-accent);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--koi-dur-fast) ease,
+    box-shadow var(--koi-dur-fast) ease;
+
+  .tb-ico {
+    color: currentColor;
+  }
 
   &:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--koi-accent) 16%, transparent) !important;
-    color: var(--koi-accent) !important;
+    background: color-mix(in srgb, var(--koi-accent) 88%, white);
+    box-shadow: 0 2px 12px color-mix(in srgb, var(--koi-accent) 35%, transparent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 2px;
   }
 }
 
@@ -141,8 +197,13 @@ body[data-route='home'] #toolbar .toolbar-actions {
     width: 30px;
     display: block;
     border-radius: 9px;
-    box-shadow: 0 2px 10px color-mix(in srgb, var(--koi-accent) 30%, transparent);
+    /* Chrome v2 (#923): the accent glow is a hover affordance, not a permanent halo. */
+    transition: box-shadow var(--koi-dur-mid) ease;
   }
+}
+
+.brand:hover .brand-logo svg {
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--koi-accent) 35%, transparent);
 }
 
 .brand-text {
@@ -169,32 +230,146 @@ body[data-route='home'] #toolbar .toolbar-actions {
   color: var(--koi-muted);
 }
 
-.palette-hint {
-  font-family: var(--koi-font-mono);
-  font-size: var(--koi-text-xs);
-  color: var(--koi-muted);
-  background: transparent;
+/* --- command bar (chrome v2, #923) -------------------------------------------------------------------
+   The centered ⌘K hero: a full-width command field that opens the palette. flex:1 + margin:0 auto centers
+   it between the left icon cluster and the right utilities, capped so it never sprawls on a wide window. */
+.cmd {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2-5);
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 560px;
+  margin: 0 auto;
+  height: 34px;
+  padding: 0 var(--koi-space-3);
   border: 1px solid var(--koi-line);
-  border-bottom-width: 2px;
-  border-radius: 5px;
-  padding: var(--koi-space-0-5) var(--koi-space-1-75);
-  cursor: pointer;
-  user-select: none;
-  transition:
-    color var(--koi-dur-fast) ease,
-    border-color var(--koi-dur-fast) ease,
-    background var(--koi-dur-fast) ease;
+  border-radius: var(--koi-radius-sm);
+  background: color-mix(in srgb, var(--koi-paper) 60%, transparent);
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm);
+  cursor: text;
+  transition: border-color var(--koi-dur-fast) ease;
 
   &:hover {
-    color: var(--koi-fg);
-    border-color: var(--koi-accent);
-    background: color-mix(in srgb, var(--koi-accent) 8%, transparent);
+    border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
   }
 
   &:focus-visible {
     outline: 2px solid var(--koi-accent);
-    outline-offset: 2px;
+    outline-offset: 1px;
   }
+}
+
+.cmd-ico {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.cmd-placeholder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmd-kbd {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-xs);
+  color: var(--koi-muted);
+  border: 1px solid var(--koi-line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 1px var(--koi-space-1-5);
+}
+
+/* --- emit-target selector (chrome v2, #923) ---------------------------------------------------------- */
+.emit-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.emit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+  height: 30px;
+  padding: 0 var(--koi-space-2-75);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  background: color-mix(in srgb, var(--koi-paper) 60%, transparent);
+  color: var(--koi-ink-soft);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm);
+  cursor: pointer;
+  transition:
+    border-color var(--koi-dur-fast) ease,
+    background var(--koi-dur-fast) ease;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+}
+
+.emit-lbl {
+  color: var(--koi-muted);
+}
+
+.emit-caret {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.7;
+}
+
+/* The dropdown menu of emit targets — anchored under the selector, above other chrome. */
+.emit-menu {
+  @include a.popover-surface;
+  position: absolute;
+  top: calc(100% + var(--koi-space-1));
+  right: 0;
+  z-index: var(--koi-z-popover);
+  min-width: 100%;
+  padding: var(--koi-space-0-5);
+}
+
+.emit-menu-item {
+  @include a.menu-item;
+  gap: var(--koi-space-2);
+
+  &[aria-checked='true'] {
+    color: var(--koi-fg);
+    background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+  }
+}
+
+.emit-menu-name {
+  flex: 1 1 auto;
+}
+
+.emit-menu-ext {
+  color: var(--koi-muted);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-xs);
 }
 
 /* Compact square ghost buttons for theme / prefs / about / file-tree toggle. */
@@ -379,8 +554,10 @@ body[data-route='home'] #toolbar .toolbar-actions {
 /* --- phone width: collapse the secondary actions into the overflow menu (#528) ----------------------
    At ≤ $bp-narrow (where the mobile bottom zone-bar already turns on) the toolbar can't fit its full
    action set, so the secondary actions hide and the single ⋮ kebab collects them. The high-frequency
-   primary actions (New / Open / Undo / Redo / Generate) stay inline. overflow-x:auto is a safety net so
-   the bar is never SILENTLY clipped on the very narrowest phones. */
+   primary actions (New / Open / Undo / Redo / Generate) and the ⌘K command bar stay inline. overflow-x:
+   auto is a safety net so the bar is never SILENTLY clipped on the very narrowest phones. (Save-to-disk,
+   Check and the theme toggle left the bar in chrome v2 (#923); the overflow menu still lists them from
+   getCommands(), so nothing became unreachable.) */
 @media (max-width: a.$bp-narrow) {
   #toolbar {
     overflow-x: auto;
@@ -392,11 +569,8 @@ body[data-route='home'] #toolbar .toolbar-actions {
     }
   }
 
-  #btn-save-project,
-  #btn-check,
   #install-affordance,
-  #palette-hint,
-  #btn-theme,
+  #emit-target-host,
   #btn-prefs {
     display: none;
   }

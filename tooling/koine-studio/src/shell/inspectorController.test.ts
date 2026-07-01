@@ -41,7 +41,6 @@ import type {
 // controller looks up via domById(...). Kept equivalent to ide.test.ts's APP_HTML.
 const APP_HTML = `
   <div id="app">
-    <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
     <main id="split">
       <aside id="leftrail" class="pane"></aside>
       <section id="center" class="pane">
@@ -882,17 +881,18 @@ describe('createInspectorController — selecting an element focuses the Propert
 });
 
 describe('createInspectorController — bounded-context scope', () => {
-  test('refreshContextList populates the scope-path selector and reveals it', async () => {
+  test('refreshContextList mirrors the model contexts into the store (scope options)', async () => {
     const lsp = makeLsp();
-    const ctl = createInspectorController(makeDeps(lsp));
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
     ctl.init();
 
     await ctl.refreshContextList();
 
-    const select = document.querySelector<HTMLSelectElement>('#breadcrumb-host select')!;
-    // "All contexts" sentinel + the one model context.
-    expect(Array.from(select.options).map((o) => o.value)).toEqual(['all', 'Billing']);
-    expect(domById('breadcrumb-host').hidden).toBe(false);
+    // Chrome v2 (#923) removed the top-bar breadcrumb <select>; the scope options now live in the store
+    // (read by the left Domain navigator + the construct palette). "All contexts" is the implicit
+    // unscoped sentinel, so only the real model context is listed.
+    expect(deps.store.getState().contexts).toEqual(['Billing']);
   });
 
   test('getCachedDomainIndex builds once then reuses until invalidateDocViews clears it', async () => {
