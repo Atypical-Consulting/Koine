@@ -22,7 +22,7 @@ runs:
   using: composite
   steps:
     - name: Cache Playwright browsers
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         # Playwright's browser download location per OS. Only the current runner's path
         # exists; actions/cache skips the others. runner.os-scoped so the Linux/Windows/

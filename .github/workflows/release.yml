@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       # De-duplicated .NET setup (setup-dotnet -> NuGet cache) via the shared composite.
       # The CLI pack never touches Koine.Wasm, so skip the wasm workloads.
@@ -32,7 +32,7 @@ jobs:
         run: dotnet pack src/Koine.Cli/Koine.Cli.csproj -c Release -o ./artifacts
 
       - name: Upload package artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: koine-cli-nupkg
           path: ./artifacts/*.nupkg

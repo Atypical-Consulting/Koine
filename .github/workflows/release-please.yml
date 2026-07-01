@@ -31,7 +31,7 @@ jobs:
     # Backstop so a stuck git/python step can't run to the 6-hour default.
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
       - run: |
@@ -59,6 +59,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: googleapis/release-please-action@v5
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         with:
           target-branch: main
