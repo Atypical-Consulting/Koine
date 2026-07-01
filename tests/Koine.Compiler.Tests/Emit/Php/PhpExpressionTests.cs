@@ -263,6 +263,18 @@ public class PhpExpressionTests
     }
 
     [Fact]
+    public void Int_member_left_of_Decimal_arithmetic_parenthesises_new_chaining()
+    {
+        // When an Int MEMBER (not a literal) is on the LEFT of Decimal arithmetic, WriteAsDecimal's
+        // fallthrough arm wraps it in `new \Koine\Runtime\Decimal($this->quantity)` which then becomes
+        // the method RECEIVER. Without surrounding parentheses, bare `new X(...)->m()` is
+        // PHP 8.4+-only syntax; the emitter targets PHP 8.1+, so the construction must be parenthesised
+        // (issue #849 — the fallthrough-arm sibling of #815/#844's int-literal fix).
+        var expr = new BinaryExpr(BinaryOp.Add, Id("quantity"), Id("price"));
+        Translate(expr).ShouldBe("(new \\Koine\\Runtime\\Decimal($this->quantity))->add($this->price)");
+    }
+
+    [Fact]
     public void Decimal_negated_comparison_flips_via_compareTo()
     {
         // The invariant-guard path: `price >= 0` negated must still use compareTo, not `<`.
