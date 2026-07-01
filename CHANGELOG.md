@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Koine is pre-1.0, so minor versions
 may include breaking changes.
 
+## [0.244.0](https://github.com/Atypical-Consulting/Koine/compare/v0.243.0...v0.244.0) (2026-07-01)
+
+
+### Features
+
+* **gbnf:** require whitespace at word-to-word boundaries + character-level engine test ([#448](https://github.com/Atypical-Consulting/Koine/issues/448)) ([#896](https://github.com/Atypical-Consulting/Koine/issues/896)) ([27f8309](https://github.com/Atypical-Consulting/Koine/commit/27f83091a39ac4a63caaafe3cb6f3cce0603151b))
+* **wasm:** warm remaining interop handlers (EmitPreview, Completions, WorkspaceSymbols, CodeActions, EmitKoine, ApplyModelEdit) ([#464](https://github.com/Atypical-Consulting/Koine/issues/464)) ([#895](https://github.com/Atypical-Consulting/Koine/issues/895)) ([4c732ff](https://github.com/Atypical-Consulting/Koine/commit/4c732ff76ab31feb61ed80733ba6d8b089ea2a7f))
+* **wasm:** warm remaining interop handlers (EmitPreview, Completions, WorkspaceSymbols, CodeActions, EmitKoine, ApplyModelEdit) ([#464](https://github.com/Atypical-Consulting/Koine/issues/464)) ([#895](https://github.com/Atypical-Consulting/Koine/issues/895)) ([e3cc6de](https://github.com/Atypical-Consulting/Koine/commit/e3cc6dec877f46aca996a935cb5b0295e193ec82))
+
 ## [Unreleased]
 
 ### Added
