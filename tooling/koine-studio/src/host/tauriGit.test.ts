@@ -86,4 +86,9 @@ describe('TauriPlatform git surface', () => {
     await new TauriPlatform().gitLog('/work');
     expect(invokeMock).toHaveBeenCalledWith('git_log', { dir: '/work', relPath: undefined });
   });
+
+  it('gitInit invokes git_init with { dir }', async () => {
+    await new TauriPlatform().gitInit('/work');
+    expect(invokeMock).toHaveBeenCalledWith('git_init', { dir: '/work' });
+  });
 });

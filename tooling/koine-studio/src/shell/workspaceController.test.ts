@@ -180,6 +180,9 @@ class FakePlatform implements Platform {
   gitLog(): Promise<GitLogEntry[]> {
     return this.gitUnavailable();
   }
+  gitInit(): Promise<void> {
+    return this.gitUnavailable();
+  }
   writeTextFile(path: string, contents: string): Promise<void> {
     const rel = this.relOf(path);
     if (this.failWrites.has(rel)) return Promise.reject(new Error(`write failed: ${path}`));

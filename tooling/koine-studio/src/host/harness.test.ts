@@ -30,4 +30,9 @@ describe('BrowserPlatform git capability', () => {
     // rejects with an Error, so any call site that forgot to guard still degrades gracefully.
     await expect(platform.gitStatus('any-folder-token')).rejects.toBeInstanceOf(Error);
   });
+
+  it('degrades gitInit to an async rejection, same as every other git* stub', async () => {
+    const platform: Platform = new BrowserPlatform();
+    await expect(platform.gitInit('any-folder-token')).rejects.toBeInstanceOf(Error);
+  });
 });

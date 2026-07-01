@@ -396,6 +396,11 @@ export class TauriPlatform implements Platform {
     return invoke<GitLogEntry[]>('git_log', { dir: folderToken, relPath });
   }
 
+  /** Initialize a new git repository in the workspace folder (`git init`). */
+  gitInit(folderToken: string): Promise<void> {
+    return invoke('git_init', { dir: folderToken }) as Promise<void>;
+  }
+
   readTextFile(path: string): Promise<string> {
     return invoke<string>('read_text_file', { path });
   }
