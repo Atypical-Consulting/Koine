@@ -1251,6 +1251,7 @@ describe('createInspectorController — deck center layout', () => {
     ctl.init();
 
     ctl.splitCodeCanvas();
+    await flush(); // let the Preact re-render settle before waitFor polls (avoids a Windows CI timeout)
 
     const deck = deps.store.getState().deck;
     expect(deck.primary).toBe('technical');

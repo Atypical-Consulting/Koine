@@ -30,8 +30,14 @@
 
 ## Integration style
 - **Merge mode:** squash
-- **PR title convention:** PR title ends in `(#issue)`; the squash appends `(#PR)`, giving the canonical
-  `… (#issue) (#PR)` shape on `main`.
+- **PR title convention:** two constraints, both CI-enforced by `pr-title-lint.yml`
+  (`amannn/action-semantic-pull-request`). (1) **Conventional Commits prefix** —
+  `<type>[(scope)]: subject`, type ∈ `feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert`;
+  the squash-merged title feeds `release-please` (ADR 0002), so a bare title is rejected *and* cuts no
+  release. Issue titles are **not** conventional — derive the prefix (label `bug`→`fix`,
+  `enhancement`→`feat`; scope like `emit-cs`/`emit-php`/`gbnf`/`wasm` from the touched area), don't pass
+  the issue title through verbatim. (2) **`(#issue)` suffix** — the squash appends `(#PR)`, giving the
+  canonical `<type>(scope): subject (#issue) (#PR)` shape on `main`.
 - **Branch naming:** `feat/<issue>-<slug>`
 
 ## Labels (apply verbatim; read live with `gh label list` before use — this is a snapshot)

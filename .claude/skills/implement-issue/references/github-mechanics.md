@@ -159,7 +159,10 @@ branch is ahead of `main`):
 git <commit-identity> \
   commit --allow-empty -m "chore(#$ISSUE): scaffold draft PR"
 git push -u origin "$BRANCH"
-gh pr create --draft --base main --head "$BRANCH" --title "<title>" --body "<body, Closes #$ISSUE>"
+gh pr create --draft --base main --head "$BRANCH" \
+  --title "<type>(<scope>): <subject> (#$ISSUE)" --body "<body, Closes #$ISSUE>"
+# Title needs a Conventional Commits prefix (feat|fix|docs|…) — CI's pr-title-lint rejects a bare
+# title, and the squash-merged title feeds release-please. Never pass the issue title through verbatim.
 ```
 
 ---
