@@ -516,4 +516,49 @@ public class R9ValueObjectTests
             """;
         Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.ValueObjectScalarArithmetic);
     }
+
+    [Fact]
+    public void Scalar_divided_by_a_value_object_is_rejected()
+    {
+        // #878: `2 / fee` — a bare numeric scalar on the LEFT, value object on the RIGHT.
+        // Division is non-commutative and #832 only demand-generates `operator /(Money, int)`,
+        // so the reversed order is meaningless and must be rejected here, not lowered to CS0019.
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0
+              }
+              entity Order identified by OrderId {
+                fee: Money
+              }
+              readmodel FeeSplit from Order {
+                weird: Money = 2 / fee
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectScalarArithmetic);
+    }
+
+    [Fact]
+    public void Value_object_divided_by_a_scalar_is_not_flagged_by_the_reversed_check()
+    {
+        // The reversed-division guard must NOT catch the canonical form (#832): a value
+        // object divided by a scalar (fee / 2) is a supported scaling-down operation.
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0
+              }
+              entity Order identified by OrderId {
+                fee: Money
+              }
+              readmodel FeeSplit from Order {
+                half: Money = fee / 2
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.ValueObjectScalarArithmetic);
+    }
 }
