@@ -12,7 +12,10 @@
 # and Node/npm. No Rust toolchain needed.
 $ErrorActionPreference = "Stop"
 # This script lives in scripts/run-ide-web/; run from the repo root so the paths below resolve.
-Set-Location (Join-Path $PSScriptRoot "../..")
+# Push/Pop (in a finally) so the caller's working directory is restored on exit — a bare
+# Set-Location would leak into the caller's session.
+Push-Location (Join-Path $PSScriptRoot "../..")
+try {
 
 $studio = "tooling/koine-studio"
 
@@ -52,3 +55,7 @@ npm run dev:web -- @args
 $code = $LASTEXITCODE
 Pop-Location
 exit $code
+
+} finally {
+    Pop-Location
+}
