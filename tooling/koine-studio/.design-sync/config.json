@@ -1,0 +1,12 @@
+{
+  "projectId": "642ba9c8-8e59-4da0-9302-19535ce1556e",
+  "shape": "styles-only",
+  "readmeHeader": ".design-sync/conventions.md",
+  "note": "Koine Studio is a Preact application (not a React component library), so it is outside the design-sync converter's React-only envelope. This is a hand-authored TOKENS & VISUAL-STYLES sync — no live components. See NOTES.md for the rebuild recipe.",
+  "build": {
+    "install": "npm ci",
+    "compileCss": "node .design-sync/ds-compile.mjs",
+    "cards": "node .design-sync/ds-cards.mjs",
+    "outDir": "ds-bundle"
+  }
+}
