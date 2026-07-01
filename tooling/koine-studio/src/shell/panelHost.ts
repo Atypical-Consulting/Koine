@@ -44,7 +44,6 @@ export interface PanelHostDeps {
   getCachedDomainIndex(): Promise<AssistantContext['domainIndex'] | null>;
   lsp: KoineLsp;
   platform: Platform;
-  setStatus(message: string, kind: 'green' | 'error'): void;
   reviewStore: NonNullable<Parameters<typeof createReviewPanel>[0]>['store'];
   gotoSourceSpan(span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>): void;
   reviewAuthorName(): string;
@@ -232,7 +231,6 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
     scenarios = createScenarioPanel({
       container: scenariosView,
       lsp: deps.lsp,
-      setStatus: (message) => deps.setStatus(message, 'green'),
     });
     return scenarios;
   }

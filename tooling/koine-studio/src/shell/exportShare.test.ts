@@ -58,12 +58,12 @@ beforeEach(() => {
 
 describe('exportShare', () => {
   describe('copyShareLink', () => {
-    it('writes the share url to the clipboard and confirms', async () => {
+    it('writes the share url to the clipboard without a success toast', async () => {
       vi.mocked(workspaceShareUrlOrNull).mockReturnValue('https://koi/#model');
       const { deps, setStatus } = makeDeps({ buffers: [{ uri: 'file:///a.koi', relPath: 'a.koi', text: 'x' }] });
       await createExportShare(deps).copyShareLink();
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith('https://koi/#model');
-      expect(setStatus).toHaveBeenCalledWith('link copied ✓', 'green');
+      expect(setStatus).not.toHaveBeenCalled();
     });
 
     it('steers to the zip export and never touches the clipboard when the link overflows', async () => {
@@ -75,11 +75,11 @@ describe('exportShare', () => {
     });
   });
 
-  it('exportSourceZip bundles the buffers and saves the archive', async () => {
+  it('exportSourceZip bundles the buffers and saves the archive without a success toast', async () => {
     const { deps, setStatus, platform } = makeDeps({ buffers: [{ uri: 'file:///a.koi', relPath: 'a.koi', text: 'x' }] });
     await createExportShare(deps).exportSourceZip();
     expect(platform.saveZip).toHaveBeenCalledWith('myproj.zip', expect.any(Uint8Array));
-    expect(setStatus).toHaveBeenCalledWith('source exported ✓', 'green');
+    expect(setStatus).not.toHaveBeenCalled();
   });
 
   describe('exportActiveDiagram', () => {
@@ -91,11 +91,11 @@ describe('exportShare', () => {
       expect(setStatus).toHaveBeenCalledWith('open the Visual diagram to export', 'error');
     });
 
-    it('exports and confirms when a diagram is on screen', async () => {
+    it('exports without a success toast when a diagram is on screen', async () => {
       vi.mocked(getActiveDomainExport).mockReturnValue({ diagram: {}, handle: {} } as never);
       const { deps, setStatus } = makeDeps();
       await createExportShare(deps).exportActiveDiagram('png');
-      expect(setStatus).toHaveBeenCalledWith('diagram exported ✓', 'green');
+      expect(setStatus).not.toHaveBeenCalled();
     });
   });
 

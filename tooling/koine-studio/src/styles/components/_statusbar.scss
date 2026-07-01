@@ -180,9 +180,10 @@
   }
 }
 
-/* Toolbar action-feedback pill (top-right of the toolbar): the transient last-action toast
-   (Saved / Renamed X→Y / errors), green for success and error for a failed action. NOT a connection
-   indicator — connection lives in #sb-connection (see docs/shell-bars-contract.md, #756). */
+/* Toolbar action-feedback pill (top-right of the toolbar): the transient toast for a FAILED action
+   (Rename rejected, save failed, …) — a successful action clears it instead of showing a success
+   toast. NOT a connection indicator — connection lives in #sb-connection (see
+   docs/shell-bars-contract.md, #756). */
 #status {
   display: inline-flex;
   align-items: center;
@@ -220,12 +221,6 @@
   border-radius: var(--koi-radius-pill);
   background: currentColor;
   box-shadow: 0 0 0 0 currentColor;
-}
-
-#status[data-kind="green"] {
-  color: var(--koi-hl-string);
-  border-color: color-mix(in srgb, var(--koi-hl-string) 40%, var(--koi-line));
-  background: color-mix(in srgb, var(--koi-hl-string) 9%, transparent);
 }
 
 #status[data-kind="error"] {

@@ -43,7 +43,7 @@ export interface LifecycleBootDeps {
   isAutoRestorableToken(token: string): Promise<boolean>;
   /** Open the host's persistent default workspace (workspace.openDefaultWorkspaceFlow). */
   openHostDefaultWorkspaceFlow(seed: string): Promise<{ opened: boolean }>;
-  setStatus(text: string, kind: 'green' | 'error'): void;
+  setStatus(text: string, kind: 'error'): void;
   /** Write a plain message into the emitted-code viewer (output.setContent). */
   setOutput(content: string, lang: 'plain'): void;
   invalidateDocViews(): void;

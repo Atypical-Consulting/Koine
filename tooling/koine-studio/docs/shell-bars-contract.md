@@ -57,12 +57,14 @@ asserts it).
   `toggle-theme`, not a bar button.
 - The **command bar** (`#palette-hint`, the centered ⌘K hero) and the **emit-target selector**
   (`#emit-target-host`, bound to `previewTarget`) / settings, and the install / update affordances.
-- The **`#status` action-feedback pill** — the *transient last-action toast*: `Saved ✓`,
-  `Renamed X → Y`, `link copied ✓`, and error toasts. It is driven by `setStatus(text, kind)` where
-  `kind ∈ { 'green', 'error' }`.
+- The **`#status` action-feedback pill** — the *transient last-action toast for a FAILED action only*:
+  `Rename rejected`, `save failed`, `connection failed`, and similar error toasts. It is driven by
+  `setStatus(text, kind)` where `kind` is `'error'`. A successful action (Saved, Renamed, exported,
+  copied, …) clears the pill instead of showing a success toast — it used to flash green on success,
+  but that was judged not to carry its weight and was dropped, leaving `#status` a pure failure signal.
 
 **`#status` is not a connection indicator.** It boots empty (hidden via `#status:empty`) and only ever
-reports the result of an action. It carries `role="status" aria-live="polite"` so action feedback is
+reports the result of a FAILED action. It carries `role="status" aria-live="polite"` so that feedback is
 announced to assistive tech — but it is deliberately decoupled from `setConnection`: a warning, an
 error toast, or a model with diagnostics must never make the connection read "Offline", and the pill
 must never seed "connecting…" (which would impersonate `#sb-connection` for the first frame — the exact
@@ -76,7 +78,7 @@ flowchart TD
   B -- Yes --> C[Status bar #statusbar<br/>context · validity · problems ·<br/>compiling · connection · version · unsaved]
   B -- No --> D{Action, or the result<br/>of the last action?}
   D -- Action --> E[Topbar #toolbar<br/>New/Open/Generate/Save/Check ·<br/>theme · settings · install/update]
-  D -- Last-action feedback --> F[Topbar #status pill<br/>transient toast: 'Saved' · 'Renamed X→Y' · errors]
+  D -- Last-action feedback --> F[Topbar #status pill<br/>transient toast, errors only — a success clears it]
   C --> G{Turned urgent?}
   G -- Yes --> H[Escalate in place — colour/pulse;<br/>never mirror into the other bar]
 ```
@@ -91,7 +93,7 @@ flowchart TD
 | Is there **unsaved** work? | `#unsaved-indicator` (status bar) |
 
 All four are persistent ambient state → all four live in the status bar. The topbar answers a different
-question — *what did my last action do?* — via the `#status` pill.
+question — *did my last action fail?* — via the `#status` pill (silent on success).
 
 ## Enforcement
 

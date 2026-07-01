@@ -22,8 +22,6 @@ export type ScenarioLsp = Pick<KoineLsp, 'scenarioCatalog' | 'runScenario'>;
 export interface ScenarioPanelOptions {
   container: HTMLElement;
   lsp: ScenarioLsp;
-  /** Optional status-bar nudge (mirrors the other panels' setStatus injection). */
-  setStatus?: (message: string) => void;
 }
 
 export interface ScenarioPanel {
@@ -187,11 +185,9 @@ export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
     }
 
     runBtn.disabled = true;
-    opts.setStatus?.(`Running ${target.name}.${op.name}…`);
     try {
       const result = await lsp.runScenario(target.name, op.name, given, args);
       renderResult(result);
-      opts.setStatus?.(result.ok ? `${target.name}.${op.name} ran` : `${target.name}.${op.name} was rejected`);
     } catch (e) {
       renderMessage(`The scenario failed to run: ${errorText(e)}`, 'error');
     } finally {

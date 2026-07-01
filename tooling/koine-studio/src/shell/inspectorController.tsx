@@ -166,7 +166,7 @@ export interface InspectorControllerDeps {
 
   // --- write-path callbacks ide.ts owns (the controller triggers, never owns, these) ---
   /** Write the action-feedback pill (errors route here from the loaders that surface their own failures). */
-  setStatus(text: string, kind: 'green' | 'error'): void;
+  setStatus(text: string, kind: 'error'): void;
   /** Rename the selected element (LSP rename refactor, applied across ide.ts's buffers). */
   onRenameElement(element: InspectorElement, newName: string): void;
   /** Persist the selected element's `///` description (setDoc → apply across buffers). */
@@ -177,7 +177,7 @@ export interface InspectorControllerDeps {
    */
   onSaveGlossaryDescription(entry: GlossaryEntry, text: string): Promise<void>;
   /** Apply a structured model edit (the #91 round-trip) for a Properties-panel field change. */
-  onApplyStructuredEdit(edit: StructuredEdit, successMsg: string): void;
+  onApplyStructuredEdit(edit: StructuredEdit): void;
   /** Insert a new DDD construct of the given kind into the active context (the palette's add path). */
   onAddConstruct(kind: AddNodeKind): void;
   /** Create a canvas-only annotation (note/group) — a view concern persisted in koine.layout.json (#255). */
@@ -1001,25 +1001,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Property editing rides the same #91 round-trip the canvas uses (applyStructuredEdit), so editing a
     // field here rewrites the `.koi` AND re-renders the diagram + this panel in step.
     onAddProperty: (element, name, type) =>
-      deps.onApplyStructuredEdit(
-        { kind: 'addField', target: element.qualifiedName, name, type },
-        `Added ${name}: ${type} to ${element.name}`,
-      ),
+      deps.onApplyStructuredEdit({ kind: 'addField', target: element.qualifiedName, name, type }),
     onRemoveProperty: (element, propName) =>
-      deps.onApplyStructuredEdit(
-        { kind: 'removeMember', target: `${element.qualifiedName}.${propName}` },
-        `Removed ${propName} from ${element.name}`,
-      ),
+      deps.onApplyStructuredEdit({ kind: 'removeMember', target: `${element.qualifiedName}.${propName}` }),
     onRenameProperty: (element, oldName, newName) =>
-      deps.onApplyStructuredEdit(
-        { kind: 'renameMember', target: `${element.qualifiedName}.${oldName}`, name: newName },
-        `Renamed ${oldName} → ${newName}`,
-      ),
+      deps.onApplyStructuredEdit({ kind: 'renameMember', target: `${element.qualifiedName}.${oldName}`, name: newName }),
     onChangeType: (element, propName, newType) =>
-      deps.onApplyStructuredEdit(
-        { kind: 'changeFieldType', target: `${element.qualifiedName}.${propName}`, type: newType },
-        `Changed ${propName} to ${newType}`,
-      ),
+      deps.onApplyStructuredEdit({ kind: 'changeFieldType', target: `${element.qualifiedName}.${propName}`, type: newType }),
     // Per-element git change history (#150): the commits that touched the element's declaration. The
     // desktop host shells out to `git log -L`; the browser host returns null (section hidden).
     loadHistory: (element) => {
