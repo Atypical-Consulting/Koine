@@ -41,6 +41,7 @@ function makeGit(initial: GitFile[]) {
         { sha: 'abcdef1234567', author: 'Ada', date: '2026-06-01T10:00:00Z', message: 'Seed the model' },
       ],
     ),
+    gitInit: vi.fn(async () => {}),
   } satisfies GitSurface;
 }
 
@@ -107,6 +108,7 @@ describe('SourceControlPanel', () => {
       gitBranches: vi.fn(),
       gitCheckout: vi.fn(),
       gitLog,
+      gitInit: vi.fn(),
     } as unknown as GitSurface;
 
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
@@ -116,6 +118,38 @@ describe('SourceControlPanel', () => {
     await Promise.resolve();
     expect(gitStatus).not.toHaveBeenCalled();
     expect(gitLog).not.toHaveBeenCalled();
+  });
+
+  test('initializes a repo from the not-a-repo state and leaves the empty state', async () => {
+    let statusCalls = 0;
+    const gitInit = vi.fn(async () => {});
+    const git = {
+      canUseGit: true,
+      gitInit,
+      // First call (the initial fetch) rejects — not a repo yet; the second (post-init reload)
+      // resolves a clean status, mirroring what a real `git init` on the folder produces.
+      gitStatus: vi.fn(async () => {
+        statusCalls += 1;
+        if (statusCalls === 1) throw new Error('not a git repository');
+        return { branch: 'main', files: [] } satisfies GitStatus;
+      }),
+      gitDiff: vi.fn(),
+      gitStage: vi.fn(),
+      gitUnstage: vi.fn(),
+      gitCommit: vi.fn(),
+      gitBranches: vi.fn(async () => ['main']),
+      gitCheckout: vi.fn(),
+      gitLog: vi.fn(async () => [] as GitLogEntry[]),
+    } satisfies GitSurface;
+
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    const initBtn = await view.findByRole('button', { name: /Initialize Repository/i });
+    fireEvent.click(initBtn);
+
+    await waitFor(() => expect(gitInit).toHaveBeenCalledWith(TOKEN));
+    // The reload's gitStatus now resolves, so the panel leaves the not-a-repo empty state.
+    await waitFor(() => expect(view.queryByRole('button', { name: /Initialize Repository/i })).toBeNull());
   });
 
   test('has no accessibility violations', async () => {

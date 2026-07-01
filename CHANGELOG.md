@@ -18,6 +18,13 @@ may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Koine Studio — Initialize Repository button in the Source Control panel.** The Source Control
+  panel's not-a-repo empty state no longer tells the Domain Developer to run `git init` themselves —
+  it now offers an **Initialize Repository** button that shells `git init` on the open workspace folder
+  and, on success, transitions the panel straight into the freshly-initialized (clean) repo, with no
+  extra wiring beyond the panel's existing post-mutation reload. Desktop-only, following the same
+  `canUseGit`-gated pattern as every other git verb (issue #859; completes the Source Control panel
+  from #272).
 - **Koine Studio — workspace settings.json now uses the same grouped key shape as user settings.json.**
   The workspace scope of the Settings JSON editor (User / Workspace scope toggle introduced in #736) now
   uses the same `group.docKey` key shape as the user scope: `preview.target`, `editor.formatOnSave`,
