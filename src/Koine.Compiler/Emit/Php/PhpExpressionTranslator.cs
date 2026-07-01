@@ -739,9 +739,14 @@ internal sealed class PhpExpressionTranslator
             return;
         }
 
-        sb.Append(@"new \Koine\Runtime\Decimal(");
+        // Parenthesise the construction so `(new \Koine\Runtime\Decimal(expr))->method()` parses on
+        // the documented PHP 8.1+ floor — same rationale as the int-literal arm above. This fallthrough
+        // covers e.g. an Int member (`$this->quantity`), which becomes the method RECEIVER when it's
+        // the left operand of arithmetic; without the parens, bare `new X(...)->m()` is PHP 8.4+-only
+        // syntax (#849, sibling of #815/#844's int-literal fix).
+        sb.Append(@"(new \Koine\Runtime\Decimal(");
         Write(expr, sb);
-        sb.Append(')');
+        sb.Append("))");
     }
 
     private TypeRef? InferType(Expr expr) => _resolver.Infer(expr, EffectiveScope());
