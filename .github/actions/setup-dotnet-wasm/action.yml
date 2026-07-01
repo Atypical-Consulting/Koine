@@ -1,0 +1,66 @@
+name: Setup .NET + wasm
+description: >-
+  Set up the .NET SDK, restore the global NuGet cache, and (optionally) install the
+  browser-wasm workloads with a cached workload folder. De-duplicates the
+  setup-dotnet -> Cache NuGet -> Cache wasm -> Install wasm block that was copy-pasted
+  across ci.yml, deploy-docs.yml, koine-studio.yml, wasm-aot-smoke.yml, and release.yml.
+  The steps and cache path/key/restore-keys are byte-for-byte the inlined originals, so
+  behaviour (and cache compatibility) is identical.
+
+inputs:
+  dotnet-version:
+    description: .NET SDK version channel to install.
+    default: '10.0.x'
+  dotnet-quality:
+    description: >-
+      SDK quality (ga/preview). All projects target net10.0; preview allows a non-GA SDK
+      when the runner image does not yet ship the GA build.
+    default: preview
+  cache-nuget:
+    description: >-
+      Restore/save the global NuGet package cache (~/.nuget/packages). Set 'false' for a
+      job that installs no packages.
+    default: 'true'
+  install-wasm-workloads:
+    description: >-
+      Install (and cache) the wasm-tools + wasm-experimental workloads for browser-wasm
+      builds. Set 'false' for a job that never touches Koine.Wasm (e.g. release.yml's pack).
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+        dotnet-quality: ${{ inputs.dotnet-quality }}
+
+    # No central package management / lock files, so cache the global NuGet
+    # package folder keyed on the project files that pin versions.
+    - name: Cache NuGet
+      if: inputs.cache-nuget == 'true'
+      uses: actions/cache@v6
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+        restore-keys: ${{ runner.os }}-nuget-
+
+    # The wasm workloads (emscripten + browser-wasm runtime pack) are slow to
+    # download; cache the SDK workload folders keyed on the SDK version.
+    - name: Cache wasm workloads
+      if: inputs.install-wasm-workloads == 'true'
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.dotnet/sdk-manifests
+          ~/.dotnet/packs
+          ~/.dotnet/metadata
+          ~/.dotnet/sdk-advertising
+        key: ${{ runner.os }}-wasm-workloads-${{ hashFiles('Directory.Build.props') }}
+        restore-keys: ${{ runner.os }}-wasm-workloads-
+
+    - name: Install wasm workloads
+      if: inputs.install-wasm-workloads == 'true'
+      shell: bash
+      run: dotnet workload install wasm-tools wasm-experimental
