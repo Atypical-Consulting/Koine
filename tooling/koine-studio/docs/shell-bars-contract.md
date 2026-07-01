@@ -50,9 +50,13 @@ asserts it).
 
 ### Topbar — actions + transient action-feedback
 
-- The **model-action buttons**: New / Open / Generate / Save / Check (`#btn-new`, `#btn-open-folder`,
-  `#btn-generate-project`, `#btn-save-project`, `#btn-check`), plus history controls.
-- **Theme / settings / command-palette**, and the install / update affordances.
+- The **model-action icons**: New / Open / Generate (`#btn-new`, `#btn-open-folder`,
+  `#btn-generate-project`), plus history controls (Undo / Redo). Chrome v2 (#923) trimmed the bar to a
+  calm set: **Save-to-disk, Check and the theme toggle left the topbar for the ⌘K command palette** (and
+  the mobile overflow menu) — reached through their catalog commands `save-project-to-disk` / `check` /
+  `toggle-theme`, not a bar button.
+- The **command bar** (`#palette-hint`, the centered ⌘K hero) and the **emit-target selector**
+  (`#emit-target-host`, bound to `previewTarget`) / settings, and the install / update affordances.
 - The **`#status` action-feedback pill** — the *transient last-action toast*: `Saved ✓`,
   `Renamed X → Y`, `link copied ✓`, and error toasts. It is driven by `setStatus(text, kind)` where
   `kind ∈ { 'green', 'error' }`.

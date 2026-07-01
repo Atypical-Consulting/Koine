@@ -296,22 +296,15 @@ const APP_HTML = `
     <div id="app">
       <header id="toolbar">
         <button type="button" id="btn-home" class="brand"><span class="brand-logo"></span><span class="brand-text"><span class="brand-name">Koine</span><span class="brand-eyebrow">Studio</span></span></button>
-        <div class="toolbar-actions" role="toolbar">
-          <div class="tb-group">
-            <button type="button" id="btn-new">New</button>
-            <button type="button" id="btn-open-folder">Open</button>
-          </div>
+        <div class="iconset" role="toolbar">
+          <button type="button" id="btn-new" class="t-ico">New</button>
+          <button type="button" id="btn-open-folder" class="t-ico">Open</button>
           <div id="history-controls-host"></div>
-          <div class="tb-group">
-            <button type="button" id="btn-generate-project">Generate</button>
-            <button type="button" id="btn-save-project">Save to disk</button>
-          </div>
-          <button type="button" id="btn-check">Check</button>
         </div>
-        <div id="breadcrumb-host" class="topbar-breadcrumb" hidden></div>
+        <button type="button" id="palette-hint" class="cmd palette-hint"><span class="cmd-kbd" data-role="cmd-kbd"></span></button>
         <div class="toolbar-right">
-          <button type="button" id="palette-hint" class="palette-hint">K</button>
-          <button type="button" id="btn-theme" class="icon-btn">theme</button>
+          <div id="emit-target-host"></div>
+          <button type="button" id="btn-generate-project" class="generate">Generate</button>
           <button type="button" id="btn-prefs" class="icon-btn">prefs</button>
           <button type="button" id="btn-toolbar-overflow" class="icon-btn" aria-haspopup="menu" aria-expanded="false" hidden>⋮</button>
           <div id="status" role="status" aria-live="polite"></div>
@@ -746,11 +739,21 @@ describe('ide init() — close/unload guard', () => {
 });
 
 describe('ide init() — Save to disk', () => {
+  // Chrome v2 (#923) dropped the Save-to-disk toolbar button; the flow is now reached through the ⌘K
+  // command palette (the `save-project-to-disk` command). Open the palette and click its row by title.
+  function runPaletteCommand(title: string): void {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+    const rows = Array.from(document.querySelectorAll('.koi-palette-item'));
+    const row = rows.find((r) => r.querySelector('.koi-palette-item-title')?.textContent === title);
+    if (!row) throw new Error(`command palette row not found: ${title}`);
+    (row as HTMLElement).click();
+  }
+
   test('Save to disk writes the open buffers as a named project', async () => {
     await boot();
     const saveSpy = (fakePlatform.current as FakePlatform).saveProjectToRoot;
 
-    (document.getElementById('btn-save-project') as HTMLButtonElement).click();
+    runPaletteCommand('Save to disk…');
     await settleBoot(); // Koine's prompt modal opens (no window.prompt)
 
     // Name the project in the modal field and confirm with the primary action.
@@ -771,7 +774,7 @@ describe('ide init() — Save to disk', () => {
     await boot();
     const saveSpy = (fakePlatform.current as FakePlatform).saveProjectToRoot;
 
-    (document.getElementById('btn-save-project') as HTMLButtonElement).click();
+    runPaletteCommand('Save to disk…');
     await settleBoot();
 
     // Dismiss the prompt with Cancel → ask() resolves null → nothing is written. The primary button
@@ -783,12 +786,16 @@ describe('ide init() — Save to disk', () => {
     expect(saveSpy).not.toHaveBeenCalled();
   });
 
-  test('Save to disk button is hidden when the host cannot save projects', async () => {
+  test('Save to disk is absent from the palette when the host cannot save projects', async () => {
     const p = installPlatform();
     // Override the readonly property to simulate a host that cannot save projects.
     (p as unknown as { canSaveProjects: boolean }).canSaveProjects = false;
     await boot({ platform: p });
-    expect((document.getElementById('btn-save-project') as HTMLButtonElement).hidden).toBe(true);
+    // The command's when() gate filters it out entirely (chrome v2, #923 removed the toolbar button whose
+    // `hidden` used to carry this): opening the palette offers no "Save to disk…" row.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+    const titles = Array.from(document.querySelectorAll('.koi-palette-item-title')).map((e) => e.textContent);
+    expect(titles).not.toContain('Save to disk…');
   });
 });
 

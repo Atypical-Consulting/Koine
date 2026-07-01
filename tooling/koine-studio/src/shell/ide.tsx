@@ -260,9 +260,9 @@ export function init(hooks: IdeHooks = {}): () => void {
   // doesn't flash it. Subscribes to compileActivity's onCompileActivityChange seam — no store wiring.
   render(<CompilingIndicator />, domById('sb-compiling-host'));
 
-  // The top-bar "scope path" breadcrumb (the bounded-context selector + the selected element) is owned by
-  // the inspector controller — it holds the contexts list + model index the breadcrumb needs, and routes
-  // a scope pick through its persist-and-repaint choke point. It renders into #breadcrumb-host from init().
+  // The bounded-context scope is surfaced in the status-bar "Context" segment and switched via the left
+  // Domain navigator (chrome v2, #923 retired the redundant top-bar breadcrumb strip). The inspector
+  // controller owns the scope choke point (persist + repaint of every scoped surface).
 
   // Dev-facing live store inspector (#193 follow-up): a read-only overlay of what the app store thinks
   // right now, toggled from the command palette. Registered only in dev builds (see devCommands), and
@@ -662,8 +662,8 @@ export function init(hooks: IdeHooks = {}): () => void {
   }
 
   // Check… — pick a baseline folder and diff the current buffer against it. Owned by the controller
-  // (it surfaces in the Code tab's Compatibility sub-view); the button + palette just trigger it.
-  domById<HTMLButtonElement>('btn-check').addEventListener('click', () => void controller.runCheck());
+  // (it surfaces in the Code tab's Compatibility sub-view). Chrome v2 (#923) dropped the top-bar Check
+  // button; it is triggered solely through the `check` command (palette / mobile overflow) now.
 
   // Boot the center chrome into the restored mode + label the Generated sub-tab (no fetch — the boot
   // flow's refreshActiveSurfaces loads everything once the workspace document is open).

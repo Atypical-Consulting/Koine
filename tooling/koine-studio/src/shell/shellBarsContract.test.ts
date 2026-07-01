@@ -37,14 +37,15 @@ const STATUS_BAR_ITEMS = [
   'unsaved-indicator',
 ];
 
-// Model actions + the transient action-feedback pill → the topbar.
+// Model actions + the transient action-feedback pill → the topbar. Chrome v2 (#923) trimmed the bar to a
+// calm set: Save-to-disk / Check / theme toggle left the topbar for the ⌘K palette (+ mobile overflow),
+// so they're no longer pinned here; the command bar (#palette-hint) is the new centered hero.
 const TOOLBAR_ITEMS = [
   'status',
   'btn-new',
   'btn-open-folder',
   'btn-generate-project',
-  'btn-save-project',
-  'btn-check',
+  'palette-hint',
 ];
 
 /** An element's OWN text (direct text nodes only), so a container isn't credited with a child's text. */
@@ -82,6 +83,13 @@ describe('shell bars single-home contract (#756)', () => {
       expect(toolbar!.contains(elt!), `#${id} must live in #toolbar`).toBe(true);
       expect(statusbar!.contains(elt!), `#${id} must NOT also be in #statusbar (no mirroring)`).toBe(false);
     }
+  });
+
+  test('the second-tier context breadcrumb strip is gone (chrome v2, #923) — context lives in the status bar', () => {
+    // The old #breadcrumb-host strip duplicated the bounded-context scope already carried by the left
+    // Domain navigator + the #sb-context status segment. Chrome v2 removed it; guard against its return.
+    expect(doc.getElementById('breadcrumb-host'), '#breadcrumb-host must not exist').toBeNull();
+    expect(doc.getElementById('sb-context'), '#sb-context must carry the active context').not.toBeNull();
   });
 
   test('connection text has a single home — only #sb-connection reads as connection across both bars', () => {

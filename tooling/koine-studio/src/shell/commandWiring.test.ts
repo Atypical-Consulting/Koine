@@ -19,8 +19,6 @@ const TOOLBAR_IDS = [
   'btn-home',
   'btn-new',
   'btn-generate-project',
-  'btn-save-project',
-  'btn-theme',
   'btn-prefs',
   'btn-toolbar-overflow',
 ];
@@ -272,10 +270,12 @@ describe('commandWiring', () => {
       expect(deps.requestNewModel).toHaveBeenCalledOnce();
     });
 
-    it('hides the Save-project button when the host cannot save projects', () => {
+    it('gates the Save-to-disk command out of the palette when the host cannot save projects', () => {
+      // Chrome v2 (#923) dropped the Save-to-disk toolbar button; the command's when() gate now solely
+      // decides visibility. A host that can't save projects filters it out of the palette entirely.
       const wiring = createCommandWiring(makeDeps({ canSaveProjects: false }));
       dispose = wiring.dispose;
-      expect((document.getElementById('btn-save-project') as HTMLButtonElement).hidden).toBe(true);
+      expect(wiring.getCommands().some((c) => c.id === 'save-project-to-disk')).toBe(false);
     });
 
     it('dispatches Generate and Settings through their command ids', () => {
@@ -295,7 +295,8 @@ describe('commandWiring', () => {
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
 
-      document.getElementById('btn-save-project')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      // The button is gone (chrome v2, #923); the command is reached via the palette / mobile overflow.
+      wiring.run('save-project-to-disk');
       expect(deps.saveProjectToDisk).toHaveBeenCalledOnce();
     });
   });
