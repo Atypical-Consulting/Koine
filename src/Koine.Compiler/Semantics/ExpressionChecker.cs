@@ -228,21 +228,24 @@ internal sealed class ExpressionChecker
     }
 
     /// <summary>
-    /// Rejects scalar add/subtract against a value object (e.g. <c>5.0 + money</c>, <c>money - 1</c>).
-    /// A value object SCALES by a scalar (<c>money * 2</c>, handled by the multiply path), but there is
-    /// no <c>operator +/-(value-object, scalar)</c> in any target — the C# emitter would produce
+    /// Rejects scalar add/subtract against a value object (e.g. <c>5.0 + money</c>, <c>money - 1</c>),
+    /// and a scalar divided BY a value object (e.g. <c>2 / fee</c>). A value object SCALES by a scalar
+    /// (<c>money * 2</c>, <c>money / 2</c> — handled by the multiply/divide paths), but there is no
+    /// <c>operator +/-(value-object, scalar)</c> in any target — the C# emitter would produce
     /// <c>5.0m + money</c> (CS0019) and the TypeScript emitter <c>new Decimal('5.0').add(money)</c>
-    /// (a <c>tsc</c> type error). <see cref="TypeResolver.Infer"/> infers such an expression as the
-    /// value-object type, so without this check it slips through to the emitters as non-compiling code.
-    /// Rejecting it here keeps the reversed-additive path unreachable across every emitter (#804,
-    /// follow-up to the reversed-multiply fixes #788/#797). Multiplication is exempt: scalar multiply
-    /// is a first-class value-object operation. (Scoped to <c>scalar +/- value-object</c>: sibling
-    /// value-object-arithmetic codegen gaps — <c>value / scalar</c> and direct same-type <c>+</c>/<c>-</c>
-    /// that no <c>sum</c> fold generated an operator for — are tracked separately, not here.)
+    /// (a <c>tsc</c> type error). Division is additionally non-commutative: #832 demand-generates only
+    /// <c>operator /(value-object, scalar)</c>, so the reversed <c>scalar / value-object</c> has no
+    /// operator to lower to either. <see cref="TypeResolver.Infer"/> infers such expressions as the
+    /// value-object type, so without this check they slip through to the emitters as non-compiling
+    /// code. Rejecting them here keeps the reversed-additive path (#804, follow-up to the
+    /// reversed-multiply fixes #788/#797) and the reversed-division path (#878) unreachable across
+    /// every emitter. Multiplication is exempt in both directions: scalar multiply is a first-class,
+    /// commutative value-object operation. (Direct same-type <c>+</c>/<c>-</c> that no <c>sum</c> fold
+    /// generated an operator for is tracked separately, not here — #833.)
     /// </summary>
     private void CheckValueObjectScalarArithmetic(BinaryExpr b, TypeScope scope)
     {
-        if (b.Op is not (BinaryOp.Add or BinaryOp.Sub))
+        if (b.Op is not (BinaryOp.Add or BinaryOp.Sub or BinaryOp.Div))
         {
             return;
         }
@@ -258,10 +261,26 @@ internal sealed class ExpressionChecker
             return;
         }
 
+        // Division is directional: `value-object / scalar` (voOnLeft) is the supported
+        // scaling-down form (#832) and must stay clean — only the reversed
+        // `scalar / value-object` (voOnRight) is meaningless and gets rejected.
+        if (b.Op == BinaryOp.Div && voOnLeft)
+        {
+            return;
+        }
+
         TypeRef vo = voOnLeft ? left! : right!;
-        var verb = b.Op == BinaryOp.Add ? "add a scalar to" : "subtract a scalar from";
+        var verb = b.Op switch
+        {
+            BinaryOp.Add => "add a scalar to",
+            BinaryOp.Sub => "subtract a scalar from",
+            _ => "divide a scalar by",
+        };
+        var tail = b.Op == BinaryOp.Div
+            ? "a value object scales by a scalar with '*'/'/', not the reverse"
+            : "a value object scales by a scalar with '*', not '+'/'-'";
         Report(DiagnosticCodes.ValueObjectScalarArithmetic,
-            $"cannot {verb} value object '{vo.Name}'; a value object scales by a scalar with '*', not '+'/'-'", b);
+            $"cannot {verb} value object '{vo.Name}'; {tail}", b);
     }
 
     private void CheckArithmeticNullSafety(BinaryExpr b, TypeScope scope)
