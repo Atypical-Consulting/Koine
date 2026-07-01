@@ -816,7 +816,7 @@ final class OrderLine
 
     public function subtotal(): Money
     {
-        return $this->unitPrice->multipliedBy(new \Koine\Runtime\Decimal($this->quantity));
+        return $this->unitPrice->multipliedBy((new \Koine\Runtime\Decimal($this->quantity)));
     }
 
     public function equals(self $other): bool

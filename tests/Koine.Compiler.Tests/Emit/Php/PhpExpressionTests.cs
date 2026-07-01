@@ -257,9 +257,11 @@ public class PhpExpressionTests
     [Fact]
     public void Decimal_arithmetic_wraps_int_operand_in_decimal()
     {
-        // `price * quantity` (Decimal * Int) -> wrap the Int operand as a Decimal expression.
+        // `price * quantity` (Decimal * Int) -> wrap the Int operand as a Decimal expression. The
+        // wrapper is now parenthesised uniformly (#849) even here, in argument position, where the
+        // parens are harmless — only the receiver position (see below) actually requires them.
         var expr = new BinaryExpr(BinaryOp.Mul, Id("price"), Id("quantity"));
-        Translate(expr).ShouldBe("$this->price->mul(new \\Koine\\Runtime\\Decimal($this->quantity))");
+        Translate(expr).ShouldBe("$this->price->mul((new \\Koine\\Runtime\\Decimal($this->quantity)))");
     }
 
     [Fact]
@@ -291,15 +293,16 @@ public class PhpExpressionTests
     public void Quantity_times_scalar_lowers_to_multipliedBy()
     {
         // `weight * quantity` (Weight quantity * Int) -> weight->multipliedBy(new Decimal(quantity)).
+        // The wrapper is parenthesised uniformly (#849); harmless here in argument position.
         var expr = new BinaryExpr(BinaryOp.Mul, Id("weight"), Id("quantity"));
-        Translate(expr).ShouldBe("$this->weight->multipliedBy(new \\Koine\\Runtime\\Decimal($this->quantity))");
+        Translate(expr).ShouldBe("$this->weight->multipliedBy((new \\Koine\\Runtime\\Decimal($this->quantity)))");
     }
 
     [Fact]
     public void Quantity_divided_by_scalar_lowers_to_dividedBy()
     {
         var expr = new BinaryExpr(BinaryOp.Div, Id("weight"), Id("quantity"));
-        Translate(expr).ShouldBe("$this->weight->dividedBy(new \\Koine\\Runtime\\Decimal($this->quantity))");
+        Translate(expr).ShouldBe("$this->weight->dividedBy((new \\Koine\\Runtime\\Decimal($this->quantity)))");
     }
 
     [Fact]
