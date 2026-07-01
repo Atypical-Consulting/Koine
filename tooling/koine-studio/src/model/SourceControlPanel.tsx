@@ -32,6 +32,7 @@ export type GitSurface = Pick<
   | 'gitBranches'
   | 'gitCheckout'
   | 'gitLog'
+  | 'gitInit'
 >;
 
 /** A single-letter glyph per change kind (the gutter letter git itself uses), shown on each file row. */
@@ -232,10 +233,20 @@ export function SourceControlPanel(props: {
       <div class="koi-sc koi-sc-empty">
         <div class="koi-rview-empty">
           <h3 class="koi-rview-empty-title">Source control</h3>
-          <p class="muted">
-            This folder isn’t a git repository. Initialize one with <code>git init</code> to track changes
-            here.
-          </p>
+          <p class="muted">This folder isn’t a git repository yet.</p>
+          <button
+            type="button"
+            class="koi-sc-act"
+            disabled={busy}
+            onClick={() => void mutate(() => git.gitInit(folderToken))}
+          >
+            Initialize Repository
+          </button>
+          {actionError && (
+            <p class="koi-sc-error" role="alert">
+              {actionError}
+            </p>
+          )}
         </div>
       </div>
     );

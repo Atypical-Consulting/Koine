@@ -25,6 +25,7 @@ function makeGit(files: GitFile[], log: GitLogEntry[] = []): GitSurface {
     gitBranches: async () => ['main', 'feature/scm'],
     gitCheckout: async () => {},
     gitLog: async () => log,
+    gitInit: async () => {},
   } satisfies GitSurface;
 }
 

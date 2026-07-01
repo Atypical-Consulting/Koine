@@ -953,6 +953,14 @@ fn git_commit(dir: String, message: String) -> Result<(), String> {
     run_git(&dir, &["commit", "-m", &message]).map(|_| ())
 }
 
+/// Initialize a new git repository in `dir` (`git init`). Resolves once `dir` is a work tree;
+/// idempotent — re-running on an existing repo still succeeds (git's own behavior). `Err` (git's
+/// stderr) when git is missing or the path can't be initialized.
+#[tauri::command]
+fn git_init(dir: String) -> Result<(), String> {
+    run_git(&dir, &["init"]).map(|_| ())
+}
+
 /// The local branch names (`git branch --format=%(refname:short)`), one per entry.
 #[tauri::command]
 fn git_branches(dir: String) -> Result<Vec<String>, String> {
@@ -1827,6 +1835,7 @@ pub fn run() {
             git_stage,
             git_unstage,
             git_commit,
+            git_init,
             git_branches,
             git_checkout,
             git_log
@@ -2829,6 +2838,17 @@ mod tests {
         assert!(git_log(plain.path(), None).is_err());
         assert!(git_branches(plain.path()).is_err());
         assert!(git_diff(plain.path(), "anything.txt".to_string(), false).is_err());
+    }
+
+    #[test]
+    fn git_init_turns_a_plain_folder_into_a_work_tree() {
+        // A plain (never `git init`-ed) folder isn't a work tree yet...
+        let plain = TempRepo::new();
+        assert!(git_status(plain.path()).is_err(), "plain folder must not be a work tree");
+
+        // ...but is, once `git_init` has run against it.
+        git_init(plain.path()).unwrap();
+        assert!(!git_status(plain.path()).unwrap().branch.is_empty(), "status now reports a branch");
     }
 
     // --- PTY teardown / pty_start race (#810) --------------------------------

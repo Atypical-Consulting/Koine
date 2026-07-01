@@ -392,6 +392,14 @@ export interface Platform {
    */
   gitLog(folderToken: string, relPath?: string): Promise<GitLogEntry[]>;
 
+  /**
+   * Initialize a new git repository in the workspace `folderToken` (`git init`). Resolves once the
+   * repo exists, after which {@link gitStatus} succeeds and the Source Control panel leaves its
+   * "not a git repository" empty state. Idempotent — re-initializing an existing repo still resolves.
+   * Desktop only; the browser stub rejects. Callers must check {@link canUseGit} first.
+   */
+  gitInit(folderToken: string): Promise<void>;
+
   /** Read a file's UTF-8 text by its token. */
   readTextFile(path: string): Promise<string>;
 
