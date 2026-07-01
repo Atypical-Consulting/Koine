@@ -7,7 +7,8 @@
 //   • Status bar (#statusbar) owns PERSISTENT AMBIENT STATE read passively — branch, problems (split
 //     ✕/⚠), context, docs coverage, compiling/busy, emit echo, cursor, encoding, connection, version.
 //   • Topbar (#toolbar) owns ACTIONS + the transient #status action-feedback pill (the last-action
-//     toast: Saved / Renamed X→Y / errors). #status is NOT a connection indicator.
+//     toast for a FAILED action; a successful action clears it rather than showing a success toast).
+//     #status is NOT a connection indicator.
 //   • One home per fact — nothing is mirrored across both bars.
 //
 // This reads the REAL index.html (not a hand-copied fixture) so the assertions track the shipped shell.

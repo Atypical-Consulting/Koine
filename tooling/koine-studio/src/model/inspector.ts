@@ -134,34 +134,33 @@ export function buildInspectorElement(
 }
 
 /**
- * The status-line message shown after renaming `element` to `newName`.
+ * The status-pill warning shown after renaming `element` to `newName`, or null when there's nothing to flag.
  *
  * For an aggregate root whose identity follows the `<Root>Id` convention, the rename refactor also
  * co-renames that identity type (`OrderId` → `PurchaseOrderId`) in the same edit (#550). When it could
  * NOT — an ambiguous link or a name collision left the id behind — this flags that the id type was left
- * unchanged, so the user isn't silently left with a mismatched `OrderId` on a `PurchaseOrder`. For every
- * other element (or when the co-rename did happen) it's just the plain "Renamed X → Y".
+ * unchanged, so the user isn't silently left with a mismatched `OrderId` on a `PurchaseOrder`. Every other
+ * case (a plain rename, or a root whose co-rename did happen) has nothing worth surfacing.
  */
 export function renameStatusMessage(
   element: Pick<InspectorElement, 'name' | 'properties' | 'stereotype'>,
   newName: string,
   edit: WorkspaceEdit,
-): string {
-  const base = `Renamed ${element.name} → ${newName}`;
+): string | null {
   // Only aggregate roots carry a convention-linked identity type worth co-renaming.
   if (element.stereotype !== 'aggregate root') {
-    return base;
+    return null;
   }
 
   const oldId = `${element.name}Id`;
   const hasConventionId = element.properties.some((p) => p.text === `id: ${oldId}`);
   if (!hasConventionId) {
-    return base;
+    return null;
   }
 
   const newId = `${newName}Id`;
   const coRenamed = Object.values(edit.changes).some((edits) => edits.some((e) => e.newText === newId));
-  return coRenamed ? base : `${base}; id type ${oldId} left unchanged`;
+  return coRenamed ? null : `Renamed ${element.name} → ${newName}; id type ${oldId} left unchanged`;
 }
 
 /**

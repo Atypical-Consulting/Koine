@@ -51,7 +51,6 @@ function makeDeps(): PanelHostDeps {
     getCachedDomainIndex: async () => null,
     lsp: {} as PanelHostDeps['lsp'],
     platform: {} as PanelHostDeps['platform'],
-    setStatus: vi.fn(),
     reviewStore: {} as PanelHostDeps['reviewStore'],
     gotoSourceSpan: vi.fn(),
     reviewAuthorName: () => 'You',

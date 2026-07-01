@@ -545,7 +545,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     onRenameElement: (element, newName) => void renameElement(element, newName),
     onSaveElementDescription: (element, text) => void saveInspectorDescription(element, text),
     onSaveGlossaryDescription: (entry, text) => saveDescription(entry, text),
-    onApplyStructuredEdit: (edit, successMsg) => void canvasWrite.applyStructuredEdit(edit, successMsg),
+    onApplyStructuredEdit: (edit) => void canvasWrite.applyStructuredEdit(edit),
     onAddConstruct: (kind) => void canvasWrite.applyDiagramAddType({ kind }),
     onAddAnnotation: (kind) => canvasWrite.createCanvasAnnotation(kind),
     onAddAggregateMember: (kind, aggregateQn) => void canvasWrite.applyDiagramAddAggregateMember(kind, aggregateQn),
@@ -614,9 +614,10 @@ export function init(hooks: IdeHooks = {}): () => void {
       const current = appStore.getState().selection;
       const reanchored = reanchorSelectionAfterRename(current, element, newName);
       if (reanchored !== current) selection.set(reanchored);
-      // Surface the co-rename of an aggregate root's convention-linked <Root>Id identity (#550), or flag
-      // it when the link was ambiguous / the new Id name collided and the id was left behind.
-      setStatus(renameStatusMessage(element, newName, edit), 'green');
+      // Flag it when the co-rename of an aggregate root's convention-linked <Root>Id identity (#550) was
+      // ambiguous / the new Id name collided and the id was left behind; nothing to show otherwise.
+      const idWarning = renameStatusMessage(element, newName, edit);
+      if (idWarning) setStatus(idWarning, 'error');
     } catch (e) {
       setStatus('Rename failed: ' + String(e), 'error');
     }
@@ -1177,7 +1178,6 @@ export function init(hooks: IdeHooks = {}): () => void {
     getCachedDomainIndex: () => controller.getCachedDomainIndex(),
     lsp,
     platform,
-    setStatus,
     reviewStore,
     gotoSourceSpan: (span) => void gotoSourceSpan(span),
     reviewAuthorName: () => reviewAuthorName(),

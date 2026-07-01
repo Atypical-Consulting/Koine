@@ -41,11 +41,12 @@ import type {
   WorkspaceEdit,
 } from '@/lsp/lsp';
 
-/** The status pill kinds — green (model valid / success toast) or error (diagnostics or a failed action
- *  toast). The pill is the topbar's transient ACTION-FEEDBACK toast only; the persistent connection
- *  indicator (#sb-connection) is a separate status-bar fact driven by the LSP lifecycle, never by this
- *  kind — so 'connecting' is deliberately NOT a pill kind (the pill must not impersonate connection, #756). */
-export type StatusKind = 'green' | 'error';
+/** The status pill kind — error (diagnostics or a failed action toast). The pill only ever reports a
+ *  failure; a successful action clears it instead of showing a success toast. It is the topbar's
+ *  transient ACTION-FEEDBACK toast only; the persistent connection indicator (#sb-connection) is a
+ *  separate status-bar fact driven by the LSP lifecycle, never by this kind — so 'connecting' is
+ *  deliberately NOT a pill kind (the pill must not impersonate connection, #756). */
+export type StatusKind = 'error';
 
 /**
  * The slice of {@link import('@/lsp/lsp').KoineLsp} the editor callback wall + diagnostics wiring needs.
@@ -146,7 +147,7 @@ export interface EditorSession {
 
   /** Write the status pill + mirror the connection state into the status bar. */
   setStatus(text: string, kind: StatusKind): void;
-  /** Re-derive the status pill from a diagnostics set (green ✓ / N errors / N warnings). */
+  /** Re-derive the status pill from a diagnostics set (empty/cleared when clean, N errors / N warnings otherwise). */
   updateStatus(diags: LspDiagnostic[]): void;
 
   /**
@@ -351,7 +352,8 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   function updateStatus(diags: LspDiagnostic[]): void {
     const { kind, parts } = diagnosticsSummary(diags);
     if (kind === 'clean') {
-      setStatus('green ✓', 'green');
+      // No success toast (#923 follow-up) — just clear whatever error the pill was showing.
+      deps.status.textContent = '';
     } else {
       // The status pill joins the SAME parts with ' / ' (not the strip's ' · ').
       setStatus(parts.join(' / '), 'error');

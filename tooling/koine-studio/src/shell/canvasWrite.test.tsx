@@ -66,17 +66,17 @@ describe('canvasWrite', () => {
   });
 
   describe('applyStructuredEdit', () => {
-    it('patches the buffer + confirms on a successful model edit', async () => {
+    it('patches the buffer without a success toast on a successful model edit', async () => {
       const { cw, deps } = build();
       (deps.lsp.applyModelEdit as ReturnType<typeof vi.fn>).mockResolvedValue({
         diagnostics: [],
         uri: 'file:///a.koi',
         edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: 'x' }],
       });
-      const ok = await cw.applyStructuredEdit({ kind: 'addType', target: 'C', name: 'V', type: 'value' } as never, 'Added V');
+      const ok = await cw.applyStructuredEdit({ kind: 'addType', target: 'C', name: 'V', type: 'value' } as never);
       expect(ok).toBe(true);
       expect(deps.workspace.applyWorkspaceEdit).toHaveBeenCalledOnce();
-      expect(deps.setStatus).toHaveBeenCalledWith('Added V', 'green');
+      expect(deps.setStatus).not.toHaveBeenCalled();
     });
 
     it('rolls back (no patch) and surfaces the rejecting diagnostic', async () => {
@@ -86,7 +86,7 @@ describe('canvasWrite', () => {
         uri: null,
         edits: [],
       });
-      const ok = await cw.applyStructuredEdit({ kind: 'addType', target: 'C', name: 'V', type: 'value' } as never, 'Added V');
+      const ok = await cw.applyStructuredEdit({ kind: 'addType', target: 'C', name: 'V', type: 'value' } as never);
       expect(ok).toBe(false);
       expect(deps.workspace.applyWorkspaceEdit).not.toHaveBeenCalled();
       expect(deps.setStatus).toHaveBeenCalledWith('KOI1234: nope', 'error');
@@ -100,7 +100,7 @@ describe('canvasWrite', () => {
     expect(deps.editor.setDoc).toHaveBeenCalledOnce();
     const written = (deps.editor.setDoc as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
     expect(written).toContain('aggregate Sales root Order'); // the validated starter, replacing the pristine doc
-    expect(deps.setStatus).toHaveBeenCalledWith(expect.stringContaining('starter aggregate'), 'green');
+    expect(deps.setStatus).not.toHaveBeenCalled();
   });
 
   it('addReviewComment mounts a composer near the selection and commits a thread on submit', () => {

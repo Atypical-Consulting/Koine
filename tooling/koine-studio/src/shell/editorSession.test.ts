@@ -165,7 +165,7 @@ describe('createEditorSession — diagnostics for the active uri', () => {
     expect(session.diagnosticsFor(ACTIVE).length).toBe(2);
   });
 
-  test('a clean push for the active uri shows the green/clean state', () => {
+  test('a clean push for the active uri clears the pill (no success toast)', () => {
     const lsp = makeLsp();
     newSession(makeDeps(lsp));
 
@@ -174,8 +174,7 @@ describe('createEditorSession — diagnostics for the active uri', () => {
 
     expect(domById('diag-count').textContent).toBe('clean');
     expect(domById('diag-count').dataset.kind).toBe('clean');
-    expect(domById('status').textContent).toBe('green ✓');
-    expect(domById('status').dataset.kind).toBe('green');
+    expect(domById('status').textContent).toBe('');
     expect(domById('sb-problems-errors').textContent).toBe('✕ 0');
     expect(domById('sb-problems-errors').classList.contains('has')).toBe(false);
     expect(domById('sb-problems-warnings').textContent).toBe('⚠ 0');
@@ -196,7 +195,7 @@ describe('createEditorSession — diagnostics for a non-active uri', () => {
 
     // Strip + pill still reflect the ACTIVE file's (clean) state — the non-active push did not paint.
     expect(domById('diag-count').textContent).toBe('clean');
-    expect(domById('status').textContent).toBe('green ✓');
+    expect(domById('status').textContent).toBe('');
     // …but the non-active file's diagnostics are cached and readable.
     expect(session.diagnosticsFor(OTHER).length).toBe(1);
     expect(session.diagnosticsFor(OTHER)[0].message).toBe('elsewhere');
@@ -277,13 +276,12 @@ describe('createEditorSession — status + server exit', () => {
     const lsp = makeLsp();
     const session = newSession(makeDeps(lsp));
 
-    // The pill is action feedback only — a success/error toast, never a connection state (#756).
-    session.setStatus('saved ✓', 'green');
-    expect(domById('status').textContent).toBe('saved ✓');
-    expect(domById('status').dataset.kind).toBe('green');
+    // The pill is action feedback only — an error toast, never a connection state (#756).
+    session.setStatus('down', 'error');
+    expect(domById('status').textContent).toBe('down');
+    expect(domById('status').dataset.kind).toBe('error');
     // The connection indicator is independent of transient pill toasts — an error toast (e.g. "Rename
     // rejected") or a model with a warning must not read "Offline".
-    session.setStatus('down', 'error');
     expect(domById('sb-connection').textContent).toBe('');
   });
 
@@ -313,7 +311,8 @@ describe('createEditorSession — status + server exit', () => {
   });
 });
 
-// The topbar `#status` pill is the transient ACTION-FEEDBACK toast (Saved / Renamed X→Y / errors),
+// The topbar `#status` pill is the transient ACTION-FEEDBACK toast for a FAILED action (Rename
+// rejected, save failed, …) — a successful action clears it instead of a success toast — and it is
 // NOT a connection indicator — connection is `#sb-connection` in the status bar, the single home for
 // that fact (#756). Its boot seed must therefore be neutral: if it shipped "connecting…" it would
 // impersonate the connection indicator for the first frame (two elements reading "connecting…"), the

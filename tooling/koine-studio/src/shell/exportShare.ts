@@ -23,7 +23,7 @@ export interface ExportShareDeps {
     'buffers' | 'activeUri' | 'folderRootToken' | 'syncActiveBuffer' | 'openFolderPath' | 'activateFile'
   >;
   editor: { getDoc(): string };
-  setStatus(text: string, kind: 'green' | 'error'): void;
+  setStatus(text: string, kind: 'error'): void;
   /** Re-derive the status pill from the CURRENT diagnostics after a transient flash (#271), so a fresh
    *  push isn't clobbered. Wraps editorSession.updateStatus(editorSession.diagnosticsFor(activeUri)). */
   refreshStatusFromDiagnostics(): void;
@@ -55,9 +55,9 @@ export function createExportShare(deps: ExportShareDeps): ExportShare {
     saveZip: (name, data) => platform.saveZip(name, data),
   });
 
-  // Copy a shareable playground link (the current model encoded in the URL hash) to the clipboard,
-  // flashing a transient confirmation in the status pill. After the flash, re-derive the pill from
-  // the CURRENT diagnostics rather than restoring a snapshot (which could clobber a fresh push).
+  // Copy a shareable playground link (the current model encoded in the URL hash) to the clipboard.
+  // Too-large-to-share is still flashed as an error, then re-derived from the CURRENT diagnostics
+  // rather than restoring a snapshot (which could clobber a fresh push).
   //
   // Shares the WHOLE workspace (every open buffer) under a versioned envelope, with the active file
   // flagged so the recipient lands on it. A workspace that overflows the URL-length cap is not
@@ -73,8 +73,6 @@ export function createExportShare(deps: ExportShareDeps): ExportShare {
         return;
       }
       await navigator.clipboard.writeText(url);
-      setStatus('link copied ✓', 'green');
-      scheduleStatusRefresh();
     } catch (e) {
       console.error('copy share link failed:', e);
     }
@@ -88,21 +86,17 @@ export function createExportShare(deps: ExportShareDeps): ExportShare {
       const files = Array.from(workspace.buffers.values()).map((b) => ({ relPath: b.relPath, text: b.text }));
       const root = sanitizeProjectName(platform.folderName(workspace.folderRootToken()));
       const bytes = await buildSourceZip(files, { root });
-      const saved = await platform.saveZip(`${root}.zip`, bytes);
-      if (saved === true) {
-        setStatus('source exported ✓', 'green');
-        scheduleStatusRefresh();
-      }
+      await platform.saveZip(`${root}.zip`, bytes);
     } catch (e) {
       setStatus('export failed', 'error');
       console.error('export source zip failed:', e);
     }
   }
 
-  // Flash a transient confirmation in the status pill, then re-derive it from the CURRENT diagnostics (so a
+  // Flash a transient error in the status pill, then re-derive it from the CURRENT diagnostics (so a
   // fresh push isn't clobbered) — the shared idiom behind the diagram export/copy handlers (#271).
-  function flashStatus(message: string, kind: 'green' | 'error'): void {
-    setStatus(message, kind);
+  function flashStatus(message: string): void {
+    setStatus(message, 'error');
     scheduleStatusRefresh();
   }
 
@@ -113,12 +107,11 @@ export function createExportShare(deps: ExportShareDeps): ExportShare {
   async function exportActiveDiagram(format: 'svg' | 'png' | 'plantuml'): Promise<void> {
     const active = getActiveDomainExport();
     if (!active) {
-      flashStatus('open the Visual diagram to export', 'error');
+      flashStatus('open the Visual diagram to export');
       return;
     }
     try {
-      const saved = await exportDiagram(format, active.diagram, active.handle, (name, bytes) => platform.saveZip(name, bytes));
-      if (saved === true) flashStatus('diagram exported ✓', 'green');
+      await exportDiagram(format, active.diagram, active.handle, (name, bytes) => platform.saveZip(name, bytes));
     } catch (e) {
       setStatus('export failed', 'error');
       console.error('export diagram failed:', e);
@@ -130,12 +123,11 @@ export function createExportShare(deps: ExportShareDeps): ExportShare {
   async function copyActiveDiagramMermaid(): Promise<void> {
     const mermaid = getActiveDomainExport()?.diagram.mermaid?.trim();
     if (!mermaid) {
-      flashStatus('no diagram to copy', 'error');
+      flashStatus('no diagram to copy');
       return;
     }
     try {
       await navigator.clipboard.writeText(mermaid);
-      flashStatus('Mermaid copied ✓', 'green');
     } catch (e) {
       setStatus('copy failed', 'error');
       console.error('copy mermaid failed:', e);
@@ -170,7 +162,6 @@ export function createExportShare(deps: ExportShareDeps): ExportShare {
         const token = await platform.saveProjectToRoot(name, files);
         if (!token) return; // root picker dismissed
         await workspace.openFolderPath(token, { recent: true });
-        setStatus('Project saved ✓', 'green');
         return;
       } catch (e) {
         if (String(e instanceof Error ? e.message : e).includes('already exists')) {

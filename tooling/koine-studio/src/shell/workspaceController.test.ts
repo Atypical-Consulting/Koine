@@ -1026,8 +1026,8 @@ describe('createWorkspaceController — idle auto-save', () => {
 
       expect(platform.writes).toHaveLength(0);
       expect(lsp.didSave).not.toHaveBeenCalled();
-      // No timer ever fired, so the status line is never clobbered with "No unsaved changes".
-      expect(setStatus).not.toHaveBeenCalledWith('No unsaved changes', 'green');
+      // No timer ever fired, so the status pill is never touched.
+      expect(setStatus).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

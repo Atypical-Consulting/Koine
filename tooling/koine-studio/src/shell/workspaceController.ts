@@ -75,7 +75,7 @@ export interface WorkspaceControllerDeps {
   explorer: WorkspaceExplorer;
 
   /** Action-feedback pill writer (ide.ts's editorSession.setStatus). */
-  setStatus(text: string, kind: 'green' | 'error'): void;
+  setStatus(text: string, kind: 'error'): void;
   /**
    * Non-clobbering notification for a user-initiated open of an empty folder (#817). Unlike
    * `setStatus('…', 'error')`, which permanently overwrites a healthy compiled status, this channel
@@ -1043,7 +1043,6 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       }
 
       if (dirtyCount(buffers) === 0) {
-        deps.setStatus('No unsaved changes', 'green');
         return;
       }
 
@@ -1062,8 +1061,6 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       }
       if (failures > 0) {
         deps.setStatus(`Save failed for ${failures} file${failures === 1 ? '' : 's'}`, 'error');
-      } else {
-        deps.setStatus(`Saved ${saved} file${saved === 1 ? '' : 's'}`, 'green');
       }
     } finally {
       saveAllQueued = false;

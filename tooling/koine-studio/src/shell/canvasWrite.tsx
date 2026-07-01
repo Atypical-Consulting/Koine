@@ -104,13 +104,6 @@ contextmap {
 `,
 };
 
-/** Status-bar confirmation shown after a doorway seeds its starter. */
-const CONCEPT_SEEDED_MSG: Record<EmptyConceptKind, string> = {
-  aggregate: 'Added a starter aggregate — edit it in Code or on the canvas',
-  stateMachine: 'Added a starter state machine — edit it in Code or on the canvas',
-  contextMap: 'Added a starter context map — edit it in Code or on the canvas',
-};
-
 // Adding a node = inserting a new construct skeleton into the active context (addType). The kind comes
 // from the palette button (defaulting to value) and the user names the type.
 const ADD_DEFAULT_NAME: Record<AddNodeKind, string> = {
@@ -132,7 +125,7 @@ export interface CanvasWriteDeps {
     selectBottomTab(tab: 'review'): void;
     selectCenter(view: 'visual' | 'technical'): void;
   };
-  setStatus(text: string, kind: 'green' | 'error'): void;
+  setStatus(text: string, kind: 'error'): void;
   prompt: Pick<PromptDialog, 'ask'>;
   confirm: Pick<ConfirmDialog, 'ask'>;
   reviewStore: { add(file: string, span: SourceSpan, text: string, author: string): void };
@@ -160,7 +153,7 @@ export interface CanvasWrite {
   /** Add a member inside the selected aggregate (#254). */
   applyDiagramAddAggregateMember(kind: AggregateMemberKind, aggregateQn: string): Promise<void>;
   /** The shared write path for a canvas authoring gesture — apply a StructuredEdit through #91. */
-  applyStructuredEdit(edit: StructuredEdit, successMsg: string): Promise<boolean>;
+  applyStructuredEdit(edit: StructuredEdit): Promise<boolean>;
   dispose(): void;
 }
 
@@ -250,18 +243,18 @@ export function createCanvasWrite(deps: CanvasWriteDeps): CanvasWrite {
   async function applyDiagramEdit(detail: DiagramNodeEditDetail): Promise<void> {
     if (detail.action === 'delete') {
       // Deleting a node removes the whole type declaration (round-trips through removeType).
-      await applyStructuredEdit({ kind: 'removeType', target: detail.qualifiedName }, `Deleted ${detail.label}`);
+      await applyStructuredEdit({ kind: 'removeType', target: detail.qualifiedName });
       return;
     }
     // Renaming a TYPE is a workspace-wide rename (every reference moves), so it uses the editor's
     // cross-file rename at the declaration's name position rather than a span-local member edit.
     if (detail.newName && detail.line != null && detail.column != null) {
-      await renameTypeAt(detail.line - 1, detail.column - 1, detail.newName, detail.label);
+      await renameTypeAt(detail.line - 1, detail.column - 1, detail.newName);
     }
   }
 
   // Cross-file rename of the symbol at a 0-based position (the diagram-node rename gesture).
-  async function renameTypeAt(line: number, character: number, newName: string, label: string): Promise<void> {
+  async function renameTypeAt(line: number, character: number, newName: string): Promise<void> {
     let edit;
     try {
       edit = await lsp.rename(line, character, newName);
@@ -274,13 +267,12 @@ export function createCanvasWrite(deps: CanvasWriteDeps): CanvasWrite {
       return;
     }
     workspace.applyWorkspaceEdit(edit);
-    setStatus(`Renamed ${label} → ${newName}`, 'green');
   }
 
   // The shared write path for every canvas authoring gesture: apply a StructuredEdit through #91's
   // round-trip, patch the buffer on success (which fires onDocEdited → the diagram AND the inspector
   // re-render in step), or surface the rejecting KOIxxxx and roll back. Returns whether it applied.
-  async function applyStructuredEdit(edit: StructuredEdit, successMsg: string): Promise<boolean> {
+  async function applyStructuredEdit(edit: StructuredEdit): Promise<boolean> {
     let result;
     try {
       result = await lsp.applyModelEdit(edit);
@@ -294,7 +286,6 @@ export function createCanvasWrite(deps: CanvasWriteDeps): CanvasWrite {
       return false; // rolled back — nothing is patched
     }
     workspace.applyWorkspaceEdit({ changes: { [result.uri]: result.edits } });
-    setStatus(successMsg, 'green');
     return true;
   }
 
@@ -312,10 +303,7 @@ export function createCanvasWrite(deps: CanvasWriteDeps): CanvasWrite {
       confirmLabel: 'Add field',
     });
     if (!fieldName) return;
-    await applyStructuredEdit(
-      { kind: 'addField', target: detail.sourceQualifiedName, name: fieldName, type: targetSimple },
-      `Added ${fieldName}: ${targetSimple} to ${detail.sourceLabel}`,
-    );
+    await applyStructuredEdit({ kind: 'addField', target: detail.sourceQualifiedName, name: fieldName, type: targetSimple });
   }
 
   // Removing a relationship = removing the field that backs it.
@@ -327,7 +315,7 @@ export function createCanvasWrite(deps: CanvasWriteDeps): CanvasWrite {
       danger: true,
     });
     if (!ok) return;
-    await applyStructuredEdit({ kind: 'removeMember', target: detail.backingMember }, `Removed ${detail.label}`);
+    await applyStructuredEdit({ kind: 'removeMember', target: detail.backingMember });
   }
 
   // Canvas-only annotations (#255): a note/group is a VIEW concern (persisted in koine.layout.json, never
@@ -362,7 +350,7 @@ export function createCanvasWrite(deps: CanvasWriteDeps): CanvasWrite {
     });
     if (!name) return;
     // The AddNodeKind string IS the construct keyword the server's TryAddType switches on (StructuredEdit.Type).
-    await applyStructuredEdit({ kind: 'addType', target: scope, name, type: kind }, `Added ${name} to ${scope}`);
+    await applyStructuredEdit({ kind: 'addType', target: scope, name, type: kind });
   }
 
   // Insert a construct that lives INSIDE an aggregate (#254). The target is the SELECTED aggregate's
@@ -379,16 +367,10 @@ export function createCanvasWrite(deps: CanvasWriteDeps): CanvasWrite {
         confirmLabel: 'Create',
       });
       if (!name) return;
-      await applyStructuredEdit(
-        { kind: 'addAggregateMember', target: aggregateQn, name, type: 'rule' },
-        `Added rule ${name} to ${aggregateName}`,
-      );
+      await applyStructuredEdit({ kind: 'addAggregateMember', target: aggregateQn, name, type: 'rule' });
       return;
     }
-    await applyStructuredEdit(
-      { kind: 'addAggregateMember', target: aggregateQn, type: 'repository' },
-      `Added a repository to ${aggregateName}`,
-    );
+    await applyStructuredEdit({ kind: 'addAggregateMember', target: aggregateQn, type: 'repository' });
   }
 
   // Clicking a diagram node both jumps to its declaration AND selects it, so the element inspector (#142)
@@ -407,7 +389,6 @@ export function createCanvasWrite(deps: CanvasWriteDeps): CanvasWrite {
     const current = editor.getDoc();
     const pristine = current.trim() === '' || current.trim() === deps.blank.trim();
     editor.setDoc(pristine ? starter : `${current.replace(/\s+$/, '')}\n\n${starter}`);
-    setStatus(CONCEPT_SEEDED_MSG[kind], 'green');
   }
 
   // --- bind the canvas gesture listeners -----------------------------------

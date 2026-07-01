@@ -133,9 +133,10 @@
               <circle cx="8" cy="12.8" r="1.15" fill="currentColor" stroke="none" />
             </svg>
           </button>
-          <!-- The action-feedback pill: the topbar's transient last-action toast (Saved / Renamed X→Y /
-               errors), driven by setStatus(text, kind) — NOT a connection indicator (connection lives
-               solely in #sb-connection; see docs/shell-bars-contract.md). Boots neutral/empty (hidden via
+          <!-- The action-feedback pill: the topbar's transient toast for a FAILED action (Rename rejected,
+               save failed, …), driven by setStatus(text, 'error') — a successful action clears it instead
+               of showing a success toast. NOT a connection indicator (connection lives solely in
+               #sb-connection; see docs/shell-bars-contract.md). Boots neutral/empty (hidden via
                `#status:empty`) so it can't impersonate the connection indicator at the first frame (#756);
                role=status + aria-live=polite announce action feedback only. -->
           <div id="status" role="status" aria-live="polite"></div>

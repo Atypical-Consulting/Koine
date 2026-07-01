@@ -435,10 +435,10 @@ describe('renameStatusMessage (#550)', () => {
     },
   });
 
-  test('plain message when the convention-linked id WAS co-renamed', () => {
+  test('nothing to flag when the convention-linked id WAS co-renamed', () => {
     // fullElement is the aggregate root Order with an `id: OrderId` property.
     const msg = renameStatusMessage(fullElement, 'PurchaseOrder', edit('PurchaseOrder', 'PurchaseOrderId'));
-    expect(msg).toBe('Renamed Order → PurchaseOrder');
+    expect(msg).toBeNull();
   });
 
   test('flags the left-behind id when the root renamed but its <Root>Id did not', () => {
@@ -447,13 +447,13 @@ describe('renameStatusMessage (#550)', () => {
     expect(msg).toBe('Renamed Order → PurchaseOrder; id type OrderId left unchanged');
   });
 
-  test('plain message for a non-root element even without a co-rename', () => {
+  test('nothing to flag for a non-root element even without a co-rename', () => {
     const entity: InspectorElement = { ...fullElement, stereotype: 'entity', properties: [{ text: 'id: OrderId', computed: false }] };
-    expect(renameStatusMessage(entity, 'Purchase', edit('Purchase'))).toBe('Renamed Order → Purchase');
+    expect(renameStatusMessage(entity, 'Purchase', edit('Purchase'))).toBeNull();
   });
 
-  test('plain message for a root whose identity is non-conventional', () => {
+  test('nothing to flag for a root whose identity is non-conventional', () => {
     const root: InspectorElement = { ...fullElement, properties: [{ text: 'id: Guid', computed: false }] };
-    expect(renameStatusMessage(root, 'PurchaseOrder', edit('PurchaseOrder'))).toBe('Renamed Order → PurchaseOrder');
+    expect(renameStatusMessage(root, 'PurchaseOrder', edit('PurchaseOrder'))).toBeNull();
   });
 });
