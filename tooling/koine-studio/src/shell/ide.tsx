@@ -65,6 +65,7 @@ import { installExportMenuDismiss } from '@/shell/exportMenuDismiss';
 import { HistoryControls } from '@/shell/HistoryControls';
 import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { CompilingIndicator } from '@/shell/CompilingIndicator';
+import { createEmitTargetControl } from '@/shell/emitTargetControl';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
 import { createWorkspaceController, type WorkspaceController } from '@/shell/workspaceController';
 import { createSearchPanel } from '@/shell/searchController';
@@ -327,6 +328,10 @@ export function init(hooks: IdeHooks = {}): () => void {
     output.setLineWrap(eff.wordWrap);
     controller.onPreviewTargetChanged(eff.previewTarget);
     lsp.setTrace(eff.lspTrace);
+    // Mirror the effective emit target into the store (#923) so the top-bar selector + status-bar echo
+    // reflect it, whichever control changed it (the selector, the Settings Output picker, or a folder/
+    // root switch that brought a different workspace override into effect).
+    appStore.getState().setEmitTarget(eff.previewTarget);
   }
 
   // Adding or removing a workspace root changes the workspace identity: folderRootToken() may now point
@@ -821,6 +826,16 @@ export function init(hooks: IdeHooks = {}): () => void {
     />,
     domById('history-controls-host'),
   );
+
+  // The top-bar emit-target selector (#923), wired by its own module so init() stays thin (#757).
+  createEmitTargetControl({
+    store: appStore,
+    host: domById('emit-target-host'),
+    wsKey,
+    getSettings: () => settings,
+    setSettings: (s) => void (settings = s),
+    applyEffectiveScoped,
+  });
 
   // Switching files: repaint the active file's diagnostics, invalidate the doc views so they re-fetch,
   // and follow the new file's bounded context. Preserves the exact effect order of the old activateFile.

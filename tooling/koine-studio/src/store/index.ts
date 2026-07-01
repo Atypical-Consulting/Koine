@@ -7,6 +7,7 @@ import { createWorkspaceSlice, type WorkspaceSlice } from '@/store/slices/worksp
 import { createUiChromeSlice, type UiChromeSlice } from '@/store/slices/uiChrome';
 import { createHistorySlice, type HistorySlice } from '@/store/slices/history';
 import { createRouteSlice, type RouteSlice } from '@/store/slices/route';
+import { createEmitTargetSlice, type EmitTargetSlice } from '@/store/slices/emitTarget';
 
 // The single Koine Studio state store: typed slices composed into one vanilla Zustand store. Vanilla
 // (not the React hook) so the imperative islands (CodeMirror, diagrams) can subscribe directly; Preact
@@ -18,7 +19,8 @@ export type AppState = SelectionSlice &
   WorkspaceSlice &
   UiChromeSlice &
   HistorySlice &
-  RouteSlice;
+  RouteSlice &
+  EmitTargetSlice;
 
 export function createAppStore(): StoreApi<AppState> {
   return createStore<AppState>((set, get) => ({
@@ -30,6 +32,7 @@ export function createAppStore(): StoreApi<AppState> {
     ...createUiChromeSlice(set, get),
     ...createHistorySlice(set, get),
     ...createRouteSlice(set, get),
+    ...createEmitTargetSlice(set),
   }));
 }
 
