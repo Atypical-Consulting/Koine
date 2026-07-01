@@ -18,9 +18,7 @@ public sealed partial class PhpEmitter
     internal sealed record PhpEmitContext(
         ModelIndex Index,
         IReadOnlyDictionary<string, string> EnumMemberToType,
-        IReadOnlySet<string> AdditiveNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BinaryArithmeticNeeds);
+        IReadOnlyDictionary<string, CSharp.OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> OperatorNeeds);
 
     /// <summary>
     /// Short class name → every <c>(FQN, declaring context)</c> that name resolves to — e.g.

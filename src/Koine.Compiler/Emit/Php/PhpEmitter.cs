@@ -66,9 +66,7 @@ public sealed partial class PhpEmitter : IEmitter
         var emit = new PhpEmitContext(
             index,
             BuildEnumMemberMap(model),
-            OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
-            OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
-            OperatorNeedsAnalyzer.BuildValueObjectArithmeticNeeds(model, index));
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index));
 
         // Build the cross-namespace type catalog (short class name → FQN) so each emitted file can
         // import the sibling-namespace types it references via `use`. Includes the runtime types

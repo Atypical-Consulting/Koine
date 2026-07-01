@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Koine.Compiler.Ast;
 
 namespace Koine.Compiler.Emit.CSharp;
@@ -14,167 +15,42 @@ namespace Koine.Compiler.Emit.CSharp;
 internal static class OperatorNeedsAnalyzer
 {
     /// <summary>
-    /// Scans every derived member initializer in the model for
-    /// <c>value-object * scalar</c> multiplications and records, per value-object
-    /// type, which scalar C# types ("int"/"decimal") it is multiplied by. Only
-    /// those operators are generated, so we never emit spurious (or non-compiling)
-    /// operators on value objects that are never multiplied.
+    /// Records, per value-object type, which scalar C# types ("int"/"decimal") it is multiplied by in a
+    /// <c>value-object * scalar</c> multiplication. Only those operators are generated, so we never emit
+    /// spurious (or non-compiling) operators on value objects that are never multiplied. A thin
+    /// projection over the single-pass <see cref="BuildOperatorNeeds"/>.
     /// </summary>
     public static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildScalarOperatorNeeds(KoineModel model, ModelIndex index) =>
-        BuildScalarOpNeeds(model, index, BinaryOp.Mul);
+        ProjectScalarFactors(BuildOperatorNeeds(model, index), static n => n.MultiplyFactors);
 
     /// <summary>
-    /// The division sibling of <see cref="BuildScalarOperatorNeeds"/>: scans the same sites for
-    /// <c>value-object / scalar</c> and records, per value-object type, which scalar C# types
-    /// ("int"/"decimal") it is divided by. Drives demand-driven <c>operator /</c> generation (#832) —
-    /// the natural dual of scalar multiplication. Division is non-commutative, so only the
-    /// value-object-on-the-left form is recorded; <c>scalar / value-object</c> would divide a scalar
-    /// <i>by</i> the value object, which is not a value-object operator, so it is deliberately not
-    /// recorded (its reversed-operand emission is a separate concern, out of scope here).
+    /// The division sibling of <see cref="BuildScalarOperatorNeeds"/>: records, per value-object type,
+    /// which scalar C# types ("int"/"decimal") it is divided by. Drives demand-driven <c>operator /</c>
+    /// generation (#832) — the natural dual of scalar multiplication. Division is non-commutative, so
+    /// only the value-object-on-the-left form is recorded; <c>scalar / value-object</c> would divide a
+    /// scalar <i>by</i> the value object, which is not a value-object operator, so it is deliberately not
+    /// recorded (its reversed-operand emission is a separate concern, out of scope here). A thin
+    /// projection over the single-pass <see cref="BuildOperatorNeeds"/>.
     /// </summary>
     public static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildScalarDivisionNeeds(KoineModel model, ModelIndex index) =>
-        BuildScalarOpNeeds(model, index, BinaryOp.Div);
+        ProjectScalarFactors(BuildOperatorNeeds(model, index), static n => n.DivideFactors);
 
     /// <summary>
-    /// Shared core for the scalar <c>*</c> / <c>/</c> demand analyses: walks every scalar-scan site
-    /// (<see cref="ScalarScanSites"/>) recording, per value-object type, the scalar C# types it is
-    /// combined with under <paramref name="op"/>. Mul and Div run the identical site enumeration; only
-    /// the operator (and division's left-only operand rule) differs, so the enumeration lives in one place.
+    /// The value-object types folded by a <c>sum</c> selector (e.g. <c>lines.sum(l =&gt; l.subtotal)</c>
+    /// producing a <c>Money</c>) and therefore needing an additive operator. A thin projection over the
+    /// single-pass <see cref="BuildOperatorNeeds"/> (its <see cref="ValueObjectOperatorNeeds.IsSummable"/>
+    /// flag).
     /// </summary>
-    private static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildScalarOpNeeds(KoineModel model, ModelIndex index, BinaryOp op)
-    {
-        var needs = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-
-        foreach ((Expr expr, IReadOnlyDictionary<string, TypeRef> scope) in ScalarScanSites(model, index))
-        {
-            new ScalarOpWalker(op, scope, index, needs).Visit(expr);
-        }
-
-        return needs.ToDictionary(kv => kv.Key, kv => (IReadOnlySet<string>)kv.Value, StringComparer.Ordinal);
-    }
+    public static IReadOnlySet<string> BuildAdditiveOperatorNeeds(KoineModel model, ModelIndex index) =>
+        BuildOperatorNeeds(model, index)
+            .Where(kv => kv.Value.IsSummable)
+            .Select(kv => kv.Key)
+            .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
-    /// Every expression the scalar <c>*</c>/<c>/</c> demand analyses scan, paired with the
-    /// member-type scope it is resolved in: member initializers, invariant conditions, command and
-    /// factory bodies, state-rule guards, service operation bodies, spec conditions, and read-model
-    /// field projections. Shared by the multiply and divide passes so the (otherwise identical) site
-    /// enumeration lives in one place — the sibling of <see cref="ExpressionScanSites"/>, which serves
-    /// the additive analyses over a richer <see cref="TypeScope"/>.
-    /// </summary>
-    private static IEnumerable<(Expr Expr, IReadOnlyDictionary<string, TypeRef> Scope)> ScalarScanSites(KoineModel model, ModelIndex index)
-    {
-        foreach (ContextNode ctx in model.Contexts)
-        {
-            foreach (TypeDecl type in ctx.AllTypeDecls())
-            {
-                IReadOnlyList<Member>? members = type switch
-                {
-                    ValueObjectDecl v => v.Members,
-                    EntityDecl e => e.Members,
-                    EventDecl ev => ev.Members,
-                    _ => null
-                };
-                if (members is null)
-                {
-                    continue;
-                }
-
-                var memberTypes = members.ToDictionary(m => m.Name, m => m.Type, StringComparer.Ordinal);
-                foreach (Member m in members)
-                {
-                    if (m.Initializer is not null)
-                    {
-                        yield return (m.Initializer, memberTypes);
-                    }
-                }
-
-                // Invariant conditions over the type's members can also use value-object arithmetic.
-                foreach (Invariant inv in Invariants(type))
-                {
-                    yield return (inv.Condition, memberTypes);
-                }
-
-                // Command bodies and state-rule guards can also use value-object arithmetic.
-                if (type is EntityDecl entity)
-                {
-                    foreach ((Expr Expr, IReadOnlyDictionary<string, TypeRef> Scope) pair in CommandExpressions(entity, memberTypes))
-                    {
-                        yield return pair;
-                    }
-
-                    foreach ((Expr Expr, IReadOnlyDictionary<string, TypeRef> Scope) pair in FactoryExpressions(entity, memberTypes))
-                    {
-                        yield return pair;
-                    }
-
-                    foreach (Expr guard in StateGuards(entity))
-                    {
-                        yield return (guard, memberTypes);
-                    }
-                }
-            }
-        }
-
-        // Service operation bodies can use value-object scalar arithmetic.
-        foreach (ContextNode ctx in model.Contexts)
-        {
-            foreach (ServiceDecl svc in ctx.Services)
-            {
-                foreach (OperationDecl op in svc.Operations)
-                {
-                    if (op.Body is not null)
-                    {
-                        var scope = op.Parameters.ToDictionary(p => p.Name, p => p.Type, StringComparer.Ordinal);
-                        yield return (op.Body, scope);
-                    }
-                }
-            }
-        }
-
-        // Spec conditions over their target type's members can use value-object arithmetic.
-        foreach (SpecDecl spec in AllSpecs(model))
-        {
-            var scope = SpecTargetMembers(spec.TargetType, index).ToDictionary(m => m.Name, m => m.Type, StringComparer.Ordinal);
-            yield return (spec.Condition, scope);
-        }
-
-        // Read-model derived-field projections (over the source type's members) can combine a value object with a scalar.
-        foreach ((ReadModelDecl rm, string context) in AllReadModels(model))
-        {
-            var scope = ReadModelSourceMembers(context, rm.SourceType, index).ToDictionary(m => m.Name, m => m.Type, StringComparer.Ordinal);
-            foreach (ReadModelField f in rm.Fields)
-            {
-                if (f.Projection is not null)
-                {
-                    yield return (f.Projection, scope);
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Scans every member initializer for a value-object <c>sum</c> selector (e.g.
-    /// <c>lines.sum(l =&gt; l.subtotal)</c> producing a <c>Money</c>) and records the
-    /// value-object types that therefore need an additive operator.
-    /// </summary>
-    public static IReadOnlySet<string> BuildAdditiveOperatorNeeds(KoineModel model, ModelIndex index)
-    {
-        var resolver = new TypeResolver(index);
-        var needs = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach ((Expr expr, TypeScope scope) in ExpressionScanSites(model, index))
-        {
-            ScanForValueObjectSum(expr, scope, resolver, needs);
-        }
-
-        return needs;
-    }
-
-    /// <summary>
-    /// Scans every member initializer (and the other expression sites) for a plain
+    /// Records, per value-object type, which additive operators it participates in via plain
     /// <c>value-object <b>+</b>/<b>-</b> value-object</c> binary arithmetic — e.g.
-    /// <c>combined: Money = base + base</c> — and records, per value-object type, which additive
-    /// operators it participates in. This is the binary-operator sibling of
+    /// <c>combined: Money = base + base</c>. This is the binary-operator sibling of
     /// <see cref="BuildAdditiveOperatorNeeds"/> (which only fires on a <c>sum(selector)</c> fold): a
     /// value object used directly in <c>+</c>/<c>-</c> needs an <c>add</c>/<c>subtract</c> method too,
     /// otherwise the lowered call site (<c>$vo-&gt;add(...)</c>) targets a method that was never
@@ -182,28 +58,186 @@ internal static class OperatorNeedsAnalyzer
     /// recorded here as well (its emission need is identical; only the call-site routing differs).
     /// Target-agnostic like the rest of this analyzer: the PHP emitter generates its <c>add</c>/<c>subtract</c>
     /// methods from this map, and the C# emitter consumes it (alongside <see cref="BuildAdditiveOperatorNeeds"/>)
-    /// to demand-generate direct <c>operator +</c>/<c>operator -</c> for plain value objects (#833).
+    /// to demand-generate direct <c>operator +</c>/<c>operator -</c> for plain value objects (#833). A thin
+    /// projection over the single-pass <see cref="BuildOperatorNeeds"/>.
     /// </summary>
-    public static IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BuildValueObjectArithmeticNeeds(KoineModel model, ModelIndex index)
+    public static IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BuildValueObjectArithmeticNeeds(KoineModel model, ModelIndex index) =>
+        BuildOperatorNeeds(model, index)
+            .Where(kv => kv.Value.BinaryOps.Count > 0)
+            .ToDictionary(kv => kv.Key, kv => (IReadOnlySet<BinaryOp>)kv.Value.BinaryOps, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The whole per-value-object need model — the single-pass output the four scalar / additive /
+    /// binary projection methods derive from — exposed directly for an emitter that needs more than one
+    /// signal at once. The PHP emitter consumes it so the "does this value object need an <c>add</c>?"
+    /// decision (the union of the <c>sum</c>-fold and binary <c>+</c> demands, see
+    /// <see cref="ValueObjectOperatorNeeds.NeedsAdd"/>) lives in the analyzer rather than being
+    /// re-combined from <see cref="BuildAdditiveOperatorNeeds"/> and
+    /// <see cref="BuildValueObjectArithmeticNeeds"/> in the emitter (#836). Internal because it surfaces
+    /// the internal <see cref="ValueObjectOperatorNeeds"/> record.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, ValueObjectOperatorNeeds> BuildValueObjectOperatorNeeds(KoineModel model, ModelIndex index) =>
+        BuildOperatorNeeds(model, index);
+
+    /// <summary>
+    /// Per-<see cref="KoineModel"/>, per-<see cref="ModelIndex"/> cache for <see cref="BuildOperatorNeeds"/>
+    /// keyed by reference identity (both are immutable per compile — <see cref="KoineModel"/> is a record
+    /// over <see cref="IReadOnlyList{T}"/> contexts, <see cref="ModelIndex"/> is built once and treated
+    /// read-only by every consumer). Without this, every public <c>Build*</c> caller (the C#, TypeScript,
+    /// Python, and Rust emitters each call several of them per emit) would re-run the full single pass —
+    /// the exact "each re-walking the model" cost the single-pass design was meant to retire (#836).
+    /// <see cref="ConditionalWeakTable{TKey,TValue}"/> uses reference identity for its keys regardless of
+    /// any value-equality a key type defines, so this is safe even though <see cref="KoineModel"/> is a
+    /// record.
+    /// </summary>
+    private static readonly ConditionalWeakTable<KoineModel, Dictionary<ModelIndex, IReadOnlyDictionary<string, ValueObjectOperatorNeeds>>> OperatorNeedsCache = new();
+
+    /// <summary>
+    /// The single demand-driven pass: walks every expression site (<see cref="ExpressionScanSites"/>)
+    /// <b>once</b>, running the scalar-multiply, scalar-divide, <c>sum</c>-fold, and plain-binary
+    /// walkers per <c>(Expr, TypeScope)</c> site and merging their signals into one
+    /// <see cref="ValueObjectOperatorNeeds"/> per value-object name. The public <c>Build*</c> methods are
+    /// thin projections over this map, so they share one site enumeration and one per-VO need model
+    /// rather than each re-walking the model (#836) — memoized per (model, index) via
+    /// <see cref="OperatorNeedsCache"/> so that sharing holds across separate <c>Build*</c> calls too, not
+    /// just within one.
+    /// </summary>
+    private static IReadOnlyDictionary<string, ValueObjectOperatorNeeds> BuildOperatorNeeds(KoineModel model, ModelIndex index)
+    {
+        Dictionary<ModelIndex, IReadOnlyDictionary<string, ValueObjectOperatorNeeds>> byIndex =
+            OperatorNeedsCache.GetValue(model, static _ => new Dictionary<ModelIndex, IReadOnlyDictionary<string, ValueObjectOperatorNeeds>>());
+
+        if (byIndex.TryGetValue(index, out IReadOnlyDictionary<string, ValueObjectOperatorNeeds>? cached))
+        {
+            return cached;
+        }
+
+        IReadOnlyDictionary<string, ValueObjectOperatorNeeds> needs = ComputeOperatorNeeds(model, index);
+        byIndex[index] = needs;
+        return needs;
+    }
+
+    private static IReadOnlyDictionary<string, ValueObjectOperatorNeeds> ComputeOperatorNeeds(KoineModel model, ModelIndex index)
     {
         var resolver = new TypeResolver(index);
-        var needs = new Dictionary<string, HashSet<BinaryOp>>(StringComparer.Ordinal);
+        var multiply = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var divide = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var binary = new Dictionary<string, HashSet<BinaryOp>>(StringComparer.Ordinal);
+        var summable = new HashSet<string>(StringComparer.Ordinal);
 
         foreach ((Expr expr, TypeScope scope) in ExpressionScanSites(model, index))
         {
-            new ValueObjectArithmeticWalker(scope, resolver, index, needs).Visit(expr);
+            new ScalarOpWalker(BinaryOp.Mul, scope, index, multiply).Visit(expr);
+            new ScalarOpWalker(BinaryOp.Div, scope, index, divide).Visit(expr);
+            new ValueObjectSumWalker(scope, resolver, summable).Visit(expr);
+            new ValueObjectArithmeticWalker(scope, resolver, index, binary).Visit(expr);
         }
 
-        return needs.ToDictionary(kv => kv.Key, kv => (IReadOnlySet<BinaryOp>)kv.Value, StringComparer.Ordinal);
+        var needs = new Dictionary<string, ValueObjectOperatorNeeds>(StringComparer.Ordinal);
+        ValueObjectOperatorNeeds Entry(string vo)
+        {
+            if (!needs.TryGetValue(vo, out ValueObjectOperatorNeeds? n))
+            {
+                needs[vo] = n = new ValueObjectOperatorNeeds();
+            }
+
+            return n;
+        }
+
+        foreach ((string vo, HashSet<string> factors) in multiply)
+        {
+            Entry(vo).UnionMultiplyFactors(factors);
+        }
+
+        foreach ((string vo, HashSet<string> factors) in divide)
+        {
+            Entry(vo).UnionDivideFactors(factors);
+        }
+
+        foreach ((string vo, HashSet<BinaryOp> ops) in binary)
+        {
+            Entry(vo).UnionBinaryOps(ops);
+        }
+
+        foreach (string vo in summable)
+        {
+            Entry(vo).MarkSummable();
+        }
+
+        return needs;
+    }
+
+    /// <summary>
+    /// Projects one scalar factor set (multiply or divide) out of the per-VO need model, keeping only
+    /// value objects that actually carry a factor under that operator — so the result is byte-identical
+    /// to the pre-unification per-operator map (which only ever held keys it recorded a factor for).
+    /// </summary>
+    private static IReadOnlyDictionary<string, IReadOnlySet<string>> ProjectScalarFactors(
+        IReadOnlyDictionary<string, ValueObjectOperatorNeeds> needs,
+        Func<ValueObjectOperatorNeeds, IReadOnlySet<string>> select) =>
+        needs.Where(kv => select(kv.Value).Count > 0)
+             .ToDictionary(kv => kv.Key, kv => select(kv.Value), StringComparer.Ordinal);
+
+    /// <summary>
+    /// The per-value-object operator demand accumulated by <see cref="BuildOperatorNeeds"/> in one pass:
+    /// the scalar C# types it is multiplied / divided by, the plain binary additive operators it
+    /// participates in, and whether it is folded by <c>sum</c>. One record replaces the separate per-pass
+    /// maps the analyzer used to build, so "which operators does this value object need?" is answered in
+    /// one place (#836). Exposed (via <see cref="BuildValueObjectOperatorNeeds"/>) to the PHP emitter,
+    /// which needs more than one signal at once.
+    /// </summary>
+    internal sealed class ValueObjectOperatorNeeds
+    {
+        private readonly HashSet<string> _multiplyFactors = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _divideFactors = new(StringComparer.Ordinal);
+        private readonly HashSet<BinaryOp> _binaryOps = new();
+
+        /// <summary>Scalar C# types ("int"/"decimal") this value object is multiplied by.</summary>
+        public IReadOnlySet<string> MultiplyFactors => _multiplyFactors;
+
+        /// <summary>Scalar C# types ("int"/"decimal") this value object is divided by.</summary>
+        public IReadOnlySet<string> DivideFactors => _divideFactors;
+
+        /// <summary>The plain binary additive operators (<c>+</c>/<c>-</c>) this value object participates in.</summary>
+        public IReadOnlySet<BinaryOp> BinaryOps => _binaryOps;
+
+        /// <summary>Whether this value object is folded by a <c>sum(selector)</c> (set only by that fold).</summary>
+        public bool IsSummable { get; private set; }
+
+        /// <summary>
+        /// Whether this value object needs an <c>add</c> operation at all — the union of the <c>sum</c>-fold
+        /// demand (<see cref="IsSummable"/>) and a plain binary <c>+</c> demand. Computed here, in the
+        /// analyzer, so an emitter asks the question once instead of re-combining the sum-fold and binary
+        /// maps itself. <see cref="IsSummable"/> stays a separate flag because it also selects the
+        /// <c>add</c>'s <i>shape</i> (a <c>Summable</c>-typed parameter vs a concrete <c>self</c>), not
+        /// merely whether one is emitted (#836).
+        /// </summary>
+        public bool NeedsAdd => IsSummable || BinaryOps.Contains(BinaryOp.Add);
+
+        /// <summary>
+        /// Mutators are internal and exposed only as named operations (not a writable property/collection)
+        /// because <see cref="BuildOperatorNeeds"/> now caches and shares each instance across every
+        /// <c>Build*</c> caller within a compile — a writable public surface would let one consumer
+        /// corrupt the result every other consumer of the same cached instance sees.
+        /// </summary>
+        internal void UnionMultiplyFactors(IEnumerable<string> factors) => _multiplyFactors.UnionWith(factors);
+
+        internal void UnionDivideFactors(IEnumerable<string> factors) => _divideFactors.UnionWith(factors);
+
+        internal void UnionBinaryOps(IEnumerable<BinaryOp> ops) => _binaryOps.UnionWith(ops);
+
+        internal void MarkSummable() => IsSummable = true;
     }
 
     /// <summary>
     /// Every expression the demand-driven value-object analyses scan, paired with the
     /// <see cref="TypeScope"/> it is resolved in: member initializers, invariant conditions, command
     /// and factory bodies, state-rule guards, service operation bodies, spec conditions, and
-    /// read-model field projections. Shared by <see cref="BuildAdditiveOperatorNeeds"/> and
-    /// <see cref="BuildValueObjectArithmeticNeeds"/> so the (otherwise identical) site enumeration
-    /// lives in one place.
+    /// read-model field projections. The <b>single</b> site enumerator — the scalar
+    /// <c>*</c>/<c>/</c> analyses (<see cref="BuildScalarOperatorNeeds"/>, <see cref="BuildScalarDivisionNeeds"/>),
+    /// the <c>sum</c> fold (<see cref="BuildAdditiveOperatorNeeds"/>), and the plain binary <c>+</c>/<c>-</c>
+    /// analysis (<see cref="BuildValueObjectArithmeticNeeds"/>) all walk it, so the site list lives in one
+    /// place and cannot drift between passes (#836).
     /// </summary>
     private static IEnumerable<(Expr Expr, TypeScope Scope)> ExpressionScanSites(KoineModel model, ModelIndex index)
     {
@@ -327,9 +361,6 @@ internal static class OperatorNeedsAnalyzer
             }
         }
     }
-
-    private static void ScanForValueObjectSum(Expr expr, TypeScope scope, TypeResolver resolver, HashSet<string> needs) =>
-        new ValueObjectSumWalker(scope, resolver, needs).Visit(expr);
 
     /// <summary>
     /// Records, per value-object type, which additive operators (<see cref="BinaryOp.Add"/> /
@@ -492,80 +523,6 @@ internal static class OperatorNeedsAnalyzer
         entity.States.SelectMany(s => s.Rules).Where(r => r.Guard is not null).Select(r => r.Guard!);
 
     /// <summary>
-    /// Every expression appearing in an entity's commands (requires conditions and
-    /// transition values), paired with a member-type map extended by that command's
-    /// parameters — for the operator-need scans.
-    /// </summary>
-    private static IEnumerable<(Expr Expr, IReadOnlyDictionary<string, TypeRef> Scope)> CommandExpressions(
-        EntityDecl entity, IReadOnlyDictionary<string, TypeRef> memberTypes)
-    {
-        foreach (CommandDecl cmd in entity.Commands)
-        {
-            var scope = new Dictionary<string, TypeRef>(memberTypes, StringComparer.Ordinal);
-            foreach (Param p in cmd.Parameters)
-            {
-                scope[p.Name] = p.Type;
-            }
-
-            foreach (CommandStmt stmt in cmd.Body)
-            {
-                if (stmt is RequiresClause req)
-                {
-                    yield return (req.Condition, scope);
-                }
-                else if (stmt is Transition tr)
-                {
-                    yield return (tr.Value, scope);
-                }
-                else if (stmt is EmitClause em)
-                {
-                    foreach (EmitArg arg in em.Args)
-                    {
-                        yield return (arg.Value, scope);
-                    }
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Every expression in an entity's factories (requires conditions, initialization
-    /// values, and emit payloads), paired with a member-type map extended by that
-    /// factory's parameters — for the operator-need scans.
-    /// </summary>
-    private static IEnumerable<(Expr Expr, IReadOnlyDictionary<string, TypeRef> Scope)> FactoryExpressions(
-        EntityDecl entity, IReadOnlyDictionary<string, TypeRef> memberTypes)
-    {
-        foreach (FactoryDecl factory in entity.Factories)
-        {
-            var scope = new Dictionary<string, TypeRef>(memberTypes, StringComparer.Ordinal);
-            foreach (Param p in factory.Parameters)
-            {
-                scope[p.Name] = p.Type;
-            }
-
-            foreach (CommandStmt stmt in factory.Body)
-            {
-                if (stmt is RequiresClause req)
-                {
-                    yield return (req.Condition, scope);
-                }
-                else if (stmt is Initialization ini)
-                {
-                    yield return (ini.Value, scope);
-                }
-                else if (stmt is EmitClause em)
-                {
-                    foreach (EmitArg arg in em.Args)
-                    {
-                        yield return (arg.Value, scope);
-                    }
-                }
-            }
-        }
-    }
-
-    /// <summary>
     /// Records, per value-object type, the scalar C# types it is combined with under a single binary
     /// operator (<see cref="BinaryOp.Mul"/> or <see cref="BinaryOp.Div"/>) anywhere in an expression.
     /// The member-type scope is constant for the whole walk. Recurses into every node, so an operation
@@ -580,18 +537,18 @@ internal static class OperatorNeedsAnalyzer
     private sealed class ScalarOpWalker : ExprWalker
     {
         private readonly BinaryOp _op;
-        private readonly IReadOnlyDictionary<string, TypeRef> _memberTypes;
+        private readonly TypeScope _scope;
         private readonly ModelIndex _index;
         private readonly Dictionary<string, HashSet<string>> _needs;
 
         public ScalarOpWalker(
             BinaryOp op,
-            IReadOnlyDictionary<string, TypeRef> memberTypes,
+            TypeScope scope,
             ModelIndex index,
             Dictionary<string, HashSet<string>> needs)
         {
             _op = op;
-            _memberTypes = memberTypes;
+            _scope = scope;
             _index = index;
             _needs = needs;
         }
@@ -600,8 +557,8 @@ internal static class OperatorNeedsAnalyzer
         {
             if (n.Op == _op)
             {
-                var (lValue, lScalar) = InferOperand(n.Left, _memberTypes, _index);
-                var (rValue, rScalar) = InferOperand(n.Right, _memberTypes, _index);
+                var (lValue, lScalar) = InferOperand(n.Left, _scope, _index);
+                var (rValue, rScalar) = InferOperand(n.Right, _scope, _index);
 
                 // Canonical order `value-object op scalar` is recorded for both `*` and `/`.
                 if (lValue is not null && rScalar is not null)
@@ -621,24 +578,31 @@ internal static class OperatorNeedsAnalyzer
         }
     }
 
-    /// <summary>Shallowly infers whether an operand is a value object or a numeric scalar.</summary>
+    /// <summary>
+    /// Shallowly infers whether an operand is a value object or a numeric scalar. The operand's type is
+    /// read straight from the lexical <see cref="TypeScope"/> by name (identifiers) — deliberately
+    /// shallow, NOT the full <see cref="TypeResolver.TypeOf"/>: only a bare identifier or a numeric
+    /// literal is classified, matching the original member-type-map inference exactly. A collection or
+    /// otherwise un-named scope entry (whose <see cref="KoineType.Name"/> is <c>null</c>) is neither a
+    /// value object nor a scalar, so it falls through unrecorded — as before.
+    /// </summary>
     private static (string? ValueObject, string? Scalar) InferOperand(
-        Expr expr, IReadOnlyDictionary<string, TypeRef> memberTypes, ModelIndex index)
+        Expr expr, TypeScope scope, ModelIndex index)
     {
         switch (expr)
         {
-            case IdentifierExpr id when memberTypes.TryGetValue(id.Name, out TypeRef? t):
-                if (index.Classify(t.Name) == TypeKind.Value)
+            case IdentifierExpr id when scope.TryGet(id.Name, out KoineType t) && t.Name is { } typeName:
+                if (index.Classify(typeName) == TypeKind.Value)
                 {
-                    return (t.Name, null);
+                    return (typeName, null);
                 }
 
-                if (t.Name == "Int")
+                if (typeName == "Int")
                 {
                     return (null, "int");
                 }
 
-                if (t.Name == "Decimal")
+                if (typeName == "Decimal")
                 {
                     return (null, "decimal");
                 }
