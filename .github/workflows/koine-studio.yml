@@ -146,9 +146,10 @@ jobs:
       # `npm test`. Only Chromium is needed; --with-deps installs the system libs Chromium
       # needs on Linux and is a no-op for those deps on macOS/Windows.
       - name: Install Playwright Chromium (Storybook story tests)
-        working-directory: tooling/koine-studio
-        shell: bash
-        run: npx playwright install --with-deps chromium
+        uses: ./.github/actions/setup-playwright
+        with:
+          working-directory: tooling/koine-studio
+          cache-key-files: tooling/koine-studio/package-lock.json
 
       # Issue #400: the Windows runner intermittently exhausts disk during the Vite module-transform
       # phase for the wasm.fallback suite, crashing vitest workers with "Error: disk full". Prune
@@ -241,8 +242,10 @@ jobs:
       # worker, so without this a worker-boot regression (issue #357 — the studio showed "connection
       # failed") ships green. Only Chromium is needed; --with-deps installs its Linux system libs.
       - name: Install Playwright Chromium (boot smoke-test)
-        working-directory: tooling/koine-studio
-        run: npx playwright install --with-deps chromium
+        uses: ./.github/actions/setup-playwright
+        with:
+          working-directory: tooling/koine-studio
+          cache-key-files: tooling/koine-studio/package-lock.json
 
       - name: Boot smoke-test — the real compiler boots in a browser (#357)
         working-directory: tooling/koine-studio

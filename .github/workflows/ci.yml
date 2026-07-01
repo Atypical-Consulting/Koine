@@ -69,10 +69,33 @@ jobs:
         with:
           python-version: '3.14'
 
+      # Cache pip's download/wheel cache so the pinned mypy install restores instead of
+      # re-downloading the wheel every run. Keyed on the exact pin below.
+      - name: Cache pip
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-mypy-1.13.0
+          restore-keys: ${{ runner.os }}-pip-
+
       - name: Install mypy
         # Pin exactly so a future mypy release tightening `--strict` inference can't redden
         # the conformance suite on an unrelated day with no source change.
         run: python -m pip install mypy==1.13.0
+
+      # Cache the cargo registry + git sources so the Rust conformance `cargo check` restores
+      # crate metadata/sources instead of re-fetching over the network. runner.os-scoped and
+      # keyed on a stable revision: the conformance fixtures are dependency-free, so a coarse
+      # key is fine — the cache mainly banks the crates.io index. (koine-studio.yml already
+      # caches ~/.cargo/registry for its Tauri build; this extends the pattern to ci.yml.)
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-ci-v1
+          restore-keys: ${{ runner.os }}-cargo-ci-
 
       # Rust: the Rust conformance suite runs `cargo check` over an emitted crate.
       # ResolveCargo() finds `cargo` on PATH (KOINE_CARGO overrides). The ubuntu-latest image ships

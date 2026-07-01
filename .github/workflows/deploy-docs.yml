@@ -81,8 +81,10 @@ jobs:
       # gates the deploy" gap — the website equivalent of Studio's #358 smoke gate (koine-studio.yml).
       # Only Chromium is needed; --with-deps installs its Linux system libs.
       - name: Install Playwright Chromium (boot smoke-test)
-        working-directory: ./website
-        run: npx playwright install --with-deps chromium
+        uses: ./.github/actions/setup-playwright
+        with:
+          working-directory: ./website
+          cache-key-files: website/package-lock.json
 
       - name: Boot smoke-test — the real Playground compiler boots in a browser (#492)
         working-directory: ./website

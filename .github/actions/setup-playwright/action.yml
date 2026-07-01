@@ -1,0 +1,43 @@
+name: Setup Playwright (Chromium, cached)
+description: >-
+  Install Playwright's Chromium browser (with its Linux system deps) and cache the browser
+  download so warm runs skip the re-download. Cross-platform: the cache path covers the
+  Linux, macOS, and Windows browser locations. De-duplicates the `npx playwright install
+  --with-deps chromium` step that ran uncached in three jobs (the two studio jobs and the
+  docs deploy), each re-downloading Chromium every run.
+
+inputs:
+  working-directory:
+    description: >-
+      Directory to run `npx playwright install` from. Playwright must be resolvable there
+      (i.e. `npm ci` has already run in this job).
+    required: true
+  cache-key-files:
+    description: >-
+      Lockfile path (a hashFiles glob) whose hash keys the browser cache, so the cache is
+      invalidated only when the pinned Playwright version changes.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Cache Playwright browsers
+      uses: actions/cache@v6
+      with:
+        # Playwright's browser download location per OS. Only the current runner's path
+        # exists; actions/cache skips the others. runner.os-scoped so the Linux/Windows/
+        # macOS legs of a matrix job never collide.
+        path: |
+          ~/.cache/ms-playwright
+          ~/Library/Caches/ms-playwright
+          ~\AppData\Local\ms-playwright
+        key: ${{ runner.os }}-playwright-${{ hashFiles(inputs.cache-key-files) }}
+        restore-keys: ${{ runner.os }}-playwright-
+
+    # On a cache hit Chromium is already present, so `install` only re-runs `--with-deps`
+    # (the Linux system libs, a no-op on macOS/Windows). On a miss it downloads Chromium
+    # into the cached path above.
+    - name: Install Playwright Chromium
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npx playwright install --with-deps chromium
