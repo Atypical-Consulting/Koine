@@ -89,5 +89,24 @@ deletes). No `_ds_sync.json` anchor (off-script bundle) — every re-sync re-ver
 - **`.d.ts` referenced types are opaque** (StoreApi/AppState/model types are the app's).
   The prop *shape* is faithful; the types don't resolve standalone.
 - **SettingsPage** is preview-only by size choice — revisit if the file cap changes.
+- **No standalone `<Name>.d.ts`.** claude.ai/design's compiler only treats a sibling
+  `<Name>.tsx` as "the implementation" — it does not accept `_preview/*.js`, so a lone
+  `.d.ts` re-fired the design-system check as an "orphan (no sibling implementation)" on
+  every re-sync. `gen-docs.mjs` therefore emits **only** `<Name>.html` + `<Name>.prompt.md`
+  (+ `_preview/<Name>.js`); the panels ship preview-only and the prop shape lives in the
+  prompt snippet + the Studio source. Do **not** re-add the `.d.ts` emit without also
+  emitting a real `<Name>.tsx` bound to a populated `window.KoineStudio_<id>.*` — today that
+  namespaced global is empty, so a `.tsx` binding would resolve to `undefined` at runtime.
+- **Token `@kind` annotations.** claude.ai/design classifies each `--koi-*` token; the
+  `--koi-z-*` (9), `--koi-dur-*` (4) and `--koi-scrollbar-size` (1) tokens are none of
+  color/spacing/radius/shadow/font, so they were flagged "unclassified" every re-sync. The
+  classifier reads the standalone **`tokens/tokens.css`** — the hand-copy, NOT the compiled
+  `_ds_bundle.css` — so the annotation must live there. Its canonical committed source is
+  **`.design-sync/tokens.css`** (`@kind other` on those 14 declarations); copy it to
+  `ds-bundle-live/tokens/tokens.css` before upload (no script generates that path — the
+  tokens/fonts/styles.css seed lives only in the remote project as a superset carry-over).
+  `src/styles/themes/_dark.scss` carries the same `/* @kind other */` markers so the app's
+  own compiled `_ds_bundle.css` agrees; Sass `expanded` mode preserves loud comments. If a
+  new token isn't color/spacing/radius/shadow/font, annotate it in BOTH places.
 - Token-side risks from the tokens sync still apply: `tokens/tokens.css` is a hand-copy
   of `src/styles/themes/`; `@charset` must be stripped each compile.

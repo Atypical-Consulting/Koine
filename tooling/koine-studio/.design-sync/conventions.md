@@ -17,7 +17,7 @@ const store = KoineStudio.createStore();          // an empty Studio store (zust
 <KoineStudio.GlossaryPanel store={store} model={glossaryModel} handlers={{ onGoto(){}, onSave(){} }} />
 ```
 
-Two shapes, told apart by each component's `*.prompt.md` / `*.d.ts`:
+Two shapes, told apart by each component's `*.prompt.md`:
 - **Plain-props** — pass data/callbacks directly: `DeckBar`, `DeckCard`, `ExportMenu`, `RightStrip`,
   `AssistantView`, `SourceControlPanel`, plus zero-config scenes `DeckStage`, `LeftRail`.
 - **Store-bound** — pass `store={KoineStudio.createStore()}` **and** the panel's data prop(s) (`model`,
@@ -27,8 +27,9 @@ Two shapes, told apart by each component's `*.prompt.md` / `*.d.ts`:
   selection, filter); the data prop carries the domain model.
 
 Also on the namespace: `KoineStudio.createStore()` (store factory) and `KoineStudio.DECK_SURFACES` (the
-Canvas/Code/Output/Docs surface descriptors). Each component ships a `<Name>.d.ts` (real prop contract)
-and a `<Name>.prompt.md` (usage) beside its preview card — **read those before composing a panel.**
+Canvas/Code/Output/Docs surface descriptors). Each component ships a `<Name>.prompt.md` (usage, with the
+required props in its snippet) beside its preview card — **read it before composing a panel;** the full
+prop types live in the Koine Studio source it names.
 `SettingsPage` is a preview-only reference (it bundles a full editor) and is not on the namespace.
 
 ### Setup

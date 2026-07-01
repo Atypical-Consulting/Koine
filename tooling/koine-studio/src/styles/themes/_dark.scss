@@ -20,15 +20,15 @@
      Tiers are ordered ascending by value; each in-use tier keeps the exact literal it replaces so
      compiled output is unchanged. Tiers above --koi-z-popover are RESERVED headroom for future
      overlay features (tooltips, toasts, drag ghosts) and are unused today. */
-  --koi-z-base: 1;       /* in-context decorations: inline markers, resizer handles, ::before glows */
-  --koi-z-sticky: 2;     /* sticky chrome that pins within the layout (the toolbar bar) */
-  --koi-z-raised: 3;     /* content floating over its own pane (the copy-code button) */
-  --koi-z-overlay: 50;   /* full-screen app overlay below modals (the welcome / start screen) */
-  --koi-z-modal: 100;    /* centered dialogs + their backdrops (command palette, modals) */
-  --koi-z-popover: 120;  /* transient menus anchored to a trigger (language picker, context menu) */
-  --koi-z-tooltip: 200;  /* reserved: hover tooltips above popovers */
-  --koi-z-toast: 300;    /* reserved: transient notifications / snackbars */
-  --koi-z-drag: 400;     /* reserved: drag ghosts / drop overlays, always on top */
+  --koi-z-base: 1;       /* @kind other — in-context decorations: inline markers, resizer handles, ::before glows */
+  --koi-z-sticky: 2;     /* @kind other — sticky chrome that pins within the layout (the toolbar bar) */
+  --koi-z-raised: 3;     /* @kind other — content floating over its own pane (the copy-code button) */
+  --koi-z-overlay: 50;   /* @kind other — full-screen app overlay below modals (the welcome / start screen) */
+  --koi-z-modal: 100;    /* @kind other — centered dialogs + their backdrops (command palette, modals) */
+  --koi-z-popover: 120;  /* @kind other — transient menus anchored to a trigger (language picker, context menu) */
+  --koi-z-tooltip: 200;  /* @kind other — reserved: hover tooltips above popovers */
+  --koi-z-toast: 300;    /* @kind other — reserved: transient notifications / snackbars */
+  --koi-z-drag: 400;     /* @kind other — reserved: drag ghosts / drop overlays, always on top */
 
   /* destination-language identity — real brand hues, shared across themes */
   --lang-csharp: #a179dc;
@@ -38,7 +38,7 @@
   --lang-rust: #dea584;
 
   /* scrollbars — thumb/track derived from theme tokens so light/dark adapt for free */
-  --koi-scrollbar-size: 10px;
+  --koi-scrollbar-size: 10px; /* @kind other — scrollbar thumb/track thickness */
   --koi-scrollbar-thumb: color-mix(in srgb, var(--koi-muted) 40%, transparent);
   --koi-scrollbar-thumb-hover: color-mix(in srgb, var(--koi-muted) 65%, transparent);
   --koi-scrollbar-track: transparent;
@@ -98,10 +98,10 @@
 
   /* motion scale — value-equivalent tokens for the frequent transition/animation durations.
      Theme-independent; a future reduced-motion mode can zero these in one place. */
-  --koi-dur-fast: 0.12s;
-  --koi-dur-base: 0.14s;
-  --koi-dur-mid: 0.15s;
-  --koi-dur-slow: 0.18s;
+  --koi-dur-fast: 0.12s; /* @kind other — motion duration */
+  --koi-dur-base: 0.14s; /* @kind other — motion duration */
+  --koi-dur-mid: 0.15s;  /* @kind other — motion duration */
+  --koi-dur-slow: 0.18s; /* @kind other — motion duration */
 
   /* syntax highlighting */
   --koi-hl-keyword: #c98cff;

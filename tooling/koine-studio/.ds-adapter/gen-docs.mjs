@@ -119,19 +119,10 @@ for (const e of manifest) {
   const isScene = sceneNames.has(e.name) || cardOnly.has(e.name);
   const storeBound = props.some((p) => p.name === 'store');
 
-  // ---- <Name>.d.ts ----
-  if (e.component && block) {
-    const dts = `// ${e.name} — prop contract (extracted from the Koine Studio source).
-// Referenced Studio types (StoreApi<AppState>, model/handler types) are the app's own; treat them as
-// opaque here — pass a store from \`KoineStudio.createStore()\` and data objects shaped per the source.
-export interface ${e.name}Props ${block}
-
-export declare function ${e.name}(props: ${e.name}Props): JSX.Element;
-`;
-    writeFileSync(path.join(dir, `${e.name}.d.ts`), dts);
-  } else if (e.component) {
-    writeFileSync(path.join(dir, `${e.name}.d.ts`), `export declare function ${e.name}(): JSX.Element; // takes no props\n`);
-  }
+  // No standalone <Name>.d.ts is emitted: claude.ai/design's compiler only accepts a sibling
+  // <Name>.tsx as "the implementation" and flags a lone .d.ts as an orphan. These panels ship
+  // preview-only (card + prompt + _preview render); the prop shape lives in the prompt below and
+  // the Studio source. See .design-sync/NOTES.md "re-sync risks".
 
   // ---- <Name>.prompt.md ----
   const kind = cardOnly.has(e.name)
@@ -153,7 +144,7 @@ ${desc || 'A Koine Studio panel.'}
 ${cardOnly.has(e.name) ? '// Preview only — see the card. Not available as a live component in this sync.' : usageSnippet(e.name, props, isScene)}
 \`\`\`
 ${storeBound ? '\n> This panel reads UI state (active context, selection, filter) from the `store` and its domain data from the data prop(s) above. `KoineStudio.createStore()` returns an empty Studio store; the panel renders against whatever you pass.\n' : ''}
-The preview card shows the canonical rendered example.${e.component && block ? ` See \`${e.name}.d.ts\` for the full prop types.` : ''}
+The preview card shows the canonical rendered example.${e.component && block ? ` The required props are shown in the usage snippet above; the full prop types live in the Koine Studio source (\`${srcRel}\`).` : ''}
 `;
   writeFileSync(path.join(dir, `${e.name}.prompt.md`), md);
 }
