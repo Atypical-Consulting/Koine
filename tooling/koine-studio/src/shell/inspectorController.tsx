@@ -54,7 +54,7 @@ import type {
 } from '@/diagrams/diagramContract';
 import { createLayoutStore } from '@/diagrams/layoutStore';
 import { mergeDiagramGraphs } from '@/model/modelTables';
-import { type GlossaryHandlers } from '@/model/glossary';
+import { coverage, type GlossaryHandlers } from '@/model/glossary';
 import { createDocsStore } from '@/docs/docsStore';
 import { renderAdrPanel, renderNotesPanel, type DocsPanelHandlers } from '@/docs/docsPanel';
 import {
@@ -547,10 +547,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     try {
       const model = await lsp.glossaryModel();
       setContextOptions(listContexts(model));
+      // Publish glossary documentation coverage for the status-bar docs ring (#923) — the model is
+      // already in hand here, and this runs on folder open + every (debounced) edit, so the ring tracks
+      // the live glossary. coverage() returns { documented, total, pct }; the ring needs the raw counts.
+      const cov = coverage(model.entries);
+      appStore.getState().setDocsCoverage({ documented: cov.documented, total: cov.total });
     } catch (e) {
       // Best-effort: empty the picker, but log so a failing glossary model isn't a silent dead end.
       console.warn('Context list refresh failed; clearing the context picker.', e);
       setContextOptions([]);
+      appStore.getState().setDocsCoverage({ documented: 0, total: 0 });
     }
   }
 
