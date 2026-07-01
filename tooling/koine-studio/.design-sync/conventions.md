@@ -1,61 +1,68 @@
 ## Koine Studio — how to build with this design system
 
-Koine Studio is the IDE for **Koine**, a DSL for Domain-Driven Design. This is a
-**token-first CSS design system**, not a component library: you style your own
-markup with the design tokens below. There are **no React/JS components to import** —
-build with plain HTML/JSX elements and Koine's CSS custom properties.
+Koine Studio is the IDE for **Koine**, a DSL for Domain-Driven Design. This sync gives you two things:
+**live React-mountable components** (the real Studio panels) and the **design tokens** they're built on.
 
-### Setup — no provider, just the stylesheet
-`styles.css` is the whole system; its `@import` closure loads the three brand fonts,
-every token, and the app's compiled component CSS. **No wrapper or provider is needed.**
-Theme: **dark is the default**. For light, set `data-theme="light"` on `<html>` —
-every `--koi-*` color token flips; nothing else changes.
+### Live components — `window.KoineStudio.*`
+The Studio's panels are authored in Preact; each is wrapped in a thin adapter so it mounts as a normal
+**React** component. Compose them like any React component:
 
-### The idiom — style with `var(--koi-*)`, never hardcoded values
-Reach for a token for every color, font, radius, space, and duration. The families
-(all real, defined in `tokens/tokens.css`):
+```jsx
+// plain-props panel
+<KoineStudio.DeckBar mode="focus" primary="visual" secondary={null}
+  onOverview={() => {}} onFocus={() => {}} onOpenBeside={() => {}} />
 
-| Family | Tokens | Use for |
-|---|---|---|
-| Surfaces | `--koi-paper` · `--koi-paper-2` · `--koi-surface` · `--koi-line` | page bg · raised panels · inputs · borders |
-| Text | `--koi-fg` · `--koi-muted` · `--koi-ink-soft` | primary · secondary · body ink |
-| Accent | `--koi-accent` · `--koi-on-accent` · `--koi-cyan` · `--koi-accent-grad` | primary accent, ink on it, secondary, signature gradient |
-| State | `--koi-error` · `--koi-on-error` | error surfaces |
-| Fonts | `--koi-font-display` · `--koi-font-body` · `--koi-font-mono` | headings · UI/body · code |
-| Radius | `--koi-radius-2xs·-xs·-sm` · `--koi-radius` (base 8px) · `--koi-radius-lg` · `--koi-radius-pill` | corners |
-| Spacing | `--koi-space-1` (4px) … `--koi-space-4-5` (18px) | padding / margin / gap |
-| Type ramp | `--koi-text-2xs` … `--koi-text-lg` (0.7–0.9rem, compact UI) | font-size |
-| Motion | `--koi-dur-fast·-base·-mid·-slow` (0.12–0.18s) | transitions |
-| Elevation | `--koi-shadow` | floating surfaces (dialogs, menus) |
-| Z-index | `--koi-z-sticky·-overlay·-modal·-popover` | stacking |
-| Syntax | `--koi-hl-keyword·-type·-string·-number·-comment·-punct` (+ `-regex·-meta`) | code coloring |
-| DDD hues | `--koi-ddd-aggregate·-entity·-value·-enum·-event·-service·-repository·-spec` (+ command/query/policy/factory/state-machine…) | one hue per DDD building block — use these when coloring domain concepts |
-| Language | `--lang-csharp·-typescript·-python·-php·-rust` | code-target brand badges |
+// store-bound panel: pass a Studio store + its data model
+const store = KoineStudio.createStore();          // an empty Studio store (zustand)
+<KoineStudio.GlossaryPanel store={store} model={glossaryModel} handlers={{ onGoto(){}, onSave(){} }} />
+```
 
-Reusable control classes ship in the compiled CSS (style forms with these, not from
-scratch): **`.koi-select` · `.koi-number` · `.koi-text` · `.koi-checkbox`** (accent
-focus ring, `--koi-surface` fill) and **`.koi-field-label`**.
+Two shapes, told apart by each component's `*.prompt.md` / `*.d.ts`:
+- **Plain-props** — pass data/callbacks directly: `DeckBar`, `DeckCard`, `ExportMenu`, `RightStrip`,
+  `AssistantView`, `SourceControlPanel`, plus zero-config scenes `DeckStage`, `LeftRail`.
+- **Store-bound** — pass `store={KoineStudio.createStore()}` **and** the panel's data prop(s) (`model`,
+  `index`, …): `GlossaryPanel`, `ModelOutlinePanel`, `PropertiesPanel`, `RelationshipsPanel`,
+  `EventsPanel`, `ContextBreadcrumb`, `DiagnosticsStripPanel`, `WorkspaceProblemsBadge`, `CanvasPalette`,
+  `DocsPanelHost`, `HistoryControls`, `StoreInspector`. The store carries UI state (active context,
+  selection, filter); the data prop carries the domain model.
 
-### Where the truth lives
-Read `tokens/tokens.css` (both themes, one file) before styling; `styles.css` is the
-entry. Every token family has a visual reference card under `components/tokens/`
-(Colors, Typography, DDD palette, Syntax highlighting, Radius, Spacing, Elevation,
-Language identity, Form controls) — open the matching `.html` to see real values.
+Also on the namespace: `KoineStudio.createStore()` (store factory) and `KoineStudio.DECK_SURFACES` (the
+Canvas/Code/Output/Docs surface descriptors). Each component ships a `<Name>.d.ts` (real prop contract)
+and a `<Name>.prompt.md` (usage) beside its preview card — **read those before composing a panel.**
+`SettingsPage` is a preview-only reference (it bundles a full editor) and is not on the namespace.
 
-### Idiomatic snippet
-```html
-<div style="
-  background: var(--koi-paper-2);
-  border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius);
-  padding: var(--koi-space-4);
-  box-shadow: var(--koi-shadow);
-  font-family: var(--koi-font-body);
-  color: var(--koi-fg);">
-  <h3 style="font-family: var(--koi-font-display); margin: 0 0 var(--koi-space-2)">Order</h3>
-  <span style="color: var(--koi-ddd-aggregate)">aggregate</span>
-  <button class="koi-select">Emit C#</button>
+### Setup
+`styles.css` is the whole styling system (fonts + tokens + the Studio's compiled component CSS via its
+`@import` closure). **No provider/wrapper is needed.** Dark is the default; set `data-theme="light"` on
+`<html>` for light — every color token flips.
+
+### Design tokens — style your own markup with `var(--koi-*)`
+Use a token for every color/font/space/radius (never hardcode). Families (defined in `tokens/tokens.css`):
+
+| Family | Tokens |
+|---|---|
+| Surfaces | `--koi-paper` · `--koi-paper-2` · `--koi-surface` · `--koi-line` |
+| Text | `--koi-fg` · `--koi-muted` · `--koi-ink-soft` |
+| Accent | `--koi-accent` · `--koi-on-accent` · `--koi-cyan` · `--koi-accent-grad` |
+| Fonts | `--koi-font-display` · `--koi-font-body` · `--koi-font-mono` |
+| Radius | `--koi-radius-2xs…-xs…-sm` · `--koi-radius` (8px) · `--koi-radius-lg` · `--koi-radius-pill` |
+| Spacing | `--koi-space-1` (4px) … `--koi-space-4-5` (18px) |
+| Type ramp | `--koi-text-2xs` … `--koi-text-lg` |
+| Motion | `--koi-dur-fast·-base·-mid·-slow` · Elevation `--koi-shadow` |
+| DDD hues | `--koi-ddd-aggregate·-entity·-value·-enum·-event·-service·-repository·-spec` (+ command/query/policy/…) |
+| Language | `--lang-csharp·-typescript·-python·-php·-rust` |
+
+Reusable control classes ship in the CSS: `.koi-select` · `.koi-number` · `.koi-text` · `.koi-checkbox`.
+The `Tokens` gallery cards (Colors, Typography, DDD palette, …) show every value.
+
+### Idiomatic snippet — a Studio-style screen from real panels + tokens
+```jsx
+const store = KoineStudio.createStore();
+<div style={{ display:'grid', gridTemplateColumns:'260px 1fr', gap:'var(--koi-space-3)',
+  background:'var(--koi-paper)', color:'var(--koi-fg)', fontFamily:'var(--koi-font-body)' }}>
+  <KoineStudio.ModelOutlinePanel store={store} model={outlineModel} handlers={handlers} />
+  <KoineStudio.DeckStage />
 </div>
 ```
-Prefer tokens over literals everywhere — that is what keeps a design on-brand and
+Prefer tokens over literals and real panels over re-implementations — that keeps a design on-brand and
 theme-aware for free.

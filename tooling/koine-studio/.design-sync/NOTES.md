@@ -2,75 +2,92 @@
 
 ## What this sync is
 
-A **tokens & visual-styles** sync to claude.ai/design project **Koine Studio**
-(`projectId` in `config.json`). NOT live components.
+A **live-component + tokens** sync to claude.ai/design project **Koine Studio**
+(`projectId` in `config.json`). It ships:
+- **Live React-mountable components** — the real Studio panels (Preact) exposed on
+  `window.KoineStudio.*` via a thin **Preact→React adapter** (`_ds_bundle.js`).
+- **Design tokens** — every `--koi-*` / `--lang-*` token + the 9 token gallery cards.
 
-**Why not components:** Koine Studio (`tooling/koine-studio`) is a **Preact**
-application (`@storybook/preact-vite`, `preact/compat` aliasing, zero `react`
-dependency), `"private": true`, no library `dist`/exports. The design-sync converter
-and the claude.ai/design runtime are **React 18 only** (`lib/bundle.mjs` externalizes
-`react`/`react-dom` to `window.React`; the string "preact" appears nowhere in the
-toolchain). Preact components return Preact vnodes React cannot render, so the
-converter's storybook/package shapes do not apply. The 22 `*.stories.tsx` are also
-app *panels* bound to the zustand domain store, not reusable UI primitives.
-Decision (approved by user 2026-07-01): sync the design foundation only. This bundle
-is therefore **hand-authored** (the skill's "upload format is the contract" escape
-hatch), not converter output — `config.json.shape` is the custom marker `"styles-only"`.
+Superset re-sync of the earlier tokens-only sync (that PR is #910). The token cards,
+`tokens/`, `fonts/`, `styles.css`, `_ds_bundle.css` are unchanged from that sync.
 
-## Rebuild recipe (fully deterministic)
+## Why an adapter (the Preact/React problem)
+
+Koine Studio is a **Preact** app; claude.ai/design's runtime and the design-sync
+converter are **React 18 only** (they render `window.<Global>.*` with React). A Preact
+component returns Preact vnodes React can't render. The adapter
+(`.ds-adapter/adapter.js`) wraps each Preact component in a real React function
+component: the outer wrapper uses the runtime's `window.React` for a host `<div>`, and
+inside a layout effect it renders the Preact tree into that host with preact's own
+`render()`. **Cross-boundary composition**: React `children` are bridged — React renders
+them into a detached DOM host that is spliced into the Preact tree — so slots work both
+ways. Proven end-to-end (store-bound + plain-props panels render under React 18, zero
+console errors).
+
+Key build detail mirrored from `.storybook/main.ts`: esbuild aliases `react` /
+`react-dom` → `preact/compat` and `react/jsx-runtime` → `preact/jsx-runtime`, so the
+panels' React-targeting deps (zustand's React hook) resolve to the single bundled preact
+instance. Without this the panels throw "Invalid hook call". The ONLY real React is the
+runtime's `window.React`, used by the adapter wrapper.
+
+## Toolchain (`.ds-adapter/`) + rebuild recipe
+
+Durable (committed): `adapter.js`, `card-runtime.js`, `stub-storybook-test.js`,
+`scan.mjs`, `gen.mjs`, `gen-docs.mjs`, `manifest-overrides.json`, `package.json`.
+Gitignored: `.ds-adapter/node_modules`, `.ds-adapter/manifest.json` (generated),
+`ds-bundle-live/` (build output), `.design-sync/sb-reference/`.
 
 From `tooling/koine-studio/`:
-
 ```bash
-npm ci                                   # sass-embedded + @fontsource-variable/*
-mkdir -p ds-bundle/tokens ds-bundle/fonts ds-bundle/components/tokens
-node .design-sync/ds-compile.mjs         # main.scss -> ds-bundle/_ds_bundle.css (then strip @charset line 1)
-node .design-sync/ds-cards.mjs           # -> ds-bundle/components/tokens/*/*.html
-# hand-maintained (committed under .design-sync/, copy into ds-bundle/):
-#   tokens/tokens.css, fonts/fonts.css + 3 latin woff2, styles.css, README.md, _ds_needs_recompile
+npm ci                                          # app deps (sass, fonts, preact)
+(cd .ds-adapter && npm i && npx playwright install chromium)   # esbuild + react 18 (for _vendor UMD)
+node .design-sync/ds-compile.mjs && sed -i '1{/^@charset/d}' ds-bundle/_ds_bundle.css   # tokens css
+node .design-sync/ds-cards.mjs                  # token gallery cards
+node .ds-adapter/scan.mjs                       # story manifest → .ds-adapter/manifest.json
+node .ds-adapter/gen.mjs                         # _ds_bundle.js + _preview/*.js + component cards (seeds ds-bundle-live from ds-bundle)
+node .ds-adapter/gen-docs.mjs                    # <Name>.d.ts + <Name>.prompt.md
+# verify: serve ds-bundle-live/ and screenshot cards; storybook reference is the oracle:
+#   npx storybook build -c .storybook -o .design-sync/sb-reference
 ```
+`gen.mjs` seeds `ds-bundle-live/` by copying `ds-bundle/` (the tokens bundle), then adds
+`_ds_bundle.js`, `_vendor/`, `_preview/`, and `components/<group>/<Name>/`.
 
-`ds-compile.mjs` strips nothing itself — the `@charset "UTF-8";` on line 1 of the
-compiled CSS must be removed before it is `@import`ed from `styles.css` (it's invalid
-inside an import). This sync did it with `sed -i '1{/^@charset/d}'`.
+## Roster (22 stories)
 
-`tokens/tokens.css`, `fonts/fonts.css`, `styles.css`, `README.md` are hand-authored,
-not generated. The authoritative token source is `src/styles/themes/{_dark,_light}.scss`
-+ `abstracts/_ddd.scss`. `tokens.css` is a curated copy of those — keep it in sync if
-the theme files change (see risk below). Fonts are the `latin-wght-normal.woff2` files
-from `node_modules/@fontsource-variable/{archivo,hanken-grotesk,jetbrains-mono}/files/`.
-
-`README.md` = `conventions.md` (via `readmeHeader`) + a gallery index, stitched by the
-`cat` in the sync (there is no converter to prepend it automatically).
+- **Adapted components (18)** on `window.KoineStudio`: all `*.stories.tsx` with a
+  `component:` in meta. Store-bound ones read UI state from a `store`
+  (`KoineStudio.createStore()`) and domain data from a `model`/`index` prop.
+- **Scenes (2)**: `DeckStage`, `LeftRail` — no standalone component; exposed as
+  zero-config scene components rendering their primary story.
+- **Card-only (1)**: `SettingsPage` — imperative CodeMirror factory; its 3MB bundle
+  would bloat `_ds_bundle.js` past the file cap, so it ships as a preview card only.
+- **Skipped (1)**: `UnsavedIndicator` — renders `null` (effect-driven host button).
+- Representative primary stories chosen in `manifest-overrides.json` (many "first"
+  stories are empty states).
 
 ## Upload
 
-Incremental path, plan writes = `components/** tokens/** fonts/** _ds_bundle.css
-styles.css README.md _ds_needs_recompile`. **No `_ds_sync.json` anchor** is shipped
-(honest choice for an off-script bundle — the converter's anchor format is
-component-oriented). Consequence: every re-sync re-verifies from scratch (re-run the
-recipe, re-screenshot cards, re-upload). `ds-bundle/` is gitignored build output.
+Atomic path (project pinned before the run). The build is a **superset** of the
+tokens sync, so reconciliation deletes = none. The project also carries user-added
+`Koine Logo.html` + `screenshots/` and app-generated `_ds_manifest.json` /
+`_adherence.oxlintrc.json` — **do not delete these** (leave the writes a superset, no
+deletes). No `_ds_sync.json` anchor (off-script bundle) — every re-sync re-verifies.
 
 ## Re-sync risks (watch-list)
 
-- **`tokens/tokens.css` is a hand-copy of `src/styles/themes/`.** If a `--koi-*` token
-  is added/renamed/recolored in the SCSS themes or `_ddd.scss`, it will NOT flow into
-  the sync automatically — update `tokens/tokens.css` AND the relevant gallery card in
-  `ds-cards.mjs` (and `LIGHT_SCOPE` there, which duplicates the light values for the
-  inline light panes). `_ds_bundle.css` IS regenerated from source each run, so the
-  component classes stay current; only the curated `tokens.css` + card data can drift.
-- **`.design-sync/ds-cards.mjs` `LIGHT_SCOPE`** duplicates the light-theme token values
-  so Colors/Syntax cards can show a light pane. Keep it equal to `tokens.css`'s light block.
-- **Fonts:** only the `latin` subset ships (3 woff2). Non-latin glyphs fall back. If the
-  app adds a weight axis beyond `wght`, revisit `fonts/fonts.css` ranges (Archivo/Hanken
-  100–900, JetBrains 100–800).
-- **`@charset` strip** must be re-applied every rebuild (sass re-emits it).
-- If Koine Studio ever ships a real **React** component library, redo this as a proper
-  converter sync (storybook shape) — this styles-only bundle is the interim.
-
-## Verification done this run
-
-All 9 cards rendered in a real browser (chromium) against a static server over
-`ds-bundle/`: fonts loaded (200), full `@import` closure resolved, both themes correct,
-`.koi-*` control classes styled from the compiled bundle. Screenshots reviewed for
-Colors, Typography, Syntax, DDD palette, Controls, Elevation, Radius.
+- **Bundle is not converter output.** `_ds_bundle.js` is hand-built via `.ds-adapter/`.
+  If a panel's imports change (new heavy/server-only dep), extend the `stubPlugin` filter
+  in `gen.mjs` (currently `@anthropic-ai/sdk`, `openai`, `node:*`).
+- **`react`→`preact/compat` alias is load-bearing** — if panels regress to blank with
+  "Invalid hook call", that alias broke.
+- **Story fixtures drive the cards.** A card renders its story's primary story with
+  preact; if a story's fixtures change, the card changes. Re-verify against a fresh
+  `.design-sync/sb-reference`.
+- **`import.meta` warnings** during `gen.mjs` are from wasm-host code pulled via the
+  store; those paths aren't hit at render time. Harmless unless a panel starts calling
+  `import.meta.env` at module scope.
+- **`.d.ts` referenced types are opaque** (StoreApi/AppState/model types are the app's).
+  The prop *shape* is faithful; the types don't resolve standalone.
+- **SettingsPage** is preview-only by size choice — revisit if the file cap changes.
+- Token-side risks from the tokens sync still apply: `tokens/tokens.css` is a hand-copy
+  of `src/styles/themes/`; `@charset` must be stripped each compile.

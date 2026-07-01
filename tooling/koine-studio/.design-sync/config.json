@@ -1,12 +1,16 @@
 {
   "projectId": "642ba9c8-8e59-4da0-9302-19535ce1556e",
-  "shape": "styles-only",
+  "shape": "adapter-live-components",
   "readmeHeader": ".design-sync/conventions.md",
-  "note": "Koine Studio is a Preact application (not a React component library), so it is outside the design-sync converter's React-only envelope. This is a hand-authored TOKENS & VISUAL-STYLES sync — no live components. See NOTES.md for the rebuild recipe.",
+  "note": "Koine Studio is a Preact app. This sync ships LIVE React-mountable components (the real Studio panels, exposed on window.KoineStudio via a thin Preact→React adapter) PLUS the design tokens. Off the design-sync converter's happy path; hand-built via .ds-adapter/. See NOTES.md for the adapter mechanism, rebuild recipe, and re-sync risks.",
   "build": {
-    "install": "npm ci",
-    "compileCss": "node .design-sync/ds-compile.mjs",
-    "cards": "node .design-sync/ds-cards.mjs",
-    "outDir": "ds-bundle"
+    "installApp": "npm ci",
+    "installAdapter": "cd .ds-adapter && npm i && npx playwright install chromium",
+    "tokensCss": "node .design-sync/ds-compile.mjs (then strip @charset line 1)",
+    "tokenCards": "node .design-sync/ds-cards.mjs",
+    "manifest": "node .ds-adapter/scan.mjs",
+    "bundleAndCards": "node .ds-adapter/gen.mjs",
+    "docs": "node .ds-adapter/gen-docs.mjs",
+    "outDir": "ds-bundle-live"
   }
 }

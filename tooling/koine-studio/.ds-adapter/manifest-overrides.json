@@ -1,0 +1,12 @@
+{
+  "UnsavedIndicator": { "skip": true, "reason": "renders null; drives an external DOM button via effects — no visual component to adapt" },
+  "DiagnosticsStripPanel": { "primary": "WithDiagnostics" },
+  "WorkspaceProblemsBadge": { "primary": "WithProblems" },
+  "CanvasPalette": { "primary": "ContextActive" },
+  "ExportMenu": { "primary": "Open" },
+  "PropertiesPanel": { "primary": "Selected" },
+  "AssistantView": { "primary": "WithAssistantContent" },
+  "StoreInspector": { "primary": "Populated" },
+  "HistoryControls": { "primary": "Enabled" },
+  "SourceControlPanel": { "primary": "CleanTree" }
+}
