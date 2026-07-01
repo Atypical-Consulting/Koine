@@ -19,18 +19,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # De-duplicated .NET setup (setup-dotnet -> NuGet cache) via the shared composite.
+      # The CLI pack never touches Koine.Wasm, so skip the wasm workloads.
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: ./.github/actions/setup-dotnet-wasm
         with:
-          dotnet-version: '10.0.x'
-          dotnet-quality: preview
-
-      - name: Cache NuGet
-        uses: actions/cache@v6
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
-          restore-keys: ${{ runner.os }}-nuget-
+          install-wasm-workloads: false
 
       - name: Pack CLI
         run: dotnet pack src/Koine.Cli/Koine.Cli.csproj -c Release -o ./artifacts

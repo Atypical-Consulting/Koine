@@ -211,33 +211,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: '10.0.x'
-          dotnet-quality: preview
-
-      - name: Cache NuGet
-        uses: actions/cache@v6
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
-          restore-keys: ${{ runner.os }}-nuget-
-
-      # The browser compiler is a .NET WebAssembly module; building it needs the wasm workloads.
-      - name: Cache wasm workloads
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.dotnet/sdk-manifests
-            ~/.dotnet/packs
-            ~/.dotnet/metadata
-            ~/.dotnet/sdk-advertising
-          key: ${{ runner.os }}-wasm-workloads-${{ hashFiles('Directory.Build.props') }}
-          restore-keys: ${{ runner.os }}-wasm-workloads-
-
-      - name: Install wasm workloads
-        run: dotnet workload install wasm-tools wasm-experimental
+      # The browser compiler is a .NET WebAssembly module; building it needs the wasm
+      # workloads. De-duplicated into the setup-dotnet-wasm composite (setup-dotnet ->
+      # NuGet cache -> wasm cache -> install wasm workloads).
+      - name: Setup .NET + wasm
+        uses: ./.github/actions/setup-dotnet-wasm
 
       - name: Setup Node
         uses: actions/setup-node@v6

@@ -30,45 +30,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # Mirror ci.yml's wasm toolchain so the scheduled job and the per-push job can't drift.
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v5
-        with:
-          # All projects target net10.0; pin the 10.0.x channel and allow preview
-          # builds in case the GA SDK is not yet on the runner image.
-          dotnet-version: '10.0.x'
-          dotnet-quality: preview
+      # Mirror ci.yml's wasm toolchain via the shared setup-dotnet-wasm composite
+      # (setup-dotnet -> NuGet cache -> wasm cache -> install wasm workloads) so the
+      # scheduled job and the per-push job can't drift.
+      - name: Setup .NET + wasm
+        uses: ./.github/actions/setup-dotnet-wasm
 
       # The smoke test runs under Node against the published AppBundle.
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: '24'
-
-      # The wasm workloads (emscripten + browser-wasm runtime pack) are slow to
-      # download; cache the SDK workload folders keyed on the SDK version.
-      - name: Cache wasm workloads
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.dotnet/sdk-manifests
-            ~/.dotnet/packs
-            ~/.dotnet/metadata
-            ~/.dotnet/sdk-advertising
-          key: ${{ runner.os }}-wasm-workloads-${{ hashFiles('Directory.Build.props') }}
-          restore-keys: ${{ runner.os }}-wasm-workloads-
-
-      - name: Install wasm workloads
-        run: dotnet workload install wasm-tools wasm-experimental
-
-      # No central package management / lock files, so cache the global NuGet
-      # package folder keyed on the project files that pin versions.
-      - name: Cache NuGet
-        uses: actions/cache@v6
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
-          restore-keys: ${{ runner.os }}-nuget-
 
       # AOT-publish the bundle the docs site actually deploys, then drive the WHOLE [JSExport]
       # surface against it under Node. -p:KoineWasmAot=true is the only flag that differs from ci.yml's
