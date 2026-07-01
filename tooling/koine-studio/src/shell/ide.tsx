@@ -66,6 +66,7 @@ import { HistoryControls } from '@/shell/HistoryControls';
 import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { CompilingIndicator } from '@/shell/CompilingIndicator';
 import { createEmitTargetControl } from '@/shell/emitTargetControl';
+import { createStatusBar } from '@/shell/statusBar';
 import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
 import { createWorkspaceController, type WorkspaceController } from '@/shell/workspaceController';
 import { createSearchPanel } from '@/shell/searchController';
@@ -839,6 +840,15 @@ export function init(hooks: IdeHooks = {}): () => void {
     getSettings: () => settings,
     setSettings: (s) => void (settings = s),
     applyEffectiveScoped,
+  });
+
+  // The status-bar reactive wiring (#923): the docs-coverage ring + emit echo panels, the Problems-tab
+  // click, and the git-branch segment. Extracted to keep init() thin (#757).
+  createStatusBar({
+    store: appStore,
+    platform,
+    folderRootToken: () => workspace.folderRootToken(),
+    onOpenProblems: () => controller.selectBottomTab('problems'),
   });
 
   // Switching files: repaint the active file's diagnostics, invalidate the doc views so they re-fetch,
