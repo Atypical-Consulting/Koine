@@ -238,7 +238,9 @@ A value object **scales** by a scalar — multiply in either operand order (`mon
 divide it down (`money / 2`) — and combines with another value of its **own type** through `+`/`-`,
 whether written directly (`fee + fee`) or via a `sum` fold (`lines.sum(...)`). But a bare scalar is never
 a valid `+`/`-` operand: `5.0 + money` or `money - 1` is a type mismatch (`KOI0215`), because there is no
-`value-object ± scalar` operation in any target. Use `*` or `/` to scale.
+`value-object ± scalar` operation in any target. Division is one-directional too: `money / 2` scales the
+value down, but `2 / money` is meaningless — a scalar cannot be divided *by* a value object — and is
+rejected the same way (`KOI0215`). Use `*` or `/` to scale.
 
 :::caution
 Operators are demand-driven, not exhaustive. If you want `Money / int` available to hand-written code, use
