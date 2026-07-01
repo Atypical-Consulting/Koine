@@ -27,7 +27,7 @@ export function HistoryControls(props: {
         onClick={() => props.onUndo()}
       >
         <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M6 4 2.5 7.5 6 11M2.5 7.5h6.5a4 4 0 0 1 0 8H8" />
+          <path d="M6.5 3 3.5 6l3 3M3.6 6H10a3.5 3.5 0 0 1 0 7H7" />
         </svg>
       </button>
       <button
@@ -40,7 +40,7 @@ export function HistoryControls(props: {
         onClick={() => props.onRedo()}
       >
         <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M10 4 13.5 7.5 10 11M13.5 7.5H7a4 4 0 0 0 0 8h1" />
+          <path d="M9.5 3 12.5 6l-3 3M12.4 6H6a3.5 3.5 0 0 0 0 7h3" />
         </svg>
       </button>
     </div>
