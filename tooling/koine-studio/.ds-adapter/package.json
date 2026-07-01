@@ -3,7 +3,7 @@
   "private": true,
   "description": "design-sync live-component toolchain for Koine Studio (Preact→React adapter). Run from koine-studio/. See ../.design-sync/NOTES.md.",
   "devDependencies": {
-    "esbuild": "^0.24.0",
+    "esbuild": "^0.28.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   }
