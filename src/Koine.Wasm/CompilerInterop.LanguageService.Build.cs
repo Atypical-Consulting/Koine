@@ -85,9 +85,11 @@ public static partial class CompilerInterop
 
             var files = DeserializeFiles(filesJson);
             var byUri = files.ToDictionary(f => f.Uri, f => f.Text, StringComparer.Ordinal);
-            var sources = files.Select(f => new SourceFile(f.Uri, f.Text)).ToList();
 
-            var result = Compiler.Compile(sources, emitter);
+            // Warm path (issue #464): reuse the reconciled snapshot so unchanged files keep their
+            // already-parsed units by reference — only the edited file re-parses. Byte-identical
+            // output to the cold Compile(sources, emitter) path (same content-addressed key).
+            var result = Compiler.Compile(GetWarmCompilation(files), emitter);
             var emittedFiles = result.Files
                 .Select(f => new WEmitFile(f.RelativePath, f.Contents))
                 .ToArray();

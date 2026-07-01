@@ -400,6 +400,61 @@ public class R17GbnfExportTests
         actual.Select(t => (t.Kind, t.Text)).ShouldBe(expected);
     }
 
+    // -------------------------------------------------------------------------
+    // Issue #448 — character-level engine: req_ws guards word-to-word boundaries.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Proves the GBNF cannot satisfy a word-to-word boundary with zero whitespace.
+    /// <para>
+    /// The token-based <see cref="GbnfMatcher"/> is whitespace-blind by construction:
+    /// <c>ws</c> is always mapped to the empty sequence because the tokeniser already
+    /// stripped whitespace.  A constrained decoder, however, operates character-by-character —
+    /// so with <c>ws ::= [ \t\r\n]*</c> (zero-or-more) it can legally emit <c>contextFoo</c>
+    /// as keyword "context" + empty ws + identifier "Foo".  The real lexer tokenises that as
+    /// the single identifier <c>contextFoo</c>, which then fails to parse.
+    /// </para>
+    /// <para>
+    /// This test uses <see cref="GbnfCharMatcher"/> — a character-level recogniser that does
+    /// NOT pre-tokenise — so the zero-whitespace merge is observable.  The test is <em>red</em>
+    /// against the original <c>ws = *</c> grammar (the character-level engine accepts the merge)
+    /// and turns <em>green</em> once <see cref="GbnfExporter"/> uses <c>req_ws</c> at every
+    /// word-to-word boundary (Task 2 of issue #448).
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void CharLevel_rejects_keyword_ident_merge_at_word_boundary()
+    {
+        string gbnf = GbnfExporter.Export();
+
+        // A deliberately token-merged variant: "context" immediately followed by "Foo" with
+        // no whitespace between them.  The real lexer would produce a single identifier
+        // "contextFoo" and the parser would fail; the GBNF must therefore reject this string.
+        const string merged = "contextFoo { value Money { amount: Decimal } }";
+        GbnfCharMatcher.Accepts(gbnf, merged)
+            .ShouldBeFalse(
+                "the GBNF must NOT accept \"contextFoo\" — the missing space makes it one " +
+                "identifier that the Koine parser cannot consume as a context declaration");
+
+        // Sanity: the correctly spaced form must still be accepted after the fix.
+        const string spaced = "context Foo { value Money { amount: Decimal } }";
+        GbnfCharMatcher.Accepts(gbnf, spaced)
+            .ShouldBeTrue("\"context Foo { ... }\" is valid Koine and must still be accepted");
+    }
+
+    /// <summary>
+    /// Verifies that the character-level GBNF engine itself is not vacuously green by confirming
+    /// that it correctly rejects a string the grammar has never had a rule for (a bare `{`).
+    /// </summary>
+    [Fact]
+    public void CharLevel_engine_rejects_foreign_input()
+    {
+        string gbnf = GbnfExporter.Export();
+
+        GbnfCharMatcher.Accepts(gbnf, "{ garbage }")
+            .ShouldBeFalse("a bare brace is not a valid Koine program and must be rejected");
+    }
+
     private static IEnumerable<string> RuleReferences(string body)
     {
         var stripped = new StringBuilder();

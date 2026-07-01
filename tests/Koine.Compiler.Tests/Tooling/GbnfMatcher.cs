@@ -184,11 +184,13 @@ internal static class GbnfMatcher
 
         private HashSet<int> MatchRef(string name, int pos, int depth)
         {
-            // The six lexer-terminal rules are matched by token kind, not by expanding their
-            // char-class bodies; `ws` matches the empty sequence at any position.
+            // The lexer-terminal rules are matched by token kind, not by expanding their
+            // char-class bodies; both `ws` and `req_ws` match the empty sequence at any token
+            // position because the tokeniser has already consumed all whitespace.
             switch (name)
             {
                 case "ws":
+                case "req_ws":
                     return new HashSet<int> { pos };
                 case "ident":
                     return Terminal(pos, TokenKind.Identifier);
@@ -243,7 +245,7 @@ internal static class GbnfMatcher
                 : throw new InvalidOperationException($"GBNF references undefined rule '{name}'");
 
         private static readonly HashSet<string> CharClassTerminals =
-            new() { "ident", "int", "decimal", "string", "regex", "ws" };
+            new() { "ident", "int", "decimal", "string", "regex", "ws", "req_ws" };
 
         public static GbnfGrammar Parse(string gbnf)
         {

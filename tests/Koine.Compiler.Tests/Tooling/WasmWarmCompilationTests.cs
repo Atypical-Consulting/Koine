@@ -1,3 +1,4 @@
+using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Services;
 
@@ -138,6 +139,154 @@ public class WasmWarmCompilationTests
         warm2.Fingerprint.ShouldBe(cold.Fingerprint);
         EmittedCSharp(warm2).ShouldBe(EmittedCSharp(cold));
         counter.ShouldBe(afterCreate, "a pure reorder (no content change) must re-parse nothing");
+    }
+
+    // ---- Task 1 (issue #464): Compile(KoineCompilation) overload == Compile(files) ---------------
+
+    /// <summary>
+    /// The new snapshot-accepting <see cref="KoineCompiler.Compile(KoineCompilation,Koine.Compiler.Emit.IEmitter)"/>
+    /// overload must return output byte-identical to the cold <c>Compile(files, emitter)</c> for the same
+    /// inputs — "warm == stateless" is the correctness guarantee of the incremental cache.
+    /// </summary>
+    [Fact]
+    public void WarmCompile_EqualsStatelessCompile_ForSameInputs()
+    {
+        var files = Workspace(SrcA, EditedB, SrcC);
+        var emitter = new CSharpEmitter();
+        var compiler = new KoineCompiler();
+
+        // Warm path: reconcile into a snapshot (simulates the second call after a keystroke) and
+        // feed it to the new Compile(KoineCompilation, …) overload.
+        var warm1 = KoineCompilation.Reconcile(null, Workspace(SrcA, SrcB, SrcC));
+        var warm2 = KoineCompilation.Reconcile(warm1, files);
+        var warmResult = compiler.Compile(warm2, emitter);
+
+        // Stateless path: cold Compile over the same files.
+        var coldResult = compiler.Compile(files, emitter);
+
+        // Emitted files: same paths and same contents.
+        var warmFiles = warmResult.Files.Select(f => $"{f.RelativePath}\n{f.Contents}").ToList();
+        var coldFiles = coldResult.Files.Select(f => $"{f.RelativePath}\n{f.Contents}").ToList();
+        warmFiles.ShouldBe(coldFiles);
+
+        // Diagnostics: same set.
+        var warmDiags = warmResult.Diagnostics
+            .Select(d => $"{d.Severity}|{d.Code}|{d.Line}:{d.Column}|{d.Message}")
+            .ToList();
+        var coldDiags = coldResult.Diagnostics
+            .Select(d => $"{d.Severity}|{d.Code}|{d.Line}:{d.Column}|{d.Message}")
+            .ToList();
+        warmDiags.ShouldBe(coldDiags);
+
+        // Success flag.
+        warmResult.Success.ShouldBe(coldResult.Success);
+    }
+
+    [Fact]
+    public void WarmCompile_WithFilterOptions_EqualsStatelessCompile()
+    {
+        var files = Workspace(SrcA, SrcB, SrcC);
+        var emitter = new CSharpEmitter();
+        var compiler = new KoineCompiler();
+        var filter = DiagnosticFilterOptions.None;
+
+        var warm = KoineCompilation.Reconcile(null, files);
+        var warmResult = compiler.Compile(warm, emitter, filter);
+        var coldResult = compiler.Compile(files, emitter, filter);
+
+        warmResult.Success.ShouldBe(coldResult.Success);
+        warmResult.Files.Count.ShouldBe(coldResult.Files.Count);
+    }
+
+    // ---- Task 2 (issue #464): WorkspaceSymbols/RefactorsAt KoineCompilation overloads ------------
+
+    [Fact]
+    public void WarmWorkspaceSymbols_EqualsStatelessDictOverload()
+    {
+        var files = Workspace(SrcA, SrcB, SrcC);
+        var docs = files.ToDictionary(f => f.Path, f => f.Source, StringComparer.Ordinal);
+        var svc = new KoineLanguageService();
+        var comp = KoineCompilation.Create(files);
+
+        var warm = svc.WorkspaceSymbols(comp, "");
+        var cold = svc.WorkspaceSymbols(docs, "");
+
+        var warmNames = warm.Select(s => $"{s.Kind}|{s.Name}|{s.Uri}").OrderBy(x => x).ToList();
+        var coldNames = cold.Select(s => $"{s.Kind}|{s.Name}|{s.Uri}").OrderBy(x => x).ToList();
+        warmNames.ShouldBe(coldNames);
+    }
+
+    [Fact]
+    public void WarmWorkspaceSymbols_Query_EqualsStateless()
+    {
+        var files = Workspace(SrcA, SrcB, SrcC);
+        var docs = files.ToDictionary(f => f.Path, f => f.Source, StringComparer.Ordinal);
+        var svc = new KoineLanguageService();
+        var comp = KoineCompilation.Create(files);
+
+        // "Sku" should match the value object in SrcA — both overloads must agree.
+        var warm = svc.WorkspaceSymbols(comp, "Sku");
+        var cold = svc.WorkspaceSymbols(docs, "Sku");
+
+        warm.Count.ShouldBe(cold.Count);
+        warm.Select(s => s.Name).ShouldBe(cold.Select(s => s.Name));
+    }
+
+    [Fact]
+    public void WarmRefactorsAt_EqualsStatelessDictOverload()
+    {
+        // A selection covering a field of a value object — may or may not surface "Extract value object"
+        // but the two overloads must always agree regardless.
+        var files = Workspace(SrcA, SrcB, SrcC);
+        var docs = files.ToDictionary(f => f.Path, f => f.Source, StringComparer.Ordinal);
+        var svc = new KoineLanguageService();
+        var comp = KoineCompilation.Create(files);
+
+        // 0-based: the "code" field on line 0 of SrcA.
+        var warm = svc.RefactorsAt(comp, UriA, 0, 20, 0, 30);
+        var cold = svc.RefactorsAt(docs, UriA, 0, 20, 0, 30);
+
+        warm.Select(a => a.Title).ShouldBe(cold.Select(a => a.Title));
+    }
+
+    // ---- Task 3 (issue #464): EmitKoine/ApplyEdit KoineCompilation overloads ---------------------
+
+    [Fact]
+    public void WarmEmitKoine_EqualsStatelessFilesOverload()
+    {
+        var files = Workspace(SrcA, SrcB, SrcC);
+        var comp = KoineCompilation.Create(files);
+
+        // Rename the "cents" member of Amount — a valid RenameMember edit over the test workspace.
+        var edit = new StructuredEdit(StructuredEditKind.RenameMember, "Payments.Amount.cents", "amount");
+
+        var warm = ModelRoundTripService.EmitKoine(comp, edit);
+        var cold = ModelRoundTripService.EmitKoine(files, edit);
+
+        // Both paths return the same koine text and the same diagnostics — warm == stateless.
+        warm.Koine.ShouldBe(cold.Koine);
+        warm.Diagnostics.Count.ShouldBe(cold.Diagnostics.Count);
+        // A valid rename over a valid workspace must succeed (non-null koine).
+        warm.Koine.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void WarmApplyEdit_EqualsStatelessFilesOverload()
+    {
+        var files = Workspace(SrcA, SrcB, SrcC);
+        var comp = KoineCompilation.Create(files);
+
+        // ChangeFieldType on the "cents" field of Amount — valid for this workspace.
+        var edit = new StructuredEdit(StructuredEditKind.ChangeFieldType, "Payments.Amount.cents", Type: "String");
+
+        var warm = ModelRoundTripService.ApplyEdit(comp, edit);
+        var cold = ModelRoundTripService.ApplyEdit(files, edit);
+
+        warm.Uri.ShouldBe(cold.Uri);
+        warm.Edits.Count.ShouldBe(cold.Edits.Count);
+        warm.Diagnostics.Count.ShouldBe(cold.Diagnostics.Count);
+        // A valid type change must produce a non-empty patch.
+        warm.Edits.Count.ShouldBeGreaterThan(0);
     }
 
     // ---- helpers --------------------------------------------------------------------------------

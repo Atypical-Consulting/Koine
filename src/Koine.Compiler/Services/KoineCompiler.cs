@@ -187,35 +187,57 @@ public sealed class KoineCompiler
     /// are the effective (remapped) set and <see cref="CompileResult.Success"/> is computed from them.
     /// With <see cref="DiagnosticFilterOptions.None"/> (the default) behaviour is unchanged.
     /// </summary>
-    public CompileResult Compile(IReadOnlyList<SourceFile> files, IEmitter emitter, DiagnosticFilterOptions filterOptions)
+    public CompileResult Compile(IReadOnlyList<SourceFile> files, IEmitter emitter, DiagnosticFilterOptions filterOptions) =>
+        Compile(KoineCompilation.Create(files), emitter, filterOptions);
+
+    /// <summary>
+    /// Runs the full pipeline over an already-built <see cref="KoineCompilation"/> snapshot through
+    /// the given emitter. This is the warm/incremental path (issue #464): the caller supplies the
+    /// pre-reconciled snapshot from <c>CompilerInterop.GetWarmCompilation</c> so the parse step is
+    /// skipped entirely for unchanged files. The returned <see cref="CompileResult"/> is byte-identical
+    /// to the cold <see cref="Compile(IReadOnlyList{SourceFile},IEmitter)"/> overload for the same inputs.
+    /// </summary>
+    public CompileResult Compile(KoineCompilation compilation, IEmitter emitter) =>
+        Compile(compilation, emitter, DiagnosticFilterOptions.None);
+
+    /// <summary>
+    /// Snapshot-accepting overload of
+    /// <see cref="Compile(IReadOnlyList{SourceFile},IEmitter,DiagnosticFilterOptions)"/>: runs
+    /// validation + emission over an already-built <see cref="KoineCompilation"/>, applying
+    /// <paramref name="filterOptions"/>. The emit-cache key (#71) is derived from the snapshot's
+    /// own ordered source list, so it is byte-identical to the cold path's key for the same inputs.
+    /// </summary>
+    public CompileResult Compile(KoineCompilation compilation, IEmitter emitter, DiagnosticFilterOptions filterOptions)
     {
-        var comp = KoineCompilation.Create(files);
+        // Derive the ordered source list from the snapshot so the #71 emit-cache key is identical
+        // to the key a cold Compile(files, …) would produce for the same source content.
+        var files = compilation.Uris.Select(uri => new SourceFile(uri, compilation.Documents[uri])).ToList();
 
         // Parsing is now error-tolerant and returns a partial model even for broken input, but the
         // emit path must NOT regress: syntax diagnostics are always carried forward, and broken
         // input never emits. If there is any syntax error, bail before semantic validation/emission
         // (the partial model is intentionally never emitted) — CompileResult.Success then stays
         // false because the syntax error is a DiagnosticSeverity.Error.
-        if (comp.SyntaxDiagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
+        if (compilation.SyntaxDiagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
         {
-            return new CompileResult(comp.Model, Filter(comp.SyntaxDiagnostics, filterOptions, files), Array.Empty<EmittedFile>());
+            return new CompileResult(compilation.Model, Filter(compilation.SyntaxDiagnostics, filterOptions, files), Array.Empty<EmittedFile>());
         }
 
         // Reuse the snapshot's single shared SemanticModel — build resolution once, reuse for
         // both validation and emission. Tell the validator which target this compile is for (issue
         // #495), so a target-aware check (KOI1007) can relax a collision the chosen target won't hit.
-        var semantic = CreateValidator().Validate(comp.SemanticModel, TargetsFor(emitter));
-        var diagnostics = Filter(Combine(comp.SyntaxDiagnostics, semantic), filterOptions, files);
+        var semantic = CreateValidator().Validate(compilation.SemanticModel, TargetsFor(emitter));
+        var diagnostics = Filter(Combine(compilation.SyntaxDiagnostics, semantic), filterOptions, files);
 
         // Success is computed from the *filtered* diagnostics (a config-promoted/warnings-as-errors
         // Error now blocks emit; a suppressed/dropped warning no longer does).
         if (diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
         {
-            return new CompileResult(comp.Model, diagnostics, Array.Empty<EmittedFile>());
+            return new CompileResult(compilation.Model, diagnostics, Array.Empty<EmittedFile>());
         }
 
-        var emitted = EmitCached(files, emitter, comp);
-        return new CompileResult(comp.Model, diagnostics, emitted);
+        var emitted = EmitCached(files, emitter, compilation);
+        return new CompileResult(compilation.Model, diagnostics, emitted);
     }
 
     /// <summary>

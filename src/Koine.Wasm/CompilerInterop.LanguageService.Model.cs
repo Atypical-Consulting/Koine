@@ -163,13 +163,13 @@ public static partial class CompilerInterop
     {
         try
         {
-            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
             if (DeserializeEdit(editJson) is not { } edit)
             {
                 return JsonSerializer.Serialize(new WEmitKoineResult(null, []), LangJson.Default.WEmitKoineResult);
             }
 
-            EmitResult result = ModelRoundTripService.EmitKoine(sources, edit);
+            // Warm path (issue #464): reuse the reconciled snapshot so unchanged files skip re-parse.
+            EmitResult result = ModelRoundTripService.EmitKoine(GetWarmCompilation(DeserializeFiles(filesJson)), edit);
             var dto = new WEmitKoineResult(result.Koine, result.Diagnostics.Select(MapRoundTripDiagnostic).ToArray());
             return JsonSerializer.Serialize(dto, LangJson.Default.WEmitKoineResult);
         }
@@ -189,13 +189,13 @@ public static partial class CompilerInterop
     {
         try
         {
-            var sources = DeserializeFiles(filesJson).Select(f => new SourceFile(f.Uri, f.Text)).ToList();
             if (DeserializeEdit(editJson) is not { } edit)
             {
                 return JsonSerializer.Serialize(new WApplyModelEditResult(null, [], []), LangJson.Default.WApplyModelEditResult);
             }
 
-            ModelEditResult result = ModelRoundTripService.ApplyEdit(sources, edit);
+            // Warm path (issue #464): reuse the reconciled snapshot so unchanged files skip re-parse.
+            ModelEditResult result = ModelRoundTripService.ApplyEdit(GetWarmCompilation(DeserializeFiles(filesJson)), edit);
             var edits = result.Edits.Select(e => new WTextEdit(SpanRange(e.Range), e.NewText)).ToArray();
             var dto = new WApplyModelEditResult(result.Uri, edits, result.Diagnostics.Select(MapRoundTripDiagnostic).ToArray());
             return JsonSerializer.Serialize(dto, LangJson.Default.WApplyModelEditResult);
