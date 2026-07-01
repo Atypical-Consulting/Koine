@@ -61,7 +61,7 @@ Create a task per item and work them in order. Step 6 is the loop — one pass p
 2. **Read the plan** — fetch the `🛠️ Implementation plan` from the issue body (or a comment, on older issues); save it and note where it lives.
 3. **Pick the execution mode** — assess complexity → *Inline (Extra)* or *Subagent-per-task (Ultracode)*.
 4. **Create the worktree** — via `superpowers:using-git-worktrees`; branch off `main`.
-5. **Open the draft PR** — empty scaffold commit, push, `gh pr create --draft` linking the issue; PR title ends with `(#<issue>)`.
+5. **Open the draft PR** — empty scaffold commit, push, `gh pr create --draft` linking the issue; PR title carries a Conventional Commits prefix (`fix:`/`feat:`/…, CI-enforced) and ends with `(#<issue>)`.
 6. **Loop until every task is checked** — implement the next unchecked task → verify green → commit → tick that task on the issue plan *and* the PR description → push.
 7. **Code review** — run the `code-review` skill, apply + commit the fixes, push.
 8. **Sync with `main`** — merge the latest `origin/main` into the branch and resolve conflicts per the profile's *Conflict hot-spots* (version, changelog, snapshots, lockfiles — see reference).
@@ -150,18 +150,36 @@ worktree/branch for this issue already exists (resume case), reuse it.
 The PR should be visible as a **draft before** the implementation loop. A PR needs the branch ahead of
 `main`, so land an empty scaffold commit, push, then open it.
 
-**The PR title must end with `(#<issue>)`** — the issue title followed by the issue number, e.g.
-`Surface the Rust emitter target in the IDE (#172)`. When the profile's *Integration style* is
-squash-merge, GitHub appends the *PR* number to the squash commit's title — so titling with the *issue*
-number makes the final `main` commit carry **both** (`… (#254) (#274)` — issue first, PR second). Drop
-it and the merged commit records only the PR number, losing the link to the issue.
+**The PR title needs a Conventional Commits prefix _and_ a `(#<issue>)` suffix** — two independent
+constraints, both enforced, e.g. `feat(studio): surface the Rust emitter target in the IDE (#172)`.
+
+- **Prefix** — start with `<type>[(scope)]: `, where `<type>` is one of
+  `feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert`. CI's `pr-title-lint`
+  (`amannn/action-semantic-pull-request`, `.github/workflows/pr-title-lint.yml`) rejects the PR
+  otherwise, and because the repo squash-merges, the PR title *becomes* the commit on `main` that
+  `release-please` parses to cut the next version — a bare title produces no release
+  (see [ADR 0002](../../adr/0002-conventional-commits-and-automated-semver.md)). **Issue titles are not
+  conventional** — "PHP emitter: WriteAsDecimal fallthrough…" reads like a scope but `PHP emitter` is not
+  a valid *type* — so supply the prefix yourself; never pass the issue title through verbatim.
+- **Suffix** — end with `(#<issue>)`, the *issue* number. When the profile's *Integration style* is
+  squash-merge, GitHub appends the *PR* number to the squash commit's title — so titling with the *issue*
+  number makes the final `main` commit carry **both** (`… (#254) (#274)` — issue first, PR second). Drop
+  it and the merged commit records only the PR number, losing the link to the issue.
+
+Pick the **type** from the change, not a guess: the issue's type label maps cleanly (`bug` → `fix`,
+`enhancement` → `feat`); otherwise read the plan (docs-only → `docs`, a pure refactor → `refactor`,
+tests-only → `test`, build/CI plumbing → `build`/`ci`). Add an optional **scope** matching the ones
+already in `git log` for the touched area (`emit-cs`, `emit-php`, `gbnf`, `wasm`, `operator-needs`, …).
+Then write a concise imperative **subject** that summarizes the fix rather than echoing the issue's
+symptom wording — so the example issue becomes e.g.
+`fix(emit-php): parenthesise new-chaining for Int members in WriteAsDecimal (#849)`.
 
 ```bash
 git <commit-identity> \
   commit --allow-empty -m "chore(#$ISSUE): scaffold draft PR for <title>"
 git push -u origin <branch>
 gh pr create --draft --base main --head <branch> \
-  --title "<title> (#$ISSUE)" \
+  --title "<type>(<scope>): <subject> (#$ISSUE)" \
   --body "Implements #$ISSUE.
 
 Closes #$ISSUE.

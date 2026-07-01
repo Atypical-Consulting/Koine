@@ -39,7 +39,7 @@ them exactly as the repo uses them.
 
 ## Integration style
 - **Merge mode:** <squash | merge | rebase>
-- **PR title convention:** <e.g. "title ends in (#issue); squash appends (#PR) → (#issue) (#PR)">
+- **PR title convention:** <note any Conventional Commits / semantic-PR-title CI gate (e.g. `feat:`/`fix:` prefix required — check `.github/workflows/` for `semantic-pull-request`) AND the issue/PR number shape, e.g. "prefix `<type>(scope):` required; title ends in (#issue); squash appends (#PR)">
 - **Branch naming:** <e.g. feat/<issue>-<slug>>
 
 ## Labels (apply verbatim; read live before use, this is a snapshot)
@@ -109,7 +109,10 @@ What detection produces for this repo, as a reference for the field values' grai
 
 ## Integration style
 - **Merge mode:** squash
-- **PR title convention:** title ends in `(#issue)`; squash appends `(#PR)` → `… (#issue) (#PR)`
+- **PR title convention:** Conventional Commits prefix `<type>(scope):` required (CI `pr-title-lint.yml` /
+  `semantic-pull-request`; feeds `release-please`, ADR 0002) — derive from issue label (`bug`→`fix`,
+  `enhancement`→`feat`), don't reuse the issue title verbatim; title also ends in `(#issue)`; squash
+  appends `(#PR)` → `<type>(scope): subject (#issue) (#PR)`
 - **Branch naming:** `feat/<issue>-<slug>`
 
 ## Labels
