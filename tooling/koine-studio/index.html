@@ -293,8 +293,9 @@
         </button>
         <!-- Active bounded context (single home; the top-bar breadcrumb strip was removed in #923). -->
         <span class="sb-seg sb-ctx" id="sb-context">Context: —</span>
-        <!-- Docs coverage ring (glossary documentation, #923): the <DocsCoverageRing> panel renders here. -->
-        <span class="sb-seg" id="sb-docs-ring"></span>
+        <!-- Docs coverage ring (glossary documentation, #923): a transparent host (display:contents) — the
+             <DocsCoverageRing> panel renders its own .sb-ring segment inside it, like the other panel hosts. -->
+        <span id="sb-docs-ring"></span>
         <!-- Workspace-wide problems rollup (every file, not just the active one). Empty when clean;
              the <WorkspaceProblemsBadge> Preact panel renders its span in here. -->
         <span id="sb-problems-host"></span>
