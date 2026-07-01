@@ -308,7 +308,6 @@ const APP_HTML = `
           <button type="button" id="btn-prefs" class="icon-btn">prefs</button>
           <button type="button" id="btn-toolbar-overflow" class="icon-btn" aria-haspopup="menu" aria-expanded="false" hidden>⋮</button>
           <div id="status" role="status" aria-live="polite"></div>
-          <button type="button" id="unsaved-indicator" class="unsaved-indicator" hidden></button>
         </div>
       </header>
       <main id="split">
@@ -389,13 +388,19 @@ const APP_HTML = `
         <div id="right-strip" class="pane" role="toolbar" aria-label="Tool windows" aria-orientation="vertical"></div>
       </main>
       <footer id="statusbar">
-        <span class="sb-item" id="sb-context">Context: —</span>
-        <span class="sb-item" id="sb-validity">No errors</span>
+        <button type="button" class="sb-seg" id="sb-branch" hidden><span data-role="branch-name"></span></button>
+        <button type="button" class="sb-seg" id="sb-problems"><span class="sb-err" id="sb-problems-errors">✕ 0</span><span class="sb-warn" id="sb-problems-warnings">⚠ 0</span></button>
+        <span class="sb-seg sb-ctx" id="sb-context">Context: —</span>
+        <span class="sb-seg" id="sb-docs-ring"></span>
         <span id="sb-problems-host"></span>
+        <button type="button" id="unsaved-indicator" class="unsaved-indicator" hidden></button>
         <span class="sb-spacer"></span>
         <span id="sb-compiling-host"></span>
-        <span class="sb-item" id="sb-connection">Connecting…</span>
-        <span class="sb-item" id="sb-version"></span>
+        <span class="sb-seg sb-emit" id="sb-emit"></span>
+        <span class="sb-seg static" id="sb-cursor">Ln 1, Col 1</span>
+        <span class="sb-seg static" id="sb-encoding">UTF-8</span>
+        <span class="sb-seg sb-ready" id="sb-connection">Connecting…</span>
+        <span class="sb-seg static" id="sb-version"></span>
       </footer>
       <nav id="mobile-zone-bar-host" aria-label="Studio zone switcher"></nav>
       <div id="inspector-sheet-host"></div>

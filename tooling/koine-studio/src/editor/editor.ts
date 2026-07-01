@@ -811,6 +811,9 @@ export interface KoineEditorOptions {
   parent: HTMLElement;
   doc: string;
   onChange?: (doc: string) => void;
+  /** Fires with the 1-based caret line/column on every edit or selection move — feeds the status-bar
+   *  cursor segment (#923). Not debounced; a plain textContent write per move is cheap. */
+  onCursor?: (line: number, col: number) => void;
   /** Soft-wrap long lines on first paint (later toggled via KoineEditor.setLineWrap). */
   lineWrap?: boolean;
   /** Show the document-overview minimap on first paint (later toggled via KoineEditor.setMinimap). */
@@ -1309,6 +1312,13 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
           // unchanged.
           if ((u.docChanged || u.selectionSet) && u.view.hasFocus && isNarrow) {
             scheduleCaretReveal();
+          }
+          // Status-bar cursor segment (#923): report the 1-based caret line/column on any edit or
+          // selection move. The main range's head is the caret; column is the 0-based in-line offset + 1.
+          if ((u.docChanged || u.selectionSet) && opts.onCursor) {
+            const head = u.state.selection.main.head;
+            const ln = u.state.doc.lineAt(head);
+            opts.onCursor(ln.number, head - ln.from + 1);
           }
         }),
       ],

@@ -23,7 +23,9 @@ const SESSION_HTML = `
   <span id="diag-count"></span>
   <div id="diag-body"></div>
   <span id="sb-connection"></span>
-  <span id="sb-validity"></span>`;
+  <span id="sb-problems-errors"></span>
+  <span id="sb-problems-warnings"></span>
+  <span id="sb-cursor"></span>`;
 
 function seedDom(): void {
   document.body.innerHTML = SESSION_HTML;
@@ -85,7 +87,9 @@ function makeDeps(lsp: Lsp, overrides: Partial<EditorSessionDeps> = {}): EditorS
     diagCount: domById('diag-count'),
     diagBody: domById('diag-body'),
     sbConnection: domById('sb-connection'),
-    sbValidity: domById('sb-validity'),
+    sbProblemsErrors: domById('sb-problems-errors'),
+    sbProblemsWarnings: domById('sb-problems-warnings'),
+    sbCursor: domById('sb-cursor'),
     activeUri: () => ACTIVE,
     uriLabel: (uri) => uri.split('/').pop() ?? uri,
     onNavigate: vi.fn(),
@@ -152,9 +156,10 @@ describe('createEditorSession — diagnostics for the active uri', () => {
     // Status pill goes red with the error/warning summary.
     expect(domById('status').dataset.kind).toBe('error');
     expect(domById('status').textContent).toBe('1 error / 1 warning');
-    // Status-bar mirrors track the same counts.
-    expect(domById('sb-validity').textContent).toBe('1 error');
-    expect(domById('sb-validity').dataset.kind).toBe('error');
+    // Status-bar problems split (#923) tracks the same counts: ✕ reddens with errors, ⚠ shows warnings.
+    expect(domById('sb-problems-errors').textContent).toBe('✕ 1');
+    expect(domById('sb-problems-errors').classList.contains('has')).toBe(true);
+    expect(domById('sb-problems-warnings').textContent).toBe('⚠ 1');
 
     // diagnosticsFor exposes the cached active diagnostics for downstream readers.
     expect(session.diagnosticsFor(ACTIVE).length).toBe(2);
@@ -171,8 +176,9 @@ describe('createEditorSession — diagnostics for the active uri', () => {
     expect(domById('diag-count').dataset.kind).toBe('clean');
     expect(domById('status').textContent).toBe('green ✓');
     expect(domById('status').dataset.kind).toBe('green');
-    expect(domById('sb-validity').textContent).toBe('No errors');
-    expect(domById('sb-validity').dataset.kind).toBe('ok');
+    expect(domById('sb-problems-errors').textContent).toBe('✕ 0');
+    expect(domById('sb-problems-errors').classList.contains('has')).toBe(false);
+    expect(domById('sb-problems-warnings').textContent).toBe('⚠ 0');
     expect(domById('diag-body').querySelector('.diag-empty')!.textContent).toBe('No diagnostics.');
   });
 });
@@ -281,16 +287,19 @@ describe('createEditorSession — status + server exit', () => {
     expect(domById('sb-connection').textContent).toBe('');
   });
 
-  test('the connection mirror tracks the LSP lifecycle: a server push reads Local, an exit reads Offline', () => {
+  test('the connection mirror tracks the LSP lifecycle: a server push reads Ready, an exit reads Offline', () => {
     const lsp = makeLsp();
     newSession(makeDeps(lsp));
 
-    // A diagnostics push WITH a warning still proves the service is live → "Local" (not "Offline").
+    // A diagnostics push WITH a warning still proves the service is live → "Ready" (not "Offline").
+    // (Chrome v2, #923 relabelled the online state from "Local" to "Ready".)
     act(() => lsp.firePublish(ACTIVE, [warn(0, 'meh')]));
-    expect(domById('sb-connection').textContent).toBe('Local');
+    expect(domById('sb-connection').textContent).toBe('Ready');
+    expect(domById('sb-connection').dataset.state).toBe('online');
 
     act(() => lsp.fireExit(1));
     expect(domById('sb-connection').textContent).toBe('Offline');
+    expect(domById('sb-connection').dataset.state).toBe('offline');
   });
 
   test('a server exit surfaces an error in the pill', () => {

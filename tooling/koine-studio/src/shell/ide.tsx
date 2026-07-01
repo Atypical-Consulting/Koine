@@ -216,11 +216,13 @@ export function init(hooks: IdeHooks = {}): () => void {
   // Bottom status-bar fields — a pure projection of existing state (no new data sources). Per the
   // single-home contract (docs/shell-bars-contract.md, #756): #sb-connection is the SOLE connection
   // indicator (driven by setConnection over the LSP lifecycle), NOT a mirror of the topbar #status pill
-  // — that pill is transient action-feedback only. #sb-validity by the diagnostics strip, and
-  // #sb-version once at boot from the build-time define. (#sb-context is written by the inspector
-  // controller's bounded-context switcher.)
+  // — that pill is transient action-feedback only. The #sb-problems split + #sb-cursor are driven by the
+  // diagnostics strip / editor (chrome v2, #923), and #sb-version once at boot from the build-time define.
+  // (#sb-context is written by the inspector controller's bounded-context switcher.)
   const sbConnEl = domById('sb-connection');
-  const sbValidityEl = domById('sb-validity');
+  const sbProblemsErrEl = domById('sb-problems-errors');
+  const sbProblemsWarnEl = domById('sb-problems-warnings');
+  const sbCursorEl = domById('sb-cursor');
   domById('sb-version').textContent = `v${__APP_VERSION__}`;
 
   // Global unsaved-work surfacing: the document title gains a `•` and a clickable "N unsaved" pill
@@ -251,8 +253,8 @@ export function init(hooks: IdeHooks = {}): () => void {
     appStore.getState().setActiveUri(workspace.activeUri());
   }
 
-  // Workspace-wide problems rollup beside #sb-validity (which is active-file only): a status-bar badge
-  // summarising every file's diagnostics, hidden while the workspace is clean. Subscribes to the
+  // Workspace-wide problems rollup beside the #sb-problems split (which is active-file only): a status-bar
+  // badge summarising every file's diagnostics, hidden while the workspace is clean. Subscribes to the
   // diagnostics slice, so the LSP publish path keeps it current with no extra wiring.
   render(<WorkspaceProblemsBadge store={appStore} />, domById('sb-problems-host'));
 
@@ -375,7 +377,9 @@ export function init(hooks: IdeHooks = {}): () => void {
     diagCount: diagCountEl,
     diagBody: diagBodyEl,
     sbConnection: sbConnEl,
-    sbValidity: sbValidityEl,
+    sbProblemsErrors: sbProblemsErrEl,
+    sbProblemsWarnings: sbProblemsWarnEl,
+    sbCursor: sbCursorEl,
     activeUri: () => workspace.activeUri(),
     uriLabel: (uri) => workspace.buffers.get(uri)?.relPath ?? basename(uri),
     onNavigate: (loc) => navigateToDefinition(loc),

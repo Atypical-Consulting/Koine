@@ -87,8 +87,12 @@ export interface EditorSessionDeps {
   diagBody: HTMLElement;
   /** Status-bar connection mirror (#sb-connection). */
   sbConnection: HTMLElement;
-  /** Status-bar validity mirror (#sb-validity). */
-  sbValidity: HTMLElement;
+  /** Status-bar problems split (#923): the active file's error / warning counts (#sb-problems-errors /
+   *  #sb-problems-warnings), replacing the old single #sb-validity readout. */
+  sbProblemsErrors: HTMLElement;
+  sbProblemsWarnings: HTMLElement;
+  /** Status-bar cursor position mirror (#sb-cursor). */
+  sbCursor: HTMLElement;
 
   /** The uri the editor currently shows / all LSP requests target (read live from ide.ts). */
   activeUri(): string;
@@ -223,6 +227,10 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
       lsp.changeDoc(deps.activeUri(), doc);
       downstreamOnChange?.(doc, deps.activeUri());
     },
+    // Status-bar cursor segment (#923): mirror the caret's 1-based line/column on every edit/selection.
+    onCursor: (line, col) => {
+      deps.sbCursor.textContent = `Ln ${line}, Col ${col}`;
+    },
     onHover: hover,
     onCompletion: completion,
     onDefinition: (line, character) => lsp.definition(line, character),
@@ -292,8 +300,11 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   // transient action toasts must NOT drive it — a model with a warning is still a live, local session
   // (the old code mirrored the pill's `kind` here, so any warning or error toast falsely read "Offline").
   function setConnection(state: 'connecting' | 'online' | 'offline'): void {
+    // Chrome v2 (#923): the online state reads "Ready" with a green dot (the compiler/LSP is up). The
+    // data-state drives the dot colour in _statusbar.scss; the text stays the single connection home (#756).
     deps.sbConnection.textContent =
-      state === 'connecting' ? 'Connecting…' : state === 'offline' ? 'Offline' : 'Local';
+      state === 'connecting' ? 'Connecting…' : state === 'offline' ? 'Offline' : 'Ready';
+    deps.sbConnection.dataset.state = state;
   }
 
   // The strip ROWS + their count text now live in the DiagnosticsStripPanel (mounted into #diag-body
@@ -302,15 +313,13 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   // mirror (#sb-validity). Both summarise the active file's diagnostics with the exact strings used
   // before the migration.
   function renderStrip(diags: LspDiagnostic[]): void {
-    const { errors, kind, parts } = diagnosticsSummary(diags);
-    // Status-bar validity: a plain-language read of the same error count that feeds #diag-count.
-    if (errors) {
-      deps.sbValidity.textContent = errors === 1 ? '1 error' : `${errors} errors`;
-      deps.sbValidity.dataset.kind = 'error';
-    } else {
-      deps.sbValidity.textContent = 'No errors';
-      deps.sbValidity.dataset.kind = 'ok';
-    }
+    const { errors, warnings, kind, parts } = diagnosticsSummary(diags);
+    // Status-bar problems split (#923): the SAME active-file counts that feed #diag-count, shown as a
+    // colour-coded ✕ errors / ⚠ warnings pair. The `.has` flag flips ✕ from muted to the error hue when
+    // errors > 0; ⚠ is always amber (styled in _statusbar.scss). Warnings alone never redden ✕.
+    deps.sbProblemsErrors.textContent = `✕ ${errors}`;
+    deps.sbProblemsErrors.classList.toggle('has', errors > 0);
+    deps.sbProblemsWarnings.textContent = `⚠ ${warnings}`;
     if (kind === 'clean') {
       deps.diagCount.textContent = 'clean';
       deps.diagCount.dataset.kind = 'clean';

@@ -4,8 +4,8 @@
 // fact so a new indicator can't silently drift into the wrong one (or get mirrored into both), the
 // failure mode #756 was opened to prevent:
 //
-//   • Status bar (#statusbar) owns PERSISTENT AMBIENT STATE read passively — context, validity,
-//     problems, compiling/busy, connection, version.
+//   • Status bar (#statusbar) owns PERSISTENT AMBIENT STATE read passively — branch, problems (split
+//     ✕/⚠), context, docs coverage, compiling/busy, emit echo, cursor, encoding, connection, version.
 //   • Topbar (#toolbar) owns ACTIONS + the transient #status action-feedback pill (the last-action
 //     toast: Saved / Renamed X→Y / errors). #status is NOT a connection indicator.
 //   • One home per fact — nothing is mirrored across both bars.
@@ -28,10 +28,15 @@ beforeAll(() => {
 // from the toolbar): no other suite asserts its bar membership, so this guard is the single home for
 // that invariant too.
 const STATUS_BAR_ITEMS = [
+  'sb-branch',
+  'sb-problems',
   'sb-context',
-  'sb-validity',
+  'sb-docs-ring',
   'sb-problems-host',
   'sb-compiling-host',
+  'sb-emit',
+  'sb-cursor',
+  'sb-encoding',
   'sb-connection',
   'sb-version',
   'unsaved-indicator',

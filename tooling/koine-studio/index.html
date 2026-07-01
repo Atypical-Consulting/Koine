@@ -278,22 +278,44 @@
            connection indicator (not a mirror of the topbar #status pill — that pill is transient
            action-feedback). One home per fact; urgency escalates an item in place, never mirrored up. -->
       <footer id="statusbar" aria-label="Model status">
-        <span class="sb-item" id="sb-context">Context: —</span>
-        <span class="sb-item" id="sb-validity">No errors</span>
+        <!-- Branch (chrome v2, #923): the workspace's git branch. The <BranchIndicator> panel fills the
+             name and reveals it once a git folder reports a branch (hidden otherwise). -->
+        <button type="button" class="sb-seg" id="sb-branch" title="Current git branch" hidden>
+          <svg class="sb-ico" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="4" r="1.6" /><circle cx="5" cy="12" r="1.6" /><circle cx="11" cy="6.4" r="1.6" /><path d="M5 5.6v4.8M5 8.6h3.6a2 2 0 0 0 2-2v-.6" /></svg>
+          <span data-role="branch-name"></span>
+        </button>
+        <!-- Problems (active file), split ✕ errors / ⚠ warnings, colour-coded; opens the Problems tab.
+             editorSession fills the two counts from the same diagnosticsSummary the strip uses (#923,
+             replacing the old single "No errors" #sb-validity readout). -->
+        <button type="button" class="sb-seg" id="sb-problems" title="Open the Problems tab">
+          <span class="sb-err" id="sb-problems-errors">✕ 0</span>
+          <span class="sb-warn" id="sb-problems-warnings">⚠ 0</span>
+        </button>
+        <!-- Active bounded context (single home; the top-bar breadcrumb strip was removed in #923). -->
+        <span class="sb-seg sb-ctx" id="sb-context">Context: —</span>
+        <!-- Docs coverage ring (glossary documentation, #923): the <DocsCoverageRing> panel renders here. -->
+        <span class="sb-seg" id="sb-docs-ring"></span>
         <!-- Workspace-wide problems rollup (every file, not just the active one). Empty when clean;
-             the <WorkspaceProblemsBadge> Preact panel renders its sb-item span in here. -->
+             the <WorkspaceProblemsBadge> Preact panel renders its span in here. -->
         <span id="sb-problems-host"></span>
         <!-- Global unsaved-work indicator (#193): the clickable "N unsaved" pill that triggers Save-all.
-             Lives in the status bar beside validity/problems so every passive model-state signal shares
-             one home (it formerly sat top-right in the toolbar). Still the <UnsavedIndicator> Preact
-             panel's element — the `el('unsaved-indicator')` mount and its tests are unchanged by the move. -->
+             Still the <UnsavedIndicator> Preact panel's element — the `el('unsaved-indicator')` mount and
+             its tests are unchanged. -->
         <button type="button" id="unsaved-indicator" class="unsaved-indicator" hidden></button>
         <span class="sb-spacer"></span>
         <!-- Transient "compiling…" indicator (#516): the <CompilingIndicator> Preact panel renders its
-             aria-live sb-item span in here while a compile is in flight (debounced), hidden when idle. -->
+             aria-live span in here while a compile is in flight (debounced), hidden when idle. -->
         <span id="sb-compiling-host"></span>
-        <span class="sb-item" id="sb-connection">Connecting…</span>
-        <span class="sb-item" id="sb-version"></span>
+        <!-- Emit target echo (#923): mirrors the top-bar selector's value. The <EmitEcho> panel renders here. -->
+        <span class="sb-seg sb-emit" id="sb-emit"></span>
+        <!-- Cursor position (#923): editorSession writes Ln/Col from the editor selection. -->
+        <span class="sb-seg static" id="sb-cursor">Ln 1, Col 1</span>
+        <!-- Encoding (#923): .koi files are UTF-8. -->
+        <span class="sb-seg static" id="sb-encoding">UTF-8</span>
+        <!-- Ready / connection — the SOLE connection indicator (#756). editorSession's setConnection
+             drives the text + state (green dot when ready). -->
+        <span class="sb-seg sb-ready" id="sb-connection">Connecting…</span>
+        <span class="sb-seg static" id="sb-version"></span>
       </footer>
 
       <!-- Narrow-viewport (mobile) zone switcher: hidden on desktop, a fixed bottom ARIA-tablist bar
