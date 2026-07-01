@@ -18,17 +18,20 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    # Backstop so a hung step (stalled restore, wedged toolchain fetch) fails fast instead
+    # of running to the 6-hour default. Cold build+test+demo lands well under this.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v5
-        with:
-          # All projects target net10.0; pin the 10.0.x channel and allow preview
-          # builds in case the GA SDK is not yet on the runner image.
-          dotnet-version: '10.0.x'
-          dotnet-quality: preview
+      # De-duplicated .NET + wasm setup: setup-dotnet -> NuGet cache -> wasm-workload
+      # cache -> install wasm workloads. See .github/actions/setup-dotnet-wasm. Koine.Wasm
+      # targets the browser-wasm RID and is part of Koine.slnx, so the `dotnet build`/
+      # `dotnet test` below need the WebAssembly workloads; without them the wasm project
+      # fails to restore/build.
+      - name: Setup .NET + wasm
+        uses: ./.github/actions/setup-dotnet-wasm
 
       # Conformance toolchains (issue #240). Each non-C# emitter's conformance suite type-checks
       # its emitted output with the target's real tool. The suites that route through
@@ -56,7 +59,7 @@ jobs:
       # `phpstan analyse --level max` (type-check) over emitted PHP. setup-php puts both `php`
       # and `phpstan` on PATH (KOINE_PHP / KOINE_PHPSTAN override).
       - name: Setup PHP + phpstan
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: '8.3'
           tools: phpstan:2
@@ -69,10 +72,33 @@ jobs:
         with:
           python-version: '3.14'
 
+      # Cache pip's download/wheel cache so the pinned mypy install restores instead of
+      # re-downloading the wheel every run. Keyed on the exact pin below.
+      - name: Cache pip
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-mypy-1.13.0
+          restore-keys: ${{ runner.os }}-pip-
+
       - name: Install mypy
         # Pin exactly so a future mypy release tightening `--strict` inference can't redden
         # the conformance suite on an unrelated day with no source change.
         run: python -m pip install mypy==1.13.0
+
+      # Cache the cargo registry + git sources so the Rust conformance `cargo check` restores
+      # crate metadata/sources instead of re-fetching over the network. runner.os-scoped and
+      # keyed on a stable revision: the conformance fixtures are dependency-free, so a coarse
+      # key is fine — the cache mainly banks the crates.io index. (koine-studio.yml already
+      # caches ~/.cargo/registry for its Tauri build; this extends the pattern to ci.yml.)
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-ci-v1
+          restore-keys: ${{ runner.os }}-cargo-ci-
 
       # Rust: the Rust conformance suite runs `cargo check` over an emitted crate.
       # ResolveCargo() finds `cargo` on PATH (KOINE_CARGO overrides). The ubuntu-latest image ships
@@ -106,36 +132,6 @@ jobs:
           fi
           echo "${CARGO_HOME:-${HOME}/.cargo}/bin" >> "${GITHUB_PATH}"
           cargo --version
-
-      # Koine.Wasm targets the browser-wasm RID and is part of the solution, so the
-      # `dotnet build`/`dotnet test` over Koine.slnx below need the WebAssembly SDK.
-      # Without these workloads the wasm project fails to restore/build. (Same pair the
-      # docs pipeline installs in deploy-docs.yml.)
-      #
-      # The wasm workloads (emscripten + browser-wasm runtime pack) are slow to
-      # download; cache the SDK workload folders keyed on the SDK version.
-      - name: Cache wasm workloads
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.dotnet/sdk-manifests
-            ~/.dotnet/packs
-            ~/.dotnet/metadata
-            ~/.dotnet/sdk-advertising
-          key: ${{ runner.os }}-wasm-workloads-${{ hashFiles('Directory.Build.props') }}
-          restore-keys: ${{ runner.os }}-wasm-workloads-
-
-      - name: Install wasm workloads
-        run: dotnet workload install wasm-tools wasm-experimental
-
-      # No central package management / lock files, so cache the global NuGet
-      # package folder keyed on the project files that pin versions.
-      - name: Cache NuGet
-        uses: actions/cache@v6
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
-          restore-keys: ${{ runner.os }}-nuget-
 
       # Fail-fast conformance-toolchain preflight (issue #524). The Test step below runs with
       # KOINE_REQUIRE_CONFORMANCE=1, which turns a toolchain that has dropped off the runner into a
