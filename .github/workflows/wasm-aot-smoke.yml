@@ -26,6 +26,9 @@ permissions:
 jobs:
   aot-smoke:
     runs-on: ubuntu-latest
+    # Backstop so a hung wasm publish/smoke step can't run to the 6-hour default. The AOT
+    # publish is ~24-32 s slower than interpreter but still finishes in a few minutes warm.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v7

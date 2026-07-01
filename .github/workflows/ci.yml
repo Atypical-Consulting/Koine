@@ -18,6 +18,9 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    # Backstop so a hung step (stalled restore, wedged toolchain fetch) fails fast instead
+    # of running to the 6-hour default. Cold build+test+demo lands well under this.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v7

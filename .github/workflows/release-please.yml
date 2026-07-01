@@ -13,6 +13,13 @@ permissions:
   contents: write
   pull-requests: write
 
+# Serialize release-please runs. The bootstrap job below does `git push origin HEAD:main`
+# and tags a baseline, so two overlapping runs could race on the tag/manifest. Never cancel
+# an in-progress run (cancelling mid-push could leave the tag/commit half-applied).
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
 jobs:
   # One-time bootstrap: the first push to main with no v* tag yet replays the full Conventional
   # Commits history (scripts/release/compute-historical-version.py) to seed the real baseline
@@ -21,6 +28,8 @@ jobs:
   # over. See adr/0002-conventional-commits-and-automated-semver.md, decision 5.
   bootstrap-baseline:
     runs-on: ubuntu-latest
+    # Backstop so a stuck git/python step can't run to the 6-hour default.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
@@ -48,6 +57,7 @@ jobs:
   release-please:
     needs: bootstrap-baseline
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: googleapis/release-please-action@v5
         with:

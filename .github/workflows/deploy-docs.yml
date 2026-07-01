@@ -30,6 +30,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Backstop so a hung wasm-AOT publish / npm build can't run to the 6-hour default; a
+    # warm deploy build is a few minutes.
+    timeout-minutes: 30
     # AOT-compile the DEPLOYED wasm bundle (issue #327). KOINE_WASM_AOT makes every build-wasm.mjs
     # invocation in this deploy publish with `-p:KoineWasmAot=true`, so the docs-site playground —
     # and the embedded Koine Studio at /Koine/studio/ (built via build-studio.mjs, which inherits
@@ -100,6 +103,8 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    # The Pages publish is quick; this only guards against a wedged deploy-pages call.
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

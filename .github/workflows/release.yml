@@ -15,6 +15,8 @@ permissions:
 jobs:
   pack:
     runs-on: ubuntu-latest
+    # Backstop so a hung restore/pack can't run to the 6-hour default; a cold pack is minutes.
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v7

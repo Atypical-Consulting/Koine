@@ -6,7 +6,9 @@ name: PR title lint
 
 on:
   pull_request_target:
-    types: [opened, edited, synchronize]
+    # A code push (`synchronize`) can't change the PR title, so re-linting on it is wasted
+    # work; lint only when the title can actually change (open/edit) or a closed PR reopens.
+    types: [opened, edited, reopened]
 
 permissions:
   pull-requests: write
