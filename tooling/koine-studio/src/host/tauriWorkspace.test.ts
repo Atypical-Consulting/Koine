@@ -1,24 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Drive TauriPlatform's app-data workspace logic against a mocked Tauri path + IPC, so the desktop
-// token rules run without a real Tauri runtime. `join` mirrors the real POSIX behavior (slash-joined);
-// `appDataDir` is a fixed root. Only these two surfaces are exercised here — tauri.ts's other imports
-// load normally under happy-dom (they only fail when CALLED outside Tauri, which we don't do).
-const { appDataDirMock, joinMock, invokeMock } = vi.hoisted(() => ({
+// Drive TauriPlatform's workspace logic against a mocked Tauri path + IPC, so the desktop token rules
+// run without a real Tauri runtime. `join` mirrors the real POSIX behavior (slash-joined);
+// `documentDir` is the new user-owned workspace root (`<documentDir>/Koine`) and `appDataDir` is the
+// legacy root still honored for back-compat. Only these surfaces are exercised here — tauri.ts's other
+// imports load normally under happy-dom (they only fail when CALLED outside Tauri, which we don't do).
+const { appDataDirMock, documentDirMock, joinMock, invokeMock } = vi.hoisted(() => ({
   appDataDirMock: vi.fn(async () => '/appdata'),
+  documentDirMock: vi.fn(async () => '/documents'),
   joinMock: vi.fn(async (...parts: string[]) => parts.join('/')),
   // Typed loosely (variadic in, `unknown` out) so a test can swap in a stateful `mockImplementation`
   // that returns the real IPC shapes (a KoiFile[] from list_koi_files, a path string from create_file)
   // without fighting a `Promise<undefined>` inference.
   invokeMock: vi.fn(async (_cmd?: string, _payload?: Record<string, unknown>): Promise<unknown> => undefined),
 }));
-vi.mock('@tauri-apps/api/path', () => ({ appDataDir: appDataDirMock, join: joinMock }));
+vi.mock('@tauri-apps/api/path', () => ({
+  appDataDir: appDataDirMock,
+  documentDir: documentDirMock,
+  join: joinMock,
+}));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 
 import { TauriPlatform } from '@/host/tauri';
 
 beforeEach(() => {
   appDataDirMock.mockClear();
+  documentDirMock.mockClear();
   joinMock.mockClear();
   invokeMock.mockReset();
   invokeMock.mockResolvedValue(undefined);
@@ -41,12 +48,24 @@ describe('TauriPlatform.isAutoRestorableToken', () => {
     expect(await p.isAutoRestorableToken('/Users/me/projects/billing')).toBe(false);
   });
 
-  // The mint side and the recognize side must agree: materializeWorkspace returns exactly the token
-  // isAutoRestorableToken later accepts (both built from the shared WORKSPACES_SUBDIR).
-  it('materializeWorkspace mints exactly the token it later vouches for', async () => {
+});
+
+// #915: the desktop workspace root moved from the hidden `<appData>/workspaces/<name>` to the
+// discoverable, user-owned `<documentDir>/Koine/<name>` (e.g. ~/Documents/Koine/billing). Both the
+// template mint side (materializeWorkspace) and the default scratch model (defaultWorkspace) resolve
+// through the shared `workspacesRoot()` = `<documentDir>/Koine`.
+describe('TauriPlatform workspace root (<documentDir>/Koine, #915)', () => {
+  const p = new TauriPlatform();
+
+  it('materializeWorkspace mints under <documentDir>/Koine/', async () => {
     const token = await p.materializeWorkspace('pizzeria', [{ relPath: 'menu.koi', contents: '' }]);
-    expect(token).toBe('/appdata/workspaces/pizzeria');
-    expect(await p.isAutoRestorableToken(token as string)).toBe(true);
+    expect(token).toBe('/documents/Koine/pizzeria');
+  });
+
+  it('defaultWorkspace resolves the scratch model under <documentDir>/Koine/Untitled', async () => {
+    // defaultWorkspace reads back listKoiFiles before seeding — return an empty workspace so it seeds once.
+    invokeMock.mockImplementation(async (cmd?: string) => (cmd === 'list_koi_files' ? [] : undefined));
+    expect(await p.defaultWorkspace('model {}')).toBe('/documents/Koine/Untitled');
   });
 });
 
@@ -93,7 +112,7 @@ describe('TauriPlatform.materializeWorkspace persist (seed-once vs wipe-and-rewr
 
     // First open seeds the pristine template into the (empty) materialized dir.
     const dir = (await p.materializeWorkspace('pizzeria', bundled, true)) as string;
-    expect(dir).toBe('/appdata/workspaces/pizzeria');
+    expect(dir).toBe('/documents/Koine/pizzeria');
     expect(stored.get(dir)!.get('order.koi')).toBe('context Ordering {}');
 
     // The user edits order.koi inside the materialized workspace.

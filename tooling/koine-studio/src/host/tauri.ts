@@ -6,7 +6,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { appDataDir, join } from '@tauri-apps/api/path';
+import { appDataDir, documentDir, join } from '@tauri-apps/api/path';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type {
@@ -148,9 +148,10 @@ class TauriTerminalTransport implements TerminalTransport {
   }
 }
 
-// The app-data subdirectory under which materialized template/example workspaces live
-// (`<appData>/workspaces/<id>`). Shared by materializeWorkspace (which mints these tokens) and
-// isAutoRestorableToken (which recognizes them at boot) so the two never drift.
+// The LEGACY app-data subdirectory under which desktop workspaces materialized before #915
+// (`<appData>/workspaces/<id>`). New workspaces now live under `<documentDir>/Koine` (see
+// workspacesRoot); this constant survives so isAutoRestorableToken still recognizes pre-existing tokens
+// and the best-effort migration can find leftover content to move over.
 const WORKSPACES_SUBDIR = 'workspaces';
 
 /**
@@ -283,9 +284,17 @@ export class TauriPlatform implements Platform {
     return Promise.resolve(null);
   }
 
-  // Materialize a synthetic workspace under the app-data dir (`<appData>/workspaces/<name>`), mirroring
-  // the browser's OPFS example semantics. `persist` (default false) controls the lifecycle, exactly as
-  // the Platform contract and the browser host declare it (#816):
+  // The desktop workspace root: `<documentDir>/Koine` (#915) — a discoverable, user-owned location
+  // (e.g. ~/Documents/Koine) rather than the hidden `<appData>/Roaming/...` dir workspaces lived in
+  // before. The mint side (materializeWorkspace / defaultWorkspace) and the recognize side
+  // (isAutoRestorableToken) both derive from THIS one helper so the two can never drift.
+  private async workspacesRoot(): Promise<string> {
+    return join(await documentDir(), 'Koine');
+  }
+
+  // Materialize a synthetic workspace under the user's Documents dir (`<documentDir>/Koine/<name>`,
+  // #915), mirroring the browser's OPFS example semantics. `persist` (default false) controls the
+  // lifecycle, exactly as the Platform contract and the browser host declare it (#816):
   //   • persist === true  → seed-once-and-preserve: seed the bundled files only when the folder holds no
   //     `.koi` yet, otherwise leave it untouched, so a user's edits to an opened example survive a
   //     re-open (and a cold boot, now that #807 restores the token). Reuses defaultWorkspace's seed-once
@@ -297,7 +306,7 @@ export class TauriPlatform implements Platform {
     files: { relPath: string; contents: string }[],
     persist = false,
   ): Promise<string | null> {
-    const dir = await join(await appDataDir(), WORKSPACES_SUBDIR, name);
+    const dir = await join(await this.workspacesRoot(), name);
     if (persist) {
       const existing = await this.listKoiFiles(dir).catch(() => [] as KoiFile[]);
       if (existing.length === 0) for (const f of files) await this.createFile(dir, f.relPath, f.contents);
@@ -312,10 +321,10 @@ export class TauriPlatform implements Platform {
     return dir;
   }
 
-  // The persistent default workspace: <appData>/Untitled. Seed model.koi only when the folder holds
-  // no .koi yet, so a reload restores the user's model instead of overwriting it.
+  // The persistent default workspace: <documentDir>/Koine/Untitled (#915). Seed model.koi only when the
+  // folder holds no .koi yet, so a reload restores the user's model instead of overwriting it.
   async defaultWorkspace(seed: string): Promise<string | null> {
-    const dir = await join(await appDataDir(), 'Untitled');
+    const dir = await join(await this.workspacesRoot(), 'Untitled');
     const existing = await this.listKoiFiles(dir).catch(() => [] as KoiFile[]);
     if (existing.length === 0) await this.createFile(dir, 'model.koi', seed);
     return dir;
