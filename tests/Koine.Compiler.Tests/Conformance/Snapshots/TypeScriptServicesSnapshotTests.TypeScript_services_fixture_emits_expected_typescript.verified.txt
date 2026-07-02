@@ -208,6 +208,33 @@ export class Decimal {
     return Decimal.fromScaled(this.toBigIntScaled(Decimal.scaleOf(this)) * right.toBigIntScaled(Decimal.scaleOf(right)), scale);
   }
 
+  /**
+   * Extra decimal places (beyond the dividend's own scale) `divide` rounds to. Unlike
+   * add/subtract/multiply, division rarely terminates exactly, so — mirroring the
+   * BCMath-backed PHP Decimal's fixed division scale — this picks a fixed guard precision
+   * rather than exposing a caller-supplied one.
+   */
+  private static readonly DIVISION_GUARD_DIGITS = 10;
+
+  divide(other: Decimal | number): Decimal {
+    const right = typeof other === 'number' ? Decimal.fromInt(other) : other;
+    const rightScale = Decimal.scaleOf(right);
+    if (right.toBigIntScaled(rightScale) === 0n) {
+      throw new DomainInvariantViolationError('Decimal', 'division by zero');
+    }
+    const resultScale = Decimal.scaleOf(this) + Decimal.DIVISION_GUARD_DIGITS;
+    const numerator = this.toBigIntScaled(resultScale + rightScale);
+    const denominator = right.toBigIntScaled(rightScale);
+    const negative = (numerator < 0n) !== (denominator < 0n);
+    const absNumerator = numerator < 0n ? -numerator : numerator;
+    const absDenominator = denominator < 0n ? -denominator : denominator;
+    const quotient = absNumerator / absDenominator;
+    const remainder = absNumerator % absDenominator;
+    // Round half-away-from-zero.
+    const rounded = remainder * 2n >= absDenominator ? quotient + 1n : quotient;
+    return Decimal.fromScaled(negative ? -rounded : rounded, resultScale);
+  }
+
   compareTo(other: Decimal): number {
     const scale = Math.max(Decimal.scaleOf(this), Decimal.scaleOf(other));
     const a = this.toBigIntScaled(scale);
