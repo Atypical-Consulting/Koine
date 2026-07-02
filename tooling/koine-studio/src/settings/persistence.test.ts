@@ -683,11 +683,15 @@ describe('last-session snapshot for the resume card (#1005)', () => {
     expect(getLastSession()).toBeNull();
   });
 
-  test('coerces a missing/non-numeric editedAt to 0', () => {
+  test('returns null when editedAt is missing / non-numeric / non-positive (corrupt snapshot)', () => {
+    // Real writes always stamp Date.now(); a record without a usable timestamp is corrupt/legacy and
+    // would render an absurd relative time ("~56 years ago"), so the reader rejects it (#1005 review).
     localStorage.setItem('koine.studio.lastSession', JSON.stringify({ project: 'p' }));
-    expect(getLastSession()).toEqual({ project: 'p', editedAt: 0 });
+    expect(getLastSession()).toBeNull();
     localStorage.setItem('koine.studio.lastSession', JSON.stringify({ project: 'p', editedAt: 'soon' }));
-    expect(getLastSession()).toEqual({ project: 'p', editedAt: 0 });
+    expect(getLastSession()).toBeNull();
+    localStorage.setItem('koine.studio.lastSession', JSON.stringify({ project: 'p', editedAt: 0 }));
+    expect(getLastSession()).toBeNull();
   });
 
   test('drops a wrong-typed file / unsavedCount rather than echoing garbage', () => {

@@ -1110,12 +1110,7 @@ fn git_log(dir: String, rel_path: Option<String>) -> Result<Vec<GitLogEntry>, St
 #[tauri::command]
 fn git_clone(url: String, parent_dir: String, dir_name: Option<String>) -> Result<String, String> {
     let dest_name = match dir_name {
-        Some(name) => {
-            if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
-                return Err(format!("invalid clone directory name: {name:?}"));
-            }
-            name
-        }
+        Some(name) => name,
         None => {
             // The url's last path segment, splitting on both `/` (paths/URLs) and `:` (scp-like
             // `git@host:owner/repo.git`), then stripping a trailing `.git`.
@@ -1124,15 +1119,24 @@ fn git_clone(url: String, parent_dir: String, dir_name: Option<String>) -> Resul
                 .rsplit(|c: char| c == '/' || c == ':')
                 .next()
                 .unwrap_or("");
-            let derived = last.strip_suffix(".git").unwrap_or(last);
-            if derived.is_empty() {
-                return Err(format!("cannot derive a clone directory name from url: {url:?}"));
-            }
-            derived.to_string()
+            last.strip_suffix(".git").unwrap_or(last).to_string()
         }
     };
 
-    run_git(&parent_dir, &["clone", &url, &dest_name])?;
+    // Validate the destination — whether caller-supplied or url-derived — so the clone can never escape
+    // `parent_dir`: a single non-empty path segment with no separators and no `..` (a url ending in
+    // `/..` would otherwise derive `".."` and target the grandparent).
+    if dest_name.is_empty()
+        || dest_name.contains('/')
+        || dest_name.contains('\\')
+        || dest_name.contains("..")
+    {
+        return Err(format!("invalid clone directory name: {dest_name:?}"));
+    }
+
+    // `--` terminates option parsing so a url or dest whose first char is `-` (e.g. a repo named `-x`)
+    // is treated as a positional argument, not a git flag.
+    run_git(&parent_dir, &["clone", "--", &url, &dest_name])?;
 
     Ok(std::path::Path::new(&parent_dir)
         .join(&dest_name)
@@ -3346,6 +3350,10 @@ mod tests {
         assert!(git_clone(source.path(), parent.path(), Some("a/b".to_string())).is_err());
         assert!(git_clone(source.path(), parent.path(), Some("..".to_string())).is_err());
         assert!(git_clone(source.path(), parent.path(), Some(String::new())).is_err());
+
+        // The SAME validation applies to a url-DERIVED name: a url ending in `/..` derives dest `".."`,
+        // which must be rejected too (not just the explicit-dir-name branch).
+        assert!(git_clone("https://example.com/owner/..".to_string(), parent.path(), None).is_err());
 
         // A non-existent local url fails fast (git rejects the missing path — no network).
         assert!(git_clone(

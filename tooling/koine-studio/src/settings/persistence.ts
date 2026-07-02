@@ -757,8 +757,10 @@ export interface LastSession {
 /**
  * The last-session snapshot, or null when none is stored. Tolerant of an absent, unparseable,
  * non-object, array, or legacy value, and of a record missing a valid string `project` (all → null).
- * `editedAt` is coerced to a number (0 when missing/non-finite); optional `file` / `unsavedCount` pass
- * through only when the right type. Never throws.
+ * A missing/non-finite/non-positive `editedAt` also → null: real writes always stamp `Date.now()`, so a
+ * record without a usable timestamp is corrupt/legacy and would otherwise render an absurd relative time
+ * ("~56 years ago") on the resume card. Optional `file` / `unsavedCount` pass through only when the
+ * right type. Never throws.
  */
 export function getLastSession(): LastSession | null {
   const raw = readRaw(LAST_SESSION_KEY);
@@ -768,9 +770,10 @@ export function getLastSession(): LastSession | null {
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     const o = parsed as Record<string, unknown>;
     if (typeof o.project !== 'string' || o.project.length === 0) return null;
+    if (typeof o.editedAt !== 'number' || !Number.isFinite(o.editedAt) || o.editedAt <= 0) return null;
     const session: LastSession = {
       project: o.project,
-      editedAt: typeof o.editedAt === 'number' && Number.isFinite(o.editedAt) ? o.editedAt : 0,
+      editedAt: o.editedAt,
     };
     if (typeof o.file === 'string') session.file = o.file;
     if (typeof o.unsavedCount === 'number' && Number.isFinite(o.unsavedCount)) session.unsavedCount = o.unsavedCount;

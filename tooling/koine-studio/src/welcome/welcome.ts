@@ -15,7 +15,7 @@ import {
   type RecentFolder,
 } from '@/settings/persistence';
 import { getPlatform } from '@/host';
-import { BUILTIN_EMIT_TARGETS } from '@/shared/emitTargets';
+import { EMIT_TARGETS } from '@/shared/emitTargets';
 import { registerOverlay, koiConfirm } from '@atypical/koine-ui';
 import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, fillVersionChip, wireExternalLink } from '@/shared/colophon';
 import { TEMPLATES, type Template } from '@/welcome/templates';
@@ -158,8 +158,13 @@ const ICON_PLAY = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.4v9
 const ICON_BRANCH =
   '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4.5" cy="4" r="1.4"/><circle cx="4.5" cy="12" r="1.4"/><circle cx="11.5" cy="5.5" r="1.4"/><path d="M4.5 5.4v5.2M4.5 8.4c0-1.8 1-2.9 3.4-2.9h1"/></svg>';
 
-/** Emit-target id → short display label (e.g. `csharp` → `C#`), for the dense recent row's language tag. */
-const LANG_LABELS = new Map(BUILTIN_EMIT_TARGETS.map((t) => [t.id, t.displayName]));
+/** Emit-target id → short display label (e.g. `csharp` → `C#`) for a recent row's language tag. Reads
+ *  `EMIT_TARGETS` LIVE (it's replaced in place at boot with backend-seeded targets — see emitTargets.ts),
+ *  never a module-load snapshot, so a custom target shows its name rather than its raw id. Falls back to
+ *  the id when unknown. */
+function langLabel(id: string): string {
+  return EMIT_TARGETS.find((t) => t.id === id)?.displayName ?? id;
+}
 
 // The Start-action keycaps (#1005): the platform-aware primary modifier (MOD — ⌘ on mac, Ctrl
 // elsewhere) plus the action's letter, with a leading ⇧ for the shift combos. Rendered as a quiet
@@ -678,32 +683,44 @@ function buildHome(
       if (cloneOpen) urlInput.focus();
     }
 
+    // Guards a clone in progress: blocks a second concurrent submit, and freezes the input handler from
+    // re-enabling the button mid-flight. Without it, editing the URL during a multi-second clone would
+    // re-enable a "Cloning…"-labelled button and Enter could fire a second onClone.
+    let cloneInFlight = false;
+
     async function submitClone(): Promise<void> {
       const url = urlInput.value.trim();
-      if (!isValidUrl()) return;
+      if (cloneInFlight || !isValidUrl()) return;
       errorEl.hidden = true;
       errorEl.textContent = '';
+      cloneInFlight = true;
       cloneSubmit.disabled = true;
       cloneSubmit.textContent = 'Cloning…';
       try {
         await cb.onClone?.(url);
-        // Resolved: onClone owns navigation (it opens the freshly-cloned folder), tearing this Home
-        // down — so there's nothing more to do on the happy path.
+        // Resolved: on the happy path onClone opens the freshly-cloned folder, tearing this Home down.
+        // But onClone ALSO resolves without navigating when the user dismisses the folder picker — so the
+        // finally below must restore the control rather than assuming a teardown.
       } catch (err) {
         // Rejected: surface the reason inline (via textContent — never innerHTML for user/host strings)
         // and leave the form open so the user can fix the URL and retry.
         errorEl.textContent = err instanceof Error && err.message ? err.message : 'Clone failed. Check the URL and try again.';
         errorEl.hidden = false;
+      } finally {
+        // Restore on every non-navigating outcome (cancelled folder pick / error): the button must never
+        // stay stuck on "Cloning…". On the happy path Home is already detached, so this is a harmless
+        // no-op on removed nodes.
+        cloneInFlight = false;
         cloneSubmit.textContent = 'Clone';
         cloneSubmit.disabled = !isValidUrl();
       }
     }
 
     urlInput.addEventListener('input', () => {
-      cloneSubmit.disabled = !isValidUrl();
+      if (!cloneInFlight) cloneSubmit.disabled = !isValidUrl();
     });
     urlInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && isValidUrl()) {
+      if (e.key === 'Enter' && !cloneInFlight && isValidUrl()) {
         e.preventDefault();
         void submitClone();
       }
@@ -937,7 +954,7 @@ function buildHome(
     if (entry.language) {
       const lang = document.createElement('span');
       lang.className = 'koi-welcome-recent-lang';
-      lang.textContent = LANG_LABELS.get(entry.language) ?? entry.language;
+      lang.textContent = langLabel(entry.language);
       line.appendChild(lang);
     }
 
@@ -958,10 +975,14 @@ function buildHome(
       branch.append(glyph, branchName);
       metaLine.appendChild(branch);
     }
-    const time = document.createElement('span');
-    time.className = 'koi-welcome-recent-time';
-    time.textContent = timeAgo(entry.openedAt, Date.now());
-    metaLine.appendChild(time);
+    // Relative open time — omitted when unknown: getRecentFolders coerces a missing openedAt to 0, and
+    // timeAgo(0, now) would otherwise render an absurd "~20800d ago" for a pre-metadata entry.
+    if (entry.openedAt > 0) {
+      const time = document.createElement('span');
+      time.className = 'koi-welcome-recent-time';
+      time.textContent = timeAgo(entry.openedAt, Date.now());
+      metaLine.appendChild(time);
+    }
 
     main.append(line, metaLine);
     open.append(mono, main);
