@@ -1607,6 +1607,19 @@ fn kill_mcp_child(state: &McpState) {
     }
 }
 
+/// Fully tear down the running MCP sidecar: reap the child, forget its scraped URL, AND drop the
+/// cached endpoint `info`. Unlike [`kill_mcp_child`] (which leaves `info` intact for the busy-port
+/// fallback's re-resolve), this clears the cache so the next `mcp_endpoint` resolves from a clean
+/// slate. Shared by `mcp_stop` and by `mcp_endpoint`'s port-change branch (#947). Does NOT take
+/// `state.resolving` — a caller that already holds it (`mcp_endpoint`, held for its whole body) must
+/// not re-enter that non-reentrant lock; `mcp_stop` takes the lock itself before calling in.
+fn teardown_sidecar(state: &McpState) {
+    kill_mcp_child(state);
+    if let Ok(mut g) = state.info.lock() {
+        *g = None;
+    }
+}
+
 /// Spawn the `koine mcp --http` sidecar on `port` (only if one isn't already running) and wait up to ~10s
 /// for it to announce its loopback endpoint on stderr. Returns the announced URL, `Ok(None)` if the child
 /// exited early or the wait elapsed with no announce line, or `Err` on a spawn failure. Holds the child
@@ -1690,14 +1703,27 @@ fn spawn_and_wait_for_endpoint(state: &McpState, port: u16) -> Result<Option<Str
     Ok(None)
 }
 
+/// Whether a cached endpoint (resolved for `info.requested_port`) may be reused verbatim for a fresh
+/// request for `port`, or whether the sidecar must be moved (torn down + respawned). Reuse only on an
+/// exact, non-fallback match: a different `port` — the JSON-apply path (#947) — must move the server,
+/// and a lingering busy-port `fallback` must re-attempt the originally-requested port (self-heal once
+/// it frees up). Port `0` (OS-assigned) is a wildcard: a caller asking for "whatever's running" reuses
+/// a live non-fallback endpoint. The port is the sidecar's identity, so it belongs in the cache key.
+fn can_reuse_cached_endpoint(info: &McpEndpointInfo, port: u16) -> bool {
+    !info.fallback && (port == 0 || info.requested_port == port)
+}
+
 /// Lazily start the `koine mcp --http` sidecar (idempotent) on `port` and return the endpoint it bound
 /// (`0` = OS-assigned). If a specific (non-zero) `port` never comes up — the child exits, or the wait
 /// times out, with no announce line — it is most likely busy: the dead child is reaped and the server is
 /// respawned ONCE on an OS-assigned port (`0`), flagged as a `fallback` so the UI can warn that copied
-/// client configs are stale. A resolved endpoint is cached in `McpState`, so a repeat call returns the
-/// running server verbatim (no re-spawn, no re-wait). The browser backend never calls this (its
-/// `Platform.mcpEndpoint` returns null without touching IPC), so a desktop-only affordance can gate
-/// purely on the resolved value.
+/// client configs are stale. A resolved endpoint is cached in `McpState`, **keyed on the requested
+/// port** ([`can_reuse_cached_endpoint`]): a repeat call for the SAME port reuses the running server
+/// verbatim (no re-spawn, no re-wait), but a call for a DIFFERENT port — the JSON-settings apply path,
+/// which changes `mcp.port` without an `mcp_stop` (#947) — tears the sidecar down and moves it to the
+/// new port; a lingering `fallback` likewise re-attempts the originally-requested port so it self-heals
+/// once that port frees up. The browser backend never calls this (its `Platform.mcpEndpoint` returns
+/// null without touching IPC), so a desktop-only affordance can gate purely on the resolved value.
 #[tauri::command]
 fn mcp_endpoint(port: u16, state: State<'_, McpState>) -> Result<Option<McpEndpointInfo>, String> {
     // Serialize resolution: the busy-port fallback reaps the child and respawns across two spawn/wait
@@ -1705,11 +1731,22 @@ fn mcp_endpoint(port: u16, state: State<'_, McpState>) -> Result<Option<McpEndpo
     // second caller blocks here, then falls through to the cached-`info` fast path below.
     let _resolving = state.resolving.lock().map_err(|e| e.to_string())?;
 
-    // Idempotent fast path: a resolved endpoint is cached — reuse the running server verbatim.
+    // Idempotent fast path — reuse the running server verbatim ONLY when the cached endpoint still
+    // matches what's being asked for (same requested port, not a lingering busy-port fallback; port `0`
+    // is a wildcard). A port change — the JSON-apply path (#947) — or a stale fallback must MOVE the
+    // server: tear the sidecar down (via the non-reentrant `teardown_sidecar`, safe under the held
+    // `resolving` lock) and fall through to a fresh spawn on `port`.
+    let mut needs_teardown = false;
     if let Ok(g) = state.info.lock() {
         if let Some(info) = g.as_ref() {
-            return Ok(Some(info.clone()));
+            if can_reuse_cached_endpoint(info, port) {
+                return Ok(Some(info.clone()));
+            }
+            needs_teardown = true;
         }
+    }
+    if needs_teardown {
+        teardown_sidecar(&state);
     }
 
     // First attempt: the requested port.
@@ -1746,13 +1783,18 @@ fn mcp_endpoint(port: u16, state: State<'_, McpState>) -> Result<Option<McpEndpo
 }
 
 /// Stop the MCP sidecar, forget its scraped URL, and drop the cached endpoint info so the next
-/// `mcp_endpoint` re-spawns a fresh server. Idempotent and safe when nothing is running.
+/// `mcp_endpoint` re-spawns a fresh server. Idempotent and safe when nothing is running. Takes
+/// `state.resolving` so a stop can't interleave with an in-flight `mcp_endpoint` resolve, then routes
+/// the teardown through the shared [`teardown_sidecar`] helper. Best-effort: it always reaps the child
+/// and returns `Ok(())`.
 #[tauri::command]
 fn mcp_stop(state: State<'_, McpState>) -> Result<(), String> {
-    kill_mcp_child(&state);
-    if let Ok(mut g) = state.info.lock() {
-        *g = None;
-    }
+    // `resolving` guards a `()` — no data invariant to corrupt — so recover from a poisoned lock and
+    // proceed rather than bail: a Stop must ALWAYS tear the sidecar down (reap the child, clear the
+    // cache), even after an unrelated panic. Mirrors the `unwrap_or_else(|e| e.into_inner())` recovery
+    // used elsewhere in this file, and preserves the pre-#947 guarantee that `mcp_stop` never fails.
+    let _resolving = state.resolving.lock().unwrap_or_else(|e| e.into_inner());
+    teardown_sidecar(&state);
     Ok(())
 }
 
@@ -2191,6 +2233,83 @@ mod tests {
             mcp_launch_args(0),
             ["mcp", "--http", "--port", "0"].map(String::from)
         );
+    }
+
+    // --- MCP sidecar teardown + cache reuse (#947) --------------------------
+    //
+    // `mcp_endpoint` caches the resolved endpoint so a repeat call reuses the running server without
+    // re-spawning. `teardown_sidecar` is the shared teardown both `mcp_stop` and `mcp_endpoint`'s
+    // port-change branch route through: it reaps the child, forgets the scraped URL, AND drops the
+    // cached `info` — WITHOUT taking `state.resolving` (its callers already hold that lock). The tests
+    // drive the helper against a bare `McpState::default()` (no real `Child` is needed to prove the
+    // cache clears), matching the codebase convention of testing the `&McpState`/pure seams rather than
+    // the Tauri-`State` command wrappers.
+
+    #[test]
+    fn teardown_sidecar_clears_cached_info_and_endpoint() {
+        let state = McpState::default();
+        // Simulate a resolved + cached sidecar (the fields `mcp_endpoint` populates on a live server).
+        *state.info.lock().unwrap() = Some(McpEndpointInfo {
+            url: "http://127.0.0.1:7900/mcp".into(),
+            requested_port: 7900,
+            fallback: false,
+        });
+        *state.endpoint.lock().unwrap() = Some("http://127.0.0.1:7900/mcp".into());
+
+        teardown_sidecar(&state);
+
+        assert!(
+            state.info.lock().unwrap().is_none(),
+            "teardown must drop the cached endpoint info so the next resolve starts clean"
+        );
+        assert!(
+            state.endpoint.lock().unwrap().is_none(),
+            "teardown must forget the scraped URL"
+        );
+        assert!(
+            state.child.lock().unwrap().is_none(),
+            "teardown must leave no child running"
+        );
+    }
+
+    #[test]
+    fn cached_endpoint_reused_only_on_exact_nonfallback_match() {
+        // A resolved, non-fallback server on port 7900.
+        let info = McpEndpointInfo {
+            url: "http://127.0.0.1:7900/mcp".into(),
+            requested_port: 7900,
+            fallback: false,
+        };
+        // Same port asked again ⇒ reuse the running server verbatim (the happy path — no regression).
+        assert!(can_reuse_cached_endpoint(&info, 7900));
+        // A DIFFERENT port (the JSON-apply path, #947) ⇒ must NOT reuse; the sidecar has to move.
+        assert!(!can_reuse_cached_endpoint(&info, 7901));
+    }
+
+    #[test]
+    fn cached_fallback_endpoint_is_never_reused() {
+        // A busy-port fallback: requested 7900 but the sidecar bound an OS-assigned port instead.
+        let fb = McpEndpointInfo {
+            url: "http://127.0.0.1:50123/mcp".into(),
+            requested_port: 7900,
+            fallback: true,
+        };
+        // Even when asked for the SAME requested port, a lingering fallback must re-attempt
+        // (teardown + respawn) so it self-heals once the original port frees up — never returned stale.
+        assert!(!can_reuse_cached_endpoint(&fb, 7900));
+        assert!(!can_reuse_cached_endpoint(&fb, 7901));
+    }
+
+    #[test]
+    fn port_zero_wildcard_reuses_a_running_nonfallback_server() {
+        // A `0` (OS-assigned) request means "reuse whatever concrete port is already running", so a
+        // live non-fallback server matches (the wildcard guard from the spec's port-0 note).
+        let info = McpEndpointInfo {
+            url: "http://127.0.0.1:7900/mcp".into(),
+            requested_port: 7900,
+            fallback: false,
+        };
+        assert!(can_reuse_cached_endpoint(&info, 0));
     }
 
     // --- sidecar launcher selection (pure) ----------------------------------
