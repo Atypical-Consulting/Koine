@@ -1,5 +1,5 @@
 // Generates the website's Concept Colors artifacts from the single source of truth
-// `design/concept-colors.json` (ADR 0003). Run via `npm run gen:colors`.
+// `design/concept-colors.json` (ADR 0004). Run via `npm run gen:colors`.
 //
 // Emits (both committed, drift-guarded by src/playground/semanticTokens.test.ts):
 //   - src/styles/concept-colors.generated.css   (--koi-ddd-<slug> vars; LIGHT is the site default in
@@ -35,7 +35,7 @@ for (const c of concepts) {
   }
 }
 
-const BANNER = `GENERATED — do not edit. Source of truth: design/concept-colors.json (ADR 0003 — Concept Colors).
+const BANNER = `GENERATED — do not edit. Source of truth: design/concept-colors.json (ADR 0004 — Concept Colors).
    Regenerate with \`npm run gen:colors\` in website/.`;
 
 // --- CSS: light is the website default (:root); dark under :root[data-theme='dark'] ------------------
@@ -58,7 +58,7 @@ writeFileSync(path.join(websiteRoot, 'src', 'styles', 'concept-colors.generated.
 // --- JSON: the concepts array, for the playground sync test and the docs page ------------------------
 mkdirSync(path.join(websiteRoot, 'src', 'generated'), { recursive: true });
 const json = {
-  note: `GENERATED — do not edit. Copied from design/concept-colors.json by website/scripts/gen-concept-colors.mjs (ADR 0003).`,
+  note: `GENERATED — do not edit. Copied from design/concept-colors.json by website/scripts/gen-concept-colors.mjs (ADR 0004).`,
   concepts,
 };
 writeFileSync(

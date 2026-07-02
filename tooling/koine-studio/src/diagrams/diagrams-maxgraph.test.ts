@@ -21,8 +21,8 @@ import { CONCEPT_COLORS } from '@/model/conceptColors.generated';
 
 // The diagram's rename/delete gestures now route through Koine's own modal (koiPrompt/koiConfirm),
 // not window.prompt/confirm. Stub them so the tests drive the async dialog deterministically.
-vi.mock('@/shared/overlay', () => ({ koiPrompt: vi.fn(), koiConfirm: vi.fn() }));
-import { koiPrompt, koiConfirm } from '@/shared/overlay';
+vi.mock('@atypical/koine-ui', () => ({ koiPrompt: vi.fn(), koiConfirm: vi.fn() }));
+import { koiPrompt, koiConfirm } from '@atypical/koine-ui';
 import {
   isDiagramEditing,
   DIAGRAM_ANNOTATION_CREATE_EVENT,
@@ -1297,7 +1297,7 @@ describe('event flow layout persistence (#270)', () => {
   });
 });
 
-// Concept Colors (ADR 0003): the canvas palette is DERIVED from the single source (CONCEPT_COLORS), and
+// Concept Colors (ADR 0004): the canvas palette is DERIVED from the single source (CONCEPT_COLORS), and
 // the event-flow view adopts the same concept colors — the separate `EVENT_FLOW_HEX` sticky palette is
 // retired. These lock that unification so the canvas can never drift from the explorer/editor hues.
 describe('concept palette on the canvas', () => {

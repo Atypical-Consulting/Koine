@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "lib": ["ES2020", "ES2022.Array", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    // Explicit — tsc's automatic @types/* discovery doesn't reliably reach across the npm workspace
+    // hoist boundary here, so name the ambient Node-builtin types this project needs (tokens.test.ts's
+    // `node:fs`/`node:url`). Vite's client types (for the styles.css side-effect import) come from the
+    // triple-slash reference in src/vite-env.d.ts instead, matching koine-studio's convention.
+    "types": ["node"],
+
+    /* Preact JSX — the primitives/components moved in by later tasks (#905) are Preact */
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    // `tsc` in the `build` script is a type-check-only gate (matches koine-studio); the actual
+    // .d.ts bundle is emitted by vite-plugin-dts during `vite build`.
+    "noEmit": true,
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src"]
+}

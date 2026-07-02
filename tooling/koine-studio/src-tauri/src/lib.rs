@@ -15,6 +15,7 @@
 // the retry budget is exhausted (or after a clean stop).
 
 use std::io::{self, BufRead, BufReader, Read, Write};
+use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
@@ -42,6 +43,21 @@ struct LspState {
     shutting_down: Arc<AtomicBool>,
 }
 
+/// The resolved MCP endpoint returned to the frontend (issue #735 follow-up): the loopback URL the
+/// sidecar bound plus whether the host had to fall back to an OS-assigned port because the requested
+/// one was busy. `requestedPort` is echoed for diagnostics; the TS `Platform` keeps only `url`+`fallback`
+/// (it reads the requested port back from the `mcpPort` setting). Serialized camelCase for the frontend.
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct McpEndpointInfo {
+    /// The `http://HOST:PORT/mcp` URL an MCP client connects to.
+    url: String,
+    /// The port the frontend asked for (`0` = OS-assigned). Echoed for diagnostics.
+    requested_port: u16,
+    /// True when `requested_port` was a specific busy port and the server fell back to an OS-assigned one.
+    fallback: bool,
+}
+
 /// State for the MCP HTTP sidecar (`koine mcp --http`). Unlike the LSP child this is a fire-and-
 /// forget HTTP server: there is no stdin piping or framing — we just keep the child alive and read
 /// its stderr to scrape the loopback URL it binds, so the UI can show a copy-paste `mcp.json`.
@@ -52,6 +68,15 @@ struct McpState {
     /// the scraped `http://HOST:PORT/mcp` endpoint, once the sidecar announces it on stderr. An
     /// `Arc` so the stderr-reader thread can own a clone (managed `State` is not `'static`).
     endpoint: Arc<Mutex<Option<String>>>,
+    /// the resolved endpoint info, cached once the sidecar comes up so a later `mcp_endpoint` call is
+    /// idempotent (returns the running server verbatim without re-spawning or re-waiting). Cleared by
+    /// `mcp_stop`. Carries the `fallback` flag so the UI's busy-port warning survives a re-open.
+    info: Mutex<Option<McpEndpointInfo>>,
+    /// serializes endpoint resolution. The busy-port fallback reaps the dead child and respawns across
+    /// two `spawn_and_wait_for_endpoint` calls; without this a second concurrent `mcp_endpoint` could
+    /// interleave between the reap and the respawn and the two callers would kill each other's servers.
+    /// Held for the whole of `mcp_endpoint`, so a second caller blocks then hits the cached-`info` path.
+    resolving: Mutex<()>,
 }
 
 /// State for the integrated terminal's pseudo-terminal (PTY). Unlike the LSP child this is a raw
@@ -155,45 +180,96 @@ fn should_restart(shutting_down: bool, attempts_made: u32, max_retries: u32) -> 
 
 // --- sidecar resolution -----------------------------------------------------
 
-/// Resolve how to launch the language server.
-/// `KOINE_LSP` (a self-contained sidecar binary) takes precedence; otherwise fall
-/// back to the Debug DLL via `dotnet`, resolved relative to this crate.
-fn resolve_sidecar_command() -> Command {
-    if let Ok(bin) = std::env::var("KOINE_LSP") {
-        let mut c = Command::new(bin);
-        c.arg("lsp");
-        c
-    } else {
-        // CARGO_MANIFEST_DIR = .../tooling/koine-studio/src-tauri
-        // -> ../../../src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll
-        let dll = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll"
-        );
-        let mut c = Command::new("dotnet");
-        c.arg(dll).arg("lsp");
-        c
+/// How to launch the `koine` tooling backend that powers both the LSP sidecar and the
+/// MCP server.
+#[derive(Debug, PartialEq)]
+enum KoineLauncher {
+    /// A self-contained `koine` executable (env override or the bundled externalBin).
+    Bin(PathBuf),
+    /// Dev fallback: `dotnet <repo>/src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll`.
+    DevDll,
+}
+
+/// Choose how to launch `koine`, in priority order: an explicit env override, then the
+/// binary the Tauri bundler dropped next to the app executable, then the dev Debug DLL.
+fn pick_koine_launcher(env_bin: Option<String>, bundled: Option<PathBuf>) -> KoineLauncher {
+    match (env_bin, bundled) {
+        (Some(b), _) => KoineLauncher::Bin(PathBuf::from(b)),
+        (None, Some(p)) => KoineLauncher::Bin(p),
+        (None, None) => KoineLauncher::DevDll,
     }
 }
 
-/// Resolve how to launch the MCP HTTP server. Mirrors [`resolve_sidecar_command`]: `KOINE_MCP`
-/// then `KOINE_LSP` (the same self-contained `koine` binary) take precedence; otherwise fall back
-/// to the Debug DLL via `dotnet`. The server is asked to bind a loopback OS-assigned port (`--port
-/// 0`) and announce it on stderr, which `mcp_endpoint` scrapes.
-fn resolve_mcp_command() -> Command {
-    let mcp_args = ["mcp", "--http", "--port", "0"];
-    if let Ok(bin) = std::env::var("KOINE_MCP").or_else(|_| std::env::var("KOINE_LSP")) {
-        let mut c = Command::new(bin);
-        c.args(mcp_args);
-        c
-    } else {
-        let dll = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll"
-        );
-        let mut c = Command::new("dotnet");
-        c.arg(dll).args(mcp_args);
-        c
+/// The Tauri bundler drops `externalBin: ["binaries/koine"]` next to the app
+/// executable as plain `koine[.exe]` — probe for it there.
+fn bundled_koine_path() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let p = exe
+        .parent()?
+        .join(format!("koine{}", std::env::consts::EXE_SUFFIX));
+    p.is_file().then_some(p)
+}
+
+/// Resolve how to launch the language server, tried in order: the `KOINE_LSP` env override (a
+/// self-contained `koine` binary), then the bundled `koine` binary dropped next to the app
+/// executable by the Tauri bundler, then the Debug DLL via `dotnet` resolved relative to this crate.
+fn resolve_sidecar_command() -> Command {
+    match pick_koine_launcher(std::env::var("KOINE_LSP").ok(), bundled_koine_path()) {
+        KoineLauncher::Bin(bin) => {
+            let mut c = Command::new(bin);
+            c.arg("lsp");
+            c
+        }
+        KoineLauncher::DevDll => {
+            // CARGO_MANIFEST_DIR = .../tooling/koine-studio/src-tauri
+            // -> ../../../src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll
+            let dll = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll"
+            );
+            let mut c = Command::new("dotnet");
+            c.arg(dll).arg("lsp");
+            c
+        }
+    }
+}
+
+/// The CLI args that launch the MCP HTTP server on `port` (`0` = OS-assigned loopback port). Pure, so
+/// the arg vector is unit-tested without spawning a process (the existing `cargo test` gate convention).
+fn mcp_launch_args(port: u16) -> [String; 4] {
+    [
+        "mcp".to_string(),
+        "--http".to_string(),
+        "--port".to_string(),
+        port.to_string(),
+    ]
+}
+
+/// Resolve how to launch the MCP HTTP server on `port`. Mirrors [`resolve_sidecar_command`], tried in
+/// order: the `KOINE_MCP` (then `KOINE_LSP`) env override (the same self-contained `koine` binary), then
+/// the bundled `koine` binary dropped next to the app executable by the Tauri bundler, then the
+/// Debug DLL via `dotnet`. The server is asked to bind the requested loopback `port` (`0` = OS-assigned)
+/// and announce it on stderr, which `mcp_endpoint` scrapes.
+fn resolve_mcp_command(port: u16) -> Command {
+    let mcp_args = mcp_launch_args(port);
+    let env_bin = std::env::var("KOINE_MCP")
+        .or_else(|_| std::env::var("KOINE_LSP"))
+        .ok();
+    match pick_koine_launcher(env_bin, bundled_koine_path()) {
+        KoineLauncher::Bin(bin) => {
+            let mut c = Command::new(bin);
+            c.args(&mcp_args);
+            c
+        }
+        KoineLauncher::DevDll => {
+            let dll = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll"
+            );
+            let mut c = Command::new("dotnet");
+            c.arg(dll).args(&mcp_args);
+            c
+        }
     }
 }
 
@@ -1516,18 +1592,34 @@ fn lsp_stop(state: State<'_, LspState>) -> Result<(), String> {
     Ok(())
 }
 
-/// Lazily start the `koine mcp --http` sidecar (idempotent) and return the loopback endpoint URL it
-/// announces on stderr, or `None` if it does not appear within the wait budget. The browser backend
-/// never calls this (its `Platform.mcpEndpoint` returns null without touching IPC), so a desktop-only
-/// affordance can gate purely on the resolved value.
-#[tauri::command]
-fn mcp_endpoint(state: State<'_, McpState>) -> Result<Option<String>, String> {
+/// Kill the running MCP sidecar child (if any) and forget its scraped URL. Shared by the busy-port
+/// fallback (to reap the dead/failed child between spawn attempts) and by `mcp_stop`. Does NOT touch the
+/// cached `info` — the caller decides whether that survives (the fallback re-resolves it; `mcp_stop` clears it).
+fn kill_mcp_child(state: &McpState) {
+    if let Ok(mut g) = state.child.lock() {
+        if let Some(mut child) = g.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+    if let Ok(mut g) = state.endpoint.lock() {
+        *g = None;
+    }
+}
+
+/// Spawn the `koine mcp --http` sidecar on `port` (only if one isn't already running) and wait up to ~10s
+/// for it to announce its loopback endpoint on stderr. Returns the announced URL, `Ok(None)` if the child
+/// exited early or the wait elapsed with no announce line, or `Err` on a spawn failure. Holds the child
+/// lock ONLY across the check-spawn-store so two concurrent callers can't both launch a server (the
+/// pre-existing double-start guard is preserved), then polls the scraped endpoint AND the child's exit
+/// status so a server that dies on a busy port ends the wait immediately rather than burning the full budget.
+fn spawn_and_wait_for_endpoint(state: &McpState, port: u16) -> Result<Option<String>, String> {
     // Spawn once. Hold the child lock across check-spawn-store so two concurrent calls can't both
     // pass the guard and launch duplicate servers.
     {
         let mut child_guard = state.child.lock().map_err(|e| e.to_string())?;
         if child_guard.is_none() {
-            let mut cmd = resolve_mcp_command();
+            let mut cmd = resolve_mcp_command(port);
             cmd.env("DOTNET_NOLOGO", "1")
                 .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
                 .stdin(Stdio::null())
@@ -1564,29 +1656,101 @@ fn mcp_endpoint(state: State<'_, McpState>) -> Result<Option<String>, String> {
     }
 
     // Wait (bounded) for the announce line; the server binds in well under a second, so this returns
-    // promptly on the first call and instantly on later ones (the URL is cached in state).
+    // promptly. Bail out early if the child has already exited (e.g. it couldn't bind a busy port) —
+    // it will never announce, so waiting the full budget would just delay the fallback.
     for _ in 0..100 {
         if let Ok(g) = state.endpoint.lock() {
             if let Some(url) = g.as_ref() {
                 return Ok(Some(url.clone()));
             }
         }
+        if let Ok(mut g) = state.child.lock() {
+            let exited = matches!(g.as_mut().map(|c| c.try_wait()), Some(Ok(Some(_))));
+            if exited {
+                // The child exited before announcing (e.g. it couldn't bind a busy port). Reap it and
+                // clear the slot so a stale dead child can't poison the next attempt — which would see
+                // `child.is_some()`, skip the respawn, and wedge (notably for port 0, whose caller has
+                // no fallback retry to reap it).
+                if let Some(mut dead) = g.take() {
+                    let _ = dead.wait();
+                }
+                drop(g);
+                if let Ok(mut e) = state.endpoint.lock() {
+                    *e = None;
+                }
+                return Ok(None); // the child exited before announcing — stop waiting
+            }
+        }
         std::thread::sleep(Duration::from_millis(100));
+    }
+
+    // Timed out with no announce line: the child is alive but wedged. Reap it (and clear the scraped
+    // endpoint) so the next attempt respawns from a clean slot instead of skipping on a stale child.
+    kill_mcp_child(state);
+    Ok(None)
+}
+
+/// Lazily start the `koine mcp --http` sidecar (idempotent) on `port` and return the endpoint it bound
+/// (`0` = OS-assigned). If a specific (non-zero) `port` never comes up — the child exits, or the wait
+/// times out, with no announce line — it is most likely busy: the dead child is reaped and the server is
+/// respawned ONCE on an OS-assigned port (`0`), flagged as a `fallback` so the UI can warn that copied
+/// client configs are stale. A resolved endpoint is cached in `McpState`, so a repeat call returns the
+/// running server verbatim (no re-spawn, no re-wait). The browser backend never calls this (its
+/// `Platform.mcpEndpoint` returns null without touching IPC), so a desktop-only affordance can gate
+/// purely on the resolved value.
+#[tauri::command]
+fn mcp_endpoint(port: u16, state: State<'_, McpState>) -> Result<Option<McpEndpointInfo>, String> {
+    // Serialize resolution: the busy-port fallback reaps the child and respawns across two spawn/wait
+    // calls, so two concurrent callers must not interleave (they would kill each other's servers). The
+    // second caller blocks here, then falls through to the cached-`info` fast path below.
+    let _resolving = state.resolving.lock().map_err(|e| e.to_string())?;
+
+    // Idempotent fast path: a resolved endpoint is cached — reuse the running server verbatim.
+    if let Ok(g) = state.info.lock() {
+        if let Some(info) = g.as_ref() {
+            return Ok(Some(info.clone()));
+        }
+    }
+
+    // First attempt: the requested port.
+    if let Some(url) = spawn_and_wait_for_endpoint(&state, port)? {
+        let info = McpEndpointInfo {
+            url,
+            requested_port: port,
+            fallback: false,
+        };
+        if let Ok(mut g) = state.info.lock() {
+            *g = Some(info.clone());
+        }
+        return Ok(Some(info));
+    }
+
+    // The requested port didn't come up — `spawn_and_wait_for_endpoint` already reaped the dead child,
+    // so the slot is clean. A specific (non-zero) port is most likely busy, so retry ONCE on an
+    // OS-assigned port, flagged as a fallback.
+    if port != 0 {
+        if let Some(url) = spawn_and_wait_for_endpoint(&state, 0)? {
+            let info = McpEndpointInfo {
+                url,
+                requested_port: port,
+                fallback: true,
+            };
+            if let Ok(mut g) = state.info.lock() {
+                *g = Some(info.clone());
+            }
+            return Ok(Some(info));
+        }
     }
 
     Ok(None)
 }
 
-/// Stop the MCP sidecar and forget its endpoint. Idempotent and safe when nothing is running.
+/// Stop the MCP sidecar, forget its scraped URL, and drop the cached endpoint info so the next
+/// `mcp_endpoint` re-spawns a fresh server. Idempotent and safe when nothing is running.
 #[tauri::command]
 fn mcp_stop(state: State<'_, McpState>) -> Result<(), String> {
-    if let Ok(mut g) = state.child.lock() {
-        if let Some(mut child) = g.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-    if let Ok(mut g) = state.endpoint.lock() {
+    kill_mcp_child(&state);
+    if let Ok(mut g) = state.info.lock() {
         *g = None;
     }
     Ok(())
@@ -1871,6 +2035,7 @@ pub fn run() {
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use std::path::PathBuf;
 
     #[test]
     fn round_trip_ascii() {
@@ -2012,6 +2177,39 @@ mod tests {
         // The tag without a URL (e.g. a future status line) is not an endpoint.
         assert_eq!(parse_mcp_endpoint("[koine-mcp] starting"), None);
         assert_eq!(parse_mcp_endpoint(""), None);
+    }
+
+    #[test]
+    fn mcp_launch_args_uses_the_requested_port() {
+        // The configured default port is passed through verbatim as the last arg.
+        assert_eq!(
+            mcp_launch_args(56463),
+            ["mcp", "--http", "--port", "56463"].map(String::from)
+        );
+        // Port 0 asks the OS to assign a free loopback port (the busy-port fallback path).
+        assert_eq!(
+            mcp_launch_args(0),
+            ["mcp", "--http", "--port", "0"].map(String::from)
+        );
+    }
+
+    // --- sidecar launcher selection (pure) ----------------------------------
+
+    #[test]
+    fn pick_koine_launcher_prefers_env_override() {
+        let l = pick_koine_launcher(Some("/opt/koine".into()), Some(PathBuf::from("/app/koine")));
+        assert_eq!(l, KoineLauncher::Bin(PathBuf::from("/opt/koine")));
+    }
+
+    #[test]
+    fn pick_koine_launcher_uses_bundled_when_no_env() {
+        let l = pick_koine_launcher(None, Some(PathBuf::from("/app/koine")));
+        assert_eq!(l, KoineLauncher::Bin(PathBuf::from("/app/koine")));
+    }
+
+    #[test]
+    fn pick_koine_launcher_falls_back_to_dev_dll() {
+        assert_eq!(pick_koine_launcher(None, None), KoineLauncher::DevDll);
     }
 
     // --- workspace filesystem tests -----------------------------------------

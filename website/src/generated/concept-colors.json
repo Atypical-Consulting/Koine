@@ -1,5 +1,5 @@
 {
-  "note": "GENERATED — do not edit. Copied from design/concept-colors.json by website/scripts/gen-concept-colors.mjs (ADR 0003).",
+  "note": "GENERATED — do not edit. Copied from design/concept-colors.json by website/scripts/gen-concept-colors.mjs (ADR 0004).",
   "concepts": [
     {
       "slug": "aggregate",

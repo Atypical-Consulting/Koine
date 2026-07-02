@@ -10,7 +10,7 @@
 // this file is search + go-to-match only.
 import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { el } from '@/shared/el';
+import { el } from '@atypical/koine-ui';
 import {
   planReplacements,
   runSearch,

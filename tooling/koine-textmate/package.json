@@ -134,63 +134,63 @@
     "semanticTokenModifiers": [
       {
         "id": "aggregate",
-        "description": "Aggregate (Concept Colors, ADR 0003)"
+        "description": "Aggregate (Concept Colors, ADR 0004)"
       },
       {
         "id": "entity",
-        "description": "Entity (Concept Colors, ADR 0003)"
+        "description": "Entity (Concept Colors, ADR 0004)"
       },
       {
         "id": "valueObject",
-        "description": "Value object (Concept Colors, ADR 0003)"
+        "description": "Value object (Concept Colors, ADR 0004)"
       },
       {
         "id": "enumeration",
-        "description": "Enumeration (Concept Colors, ADR 0003)"
+        "description": "Enumeration (Concept Colors, ADR 0004)"
       },
       {
         "id": "domainEvent",
-        "description": "Domain event (Concept Colors, ADR 0003)"
+        "description": "Domain event (Concept Colors, ADR 0004)"
       },
       {
         "id": "integrationEvent",
-        "description": "Integration event (Concept Colors, ADR 0003)"
+        "description": "Integration event (Concept Colors, ADR 0004)"
       },
       {
         "id": "command",
-        "description": "Command (Concept Colors, ADR 0003)"
+        "description": "Command (Concept Colors, ADR 0004)"
       },
       {
         "id": "query",
-        "description": "Query (Concept Colors, ADR 0003)"
+        "description": "Query (Concept Colors, ADR 0004)"
       },
       {
         "id": "readModel",
-        "description": "Read model (Concept Colors, ADR 0003)"
+        "description": "Read model (Concept Colors, ADR 0004)"
       },
       {
         "id": "service",
-        "description": "Service (Concept Colors, ADR 0003)"
+        "description": "Service (Concept Colors, ADR 0004)"
       },
       {
         "id": "repository",
-        "description": "Repository (Concept Colors, ADR 0003)"
+        "description": "Repository (Concept Colors, ADR 0004)"
       },
       {
         "id": "policy",
-        "description": "Policy (Concept Colors, ADR 0003)"
+        "description": "Policy (Concept Colors, ADR 0004)"
       },
       {
         "id": "factory",
-        "description": "Factory (Concept Colors, ADR 0003)"
+        "description": "Factory (Concept Colors, ADR 0004)"
       },
       {
         "id": "stateMachine",
-        "description": "State machine (Concept Colors, ADR 0003)"
+        "description": "State machine (Concept Colors, ADR 0004)"
       },
       {
         "id": "specification",
-        "description": "Specification (Concept Colors, ADR 0003)"
+        "description": "Specification (Concept Colors, ADR 0004)"
       }
     ],
     "semanticTokenScopes": [

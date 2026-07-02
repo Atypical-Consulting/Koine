@@ -66,21 +66,8 @@ export const IconDocs = svg(
     <path d="M9 8h5M9 12h5" />
   </>,
 );
-export const IconOverview = svg(
-  <>
-    <rect x="3" y="3" width="8" height="8" rx="1.5" />
-    <rect x="13" y="3" width="8" height="8" rx="1.5" />
-    <rect x="3" y="13" width="8" height="8" rx="1.5" />
-    <rect x="13" y="13" width="8" height="8" rx="1.5" />
-  </>,
-);
-export const IconSplit = svg(
-  <>
-    <rect x="3" y="4" width="18" height="16" rx="2" />
-    <path d="M12 4v16" />
-  </>,
-);
-export const IconClose = svg(<path d="M6 6l12 12M18 6 6 18" />, { strokeWidth: 2, lineCap: true });
+// IconOverview / IconSplit / IconClose moved to @atypical/koine-ui's deckIcons.tsx (issue #905,
+// Task 4) — DeckBar/DeckCard, their only consumers, now live there.
 export const IconSwap = svg(<path d="M7 4 3 8l4 4M3 8h13M17 20l4-4-4-4M21 16H8" />, {
   strokeWidth: 1.8,
   lineCap: true,

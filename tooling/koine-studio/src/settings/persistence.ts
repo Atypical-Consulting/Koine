@@ -96,6 +96,11 @@ export interface Settings {
   aiTemperature: number;
   /** Whether the local MCP server (desktop sidecar) is enabled. Opt-in: no background server unless on. */
   mcpEnabled: boolean;
+  /** Fixed loopback port the desktop MCP sidecar binds. `0` lets the OS assign one; the default 56463 keeps
+   *  a copied `mcp.json` stable across Studio restarts. Clamped to a valid TCP port (0..65535). Desktop-only:
+   *  the browser host serves no sidecar and ignores it. If the configured port is busy the host falls back
+   *  to an OS-assigned one (surfaced as a warning in Settings). */
+  mcpPort: number;
   /** Which client the Settings → MCP setup recipe is shown for. */
   mcpClient: McpClientId;
   /** The language the emitted-code ("Generated") preview renders. */
@@ -138,6 +143,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiConstrainGrammar: true,
   aiTemperature: 0.2,
   mcpEnabled: false,
+  mcpPort: 56463,
   mcpClient: 'lm-studio',
   previewTarget: 'csharp',
   displayName: '',
@@ -214,6 +220,11 @@ const TAB_MAX = 8;
 // Assistant sampling-temperature bounds — both Anthropic and OpenAI accept 0..2.
 const TEMP_MIN = 0;
 const TEMP_MAX = 2;
+
+// MCP sidecar loopback-port bounds — a TCP port number; 0 means "let the OS assign one". Mirror the
+// Settings input range (prefs.ts) so a stored value can never drive the host outside what the UI permits.
+const MCP_PORT_MIN = 0;
+const MCP_PORT_MAX = 65535;
 
 // The canonical accent roster. This data layer owns the list; the appearance layer derives its
 // presets and picker order from it, so a new accent is added in exactly one place.
@@ -310,6 +321,13 @@ function coerceTemperature(v: unknown): number {
   return Math.min(Math.max(v, TEMP_MIN), TEMP_MAX);
 }
 
+/** A finite integer clamped into the TCP port range (rounded), else the default (56463). `0` is valid
+ *  (OS-assigned port). Mirrors the MCP port input's bounds in prefs.ts, so what applies == what survives. */
+function coerceMcpPort(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return DEFAULT_SETTINGS.mcpPort;
+  return Math.min(Math.max(Math.round(v), MCP_PORT_MIN), MCP_PORT_MAX);
+}
+
 /** A string font-family override (empty allowed), else the default empty string. */
 function coerceFontFamily(v: unknown): string {
   return typeof v === 'string' ? v : DEFAULT_SETTINGS.fontFamily;
@@ -399,6 +417,7 @@ export function loadSettings(): Settings {
           : DEFAULT_SETTINGS.aiConstrainGrammar,
       aiTemperature: coerceTemperature(parsed.aiTemperature),
       mcpEnabled: typeof parsed.mcpEnabled === 'boolean' ? parsed.mcpEnabled : DEFAULT_SETTINGS.mcpEnabled,
+      mcpPort: coerceMcpPort(parsed.mcpPort),
       mcpClient: coerceMcpClient(parsed.mcpClient),
       previewTarget: coercePreviewTarget(parsed.previewTarget),
       displayName: typeof parsed.displayName === 'string' ? parsed.displayName : DEFAULT_SETTINGS.displayName,

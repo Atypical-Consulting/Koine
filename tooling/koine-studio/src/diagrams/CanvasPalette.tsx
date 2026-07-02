@@ -4,7 +4,7 @@ import type { AppState } from '@/store/index';
 import { isAllContexts } from '@/model/activeContext';
 import { lookupElement, type ModelIndex } from '@/model/modelIndex';
 import type { AddNodeKind, CanvasAnnotationKind, AggregateMemberKind } from '@/diagrams/diagramContract';
-import { ExportMenu, type ExportFormat } from '@/diagrams/ExportMenu';
+import { ExportMenu, type ExportFormat } from '@atypical/koine-ui';
 
 // The DDD constructs that round-trip to `.koi` via the addType seam (server Task 1). Each `kind` doubles
 // as the `koi-model-icon` `data-construct` slug, so a button wears the SAME shape-coded glyph the diagram

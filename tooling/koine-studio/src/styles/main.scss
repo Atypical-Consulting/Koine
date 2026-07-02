@@ -2,7 +2,6 @@
 //
 // Layers (all partials live under src/styles/):
 //   abstracts/   — variables, mixins, functions (zero CSS output)
-//   themes/      — runtime --koi-* CSS custom properties for light + dark
 //   base/        — resets, typography, scrollbars, animations, a11y
 //   layout/      — toolbar, split-pane, inspector
 //   components/  — every UI widget partial
@@ -14,10 +13,13 @@
 //
 // Runtime tokens stay CSS custom properties (--koi-*), never SCSS $variables,
 // so data-theme switching and the CodeMirror theme keep working at runtime.
+//
+// The --koi-* token definitions (formerly themes/_dark.scss + _light.scss +
+// abstracts/_ddd.scss's :root / html[data-theme] blocks) moved to the framework-free
+// @atypical/koine-ui package as plain CSS (issue #905, Task 2) — see
+// tooling/koine-ui/src/tokens.css. main.ts imports '@atypical/koine-ui/styles.css'
+// before this file, so every var(--koi-*) reference below still resolves.
 
-@use './abstracts/ddd';
-@use './themes/dark';
-@use './themes/light';
 @use './base/typography';
 @use './base/scrollbars';
 @use './layout/toolbar';

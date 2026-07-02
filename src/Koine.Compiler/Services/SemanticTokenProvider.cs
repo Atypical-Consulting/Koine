@@ -24,7 +24,7 @@ public enum SemanticTokenType
 /// modifier bitset is the OR of <c>(1 &lt;&lt; (int)modifier)</c> for each applied modifier.
 ///
 /// <para>Bit 0 (<see cref="Declaration"/>) marks a declaration site. Bits 1–15 are the DDD
-/// <em>concept kinds</em> ("Concept Colors", ADR 0003): a declaration name carries
+/// <em>concept kinds</em> ("Concept Colors", ADR 0004): a declaration name carries
 /// <c>declaration | &lt;kind&gt;</c>, a reference carries <c>&lt;kind&gt;</c> alone, and base token
 /// types (<see cref="SemanticTokenType.Type"/>/<see cref="SemanticTokenType.Enum"/>) are unchanged so
 /// clients that don't understand the modifiers degrade to today's coloring. The order is an
@@ -87,7 +87,7 @@ public sealed class SemanticTokenProvider
 
     /// <summary>
     /// The legend modifier names, in <see cref="SemanticTokenModifier"/> order. Bit 0 is
-    /// <c>declaration</c>; bits 1–15 are the DDD concept kinds (Concept Colors, ADR 0003).
+    /// <c>declaration</c>; bits 1–15 are the DDD concept kinds (Concept Colors, ADR 0004).
     /// Append-only — the LSP shell advertises this verbatim as <c>legend.tokenModifiers</c>.
     /// </summary>
     public static readonly IReadOnlyList<string> TokenModifierNames =
@@ -122,7 +122,7 @@ public sealed class SemanticTokenProvider
         // operand highlights as a property even though it is not a declared TYPE name).
         IReadOnlySet<string> propertyNames = CollectPropertyNames(index);
 
-        // Concept-kind bit per declared type NAME (Concept Colors, ADR 0003), so both a
+        // Concept-kind bit per declared type NAME (Concept Colors, ADR 0004), so both a
         // declaration and a reference to that name carry the kind. Primitives / collections /
         // ID types are not declared TypeDecls, so they carry no kind bit (the neutral type color).
         IReadOnlyDictionary<string, int> kindBits = CollectConceptKindBits(index);

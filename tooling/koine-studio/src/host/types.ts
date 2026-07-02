@@ -43,6 +43,19 @@ export interface SourceDoc {
 }
 
 /**
+ * The local MCP server endpoint a desktop host serves: the loopback URL an MCP client connects to, plus
+ * whether the host had to fall back to an OS-assigned port because the configured `mcpPort` was busy. The
+ * requested port is the persisted `mcpPort` setting (the UI reads it back for the fallback warning), so it
+ * is deliberately NOT carried here — only the observable outcome (`url` + `fallback`).
+ */
+export interface McpEndpoint {
+  /** The `http://127.0.0.1:PORT/mcp` URL an MCP client connects to. */
+  url: string;
+  /** True when the configured port was busy and the server fell back to an OS-assigned one. */
+  fallback: boolean;
+}
+
+/**
  * Transport for the JSON-RPC language server. {@link import('@/lsp/lsp').KoineLsp} frames the
  * messages; the transport just moves the bytes and surfaces server→client messages. On the
  * desktop this brokers stdio to the `koine lsp` child; in the browser it drives an in-process
@@ -174,12 +187,13 @@ export interface Platform {
   appVersion(): Promise<string>;
 
   /**
-   * The local MCP server endpoint URL (`http://127.0.0.1:PORT/mcp`) to hand to an external MCP
-   * client such as LM Studio, or null when the host can't serve one. The desktop shell lazily
-   * launches a `koine mcp --http` sidecar and returns the URL it binds; a browser tab cannot listen
-   * as a server, so it returns null and the UI hides the affordance.
+   * The local MCP server endpoint to hand to an external MCP client such as LM Studio — the loopback URL
+   * plus whether the host fell back to an OS-assigned port (see {@link McpEndpoint}) — or null when the
+   * host can't serve one. The desktop shell lazily launches a `koine mcp --http` sidecar on the configured
+   * `mcpPort` (falling back to an OS-assigned port if it is busy) and returns what it bound; a browser tab
+   * cannot listen as a server, so it returns null and the UI hides the affordance.
    */
-  mcpEndpoint(): Promise<string | null>;
+  mcpEndpoint(): Promise<McpEndpoint | null>;
 
   /**
    * Stop the local MCP sidecar if one is running and forget its endpoint, so the next

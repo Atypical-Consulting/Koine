@@ -2,7 +2,7 @@
 // files go through the File System Access API (fs.ts). Used when the studio is served as a plain
 // web page rather than hosted in the Tauri desktop shell.
 import type { EditSession } from '@/ai/editSession';
-import type { FsEntry, GitLogEntry, GitStatus, KoiFile, LspTransport, Platform, SourceDoc } from '@/host/types';
+import type { FsEntry, GitLogEntry, GitStatus, KoiFile, LspTransport, McpEndpoint, Platform, SourceDoc } from '@/host/types';
 import { WasmLspTransport } from '@/host/browser/transport';
 import {
   runEditTool as runEditToolImpl,
@@ -38,7 +38,7 @@ export class BrowserPlatform implements Platform {
 
   // A browser tab cannot listen as a server, so there is no MCP HTTP endpoint to advertise; the
   // `koine mcp --http` CLI recipe covers the web user. Null hides the desktop-only affordance.
-  async mcpEndpoint(): Promise<string | null> {
+  async mcpEndpoint(): Promise<McpEndpoint | null> {
     return null;
   }
 

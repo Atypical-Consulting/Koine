@@ -1,12 +1,14 @@
-// Generates the Studio's Concept Colors artifacts from the single source of truth
-// `design/concept-colors.json` (ADR 0003). Run via `npm run gen:colors`.
+// Generates the Studio's Concept Colors TS map from the single source of truth
+// `design/concept-colors.json` (ADR 0004). Run via `npm run gen:colors`.
 //
-// Emits (both committed, both carry a GENERATED banner, both drift-guarded by
-// src/model/conceptColors.test.ts):
-//   - src/styles/abstracts/_ddd.generated.scss   (the --koi-ddd-<slug> CSS vars, dark + light)
+// Emits (committed, GENERATED banner, drift-guarded by src/model/conceptColors.test.ts):
 //   - src/model/conceptColors.generated.ts        (CONCEPT_SLUGS + CONCEPT_COLORS)
 //
-// A concept hex lives ONLY in the JSON; edit the JSON and re-run this — never hand-edit the outputs.
+// The --koi-ddd-<slug> CSS vars are NOT emitted here: after the @atypical/koine-ui extraction
+// (issue #905) the design tokens live in that package — see tooling/koine-ui/scripts/gen-concept-colors.mjs,
+// which emits the CSS palette. This script owns only the TypeScript map the editor/canvas consume.
+//
+// A concept hex lives ONLY in the JSON; edit the JSON and re-run this — never hand-edit the output.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -59,28 +61,8 @@ for (const c of concepts) {
   }
 }
 
-const BANNER_SCSS = `/* GENERATED — do not edit. Source of truth: design/concept-colors.json (ADR 0003 — Concept Colors).
-   Regenerate with \`npm run gen:colors\` in tooling/koine-studio. */`;
-const BANNER_TS = `// GENERATED — do not edit. Source of truth: design/concept-colors.json (ADR 0003 — Concept Colors).
+const BANNER_TS = `// GENERATED — do not edit. Source of truth: design/concept-colors.json (ADR 0004 — Concept Colors).
 // Regenerate with \`npm run gen:colors\` in tooling/koine-studio.`;
-
-// --- SCSS partial -------------------------------------------------------------
-const darkVars = concepts.map((c) => `  --koi-ddd-${c.slug}: ${c.dark};`).join('\n');
-const lightVars = concepts.map((c) => `  --koi-ddd-${c.slug}: ${c.light};`).join('\n');
-const scss = `${BANNER_SCSS}
-
-/* The DDD concept palette — one hue per concept, shared by the Explorer icons, the inspector accent,
-   the diagram nodes, and (via cm-st-k-<slug>) the code editor. Dark is the :root default; the light
-   theme (html[data-theme='light']) swaps in contrast-tuned variants readable on white. */
-:root {
-${darkVars}
-}
-
-html[data-theme='light'] {
-${lightVars}
-}
-`;
-writeFileSync(path.join(studioRoot, 'src', 'styles', 'abstracts', '_ddd.generated.scss'), scss);
 
 // --- TypeScript module --------------------------------------------------------
 const slugUnion = concepts.map((c) => `'${c.slug}'`).join(' | ');
@@ -119,4 +101,4 @@ ${colorEntries}
 `;
 writeFileSync(path.join(studioRoot, 'src', 'model', 'conceptColors.generated.ts'), ts);
 
-console.log(`✓ concept colors generated (${concepts.length} concepts) → _ddd.generated.scss, conceptColors.generated.ts`);
+console.log(`✓ concept colors generated (${concepts.length} concepts) → conceptColors.generated.ts`);

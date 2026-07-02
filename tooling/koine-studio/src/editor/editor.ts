@@ -92,7 +92,7 @@ import { loadSettings, resolveKeybindings } from '@/settings/persistence';
 // The Draft 2020-12 schema for the settings.json document — drives the editable editor's lint/hover/completion.
 import { SETTINGS_JSON_SCHEMA, settingsFieldMeta } from '@/settings/settingsSchema';
 import { buildExtraKeys, type BindingId } from '@/editor/keybindings';
-// Concept Colors (ADR 0003): the ordered concept-kind slugs, indexed by LSP modifier bit (bit i+1 ⇒
+// Concept Colors (ADR 0004): the ordered concept-kind slugs, indexed by LSP modifier bit (bit i+1 ⇒
 // CONCEPT_SLUGS[i]). Generated from design/concept-colors.json — the code editor paints a kind-tagged
 // identifier with its concept color (`--koi-ddd-<slug>`), matching the explorer and canvas.
 import { CONCEPT_SLUGS } from '@/model/conceptColors.generated';
@@ -578,7 +578,7 @@ export const SEMANTIC_TOKEN_TYPES = [
 const SEMANTIC_MODIFIER_DECLARATION = 1 << 0;
 
 /**
- * The concept-kind slug carried by a token's modifier bits, or `null` (Concept Colors, ADR 0003).
+ * The concept-kind slug carried by a token's modifier bits, or `null` (Concept Colors, ADR 0004).
  * Bits 1–15 are DDD concept kinds: bit `i+1` ⇒ {@link CONCEPT_SLUGS}`[i]`. A token carries at most one
  * kind bit; an out-of-range/unknown bit maps to no slug (defensive — matches the WASM/website mirrors).
  */
@@ -665,7 +665,7 @@ const semanticTokensRedrawEffect = StateEffect.define<null>();
 // _dark.scss / _light.scss) keep enum / enumMember / property / parameter visually distinct from each
 // other and from value/type. `cm-st-declaration` bolds the declaring occurrence.
 //
-// Concept Colors (ADR 0003): a kind-tagged identifier also gets `cm-st-k-<slug>`, painting it in its
+// Concept Colors (ADR 0004): a kind-tagged identifier also gets `cm-st-k-<slug>`, painting it in its
 // DDD concept color (`--koi-ddd-<slug>`) so `PaymentMethod` is the same amber in explorer, canvas, and
 // code. These rules are declared AFTER the base `cm-st-*` rules so — at equal specificity — the concept
 // color wins over the base type/enum color (this is what retires the ad-hoc `--koi-hl-sem-enum` hue for

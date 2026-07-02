@@ -54,6 +54,7 @@ export const SETTINGS_FIELDS: readonly FieldDef[] = [
   { runtimeKey: 'aiConstrainGrammar', group: 'ai', docKey: 'constrainGrammar' },
   { runtimeKey: 'aiTemperature', group: 'ai', docKey: 'temperature' },
   { runtimeKey: 'mcpEnabled', group: 'mcp', docKey: 'enabled' },
+  { runtimeKey: 'mcpPort', group: 'mcp', docKey: 'port' },
   { runtimeKey: 'mcpClient', group: 'mcp', docKey: 'client' },
   { runtimeKey: 'previewTarget', group: 'preview', docKey: 'target' },
   { runtimeKey: 'lspTrace', group: 'lsp', docKey: 'trace' },
@@ -139,6 +140,13 @@ const LEAF_SCHEMAS: Record<FieldDef['runtimeKey'], LeafSchema> = {
     description: 'Assistant sampling temperature (0..2). Lower is more deterministic.',
   },
   mcpEnabled: { type: 'boolean', title: 'Enable MCP', description: 'Enable the local MCP server (desktop sidecar).' },
+  mcpPort: {
+    type: 'integer',
+    minimum: 0,
+    maximum: 65535,
+    title: 'Port',
+    description: 'Fixed loopback port for the MCP server (0 = pick automatically). Default 56463.',
+  },
   mcpClient: {
     type: 'string',
     enum: ['claude-desktop', 'lm-studio', 'cursor', 'vscode', 'generic'],

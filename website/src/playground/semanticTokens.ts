@@ -40,7 +40,7 @@ export const SEMANTIC_TOKEN_TYPES = [
 const SEMANTIC_MODIFIER_DECLARATION = 1 << 0;
 
 /**
- * Concept Colors (ADR 0003): the DDD concept-kind slugs in LSP modifier-bit order — bit `i+1` ⇒
+ * Concept Colors (ADR 0004): the DDD concept-kind slugs in LSP modifier-bit order — bit `i+1` ⇒
  * `CONCEPT_KIND_SLUGS[i]` (bit 0 is `declaration`). A contract-pinned local mirror of the same order
  * emitted from `design/concept-colors.json`, kept here for the same reason `SEMANTIC_TOKEN_TYPES` is a
  * local copy (website/ and tooling/koine-studio/ are separate build roots). The sync test asserts this
@@ -158,7 +158,7 @@ const semanticTokensRedrawEffect = StateEffect.define<null>();
 // reuses `--koi-hl-keyword`, and enum / enumMember / property / parameter get their own `--koi-hl-sem-*`
 // hues (distinct in both themes). `cm-st-declaration` (the only modifier) bolds the declaring occurrence.
 //
-// Concept Colors (ADR 0003): a kind-tagged identifier also gets `cm-st-k-<slug>`, painting it in its DDD
+// Concept Colors (ADR 0004): a kind-tagged identifier also gets `cm-st-k-<slug>`, painting it in its DDD
 // concept color (`--koi-ddd-<slug>` from concept-colors.generated.css) so a name is the same color here,
 // in Studio, and in the explorer. These rules are declared AFTER the base `cm-st-*` rules so — at equal
 // specificity — the concept color wins over the base type/enum color. Structure stays neutral.

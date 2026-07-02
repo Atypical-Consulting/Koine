@@ -9,7 +9,7 @@
 // model state, just DOM + gesture wiring, and the Preact panel lives INSIDE its body. The file is .tsx
 // only to sit beside its siblings — it renders no JSX itself.
 
-import { registerOverlay, visibleFocusables } from '@/shared/overlay';
+import { registerOverlay, visibleFocusables } from '@atypical/koine-ui';
 
 export type SheetDetent = 'peek' | 'half' | 'full';
 

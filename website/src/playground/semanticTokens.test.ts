@@ -142,7 +142,7 @@ describe('buildSemanticDecorations (the path the editor ViewPlugin paints from)'
   });
 });
 
-// Concept Colors (ADR 0003): modifier bits 1–15 are DDD concept kinds; the decoder appends a
+// Concept Colors (ADR 0004): modifier bits 1–15 are DDD concept kinds; the decoder appends a
 // `cm-st-k-<slug>` class per CONCEPT_KIND_SLUGS (bit i+1 ⇒ CONCEPT_KIND_SLUGS[i]) so the playground paints
 // a name in its concept color. The mirror must not drift from the generated palette.
 describe('decodeSemanticTokens — concept-kind modifiers', () => {

@@ -1,4 +1,4 @@
-// GENERATED — do not edit. Source of truth: design/concept-colors.json (ADR 0003 — Concept Colors).
+// GENERATED — do not edit. Source of truth: design/concept-colors.json (ADR 0004 — Concept Colors).
 // Regenerate with `npm run gen:colors` in tooling/koine-studio.
 
 /** A DDD concept slug — the key of a `--koi-ddd-<slug>` var and a `cm-st-k-<slug>` editor class. */

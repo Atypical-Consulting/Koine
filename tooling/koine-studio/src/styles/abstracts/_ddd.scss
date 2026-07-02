@@ -1,9 +1,0 @@
-/* --- DDD concept palette ---------------------------------------------------------------------------
-   One source of truth for the colour of each DDD concept, shared by the Explorer icons (_model.scss),
-   the inspector accent, the diagram nodes (_diagrams.scss), and the code editor (cm-st-k-<slug>).
-
-   The hex values are NOT written here — they live in `design/concept-colors.json` (ADR 0003 — Concept
-   Colors: one concept, one color, everywhere) and are emitted into `_ddd.generated.scss` by
-   `npm run gen:colors`. This partial forwards the generated vars so existing `@use './abstracts/ddd'`
-   call sites keep working. Edit the JSON and regenerate; never hand-edit the generated partial. */
-@forward 'ddd.generated';

@@ -5,6 +5,10 @@ import '@fontsource-variable/hanken-grotesk';
 import '@fontsource-variable/jetbrains-mono';
 import '@maxgraph/core/css/common.css';
 import '@xterm/xterm/css/xterm.css';
+// The --koi-* design tokens (dark/light theme + DDD-construct hues) now live in the
+// @atypical/koine-ui package (issue #905, Task 2). Import it before main.scss so every
+// var(--koi-*) reference in the component styles below resolves at load time.
+import '@atypical/koine-ui/styles.css';
 import '@/styles/main.scss';
 import { init } from '@/shell/ide';
 import { mountHome, type WelcomeCallbacks, type HomeHandle } from '@/welcome/welcome';

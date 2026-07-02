@@ -9,10 +9,9 @@ Generated/
 .DS_Store
 BenchmarkDotNet.Artifacts/
 
-# Node tooling — a stray root npm invocation can drop these at the repo root (the real Node projects
-# live under tooling/ and website/ with their own ignores). Anchored so subproject lockfiles are kept.
+# Node tooling — the root is an npm workspace root (tooling/*, website), so /node_modules/
+# and package-lock.json here are real, tracked workspace artifacts, not stray drops.
 /node_modules/
-/package-lock.json
 
 # Skill eval scratch — workspace logs/JSON dropped by create-issue skill evals; never source.
 .claude/skills/create-issue-workspace/

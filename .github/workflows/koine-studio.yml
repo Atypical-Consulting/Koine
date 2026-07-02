@@ -98,7 +98,9 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: tooling/koine-studio/package-lock.json
+          # The repo root is the npm workspace root (tooling/*, website); the workspace's
+          # single lockfile lives there, not per-member.
+          cache-dependency-path: package-lock.json
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -134,11 +136,16 @@ jobs:
           cargo build --locked
           cargo test --locked
 
+      # npm workspaces keep a single lockfile at the repo root, so `npm ci` must run
+      # there (it resolves `@atypical/koine-ui` via the workspace symlink, not the
+      # registry). The build script below still runs from the package subdirectory;
+      # npm's ancestor node_modules walk finds the root-installed deps normally.
+      - name: Install npm dependencies (workspace root)
+        run: npm ci
+
       - name: Build frontend (npm)
         working-directory: tooling/koine-studio
-        run: |
-          npm ci
-          npm run build
+        run: npm run build
 
       # `npm test` (vitest) now runs two projects: the happy-dom unit/DOM suite AND the
       # `storybook` project, which executes every story as a real-browser test via
@@ -149,39 +156,22 @@ jobs:
         uses: ./.github/actions/setup-playwright
         with:
           working-directory: tooling/koine-studio
-          cache-key-files: tooling/koine-studio/package-lock.json
+          cache-key-files: package-lock.json
 
       # Issue #400: the Windows runner intermittently exhausts disk during the Vite module-transform
-      # phase for the wasm.fallback suite, crashing vitest workers with "Error: disk full". Prune
-      # large toolchains the studio job does not need (Android SDK, Java, Go, etc.) before the
-      # test step to reclaim several GB of headroom. The before/after log lines confirm how much
-      # space was freed and how much margin remains for the vitest run.
-      - name: Free disk space and log headroom (Windows)
+      # phase, crashing vitest workers with "Error: disk full". The cause is drive placement, not
+      # total space: %TEMP% lives on C: (~30 GB free) where Vite/rolldown spill their transform temp,
+      # while the workspace drive D: has ~140 GB free. Point TEMP/TMP at D: (RUNNER_TEMP already lives
+      # there) so the transform has ample headroom. This replaces the previous approach of pruning
+      # toolchains off C:, which burned ~3.5 min per run on slow Remove-Item calls to reclaim space on
+      # the wrong drive. GITHUB_ENV makes the redirect apply to the vitest step below.
+      - name: "Redirect temp to the D: drive for headroom (Windows)"
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Write-Host "=== disk headroom BEFORE cleanup ==="
-          Get-PSDrive -PSProvider FileSystem |
-            Select-Object Name,
-              @{N='Used(GB)';E={[Math]::Round($_.Used/1GB,2)}},
-              @{N='Free(GB)';E={[Math]::Round($_.Free/1GB,2)}} |
-            Format-Table -AutoSize
-          $remove = @(
-            $env:JAVA_HOME_8_X64, $env:JAVA_HOME_11_X64,
-            $env:JAVA_HOME_17_X64, $env:JAVA_HOME_21_X64,
-            'C:\Program Files (x86)\Android',
-            'C:\Program Files\MongoDB',
-            'C:\hostedtoolcache\windows\go',
-            'C:\hostedtoolcache\windows\Python',
-            'C:\hostedtoolcache\windows\Ruby'
-          )
-          foreach ($p in $remove) {
-            if ($p -and (Test-Path $p)) {
-              Write-Host "  Removing: $p"
-              Remove-Item -Recurse -Force $p -ErrorAction SilentlyContinue
-            }
-          }
-          Write-Host "=== disk headroom AFTER cleanup ==="
+          "TEMP=$env:RUNNER_TEMP" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TMP=$env:RUNNER_TEMP"  | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "TEMP/TMP redirected to $env:RUNNER_TEMP"
           Get-PSDrive -PSProvider FileSystem |
             Select-Object Name,
               @{N='Used(GB)';E={[Math]::Round($_.Used/1GB,2)}},
@@ -223,7 +213,27 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: tooling/koine-studio/package-lock.json
+          # The repo root is the npm workspace root (tooling/*, website); the workspace's
+          # single lockfile lives there, not per-member.
+          cache-dependency-path: package-lock.json
+
+      # npm workspaces keep a single lockfile at the repo root, so `npm ci` must run
+      # there (it resolves `@atypical/koine-ui` via the workspace symlink, not the
+      # registry). The build scripts below still run from the package subdirectory;
+      # npm's ancestor node_modules walk finds the root-installed deps normally.
+      - name: Install npm dependencies (workspace root)
+        run: npm ci
+
+      # Pack verification for the extracted @atypical/koine-ui package (issue #905): proves on every
+      # PR that its published tarball contains the right files (dist/ only, no source/test files).
+      # `npm pack` always runs the package's own `prepack` (`npm run build`) first, so this alone
+      # proves both "builds cleanly" and "packs cleanly" — a separate `npm run build` here would just
+      # rebuild the same unchanged output the root `postinstall` hook already built during `npm ci`
+      # above. `--dry-run` never touches a registry — no publish, no credentials needed. Actual
+      # publish-on-release is a separate follow-up (needs a release trigger/token decision).
+      - name: Pack @atypical/koine-ui
+        working-directory: tooling/koine-ui
+        run: npm pack --dry-run
 
       # (a) Publish + bundle the in-browser compiler, then (b) typecheck and bundle the web frontend.
       # Built at the DEPLOY's sub-path base (/Koine/studio/) so the boot smoke-test below exercises the
@@ -234,7 +244,6 @@ jobs:
         env:
           KOINE_STUDIO_BASE: /Koine/studio/
         run: |
-          npm ci
           npm run build:wasm
           npm run build:web
 
@@ -245,7 +254,7 @@ jobs:
         uses: ./.github/actions/setup-playwright
         with:
           working-directory: tooling/koine-studio
-          cache-key-files: tooling/koine-studio/package-lock.json
+          cache-key-files: package-lock.json
 
       - name: Boot smoke-test — the real compiler boots in a browser (#357)
         working-directory: tooling/koine-studio

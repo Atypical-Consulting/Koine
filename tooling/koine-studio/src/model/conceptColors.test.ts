@@ -4,7 +4,7 @@ import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { CONCEPT_COLORS, CONCEPT_SLUGS, type ConceptSlug } from '@/model/conceptColors.generated';
 
-// Concept Colors (ADR 0003): the generated TS module must never drift from the single source of truth
+// Concept Colors (ADR 0004): the generated TS module must never drift from the single source of truth
 // `design/concept-colors.json`, and every `light` value must stay readable on a white background.
 
 const here = path.dirname(fileURLToPath(import.meta.url));

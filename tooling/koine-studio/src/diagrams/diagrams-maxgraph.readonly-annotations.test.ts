@@ -9,8 +9,8 @@ import * as mx from '@maxgraph/core';
 import { buildCanvas } from '@/diagrams/diagrams-maxgraph';
 
 // The annotation prompt routes through Koine's own modal; stub it so the test drives the async dialog.
-vi.mock('@/shared/overlay', () => ({ koiPrompt: vi.fn(), koiConfirm: vi.fn() }));
-import { koiPrompt } from '@/shared/overlay';
+vi.mock('@atypical/koine-ui', () => ({ koiPrompt: vi.fn(), koiConfirm: vi.fn() }));
+import { koiPrompt } from '@atypical/koine-ui';
 import {
   DIAGRAM_ANNOTATION_CREATE_EVENT,
   positionKey,

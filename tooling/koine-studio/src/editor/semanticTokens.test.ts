@@ -131,7 +131,7 @@ describe('decodeSemanticTokens', () => {
 
 // CodeMirror glue for the semanticTokensExtension ViewPlugin, driven against a REAL EditorView (the
 // @codemirror/* packages construct fine under happy-dom — see inlayHints.test.ts). The raw delta stream
-// Concept Colors (ADR 0003): modifier bits 1–15 are DDD concept kinds. The decoder appends a
+// Concept Colors (ADR 0004): modifier bits 1–15 are DDD concept kinds. The decoder appends a
 // `cm-st-k-<slug>` class per the CONCEPT_SLUGS bit order (bit i+1 ⇒ CONCEPT_SLUGS[i]); the kind class
 // wins the color over the base `cm-st-<type>` rule. Bit 0 stays `declaration`.
 describe('decodeSemanticTokens — concept-kind modifiers', () => {

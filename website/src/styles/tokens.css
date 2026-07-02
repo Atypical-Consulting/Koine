@@ -5,7 +5,7 @@
   Fontsource (imported in the consuming page/layout).
 */
 
-/* Concept Colors (ADR 0003): the --koi-ddd-<slug> palette, generated from design/concept-colors.json.
+/* Concept Colors (ADR 0004): the --koi-ddd-<slug> palette, generated from design/concept-colors.json.
    @import must precede other rules, so it stays at the very top. */
 @import './concept-colors.generated.css';
 
