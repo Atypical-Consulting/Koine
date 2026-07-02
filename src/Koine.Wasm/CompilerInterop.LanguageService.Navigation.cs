@@ -4,7 +4,6 @@ using System.Text.Json;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
-using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
 using Koine.Compiler.Emit.Grammar;
 using Koine.Compiler.Formatting;

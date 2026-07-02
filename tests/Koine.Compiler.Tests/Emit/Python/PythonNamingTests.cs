@@ -1,5 +1,3 @@
-using Koine.Compiler.Emit.Python;
-
 namespace Koine.Compiler.Tests;
 
 /// <summary>

@@ -1,4 +1,4 @@
-namespace Koine.Compiler.Emit.Python;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The once-emitted Python runtime support, the analogue of the C# emitter's <c>Koine.Runtime</c>

@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Koine.Compiler;
 using Koine.Compiler.Emit;
 
 namespace Koine.Wasm.Tests;

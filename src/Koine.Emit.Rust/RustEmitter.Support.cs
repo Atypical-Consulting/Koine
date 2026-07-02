@@ -2,7 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.Rust;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Orchestration support for <see cref="RustEmitter"/>: the per-emit state threaded through the

@@ -1,5 +1,4 @@
 using Koine.Compiler.Emit;
-using Koine.Compiler.Emit.Php;
 using Koine.Compiler.Services;
 using Koine.Compiler.Tests.Conformance;
 

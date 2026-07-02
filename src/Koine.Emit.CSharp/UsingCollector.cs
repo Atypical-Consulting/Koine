@@ -1,4 +1,4 @@
-namespace Koine.Compiler.Emit.CSharp;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Derives the <c>using</c> directives a generated file needs from the runtime/BCL types

@@ -1,5 +1,4 @@
 using Koine.Compiler.Emit;
-using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Emit.Glossary;
 using Koine.Compiler.Services;
 

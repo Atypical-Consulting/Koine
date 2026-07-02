@@ -1,3 +1,4 @@
+using Koine.Compiler;
 using Koine.Compiler.Emit;
 
 namespace Koine.Mcp;

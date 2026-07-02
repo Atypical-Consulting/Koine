@@ -2,7 +2,6 @@ using System.Globalization;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Ast.Bound;
 using Koine.Compiler.Diagnostics;
-using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Semantics;
 using Koine.Compiler.Services;
 

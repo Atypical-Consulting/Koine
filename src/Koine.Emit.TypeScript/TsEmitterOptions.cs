@@ -1,4 +1,4 @@
-namespace Koine.Compiler.Emit.TypeScript;
+namespace Koine.Compiler;
 
 /// <summary>
 /// A composable layer of the TypeScript target, selected via <c>--layers</c> /

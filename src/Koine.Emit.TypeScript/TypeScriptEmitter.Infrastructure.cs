@@ -1,8 +1,9 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.TypeScript;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The opt-in Infrastructure layer of <see cref="TypeScriptEmitter"/> (issue #241), the TS analogue of

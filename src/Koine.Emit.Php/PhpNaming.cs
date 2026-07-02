@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Koine.Compiler.Emit.Php;
+namespace Koine.Compiler;
 
 /// <summary>
 /// PHP-specific identifier casing and keyword-escaping helpers. Class names are

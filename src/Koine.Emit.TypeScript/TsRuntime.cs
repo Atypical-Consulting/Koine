@@ -1,4 +1,4 @@
-namespace Koine.Compiler.Emit.TypeScript;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The once-emitted TypeScript runtime support, the analogue of the C# emitter's

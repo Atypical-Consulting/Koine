@@ -1,4 +1,4 @@
-namespace Koine.Compiler.Emit.Rust;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Per-emit configuration for the Rust backend, mapped from the CLI's <c>targets.rust.*</c> block.

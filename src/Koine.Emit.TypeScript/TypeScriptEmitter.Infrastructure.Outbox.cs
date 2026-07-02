@@ -1,6 +1,7 @@
 using System.Text;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.TypeScript;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The transactional-outbox slice of the TypeScript Infrastructure layer (issue #241). For a context

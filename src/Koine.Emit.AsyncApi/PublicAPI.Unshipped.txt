@@ -1,13 +1,13 @@
 #nullable enable
-Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter
-Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.AsyncApiEmitter() -> void
-Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.TargetName.get -> string!
-Koine.Compiler.Emit.AsyncApiEmitterProvider
-Koine.Compiler.Emit.AsyncApiEmitterProvider.AsyncApiEmitterProvider() -> void
-Koine.Compiler.Emit.AsyncApiEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! options) -> Koine.Compiler.Emit.IEmitter!
-Koine.Compiler.Emit.AsyncApiEmitterProvider.DisplayName.get -> string!
-Koine.Compiler.Emit.AsyncApiEmitterProvider.FileExtension.get -> string!
-Koine.Compiler.Emit.AsyncApiEmitterProvider.Target.get -> string!
-const Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.FileName = "asyncapi.yaml" -> string!
+Koine.Compiler.AsyncApiEmitter
+Koine.Compiler.AsyncApiEmitter.AsyncApiEmitter() -> void
+Koine.Compiler.AsyncApiEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.AsyncApiEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.AsyncApiEmitter.TargetName.get -> string!
+Koine.Compiler.AsyncApiEmitterProvider
+Koine.Compiler.AsyncApiEmitterProvider.AsyncApiEmitterProvider() -> void
+Koine.Compiler.AsyncApiEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! options) -> Koine.Compiler.Emit.IEmitter!
+Koine.Compiler.AsyncApiEmitterProvider.DisplayName.get -> string!
+Koine.Compiler.AsyncApiEmitterProvider.FileExtension.get -> string!
+Koine.Compiler.AsyncApiEmitterProvider.Target.get -> string!
+const Koine.Compiler.AsyncApiEmitter.FileName = "asyncapi.yaml" -> string!

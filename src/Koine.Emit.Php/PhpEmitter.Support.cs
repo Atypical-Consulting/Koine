@@ -1,7 +1,8 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.Php;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Orchestration support for <see cref="PhpEmitter"/>: per-run state, the PHP PSR-4 file layout
@@ -18,7 +19,7 @@ public sealed partial class PhpEmitter
     internal sealed record PhpEmitContext(
         ModelIndex Index,
         IReadOnlyDictionary<string, string> EnumMemberToType,
-        IReadOnlyDictionary<string, CSharp.OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> OperatorNeeds);
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> OperatorNeeds);
 
     /// <summary>
     /// Short class name → every <c>(FQN, declaring context)</c> that name resolves to — e.g.

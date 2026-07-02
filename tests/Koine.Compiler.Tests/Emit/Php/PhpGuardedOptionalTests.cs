@@ -1,5 +1,4 @@
 using Koine.Compiler.Ast;
-using Koine.Compiler.Emit.Php;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;

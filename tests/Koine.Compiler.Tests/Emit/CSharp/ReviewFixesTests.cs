@@ -1,8 +1,4 @@
 using Koine.Compiler.Emit;
-using Koine.Compiler.Emit.CSharp;
-using Koine.Compiler.Emit.Php;
-using Koine.Compiler.Emit.Python;
-using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;

@@ -1,69 +1,69 @@
 #nullable enable
-Koine.Compiler.Emit.Docs.DiagramDescriptor
-Koine.Compiler.Emit.Docs.DiagramDescriptor.Caption.get -> string!
-Koine.Compiler.Emit.Docs.DiagramDescriptor.Caption.init -> void
-Koine.Compiler.Emit.Docs.DiagramDescriptor.DiagramDescriptor(string! Caption, string! Kind, string! Mermaid, Koine.Compiler.Emit.Docs.DiagramGraph! Graph) -> void
-Koine.Compiler.Emit.Docs.DiagramDescriptor.Graph.get -> Koine.Compiler.Emit.Docs.DiagramGraph!
-Koine.Compiler.Emit.Docs.DiagramDescriptor.Graph.init -> void
-Koine.Compiler.Emit.Docs.DiagramDescriptor.Kind.get -> string!
-Koine.Compiler.Emit.Docs.DiagramDescriptor.Kind.init -> void
-Koine.Compiler.Emit.Docs.DiagramDescriptor.Mermaid.get -> string!
-Koine.Compiler.Emit.Docs.DiagramDescriptor.Mermaid.init -> void
-Koine.Compiler.Emit.Docs.DiagramEdge
-Koine.Compiler.Emit.Docs.DiagramEdge.ArrowKind.get -> string?
-Koine.Compiler.Emit.Docs.DiagramEdge.ArrowKind.init -> void
-Koine.Compiler.Emit.Docs.DiagramEdge.BackingMember.get -> string?
-Koine.Compiler.Emit.Docs.DiagramEdge.BackingMember.init -> void
-Koine.Compiler.Emit.Docs.DiagramEdge.Cardinality.get -> string?
-Koine.Compiler.Emit.Docs.DiagramEdge.Cardinality.init -> void
-Koine.Compiler.Emit.Docs.DiagramEdge.DiagramEdge(string! From, string! To, string? Label, string? Cardinality = null, string? SourceCardinality = null, string? ArrowKind = null, string? BackingMember = null) -> void
-Koine.Compiler.Emit.Docs.DiagramEdge.From.get -> string!
-Koine.Compiler.Emit.Docs.DiagramEdge.From.init -> void
-Koine.Compiler.Emit.Docs.DiagramEdge.Label.get -> string?
-Koine.Compiler.Emit.Docs.DiagramEdge.Label.init -> void
-Koine.Compiler.Emit.Docs.DiagramEdge.SourceCardinality.get -> string?
-Koine.Compiler.Emit.Docs.DiagramEdge.SourceCardinality.init -> void
-Koine.Compiler.Emit.Docs.DiagramEdge.To.get -> string!
-Koine.Compiler.Emit.Docs.DiagramEdge.To.init -> void
-Koine.Compiler.Emit.Docs.DiagramGraph
-Koine.Compiler.Emit.Docs.DiagramGraph.DiagramGraph(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramNode!>! Nodes, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramEdge!>! Edges) -> void
-Koine.Compiler.Emit.Docs.DiagramGraph.Edges.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramEdge!>!
-Koine.Compiler.Emit.Docs.DiagramGraph.Edges.init -> void
-Koine.Compiler.Emit.Docs.DiagramGraph.Nodes.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramNode!>!
-Koine.Compiler.Emit.Docs.DiagramGraph.Nodes.init -> void
-Koine.Compiler.Emit.Docs.DiagramMember
-Koine.Compiler.Emit.Docs.DiagramMember.DiagramMember(string! Text, string! Kind) -> void
-Koine.Compiler.Emit.Docs.DiagramMember.Kind.get -> string!
-Koine.Compiler.Emit.Docs.DiagramMember.Kind.init -> void
-Koine.Compiler.Emit.Docs.DiagramMember.Text.get -> string!
-Koine.Compiler.Emit.Docs.DiagramMember.Text.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode
-Koine.Compiler.Emit.Docs.DiagramNode.DiagramNode(string! Id, string! Label, string! Kind, string! QualifiedName, Koine.Compiler.Ast.SourceSpan? Span, string? Stereotype = null, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramMember!>? Members = null, System.Collections.Generic.IReadOnlyList<string!>? Invariants = null, string? Doc = null) -> void
-Koine.Compiler.Emit.Docs.DiagramNode.Doc.get -> string?
-Koine.Compiler.Emit.Docs.DiagramNode.Doc.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode.Id.get -> string!
-Koine.Compiler.Emit.Docs.DiagramNode.Id.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode.Invariants.get -> System.Collections.Generic.IReadOnlyList<string!>?
-Koine.Compiler.Emit.Docs.DiagramNode.Invariants.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode.Kind.get -> string!
-Koine.Compiler.Emit.Docs.DiagramNode.Kind.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode.Label.get -> string!
-Koine.Compiler.Emit.Docs.DiagramNode.Label.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode.Members.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramMember!>?
-Koine.Compiler.Emit.Docs.DiagramNode.Members.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode.QualifiedName.get -> string!
-Koine.Compiler.Emit.Docs.DiagramNode.QualifiedName.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode.Span.get -> Koine.Compiler.Ast.SourceSpan?
-Koine.Compiler.Emit.Docs.DiagramNode.Span.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode.Stereotype.get -> string?
-Koine.Compiler.Emit.Docs.DiagramNode.Stereotype.init -> void
-Koine.Compiler.Emit.Docs.DocsEmitter
-Koine.Compiler.Emit.Docs.DocsEmitter.DocsEmitter() -> void
-Koine.Compiler.Emit.Docs.DocsEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.Docs.DocsEmitter.EmitDiagrams(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramDescriptor!>!>!
-Koine.Compiler.Emit.Docs.DocsEmitter.TargetName.get -> string!
-Koine.Compiler.Emit.DocsEmitterProvider
-Koine.Compiler.Emit.DocsEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! options) -> Koine.Compiler.Emit.IEmitter!
-Koine.Compiler.Emit.DocsEmitterProvider.DocsEmitterProvider() -> void
-Koine.Compiler.Emit.DocsEmitterProvider.IsEmitTarget.get -> bool
-Koine.Compiler.Emit.DocsEmitterProvider.Target.get -> string!
+Koine.Compiler.DiagramDescriptor
+Koine.Compiler.DiagramDescriptor.Caption.get -> string!
+Koine.Compiler.DiagramDescriptor.Caption.init -> void
+Koine.Compiler.DiagramDescriptor.DiagramDescriptor(string! Caption, string! Kind, string! Mermaid, Koine.Compiler.DiagramGraph! Graph) -> void
+Koine.Compiler.DiagramDescriptor.Graph.get -> Koine.Compiler.DiagramGraph!
+Koine.Compiler.DiagramDescriptor.Graph.init -> void
+Koine.Compiler.DiagramDescriptor.Kind.get -> string!
+Koine.Compiler.DiagramDescriptor.Kind.init -> void
+Koine.Compiler.DiagramDescriptor.Mermaid.get -> string!
+Koine.Compiler.DiagramDescriptor.Mermaid.init -> void
+Koine.Compiler.DiagramEdge
+Koine.Compiler.DiagramEdge.ArrowKind.get -> string?
+Koine.Compiler.DiagramEdge.ArrowKind.init -> void
+Koine.Compiler.DiagramEdge.BackingMember.get -> string?
+Koine.Compiler.DiagramEdge.BackingMember.init -> void
+Koine.Compiler.DiagramEdge.Cardinality.get -> string?
+Koine.Compiler.DiagramEdge.Cardinality.init -> void
+Koine.Compiler.DiagramEdge.DiagramEdge(string! From, string! To, string? Label, string? Cardinality = null, string? SourceCardinality = null, string? ArrowKind = null, string? BackingMember = null) -> void
+Koine.Compiler.DiagramEdge.From.get -> string!
+Koine.Compiler.DiagramEdge.From.init -> void
+Koine.Compiler.DiagramEdge.Label.get -> string?
+Koine.Compiler.DiagramEdge.Label.init -> void
+Koine.Compiler.DiagramEdge.SourceCardinality.get -> string?
+Koine.Compiler.DiagramEdge.SourceCardinality.init -> void
+Koine.Compiler.DiagramEdge.To.get -> string!
+Koine.Compiler.DiagramEdge.To.init -> void
+Koine.Compiler.DiagramGraph
+Koine.Compiler.DiagramGraph.DiagramGraph(System.Collections.Generic.IReadOnlyList<Koine.Compiler.DiagramNode!>! Nodes, System.Collections.Generic.IReadOnlyList<Koine.Compiler.DiagramEdge!>! Edges) -> void
+Koine.Compiler.DiagramGraph.Edges.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.DiagramEdge!>!
+Koine.Compiler.DiagramGraph.Edges.init -> void
+Koine.Compiler.DiagramGraph.Nodes.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.DiagramNode!>!
+Koine.Compiler.DiagramGraph.Nodes.init -> void
+Koine.Compiler.DiagramMember
+Koine.Compiler.DiagramMember.DiagramMember(string! Text, string! Kind) -> void
+Koine.Compiler.DiagramMember.Kind.get -> string!
+Koine.Compiler.DiagramMember.Kind.init -> void
+Koine.Compiler.DiagramMember.Text.get -> string!
+Koine.Compiler.DiagramMember.Text.init -> void
+Koine.Compiler.DiagramNode
+Koine.Compiler.DiagramNode.DiagramNode(string! Id, string! Label, string! Kind, string! QualifiedName, Koine.Compiler.Ast.SourceSpan? Span, string? Stereotype = null, System.Collections.Generic.IReadOnlyList<Koine.Compiler.DiagramMember!>? Members = null, System.Collections.Generic.IReadOnlyList<string!>? Invariants = null, string? Doc = null) -> void
+Koine.Compiler.DiagramNode.Doc.get -> string?
+Koine.Compiler.DiagramNode.Doc.init -> void
+Koine.Compiler.DiagramNode.Id.get -> string!
+Koine.Compiler.DiagramNode.Id.init -> void
+Koine.Compiler.DiagramNode.Invariants.get -> System.Collections.Generic.IReadOnlyList<string!>?
+Koine.Compiler.DiagramNode.Invariants.init -> void
+Koine.Compiler.DiagramNode.Kind.get -> string!
+Koine.Compiler.DiagramNode.Kind.init -> void
+Koine.Compiler.DiagramNode.Label.get -> string!
+Koine.Compiler.DiagramNode.Label.init -> void
+Koine.Compiler.DiagramNode.Members.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.DiagramMember!>?
+Koine.Compiler.DiagramNode.Members.init -> void
+Koine.Compiler.DiagramNode.QualifiedName.get -> string!
+Koine.Compiler.DiagramNode.QualifiedName.init -> void
+Koine.Compiler.DiagramNode.Span.get -> Koine.Compiler.Ast.SourceSpan?
+Koine.Compiler.DiagramNode.Span.init -> void
+Koine.Compiler.DiagramNode.Stereotype.get -> string?
+Koine.Compiler.DiagramNode.Stereotype.init -> void
+Koine.Compiler.DocsEmitter
+Koine.Compiler.DocsEmitter.DocsEmitter() -> void
+Koine.Compiler.DocsEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.DocsEmitter.EmitDiagrams(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyList<Koine.Compiler.DiagramDescriptor!>!>!
+Koine.Compiler.DocsEmitter.TargetName.get -> string!
+Koine.Compiler.DocsEmitterProvider
+Koine.Compiler.DocsEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! options) -> Koine.Compiler.Emit.IEmitter!
+Koine.Compiler.DocsEmitterProvider.DocsEmitterProvider() -> void
+Koine.Compiler.DocsEmitterProvider.IsEmitTarget.get -> bool
+Koine.Compiler.DocsEmitterProvider.Target.get -> string!

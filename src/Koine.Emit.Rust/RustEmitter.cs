@@ -1,7 +1,8 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.Rust;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The Rust backend (issue #24). Turns a validated <see cref="KoineModel"/> into an idiomatic,
@@ -63,9 +64,9 @@ public sealed partial class RustEmitter : IEmitter
             // Demand-driven operator emission (R9), shared with the C#/Python emitters so the targets
             // stay semantically aligned: a value object only gets an additive `Add` where the model
             // `sum`s it, or a scalar `Mul` where the model multiplies it by a scalar.
-            CSharp.OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
-            CSharp.OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
-            CSharp.OperatorNeedsAnalyzer.BuildScalarDivisionNeeds(model, index));
+            OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
+            OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
+            OperatorNeedsAnalyzer.BuildScalarDivisionNeeds(model, index));
 
         var files = new List<EmittedFile>
         {

@@ -1,5 +1,4 @@
 using Koine.Cli.Commands;
-using Koine.Compiler.Emit.CSharp;
 
 namespace Koine.Compiler.Tests;
 

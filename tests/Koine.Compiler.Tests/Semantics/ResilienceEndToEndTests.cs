@@ -1,6 +1,5 @@
 using System.Text;
 using Koine.Compiler.Ast;
-using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Formatting;
 using Koine.Compiler.Services;
 

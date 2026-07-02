@@ -1,7 +1,7 @@
 using System.Text;
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.Rust;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The value-object slice of <see cref="RustEmitter"/>. A Koine <c>value</c> emits as a struct with

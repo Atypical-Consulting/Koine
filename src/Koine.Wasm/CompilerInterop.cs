@@ -3,9 +3,9 @@ using System.Runtime.InteropServices.JavaScript;
 using System.Runtime.Versioning;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Koine.Compiler;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
-using Koine.Compiler.Emit.CSharp;
 using Koine.Compiler.Services;
 
 namespace Koine.Wasm;

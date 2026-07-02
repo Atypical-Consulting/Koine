@@ -1,4 +1,4 @@
-namespace Koine.Compiler.Emit.Rust;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The fixed-string runtime for the generated Rust crate, emitted once at <c>src/koine_runtime.rs</c>

@@ -1,7 +1,7 @@
 using System.Text;
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.AsyncApi;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Operations slice of the AsyncAPI emitter: turns the context map's pub/sub graph into

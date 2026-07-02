@@ -1,7 +1,7 @@
 using System.Text;
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.AsyncApi;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Channels-and-messages slice of the AsyncAPI emitter: turns each integration event into a

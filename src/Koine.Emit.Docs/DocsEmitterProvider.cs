@@ -1,6 +1,6 @@
-using Koine.Compiler.Emit.Docs;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit;
+namespace Koine.Compiler;
 
 /// <summary>Provider for the living-documentation emitter (no per-emit options).</summary>
 public sealed class DocsEmitterProvider : IEmitterProvider

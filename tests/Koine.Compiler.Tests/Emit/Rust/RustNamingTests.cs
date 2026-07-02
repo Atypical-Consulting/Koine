@@ -1,5 +1,3 @@
-using Koine.Compiler.Emit.Rust;
-
 namespace Koine.Compiler.Tests;
 
 /// <summary>

@@ -1,7 +1,7 @@
 using System.Text;
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.AsyncApi;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Schemas slice of the AsyncAPI emitter: renders one <c>&lt;Event&gt;Payload</c> JSON-Schema per

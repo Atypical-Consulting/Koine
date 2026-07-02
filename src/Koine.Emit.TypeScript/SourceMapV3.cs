@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Koine.Compiler.Emit.TypeScript;
+namespace Koine.Compiler;
 
 /// <summary>
 /// A minimal <a href="https://sourcemaps.info/spec.html">Source Map v3</a> builder for the

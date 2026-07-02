@@ -1,6 +1,6 @@
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.CSharp;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The immutable, per-<see cref="CSharpEmitter.Emit(KoineModel)"/> state that every emit method
