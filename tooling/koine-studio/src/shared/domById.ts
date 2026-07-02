@@ -4,7 +4,7 @@
 // deliberately distinct from `@atypical/koine-ui`'s `el` (the tag-based element *builder*) to avoid collision — this
 // is a by-id *getter*, not a constructor.
 export function domById<T extends HTMLElement = HTMLElement>(id: string): T {
-  const node = document.getElementById(id);
+  const node = document.getElementById(id); // eslint-disable-line no-restricted-properties -- this IS the sanctioned throw-on-missing wrapper the rule steers callers to
   if (!node) throw new Error(`missing #${id}`);
   return node as T;
 }

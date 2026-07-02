@@ -59,7 +59,7 @@ export function createOverlays(deps: OverlaysDeps): Overlays {
   // A one-time, dismissible top banner shown when the workspace is memory-only (no OPFS) — so work
   // that won't survive a reload is never lost silently. Points at the durable escape hatches.
   function showMemoryOnlyBanner(): void {
-    if (document.getElementById('koi-memory-banner')) return;
+    if (document.getElementById('koi-memory-banner')) return; // eslint-disable-line no-restricted-properties -- existence probe: absence is the expected case, so a throw-on-missing wrapper would be wrong
     const bar = document.createElement('div');
     bar.id = 'koi-memory-banner';
     bar.className = 'koi-memory-banner';
@@ -75,7 +75,7 @@ export function createOverlays(deps: OverlaysDeps): Overlays {
     dismiss.textContent = '✕';
     dismiss.addEventListener('click', () => bar.remove());
     bar.append(msg, dismiss);
-    document.getElementById('app')?.prepend(bar);
+    document.getElementById('app')?.prepend(bar); // eslint-disable-line no-restricted-properties -- optional prepend: the `?.` already no-ops when #app is absent, so throwing would be wrong
   }
 
   // Does the workspace hold unsaved work that New would destroy? Files live on disk, so only a dirty

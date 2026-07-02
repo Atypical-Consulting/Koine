@@ -15,6 +15,11 @@ export function useAppStore<T>(
   a: StoreApi<AppState> | ((s: AppState) => T),
   b?: (s: AppState) => T,
 ): T {
-  if (typeof a === 'function') return useStore(appStore, a);
-  return useStore(a, b!);
+  // Resolve the (store, selector) pair from the overloaded arguments FIRST, then subscribe with a single
+  // unconditional `useStore` call — a hook must run in the same order every render (react-hooks/rules-of-
+  // hooks). Behavior is identical to the previous per-branch calls: 1-arg → the singleton; 2-arg → the
+  // injected store. Pinned by hooks.test.tsx.
+  const store = typeof a === 'function' ? appStore : a;
+  const selector = typeof a === 'function' ? a : b!;
+  return useStore(store, selector);
 }

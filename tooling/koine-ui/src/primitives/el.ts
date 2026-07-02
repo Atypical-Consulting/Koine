@@ -35,7 +35,7 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   const node = document.createElement(tag);
   if (options.class !== undefined) node.className = options.class;
   if (options.text !== undefined) node.textContent = options.text;
-  if (options.html !== undefined) node.innerHTML = options.html;
+  if (options.html !== undefined) node.innerHTML = options.html; // eslint-disable-line no-restricted-syntax -- the package's one sanctioned sink: the `html:` option is documented (line 14) as already-trusted/escaped markup (e.g. renderMarkdown output)
   if (options.attrs) {
     for (const [name, value] of Object.entries(options.attrs)) {
       if (value == null || value === false) continue;

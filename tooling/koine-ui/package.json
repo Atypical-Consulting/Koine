@@ -25,6 +25,7 @@
     "gen:colors": "node scripts/gen-concept-colors.mjs",
     "build": "tsc && vite build",
     "prepack": "npm run build",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
     "storybook": "storybook dev -p 6007",

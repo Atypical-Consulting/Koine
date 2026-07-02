@@ -13,6 +13,7 @@ survives long after the conversation or PR that produced it.
 | [0002](0002-conventional-commits-and-automated-semver.md) | Conventional Commits + automated semantic versioning via release-please | Accepted |
 | [0003](0003-npm-workspace-for-front-end-packages.md) | npm workspace root for the front-end packages | Accepted |
 | [0004](0004-concept-colors-single-palette-and-lsp-kind-modifiers.md) | Concept Colors — single palette + LSP kind modifiers | Proposed |
+| [0005](0005-eslint-gate-for-frontend-safety-conventions.md) | ESLint flat-config gate for the front-end safety conventions | Proposed |
 
 ## When to write one
 

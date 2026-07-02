@@ -122,7 +122,7 @@ function buildConceptTile(t: (typeof CONCEPT_TILES)[number]): HTMLButtonElement 
 
   const glyph = document.createElement('span');
   glyph.className = 'koi-concept-tile__glyph';
-  glyph.innerHTML = CONCEPT_GLYPH[t.kind]; // trusted, static markup defined above
+  glyph.innerHTML = CONCEPT_GLYPH[t.kind]; // eslint-disable-line no-restricted-syntax -- trusted, static markup: CONCEPT_GLYPH is a const map keyed by the typed EmptyConceptKind (no user input)
 
   const name = document.createElement('span');
   name.className = 'koi-concept-tile__name';
