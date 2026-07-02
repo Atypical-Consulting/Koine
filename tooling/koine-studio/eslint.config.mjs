@@ -19,6 +19,7 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-misused-promises': 'error',
+      'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'error',
     },
   },
