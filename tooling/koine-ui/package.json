@@ -5,6 +5,8 @@
   "type": "module",
   "description": "Framework-free design tokens and Preact UI primitives extracted from Koine Studio.",
   "license": "MIT",
+  "types": "./dist/index.d.ts",
+  "module": "./dist/index.js",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
   },

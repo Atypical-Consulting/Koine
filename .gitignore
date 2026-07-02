@@ -16,3 +16,13 @@ BenchmarkDotNet.Artifacts/
 # Skill eval scratch — workspace logs/JSON dropped by create-issue skill evals; never source.
 .claude/skills/create-issue-workspace/
 .superpowers/
+
+# design-sync (claude.ai/design sync for @atypical/koine-ui) — build/verification scratch.
+# The durable set (.design-sync/config.json, NOTES.md, conventions.md, previews/, overrides/,
+# gen-adapter-entry.mjs) is committed; everything below is regenerated per run.
+.ds-sync/
+ds-bundle/
+.design-sync/sb-reference/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
