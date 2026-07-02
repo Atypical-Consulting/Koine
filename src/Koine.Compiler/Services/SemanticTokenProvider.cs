@@ -22,10 +22,33 @@ public enum SemanticTokenType
 /// <summary>
 /// The semantic token modifiers this provider emits, as bit positions. A token's
 /// modifier bitset is the OR of <c>(1 &lt;&lt; (int)modifier)</c> for each applied modifier.
+///
+/// <para>Bit 0 (<see cref="Declaration"/>) marks a declaration site. Bits 1–15 are the DDD
+/// <em>concept kinds</em> ("Concept Colors", ADR 0003): a declaration name carries
+/// <c>declaration | &lt;kind&gt;</c>, a reference carries <c>&lt;kind&gt;</c> alone, and base token
+/// types (<see cref="SemanticTokenType.Type"/>/<see cref="SemanticTokenType.Enum"/>) are unchanged so
+/// clients that don't understand the modifiers degrade to today's coloring. The order is an
+/// <strong>append-only</strong> legend contract — never reorder or remove a bit; new kinds append at
+/// higher bits.</para>
 /// </summary>
 public enum SemanticTokenModifier
 {
     Declaration,
+    Aggregate,
+    Entity,
+    ValueObject,
+    Enumeration,
+    DomainEvent,
+    IntegrationEvent,
+    Command,
+    Query,
+    ReadModel,
+    Service,
+    Repository,
+    Policy,
+    Factory,
+    StateMachine,
+    Specification,
 }
 
 /// <summary>
@@ -62,9 +85,18 @@ public sealed class SemanticTokenProvider
     public static readonly IReadOnlyList<string> TokenTypeNames =
         new[] { "type", "enum", "enumMember", "property", "keyword", "parameter" };
 
-    /// <summary>The legend modifier names, in <see cref="SemanticTokenModifier"/> order.</summary>
+    /// <summary>
+    /// The legend modifier names, in <see cref="SemanticTokenModifier"/> order. Bit 0 is
+    /// <c>declaration</c>; bits 1–15 are the DDD concept kinds (Concept Colors, ADR 0003).
+    /// Append-only — the LSP shell advertises this verbatim as <c>legend.tokenModifiers</c>.
+    /// </summary>
     public static readonly IReadOnlyList<string> TokenModifierNames =
-        new[] { "declaration" };
+        new[]
+        {
+            "declaration", "aggregate", "entity", "valueObject", "enumeration", "domainEvent",
+            "integrationEvent", "command", "query", "readModel", "service", "repository", "policy",
+            "factory", "stateMachine", "specification",
+        };
 
     /// <summary>
     /// Classifies every default-channel identifier token in <paramref name="source"/> and
@@ -90,6 +122,11 @@ public sealed class SemanticTokenProvider
         // operand highlights as a property even though it is not a declared TYPE name).
         IReadOnlySet<string> propertyNames = CollectPropertyNames(index);
 
+        // Concept-kind bit per declared type NAME (Concept Colors, ADR 0003), so both a
+        // declaration and a reference to that name carry the kind. Primitives / collections /
+        // ID types are not declared TypeDecls, so they carry no kind bit (the neutral type color).
+        IReadOnlyDictionary<string, int> kindBits = CollectConceptKindBits(index);
+
         var tokens = new List<SemanticToken>();
         foreach (IToken tok in IdentifierTokens(source))
         {
@@ -101,7 +138,7 @@ public sealed class SemanticTokenProvider
 
             var line = tok.Line;       // 1-based
             var col = tok.Column;      // 0-based
-            Classification? classified = Classify(text, line, col, index, declarations, propertyNames);
+            Classification? classified = Classify(text, line, col, index, declarations, propertyNames, kindBits);
             if (classified is not { } c)
             {
                 continue;
@@ -151,10 +188,15 @@ public sealed class SemanticTokenProvider
         int col,
         ModelIndex index,
         IReadOnlyDictionary<(int, int), DeclKind> declarations,
-        IReadOnlySet<string> propertyNames)
+        IReadOnlySet<string> propertyNames,
+        IReadOnlyDictionary<string, int> kindBits)
     {
         var isDeclaration = declarations.TryGetValue((line, col), out DeclKind declKind);
         var declModifier = isDeclaration ? 1 << (int)SemanticTokenModifier.Declaration : 0;
+
+        // The concept-kind bit rides on a type/enum name (declaration OR reference). Subordinate
+        // tokens (property/parameter/enum-member) are not concepts, so they never carry a kind bit.
+        var kindBit = kindBits.TryGetValue(text, out var bit) ? bit : 0;
 
         // A declaration site is authoritative about what it declares (a member name that
         // collides with a type name elsewhere still highlights as a property at its own
@@ -163,25 +205,25 @@ public sealed class SemanticTokenProvider
         {
             return declKind switch
             {
-                DeclKind.Enum => new Classification(SemanticTokenType.Enum, declModifier),
+                DeclKind.Enum => new Classification(SemanticTokenType.Enum, declModifier | kindBit),
                 DeclKind.EnumMember => new Classification(SemanticTokenType.EnumMember, declModifier),
                 DeclKind.Property => new Classification(SemanticTokenType.Property, declModifier),
                 DeclKind.Parameter => new Classification(SemanticTokenType.Parameter, declModifier),
-                _ => new Classification(SemanticTokenType.Type, declModifier),
+                _ => new Classification(SemanticTokenType.Type, declModifier | kindBit),
             };
         }
 
         // Reference sites: classify by the model.
         if (index.IsEnumType(text))
         {
-            return new Classification(SemanticTokenType.Enum, 0);
+            return new Classification(SemanticTokenType.Enum, kindBit);
         }
 
         if (index.IsKnownType(text) || ModelIndex.Primitives.Contains(text)
                                     || text is ModelIndex.ListTypeName or ModelIndex.SetTypeName
                                         or ModelIndex.MapTypeName or ModelIndex.RangeTypeName)
         {
-            return new Classification(SemanticTokenType.Type, 0);
+            return new Classification(SemanticTokenType.Type, kindBit);
         }
 
         if (index.EnumMemberToType.ContainsKey(text))
@@ -195,6 +237,39 @@ public sealed class SemanticTokenProvider
         }
 
         return null; // not something we highlight semantically (let the grammar handle it)
+    }
+
+    /// <summary>
+    /// The concept-kind modifier bit for a declared type NAME → <c>(1 &lt;&lt; bit)</c>, for every
+    /// <see cref="TypeDecl"/> subtype that names a DDD concept. Types with no distinct kind (e.g.
+    /// generated ID value objects, which have no <see cref="TypeDecl"/>) simply never appear here and
+    /// carry the neutral <see cref="SemanticTokenType.Type"/> color. The mapped subtypes match
+    /// <see cref="ModelIndex.Classify"/>'s <c>TypeKind</c> cases.
+    /// </summary>
+    private static IReadOnlyDictionary<string, int> CollectConceptKindBits(ModelIndex index)
+    {
+        var map = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (TypeDecl t in index.AllTypes())
+        {
+            SemanticTokenModifier? kind = t switch
+            {
+                AggregateDecl => SemanticTokenModifier.Aggregate,
+                EntityDecl => SemanticTokenModifier.Entity,
+                ValueObjectDecl => SemanticTokenModifier.ValueObject,
+                EnumDecl => SemanticTokenModifier.Enumeration,
+                EventDecl => SemanticTokenModifier.DomainEvent,
+                IntegrationEventDecl => SemanticTokenModifier.IntegrationEvent,
+                ReadModelDecl => SemanticTokenModifier.ReadModel,
+                QueryDecl => SemanticTokenModifier.Query,
+                _ => null,
+            };
+            if (kind is { } k)
+            {
+                map[t.Name] = 1 << (int)k;
+            }
+        }
+
+        return map;
     }
 
     private enum DeclKind { Type, Enum, EnumMember, Property, Parameter }
