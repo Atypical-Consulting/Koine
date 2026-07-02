@@ -889,7 +889,7 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     confirmMsgEl.className = 'explorer-confirm-msg';
     modal.body.appendChild(confirmMsgEl);
 
-    const footer = modal.backdrop.querySelector<HTMLElement>('.koi-modal-footer')!;
+    const footer = modal.footer;
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
     cancelBtn.className = 'explorer-confirm-btn';

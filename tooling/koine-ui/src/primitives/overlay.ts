@@ -75,6 +75,8 @@ export interface ModalHandle {
   readonly backdrop: HTMLElement;
   /** The .koi-modal-body element to populate with content. */
   readonly body: HTMLElement;
+  /** The .koi-modal-footer element to hold action buttons. */
+  readonly footer: HTMLElement;
   open(): void;
   close(): void;
   toggle(): void;
@@ -97,6 +99,7 @@ export function createModal(opts: ModalOptions): ModalHandle {
     attrs: { type: 'button', 'aria-label': 'Close' },
   });
   const body = el('div', { class: 'koi-modal-body' });
+  const footer = el('div', { class: 'koi-modal-footer' });
   const modal = el(
     'div',
     {
@@ -109,7 +112,7 @@ export function createModal(opts: ModalOptions): ModalHandle {
         closeBtn,
       ]),
       body,
-      el('div', { class: 'koi-modal-footer' }),
+      footer,
     ],
   );
   if (opts.variant) modal.classList.add(opts.variant);
@@ -185,6 +188,7 @@ export function createModal(opts: ModalOptions): ModalHandle {
   return {
     backdrop,
     body,
+    footer,
     open,
     close,
     toggle,
@@ -230,7 +234,7 @@ export function createConfirmDialog(): ConfirmDialog {
   msgEl.className = 'koi-confirm-msg';
   modal.body.appendChild(msgEl);
 
-  const footer = modal.backdrop.querySelector<HTMLElement>('.koi-modal-footer')!;
+  const footer = modal.footer;
   const cancelBtn = document.createElement('button');
   cancelBtn.type = 'button';
   cancelBtn.className = 'koi-confirm-btn';
@@ -328,7 +332,7 @@ export function createPromptDialog(): PromptDialog {
   });
   modal.body.appendChild(el('div', { class: 'koi-prompt' }, [msgEl, labelEl, input, errorEl]));
 
-  const footer = modal.backdrop.querySelector<HTMLElement>('.koi-modal-footer')!;
+  const footer = modal.footer;
   const cancelBtn = el('button', { class: 'koi-confirm-btn', attrs: { type: 'button' } });
   const okBtn = el('button', { class: 'koi-confirm-btn koi-confirm-btn-primary', attrs: { type: 'button' } });
   footer.append(cancelBtn, okBtn);
