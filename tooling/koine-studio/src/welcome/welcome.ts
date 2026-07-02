@@ -339,32 +339,35 @@ function buildHome(
   const topbarEnd = document.createElement('div');
   topbarEnd.className = 'koi-home-topbar-slot koi-home-topbar-end';
 
-  // Brand lockup: the κ monogram tile + a "Koine" / "STUDIO" wordmark. The lockup carries the
-  // accessible name; the monogram SVG and the wordmark text are decorative (aria-hidden) so the name
-  // reads once, cleanly, as "Koine Studio". `koineMark('home')` gets a stable gradient id so this
-  // single copy never collides with another mark elsewhere in the document.
+  // Brand lockup: REUSE the editor toolbar's global `.brand` markup (index.html #btn-home) so Home's
+  // lockup is pixel-identical to the editor's for free — same `.brand-logo` + `.brand-text` >
+  // `.brand-name` / `.brand-eyebrow` structure, styled by the shared `.brand*` rules. The extra
+  // `koi-home-brand` class is a stable hook that only strips the button hover (this copy is a decorative
+  // <div>, not a nav control). The lockup carries the accessible name (role=img + aria-label); the
+  // monogram SVG and wordmark text are decorative (aria-hidden) so it reads once as "Koine Studio".
+  // `koineMark('home')` gets a stable gradient id distinct from the editor's so the two never collide.
   const brand = document.createElement('div');
-  brand.className = 'koi-home-brand';
+  brand.className = 'brand koi-home-brand';
   brand.setAttribute('role', 'img');
   brand.setAttribute('aria-label', 'Koine Studio');
 
-  const brandMark = document.createElement('span');
-  brandMark.className = 'koi-home-brand-mark';
-  brandMark.setAttribute('aria-hidden', 'true');
-  brandMark.innerHTML = koineMark('home');
+  const brandLogo = document.createElement('span');
+  brandLogo.className = 'brand-logo';
+  brandLogo.setAttribute('aria-hidden', 'true');
+  brandLogo.innerHTML = koineMark('home');
 
-  const brandWord = document.createElement('span');
-  brandWord.className = 'koi-home-brand-word';
-  brandWord.setAttribute('aria-hidden', 'true');
+  const brandText = document.createElement('span');
+  brandText.className = 'brand-text';
+  brandText.setAttribute('aria-hidden', 'true');
   const brandName = document.createElement('span');
-  brandName.className = 'koi-home-brand-name';
+  brandName.className = 'brand-name';
   brandName.textContent = 'Koine';
-  const brandSub = document.createElement('span');
-  brandSub.className = 'koi-home-brand-sub';
-  brandSub.textContent = 'STUDIO';
-  brandWord.append(brandName, brandSub);
+  const brandEyebrow = document.createElement('span');
+  brandEyebrow.className = 'brand-eyebrow';
+  brandEyebrow.textContent = 'Studio';
+  brandText.append(brandName, brandEyebrow);
 
-  brand.append(brandMark, brandWord);
+  brand.append(brandLogo, brandText);
   topbarStart.appendChild(brand);
 
   // A quiet top-bar icon button (theme / settings), matching the toolbar's `.icon-btn` vocabulary.

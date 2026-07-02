@@ -45,6 +45,31 @@
   padding: var(--koi-space-4) 20px;
 }
 
+// The app top-bar chrome — the flex bar + paper-gradient fill + hairline bottom border + accent-gradient
+// under-edge (::after) shared by the editor's #toolbar and Home's `.koi-home-topbar` (#1005). Single
+// source of truth for the two bars so navigating Home↔Editor never shifts the chrome. Verbatim from the
+// original `#toolbar` chrome; the two callers keep their own flex sizing / z-index / justification inline.
+@mixin topbar-chrome {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-4-5);
+  padding: var(--koi-space-2-75) var(--koi-space-4);
+  background: linear-gradient(180deg, var(--koi-paper-2), color-mix(in srgb, var(--koi-paper-2) 80%, var(--koi-paper)));
+  border-bottom: 1px solid var(--koi-line);
+  position: relative;
+
+  &::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 1px;
+    background: var(--koi-accent-grad);
+    opacity: 0.5;
+  }
+}
+
 // Ghost toolbar button — transparent surface, ink-soft text, lifts to surface/fg on hover.
 // Verbatim from the original `.toolbar-actions button, #btn-check` rules.
 @mixin ghost-button {

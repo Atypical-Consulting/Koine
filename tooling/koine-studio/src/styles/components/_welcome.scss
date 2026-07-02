@@ -1,3 +1,5 @@
+@use '../abstracts' as a;
+
 /* --- welcome / start console (routed Home view) ---
    A truly full-bleed start page: an app top bar spanning the window, then a body that fills the rest —
    a two-column split (the live `.koi` artifact on the left, the get-to-work rail on the right), plus the
@@ -21,28 +23,12 @@
    (::after) at its bottom separates it from the body — a subtle nod to the accent→cyan lockup rather
    than a flat rule. */
 .koi-home-topbar {
-  position: relative;
+  /* The SAME bar chrome as the editor's #toolbar, now via the shared `topbar-chrome` mixin (padding,
+     paper-2→paper gradient, --koi-line bottom border, accent-gradient hairline ::after) — so navigating
+     Home↔Editor never shifts the chrome. Only Home's own sizing + end-justification stay inline. */
+  @include a.topbar-chrome;
   flex: none;
-  display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: var(--koi-space-3);
-  /* Match the editor's #toolbar exactly (see layout/_toolbar.scss) so the brand + controls sit at the
-     same position and the bar is the same height — navigating Home↔Editor never shifts the chrome:
-     the same padding, the same paper-2→paper gradient, the same --koi-line bottom border, and the same
-     accent-gradient hairline (::after). No fixed height — the padding + content set it, like #toolbar. */
-  padding: var(--koi-space-2-75) var(--koi-space-4);
-  background: linear-gradient(180deg, var(--koi-paper-2), color-mix(in srgb, var(--koi-paper-2) 80%, var(--koi-paper)));
-  border-bottom: 1px solid var(--koi-line);
-
-  &::after {
-    content: '';
-    position: absolute;
-    inset: auto 0 -1px 0;
-    height: 1px;
-    background: var(--koi-accent-grad);
-    opacity: 0.5;
-  }
 }
 
 /* The left/right control slots. Left holds the brand lockup; right holds the icon buttons. */
@@ -57,47 +43,18 @@
   justify-content: flex-end;
 }
 
-/* --- brand lockup: κ monogram tile + "Koine" / "STUDIO" wordmark ---------- */
+/* --- brand lockup: κ monogram tile + "Koine" / "STUDIO" wordmark ------------
+   Home REUSES the editor toolbar's global `.brand` lockup (layout/_toolbar.scss) — same markup
+   (`.brand-logo` + `.brand-text` > `.brand-name` / `.brand-eyebrow`), so it is pixel-identical to the
+   editor brand for free (30px logo radius 9, gap, -6px left pull, name/eyebrow type). The extra
+   `.koi-home-brand` class is only a stable hook to strip the ONE difference: unlike the editor's, this
+   lockup is NOT a nav button, so suppress the `.brand` hover/click affordance for this instance. */
 .koi-home-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--koi-space-2-5);
-  min-width: 0;
-}
+  cursor: default;
 
-.koi-home-brand-mark {
-  display: inline-flex;
-  flex: none;
-
-  svg {
-    width: 28px;
-    height: 28px;
-    display: block;
+  &:hover {
+    background: transparent;
   }
-}
-
-.koi-home-brand-word {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-  line-height: 1;
-}
-
-.koi-home-brand-name {
-  font-family: var(--koi-font-display);
-  font-weight: 800;
-  font-size: 1rem;
-  letter-spacing: -0.01em;
-  color: var(--koi-fg);
-}
-
-.koi-home-brand-sub {
-  font-family: var(--koi-font-mono);
-  font-size: var(--koi-text-2xs);
-  font-weight: 500;
-  letter-spacing: 0.24em;
-  color: var(--koi-muted);
 }
 
 /* --- top-bar icon buttons (theme toggle, Settings gear) ------------------- */
@@ -174,11 +131,11 @@
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
-  /* Horizontal page inset only — NO top/bottom — so the console body fills the card top-to-bottom and its
-     vertical hero|launch divider runs floor-to-ceiling (top-bar hairline to the window bottom). The
-     columns own the top/bottom inset (so content isn't flush); the gallery view restores a full inset on
-     itself below, since it has no full-height divider to preserve. */
-  padding: 0 clamp(20px, 3.4vw, 40px);
+  /* LEFT inset only — no top/bottom (so the vertical divider runs floor-to-ceiling) and no RIGHT (so the
+     launch rail reaches the window's right edge and its scrollbar sits flush against the browser edge,
+     like a native panel). The columns own their remaining insets: the hero its top/bottom, the launch its
+     top/bottom AND its right content padding. The gallery view restores a full inset on itself below. */
+  padding: 0 0 0 clamp(20px, 3.4vw, 40px);
   animation: koi-fade 0.28s ease both;
 
   &[hidden] {
@@ -374,7 +331,11 @@
    divider and each column insets its own content from it. */
 .koi-home-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 424px;
+  /* The launch rail is a fixed column. It reaches the browser's right edge (its scrollbar sits flush)
+     and carries its right content padding INTERNALLY, so the content box is narrower than the column —
+     468px (was 424px) restores enough content width for the dense recent rows (name + lang tag + branch
+     + relative time) to show in full instead of truncating "ordering"→"or…" / "inventory"→"invent…". */
+  grid-template-columns: minmax(0, 1fr) 468px;
   flex: 1;
   min-height: 0;
 }
@@ -534,9 +495,11 @@
      value the other computes to `auto`, so a sub-pixel-wide child would raise a spurious horizontal
      scrollbar in the rail. Pin the x-axis hidden and keep only the vertical scroll. */
   overflow: hidden auto;
-  /* Owns the top/bottom inset (the view keeps the horizontal one); the left inset holds content off the
-     dividing hairline. */
-  padding: clamp(20px, 3vw, 34px) 0 clamp(22px, 3vw, 34px) clamp(24px, 4vw, 56px);
+  /* The rail reaches the window's right edge (the view no longer pads the right), so its scrollbar sits
+     flush against the browser edge. The RIGHT padding here is INSIDE the scroll container — it insets the
+     content, not the scrollbar. Left inset holds content off the dividing hairline; top/bottom is the
+     page inset. */
+  padding: clamp(20px, 3vw, 34px) clamp(20px, 3.4vw, 40px) clamp(22px, 3vw, 34px) clamp(24px, 4vw, 56px);
 }
 
 .koi-welcome-rail-title {
