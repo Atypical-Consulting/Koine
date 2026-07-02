@@ -426,8 +426,8 @@ describe('Home dense recents (#1005)', () => {
     seedRecents([{ path: '/proj/billing', openedAt: Date.now() - 8 * 60_000 }]);
     mountHome(container, makeCallbacks());
     const item = document.querySelector<HTMLElement>('.koi-welcome-recent-item')!;
-    // Monogram is the folder's initial (decorative); the name is its basename; the time is relative.
-    expect(item.querySelector('.koi-welcome-recent-mono')?.textContent).toBe('B');
+    // Monogram is the folder's LOWERCASE initial (decorative); the name is its basename; time is relative.
+    expect(item.querySelector('.koi-welcome-recent-mono')?.textContent).toBe('b');
     expect(item.querySelector('.koi-welcome-recent-item-name')?.textContent).toBe('billing');
     expect(item.querySelector('.koi-welcome-recent-time')?.textContent).toMatch(/min ago/);
   });
@@ -671,10 +671,11 @@ describe('Home keycaps + shortcuts (#1005)', () => {
     return { root: document.querySelector<HTMLElement>('.koi-welcome')!, cb };
   }
 
-  /** The keycap text rendered on the Start action / clone row with this data-action. */
+  /** The concatenated keys rendered on the Start action / clone row with this data-action — each key is
+   *  its own boxed <kbd>, so the group's textContent is the chord (e.g. `⌘N`, `⇧⌘C`). */
   function keycapFor(root: HTMLElement, dataAction: string): string {
     const host = root.querySelector<HTMLElement>(`[data-action="${dataAction}"]`)!;
-    return host.querySelector<HTMLElement>('.koi-welcome-keycap')?.textContent ?? '';
+    return host.querySelector<HTMLElement>('.koi-welcome-keys')?.textContent ?? '';
   }
 
   /** Dispatch a document-level keydown (the handler listens on `document`). */
@@ -682,9 +683,10 @@ describe('Home keycaps + shortcuts (#1005)', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
   }
 
-  test('renders a per-action keycap carrying the platform modifier glyph on the four Start actions', () => {
+  test('renders per-action boxed keys carrying the platform modifier glyph on the four Start actions', () => {
     const { root } = mountFor({ canClone: true });
-    // New / Example: mod+letter (MOD is ⌘ on mac, Ctrl elsewhere).
+    // Each action shows its keys as individual boxes (one <kbd class="koi-welcome-key"> per key); the
+    // group's text is the whole chord. New / Example: mod+letter (MOD is ⌘ on mac, Ctrl elsewhere).
     expect(keycapFor(root, 'new-model')).toContain('N');
     expect(keycapFor(root, 'new-model')).toContain(MOD);
     expect(keycapFor(root, 'open-example')).toContain('E');
@@ -696,13 +698,19 @@ describe('Home keycaps + shortcuts (#1005)', () => {
     expect(keycapFor(root, 'clone')).toContain('C');
     expect(keycapFor(root, 'clone')).toContain(MOD);
     expect(keycapFor(root, 'clone')).toContain('⇧');
+    // The New action's keys are separate boxes — one carries the MOD glyph, one carries the letter.
+    const newKeys = Array.from(
+      root.querySelectorAll<HTMLElement>('[data-action="new-model"] .koi-welcome-key'),
+    ).map((k) => k.textContent);
+    expect(newKeys).toContain(MOD);
+    expect(newKeys).toContain('N');
   });
 
-  test('the clone keycap only renders when the clone row does (canClone off → no keycap)', () => {
+  test('the clone keys only render when the clone row does (canClone off → no key group)', () => {
     const { root } = mountFor({ canClone: false });
     expect(root.querySelector('[data-action="clone"]')).toBeNull();
-    // Only three keycaps remain (New / Example / Open folder).
-    expect(root.querySelectorAll('.koi-welcome-keycap').length).toBe(3);
+    // Only three key groups remain (New / Example / Open folder).
+    expect(root.querySelectorAll('.koi-welcome-keys').length).toBe(3);
   });
 
   test('mod+N fires onNewModel — ⌘ and Ctrl both count as the primary modifier', () => {
@@ -863,26 +871,29 @@ describe('Home colophon footer', () => {
     return Array.from(footer.querySelectorAll<HTMLElement>('.koi-home-colophon-link')).map((a) => a.textContent?.trim());
   }
 
-  test('the routed Home (mountHome) carries the four links, byline and a hidden version chip', () => {
+  test('the routed Home (mountHome) carries the three text links, byline and a hidden version chip', () => {
     const el = document.createElement('div');
     mountHome(el, makeCallbacks(), SAMPLE);
     const footer = footerOf(el.querySelector<HTMLElement>('.koi-welcome')!);
-    expect(linkLabels(footer)).toEqual(['GitHub', 'Home', 'Docs', 'Blog']);
+    // Home shows a text-only Docs · GitHub · Blog trio (no icons, no Home link) per the mock.
+    expect(linkLabels(footer)).toEqual(['Docs', 'GitHub', 'Blog']);
     expect(footer.querySelector('.koi-home-colophon-credit')?.textContent).toContain('Philippe Matray');
     // The chip stays hidden until the async version fetch resolves (mirrors the About chip).
     expect(footer.querySelector<HTMLElement>('.koi-home-colophon-chip')!.hidden).toBe(true);
   });
 
-  test('each colophon link is a real external anchor (href + target + rel)', () => {
+  test('each colophon link is a real, text-only external anchor (href + target + rel, no icon)', () => {
     const el = document.createElement('div');
     mountHome(el, makeCallbacks(), SAMPLE);
     const footer = footerOf(el.querySelector<HTMLElement>('.koi-welcome')!);
     const links = Array.from(footer.querySelectorAll<HTMLAnchorElement>('a.koi-home-colophon-link'));
-    expect(links.length).toBe(4);
+    expect(links.length).toBe(3);
     for (const a of links) {
       expect(a.getAttribute('href')).toMatch(/^https:\/\//);
       expect(a.target).toBe('_blank');
       expect(a.rel).toBe('noopener noreferrer');
+      // Text-only per the mock — the icon span is gone.
+      expect(a.querySelector('.koi-home-colophon-link-icon')).toBeNull();
     }
   });
 });
@@ -1150,14 +1161,13 @@ describe('Home top bar (brand + theme + settings)', () => {
 });
 
 describe('Home hero snippet', () => {
-  test('collapses the spacing before the invariant message to a single space', () => {
+  test('the invariant line ends at the 0 literal, with no trailing message string', () => {
     const el = document.createElement('div');
     mountHome(el, makeCallbacks(), SAMPLE);
     const code = el.querySelector('.koi-welcome-snippet-code')!.textContent ?? '';
-    // Exactly one space between the `0` literal and the invariant message string.
-    expect(code).toContain('0 "a monetary amount cannot be negative"');
-    // The old three-space gap is gone.
-    expect(code).not.toContain('0   "a monetary');
+    // The invariant now reads `amount >= 0` and stops there — the old message string is gone entirely.
+    expect(code).toContain('invariant amount >= 0');
+    expect(code).not.toContain('a monetary amount cannot be negative');
   });
 });
 
@@ -1186,15 +1196,15 @@ describe('Home hero — multi-target caption + colophon', () => {
     expect(dots.length).toBe(4);
   });
 
-  test('the colophon now sits inside the hero lede, still carrying its four links + credit', () => {
+  test('the colophon now sits inside the hero lede, still carrying its three links + credit', () => {
     mountHome(container, makeCallbacks(), SAMPLE);
     const root = document.querySelector<HTMLElement>('.koi-welcome')!;
 
     // Relocated into the hero's left column (still inside the console view, inside the body grid).
     const colophon = root.querySelector<HTMLElement>('.koi-welcome-lede .koi-home-colophon');
     expect(colophon).not.toBeNull();
-    // Still the same colophon markup: the four project links + the byline survive the move.
-    expect(colophon!.querySelectorAll('.koi-home-colophon-link').length).toBe(4);
+    // The Home colophon is the text-only Docs · GitHub · Blog trio + the byline.
+    expect(colophon!.querySelectorAll('.koi-home-colophon-link').length).toBe(3);
     expect(colophon!.querySelector('.koi-home-colophon-credit')?.textContent).toContain('Philippe Matray');
   });
 });

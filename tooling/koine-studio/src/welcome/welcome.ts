@@ -15,14 +15,13 @@ import {
   type RecentFolder,
 } from '@/settings/persistence';
 import { getPlatform } from '@/host';
-import { EMIT_TARGETS } from '@/shared/emitTargets';
 import { registerOverlay, koiConfirm } from '@atypical/koine-ui';
 import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, fillVersionChip, wireExternalLink } from '@/shared/colophon';
 import { TEMPLATES, type Template } from '@/welcome/templates';
 import { wrapIndex } from '@/shared/wrapIndex';
 import { basename } from '@/shared/path';
 import { koineMark } from '@/shared/logo';
-import { toggleTheme } from '@/settings/theme';
+import { toggleTheme, currentTheme } from '@/settings/theme';
 import { MOD } from '@/shared/platform';
 
 /** What the welcome actions delegate to; the host (ide.ts) performs the real work. */
@@ -128,7 +127,7 @@ function prefersReducedMotion(): boolean {
 const HERO_SNIPPET = `<span class="koi-syn-kw">value</span> <span class="koi-syn-type">Money</span> <span class="koi-syn-punct">{</span>
   <span class="koi-syn-id">amount</span><span class="koi-syn-punct">:</span>   <span class="koi-syn-type">Decimal</span>
   <span class="koi-syn-id">currency</span><span class="koi-syn-punct">:</span> <span class="koi-syn-type">Currency</span>
-  <span class="koi-syn-kw">invariant</span> <span class="koi-syn-id">amount</span> <span class="koi-syn-punct">&gt;=</span> <span class="koi-syn-num">0</span> <span class="koi-syn-str">"a monetary amount cannot be negative"</span>
+  <span class="koi-syn-kw">invariant</span> <span class="koi-syn-id">amount</span> <span class="koi-syn-punct">&gt;=</span> <span class="koi-syn-num">0</span>
 <span class="koi-syn-punct">}</span>`;
 
 /** Plus / folder marks reused from the toolbar's New / Open buttons so the start actions read as the
@@ -145,9 +144,15 @@ const ICON_BACK =
 /** A right chevron — the quiet "opens this example" disclosure on each gallery card. */
 const ICON_ARROW =
   '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>';
-/** A crescent moon — the top-bar theme toggle, in the same stroked 16×16 style as the actions above. */
+/** A crescent moon — the theme toggle in LIGHT mode (click → go dark), stroked 16×16 like the rest. */
 const ICON_THEME =
   '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 9.3A5.4 5.4 0 0 1 6.7 2.8 5.4 5.4 0 1 0 13.2 9.3z"/></svg>';
+/** A sun (rayed disc) — the theme toggle in DARK mode (click → go light); the icon swaps on each flip. */
+const ICON_SUN =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.1"/><path d="M8 1.3v1.7M8 13v1.7M1.3 8h1.7M13 8h1.7M3.4 3.4l1.2 1.2M11.4 11.4l1.2 1.2M12.6 3.4l-1.2 1.2M4.6 11.4l-1.2 1.2"/></svg>';
+/** A magnifier — the recents filter's leading glyph, stroked 16×16 like the rest. */
+const ICON_SEARCH =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 13.6 13.6"/></svg>';
 /** A cog — the Settings gear: a toothed wheel (eight trapezoidal teeth) around a centre hub, drawn in the
  *  same stroked 16×16 style. A proper geared rim (not radial spokes, which read as a sun). */
 const ICON_SETTINGS =
@@ -158,33 +163,48 @@ const ICON_PLAY = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.4v9
 const ICON_BRANCH =
   '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4.5" cy="4" r="1.4"/><circle cx="4.5" cy="12" r="1.4"/><circle cx="11.5" cy="5.5" r="1.4"/><path d="M4.5 5.4v5.2M4.5 8.4c0-1.8 1-2.9 3.4-2.9h1"/></svg>';
 
-/** Emit-target id → short display label (e.g. `csharp` → `C#`) for a recent row's language tag. Reads
- *  `EMIT_TARGETS` LIVE (it's replaced in place at boot with backend-seeded targets — see emitTargets.ts),
- *  never a module-load snapshot, so a custom target shows its name rather than its raw id. Falls back to
- *  the id when unknown. */
-function langLabel(id: string): string {
-  return EMIT_TARGETS.find((t) => t.id === id)?.displayName ?? id;
+/** Emit-target id → SHORT code for a recent row's language tag (e.g. `csharp` → `C#`, `typescript` →
+ *  `TS`). A small static map so the dense row stays compact; an unknown id falls back to its upper-cased
+ *  form. Pure and side-effect-free. */
+function shortLang(id: string): string {
+  const codes: Record<string, string> = {
+    csharp: 'C#',
+    typescript: 'TS',
+    python: 'PY',
+    php: 'PHP',
+    rust: 'RS',
+    asyncapi: 'ASYNC',
+    openapi: 'OPENAPI',
+  };
+  return codes[id] ?? id.toUpperCase();
 }
 
 // The Start-action keycaps (#1005): the platform-aware primary modifier (MOD — ⌘ on mac, Ctrl
-// elsewhere) plus the action's letter, with a leading ⇧ for the shift combos. Rendered as a quiet
-// <kbd> on the right of each action and MIRRORED by buildHome's document-level keydown handler, so the
-// on-screen hint and the shortcut that actually fires it can never drift apart.
-const KEYCAP_SHIFT = '⇧';
-const KEYCAP_NEW = `${MOD}N`;
-const KEYCAP_EXAMPLE = `${MOD}E`;
-const KEYCAP_CLONE = `${KEYCAP_SHIFT}${MOD}C`;
-const KEYCAP_OPEN = `${KEYCAP_SHIFT}${MOD}O`;
+// elsewhere) plus the action's letter, with a leading ⇧ for the shift combos. Each action's shortcut is
+// an ARRAY of keys, rendered as one small boxed <kbd> per key (the mockup's individual keycaps), and
+// MIRRORED by buildHome's document-level keydown handler so the on-screen hint and the shortcut that
+// actually fires it can never drift apart.
+const KEY_SHIFT = '⇧';
+const KEYS_NEW = [MOD, 'N'];
+const KEYS_EXAMPLE = [MOD, 'E'];
+const KEYS_CLONE = [KEY_SHIFT, MOD, 'C'];
+const KEYS_OPEN = [KEY_SHIFT, MOD, 'O'];
 
-/** Append a quiet, decorative keycap (`.koi-welcome-keycap` <kbd>) to a Start action/trigger. The glyph
- *  is set via textContent (platform-derived, not user input) and marked aria-hidden — the action's
- *  visible label already carries the accessible name (WCAG 2.5.3); the keycap is a redundant hint. */
-function appendKeycap(host: HTMLElement, keycap: string): void {
-  const cap = document.createElement('kbd');
-  cap.className = 'koi-welcome-keycap';
-  cap.setAttribute('aria-hidden', 'true');
-  cap.textContent = keycap;
-  host.appendChild(cap);
+/** Append a quiet, decorative keycap group (`.koi-welcome-keys`) to a Start action/trigger: one small
+ *  boxed `.koi-welcome-key` <kbd> per key in `keys`. Each glyph is set via textContent (platform-derived,
+ *  not user input) and the whole group is aria-hidden — the action's visible label already carries the
+ *  accessible name (WCAG 2.5.3); the keys are a redundant hint. */
+function appendKeycap(host: HTMLElement, keys: readonly string[]): void {
+  const group = document.createElement('span');
+  group.className = 'koi-welcome-keys';
+  group.setAttribute('aria-hidden', 'true');
+  for (const k of keys) {
+    const cap = document.createElement('kbd');
+    cap.className = 'koi-welcome-key';
+    cap.textContent = k;
+    group.appendChild(cap);
+  }
+  host.appendChild(group);
 }
 
 /** Build a start action as a button with an icon, a label and a one-line description. */
@@ -196,8 +216,8 @@ function makeAction(opts: {
   disabled?: boolean;
   /** Stable semantic hook (sets `data-action`) for tests and the routed Home's navigation wiring. */
   action?: string;
-  /** An optional keyboard-shortcut keycap rendered on the right (e.g. `⌘N`); see the KEYCAP_* glyphs. */
-  keycap?: string;
+  /** An optional keyboard shortcut rendered on the right as boxed keys (e.g. `[⌘][N]`); see the KEYS_* arrays. */
+  keycap?: readonly string[];
   onClick: () => void;
 }): HTMLButtonElement {
   const btn = document.createElement('button');
@@ -359,16 +379,19 @@ function buildHome(
     return btn;
   }
 
-  // Theme toggle: flips + applies + persists + notifies (theme.ts flips document root's data-theme).
-  topbarEnd.appendChild(
-    makeTopbarIconButton({
-      icon: ICON_THEME,
-      label: 'Toggle theme',
-      onClick: () => {
-        toggleTheme();
-      },
-    }),
-  );
+  // Theme toggle: flips + applies + persists + notifies (theme.ts flips document root's data-theme). The
+  // glyph shows the DESTINATION affordance — a sun in dark mode (click → go light), a moon in light mode
+  // (click → go dark) — and swaps on every flip so it always points at where the toggle takes you.
+  const themeIconFor = (): string => (currentTheme() === 'dark' ? ICON_SUN : ICON_THEME);
+  const themeBtn = makeTopbarIconButton({
+    icon: themeIconFor(),
+    label: 'Toggle theme',
+    onClick: () => {
+      toggleTheme();
+      themeBtn.innerHTML = themeIconFor();
+    },
+  });
+  topbarEnd.appendChild(themeBtn);
   // Settings gear: Home routes this to the editor's Settings overlay via the optional callback.
   topbarEnd.appendChild(
     makeTopbarIconButton({
@@ -538,7 +561,13 @@ function buildHome(
       bodyCol.appendChild(detail);
     }
 
-    resumeCard.append(tile, bodyCol);
+    // A quiet trailing chevron on the far right — the "opens this" disclosure, matching the gallery card.
+    const chevron = document.createElement('span');
+    chevron.className = 'koi-home-resume-chevron';
+    chevron.setAttribute('aria-hidden', 'true');
+    chevron.innerHTML = ICON_ARROW;
+
+    resumeCard.append(tile, bodyCol, chevron);
     launch.appendChild(resumeCard);
   }
 
@@ -563,7 +592,7 @@ function buildHome(
       desc: 'Begin with an empty context',
       primary: true,
       action: 'new-model',
-      keycap: KEYCAP_NEW,
+      keycap: KEYS_NEW,
       onClick: () => {
         cb.onNewModel();
       },
@@ -576,26 +605,27 @@ function buildHome(
     label: 'Start from an example',
     desc: 'Open a ready-made domain',
     action: 'open-example',
-    keycap: KEYCAP_EXAMPLE,
+    keycap: KEYS_EXAMPLE,
     onClick: () => showGallery(),
   });
   actions.appendChild(exampleAction);
-  actions.appendChild(
-    makeAction({
-      icon: ICON_OPEN,
-      label: 'Open folder…',
-      // Opening a folder needs the File System Access API (Chromium-only). Where it's missing, show the
-      // action as disabled with an honest reason rather than a button that errors on click.
-      desc: canOpenFolders ? 'Work on an existing workspace' : 'Needs a Chromium-based browser (Chrome / Edge)',
-      disabled: !canOpenFolders,
-      action: 'open-folder',
-      // Only hint the shortcut where it works — the handler self-gates on canOpenFolders too.
-      keycap: canOpenFolders ? KEYCAP_OPEN : undefined,
-      onClick: () => {
-        cb.onOpenFolder();
-      },
-    }),
-  );
+
+  // Open folder… is built here but appended LAST (after the Clone row, when present) so the Start order
+  // reads New → Example → Clone → Open folder, per the hi-fi mock.
+  const openFolderAction = makeAction({
+    icon: ICON_OPEN,
+    label: 'Open folder…',
+    // Opening a folder needs the File System Access API (Chromium-only). Where it's missing, show the
+    // action as disabled with an honest reason rather than a button that errors on click.
+    desc: canOpenFolders ? 'Work on an existing workspace' : 'Needs a Chromium-based browser (Chrome / Edge)',
+    disabled: !canOpenFolders,
+    action: 'open-folder',
+    // Only hint the shortcut where it works — the handler self-gates on canOpenFolders too.
+    keycap: canOpenFolders ? KEYS_OPEN : undefined,
+    onClick: () => {
+      cb.onOpenFolder();
+    },
+  });
 
   // Clone repository (#1005) — a Start row that reveals an inline URL form, rendered ONLY when the host
   // can clone (`canClone`, from Platform.canUseGit) so the browser tab never shows an action it can't
@@ -629,10 +659,10 @@ function buildHome(
     triggerLabel.textContent = 'Clone repository';
     const triggerDesc = document.createElement('span');
     triggerDesc.className = 'koi-welcome-action-desc';
-    triggerDesc.textContent = 'Clone a git repository by URL';
+    triggerDesc.textContent = 'Pull an existing Koine project from Git';
     triggerText.append(triggerLabel, triggerDesc);
     trigger.append(triggerIcon, triggerText);
-    appendKeycap(trigger, KEYCAP_CLONE);
+    appendKeycap(trigger, KEYS_CLONE);
     cloneTriggerEl = trigger; // let the ⇧mod+C shortcut activate this toggle
 
     const cloneForm = document.createElement('div');
@@ -731,6 +761,9 @@ function buildHome(
     actions.appendChild(cloneRow);
   }
 
+  // Open folder… lands last, after the Clone row (when present): New → Example → Clone → Open folder.
+  actions.appendChild(openFolderAction);
+
   launch.appendChild(actions);
 
   // Recent folders — populated immediately on mount via refreshRecent(). The header (title + count
@@ -740,10 +773,15 @@ function buildHome(
   const recent = document.createElement('div');
   recent.className = 'koi-welcome-recent';
 
-  // Header row: the "Recent" title + a live count pill (total recents). The pill text and the header's
-  // count/filter visibility are updated per render; the elements themselves never rebuild.
+  // Header row (ONE line): the "Recent" title + a live count pill on the left, and the compact filter
+  // (magnifier + search input) pushed to the right. The pill text and the count/filter visibility are
+  // updated per render; the elements themselves never rebuild — the filter, in particular, is built ONCE
+  // and only re-attached/hidden across renders (rebuilding it would drop focus mid-type, #1005 tested).
   const recentHead = document.createElement('div');
   recentHead.className = 'koi-welcome-recent-head';
+
+  const recentTitleGroup = document.createElement('div');
+  recentTitleGroup.className = 'koi-welcome-recent-head-title';
 
   const recentHeading = document.createElement('h2');
   recentHeading.className = 'koi-welcome-rail-title';
@@ -751,9 +789,19 @@ function buildHome(
 
   const recentCount = document.createElement('span');
   recentCount.className = 'koi-welcome-recent-count';
-  recentHead.append(recentHeading, recentCount);
+  recentTitleGroup.append(recentHeading, recentCount);
 
   const recentFilterId = `koi-welcome-recent-filter-${Math.random().toString(36).slice(2, 8)}`;
+
+  // The filter lives on the right of the header row: a magnifier glyph, an sr-only label, and the search
+  // input — grouped so the whole cluster right-aligns as one compact unit.
+  const recentFilterWrap = document.createElement('div');
+  recentFilterWrap.className = 'koi-welcome-recent-filter-wrap';
+
+  const recentFilterIcon = document.createElement('span');
+  recentFilterIcon.className = 'koi-welcome-recent-filter-icon';
+  recentFilterIcon.setAttribute('aria-hidden', 'true');
+  recentFilterIcon.innerHTML = ICON_SEARCH;
 
   const recentFilterLabel = document.createElement('label');
   recentFilterLabel.className = 'koi-sr-only';
@@ -764,11 +812,14 @@ function buildHome(
   recentFilter.type = 'search';
   recentFilter.id = recentFilterId;
   recentFilter.className = 'koi-welcome-recent-filter';
-  recentFilter.placeholder = 'Filter recent folders…';
+  recentFilter.placeholder = 'Filter…';
   recentFilter.addEventListener('input', () => {
     recentQuery = recentFilter.value;
     renderRecent();
   });
+
+  recentFilterWrap.append(recentFilterIcon, recentFilterLabel, recentFilter);
+  recentHead.append(recentTitleGroup, recentFilterWrap);
 
   // Only this container is rebuilt per render (rows / View-all toggle / clear-all, or the empty copy).
   // The header + filter above it are built once and always mounted — a filter keystroke re-renders the
@@ -776,7 +827,7 @@ function buildHome(
   const recentBody = document.createElement('div');
   recentBody.className = 'koi-welcome-recent-body';
 
-  recent.append(recentHead, recentFilterLabel, recentFilter, recentBody);
+  recent.append(recentHead, recentBody);
   launch.appendChild(recent);
   body.appendChild(launch);
 
@@ -798,20 +849,19 @@ function buildHome(
     const links = document.createElement('nav');
     links.className = 'koi-home-colophon-links';
     links.setAttribute('aria-label', 'Koine project links');
-    for (const link of PROJECT_LINKS) {
+    // Home shows a text-only Docs · GitHub · Blog trio (no icons, no Home link) per the mock — a local
+    // filter/reorder of the shared PROJECT_LINKS so About's icon'd list (shared/colophon) stays untouched.
+    const HOME_LINK_ORDER = ['Docs', 'GitHub', 'Blog'];
+    for (const label of HOME_LINK_ORDER) {
+      const link = PROJECT_LINKS.find((l) => l.label === label);
+      if (!link) continue;
       const a = document.createElement('a');
       a.className = 'koi-home-colophon-link';
       a.href = link.href;
       a.target = '_blank';
       a.rel = 'noopener noreferrer';
       a.title = link.hint;
-
-      const icon = document.createElement('span');
-      icon.className = 'koi-home-colophon-link-icon';
-      icon.setAttribute('aria-hidden', 'true');
-      icon.innerHTML = link.icon;
-
-      a.append(icon, link.label);
+      a.textContent = link.label; // text-only — no icon span
       wireExternalLink(a, link.href, platform); // open in the system browser, not the webview
       links.append(a);
     }
@@ -848,6 +898,7 @@ function buildHome(
     const hasAny = all.length > 0;
     recentCount.textContent = hasAny ? String(all.length) : '';
     recentCount.hidden = !hasAny;
+    recentFilterWrap.hidden = !hasAny;
     recentFilter.hidden = !hasAny;
     recentFilterLabel.hidden = !hasAny;
     // Sync the value only when a render was triggered by something other than the input itself
@@ -917,10 +968,10 @@ function buildHome(
   }
 
   /**
-   * Build one dense recent row: a teal monogram tile (the folder's initial), a two-line main column —
-   * the name plus an optional emit-language tag, then an optional git branch and the relative open time
-   * — and the hover/focus-revealed pin, copy and remove controls (their aria-labels/behaviour unchanged
-   * from the previous list). Absent branch/language fields are simply omitted.
+   * Build one dense recent row as a SINGLE line: a teal monogram tile, the folder name and an optional
+   * emit-language tag on the left, then — pushed to the right by a flex spacer — an optional git branch
+   * and the relative open time; plus the hover/focus-revealed pin, copy and remove controls (their
+   * aria-labels/behaviour unchanged). Absent branch/language fields (and a 0-time) are simply omitted.
    */
   function buildRecentRow(entry: RecentFolder): HTMLElement {
     const path = entry.path;
@@ -938,32 +989,27 @@ function buildHome(
       cb.onOpenRecent(path);
     });
 
-    // Teal monogram — the folder's initial in an accent-cyan tile; decorative (the name carries the label).
+    // Teal monogram — the folder's LOWERCASE initial in an accent-cyan tile; decorative (name carries it).
     const mono = document.createElement('span');
     mono.className = 'koi-welcome-recent-mono';
     mono.setAttribute('aria-hidden', 'true');
-    mono.textContent = (name.charAt(0) || '?').toUpperCase();
+    mono.textContent = (name.charAt(0) || '?').toLowerCase();
 
-    const main = document.createElement('span');
-    main.className = 'koi-welcome-recent-main';
-
-    // Line 1: the folder name + an optional emit-language tag (id mapped to its short label).
-    const line = document.createElement('span');
-    line.className = 'koi-welcome-recent-line';
+    // Left group: the folder name + an optional emit-language SHORT code (e.g. C#).
     const nameEl = document.createElement('span');
     nameEl.className = 'koi-welcome-recent-item-name';
     nameEl.textContent = name;
-    line.appendChild(nameEl);
+    open.append(mono, nameEl);
     if (entry.language) {
       const lang = document.createElement('span');
       lang.className = 'koi-welcome-recent-lang';
-      lang.textContent = langLabel(entry.language);
-      line.appendChild(lang);
+      lang.textContent = shortLang(entry.language);
+      open.appendChild(lang);
     }
 
-    // Line 2: an optional git branch (teal glyph + name) then the relative open time.
-    const metaLine = document.createElement('span');
-    metaLine.className = 'koi-welcome-recent-meta';
+    // Right group (pushed to the far right by margin-left:auto): an optional git branch then the time.
+    const side = document.createElement('span');
+    side.className = 'koi-welcome-recent-side';
     if (entry.branch) {
       const branch = document.createElement('span');
       branch.className = 'koi-welcome-recent-branch';
@@ -976,7 +1022,7 @@ function buildHome(
       branchName.className = 'koi-welcome-recent-branch-name';
       branchName.textContent = entry.branch;
       branch.append(glyph, branchName);
-      metaLine.appendChild(branch);
+      side.appendChild(branch);
     }
     // Relative open time — omitted when unknown: getRecentFolders coerces a missing openedAt to 0, and
     // timeAgo(0, now) would otherwise render an absurd "~20800d ago" for a pre-metadata entry.
@@ -984,11 +1030,10 @@ function buildHome(
       const time = document.createElement('span');
       time.className = 'koi-welcome-recent-time';
       time.textContent = timeAgo(entry.openedAt, Date.now());
-      metaLine.appendChild(time);
+      side.appendChild(time);
     }
 
-    main.append(line, metaLine);
-    open.append(mono, main);
+    open.appendChild(side);
     item.appendChild(open);
 
     const pin = document.createElement('button');

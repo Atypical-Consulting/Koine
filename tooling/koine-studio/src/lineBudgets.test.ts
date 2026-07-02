@@ -96,7 +96,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1342 → 1442: #1005 keycaps — per-action shortcut keycaps (the KEYCAP_* glyphs + appendKeycap
   // helper) plus the document-level Home keydown handler (mod+N/E, ⇧mod+O/C, focused-field guard) and its
   // destroy() teardown; ceil(1413 × 1.02) = 1442.
-  { file: 'src/welcome/welcome.ts', maxLines: 1442 },
+  // Raised 1442 → 1513: #1005 hi-fi visual-fidelity pass — single-line recent rows (side group) + shortLang
+  // codes, header-mounted filter (magnifier wrap), resume chevron, boxed per-key keycaps (keys/key), sun/moon
+  // theme icon and text-only colophon; net imperative-DOM growth to 1483 LOC, ceil(1483 × 1.02) = 1513.
+  { file: 'src/welcome/welcome.ts', maxLines: 1513 },
 ];
 
 describe('line-budget guard', () => {

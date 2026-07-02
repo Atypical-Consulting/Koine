@@ -237,9 +237,10 @@
   }
 }
 
-/* The live "ping" dot marks a still-live (warm) session: a solid accent dot at the tile's top-right that
-   radiates a fading halo. The halo only plays with the `is-live` class — JS omits that class under
-   prefers-reduced-motion, and the global reduced-motion collapse in _animations.scss neutralizes it too. */
+/* The live "ping" dot marks a still-live (warm) session: a solid GREEN dot at the tile's top-right that
+   radiates a fading halo (green reads as "live / connected", not the accent-blue chrome). The halo only
+   plays with the `is-live` class — JS omits that class under prefers-reduced-motion, and the global
+   reduced-motion collapse in _animations.scss neutralizes it too. */
 .koi-home-resume-ping {
   position: absolute;
   top: -3px;
@@ -247,7 +248,7 @@
   width: 8px;
   height: 8px;
   border-radius: var(--koi-radius-pill);
-  background: var(--koi-accent);
+  background: var(--koi-ddd-entity);
   border: 2px solid var(--koi-surface);
 
   &.is-live::after {
@@ -256,7 +257,7 @@
     inset: -2px;
     z-index: -1;
     border-radius: inherit;
-    background: var(--koi-accent);
+    background: var(--koi-ddd-entity);
     animation: koi-resume-ping 1.8s ease-out infinite;
   }
 }
@@ -275,6 +276,7 @@
 
 .koi-home-resume-body {
   min-width: 0;
+  flex: 1 1 auto; /* take the middle so the trailing chevron sits at the far right */
   display: flex;
   flex-direction: column;
   gap: var(--koi-space-0-5);
@@ -286,7 +288,31 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.18em;
+  color: var(--koi-accent); /* accent eyebrow — the "LAST SESSION" label leads with the brand hue */
+}
+
+/* The trailing right-chevron — a quiet "opens this session" disclosure on the far right of the card. */
+.koi-home-resume-chevron {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
   color: var(--koi-muted);
+  transition: transform var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease;
+
+  svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .koi-home-resume:hover & {
+    color: var(--koi-accent);
+    transform: translateX(2px);
+  }
 }
 
 /* project · file — one baseline-aligned row; the file truncates so a long path never grows the card. */
@@ -572,17 +598,31 @@
   }
 }
 
-/* Per-action keyboard-shortcut keycap (#1005): a quiet <kbd> pushed to the right edge of a Start action
-   (or the clone trigger). Same treatment vocabulary as `.deck-hint kbd` / `.koi-kbd` — monospace, a
-   hairline border with a slightly heavier bottom edge and a faint fill — but derived from currentColor
-   (no literal hex) so it reads correctly on BOTH the plain-surface actions and the accent-filled primary
-   one. Decorative (aria-hidden): the action's visible label already carries the accessible name. */
-.koi-welcome-keycap {
+/* Per-action keyboard-shortcut keycaps (#1005): a group of small boxed keys pushed to the right edge of
+   a Start action (or the clone trigger) — one `.koi-welcome-key` per key in the chord (e.g. [⌘][N]).
+   Decorative (aria-hidden): the action's visible label already carries the accessible name. */
+.koi-welcome-keys {
   flex: none;
   margin-left: auto;
   align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-0-5);
+}
+
+/* One small key cap. Same treatment vocabulary as `.deck-hint kbd` / `.koi-kbd` — monospace, a hairline
+   border with a slightly heavier bottom edge and a faint fill — but derived from currentColor (no literal
+   hex) so it reads correctly on BOTH the plain-surface actions and the accent-filled primary one. */
+.koi-welcome-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--koi-space-1);
+  box-sizing: border-box;
   font-family: var(--koi-font-mono);
-  font-size: var(--koi-text-xs);
+  font-size: var(--koi-text-2xs);
   line-height: 1;
   letter-spacing: 0.02em;
   white-space: nowrap;
@@ -591,7 +631,6 @@
   border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
   border-bottom-width: 2px;
   border-radius: var(--koi-radius-sm);
-  padding: var(--koi-space-0-5) var(--koi-space-1-5);
   opacity: 0.85;
 }
 
@@ -742,16 +781,25 @@
 }
 
 /* --- recent folders ------------------------------------------------------- */
-/* Header row: the "Recent" rail title + a live count pill; the header-mounted filter sits below it.
-   Header + filter persist across re-renders (only the rows / toggle / clear-all rebuild). */
+/* Header row (ONE line): the "Recent" rail title + a live count pill on the left, the compact filter on
+   the right. Header + filter persist across re-renders (only the rows / toggle / clear-all rebuild). */
 .koi-welcome-recent-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--koi-space-2);
+  margin-bottom: var(--koi-space-2);
 
   .koi-welcome-rail-title {
     margin-bottom: 0;
   }
+}
+
+/* Left cluster: the "Recent" title + its count pill, kept together so the filter can right-align. */
+.koi-welcome-recent-head-title {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+  min-width: 0;
 }
 
 /* A quiet pill carrying the total recent count beside the title. */
@@ -768,19 +816,58 @@
   border-radius: var(--koi-radius-pill);
 }
 
-.koi-welcome-recent-filter {
-  width: 100%;
-  box-sizing: border-box;
-  margin: var(--koi-space-2) 0 var(--koi-space-1-5);
+/* Right cluster: a magnifier glyph over the compact search input, pushed to the far right of the header. */
+.koi-welcome-recent-filter-wrap {
+  flex: 0 1 auto;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+  min-width: 0;
+  max-width: 200px;
+  padding: 0 var(--koi-space-2);
   background: var(--koi-surface);
-  color: var(--koi-fg);
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
-  padding: var(--koi-space-1-25) var(--koi-space-2);
+
+  &:focus-within {
+    border-color: var(--koi-accent);
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+
+  &[hidden] { display: none; }
+}
+
+.koi-welcome-recent-filter-icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--koi-muted);
+
+  svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+}
+
+.koi-welcome-recent-filter {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  background: transparent;
+  color: var(--koi-fg);
+  border: 0;
+  padding: var(--koi-space-1) 0;
   font-family: var(--koi-font-body);
   font-size: var(--koi-text-sm);
 
-  &:focus-visible { outline: 2px solid var(--koi-accent); outline-offset: 1px; }
+  &::placeholder { color: var(--koi-muted); }
+  &:focus-visible { outline: none; }
 }
 
 /* The rebuilt-per-render body: rows, then the View-all toggle + clear-all, or the empty copy. Stacked
@@ -812,19 +899,21 @@
   &[hidden] { display: none; }
 }
 
-/* The row's open affordance: a teal monogram tile + a two-line main column (name/lang, then
-   branch/time). Fills the row so the whole thing is one large click target. */
+/* The row's open affordance: ONE compact line — a teal monogram tile, the name + optional language tag
+   on the left, and (pushed right by the side group) an optional branch + relative time. Fills the row so
+   the whole thing is one large, vertically-centred click target (~38px). */
 .koi-welcome-recent-open {
   flex: 1 1 auto;
-  min-width: 0;             /* allow the name line to ellipsis */
+  min-width: 0;             /* allow the name to ellipsis */
+  min-height: 38px;
   display: flex;
   align-items: center;
-  gap: var(--koi-space-2-5);
+  gap: var(--koi-space-2);
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--koi-radius-sm);
-  padding: var(--koi-space-1-5) var(--koi-space-2);
+  padding: var(--koi-space-1) var(--koi-space-2);
   color: var(--koi-fg);
   cursor: pointer;
 
@@ -832,14 +921,14 @@
   &:focus-visible { outline: 2px solid var(--koi-accent); outline-offset: 1px; }
 }
 
-/* Teal monogram — the folder's initial in an accent-cyan tile. */
+/* Teal monogram — the folder's LOWERCASE initial in an accent-cyan tile. */
 .koi-welcome-recent-mono {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: var(--koi-radius-sm);
   background: color-mix(in srgb, var(--koi-cyan) 16%, transparent);
   color: var(--koi-cyan);
@@ -847,23 +936,7 @@
   font-size: var(--koi-text-sm);
   font-weight: 700;
   line-height: 1;
-  text-transform: uppercase;
-}
-
-.koi-welcome-recent-main {
-  min-width: 0;
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-/* Line 1: name (truncates) + language tag. */
-.koi-welcome-recent-line {
-  display: flex;
-  align-items: baseline;
-  gap: var(--koi-space-1-5);
-  min-width: 0;
+  text-transform: lowercase;
 }
 
 .koi-welcome-recent-item-name {
@@ -888,12 +961,15 @@
   border-radius: var(--koi-radius-2xs);
 }
 
-/* Line 2: an optional teal branch chip + the relative open time (pushed to the right). */
-.koi-welcome-recent-meta {
+/* Right group: an optional teal branch chip + the relative open time, right-aligned via margin-left:auto. */
+.koi-welcome-recent-side {
+  flex: none;
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: var(--koi-space-2);
   min-width: 0;
+  padding-left: var(--koi-space-2);
   font-family: var(--koi-font-mono);
   font-size: var(--koi-text-2xs);
   color: var(--koi-muted);
@@ -932,8 +1008,7 @@
 
 .koi-welcome-recent-time {
   flex: none;
-  margin-left: auto;        /* push the time to the right edge of the meta line */
-  white-space: nowrap;
+  white-space: nowrap;      /* sits inside the right-aligned side group, after the branch */
 }
 
 .koi-welcome-recent-pin,
