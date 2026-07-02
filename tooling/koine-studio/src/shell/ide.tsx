@@ -183,7 +183,7 @@ export function init(hooks: IdeHooks = {}): () => void {
   // Render the header monogram from the shared template ('h' = a stable gradient id) so the welcome,
   // about, and header marks all flow from logo.ts and can't drift apart on the next tweak.
   const brandLogo = document.querySelector('.brand-logo');
-  if (brandLogo) brandLogo.innerHTML = koineMark('h');
+  if (brandLogo) brandLogo.innerHTML = koineMark('h'); // eslint-disable-line no-restricted-syntax -- static, trusted brand monogram from logo.ts (koineMark returns a fixed SVG); same-line keeps the ide.budget line count
 
   // Apply the persisted theme + appearance (accent, reduced motion, editor metrics) before
   // CodeMirror is created so the editor picks up the right tokens / size on first paint.

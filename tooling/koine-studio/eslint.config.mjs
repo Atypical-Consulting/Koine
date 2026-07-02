@@ -26,7 +26,52 @@ export default tseslint.config(
         property: 'getElementById',
         message: 'Use domById (src/shared/domById.ts) so a missing #id throws loudly instead of a silent null.',
       }],
+      'no-restricted-syntax': ['error', {
+        // Any `x.innerHTML = …` (and `+=`). The escape-before-innerHTML contract (editor/markdown.ts)
+        // lives outside the type system, so the sink is banned by default: use textContent / el() / JSX,
+        // or renderMarkdown output behind a justified same-line disable, or an allow-listed island below.
+        selector: "AssignmentExpression[left.property.name='innerHTML']",
+        message: 'Assigning innerHTML is an XSS sink. Use textContent/el()/JSX; renderMarkdown output only, behind a justified disable; imperative islands are allow-listed in eslint.config.mjs.',
+      }],
     },
+  },
+  // Permanent imperative islands (CONTRIBUTING non-goals): CodeMirror (editor), maxGraph
+  // (diagrams-maxgraph), and the host seam build DOM imperatively by nature — innerHTML there is
+  // inherent to the library boundary, not a migration debt, so the ban is permanently off for them.
+  {
+    files: ['src/editor/**', 'src/diagrams/diagrams-maxgraph.ts', 'src/host/**'],
+    rules: { 'no-restricted-syntax': 'off' },
+  },
+  // ── Pending-migration imperative islands ──────────────────────────────────────────────────────────
+  // Each entry FREEZES a panel's innerHTML count where it is (the ban still catches any NEW site) and is
+  // DELETED when the named migration issue converts that panel to Preact/JSX — the same freeze-then-shrink
+  // doctrine as the #757 line budget. The allow-list shrinks as the imperative-island arc lands.
+  {
+    files: ['src/shell/explorer.ts'], // retired by #989 (file explorer → store-bound Preact tree)
+    rules: { 'no-restricted-syntax': 'off' },
+  },
+  {
+    files: ['src/ai/aiPanel.ts'], // retired by #990 (AI assistant panel → Preact over the chat slice)
+    rules: { 'no-restricted-syntax': 'off' },
+  },
+  {
+    // retired by #991 (self-contained panels → Preact: welcome/home, about, generate-project wizard)
+    files: ['src/welcome/welcome.ts', 'src/settings/about.ts', 'src/export/generateProjectWizard.ts'],
+    rules: { 'no-restricted-syntax': 'off' },
+  },
+  {
+    // retired when the settings form is Preact-converted (split by #987, migrated with the panels arc #991)
+    files: ['src/settings/prefs.ts'],
+    rules: { 'no-restricted-syntax': 'off' },
+  },
+  {
+    files: ['src/docs/docsPanel.ts', 'src/model/glossary.ts'], // retired by #992 (pure-DOM model/docs builders → JSX)
+    rules: { 'no-restricted-syntax': 'off' },
+  },
+  {
+    // retired across the arc: #991 (domain navigator) + #992 (Properties/docs panels); file also decomposed by #985
+    files: ['src/shell/inspectorController.tsx'],
+    rules: { 'no-restricted-syntax': 'off' },
   },
   // Tests & stories: the deliberate fire-and-forget promises in vitest fixtures and Storybook play
   // functions are a documented follow-up (fix the ~93 by awaiting), not a prod convention breach.
@@ -37,6 +82,8 @@ export default tseslint.config(
       '@typescript-eslint/no-floating-promises': 'off',
       // Tests legitimately probe optional-absence in fixture DOM (getElementById → null is the assertion).
       'no-restricted-properties': 'off',
+      // Fixture/DOM setup in vitest and Storybook legitimately writes innerHTML to stage markup.
+      'no-restricted-syntax': 'off',
     },
   },
 );
