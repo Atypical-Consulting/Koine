@@ -19,6 +19,11 @@ export default defineConfig({
       entry: fileURLToPath(new URL('./src/index.ts', import.meta.url)),
       formats: ['es'],
       fileName: () => 'index.js',
+      // src/index.ts imports './styles.css' as a side effect so Vite's library build extracts the
+      // design tokens (issue #905, Task 2) into their own file; name it to match the package.json
+      // "./styles.css" export (Vite's default would otherwise derive the name from package.json's
+      // `name`, i.e. a scoped/slashed string, not "styles.css").
+      cssFileName: 'styles',
     },
     rollupOptions: {
       external: ['preact', 'preact/hooks', 'preact/jsx-runtime'],

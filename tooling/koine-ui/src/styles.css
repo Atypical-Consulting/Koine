@@ -1,0 +1,7 @@
+/* @atypical/koine-ui — styles barrel.
+ *
+ * Exposed as the package's "./styles.css" export. Only the design tokens live here for now
+ * (issue #905, Task 2); primitives'/components' own CSS will be added here as they move in
+ * (Tasks 3-4).
+ */
+@import './tokens.css';

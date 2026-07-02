@@ -5,6 +5,11 @@
     "module": "ESNext",
     "lib": ["ES2020", "ES2022.Array", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
+    // Explicit — tsc's automatic @types/* discovery doesn't reliably reach across the npm workspace
+    // hoist boundary here, so name the ambient Node-builtin types this project needs (tokens.test.ts's
+    // `node:fs`/`node:url`). Vite's client types (for the styles.css side-effect import) come from the
+    // triple-slash reference in src/vite-env.d.ts instead, matching koine-studio's convention.
+    "types": ["node"],
 
     /* Preact JSX — the primitives/components moved in by later tasks (#905) are Preact */
     "jsx": "react-jsx",

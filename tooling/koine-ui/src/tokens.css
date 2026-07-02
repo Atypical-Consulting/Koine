@@ -1,3 +1,17 @@
+/* @atypical/koine-ui — design tokens
+ *
+ * The --koi-* runtime CSS custom properties, relocated verbatim from Koine Studio's SCSS
+ * (src/styles/themes/_dark.scss, _light.scss, and src/styles/abstracts/_ddd.scss — issue #905,
+ * Task 2). All three source blocks were already plain CSS custom-property declarations (no SCSS
+ * interpolation/nesting/variables), so this is a relocation + a .scss → .css rename, not a rewrite.
+ *
+ * The theme-switching mechanism is untouched: the active theme is selected by
+ * document.documentElement.dataset.theme. :root below stays the dark default; the
+ * html[data-theme='light'] block redefines EVERY --koi-* theme token for light. Because the
+ * CodeMirror editor theme reads the same var() tokens, flipping data-theme re-themes the editor for
+ * free — no CodeMirror reconfiguration.
+ */
+
 :root {
   /* fonts — the brand typefaces, shared with the docs site (self-hosted via @fontsource) */
   --koi-font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -120,4 +134,79 @@
   --koi-hl-sem-enum-member: #fc9867;
   --koi-hl-sem-property: #83e8c4;
   --koi-hl-sem-parameter: #ff9d8a;
+}
+
+/* --- light theme override ---
+   The active theme is selected by document.documentElement.dataset.theme. :root above stays the
+   dark default; this block redefines EVERY --koi-* token for light. Because the CodeMirror editor
+   theme reads the same var() tokens, flipping data-theme re-themes the editor for free — no CM
+   reconfiguration. Syntax tokens are darkened for legible contrast on a white background. */
+html[data-theme='light'] {
+  /* surfaces */
+  --koi-paper: #ffffff;
+  --koi-paper-2: #f4f6fa;
+  --koi-surface: #e9edf3;
+  --koi-line: #d2d9e3;
+  --koi-diagram-edge: #7a8698; /* relationship connectors — clearly darker than --koi-line so edges read assertively */
+
+  /* text */
+  --koi-fg: #1c2230;
+  --koi-muted: #5b6573;
+  --koi-ink-soft: #3a4452;
+
+  /* accents */
+  --koi-accent: #2f7fe0;
+  --koi-on-accent: #ffffff;
+  --koi-cyan: #0b9d8f;
+
+  /* state (darker red for legible contrast on white) */
+  --koi-error: #cf222e;
+  /* ink on a filled --koi-error surface — white reads on the light theme's deep red */
+  --koi-on-error: #ffffff;
+
+  /* syntax highlighting (contrast-safe on white) */
+  --koi-hl-keyword: #8a3ffc;
+  --koi-hl-type: #0b7fb8;
+  --koi-hl-string: #1a7f37;
+  --koi-hl-regex: #bc4c00;
+  --koi-hl-number: #9a6700;
+  --koi-hl-comment: #6a7484;
+  --koi-hl-meta: #bf3989;
+  --koi-hl-punct: #57606a;
+
+  /* semantic-token highlighting (LSP-driven, issue #329), contrast-safe on white: value/type reuses
+     --koi-hl-type; enum / enumMember / property / parameter get their own distinct hues. */
+  --koi-hl-sem-enum: #8a5a00;
+  --koi-hl-sem-enum-member: #a64d00;
+  --koi-hl-sem-property: #0f7a5f;
+  --koi-hl-sem-parameter: #a83232;
+}
+
+/* The dark theme is the :root default; data-theme='dark' needs no override block. */
+
+/* --- DDD concept palette ---------------------------------------------------------------------------
+   One source of truth for the colour of each DDD concept, shared by the Explorer icons (_model.scss)
+   and the diagram nodes (_diagrams.scss) so the two never disagree. Saturated mid-tones that read on
+   both the light and dark themes. Tweak a value here and both surfaces update together. */
+:root {
+  --koi-ddd-aggregate: #8b87f5; /* indigo — the boundary owner */
+  --koi-ddd-entity: #34d399; /* green */
+  --koi-ddd-value: #5aa9f0; /* blue */
+  --koi-ddd-enum: #fbbf24; /* amber */
+  --koi-ddd-event: #f472b6; /* pink — domain events */
+  --koi-ddd-integration-event: #2dd4bf; /* teal — cross-context events */
+  --koi-ddd-service: #fb923c; /* orange — domain services */
+  --koi-ddd-repository: #94a3b8; /* slate — repositories / types */
+  --koi-ddd-spec: #c084fc; /* violet — specifications / rules */
+
+  /* Behavioural & lifecycle constructs (#453). The model graph emits `states` today; commands, queries,
+     read models, policies and factories are Phase 2 — these hues are defined ahead of the rows so the
+     tactical tree (and a future Explorer bucket) lights up the moment they appear. Distinct from the
+     structural hues above. */
+  --koi-ddd-state-machine: #06b6d4; /* cyan — an entity/aggregate lifecycle (the `states` kind) */
+  --koi-ddd-command: #ef4444; /* red — an imperative command (intent to change state) */
+  --koi-ddd-query: #38bdf8; /* sky — a read query */
+  --koi-ddd-read-model: #a3e635; /* lime — a denormalised read model / projection */
+  --koi-ddd-policy: #d946ef; /* magenta — a policy / process manager (reacts to events) */
+  --koi-ddd-factory: #f59e0b; /* amber — a factory (constructs aggregates) */
 }
