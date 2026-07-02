@@ -12,6 +12,17 @@
     <Project Path="src/Koine.Cli/Koine.Cli.csproj" />
     <Project Path="src/Koine.Compiler/Koine.Compiler.csproj" />
     <Project Path="src/Koine.Compiler.SourceGen/Koine.Compiler.SourceGen.csproj" />
+    <Project Path="src/Koine.Emit.All/Koine.Emit.All.csproj" />
+    <Project Path="src/Koine.Emit.AsyncApi/Koine.Emit.AsyncApi.csproj" />
+    <Project Path="src/Koine.Emit.Common/Koine.Emit.Common.csproj" />
+    <Project Path="src/Koine.Emit.CSharp/Koine.Emit.CSharp.csproj" />
+    <Project Path="src/Koine.Emit.Docs/Koine.Emit.Docs.csproj" />
+    <Project Path="src/Koine.Emit.Glossary/Koine.Emit.Glossary.csproj" />
+    <Project Path="src/Koine.Emit.OpenApi/Koine.Emit.OpenApi.csproj" />
+    <Project Path="src/Koine.Emit.Php/Koine.Emit.Php.csproj" />
+    <Project Path="src/Koine.Emit.Python/Koine.Emit.Python.csproj" />
+    <Project Path="src/Koine.Emit.Rust/Koine.Emit.Rust.csproj" />
+    <Project Path="src/Koine.Emit.TypeScript/Koine.Emit.TypeScript.csproj" />
     <Project Path="src/Koine.Mcp/Koine.Mcp.csproj" />
     <Project Path="src/Koine.Wasm/Koine.Wasm.csproj" />
   </Folder>

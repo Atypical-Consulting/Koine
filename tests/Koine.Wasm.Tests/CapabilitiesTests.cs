@@ -71,7 +71,7 @@ public class CapabilitiesTests
     public void Targets_match_the_registry_supported_target_infos()
     {
         var targets = Caps()["targets"]!.AsArray();
-        var expected = new EmitterRegistry().SupportedTargetInfos;
+        var expected = new EmitterRegistry(BuiltInEmitterProviders.All).SupportedTargetInfos;
 
         // Same list, in the same order, as ListEmitTargets / koine/emitTargets — no second target list.
         targets.Select(t => t!["id"]!.GetValue<string>())

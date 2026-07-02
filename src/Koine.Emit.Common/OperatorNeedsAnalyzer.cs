@@ -7,10 +7,15 @@ namespace Koine.Compiler.Emit.CSharp;
 /// Demand-driven analysis that decides which non-quantity value objects need generated
 /// arithmetic operators (R9). A value object's <c>+</c>/<c>*</c> operators are emitted
 /// ONLY where the model actually folds it with <c>sum</c> or multiplies it by a scalar,
-/// so the C# emitter never emits operators no one calls.
+/// so an emitter never emits operators no one calls.
 ///
 /// <para>Pure and stateless: every method derives its result from the model alone, so the
 /// scans are easy to test and reason about independently of the emitter's mutable wiring.</para>
+///
+/// <para><b>Shared across all five code emitters</b> (C#, TypeScript, Python, Php, Rust): it lives in
+/// the <c>Koine.Emit.Common</c> assembly (issue #861), even though the namespace is still
+/// <c>Koine.Compiler.Emit.CSharp</c> (kept unchanged so the extraction stays reference-only). It is not
+/// a C#-only helper — a new code emitter should reuse it rather than re-deriving operator needs.</para>
 /// </summary>
 internal static class OperatorNeedsAnalyzer
 {

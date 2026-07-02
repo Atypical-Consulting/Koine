@@ -8,7 +8,7 @@ namespace Koine.Compiler.Emit;
 /// <c>id</c> binds to that parameter instead — either directly (the parameter is already spelled
 /// <c>id</c>) or via an alias.
 /// </summary>
-internal enum FactoryIdSource
+public enum FactoryIdSource
 {
     /// <summary>No explicit-id parameter: mint a fresh id with the target's generator
     /// (<c>OrderId.New()</c> / <c>::generate()</c> / …). The Guid / auto-generate case.</summary>
@@ -33,7 +33,7 @@ internal enum FactoryIdSource
 /// <param name="Source">Which way the factory obtains its identity.</param>
 /// <param name="AliasFrom">The emitted parameter name to alias <c>id</c> to; non-null only when
 /// <see cref="Source"/> is <see cref="FactoryIdSource.Alias"/>.</param>
-internal readonly record struct FactoryIdBinding(FactoryIdSource Source, string? AliasFrom)
+public readonly record struct FactoryIdBinding(FactoryIdSource Source, string? AliasFrom)
 {
     /// <summary>
     /// Resolves how <paramref name="factory"/> binds the new <paramref name="entity"/> aggregate's

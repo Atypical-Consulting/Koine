@@ -28,6 +28,21 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Koine.Compiler.Tests" />
+    <!-- The emitters were extracted into their own Koine.Emit.<Target> assemblies (issue #861) but still
+         consume compiler internals they used when co-located (e.g. the expression Lowerer, the semantic
+         model's bound-value-object lookup). Granting IVT keeps that access working with zero source
+         changes and without widening Koine.Compiler's public API. Koine.Emit.Common holds shared emitter
+         helpers that likewise reach compiler internals. -->
+    <InternalsVisibleTo Include="Koine.Emit.Common" />
+    <InternalsVisibleTo Include="Koine.Emit.CSharp" />
+    <InternalsVisibleTo Include="Koine.Emit.TypeScript" />
+    <InternalsVisibleTo Include="Koine.Emit.Python" />
+    <InternalsVisibleTo Include="Koine.Emit.Php" />
+    <InternalsVisibleTo Include="Koine.Emit.Rust" />
+    <InternalsVisibleTo Include="Koine.Emit.Glossary" />
+    <InternalsVisibleTo Include="Koine.Emit.Docs" />
+    <InternalsVisibleTo Include="Koine.Emit.AsyncApi" />
+    <InternalsVisibleTo Include="Koine.Emit.OpenApi" />
   </ItemGroup>
 
   <ItemGroup>

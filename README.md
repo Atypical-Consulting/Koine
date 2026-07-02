@@ -383,28 +383,31 @@ The pipeline is strictly layered so backends are pluggable:
   → Lexer/Parser (ANTLR, generated from Grammar/KoineLexer.g4 + KoineParser.g4)
   → KoineModelBuilderVisitor → semantic model (Ast/, target-agnostic)
   → SemanticValidator (Semantics/) → diagnostics with line/column
-  → IEmitter (Emit/CSharp, Emit/TypeScript, Emit/Python, Emit/Php, Emit/Rust, …) → source files
+  → IEmitter (Koine.Emit.CSharp, .TypeScript, .Python, .Php, .Rust, …) → source files
 ```
 
 ```
 Koine.slnx
 ├── src/
-│   ├── Koine.Compiler/
+│   ├── Koine.Compiler/     # parser, Ast/, semantics + emit CONTRACTS (IEmitter, EmitterRegistry, …)
 │   │   ├── Grammar/        # KoineLexer.g4, KoineParser.g4
 │   │   ├── Ast/            # semantic model + ModelIndex (NO target-specific concepts)
 │   │   ├── Parsing/        # KoineModelBuilderVisitor, SyntaxErrorListener
 │   │   ├── Semantics/      # SemanticValidator (+ focused validators)
-│   │   ├── Emit/           # IEmitter + EmittedFile
-│   │   │   ├── CSharp/     # CSharpEmitter (primary target)
-│   │   │   ├── TypeScript/ # TypeScriptEmitter
-│   │   │   ├── Python/     # PythonEmitter (tactical core + strategic/CQRS layer)
-│   │   │   ├── Php/        # PhpEmitter (tactical core + strategic/CQRS layer, PHP 8.1)
-│   │   │   ├── Rust/       # RustEmitter (multi-context + CQRS read side)
-│   │   │   ├── Glossary/   # ubiquitous-language glossary
-│   │   │   ├── Docs/       # living documentation (Markdown + Mermaid diagrams)
-│   │   │   └── OpenApi/    # OpenApiEmitter (OpenAPI 3.1 spec per bounded context)
+│   │   ├── Emit/           # IEmitter, IEmitterProvider, EmitterOptions, EmitterRegistry, EmitterLoader
 │   │   ├── Diagnostics/    # Diagnostic
 │   │   └── Services/       # KoineCompiler (orchestrator) + LSP/tooling backend
+│   ├── Koine.Emit.Common/  # shared emitter helpers (FactoryIdBinding, MarkdownDoc, OperatorNeedsAnalyzer)
+│   ├── Koine.Emit.CSharp/      # CSharpEmitter (primary target)  ── each emitter its own assembly (#861)
+│   ├── Koine.Emit.TypeScript/  # TypeScriptEmitter
+│   ├── Koine.Emit.Python/      # PythonEmitter (tactical core + strategic/CQRS layer)
+│   ├── Koine.Emit.Php/         # PhpEmitter (tactical core + strategic/CQRS layer, PHP 8.1)
+│   ├── Koine.Emit.Rust/        # RustEmitter (multi-context + CQRS read side)
+│   ├── Koine.Emit.Glossary/    # ubiquitous-language glossary
+│   ├── Koine.Emit.Docs/        # living documentation (Markdown + Mermaid diagrams)
+│   ├── Koine.Emit.AsyncApi/    # AsyncApiEmitter (AsyncAPI 3.0 doc from integration events)
+│   ├── Koine.Emit.OpenApi/     # OpenApiEmitter (OpenAPI 3.1 spec per bounded context)
+│   ├── Koine.Emit.All/     # aggregator: BuiltInEmitterProviders.All — one reference, all targets
 │   ├── Koine.Cli/          # `koine` command-line tool
 │   ├── Koine.Wasm/         # the compiler as a WebAssembly module (Playground + Studio web)
 │   └── Koine.Mcp/          # MCP server for AI agents

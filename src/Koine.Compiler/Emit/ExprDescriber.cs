@@ -10,9 +10,9 @@ namespace Koine.Compiler.Emit;
 /// to an ellipsis placeholder. Both <c>GlossaryEmitter</c> and <c>DocsEmitter</c> consume this one
 /// implementation rather than duplicating it.
 /// </summary>
-internal sealed class ExprDescriber : ExprVisitor<string>
+public sealed class ExprDescriber : ExprVisitor<string>
 {
-    public static readonly ExprDescriber Instance = new();
+    private static readonly ExprDescriber Instance = new();
 
     private ExprDescriber() { }
 

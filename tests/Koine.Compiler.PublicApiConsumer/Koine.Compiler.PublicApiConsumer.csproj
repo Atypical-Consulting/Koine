@@ -28,10 +28,14 @@
     <Using Include="Shouldly" />
   </ItemGroup>
 
-  <!-- Deliberately a plain ProjectReference: no InternalsVisibleTo grant exists for this assembly,
-       so only Koine.Compiler's public API is visible here. -->
+  <!-- Deliberately plain ProjectReferences: no InternalsVisibleTo grant exists for this assembly, so
+       only the public API of Koine.Compiler and the extracted Koine.Emit.* packages is visible here.
+       Koine.Emit.All (issue #861) supplies the public BuiltInEmitterProviders.All that the platform
+       consumer feeds to EmitterRegistry — proving the built-in target set is reachable through the
+       package's public surface alone. -->
   <ItemGroup>
     <ProjectReference Include="..\..\src\Koine.Compiler\Koine.Compiler.csproj" />
+    <ProjectReference Include="..\..\src\Koine.Emit.All\Koine.Emit.All.csproj" />
   </ItemGroup>
 
 </Project>

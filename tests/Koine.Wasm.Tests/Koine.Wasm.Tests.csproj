@@ -40,6 +40,9 @@
          Koine.Compiler; Koine.Wasm brings the JSExport CompilerInterop the parity test drives. -->
     <ProjectReference Include="..\..\src\Koine.Cli\Koine.Cli.csproj" />
     <ProjectReference Include="..\..\src\Koine.Wasm\Koine.Wasm.csproj" />
+    <!-- The built-in provider set is now supplied by the Koine.Emit.All aggregator (issue #861); the
+         routing/parity tests seed an EmitterRegistry from BuiltInEmitterProviders.All. -->
+    <ProjectReference Include="..\..\src\Koine.Emit.All\Koine.Emit.All.csproj" />
   </ItemGroup>
 
 </Project>

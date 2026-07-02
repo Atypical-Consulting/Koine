@@ -1,115 +1,8 @@
 #nullable enable
-Koine.Compiler.Services.KoineCompiler.Compile(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Emit.IEmitter! emitter) -> Koine.Compiler.Services.CompileResult!
-Koine.Compiler.Services.KoineCompiler.Compile(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Emit.IEmitter! emitter, Koine.Compiler.Diagnostics.DiagnosticFilterOptions! filterOptions) -> Koine.Compiler.Services.CompileResult!
-Koine.Compiler.Services.KoineLanguageService.WorkspaceSymbols(Koine.Compiler.Services.KoineCompilation! compilation, string! query) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.WorkspaceSymbol!>!
-Koine.Compiler.Services.KoineLanguageService.RefactorsAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int startLine, int startChar, int endLine, int endChar) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CodeActionEdit!>!
-static Koine.Compiler.Services.ModelRoundTripService.EmitKoine(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.StructuredEdit! edit) -> Koine.Compiler.Services.EmitResult!
-static Koine.Compiler.Services.ModelRoundTripService.ApplyEdit(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.StructuredEdit! edit) -> Koine.Compiler.Services.ModelEditResult!
-Koine.Compiler.Emit.CSharp.CSharpEmitter.CacheDiscriminator.get -> string!
-Koine.Compiler.Emit.IEmitter.CacheDiscriminator.get -> string!
-Koine.Compiler.Emit.Php.PhpEmitter.CacheDiscriminator.get -> string!
-Koine.Compiler.Emit.Python.PythonEmitter.CacheDiscriminator.get -> string!
-Koine.Compiler.Emit.Rust.RustEmitter
-Koine.Compiler.Emit.Rust.RustEmitter.CacheDiscriminator.get -> string!
-Koine.Compiler.Emit.Rust.RustEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.Rust.RustEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.Rust.RustEmitter.RustEmitter() -> void
-Koine.Compiler.Emit.Rust.RustEmitter.TargetName.get -> string!
-Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.CacheDiscriminator.get -> string!
-Koine.Compiler.Emit.OpenApi.OpenApiEmitter
-Koine.Compiler.Emit.OpenApi.OpenApiEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.OpenApi.OpenApiEmitter.OpenApiEmitter() -> void
-Koine.Compiler.Emit.OpenApi.OpenApiEmitter.TargetName.get -> string!
-Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.get -> bool
-Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.init -> void
-Koine.Compiler.Emit.EmitterOptions.ReferenceOnly.get -> bool
-Koine.Compiler.Emit.EmitterOptions.ReferenceOnly.init -> void
 *REMOVED*Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false) -> void
 *REMOVED*Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null) -> void
 *REMOVED*Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null, int? RegexMatchTimeoutMs = null) -> void
-Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null, int? RegexMatchTimeoutMs = null, string? RegexMode = null) -> void
-Koine.Compiler.Emit.EmitterOptions.RegexMode.get -> string?
-Koine.Compiler.Emit.EmitterOptions.RegexMode.init -> void
-Koine.Compiler.Emit.EmitterOptions.Layers.get -> string?
-Koine.Compiler.Emit.EmitterOptions.Layers.init -> void
-Koine.Compiler.Emit.EmitterOptions.ApplicationMediatr.get -> bool
-Koine.Compiler.Emit.EmitterOptions.ApplicationMediatr.init -> void
-Koine.Compiler.Emit.EmitterOptions.ApplicationMapping.get -> string?
-Koine.Compiler.Emit.EmitterOptions.ApplicationMapping.init -> void
-Koine.Compiler.Emit.EmitterOptions.RegexMatchTimeoutMs.get -> int?
-Koine.Compiler.Emit.EmitterOptions.RegexMatchTimeoutMs.init -> void
-Koine.Compiler.Emit.EmittedFile.SourceMap.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.SourceMapSegment!>?
-Koine.Compiler.Emit.EmittedFile.SourceMap.init -> void
-Koine.Compiler.Emit.SourceMapSegment
-Koine.Compiler.Emit.SourceMapSegment.GeneratedEndLine.get -> int
-Koine.Compiler.Emit.SourceMapSegment.GeneratedEndLine.init -> void
-Koine.Compiler.Emit.SourceMapSegment.GeneratedStartLine.get -> int
-Koine.Compiler.Emit.SourceMapSegment.GeneratedStartLine.init -> void
-Koine.Compiler.Emit.SourceMapSegment.Source.get -> Koine.Compiler.Ast.SourceSpan
-Koine.Compiler.Emit.SourceMapSegment.Source.init -> void
-Koine.Compiler.Emit.SourceMapSegment.SourceFile.get -> string!
-Koine.Compiler.Emit.SourceMapSegment.SourceFile.init -> void
-Koine.Compiler.Emit.SourceMapSegment.SourceMapSegment(int GeneratedStartLine, int GeneratedEndLine, string! SourceFile, Koine.Compiler.Ast.SourceSpan Source) -> void
-Koine.Compiler.Emit.Docs.DiagramDescriptor
-Koine.Compiler.Emit.Docs.DiagramDescriptor.Caption.get -> string!
-Koine.Compiler.Emit.Docs.DiagramDescriptor.Caption.init -> void
-Koine.Compiler.Emit.Docs.DiagramDescriptor.DiagramDescriptor(string! Caption, string! Kind, string! Mermaid, Koine.Compiler.Emit.Docs.DiagramGraph! Graph) -> void
-Koine.Compiler.Emit.Docs.DiagramDescriptor.Graph.get -> Koine.Compiler.Emit.Docs.DiagramGraph!
-Koine.Compiler.Emit.Docs.DiagramDescriptor.Graph.init -> void
-Koine.Compiler.Emit.Docs.DiagramDescriptor.Kind.get -> string!
-Koine.Compiler.Emit.Docs.DiagramDescriptor.Kind.init -> void
-Koine.Compiler.Emit.Docs.DiagramDescriptor.Mermaid.get -> string!
-Koine.Compiler.Emit.Docs.DiagramDescriptor.Mermaid.init -> void
-Koine.Compiler.Emit.Docs.DiagramEdge
-Koine.Compiler.Emit.Docs.DiagramEdge.DiagramEdge(string! From, string! To, string? Label, string? Cardinality = null, string? SourceCardinality = null, string? ArrowKind = null, string? BackingMember = null) -> void
-Koine.Compiler.Emit.Docs.DiagramEdge.ArrowKind.get -> string?
-Koine.Compiler.Emit.Docs.DiagramEdge.ArrowKind.init -> void
-Koine.Compiler.Emit.Docs.DiagramEdge.BackingMember.get -> string?
-Koine.Compiler.Emit.Docs.DiagramEdge.BackingMember.init -> void
-Koine.Compiler.Emit.Docs.DiagramEdge.Cardinality.get -> string?
-Koine.Compiler.Emit.Docs.DiagramEdge.Cardinality.init -> void
-Koine.Compiler.Emit.Docs.DiagramEdge.From.get -> string!
-Koine.Compiler.Emit.Docs.DiagramEdge.From.init -> void
-Koine.Compiler.Emit.Docs.DiagramEdge.Label.get -> string?
-Koine.Compiler.Emit.Docs.DiagramEdge.Label.init -> void
-Koine.Compiler.Emit.Docs.DiagramEdge.SourceCardinality.get -> string?
-Koine.Compiler.Emit.Docs.DiagramEdge.SourceCardinality.init -> void
-Koine.Compiler.Emit.Docs.DiagramEdge.To.get -> string!
-Koine.Compiler.Emit.Docs.DiagramEdge.To.init -> void
-Koine.Compiler.Emit.Docs.DiagramGraph
-Koine.Compiler.Emit.Docs.DiagramGraph.DiagramGraph(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramNode!>! Nodes, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramEdge!>! Edges) -> void
-Koine.Compiler.Emit.Docs.DiagramGraph.Edges.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramEdge!>!
-Koine.Compiler.Emit.Docs.DiagramGraph.Edges.init -> void
-Koine.Compiler.Emit.Docs.DiagramGraph.Nodes.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramNode!>!
-Koine.Compiler.Emit.Docs.DiagramGraph.Nodes.init -> void
-Koine.Compiler.Emit.Docs.DiagramMember
-Koine.Compiler.Emit.Docs.DiagramMember.DiagramMember(string! Text, string! Kind) -> void
-Koine.Compiler.Emit.Docs.DiagramMember.Kind.get -> string!
-Koine.Compiler.Emit.Docs.DiagramMember.Kind.init -> void
-Koine.Compiler.Emit.Docs.DiagramMember.Text.get -> string!
-Koine.Compiler.Emit.Docs.DiagramMember.Text.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode
-Koine.Compiler.Emit.Docs.DiagramNode.DiagramNode(string! Id, string! Label, string! Kind, string! QualifiedName, Koine.Compiler.Ast.SourceSpan? Span, string? Stereotype = null, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramMember!>? Members = null, System.Collections.Generic.IReadOnlyList<string!>? Invariants = null, string? Doc = null) -> void
-Koine.Compiler.Emit.Docs.DiagramNode.Doc.get -> string?
-Koine.Compiler.Emit.Docs.DiagramNode.Doc.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode.Id.get -> string!
-Koine.Compiler.Emit.Docs.DiagramNode.Id.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode.Invariants.get -> System.Collections.Generic.IReadOnlyList<string!>?
-Koine.Compiler.Emit.Docs.DiagramNode.Invariants.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode.Kind.get -> string!
-Koine.Compiler.Emit.Docs.DiagramNode.Kind.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode.Label.get -> string!
-Koine.Compiler.Emit.Docs.DiagramNode.Label.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode.Members.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramMember!>?
-Koine.Compiler.Emit.Docs.DiagramNode.Members.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode.QualifiedName.get -> string!
-Koine.Compiler.Emit.Docs.DiagramNode.QualifiedName.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode.Span.get -> Koine.Compiler.Ast.SourceSpan?
-Koine.Compiler.Emit.Docs.DiagramNode.Span.init -> void
-Koine.Compiler.Emit.Docs.DiagramNode.Stereotype.get -> string?
-Koine.Compiler.Emit.Docs.DiagramNode.Stereotype.init -> void
-Koine.Compiler.Emit.Docs.DocsEmitter.EmitDiagrams(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Docs.DiagramDescriptor!>!>!
-Koine.Compiler.Emit.EmitterRegistry.SupportedList.get -> string!
+*REMOVED*override Koine.Compiler.Ast.PrimitiveType.Name.get -> string?
 Koine.Compiler.Ast.CoverageItem
 Koine.Compiler.Ast.CoverageItem.Context.get -> string!
 Koine.Compiler.Ast.CoverageItem.Context.init -> void
@@ -121,8 +14,8 @@ Koine.Compiler.Ast.CoverageItem.Name.init -> void
 Koine.Compiler.Ast.CoverageItem.State.get -> Koine.Compiler.Ast.CoverageState
 Koine.Compiler.Ast.CoverageItem.State.init -> void
 Koine.Compiler.Ast.CoverageReport
-Koine.Compiler.Ast.CoverageReport.Covered.get -> int
 Koine.Compiler.Ast.CoverageReport.CoverageReport(string! Target, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CoverageItem!>! Items) -> void
+Koine.Compiler.Ast.CoverageReport.Covered.get -> int
 Koine.Compiler.Ast.CoverageReport.IsComplete.get -> bool
 Koine.Compiler.Ast.CoverageReport.Items.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CoverageItem!>!
 Koine.Compiler.Ast.CoverageReport.Items.init -> void
@@ -133,248 +26,280 @@ Koine.Compiler.Ast.CoverageState
 Koine.Compiler.Ast.CoverageState.Covered = 0 -> Koine.Compiler.Ast.CoverageState
 Koine.Compiler.Ast.CoverageState.Missing = 2 -> Koine.Compiler.Ast.CoverageState
 Koine.Compiler.Ast.CoverageState.Partial = 1 -> Koine.Compiler.Ast.CoverageState
+Koine.Compiler.Ast.EntityDecl.IdentityNameSpan.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Ast.EntityDecl.IdentityNameSpan.init -> void
+Koine.Compiler.Ast.EntityDecl.IdentityStrategySpan.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Ast.EntityDecl.IdentityStrategySpan.init -> void
 Koine.Compiler.Ast.ModelCoverage
-static Koine.Compiler.Ast.ModelCoverage.Compute(Koine.Compiler.Ast.KoineModel! model, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>! emitted, string! target) -> Koine.Compiler.Ast.CoverageReport!
-static Koine.Compiler.Ast.ModelCoverage.RenderText(Koine.Compiler.Ast.CoverageReport! report) -> string!
-static Koine.Compiler.Ast.ModelCoverage.ToJson(Koine.Compiler.Ast.CoverageReport! report) -> string!
-Koine.Compiler.Services.ModelNode
-Koine.Compiler.Services.ModelNode.ModelNode(string! Kind, string! QualifiedName, string! Title, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelMember!>! Members, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelNode!>! Children) -> void
-Koine.Compiler.Services.ModelNode.Kind.get -> string!
-Koine.Compiler.Services.ModelNode.Kind.init -> void
-Koine.Compiler.Services.ModelNode.QualifiedName.get -> string!
-Koine.Compiler.Services.ModelNode.QualifiedName.init -> void
-Koine.Compiler.Services.ModelNode.Title.get -> string!
-Koine.Compiler.Services.ModelNode.Title.init -> void
-Koine.Compiler.Services.ModelNode.Members.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelMember!>!
-Koine.Compiler.Services.ModelNode.Members.init -> void
-Koine.Compiler.Services.ModelNode.Children.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelNode!>!
-Koine.Compiler.Services.ModelNode.Children.init -> void
+Koine.Compiler.Ast.ModelIndex.CommandsEmitting(string! eventName) -> System.Collections.Generic.IReadOnlyList<(string! targetType, string! commandName)>!
+Koine.Compiler.Ast.ModelIndex.EventsEmittedBy(string! targetType, string! commandName) -> System.Collections.Generic.IReadOnlyList<string!>!
+Koine.Compiler.Ast.ModelIndex.PoliciesTriggeredByEvent(string! eventName) -> System.Collections.Generic.IReadOnlyList<(string! targetType, string! commandName)>!
+Koine.Compiler.Ast.ModelIndex.SubscriptionEventNameIsAmbiguous(string! subscriberContext, string! eventShortName) -> bool
+Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider
+Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider.AddOptionalMarkerCodeFixProvider() -> void
+Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider.FixableDiagnosticCodes.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider.GetFixes(Koine.Compiler.CodeFixes.CodeFixContext! context) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.CodeFix!>!
+Koine.Compiler.CodeFixes.Providers.RenameDuplicateCodeFixProvider
+Koine.Compiler.CodeFixes.Providers.RenameDuplicateCodeFixProvider.FixableDiagnosticCodes.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Koine.Compiler.CodeFixes.Providers.RenameDuplicateCodeFixProvider.GetFixes(Koine.Compiler.CodeFixes.CodeFixContext! context) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.CodeFix!>!
+Koine.Compiler.CodeFixes.Providers.RenameDuplicateCodeFixProvider.RenameDuplicateCodeFixProvider() -> void
+Koine.Compiler.Diagnostics.DiagnosticCategory.References = 19 -> Koine.Compiler.Diagnostics.DiagnosticCategory
+Koine.Compiler.Emit.EmitTargetInfo
+Koine.Compiler.Emit.EmitTargetInfo.DisplayName.get -> string!
+Koine.Compiler.Emit.EmitTargetInfo.DisplayName.init -> void
+Koine.Compiler.Emit.EmitTargetInfo.EmitTargetInfo(string! Id, string! DisplayName, string! FileExtension) -> void
+Koine.Compiler.Emit.EmitTargetInfo.FileExtension.get -> string!
+Koine.Compiler.Emit.EmitTargetInfo.FileExtension.init -> void
+Koine.Compiler.Emit.EmitTargetInfo.Id.get -> string!
+Koine.Compiler.Emit.EmitTargetInfo.Id.init -> void
+Koine.Compiler.Emit.EmittedFile.SourceMap.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.SourceMapSegment!>?
+Koine.Compiler.Emit.EmittedFile.SourceMap.init -> void
+Koine.Compiler.Emit.EmitterOptions.ApplicationMapping.get -> string?
+Koine.Compiler.Emit.EmitterOptions.ApplicationMapping.init -> void
+Koine.Compiler.Emit.EmitterOptions.ApplicationMediatr.get -> bool
+Koine.Compiler.Emit.EmitterOptions.ApplicationMediatr.init -> void
+Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.get -> bool
+Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.init -> void
+Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null, int? RegexMatchTimeoutMs = null, string? RegexMode = null) -> void
+Koine.Compiler.Emit.EmitterOptions.Layers.get -> string?
+Koine.Compiler.Emit.EmitterOptions.Layers.init -> void
+Koine.Compiler.Emit.EmitterOptions.ReferenceOnly.get -> bool
+Koine.Compiler.Emit.EmitterOptions.ReferenceOnly.init -> void
+Koine.Compiler.Emit.EmitterOptions.RegexMatchTimeoutMs.get -> int?
+Koine.Compiler.Emit.EmitterOptions.RegexMatchTimeoutMs.init -> void
+Koine.Compiler.Emit.EmitterOptions.RegexMode.get -> string?
+Koine.Compiler.Emit.EmitterOptions.RegexMode.init -> void
+Koine.Compiler.Emit.EmitterRegistry.EmitterRegistry(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.IEmitterProvider!>! builtInProviders) -> void
+Koine.Compiler.Emit.EmitterRegistry.EmitterRegistry(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.IEmitterProvider!>! builtInProviders, System.Collections.Generic.IEnumerable<Koine.Compiler.Emit.IEmitterProvider!>? externalProviders) -> void
+Koine.Compiler.Emit.EmitterRegistry.SupportedList.get -> string!
+Koine.Compiler.Emit.EmitterRegistry.SupportedTargetInfos.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmitTargetInfo!>!
+Koine.Compiler.Emit.ExprDescriber
+Koine.Compiler.Emit.Grammar.GbnfExporter
+Koine.Compiler.Emit.IEmitter.CacheDiscriminator.get -> string!
+Koine.Compiler.Emit.IEmitterProvider.DisplayName.get -> string!
+Koine.Compiler.Emit.IEmitterProvider.FileExtension.get -> string!
+Koine.Compiler.Emit.IEmitterProvider.IsEmitTarget.get -> bool
+Koine.Compiler.Emit.SourceMapSegment
+Koine.Compiler.Emit.SourceMapSegment.GeneratedEndLine.get -> int
+Koine.Compiler.Emit.SourceMapSegment.GeneratedEndLine.init -> void
+Koine.Compiler.Emit.SourceMapSegment.GeneratedStartLine.get -> int
+Koine.Compiler.Emit.SourceMapSegment.GeneratedStartLine.init -> void
+Koine.Compiler.Emit.SourceMapSegment.Source.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Emit.SourceMapSegment.Source.init -> void
+Koine.Compiler.Emit.SourceMapSegment.SourceFile.get -> string!
+Koine.Compiler.Emit.SourceMapSegment.SourceFile.init -> void
+Koine.Compiler.Emit.SourceMapSegment.SourceMapSegment(int GeneratedStartLine, int GeneratedEndLine, string! SourceFile, Koine.Compiler.Ast.SourceSpan Source) -> void
+Koine.Compiler.Formatting.FormatRangeEdit
+Koine.Compiler.Formatting.FormatRangeEdit.EndCharacter.get -> int
+Koine.Compiler.Formatting.FormatRangeEdit.EndCharacter.init -> void
+Koine.Compiler.Formatting.FormatRangeEdit.EndLine.get -> int
+Koine.Compiler.Formatting.FormatRangeEdit.EndLine.init -> void
+Koine.Compiler.Formatting.FormatRangeEdit.FormatRangeEdit(int StartLine, int StartCharacter, int EndLine, int EndCharacter, string! NewText) -> void
+Koine.Compiler.Formatting.FormatRangeEdit.NewText.get -> string!
+Koine.Compiler.Formatting.FormatRangeEdit.NewText.init -> void
+Koine.Compiler.Formatting.FormatRangeEdit.StartCharacter.get -> int
+Koine.Compiler.Formatting.FormatRangeEdit.StartCharacter.init -> void
+Koine.Compiler.Formatting.FormatRangeEdit.StartLine.get -> int
+Koine.Compiler.Formatting.FormatRangeEdit.StartLine.init -> void
+Koine.Compiler.Formatting.KoineFormatter.FormatRange(string! source, int startLine, int startCharacter, int endLine, int endCharacter) -> Koine.Compiler.Formatting.FormatRangeEdit?
+Koine.Compiler.Services.CallHierarchyIncomingCall
+Koine.Compiler.Services.CallHierarchyIncomingCall.CallHierarchyIncomingCall(Koine.Compiler.Services.CallHierarchyItem! From) -> void
+Koine.Compiler.Services.CallHierarchyIncomingCall.From.get -> Koine.Compiler.Services.CallHierarchyItem!
+Koine.Compiler.Services.CallHierarchyIncomingCall.From.init -> void
+Koine.Compiler.Services.CallHierarchyItem
+Koine.Compiler.Services.CallHierarchyItem.CallHierarchyItem(string! Name, Koine.Compiler.Services.CallHierarchyItemKind Kind, string? OwningType, string! Uri, Koine.Compiler.Ast.SourceSpan Span) -> void
+Koine.Compiler.Services.CallHierarchyItem.Kind.get -> Koine.Compiler.Services.CallHierarchyItemKind
+Koine.Compiler.Services.CallHierarchyItem.Kind.init -> void
+Koine.Compiler.Services.CallHierarchyItem.Name.get -> string!
+Koine.Compiler.Services.CallHierarchyItem.Name.init -> void
+Koine.Compiler.Services.CallHierarchyItem.OwningType.get -> string?
+Koine.Compiler.Services.CallHierarchyItem.OwningType.init -> void
+Koine.Compiler.Services.CallHierarchyItem.Span.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Services.CallHierarchyItem.Span.init -> void
+Koine.Compiler.Services.CallHierarchyItem.Uri.get -> string!
+Koine.Compiler.Services.CallHierarchyItem.Uri.init -> void
+Koine.Compiler.Services.CallHierarchyItemKind
+Koine.Compiler.Services.CallHierarchyItemKind.Command = 0 -> Koine.Compiler.Services.CallHierarchyItemKind
+Koine.Compiler.Services.CallHierarchyItemKind.Event = 1 -> Koine.Compiler.Services.CallHierarchyItemKind
+Koine.Compiler.Services.CallHierarchyOutgoingCall
+Koine.Compiler.Services.CallHierarchyOutgoingCall.CallHierarchyOutgoingCall(Koine.Compiler.Services.CallHierarchyItem! To) -> void
+Koine.Compiler.Services.CallHierarchyOutgoingCall.To.get -> Koine.Compiler.Services.CallHierarchyItem!
+Koine.Compiler.Services.CallHierarchyOutgoingCall.To.init -> void
+Koine.Compiler.Services.EmitResult
+Koine.Compiler.Services.EmitResult.Diagnostics.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
+Koine.Compiler.Services.EmitResult.Diagnostics.init -> void
+Koine.Compiler.Services.EmitResult.EmitResult(string? Koine, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! Diagnostics) -> void
+Koine.Compiler.Services.EmitResult.Koine.get -> string?
+Koine.Compiler.Services.EmitResult.Koine.init -> void
+Koine.Compiler.Services.InlayHint
+Koine.Compiler.Services.InlayHint.Character.get -> int
+Koine.Compiler.Services.InlayHint.Character.init -> void
+Koine.Compiler.Services.InlayHint.InlayHint(int Line, int Character, string! Label, Koine.Compiler.Services.InlayHintKind Kind) -> void
+Koine.Compiler.Services.InlayHint.Kind.get -> Koine.Compiler.Services.InlayHintKind
+Koine.Compiler.Services.InlayHint.Kind.init -> void
+Koine.Compiler.Services.InlayHint.Label.get -> string!
+Koine.Compiler.Services.InlayHint.Label.init -> void
+Koine.Compiler.Services.InlayHint.Line.get -> int
+Koine.Compiler.Services.InlayHint.Line.init -> void
+Koine.Compiler.Services.InlayHintKind
+Koine.Compiler.Services.InlayHintKind.Parameter = 1 -> Koine.Compiler.Services.InlayHintKind
+Koine.Compiler.Services.InlayHintKind.Type = 0 -> Koine.Compiler.Services.InlayHintKind
+Koine.Compiler.Services.KoineCompiler.Compile(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Emit.IEmitter! emitter) -> Koine.Compiler.Services.CompileResult!
+Koine.Compiler.Services.KoineCompiler.Compile(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Emit.IEmitter! emitter, Koine.Compiler.Diagnostics.DiagnosticFilterOptions! filterOptions) -> Koine.Compiler.Services.CompileResult!
+Koine.Compiler.Services.KoineLanguageService.IncomingCalls(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.CallHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CallHierarchyIncomingCall!>!
+Koine.Compiler.Services.KoineLanguageService.InlayHintsAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int startLine, int startChar, int endLine, int endChar) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.InlayHint!>!
+Koine.Compiler.Services.KoineLanguageService.LinkedEditingRangeAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>?
+Koine.Compiler.Services.KoineLanguageService.LinkedEditingRangeAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>?
+Koine.Compiler.Services.KoineLanguageService.OutgoingCalls(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.CallHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CallHierarchyOutgoingCall!>!
+Koine.Compiler.Services.KoineLanguageService.PrepareCallHierarchy(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CallHierarchyItem!>!
+Koine.Compiler.Services.KoineLanguageService.PrepareTypeHierarchy(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
+Koine.Compiler.Services.KoineLanguageService.RefactorsAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int startLine, int startChar, int endLine, int endChar) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CodeActionEdit!>!
+Koine.Compiler.Services.KoineLanguageService.RenameEditsAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character, string! newName) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameEdit!>?
+Koine.Compiler.Services.KoineLanguageService.RenameEditsAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character, string! newName) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameEdit!>?
+Koine.Compiler.Services.KoineLanguageService.RenamePreviewAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character, string! newName) -> Koine.Compiler.Services.RenamePreview?
+Koine.Compiler.Services.KoineLanguageService.RenamePreviewAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character, string! newName) -> Koine.Compiler.Services.RenamePreview?
+Koine.Compiler.Services.KoineLanguageService.Subtypes(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.TypeHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
+Koine.Compiler.Services.KoineLanguageService.Supertypes(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.TypeHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
+Koine.Compiler.Services.KoineLanguageService.WorkspaceSymbols(Koine.Compiler.Services.KoineCompilation! compilation, string! query) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.WorkspaceSymbol!>!
+Koine.Compiler.Services.ModelEditResult
+Koine.Compiler.Services.ModelEditResult.Diagnostics.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
+Koine.Compiler.Services.ModelEditResult.Diagnostics.init -> void
+Koine.Compiler.Services.ModelEditResult.Edits.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TextEditModel!>!
+Koine.Compiler.Services.ModelEditResult.Edits.init -> void
+Koine.Compiler.Services.ModelEditResult.ModelEditResult(string? Uri, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TextEditModel!>! Edits, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! Diagnostics) -> void
+Koine.Compiler.Services.ModelEditResult.Uri.get -> string?
+Koine.Compiler.Services.ModelEditResult.Uri.init -> void
 Koine.Compiler.Services.ModelMember
-Koine.Compiler.Services.ModelMember.ModelMember(string! Kind, string! Name, string? Type, string? Value) -> void
 Koine.Compiler.Services.ModelMember.Kind.get -> string!
 Koine.Compiler.Services.ModelMember.Kind.init -> void
+Koine.Compiler.Services.ModelMember.ModelMember(string! Kind, string! Name, string? Type, string? Value) -> void
 Koine.Compiler.Services.ModelMember.Name.get -> string!
 Koine.Compiler.Services.ModelMember.Name.init -> void
 Koine.Compiler.Services.ModelMember.Type.get -> string?
 Koine.Compiler.Services.ModelMember.Type.init -> void
 Koine.Compiler.Services.ModelMember.Value.get -> string?
 Koine.Compiler.Services.ModelMember.Value.init -> void
+Koine.Compiler.Services.ModelNode
+Koine.Compiler.Services.ModelNode.Children.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelNode!>!
+Koine.Compiler.Services.ModelNode.Children.init -> void
+Koine.Compiler.Services.ModelNode.Kind.get -> string!
+Koine.Compiler.Services.ModelNode.Kind.init -> void
+Koine.Compiler.Services.ModelNode.Members.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelMember!>!
+Koine.Compiler.Services.ModelNode.Members.init -> void
+Koine.Compiler.Services.ModelNode.ModelNode(string! Kind, string! QualifiedName, string! Title, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelMember!>! Members, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelNode!>! Children) -> void
+Koine.Compiler.Services.ModelNode.QualifiedName.get -> string!
+Koine.Compiler.Services.ModelNode.QualifiedName.init -> void
+Koine.Compiler.Services.ModelNode.Title.get -> string!
+Koine.Compiler.Services.ModelNode.Title.init -> void
 Koine.Compiler.Services.ModelRoundTripService
-const Koine.Compiler.Services.ModelRoundTripService.ContextMapQualifiedName = "$contextMap" -> string!
-static Koine.Compiler.Services.ModelRoundTripService.ModelToJson(Koine.Compiler.Ast.KoineModel! model, string? qualifiedName = null) -> Koine.Compiler.Services.ModelNode!
-static Koine.Compiler.Services.ModelRoundTripService.MembersOf(Koine.Compiler.Ast.KoineModel! model, string! qualifiedName) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelMember!>!
-static Koine.Compiler.Services.ModelRoundTripService.EmitKoine(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files, Koine.Compiler.Services.StructuredEdit! edit) -> Koine.Compiler.Services.EmitResult!
-static Koine.Compiler.Services.ModelRoundTripService.ApplyEdit(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files, Koine.Compiler.Services.StructuredEdit! edit) -> Koine.Compiler.Services.ModelEditResult!
+Koine.Compiler.Services.RenameEdit
+Koine.Compiler.Services.RenameEdit.NewText.get -> string!
+Koine.Compiler.Services.RenameEdit.NewText.init -> void
+Koine.Compiler.Services.RenameEdit.Occurrence.get -> Koine.Compiler.Services.Reference!
+Koine.Compiler.Services.RenameEdit.Occurrence.init -> void
+Koine.Compiler.Services.RenameEdit.RenameEdit(Koine.Compiler.Services.Reference! Occurrence, string! NewText) -> void
+Koine.Compiler.Services.RenameFileChanges
+Koine.Compiler.Services.RenameFileChanges.Occurrences.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>!
+Koine.Compiler.Services.RenameFileChanges.Occurrences.init -> void
+Koine.Compiler.Services.RenameFileChanges.RenameFileChanges(string! Uri, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>! Occurrences) -> void
+Koine.Compiler.Services.RenameFileChanges.Uri.get -> string!
+Koine.Compiler.Services.RenameFileChanges.Uri.init -> void
+Koine.Compiler.Services.RenamePreview
+Koine.Compiler.Services.RenamePreview.Files.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameFileChanges!>!
+Koine.Compiler.Services.RenamePreview.Files.init -> void
+Koine.Compiler.Services.RenamePreview.NewName.get -> string!
+Koine.Compiler.Services.RenamePreview.NewName.init -> void
+Koine.Compiler.Services.RenamePreview.RenamePreview(string! NewName, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameFileChanges!>! Files) -> void
+Koine.Compiler.Services.ScenarioService
+Koine.Compiler.Services.SemanticTokenModifier.Aggregate = 1 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Command = 7 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.DomainEvent = 5 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Entity = 2 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Enumeration = 4 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Factory = 13 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.IntegrationEvent = 6 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Policy = 12 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Query = 8 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.ReadModel = 9 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Repository = 11 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Service = 10 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Specification = 15 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.StateMachine = 14 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.ValueObject = 3 -> Koine.Compiler.Services.SemanticTokenModifier
 Koine.Compiler.Services.StructuredEdit
-Koine.Compiler.Services.StructuredEdit.StructuredEdit(string! Kind, string! Target, string? Name = null, string? Type = null, string? Value = null) -> void
 Koine.Compiler.Services.StructuredEdit.Kind.get -> string!
 Koine.Compiler.Services.StructuredEdit.Kind.init -> void
-Koine.Compiler.Services.StructuredEdit.Target.get -> string!
-Koine.Compiler.Services.StructuredEdit.Target.init -> void
 Koine.Compiler.Services.StructuredEdit.Name.get -> string?
 Koine.Compiler.Services.StructuredEdit.Name.init -> void
+Koine.Compiler.Services.StructuredEdit.StructuredEdit(string! Kind, string! Target, string? Name = null, string? Type = null, string? Value = null) -> void
+Koine.Compiler.Services.StructuredEdit.Target.get -> string!
+Koine.Compiler.Services.StructuredEdit.Target.init -> void
 Koine.Compiler.Services.StructuredEdit.Type.get -> string?
 Koine.Compiler.Services.StructuredEdit.Type.init -> void
 Koine.Compiler.Services.StructuredEdit.Value.get -> string?
 Koine.Compiler.Services.StructuredEdit.Value.init -> void
 Koine.Compiler.Services.StructuredEditKind
-const Koine.Compiler.Services.StructuredEditKind.RenameMember = "renameMember" -> string!
-const Koine.Compiler.Services.StructuredEditKind.AddField = "addField" -> string!
-const Koine.Compiler.Services.StructuredEditKind.RemoveMember = "removeMember" -> string!
-const Koine.Compiler.Services.StructuredEditKind.ChangeFieldType = "changeFieldType" -> string!
-const Koine.Compiler.Services.StructuredEditKind.AddTransition = "addTransition" -> string!
-const Koine.Compiler.Services.StructuredEditKind.AddType = "addType" -> string!
-const Koine.Compiler.Services.StructuredEditKind.AddAggregateMember = "addAggregateMember" -> string!
-const Koine.Compiler.Services.StructuredEditKind.RemoveType = "removeType" -> string!
-Koine.Compiler.Services.EmitResult
-Koine.Compiler.Services.EmitResult.EmitResult(string? Koine, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! Diagnostics) -> void
-Koine.Compiler.Services.EmitResult.Koine.get -> string?
-Koine.Compiler.Services.EmitResult.Koine.init -> void
-Koine.Compiler.Services.EmitResult.Diagnostics.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
-Koine.Compiler.Services.EmitResult.Diagnostics.init -> void
-Koine.Compiler.Services.ModelEditResult
-Koine.Compiler.Services.ModelEditResult.ModelEditResult(string? Uri, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TextEditModel!>! Edits, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! Diagnostics) -> void
-Koine.Compiler.Services.ModelEditResult.Uri.get -> string?
-Koine.Compiler.Services.ModelEditResult.Uri.init -> void
-Koine.Compiler.Services.ModelEditResult.Edits.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TextEditModel!>!
-Koine.Compiler.Services.ModelEditResult.Edits.init -> void
-Koine.Compiler.Services.ModelEditResult.Diagnostics.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
-Koine.Compiler.Services.ModelEditResult.Diagnostics.init -> void
-const Koine.Compiler.Diagnostics.DiagnosticCodes.AggregateNameMatchesRoot = "KOI0109" -> string!
-const Koine.Compiler.Diagnostics.DiagnosticCodes.SpecCallTargetMismatch = "KOI1006" -> string!
-const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateSpecPredicate = "KOI1007" -> string!
-const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectScalarArithmetic = "KOI0215" -> string!
-const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectScalarArithmeticNoNumericField = "KOI0216" -> string!
-const Koine.Compiler.Diagnostics.DiagnosticCodes.NarrowingConversionInDerivedMember = "KOI0217" -> string!
-Koine.Compiler.Ast.EntityDecl.IdentityNameSpan.get -> Koine.Compiler.Ast.SourceSpan
-Koine.Compiler.Ast.EntityDecl.IdentityNameSpan.init -> void
-Koine.Compiler.Ast.EntityDecl.IdentityStrategySpan.get -> Koine.Compiler.Ast.SourceSpan
-Koine.Compiler.Ast.EntityDecl.IdentityStrategySpan.init -> void
-*REMOVED*override Koine.Compiler.Ast.PrimitiveType.Name.get -> string?
-override Koine.Compiler.Ast.PrimitiveType.Name.get -> string!
-Koine.Compiler.Services.ScenarioService
-static Koine.Compiler.Services.ScenarioService.Error(string! target, string! operation, string! note) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
-static Koine.Compiler.Services.ScenarioService.Catalog(Koine.Compiler.Ast.SemanticModel! semantic) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
-static Koine.Compiler.Services.ScenarioService.Run(Koine.Compiler.Ast.SemanticModel! semantic, string! target, string! operation, System.Text.Json.JsonElement given, System.Text.Json.JsonElement args) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
-static Koine.Compiler.Services.ScenarioService.WriteJson(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! tree) -> string!
-Koine.Compiler.Ast.ModelIndex.EventsEmittedBy(string! targetType, string! commandName) -> System.Collections.Generic.IReadOnlyList<string!>!
-Koine.Compiler.Ast.ModelIndex.CommandsEmitting(string! eventName) -> System.Collections.Generic.IReadOnlyList<(string! targetType, string! commandName)>!
-Koine.Compiler.Ast.ModelIndex.PoliciesTriggeredByEvent(string! eventName) -> System.Collections.Generic.IReadOnlyList<(string! targetType, string! commandName)>!
-Koine.Compiler.Services.InlayHintKind
-Koine.Compiler.Services.InlayHintKind.Parameter = 1 -> Koine.Compiler.Services.InlayHintKind
-Koine.Compiler.Services.InlayHintKind.Type = 0 -> Koine.Compiler.Services.InlayHintKind
-Koine.Compiler.Services.InlayHint
-Koine.Compiler.Services.InlayHint.InlayHint(int Line, int Character, string! Label, Koine.Compiler.Services.InlayHintKind Kind) -> void
-Koine.Compiler.Services.InlayHint.Line.get -> int
-Koine.Compiler.Services.InlayHint.Line.init -> void
-Koine.Compiler.Services.InlayHint.Character.get -> int
-Koine.Compiler.Services.InlayHint.Character.init -> void
-Koine.Compiler.Services.InlayHint.Label.get -> string!
-Koine.Compiler.Services.InlayHint.Label.init -> void
-Koine.Compiler.Services.InlayHint.Kind.get -> Koine.Compiler.Services.InlayHintKind
-Koine.Compiler.Services.InlayHint.Kind.init -> void
-Koine.Compiler.Services.KoineLanguageService.InlayHintsAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int startLine, int startChar, int endLine, int endChar) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.InlayHint!>!
-Koine.Compiler.Services.CallHierarchyItemKind
-Koine.Compiler.Services.CallHierarchyItemKind.Command = 0 -> Koine.Compiler.Services.CallHierarchyItemKind
-Koine.Compiler.Services.CallHierarchyItemKind.Event = 1 -> Koine.Compiler.Services.CallHierarchyItemKind
-Koine.Compiler.Services.CallHierarchyItem
-Koine.Compiler.Services.CallHierarchyItem.CallHierarchyItem(string! Name, Koine.Compiler.Services.CallHierarchyItemKind Kind, string? OwningType, string! Uri, Koine.Compiler.Ast.SourceSpan Span) -> void
-Koine.Compiler.Services.CallHierarchyItem.Name.get -> string!
-Koine.Compiler.Services.CallHierarchyItem.Name.init -> void
-Koine.Compiler.Services.CallHierarchyItem.Kind.get -> Koine.Compiler.Services.CallHierarchyItemKind
-Koine.Compiler.Services.CallHierarchyItem.Kind.init -> void
-Koine.Compiler.Services.CallHierarchyItem.OwningType.get -> string?
-Koine.Compiler.Services.CallHierarchyItem.OwningType.init -> void
-Koine.Compiler.Services.CallHierarchyItem.Uri.get -> string!
-Koine.Compiler.Services.CallHierarchyItem.Uri.init -> void
-Koine.Compiler.Services.CallHierarchyItem.Span.get -> Koine.Compiler.Ast.SourceSpan
-Koine.Compiler.Services.CallHierarchyItem.Span.init -> void
-Koine.Compiler.Services.CallHierarchyIncomingCall
-Koine.Compiler.Services.CallHierarchyIncomingCall.CallHierarchyIncomingCall(Koine.Compiler.Services.CallHierarchyItem! From) -> void
-Koine.Compiler.Services.CallHierarchyIncomingCall.From.get -> Koine.Compiler.Services.CallHierarchyItem!
-Koine.Compiler.Services.CallHierarchyIncomingCall.From.init -> void
-Koine.Compiler.Services.CallHierarchyOutgoingCall
-Koine.Compiler.Services.CallHierarchyOutgoingCall.CallHierarchyOutgoingCall(Koine.Compiler.Services.CallHierarchyItem! To) -> void
-Koine.Compiler.Services.CallHierarchyOutgoingCall.To.get -> Koine.Compiler.Services.CallHierarchyItem!
-Koine.Compiler.Services.CallHierarchyOutgoingCall.To.init -> void
-Koine.Compiler.Services.KoineLanguageService.PrepareCallHierarchy(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CallHierarchyItem!>!
-Koine.Compiler.Services.KoineLanguageService.IncomingCalls(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.CallHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CallHierarchyIncomingCall!>!
-Koine.Compiler.Services.KoineLanguageService.OutgoingCalls(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.CallHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CallHierarchyOutgoingCall!>!
-Koine.Compiler.Emit.EmitTargetInfo
-Koine.Compiler.Emit.EmitTargetInfo.EmitTargetInfo(string! Id, string! DisplayName, string! FileExtension) -> void
-Koine.Compiler.Emit.EmitTargetInfo.Id.get -> string!
-Koine.Compiler.Emit.EmitTargetInfo.Id.init -> void
-Koine.Compiler.Emit.EmitTargetInfo.DisplayName.get -> string!
-Koine.Compiler.Emit.EmitTargetInfo.DisplayName.init -> void
-Koine.Compiler.Emit.EmitTargetInfo.FileExtension.get -> string!
-Koine.Compiler.Emit.EmitTargetInfo.FileExtension.init -> void
-Koine.Compiler.Emit.IEmitterProvider.DisplayName.get -> string!
-Koine.Compiler.Emit.IEmitterProvider.FileExtension.get -> string!
-Koine.Compiler.Emit.IEmitterProvider.IsEmitTarget.get -> bool
-Koine.Compiler.Emit.EmitterRegistry.SupportedTargetInfos.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmitTargetInfo!>!
-Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter
-Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.AsyncApiEmitter() -> void
-Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.TargetName.get -> string!
-const Koine.Compiler.Emit.AsyncApi.AsyncApiEmitter.FileName = "asyncapi.yaml" -> string!
-Koine.Compiler.Diagnostics.DiagnosticCategory.References = 19 -> Koine.Compiler.Diagnostics.DiagnosticCategory
-const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectReferencesEntity = "KOI1601" -> string!
-const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityReferencesForeignAggregate = "KOI1602" -> string!
-const Koine.Compiler.Diagnostics.DiagnosticCodes.CommandParameterReferencesEntity = "KOI1603" -> string!
-const Koine.Compiler.Diagnostics.DiagnosticCodes.DomainEventReferencesEntity = "KOI1604" -> string!
-const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityFieldReferencesMessageType = "KOI1605" -> string!
-const Koine.Compiler.Diagnostics.DiagnosticCodes.FactoryNeedsGeneratableIdentity = "KOI0808" -> string!
-const Koine.Compiler.Diagnostics.DiagnosticCodes.AmbiguousFactoryIdentity = "KOI0809" -> string!
-static Koine.Compiler.Ast.MemberAnalysis.IdentityParameters(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>!
-static Koine.Compiler.Ast.MemberAnalysis.FactoryProvidesExplicitId(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory) -> bool
-static Koine.Compiler.Ast.MemberAnalysis.ExplicitIdParameter(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory) -> Koine.Compiler.Ast.Param?
-Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider
-Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider.AddOptionalMarkerCodeFixProvider() -> void
-Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider.FixableDiagnosticCodes.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
-Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider.GetFixes(Koine.Compiler.CodeFixes.CodeFixContext! context) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.CodeFix!>!
-Koine.Compiler.CodeFixes.Providers.RenameDuplicateCodeFixProvider
-Koine.Compiler.CodeFixes.Providers.RenameDuplicateCodeFixProvider.RenameDuplicateCodeFixProvider() -> void
-Koine.Compiler.CodeFixes.Providers.RenameDuplicateCodeFixProvider.FixableDiagnosticCodes.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
-Koine.Compiler.CodeFixes.Providers.RenameDuplicateCodeFixProvider.GetFixes(Koine.Compiler.CodeFixes.CodeFixContext! context) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.CodeFix!>!
-Koine.Compiler.Services.RenamePreview
-Koine.Compiler.Services.RenamePreview.RenamePreview(string! NewName, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameFileChanges!>! Files) -> void
-Koine.Compiler.Services.RenamePreview.NewName.get -> string!
-Koine.Compiler.Services.RenamePreview.NewName.init -> void
-Koine.Compiler.Services.RenamePreview.Files.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameFileChanges!>!
-Koine.Compiler.Services.RenamePreview.Files.init -> void
-Koine.Compiler.Services.RenameFileChanges
-Koine.Compiler.Services.RenameFileChanges.RenameFileChanges(string! Uri, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>! Occurrences) -> void
-Koine.Compiler.Services.RenameFileChanges.Uri.get -> string!
-Koine.Compiler.Services.RenameFileChanges.Uri.init -> void
-Koine.Compiler.Services.RenameFileChanges.Occurrences.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>!
-Koine.Compiler.Services.RenameFileChanges.Occurrences.init -> void
-Koine.Compiler.Services.KoineLanguageService.RenamePreviewAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character, string! newName) -> Koine.Compiler.Services.RenamePreview?
-Koine.Compiler.Services.KoineLanguageService.RenamePreviewAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character, string! newName) -> Koine.Compiler.Services.RenamePreview?
-Koine.Compiler.Services.RenameEdit
-Koine.Compiler.Services.RenameEdit.RenameEdit(Koine.Compiler.Services.Reference! Occurrence, string! NewText) -> void
-Koine.Compiler.Services.RenameEdit.Occurrence.get -> Koine.Compiler.Services.Reference!
-Koine.Compiler.Services.RenameEdit.Occurrence.init -> void
-Koine.Compiler.Services.RenameEdit.NewText.get -> string!
-Koine.Compiler.Services.RenameEdit.NewText.init -> void
-Koine.Compiler.Services.KoineLanguageService.RenameEditsAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character, string! newName) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameEdit!>?
-Koine.Compiler.Services.KoineLanguageService.RenameEditsAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character, string! newName) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameEdit!>?
-Koine.Compiler.Services.KoineLanguageService.LinkedEditingRangeAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>?
-Koine.Compiler.Services.KoineLanguageService.LinkedEditingRangeAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>?
-Koine.Compiler.Formatting.FormatRangeEdit
-Koine.Compiler.Formatting.FormatRangeEdit.FormatRangeEdit(int StartLine, int StartCharacter, int EndLine, int EndCharacter, string! NewText) -> void
-Koine.Compiler.Formatting.FormatRangeEdit.StartLine.get -> int
-Koine.Compiler.Formatting.FormatRangeEdit.StartLine.init -> void
-Koine.Compiler.Formatting.FormatRangeEdit.StartCharacter.get -> int
-Koine.Compiler.Formatting.FormatRangeEdit.StartCharacter.init -> void
-Koine.Compiler.Formatting.FormatRangeEdit.EndLine.get -> int
-Koine.Compiler.Formatting.FormatRangeEdit.EndLine.init -> void
-Koine.Compiler.Formatting.FormatRangeEdit.EndCharacter.get -> int
-Koine.Compiler.Formatting.FormatRangeEdit.EndCharacter.init -> void
-Koine.Compiler.Formatting.FormatRangeEdit.NewText.get -> string!
-Koine.Compiler.Formatting.FormatRangeEdit.NewText.init -> void
-Koine.Compiler.Formatting.KoineFormatter.FormatRange(string! source, int startLine, int startCharacter, int endLine, int endCharacter) -> Koine.Compiler.Formatting.FormatRangeEdit?
+Koine.Compiler.Services.TypeHierarchyItem
+Koine.Compiler.Services.TypeHierarchyItem.Context.get -> string?
+Koine.Compiler.Services.TypeHierarchyItem.Context.init -> void
+Koine.Compiler.Services.TypeHierarchyItem.Kind.get -> Koine.Compiler.Services.TypeHierarchyItemKind
+Koine.Compiler.Services.TypeHierarchyItem.Kind.init -> void
+Koine.Compiler.Services.TypeHierarchyItem.Name.get -> string!
+Koine.Compiler.Services.TypeHierarchyItem.Name.init -> void
+Koine.Compiler.Services.TypeHierarchyItem.Span.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Services.TypeHierarchyItem.Span.init -> void
+Koine.Compiler.Services.TypeHierarchyItem.TypeHierarchyItem(string! Name, Koine.Compiler.Services.TypeHierarchyItemKind Kind, string! Uri, Koine.Compiler.Ast.SourceSpan Span) -> void
+Koine.Compiler.Services.TypeHierarchyItem.Uri.get -> string!
+Koine.Compiler.Services.TypeHierarchyItem.Uri.init -> void
 Koine.Compiler.Services.TypeHierarchyItemKind
 Koine.Compiler.Services.TypeHierarchyItemKind.Aggregate = 0 -> Koine.Compiler.Services.TypeHierarchyItemKind
 Koine.Compiler.Services.TypeHierarchyItemKind.Entity = 1 -> Koine.Compiler.Services.TypeHierarchyItemKind
-Koine.Compiler.Services.TypeHierarchyItemKind.Value = 2 -> Koine.Compiler.Services.TypeHierarchyItemKind
-Koine.Compiler.Services.TypeHierarchyItemKind.ReadModel = 3 -> Koine.Compiler.Services.TypeHierarchyItemKind
 Koine.Compiler.Services.TypeHierarchyItemKind.Enum = 4 -> Koine.Compiler.Services.TypeHierarchyItemKind
 Koine.Compiler.Services.TypeHierarchyItemKind.Event = 5 -> Koine.Compiler.Services.TypeHierarchyItemKind
 Koine.Compiler.Services.TypeHierarchyItemKind.Other = 6 -> Koine.Compiler.Services.TypeHierarchyItemKind
-Koine.Compiler.Services.TypeHierarchyItem
-Koine.Compiler.Services.TypeHierarchyItem.TypeHierarchyItem(string! Name, Koine.Compiler.Services.TypeHierarchyItemKind Kind, string! Uri, Koine.Compiler.Ast.SourceSpan Span) -> void
-Koine.Compiler.Services.TypeHierarchyItem.Name.get -> string!
-Koine.Compiler.Services.TypeHierarchyItem.Name.init -> void
-Koine.Compiler.Services.TypeHierarchyItem.Kind.get -> Koine.Compiler.Services.TypeHierarchyItemKind
-Koine.Compiler.Services.TypeHierarchyItem.Kind.init -> void
-Koine.Compiler.Services.TypeHierarchyItem.Uri.get -> string!
-Koine.Compiler.Services.TypeHierarchyItem.Uri.init -> void
-Koine.Compiler.Services.TypeHierarchyItem.Span.get -> Koine.Compiler.Ast.SourceSpan
-Koine.Compiler.Services.TypeHierarchyItem.Span.init -> void
-Koine.Compiler.Services.TypeHierarchyItem.Context.get -> string?
-Koine.Compiler.Services.TypeHierarchyItem.Context.init -> void
-Koine.Compiler.Services.KoineLanguageService.PrepareTypeHierarchy(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
-Koine.Compiler.Services.KoineLanguageService.Supertypes(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.TypeHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
-Koine.Compiler.Services.KoineLanguageService.Subtypes(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.TypeHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
-Koine.Compiler.Ast.ModelIndex.SubscriptionEventNameIsAmbiguous(string! subscriberContext, string! eventShortName) -> bool
-Koine.Compiler.Emit.Grammar.GbnfExporter
+Koine.Compiler.Services.TypeHierarchyItemKind.ReadModel = 3 -> Koine.Compiler.Services.TypeHierarchyItemKind
+Koine.Compiler.Services.TypeHierarchyItemKind.Value = 2 -> Koine.Compiler.Services.TypeHierarchyItemKind
+Koine.Compiler.Services.VersionInfo
+const Koine.Compiler.Diagnostics.DiagnosticCodes.AggregateNameMatchesRoot = "KOI0109" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.AmbiguousFactoryIdentity = "KOI0809" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.CommandParameterReferencesEntity = "KOI1603" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DomainEventReferencesEntity = "KOI1604" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateSpecPredicate = "KOI1007" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityFieldReferencesMessageType = "KOI1605" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityReferencesForeignAggregate = "KOI1602" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.FactoryNeedsGeneratableIdentity = "KOI0808" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.NarrowingConversionInDerivedMember = "KOI0217" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.SpecCallTargetMismatch = "KOI1006" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectReferencesEntity = "KOI1601" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectScalarArithmetic = "KOI0215" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectScalarArithmeticNoNumericField = "KOI0216" -> string!
+const Koine.Compiler.Services.ModelRoundTripService.ContextMapQualifiedName = "$contextMap" -> string!
+const Koine.Compiler.Services.StructuredEditKind.AddAggregateMember = "addAggregateMember" -> string!
+const Koine.Compiler.Services.StructuredEditKind.AddField = "addField" -> string!
+const Koine.Compiler.Services.StructuredEditKind.AddTransition = "addTransition" -> string!
+const Koine.Compiler.Services.StructuredEditKind.AddType = "addType" -> string!
+const Koine.Compiler.Services.StructuredEditKind.ChangeFieldType = "changeFieldType" -> string!
+const Koine.Compiler.Services.StructuredEditKind.RemoveMember = "removeMember" -> string!
+const Koine.Compiler.Services.StructuredEditKind.RemoveType = "removeType" -> string!
+const Koine.Compiler.Services.StructuredEditKind.RenameMember = "renameMember" -> string!
+override Koine.Compiler.Ast.PrimitiveType.Name.get -> string!
+static Koine.Compiler.Ast.MemberAnalysis.ExplicitIdParameter(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory) -> Koine.Compiler.Ast.Param?
+static Koine.Compiler.Ast.MemberAnalysis.FactoryProvidesExplicitId(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory) -> bool
+static Koine.Compiler.Ast.MemberAnalysis.IdentityParameters(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>!
+static Koine.Compiler.Ast.ModelCoverage.Compute(Koine.Compiler.Ast.KoineModel! model, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>! emitted, string! target) -> Koine.Compiler.Ast.CoverageReport!
+static Koine.Compiler.Ast.ModelCoverage.RenderText(Koine.Compiler.Ast.CoverageReport! report) -> string!
+static Koine.Compiler.Ast.ModelCoverage.ToJson(Koine.Compiler.Ast.CoverageReport! report) -> string!
+static Koine.Compiler.Emit.ExprDescriber.Describe(Koine.Compiler.Ast.Expr! e) -> string!
 static Koine.Compiler.Emit.Grammar.GbnfExporter.Export() -> string!
 static Koine.Compiler.Services.KoineCompilation.Reconcile(Koine.Compiler.Services.KoineCompilation? previous, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files) -> Koine.Compiler.Services.KoineCompilation!
-Koine.Compiler.Services.VersionInfo
+static Koine.Compiler.Services.ModelRoundTripService.ApplyEdit(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.StructuredEdit! edit) -> Koine.Compiler.Services.ModelEditResult!
+static Koine.Compiler.Services.ModelRoundTripService.ApplyEdit(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files, Koine.Compiler.Services.StructuredEdit! edit) -> Koine.Compiler.Services.ModelEditResult!
+static Koine.Compiler.Services.ModelRoundTripService.EmitKoine(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.StructuredEdit! edit) -> Koine.Compiler.Services.EmitResult!
+static Koine.Compiler.Services.ModelRoundTripService.EmitKoine(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files, Koine.Compiler.Services.StructuredEdit! edit) -> Koine.Compiler.Services.EmitResult!
+static Koine.Compiler.Services.ModelRoundTripService.MembersOf(Koine.Compiler.Ast.KoineModel! model, string! qualifiedName) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelMember!>!
+static Koine.Compiler.Services.ModelRoundTripService.ModelToJson(Koine.Compiler.Ast.KoineModel! model, string? qualifiedName = null) -> Koine.Compiler.Services.ModelNode!
+static Koine.Compiler.Services.ScenarioService.Catalog(Koine.Compiler.Ast.SemanticModel! semantic) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
+static Koine.Compiler.Services.ScenarioService.Error(string! target, string! operation, string! note) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
+static Koine.Compiler.Services.ScenarioService.Run(Koine.Compiler.Ast.SemanticModel! semantic, string! target, string! operation, System.Text.Json.JsonElement given, System.Text.Json.JsonElement args) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
+static Koine.Compiler.Services.ScenarioService.WriteJson(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! tree) -> string!
 static Koine.Compiler.Services.VersionInfo.Display(System.Reflection.Assembly! assembly) -> string!
-Koine.Compiler.Services.SemanticTokenModifier.Aggregate = 1 -> Koine.Compiler.Services.SemanticTokenModifier
-Koine.Compiler.Services.SemanticTokenModifier.Entity = 2 -> Koine.Compiler.Services.SemanticTokenModifier
-Koine.Compiler.Services.SemanticTokenModifier.ValueObject = 3 -> Koine.Compiler.Services.SemanticTokenModifier
-Koine.Compiler.Services.SemanticTokenModifier.Enumeration = 4 -> Koine.Compiler.Services.SemanticTokenModifier
-Koine.Compiler.Services.SemanticTokenModifier.DomainEvent = 5 -> Koine.Compiler.Services.SemanticTokenModifier
-Koine.Compiler.Services.SemanticTokenModifier.IntegrationEvent = 6 -> Koine.Compiler.Services.SemanticTokenModifier
-Koine.Compiler.Services.SemanticTokenModifier.Command = 7 -> Koine.Compiler.Services.SemanticTokenModifier
-Koine.Compiler.Services.SemanticTokenModifier.Query = 8 -> Koine.Compiler.Services.SemanticTokenModifier
-Koine.Compiler.Services.SemanticTokenModifier.ReadModel = 9 -> Koine.Compiler.Services.SemanticTokenModifier
-Koine.Compiler.Services.SemanticTokenModifier.Service = 10 -> Koine.Compiler.Services.SemanticTokenModifier
-Koine.Compiler.Services.SemanticTokenModifier.Repository = 11 -> Koine.Compiler.Services.SemanticTokenModifier
-Koine.Compiler.Services.SemanticTokenModifier.Policy = 12 -> Koine.Compiler.Services.SemanticTokenModifier
-Koine.Compiler.Services.SemanticTokenModifier.Factory = 13 -> Koine.Compiler.Services.SemanticTokenModifier
-Koine.Compiler.Services.SemanticTokenModifier.StateMachine = 14 -> Koine.Compiler.Services.SemanticTokenModifier
-Koine.Compiler.Services.SemanticTokenModifier.Specification = 15 -> Koine.Compiler.Services.SemanticTokenModifier

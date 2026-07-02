@@ -76,12 +76,28 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Koine.Compiler\Koine.Compiler.csproj" />
+    <!-- The emitters were extracted into their own assemblies (issue #861); Koine.Emit.All aggregates
+         them and supplies BuiltInEmitterProviders.All to the shared EmitterRegistry above. -->
+    <ProjectReference Include="..\Koine.Emit.All\Koine.Emit.All.csproj" />
   </ItemGroup>
 
-  <!-- Preserve the compiler + ANTLR fully (they use reflection); trim everything else. -->
+  <!-- Preserve the compiler + ANTLR fully (they use reflection); trim everything else. Root every
+       extracted emitter assembly too (issue #861): the browser host resolves every built-in target by
+       name, so full-trim must keep them all, byte-for-byte equal to the pre-split host. -->
   <ItemGroup>
     <TrimmerRootAssembly Include="Koine.Compiler" />
     <TrimmerRootAssembly Include="Antlr4.Runtime.Standard" />
+    <TrimmerRootAssembly Include="Koine.Emit.Common" />
+    <TrimmerRootAssembly Include="Koine.Emit.All" />
+    <TrimmerRootAssembly Include="Koine.Emit.CSharp" />
+    <TrimmerRootAssembly Include="Koine.Emit.TypeScript" />
+    <TrimmerRootAssembly Include="Koine.Emit.Python" />
+    <TrimmerRootAssembly Include="Koine.Emit.Php" />
+    <TrimmerRootAssembly Include="Koine.Emit.Rust" />
+    <TrimmerRootAssembly Include="Koine.Emit.Glossary" />
+    <TrimmerRootAssembly Include="Koine.Emit.Docs" />
+    <TrimmerRootAssembly Include="Koine.Emit.AsyncApi" />
+    <TrimmerRootAssembly Include="Koine.Emit.OpenApi" />
   </ItemGroup>
 
 </Project>

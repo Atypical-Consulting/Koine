@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Koine.Compiler</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Shared emitter helpers, factored out of Koine.Compiler so each Koine.Emit.<Target> can reuse
+       them without pulling in a sibling emitter (issue #861). Packable so a plugin emitter author can
+       depend on the same helpers the built-ins use. Assembly name (Koine.Emit.Common) deliberately
+       differs from the namespace (Koine.Compiler.Emit) so the extraction is reference-only churn. -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Koine.Emit.Common</PackageId>
+    <Description>Shared helpers for Koine emitters — factory-id binding and Markdown documentation rendering — reused across the built-in Koine.Emit.&lt;Target&gt; backends and available to third-party IEmitterProvider authors.</Description>
+    <PackageTags>ddd;domain-driven-design;dsl;compiler;code-generation;koine;emitter</PackageTags>
+  </PropertyGroup>
+
+  <!-- Per-project public-API contract gate (RS0016), mirroring Koine.Compiler. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Koine.Compiler\Koine.Compiler.csproj" />
+  </ItemGroup>
+
+  <!-- OperatorNeedsAnalyzer (the R9 demand-driven operator model, issue #836) is shared machinery the
+       five code emitters consume, but its class + nested ValueObjectOperatorNeeds stay internal (they
+       are not part of a supported public helper API). Grant IVT so the extracted code-emitter
+       assemblies — and the test project — reach it, without widening this package's public surface. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Koine.Emit.CSharp" />
+    <InternalsVisibleTo Include="Koine.Emit.TypeScript" />
+    <InternalsVisibleTo Include="Koine.Emit.Python" />
+    <InternalsVisibleTo Include="Koine.Emit.Php" />
+    <InternalsVisibleTo Include="Koine.Emit.Rust" />
+    <InternalsVisibleTo Include="Koine.Compiler.Tests" />
+  </ItemGroup>
+
+</Project>

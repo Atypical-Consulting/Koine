@@ -266,11 +266,11 @@ public class R18CSharpApplicationTests
     {
         // The neutral provider mapping: `application` among the layers turns the C# Application
         // layer on; `domain`-only (or no layers) keeps the byte-identical domain output.
-        var domainOnly = new EmitterRegistry().TryCreate(
+        var domainOnly = new EmitterRegistry(BuiltInEmitterProviders.All).TryCreate(
             "csharp", new EmitterOptions(new Dictionary<string, string>(), Layers: "domain"), out var d);
         domainOnly.ShouldBeTrue();
 
-        var withApp = new EmitterRegistry().TryCreate(
+        var withApp = new EmitterRegistry(BuiltInEmitterProviders.All).TryCreate(
             "csharp", new EmitterOptions(new Dictionary<string, string>(), Layers: "domain,application"), out _);
         withApp.ShouldBeTrue();
 

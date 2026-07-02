@@ -9,8 +9,9 @@ Koine is a **domain-specific language for Domain-Driven Design**. You write a bo
 ubiquitous language once in `.koi` files and the compiler emits idiomatic, self-contained C#
 (value objects, entities, aggregates, invariants, commands, events, state machines, repositories,
 the application/CQRS layer, context maps, etc.). C# is the primary, most complete target; TypeScript,
-Python, and PHP emitters also ship, and the parser and semantic model are kept strictly target-agnostic
-so a further emitter (e.g. Rust) is a new emitter, not a rewrite (`Emit/TypeScript/`, `Emit/Python/`, `Emit/Php/`).
+Python, PHP, and Rust emitters also ship, and the parser and semantic model are kept strictly
+target-agnostic so a further emitter is a new project, not a rewrite. Each backend lives in its own
+`src/Koine.Emit.<Target>` assembly over a shared `Koine.Emit.Common` (issue #861).
 
 Read `README.md` for the language overview and the full construct table, and `USER-STORIES.md` for the
 roadmap (work is organized as releases **R1–R17**). The docs site source lives in `website/` (Astro
@@ -85,21 +86,35 @@ imports, context maps, and integration events resolve (R13/R14).
   → ANTLR lexer/parser   (src/Koine.Compiler/Grammar/KoineLexer.g4 + KoineParser.g4, visitor mode)
   → KoineModelBuilderVisitor (Parsing/) → semantic model (Ast/, NO C# concepts)
   → SemanticValidator (Semantics/) → diagnostics with line/column
-  → IEmitter (Emit/CSharp/CSharpEmitter) → C# source files
+  → IEmitter (Koine.Emit.CSharp/CSharpEmitter) → C# source files
 ```
 
 The whole thing is orchestrated by `Services/KoineCompiler.cs`.
+
+> **Emitters are separate assemblies (issue #861).** Each backend lives in its own packable
+> `src/Koine.Emit.<Target>` project (`CSharp`, `TypeScript`, `Python`, `Php`, `Rust`, `Glossary`,
+> `Docs`, `AsyncApi`, `OpenApi`), over a shared `Koine.Emit.Common` (helpers like `FactoryIdBinding`,
+> `MarkdownDoc`, `OperatorNeedsAnalyzer`). `Koine.Compiler` keeps only the emit **contracts**
+> (`IEmitter`, `IEmitterProvider`, `EmitterOptions`, `EmitterRegistry`, `EmitterLoader`) — the
+> orchestrator needs them — plus target-agnostic model utilities the core also consumes
+> (`ExprDescriber`, `Emit/Glossary/GlossaryModelBuilder`). The `Koine.Emit.All` aggregator owns
+> `BuiltInEmitterProviders.All` and is what the CLI / MCP / Wasm / tests reference. **Namespaces stay
+> `Koine.Compiler.Emit.*`** (assembly name ≠ namespace), so adding a target is a new
+> `Koine.Emit.<Target>` project, never a change to `Ast/` or the contracts.
 
 - **`Ast/`** is the target-agnostic semantic model (`SemanticModel`, `Nodes`, `Expressions`,
   `KoineType`, `ModelIndex`, `TypeResolver`). **No C#-specific concept belongs here** — that's the
   invariant that keeps multiple emitters possible.
 - **`Semantics/`** holds the validators (`SemanticValidator` plus focused ones for CQRS, context
   maps, integration events, entity behaviors, expressions). Diagnostics carry source spans.
-- **`Emit/CSharp/`** is the C# emitter, split by concern across partial classes
+- **`Koine.Emit.CSharp`** is the C# emitter, split by concern across partial classes
   (`CSharpEmitter.ValueObjects.cs`, `.Entities.cs`, `.Aggregates.cs`, `.Behaviors.cs`, `.Cqrs.cs`,
   `.Runtime.cs`). Supporting pieces: `CSharpTypeMapper`, `CSharpNaming`, `CSharpExpressionTranslator`,
-  `UsingCollector`, `OperatorNeedsAnalyzer`, `CSharpEmitterOptions`. `Emit/Glossary/` emits the
-  ubiquitous-language glossary; `Emit/TypeScript/`, `Emit/Python/`, and `Emit/Php/` are the additional language emitters.
+  `UsingCollector`, `CSharpEmitterOptions` (plus `OperatorNeedsAnalyzer`, now in `Koine.Emit.Common`
+  since the five code emitters share it). `Koine.Emit.Glossary` emits the ubiquitous-language glossary;
+  `Koine.Emit.{TypeScript,Python,Php,Rust}` are the additional language emitters; `Koine.Emit.Docs`,
+  `Koine.Emit.AsyncApi`, `Koine.Emit.OpenApi` emit living docs and API specs. All namespaces remain
+  `Koine.Compiler.Emit.*`.
 - **`Services/`** also hosts the editor/tooling backend reused by `koine lsp`: `WorkspaceIndex`,
   `KoineLanguageService`, `SemanticTokenProvider`, `TokenLocator`, `RefactorService`,
   `CompatibilityChecker`.
@@ -156,6 +171,6 @@ regenerated each build and git-ignored (not committed) — the committed referen
 ## When adding language features
 
 Touch the layers in order and keep the boundary clean: grammar (`.g4`) → builder visitor (`Parsing/`)
-→ semantic model (`Ast/`) → validators (`Semantics/`) → emitter (`Emit/CSharp/`) → tests (a new
+→ semantic model (`Ast/`) → validators (`Semantics/`) → emitter (`Koine.Emit.<Target>`) → tests (a new
 `R##…Tests.cs` with snapshot + Roslyn coverage). Never leak a C# concept into `Ast/`. Update `README.md`
 / `website/` reference docs and the feature catalogue when a construct's emitted shape changes.

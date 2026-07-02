@@ -20,7 +20,7 @@ public class EmitterRegistryTests
     [Fact]
     public void Unified_registry_exposes_the_full_target_list_in_display_order()
     {
-        new EmitterRegistry().SupportedTargets.ShouldBe(UnifiedTargets);
+        new EmitterRegistry(BuiltInEmitterProviders.All).SupportedTargets.ShouldBe(UnifiedTargets);
     }
 
     [Fact]
@@ -37,7 +37,7 @@ public class EmitterRegistryTests
     [Fact]
     public void Empty_options_create_emitters_byte_identical_to_the_parameterless_path()
     {
-        var registry = new EmitterRegistry();
+        var registry = new EmitterRegistry(BuiltInEmitterProviders.All);
         foreach (var target in UnifiedTargets)
         {
             registry.IsSupported(target).ShouldBeTrue();
@@ -47,9 +47,29 @@ public class EmitterRegistryTests
     }
 
     [Fact]
+    public void Registry_reflects_exactly_the_injected_built_in_provider_set()
+    {
+        // The registry no longer hardcodes the built-ins (issue #861): it is seeded from the provider
+        // set the caller injects. Inject a single stub as the built-in set ⇒ exactly that one target,
+        // with NONE of the nine real built-ins auto-added (that would prove a hidden static read).
+        var registry = new EmitterRegistry(new IEmitterProvider[] { new StubEmitterProvider() });
+
+        registry.SupportedTargets.ShouldBe(new[] { StubEmitterProvider.TargetName });
+        registry.IsSupported("csharp").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void BuiltInEmitterProviders_All_lists_the_nine_targets_in_display_order()
+    {
+        // The Koine.Emit.All aggregator (issue #861) owns the built-in set — the single source of truth
+        // the hosts feed into the registry. Its display order must stay the canonical nine.
+        BuiltInEmitterProviders.All.Select(p => p.Target).ShouldBe(UnifiedTargets);
+    }
+
+    [Fact]
     public void External_provider_resolves_through_the_compiler_registry()
     {
-        var registry = new EmitterRegistry(new[] { new StubEmitterProvider() });
+        var registry = new EmitterRegistry(BuiltInEmitterProviders.All, new[] { new StubEmitterProvider() });
 
         registry.SupportedTargets.ShouldBe(UnifiedTargets.Append(StubEmitterProvider.TargetName));
         registry.IsSupported(StubEmitterProvider.TargetName).ShouldBeTrue();
@@ -84,7 +104,7 @@ public class EmitterRegistryTests
         // The registry is the single source of truth for the IDE's emit-target list (issue #282):
         // each code target carries its display name + file extension. Glossary/docs are not emit
         // targets and must be excluded, even though they remain in SupportedTargets.
-        new EmitterRegistry().SupportedTargetInfos.ShouldBe(new[]
+        new EmitterRegistry(BuiltInEmitterProviders.All).SupportedTargetInfos.ShouldBe(new[]
         {
             new EmitTargetInfo("csharp", "C#", ".cs"),
             new EmitTargetInfo("typescript", "TypeScript", ".ts"),
@@ -95,7 +115,7 @@ public class EmitterRegistryTests
             new EmitTargetInfo("openapi", "OpenAPI", ".yaml"),
         });
 
-        var ids = new EmitterRegistry().SupportedTargetInfos.Select(i => i.Id).ToArray();
+        var ids = new EmitterRegistry(BuiltInEmitterProviders.All).SupportedTargetInfos.Select(i => i.Id).ToArray();
         ids.ShouldNotContain("glossary");
         ids.ShouldNotContain("docs");
     }
@@ -106,7 +126,7 @@ public class EmitterRegistryTests
         // A registry target gained → the IDE offers it automatically: an external provider that is an
         // emit target appears in SupportedTargetInfos. The stub declares no metadata, so the default
         // interface members apply — display name = target id, extension = ".txt".
-        var registry = new EmitterRegistry(new[] { new StubEmitterProvider() });
+        var registry = new EmitterRegistry(BuiltInEmitterProviders.All, new[] { new StubEmitterProvider() });
 
         var stub = registry.SupportedTargetInfos.Single(i => i.Id == StubEmitterProvider.TargetName);
         stub.DisplayName.ShouldBe(StubEmitterProvider.TargetName);
@@ -117,7 +137,7 @@ public class EmitterRegistryTests
     public void Supported_list_is_the_comma_space_join_of_supported_targets()
     {
         // Locks the shared formatter the CLI and MCP error messages both delegate to.
-        var registry = new EmitterRegistry();
+        var registry = new EmitterRegistry(BuiltInEmitterProviders.All);
         registry.SupportedList.ShouldBe(string.Join(", ", registry.SupportedTargets));
     }
 

@@ -32,7 +32,7 @@ public static partial class CompilerInterop
     /// construction and the providers are stateless) rather than rebuilt per call, since
     /// <see cref="Compile"/>/<see cref="EmitPreview"/> run on every playground keystroke.
     /// </summary>
-    private static readonly EmitterRegistry Registry = new();
+    private static readonly EmitterRegistry Registry = new(BuiltInEmitterProviders.All);
 
     /// <summary>
     /// Parses + validates <paramref name="source"/> and returns the diagnostics as a JSON array

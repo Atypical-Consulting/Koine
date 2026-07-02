@@ -1,0 +1,11 @@
+#nullable enable
+Koine.Compiler.Emit.OpenApi.OpenApiEmitter
+Koine.Compiler.Emit.OpenApi.OpenApiEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.OpenApi.OpenApiEmitter.OpenApiEmitter() -> void
+Koine.Compiler.Emit.OpenApi.OpenApiEmitter.TargetName.get -> string!
+Koine.Compiler.Emit.OpenApiEmitterProvider
+Koine.Compiler.Emit.OpenApiEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! options) -> Koine.Compiler.Emit.IEmitter!
+Koine.Compiler.Emit.OpenApiEmitterProvider.DisplayName.get -> string!
+Koine.Compiler.Emit.OpenApiEmitterProvider.FileExtension.get -> string!
+Koine.Compiler.Emit.OpenApiEmitterProvider.OpenApiEmitterProvider() -> void
+Koine.Compiler.Emit.OpenApiEmitterProvider.Target.get -> string!

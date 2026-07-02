@@ -36,6 +36,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Koine.Compiler\Koine.Compiler.csproj" />
+    <ProjectReference Include="..\Koine.Emit.All\Koine.Emit.All.csproj" />
   </ItemGroup>
 
   <ItemGroup>

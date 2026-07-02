@@ -14,8 +14,10 @@ namespace Koine.Cli.Infrastructure;
 /// </summary>
 internal static class EmitterRegistry
 {
-    /// <summary>The built-in-only registry, shared by the parameterless lookups.</summary>
-    private static readonly CompilerEmitterRegistry BuiltIn = new();
+    /// <summary>The built-in-only registry, shared by the parameterless lookups. The built-in provider
+    /// set now comes from the <c>Koine.Emit.All</c> aggregator (issue #861) rather than a static the
+    /// core compiler hardcodes.</summary>
+    private static readonly CompilerEmitterRegistry BuiltIn = new(Compiler.Emit.BuiltInEmitterProviders.All);
 
     /// <summary>The supported target names, in display order for help and error messages.</summary>
     public static IReadOnlyList<string> SupportedTargets => BuiltIn.SupportedTargets;
@@ -89,7 +91,8 @@ internal static class EmitterRegistry
             return BuiltIn.TryCreate(target, emitterOptions, out emitter);
         }
 
-        var registry = new CompilerEmitterRegistry(Compiler.Emit.EmitterLoader.Load(emitterAssemblies));
+        var registry = new CompilerEmitterRegistry(
+            Compiler.Emit.BuiltInEmitterProviders.All, Compiler.Emit.EmitterLoader.Load(emitterAssemblies));
         return registry.TryCreate(target, emitterOptions, out emitter);
     }
 

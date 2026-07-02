@@ -940,15 +940,6 @@ Koine.Compiler.Diagnostics.DiagnosticSeverity.Error = 0 -> Koine.Compiler.Diagno
 Koine.Compiler.Diagnostics.DiagnosticSeverity.Hidden = 3 -> Koine.Compiler.Diagnostics.DiagnosticSeverity
 Koine.Compiler.Diagnostics.DiagnosticSeverity.Info = 2 -> Koine.Compiler.Diagnostics.DiagnosticSeverity
 Koine.Compiler.Diagnostics.DiagnosticSeverity.Warning = 1 -> Koine.Compiler.Diagnostics.DiagnosticSeverity
-Koine.Compiler.Emit.CSharp.CSharpEmitter
-Koine.Compiler.Emit.CSharp.CSharpEmitter.CSharpEmitter() -> void
-Koine.Compiler.Emit.CSharp.CSharpEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.CSharp.CSharpEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.CSharp.CSharpEmitter.TargetName.get -> string!
-Koine.Compiler.Emit.Docs.DocsEmitter
-Koine.Compiler.Emit.Docs.DocsEmitter.DocsEmitter() -> void
-Koine.Compiler.Emit.Docs.DocsEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.Docs.DocsEmitter.TargetName.get -> string!
 Koine.Compiler.Emit.EmittedFile
 Koine.Compiler.Emit.EmittedFile.Contents.get -> string!
 Koine.Compiler.Emit.EmittedFile.Contents.init -> void
@@ -965,15 +956,9 @@ Koine.Compiler.Emit.EmitterOptions.Layout.init -> void
 Koine.Compiler.Emit.EmitterOptions.NamespaceMap.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
 Koine.Compiler.Emit.EmitterOptions.NamespaceMap.init -> void
 Koine.Compiler.Emit.EmitterRegistry
-Koine.Compiler.Emit.EmitterRegistry.EmitterRegistry() -> void
-Koine.Compiler.Emit.EmitterRegistry.EmitterRegistry(System.Collections.Generic.IEnumerable<Koine.Compiler.Emit.IEmitterProvider!>? externalProviders) -> void
 Koine.Compiler.Emit.EmitterRegistry.IsSupported(string! target) -> bool
 Koine.Compiler.Emit.EmitterRegistry.SupportedTargets.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Koine.Compiler.Emit.EmitterRegistry.TryCreate(string! target, Koine.Compiler.Emit.EmitterOptions! options, out Koine.Compiler.Emit.IEmitter! emitter) -> bool
-Koine.Compiler.Emit.Glossary.GlossaryEmitter
-Koine.Compiler.Emit.Glossary.GlossaryEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.Glossary.GlossaryEmitter.GlossaryEmitter() -> void
-Koine.Compiler.Emit.Glossary.GlossaryEmitter.TargetName.get -> string!
 Koine.Compiler.Emit.Glossary.GlossaryEntry
 Koine.Compiler.Emit.Glossary.GlossaryEntry.Context.get -> string!
 Koine.Compiler.Emit.Glossary.GlossaryEntry.Context.init -> void
@@ -1002,21 +987,6 @@ Koine.Compiler.Emit.IEmitter.TargetName.get -> string!
 Koine.Compiler.Emit.IEmitterProvider
 Koine.Compiler.Emit.IEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! options) -> Koine.Compiler.Emit.IEmitter!
 Koine.Compiler.Emit.IEmitterProvider.Target.get -> string!
-Koine.Compiler.Emit.Php.PhpEmitter
-Koine.Compiler.Emit.Php.PhpEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.Php.PhpEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.Php.PhpEmitter.PhpEmitter() -> void
-Koine.Compiler.Emit.Php.PhpEmitter.TargetName.get -> string!
-Koine.Compiler.Emit.Python.PythonEmitter
-Koine.Compiler.Emit.Python.PythonEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.Python.PythonEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.Python.PythonEmitter.PythonEmitter() -> void
-Koine.Compiler.Emit.Python.PythonEmitter.TargetName.get -> string!
-Koine.Compiler.Emit.TypeScript.TypeScriptEmitter
-Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.TargetName.get -> string!
-Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.TypeScriptEmitter() -> void
 Koine.Compiler.Formatting.AstPrinter
 Koine.Compiler.Formatting.AstPrinter.AstPrinter() -> void
 Koine.Compiler.Formatting.AstPrinter.AstPrinter(string! source) -> void
@@ -1472,7 +1442,6 @@ const Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownStringOperation = "KOI02
 const Koine.Compiler.Diagnostics.DiagnosticCodes.UnknownType = "KOI0101" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.UnreachableTransition = "KOI0703" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.UnsatisfiableInvariantPair = "KOI0313" -> string!
-const Koine.Compiler.Emit.Glossary.GlossaryEmitter.FileName = "glossary.md" -> string!
 override Koine.Compiler.Ast.CollectionType.Element.get -> Koine.Compiler.Ast.KoineType?
 override Koine.Compiler.Ast.CollectionType.IsOptional.get -> bool
 override Koine.Compiler.Ast.CollectionType.Kind.get -> Koine.Compiler.Ast.TypeKind
