@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest';
 import { act } from '@testing-library/preact';
 import { EditorView } from '@codemirror/view';
-import type { FsEntry, GitLogEntry, GitStatus, KoiFile, LspTransport, Platform } from '@/host/types';
+import type { FsEntry, GitLogEntry, GitStatus, KoiFile, LspTransport, McpEndpoint, Platform } from '@/host/types';
 import { buildShareUrl, buildWorkspaceShareUrl } from '@/export/share';
 import { loadSettings, saveSettings } from '@/settings/persistence';
 
@@ -156,7 +156,7 @@ class FakePlatform implements Platform {
   appVersion(): Promise<string> {
     return Promise.resolve('0.0.0-test');
   }
-  mcpEndpoint(): Promise<string | null> {
+  mcpEndpoint(): Promise<McpEndpoint | null> {
     return Promise.resolve(null);
   }
   mcpStop(): Promise<void> {

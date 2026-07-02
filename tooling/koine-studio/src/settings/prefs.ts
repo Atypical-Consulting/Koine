@@ -26,6 +26,7 @@ import {
     type PreviewTarget,
     type StartupView,
 } from "@/settings/persistence";
+import type { McpEndpoint } from "@/host/types";
 import { DIAGRAM_ZOOM_MIN, DIAGRAM_ZOOM_MAX } from "@/diagrams/diagramContract";
 import { setTheme } from "@/settings/theme";
 import { ACCENTS, ACCENT_ORDER } from "@/settings/appearance";
@@ -45,11 +46,12 @@ export interface PrefsCallbacks {
     onChange(s: Settings): void;
 
     /**
-     * Resolve the local MCP HTTP endpoint URL to surface in the Assistant settings (so the user can
-     * paste it into LM Studio), or null when the host can't serve one — the web build, where the row
-     * stays hidden. Optional: a caller that doesn't wire it simply never shows the row.
+     * Resolve the local MCP HTTP endpoint to surface in the Assistant settings (so the user can paste its
+     * URL into LM Studio) — the loopback URL plus whether the host fell back to an OS-assigned port because
+     * the configured one was busy ({@link McpEndpoint}) — or null when the host can't serve one (the web
+     * build, where the row stays hidden). Optional: a caller that doesn't wire it simply never shows the row.
      */
-    mcpEndpoint?(): Promise<string | null>;
+    mcpEndpoint?(): Promise<McpEndpoint | null>;
 
     /**
      * Stop the local MCP sidecar when the user disables it. Optional: a host that never starts one
@@ -115,6 +117,12 @@ const TEMP_MIN = 0;
 const TEMP_MAX = 2;
 const TEMP_STEP = 0.1;
 
+// MCP sidecar loopback-port bounds (#735 follow-up): a TCP port; 0 = OS-assigned. Mirror the load-time
+// clamp in persistence.ts (coerceMcpPort) so what the input accepts == what survives a reload.
+const MCP_PORT_MIN = 0;
+const MCP_PORT_MAX = 65535;
+const MCP_PORT_STEP = 1;
+
 // Category rail icons, drawn in the studio's 16×16 line-icon idiom (stroke = currentColor).
 const ICON = {
     appearance:
@@ -169,19 +177,20 @@ interface MountedPrefsPane extends PrefsPaneHandle {
  * of this same launch.
  *
  * It only asks the host to (lazily) (re)spawn `koine mcp --http` and resolves the endpoint it announces
- * (or `''` when it can't be brought up). The browser host passes `mcpHostable: false` and never spawns; a
- * disabled `mcpEnabled` is a no-op. `mcpEndpoint` is idempotent (it reuses a running sidecar), so a
- * redundant call — e.g. on a representation flip — reflects the live endpoint without a second process.
+ * (or `null` when disabled, not hostable, or it can't be brought up). The browser host passes
+ * `mcpHostable: false` and never spawns; a disabled `mcpEnabled` is a no-op. `mcpEndpoint` is idempotent
+ * (it reuses a running sidecar), so a redundant call — e.g. on a representation flip — reflects the live
+ * endpoint without a second process.
  */
 export async function startMcpSidecarIfEnabled(
     cb: PrefsCallbacks,
     s: Settings = loadSettings(),
-): Promise<string> {
-    if (!(s.mcpEnabled && cb.mcpHostable !== false)) return "";
+): Promise<McpEndpoint | null> {
+    if (!(s.mcpEnabled && cb.mcpHostable !== false)) return null;
     try {
-        return (await cb.mcpEndpoint?.()) ?? "";
+        return (await cb.mcpEndpoint?.()) ?? null;
     } catch {
-        return "";
+        return null;
     }
 }
 
@@ -1588,6 +1597,22 @@ export function mountPreferencesPane(
         mcpControl,
     );
 
+    // Fixed loopback port (#735 follow-up). A clamped numeric input (0..65535; 0 = OS-assigned). On change it
+    // persists mcpPort and restarts the sidecar via the SAME stop→start path the enable toggle uses, so a
+    // running server rebinds to the new port and the endpoint/recipe repaint (with a busy-port fallback warning).
+    const mcpPortInput = metricInput(
+        MCP_PORT_MIN,
+        MCP_PORT_MAX,
+        MCP_PORT_STEP,
+        () => loadSettings().mcpPort,
+        (v) => void applyMcpPort(v),
+    );
+    const mcpPortRow = row(
+        "Port",
+        "Fixed loopback port for the MCP server (0 = pick automatically). Default 56463.",
+        mcpPortInput,
+    );
+
     // Per-client recipe picker.
     const mcpClientSelect = select(
         MCP_CLIENTS.map((c) => ({ value: c.id, label: c.label })),
@@ -1670,13 +1695,14 @@ export function mountPreferencesPane(
     mcpStatus.setAttribute("role", "status");
     mcpStatus.setAttribute("aria-live", "polite");
 
-    type McpStatusKind = "idle" | "off" | "checking" | "ok" | "fail";
+    type McpStatusKind = "idle" | "off" | "checking" | "ok" | "fail" | "warn";
     const STATUS_LABEL: Record<McpStatusKind, string> = {
         idle: "Not checked",
         off: "Server off",
         checking: "Checking…",
         ok: "Connected",
         fail: "Not reachable",
+        warn: "Port fallback",
     };
     function setMcpStatus(kind: McpStatusKind, text?: string): void {
         mcpStatus.dataset.state = kind;
@@ -1712,15 +1738,32 @@ export function mountPreferencesPane(
         else setMcpStatus("fail");
     }
 
-    // Resolve (and on the desktop, lazily launch) the MCP sidecar endpoint URL, or '' if it can't be
+    // Resolve (and on the desktop, lazily launch) the MCP sidecar endpoint, or null if it can't be
     // brought up. DOM-free so callers can guard the write against a newer action via mcpGen.
-    async function resolveMcpEndpoint(): Promise<string> {
-        if (!cb.mcpEndpoint) return "";
+    async function resolveMcpEndpoint(): Promise<McpEndpoint | null> {
+        if (!cb.mcpEndpoint) return null;
         try {
-            return (await cb.mcpEndpoint()) ?? "";
+            return (await cb.mcpEndpoint()) ?? null;
         } catch {
-            return "";
+            return null;
         }
+    }
+
+    // The port number the server actually bound, parsed from its loopback URL (falls back to the raw URL).
+    function portFromUrl(url: string): string {
+        try {
+            return new URL(url).port || url;
+        } catch {
+            return url;
+        }
+    }
+
+    // The busy-port fallback warning shown in the status span: the CONFIGURED port was busy, so the host
+    // bound the ACTUAL (OS-assigned) one — copied client configs still pointing at the configured port
+    // won't reach the server. Requested port = the persisted mcpPort setting; actual = parsed from the URL.
+    function fallbackWarning(url: string): string {
+        const requested = loadSettings().mcpPort;
+        return `Port ${requested} was busy — serving on ${portFromUrl(url)}. Update any copied client configs.`;
     }
 
     // Paint the "server off" state: no endpoint, the recipe on its placeholder URL, status off.
@@ -1730,13 +1773,15 @@ export function mountPreferencesPane(
         setMcpStatus("off");
     }
 
-    // Apply an enable result to the UI: reveal the URL + recipe, or surface a start failure (a blank
-    // URL means the sidecar never came up) instead of a benign "Not checked".
-    function showMcpStarted(url: string): void {
-        mcpUrlInput.value = url;
+    // Apply an enable/(re)start result to the UI: reveal the URL + recipe, surface a busy-port fallback as a
+    // warning (requested vs actual port), or surface a start failure (a null endpoint means the sidecar
+    // never came up) instead of a benign "Not checked".
+    function showMcpStarted(endpoint: McpEndpoint | null): void {
+        mcpUrlInput.value = endpoint?.url ?? "";
         renderRecipe();
-        if (url) setMcpStatus("idle");
-        else setMcpStatus("fail", "Server didn’t start");
+        if (!endpoint) setMcpStatus("fail", "Server didn’t start");
+        else if (endpoint.fallback) setMcpStatus("warn", fallbackWarning(endpoint.url));
+        else setMcpStatus("idle");
     }
 
     // Toggle the sidecar: start + reveal the endpoint on enable, stop + clear it on disable.
@@ -1744,15 +1789,32 @@ export function mountPreferencesPane(
         const gen = ++mcpGen;
         commit({ mcpEnabled: on });
         if (on) {
-            const url = await resolveMcpEndpoint();
+            const endpoint = await resolveMcpEndpoint();
             if (gen !== mcpGen) return; // superseded by a newer toggle/reset — drop this stale result
-            showMcpStarted(url);
+            showMcpStarted(endpoint);
         } else {
             await cb.mcpStop?.();
             if (gen !== mcpGen) return;
             showMcpOff();
         }
         syncMcpUi(on);
+    }
+
+    // Persist a new port and, when a server is actually running here, rebind it: stop the sidecar then
+    // (re)start it through the SAME startMcpSidecarIfEnabled path the enable toggle uses (#735), so the
+    // endpoint/recipe repaint on the new port (and a busy port surfaces the fallback warning). Guarded by
+    // mcpGen so a stale restart can't repaint over a newer toggle/reset. When MCP is disabled (or the host
+    // can't serve one) there is nothing running, so the change just persists silently.
+    async function applyMcpPort(port: number): Promise<void> {
+        commit({ mcpPort: port });
+        const s = loadSettings();
+        if (!(s.mcpEnabled && cb.mcpHostable !== false)) return;
+        const gen = ++mcpGen;
+        await cb.mcpStop?.();
+        if (gen !== mcpGen) return;
+        const endpoint = await startMcpSidecarIfEnabled(cb, s);
+        if (gen !== mcpGen) return;
+        showMcpStarted(endpoint);
     }
 
     // Reflect enabled state + host capability: the endpoint and test rows only matter when a server is
@@ -1762,6 +1824,7 @@ export function mountPreferencesPane(
         mcpEnableToggle.el.disabled = !hostable;
         mcpWebHint.hidden = hostable;
         mcpEndpointRow.hidden = !hostable || !enabled;
+        mcpPortRow.hidden = !hostable || !enabled;
         mcpTestRow.hidden = !hostable || !enabled;
     }
 
@@ -1774,8 +1837,8 @@ export function mountPreferencesPane(
         const s = loadSettings();
         if (s.mcpEnabled && cb.mcpHostable !== false) {
             const gen = ++mcpGen;
-            void startMcpSidecarIfEnabled(cb, s).then((url) => {
-                if (gen === mcpGen) showMcpStarted(url);
+            void startMcpSidecarIfEnabled(cb, s).then((endpoint) => {
+                if (gen === mcpGen) showMcpStarted(endpoint);
             });
         } else {
             ++mcpGen;
@@ -1789,6 +1852,7 @@ export function mountPreferencesPane(
         mcpEnableRow,
         mcpWebHint,
         mcpEndpointRow,
+        mcpPortRow,
         mcpClientRow,
         mcpRecipe,
         mcpTestRow,
@@ -2058,6 +2122,7 @@ export function mountPreferencesPane(
         aiConstrainGrammar.set(s.aiConstrainGrammar);
         syncAiExclusivity();
         mcpEnableToggle.set(s.mcpEnabled);
+        mcpPortInput.value = String(s.mcpPort);
         mcpClientSelect.value = s.mcpClient;
         renderRecipe();
         syncProviderFields();

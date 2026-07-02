@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it, test, vi } from 'vitest';
 import { createWorkspaceController, type WorkspaceControllerDeps } from '@/shell/workspaceController';
 import { pathToFileUri } from '@/shell/ideUtils';
-import type { FsEntry, GitLogEntry, GitStatus, KoiFile, Platform, SourceDoc } from '@/host/types';
+import type { FsEntry, GitLogEntry, GitStatus, KoiFile, McpEndpoint, Platform, SourceDoc } from '@/host/types';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
 
 // --- in-memory Platform ------------------------------------------------------
@@ -95,7 +95,7 @@ class FakePlatform implements Platform {
   appVersion(): Promise<string> {
     return Promise.resolve('0.0.0-test');
   }
-  mcpEndpoint(): Promise<string | null> {
+  mcpEndpoint(): Promise<McpEndpoint | null> {
     return Promise.resolve(null);
   }
   mcpStop(): Promise<void> {

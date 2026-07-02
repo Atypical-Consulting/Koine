@@ -318,7 +318,7 @@ describe('createSettingsPage', () => {
   // mcpEndpoint callback, the actual host hook that (re)spawns `koine mcp --http`).
   const desktopCb = () => ({
     onChange: vi.fn(),
-    mcpEndpoint: vi.fn(async () => 'http://127.0.0.1:51000/mcp'),
+    mcpEndpoint: vi.fn(async () => ({ url: 'http://127.0.0.1:51000/mcp', fallback: false })),
     mcpStop: vi.fn(async () => {}),
     mcpHostable: true,
   });

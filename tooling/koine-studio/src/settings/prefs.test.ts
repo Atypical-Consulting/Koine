@@ -22,6 +22,7 @@ import {
 import { DEFAULT_BINDINGS } from "@/editor/keybindings";
 import { BUILTIN_EMIT_TARGETS } from "@/shared/emitTargets";
 import { MCP_CLIENTS } from "@/mcp/mcp";
+import type { McpEndpoint } from "@/host/types";
 
 // Flush queued microtasks + timers so the panel's async steps (mcpEndpoint, mcpStop, probe) settle.
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -46,7 +47,7 @@ function openPrefs(
     document.body.appendChild(host);
     const pane = mountPreferencesPane(host, {
         onChange: () => {},
-        mcpEndpoint: async () => URL,
+        mcpEndpoint: async () => ({ url: URL, fallback: false }),
         mcpStop: async () => {},
         mcpHostable: true,
         ...over,
@@ -105,7 +106,7 @@ describe("Settings → MCP panel", () => {
     });
 
     it("enabling starts the sidecar and the snippet picks up the live URL", async () => {
-        const mcpEndpoint = vi.fn(async () => URL);
+        const mcpEndpoint = vi.fn(async () => ({ url: URL, fallback: false }));
         openPrefs({ mcpEndpoint });
         await settle();
         mcpToggle().click();
@@ -119,7 +120,7 @@ describe("Settings → MCP panel", () => {
         // The on-show path is the "open Settings to revive the sidecar" affordance — it must survive the start
         // being lifted out of applyOpenState into an explicit on-show call.
         saveSettings({ ...DEFAULT_SETTINGS, mcpEnabled: true });
-        const mcpEndpoint = vi.fn(async () => URL);
+        const mcpEndpoint = vi.fn(async () => ({ url: URL, fallback: false }));
         openPrefs({ mcpEndpoint });
         await settle();
         expect(mcpEndpoint).toHaveBeenCalled();
@@ -131,16 +132,16 @@ describe("Settings → MCP panel", () => {
         // MCP. The mcpGen staleness guard must discard the in-flight resolve so it can't repaint a live URL
         // over the just-disabled "Server off" state. A manually-controlled promise makes the race deterministic.
         saveSettings({ ...DEFAULT_SETTINGS, mcpEnabled: true });
-        let resolveEndpoint!: (u: string) => void;
+        let resolveEndpoint!: (e: McpEndpoint) => void;
         const mcpEndpoint = vi.fn(
-            () => new Promise<string>((res) => (resolveEndpoint = res)),
+            () => new Promise<McpEndpoint>((res) => (resolveEndpoint = res)),
         );
         openPrefs({ mcpEndpoint });
         // The on-open start is in flight (endpoint promise still pending). Disable MCP now.
         mcpToggle().click();
         await settle();
         // The stale on-open endpoint resolves AFTER the disable — the guard must drop it.
-        resolveEndpoint(URL);
+        resolveEndpoint({ url: URL, fallback: false });
         await settle();
         expect(status().dataset.state).toBe("off");
         expect(endpointUrl().value).toBe("");
@@ -271,38 +272,38 @@ describe("startMcpSidecarIfEnabled (#735)", () => {
     });
 
     it("(re)starts the sidecar on a hostable desktop host when MCP is enabled", async () => {
-        const mcpEndpoint = vi.fn(async () => URL);
-        const url = await startMcpSidecarIfEnabled(
+        const mcpEndpoint = vi.fn(async () => ({ url: URL, fallback: false }));
+        const endpoint = await startMcpSidecarIfEnabled(
             { onChange: () => {}, mcpEndpoint, mcpHostable: true },
             ENABLED,
         );
         expect(mcpEndpoint).toHaveBeenCalledTimes(1);
-        expect(url).toBe(URL);
+        expect(endpoint).toEqual({ url: URL, fallback: false });
     });
 
     it("does nothing when MCP is disabled", async () => {
-        const mcpEndpoint = vi.fn(async () => URL);
-        const url = await startMcpSidecarIfEnabled(
+        const mcpEndpoint = vi.fn(async () => ({ url: URL, fallback: false }));
+        const endpoint = await startMcpSidecarIfEnabled(
             { onChange: () => {}, mcpEndpoint, mcpHostable: true },
             DISABLED,
         );
         expect(mcpEndpoint).not.toHaveBeenCalled();
-        expect(url).toBe("");
+        expect(endpoint).toBeNull();
     });
 
     it("does nothing on a non-hostable (browser) host even when enabled", async () => {
-        const mcpEndpoint = vi.fn(async () => URL);
-        const url = await startMcpSidecarIfEnabled(
+        const mcpEndpoint = vi.fn(async () => ({ url: URL, fallback: false }));
+        const endpoint = await startMcpSidecarIfEnabled(
             { onChange: () => {}, mcpEndpoint, mcpHostable: false },
             ENABLED,
         );
         expect(mcpEndpoint).not.toHaveBeenCalled();
-        expect(url).toBe("");
+        expect(endpoint).toBeNull();
     });
 
     it("reads loadSettings() when no snapshot is passed", async () => {
         saveSettings({ ...DEFAULT_SETTINGS, mcpEnabled: true });
-        const mcpEndpoint = vi.fn(async () => URL);
+        const mcpEndpoint = vi.fn(async () => ({ url: URL, fallback: false }));
         await startMcpSidecarIfEnabled({
             onChange: () => {},
             mcpEndpoint,
@@ -312,7 +313,7 @@ describe("startMcpSidecarIfEnabled (#735)", () => {
     });
 
     it("treats an omitted mcpHostable as hostable (desktop default)", async () => {
-        const mcpEndpoint = vi.fn(async () => URL);
+        const mcpEndpoint = vi.fn(async () => ({ url: URL, fallback: false }));
         await startMcpSidecarIfEnabled(
             { onChange: () => {}, mcpEndpoint },
             ENABLED,
@@ -400,7 +401,7 @@ describe("Settings → About panel", () => {
         document.body.appendChild(host);
         const pane = mountPreferencesPane(host, {
             onChange: () => {},
-            mcpEndpoint: async () => URL,
+            mcpEndpoint: async () => ({ url: URL, fallback: false }),
             mcpStop: async () => {},
             mcpHostable: true,
         });
@@ -1219,7 +1220,7 @@ describe("mountPreferencesPane", () => {
         // The modal mounts this pane at app init (long before its first open), so the opt-in server must NOT
         // spawn until the surface is actually shown. The (re)start moved to the explicit startMcpSidecar call.
         saveSettings({ ...DEFAULT_SETTINGS, mcpEnabled: true });
-        const mcpEndpoint = vi.fn(async () => URL);
+        const mcpEndpoint = vi.fn(async () => ({ url: URL, fallback: false }));
         const handle = mountPreferencesPane(host, {
             onChange: () => {},
             mcpEndpoint,
