@@ -365,6 +365,38 @@ public class RustSnapshotTests
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
+    /// <summary>
+    /// Regression (#961): a derived member whose body infers to <c>Int</c> but is declared <c>Decimal</c>
+    /// (<c>total: Decimal = a + b</c> over two <c>Int</c> fields — a widening C# does implicitly) must
+    /// wrap the body in <c>Decimal::from(...)</c>. Rust has no implicit numeric widening, so a bare
+    /// <c>i64</c> body in a <c>-&gt; Decimal</c> getter is rustc E0308. This is the derived-member dual of
+    /// the scalar-operator coercion #937 fixed; before this fix <c>WriteDerived</c> emitted the body as-is.
+    /// </summary>
+    [Fact]
+    public void Rust_int_bodied_derived_member_is_widened_to_its_decimal_declared_type()
+    {
+        const string model = """
+            context Shop {
+              value Sums {
+                a: Int
+                b: Int
+                total: Decimal = a + b
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
+        shop.ShouldContain("pub fn total(&self) -> Decimal {");
+        // The Int-typed body must be widened to the declared Decimal, not emitted bare (which is E0308).
+        shop.ShouldContain("Decimal::from(self.a + self.b)");
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
     // ------------------------------------------------------------------
     // End-to-end: the real billing starter template (value objects, a smart enum, entities, an
     // aggregate with a nested enum/value/entity, a derived scalar-Mul member, a `when`-guarded

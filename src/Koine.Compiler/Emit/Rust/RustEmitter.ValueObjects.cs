@@ -194,9 +194,18 @@ public sealed partial class RustEmitter
         var body = RustExpressionTranslator.StripOuterParens(
             translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Property, EnumExpectedRef(m, typeMapper)));
 
+        // Reconcile the body's inferred numeric type with the declared type. Rust has no implicit numeric
+        // widening, so an `Int`-inferred body in a `-> Decimal` getter (a widening C# does for free) must
+        // be wrapped in `Decimal::from(...)` or rustc rejects it as E0308 (#961) — the derived-member dual
+        // of the scalar-operator coercion #937 fixed. Takes precedence over the clone/`to_string` cases
+        // below (the wrapped value is always a `Copy` primitive, so no clone is owed).
+        if (NumericCoercionWrap(m.Type, translator.InferType(m.Initializer!)) is { } wrap)
+        {
+            body = $"{wrap}({body})";
+        }
         // A String-typed derived member whose body yields a borrowed &str (e.g. `name.trim`) must be
         // owned; a bare non-Copy field read must be cloned out of `&self`.
-        if (m.Type is { Name: "String", IsOptional: false } && body.EndsWith(".trim()", StringComparison.Ordinal))
+        else if (m.Type is { Name: "String", IsOptional: false } && body.EndsWith(".trim()", StringComparison.Ordinal))
         {
             body += ".to_string()";
         }
@@ -210,6 +219,26 @@ public sealed partial class RustEmitter
           .Append(" {\n");
         sb.Append(Indent).Append(Indent).Append(body).Append('\n');
         sb.Append(Indent).Append("}\n");
+    }
+
+    /// <summary>
+    /// The Rust conversion function to wrap a derived member's body in when its inferred numeric type
+    /// differs from its <paramref name="declared"/> type, or <c>null</c> when none is needed. Widening
+    /// (<c>Int</c> body → <c>Decimal</c> declared) uses <c>Decimal::from</c> (#961); the narrowing dual
+    /// (<c>Decimal</c> body → <c>Int</c> declared) uses <c>dec_to_i64</c>, mirroring <see cref="ScaleField"/>
+    /// — that case is normally rejected upstream by the semantic validator (<c>KOI0217</c>), so the branch
+    /// is defensive for direct emitter use. Same-type, non-numeric, and optional numeric bodies (which
+    /// interact with <c>Option</c> wrapping and are out of scope) are left unchanged.
+    /// </summary>
+    private static string? NumericCoercionWrap(TypeRef declared, TypeRef? bodyType)
+    {
+        if (bodyType is null || declared.IsOptional || bodyType.IsOptional
+            || !TypeResolver.IsNumeric(declared) || !TypeResolver.IsNumeric(bodyType)
+            || declared.Name == bodyType.Name)
+        {
+            return null;
+        }
+        return declared.Name == "Decimal" ? "Decimal::from" : "crate::koine_runtime::dec_to_i64";
     }
 
     // ----------------------------------------------------------------------
