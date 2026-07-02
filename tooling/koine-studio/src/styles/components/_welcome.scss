@@ -568,6 +568,29 @@
   }
 }
 
+/* Per-action keyboard-shortcut keycap (#1005): a quiet <kbd> pushed to the right edge of a Start action
+   (or the clone trigger). Same treatment vocabulary as `.deck-hint kbd` / `.koi-kbd` — monospace, a
+   hairline border with a slightly heavier bottom edge and a faint fill — but derived from currentColor
+   (no literal hex) so it reads correctly on BOTH the plain-surface actions and the accent-filled primary
+   one. Decorative (aria-hidden): the action's visible label already carries the accessible name. */
+.koi-welcome-keycap {
+  flex: none;
+  margin-left: auto;
+  align-self: center;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-xs);
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: currentColor;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-bottom-width: 2px;
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-0-5) var(--koi-space-1-5);
+  opacity: 0.85;
+}
+
 /* --- clone repository (#1005): a Start row that reveals an inline URL form ------ */
 /* The wrapper is one flow item in the actions column, stacking the trigger row above its form. The
    trigger reuses .koi-welcome-action styling; the form drops in below when the row is toggled open. */

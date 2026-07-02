@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi, type Mock } from 'vitest';
 import { mountHome, filterTemplates, DIFFICULTY_ORDER, type WelcomeCallbacks } from '@/welcome/welcome';
 import type { Template } from '@/welcome/templates';
+import { MOD } from '@/shared/platform';
 
 // Each test mounts a fresh welcome root into a container appended to document.body; the global
 // afterEach wipes the body so roots/handlers don't leak across cases.
@@ -624,6 +625,140 @@ describe('Home clone row (#1005)', () => {
     // A bubbling click landing in the input must be contained — it must NOT re-toggle (collapse) the row.
     urlInput(root).dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(form(root).hidden).toBe(false);
+  });
+});
+
+describe('Home keycaps + shortcuts (#1005)', () => {
+  let container: HTMLElement;
+  // The last-mounted Home, destroyed in afterEach so its document-level keydown listener never leaks
+  // into the next case (the whole point of Task 11's teardown — #1000/#980).
+  let home: ReturnType<typeof mountHome> | null;
+
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = '';
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    home = null;
+  });
+
+  afterEach(() => {
+    home?.destroy();
+    home = null;
+  });
+
+  /** Mount Home (canClone/canOpenFolders default on) and return its root + the callback spies. */
+  function mountFor(opts: { canClone?: boolean; canOpenFolders?: boolean } = {}): {
+    root: HTMLElement;
+    cb: WelcomeCallbacks;
+  } {
+    const cb = makeCallbacks();
+    home = mountHome(container, cb, SAMPLE, opts.canOpenFolders ?? true, { canClone: opts.canClone ?? true });
+    return { root: document.querySelector<HTMLElement>('.koi-welcome')!, cb };
+  }
+
+  /** The keycap text rendered on the Start action / clone row with this data-action. */
+  function keycapFor(root: HTMLElement, dataAction: string): string {
+    const host = root.querySelector<HTMLElement>(`[data-action="${dataAction}"]`)!;
+    return host.querySelector<HTMLElement>('.koi-welcome-keycap')?.textContent ?? '';
+  }
+
+  /** Dispatch a document-level keydown (the handler listens on `document`). */
+  function press(init: KeyboardEventInit): void {
+    document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+  }
+
+  test('renders a per-action keycap carrying the platform modifier glyph on the four Start actions', () => {
+    const { root } = mountFor({ canClone: true });
+    // New / Example: mod+letter (MOD is ⌘ on mac, Ctrl elsewhere).
+    expect(keycapFor(root, 'new-model')).toContain('N');
+    expect(keycapFor(root, 'new-model')).toContain(MOD);
+    expect(keycapFor(root, 'open-example')).toContain('E');
+    expect(keycapFor(root, 'open-example')).toContain(MOD);
+    // Open folder / Clone: shift combos carry the ⇧ marker on top of the modifier + letter.
+    expect(keycapFor(root, 'open-folder')).toContain('O');
+    expect(keycapFor(root, 'open-folder')).toContain(MOD);
+    expect(keycapFor(root, 'open-folder')).toContain('⇧');
+    expect(keycapFor(root, 'clone')).toContain('C');
+    expect(keycapFor(root, 'clone')).toContain(MOD);
+    expect(keycapFor(root, 'clone')).toContain('⇧');
+  });
+
+  test('the clone keycap only renders when the clone row does (canClone off → no keycap)', () => {
+    const { root } = mountFor({ canClone: false });
+    expect(root.querySelector('[data-action="clone"]')).toBeNull();
+    // Only three keycaps remain (New / Example / Open folder).
+    expect(root.querySelectorAll('.koi-welcome-keycap').length).toBe(3);
+  });
+
+  test('mod+N fires onNewModel — ⌘ and Ctrl both count as the primary modifier', () => {
+    const { cb } = mountFor();
+    press({ key: 'n', metaKey: true });
+    expect(cb.onNewModel).toHaveBeenCalledTimes(1);
+    press({ key: 'n', ctrlKey: true });
+    expect(cb.onNewModel).toHaveBeenCalledTimes(2);
+  });
+
+  test('a bare key (no modifier) never fires the shortcut', () => {
+    const { cb } = mountFor();
+    press({ key: 'n' });
+    expect(cb.onNewModel).not.toHaveBeenCalled();
+  });
+
+  test('⇧mod+O fires onOpenFolder', () => {
+    const { cb } = mountFor();
+    press({ key: 'o', metaKey: true, shiftKey: true });
+    expect(cb.onOpenFolder).toHaveBeenCalledTimes(1);
+  });
+
+  test('⇧mod+O does NOT fire when the host cannot open folders', () => {
+    const { cb } = mountFor({ canOpenFolders: false });
+    press({ key: 'o', metaKey: true, shiftKey: true });
+    expect(cb.onOpenFolder).not.toHaveBeenCalled();
+  });
+
+  test('mod+E opens the example gallery', () => {
+    const { root } = mountFor();
+    const galleryView = root.querySelector<HTMLElement>('.koi-gallery-view')!;
+    expect(galleryView.hidden).toBe(true);
+    press({ key: 'e', metaKey: true });
+    expect(galleryView.hidden).toBe(false);
+  });
+
+  test('⇧mod+C toggles the clone form open when canClone', () => {
+    const { root } = mountFor({ canClone: true });
+    const form = root.querySelector<HTMLElement>('.koi-welcome-clone-form')!;
+    expect(form.hidden).toBe(true);
+    press({ key: 'c', metaKey: true, shiftKey: true });
+    expect(form.hidden).toBe(false);
+  });
+
+  test('a shortcut does NOT fire while the recents filter is focused (typing is not hijacked)', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/a/one', '/b/two']));
+    const { cb } = mountFor();
+    const filter = document.querySelector<HTMLInputElement>('.koi-welcome-recent-filter')!;
+    filter.focus();
+    expect(document.activeElement).toBe(filter);
+    press({ key: 'n', metaKey: true });
+    expect(cb.onNewModel).not.toHaveBeenCalled();
+  });
+
+  test('a shortcut does NOT fire while the clone URL input is focused', () => {
+    const { cb, root } = mountFor({ canClone: true });
+    // Opening the form focuses the URL input; a stray mod+N there must not jump.
+    root.querySelector<HTMLButtonElement>('.koi-welcome-clone-trigger')!.click();
+    const url = root.querySelector<HTMLInputElement>('.koi-welcome-clone-url')!;
+    expect(document.activeElement).toBe(url);
+    press({ key: 'n', metaKey: true });
+    expect(cb.onNewModel).not.toHaveBeenCalled();
+  });
+
+  test('a shortcut does NOT fire after destroy() — the keydown listener is removed', () => {
+    const { cb } = mountFor();
+    home!.destroy();
+    home = null; // already destroyed — keep afterEach from double-tearing-down
+    press({ key: 'n', metaKey: true });
+    expect(cb.onNewModel).not.toHaveBeenCalled();
   });
 });
 

@@ -93,7 +93,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1197 → 1342: #1005 clone row — the "Clone repository" Start row + its inline URL form (monospace
   // input, validated Clone button, busy/error states, stopPropagation guard) plus the onClone callback and
   // canClone plumbing; ceil(1315 × 1.02) = 1342.
-  { file: 'src/welcome/welcome.ts', maxLines: 1342 },
+  // Raised 1342 → 1442: #1005 keycaps — per-action shortcut keycaps (the KEYCAP_* glyphs + appendKeycap
+  // helper) plus the document-level Home keydown handler (mod+N/E, ⇧mod+O/C, focused-field guard) and its
+  // destroy() teardown; ceil(1413 × 1.02) = 1442.
+  { file: 'src/welcome/welcome.ts', maxLines: 1442 },
 ];
 
 describe('line-budget guard', () => {

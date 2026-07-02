@@ -23,6 +23,7 @@ import { wrapIndex } from '@/shared/wrapIndex';
 import { basename } from '@/shared/path';
 import { koineMark } from '@/shared/logo';
 import { toggleTheme } from '@/settings/theme';
+import { MOD } from '@/shared/platform';
 
 /** What the welcome actions delegate to; the host (ide.ts) performs the real work. */
 export interface WelcomeCallbacks {
@@ -159,6 +160,27 @@ const ICON_BRANCH =
 /** Emit-target id → short display label (e.g. `csharp` → `C#`), for the dense recent row's language tag. */
 const LANG_LABELS = new Map(BUILTIN_EMIT_TARGETS.map((t) => [t.id, t.displayName]));
 
+// The Start-action keycaps (#1005): the platform-aware primary modifier (MOD — ⌘ on mac, Ctrl
+// elsewhere) plus the action's letter, with a leading ⇧ for the shift combos. Rendered as a quiet
+// <kbd> on the right of each action and MIRRORED by buildHome's document-level keydown handler, so the
+// on-screen hint and the shortcut that actually fires it can never drift apart.
+const KEYCAP_SHIFT = '⇧';
+const KEYCAP_NEW = `${MOD}N`;
+const KEYCAP_EXAMPLE = `${MOD}E`;
+const KEYCAP_CLONE = `${KEYCAP_SHIFT}${MOD}C`;
+const KEYCAP_OPEN = `${KEYCAP_SHIFT}${MOD}O`;
+
+/** Append a quiet, decorative keycap (`.koi-welcome-keycap` <kbd>) to a Start action/trigger. The glyph
+ *  is set via textContent (platform-derived, not user input) and marked aria-hidden — the action's
+ *  visible label already carries the accessible name (WCAG 2.5.3); the keycap is a redundant hint. */
+function appendKeycap(host: HTMLElement, keycap: string): void {
+  const cap = document.createElement('kbd');
+  cap.className = 'koi-welcome-keycap';
+  cap.setAttribute('aria-hidden', 'true');
+  cap.textContent = keycap;
+  host.appendChild(cap);
+}
+
 /** Build a start action as a button with an icon, a label and a one-line description. */
 function makeAction(opts: {
   icon: string;
@@ -168,6 +190,8 @@ function makeAction(opts: {
   disabled?: boolean;
   /** Stable semantic hook (sets `data-action`) for tests and the routed Home's navigation wiring. */
   action?: string;
+  /** An optional keyboard-shortcut keycap rendered on the right (e.g. `⌘N`); see the KEYCAP_* glyphs. */
+  keycap?: string;
   onClick: () => void;
 }): HTMLButtonElement {
   const btn = document.createElement('button');
@@ -194,6 +218,7 @@ function makeAction(opts: {
   text.append(label, desc);
 
   btn.append(icon, text);
+  if (opts.keycap) appendKeycap(btn, opts.keycap);
   btn.addEventListener('click', opts.onClick);
   return btn;
 }
@@ -263,6 +288,10 @@ function buildHome(
   // Whether the recent list is expanded past its collapsed cap (View all / Show less). Sticky per Home
   // instance so a re-render (filter keystroke, pin, remove) preserves the user's expand choice.
   let recentExpanded = false;
+
+  // The clone row's toggle trigger, captured when the clone Start row is built (canClone hosts only) so
+  // the ⇧mod+C keyboard shortcut can activate it — null on hosts without git, where no row renders.
+  let cloneTriggerEl: HTMLButtonElement | null = null;
 
   const root = document.createElement('div');
   root.className = 'koi-welcome koi-welcome-embedded';
@@ -528,6 +557,7 @@ function buildHome(
       desc: 'Begin with an empty context',
       primary: true,
       action: 'new-model',
+      keycap: KEYCAP_NEW,
       onClick: () => {
         cb.onNewModel();
       },
@@ -540,6 +570,7 @@ function buildHome(
     label: 'Start from an example',
     desc: 'Open a ready-made domain',
     action: 'open-example',
+    keycap: KEYCAP_EXAMPLE,
     onClick: () => showGallery(),
   });
   actions.appendChild(exampleAction);
@@ -552,6 +583,8 @@ function buildHome(
       desc: canOpenFolders ? 'Work on an existing workspace' : 'Needs a Chromium-based browser (Chrome / Edge)',
       disabled: !canOpenFolders,
       action: 'open-folder',
+      // Only hint the shortcut where it works — the handler self-gates on canOpenFolders too.
+      keycap: canOpenFolders ? KEYCAP_OPEN : undefined,
       onClick: () => {
         cb.onOpenFolder();
       },
@@ -593,6 +626,8 @@ function buildHome(
     triggerDesc.textContent = 'Clone a git repository by URL';
     triggerText.append(triggerLabel, triggerDesc);
     trigger.append(triggerIcon, triggerText);
+    appendKeycap(trigger, KEYCAP_CLONE);
+    cloneTriggerEl = trigger; // let the ⇧mod+C shortcut activate this toggle
 
     const cloneForm = document.createElement('div');
     cloneForm.className = 'koi-welcome-clone-form';
@@ -1276,10 +1311,52 @@ function buildHome(
     consoleView.hidden = false;
   }
 
-  // Tear the view down: detach the root. Used by mountHome's caller (the boot router) when swapping
-  // Home → Editor.
+  // --- Home keyboard shortcuts (#1005) ----------------------------------------------------------
+  // Mirror the Start-action keycaps: mod+N new model, mod+E example gallery, ⇧mod+O open folder,
+  // ⇧mod+C toggle the clone form. 'mod' is ⌘ on mac / Ctrl elsewhere — like chordFromEvent we treat
+  // metaKey OR ctrlKey as the primary modifier. The listener lives on `document` (so it fires wherever
+  // focus sits on Home) and is removed in destroy(), so a torn-down Home leaves no live handler (#1000/#980).
+
+  /** Whether focus is in a text-entry control, so a stray modifier never hijacks typing — the recents
+   *  filter, the clone URL field and the gallery search must keep every "n"/"e"/"o"/"c" keystroke. */
+  function isTextEntryFocused(): boolean {
+    const el = document.activeElement as HTMLElement | null;
+    if (!el) return false;
+    const tag = el.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+  }
+
+  function onHomeKeydown(e: KeyboardEvent): void {
+    if (!(e.metaKey || e.ctrlKey)) return; // needs the primary modifier (⌘ / Ctrl)
+    // These are the console's shortcuts: stand down while the gallery is layered over it (it owns its
+    // own keys, incl. Esc) or while the user is typing into a field, so a stray modifier never jumps.
+    if (galleryOpen || isTextEntryFocused()) return;
+    const key = e.key.toLowerCase();
+    if (e.shiftKey) {
+      if (key === 'o' && canOpenFolders) {
+        e.preventDefault();
+        cb.onOpenFolder();
+      } else if (key === 'c' && opts.canClone) {
+        e.preventDefault();
+        cloneTriggerEl?.click(); // reuse the clone row's own toggle
+      }
+      return;
+    }
+    if (key === 'n') {
+      e.preventDefault();
+      cb.onNewModel();
+    } else if (key === 'e') {
+      e.preventDefault();
+      showGallery();
+    }
+  }
+  document.addEventListener('keydown', onHomeKeydown);
+
+  // Tear the view down: detach the root AND drop the document-level keydown listener so a destroyed
+  // Home leaves no live handler behind (the repo actively guards against listener leaks — #1000/#980).
   function destroy(): void {
     resetGallery();
+    document.removeEventListener('keydown', onHomeKeydown);
     root.remove();
   }
 
