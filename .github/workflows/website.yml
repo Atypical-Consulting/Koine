@@ -12,14 +12,17 @@ name: Website
 # separate post-merge gate in deploy-docs.yml.
 #
 # Path-gated to website/** and src/** (the Playground bundles the compiler to wasm, so a
-# compiler change can affect website behaviour), plus this workflow file itself, so
-# unrelated PRs don't pay for it.
+# compiler change can affect website behaviour), plus templates/** (the website-build job
+# compiles templates/pizzeria into the living docs and scans every template for the
+# Playground samples, so a template change can break the static build) and this workflow
+# file itself, so unrelated PRs don't pay for it.
 
 on:
   pull_request:
     paths:
       - 'website/**'
       - 'src/**'
+      - 'templates/**'
       - '.github/workflows/website.yml'
   workflow_dispatch:
 

@@ -18,4 +18,10 @@
 // Expected, harmless: because the injected `/[...prefix]/rss.xml` route is now shadowed,
 // `astro build` prints one WARN ("Could not render `/blog/rss.xml` … conflicts with
 // higher priority route"). The build still exits 0 and this endpoint serves the feed.
+//
+// Single-locale assumption: this static route produces exactly one feed (the default
+// locale). starlight-blog's own dynamic route emits one feed per locale via its
+// `getStaticPaths`; we intentionally omit that (a static route takes no `getStaticPaths`).
+// If the site ever becomes multilingual (astro.config.mjs gains `locales`), revisit this —
+// the per-locale feeds would need to be reinstated. See PR #954 follow-ups.
 export { GET } from 'starlight-blog/routes/rss';
