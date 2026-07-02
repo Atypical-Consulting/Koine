@@ -58,6 +58,7 @@ function makeDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
       canvasWrite: d('canvasWrite'),
       panels: d('panels'),
       reviewStoreSub: d('reviewStoreSub'),
+      workspaceSeams: d('workspaceSeams'),
       autoSave: d('autoSave'),
       exportMenuDismiss: d('exportMenuDismiss'),
       editorKeys: d('editorKeys'),
@@ -261,7 +262,7 @@ describe('lifecycleBoot', () => {
     boot.teardown();
     expect(order).toEqual([
       'controller', 'editorSession', 'commandWiring', 'layout', 'overlays',
-      'canvasWrite', 'panels', 'reviewStoreSub', 'autoSave', 'exportMenuDismiss', 'editorKeys',
+      'canvasWrite', 'panels', 'reviewStoreSub', 'workspaceSeams', 'autoSave', 'exportMenuDismiss', 'editorKeys',
       'statusBar', 'explorer',
     ]);
     expect(storeSubUnsub).toHaveBeenCalledOnce(); // unsubRouteIntent fired between autoSave and exportMenuDismiss

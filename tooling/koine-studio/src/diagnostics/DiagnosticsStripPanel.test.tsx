@@ -15,7 +15,7 @@ const err = (msg: string): LspDiagnostic => ({
 describe('DiagnosticsStripPanel', () => {
   test('shows "clean" with no diagnostics, then the count + a row when one arrives', () => {
     const store = createAppStore();
-    store.getState().setActiveUri('file:///a.koi');
+    store.getState().setActive('file:///a.koi');
     const { container } = render(
       <DiagnosticsStripPanel store={store} activeUri={() => 'file:///a.koi'} onGoto={() => {}} />,
     );
@@ -40,7 +40,7 @@ describe('DiagnosticsStripPanel', () => {
 
   test('has no accessibility violations', async () => {
     const store = createAppStore();
-    store.getState().setActiveUri('file:///a.koi');
+    store.getState().setActive('file:///a.koi');
     const { container } = render(
       <DiagnosticsStripPanel store={store} activeUri={() => 'file:///a.koi'} onGoto={() => {}} />,
     );

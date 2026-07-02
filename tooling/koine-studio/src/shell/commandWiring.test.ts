@@ -44,7 +44,7 @@ function makeDeps(over: Partial<CommandWiringDeps> = {}): CommandWiringDeps {
     openFolder: vi.fn(),
     search: { focus: vi.fn(), toggle: vi.fn() },
     requestNewModel: vi.fn(),
-    workspace: { saveAllDirty: vi.fn(), buffers: new Map() },
+    workspace: { saveAllDirty: vi.fn(), buffers: () => new Map() },
     copyShareLink: vi.fn(),
     controller: {
       runCheck: vi.fn(),
@@ -128,7 +128,7 @@ describe('commandWiring', () => {
         ['file:///b.koi', { uri: 'file:///b.koi', relPath: 'b.koi' }],
         ['file:///a.koi', { uri: 'file:///a.koi', relPath: 'a.koi' }],
       ]);
-      const deps = makeDeps({ workspace: { saveAllDirty: vi.fn(), buffers } });
+      const deps = makeDeps({ workspace: { saveAllDirty: vi.fn(), buffers: () => buffers } });
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
       const gotos = wiring.getCommands().filter((c) => c.group === 'Go to File');
@@ -136,6 +136,27 @@ describe('commandWiring', () => {
       expect(gotos.map((c) => c.title)).toEqual(['a.koi', 'b.koi']);
       gotos[0].run();
       expect(deps.openUri).toHaveBeenCalledWith('file:///a.koi');
+    });
+
+    it('re-reads the buffers thunk on each getCommands() so quick-open reflects files opened AFTER construction (#982 regression)', () => {
+      // The workspace slice REPLACES its buffer Map on every mutation, and commandWiring is constructed at
+      // boot BEFORE the workspace opens — capturing buffers by value would freeze the palette at the
+      // initial empty set (dead "Go to File"). The thunk must re-read the live Map each time.
+      let buffers = new Map<string, { uri: string; relPath: string }>();
+      const deps = makeDeps({ workspace: { saveAllDirty: vi.fn(), buffers: () => buffers } });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+      // At construction the workspace is empty: no Go-to-File rows.
+      expect(wiring.getCommands().filter((c) => c.group === 'Go to File')).toHaveLength(0);
+      // A folder opens after construction, REPLACING the store's Map with a new reference.
+      buffers = new Map([['file:///a.koi', { uri: 'file:///a.koi', relPath: 'a.koi' }]]);
+      // getCommands() re-reads the thunk, so the newly opened file now surfaces.
+      expect(
+        wiring
+          .getCommands()
+          .filter((c) => c.group === 'Go to File')
+          .map((c) => c.title),
+      ).toEqual(['a.koi']);
     });
 
     it('runs the format command through the injected format() thunk', () => {

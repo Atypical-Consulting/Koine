@@ -231,10 +231,10 @@ export function init(hooks: IdeHooks = {}): () => void {
   // is captured once, clean.
   // The pill is now the <UnsavedIndicator> Preact panel (#193) bound to the existing static button: it
   // subscribes to the workspace slice's dirty count, sets the button's text/hidden/aria-label + the
-  // title bullet, and wires Save-all. So `refreshDirtyIndicator` here just projects the controller's
-  // live buffers Map into the slice on every dirty transition (edit, save, save-all, rename, swap) —
-  // the panel re-renders off the slice. (The button stays index.html's element, so the controller's
-  // `domById(...)` lookups and the test's getElementById are untouched.)
+  // title bullet, and wires Save-all. The workspace slice is the single owner of buffers/activeUri now
+  // (#982), so the panel re-renders inherently off every slice action — no manual projection push is
+  // needed. (The button stays index.html's element, so the controller's `domById(...)` lookups and the
+  // test's getElementById are untouched.)
   const baseTitle = document.title;
   const unsavedEl = domById('unsaved-indicator') as HTMLButtonElement;
   // <UnsavedIndicator> renders no tree of its own (it governs the static button via effects), so it
@@ -249,10 +249,6 @@ export function init(hooks: IdeHooks = {}): () => void {
     />,
     unsavedHost,
   );
-  function refreshDirtyIndicator(): void {
-    appStore.getState().setBuffers(Object.fromEntries(workspace.buffers));
-    appStore.getState().setActiveUri(workspace.activeUri());
-  }
 
   // Workspace-wide problems rollup beside the #sb-problems split (which is active-file only): a status-bar
   // badge summarising every file's diagnostics, hidden while the workspace is clean. Subscribes to the
@@ -344,7 +340,8 @@ export function init(hooks: IdeHooks = {}): () => void {
   // it). Without this, removing the primary root strands the Docs/layout/diagram stores on the dead key
   // (#174) and a per-workspace word-wrap/preview-target override goes stale until an unrelated event.
   function onRootSetChanged(): void {
-    appStore.getState().setFolderRootToken(workspace.folderRootToken());
+    // The controller already published the new roots into the slice (addRoot/removeRoot call setRoots),
+    // so this just re-syncs the folder-derived views + scoped behaviors (#982).
     controller.invalidateDocViews();
     controller.invalidateDocsPanel();
     void controller.refreshContextList();
@@ -751,7 +748,9 @@ export function init(hooks: IdeHooks = {}): () => void {
       setStatus(text, 'error');
       setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 2000);
     },
-    refreshDirtyIndicator,
+    // The workspace slice is the single owner of buffers/activeUri/roots (#982); the controller reads +
+    // writes it through this store handle, so the UnsavedIndicator/StoreInspector repaint inherently.
+    store: appStore,
     showDiagnostics: (uri) => editorSession.showDiagnostics(uri),
     invalidateDocViews: () => controller.invalidateDocViews(),
     // Keep the diag-count gate in step with the diagnostics slice: a file that reopens with the same
@@ -774,9 +773,9 @@ export function init(hooks: IdeHooks = {}): () => void {
     // the render paths, so the initial ensureLoaded is already scoped even before the dropdown
     // finishes repainting. The Docs surface is folder-derived, so a folder switch must drop it too.
     onFolderOpened: () => {
-      // Publish the new folder token into the workspace slice so the folder-derived <DocsPanelHost>
-      // reloads (it subscribes ONLY to folderRootToken, never to model edits — the #174 contract).
-      appStore.getState().setFolderRootToken(workspace.folderRootToken());
+      // openFolderPath already published the new roots into the slice (setRoots derives folderRootToken,
+      // so the folder-derived <DocsPanelHost> reloaded — the #174 contract). This just restores the
+      // bounded-context scope and refreshes the doc surfaces.
       controller.restoreActiveContext();
       controller.invalidateDocViews();
       controller.invalidateDocsPanel();
@@ -818,9 +817,6 @@ export function init(hooks: IdeHooks = {}): () => void {
     },
     publish: (s) => appStore.getState().setHistoryState(s),
   });
-  // Reset history whenever the explorer tree is re-read: a folder open (fresh baseline) or any
-  // structural file op (rename/move/delete/create) whose snapshots would reference stale uris.
-  workspace.onEntriesRefreshed(() => history.reset());
   // The top-bar Undo/Redo buttons (reactive enable/disable via the store).
   render(
     <HistoryControls
@@ -852,25 +848,27 @@ export function init(hooks: IdeHooks = {}): () => void {
     onOpenProblems: () => controller.selectBottomTab('problems'),
   });
 
-  // Switching files: repaint the active file's diagnostics, invalidate the doc views so they re-fetch,
-  // and follow the new file's bounded context. Preserves the exact effect order of the old activateFile.
-  workspace.onActiveChanged((uri) => {
-    editorSession.showDiagnostics(uri);
-    controller.invalidateDocViews();
-    workspace.renderTree();
-    void controller.followActiveFileContext();
+  // The workspace-slice seams (#982): the controller signals transitions by bumping the slice's seq
+  // fields (activationSeq/workspaceEditSeq/entriesSeq/saveSeq) at the points the old on* callbacks fired;
+  // subscribe ONCE and run the matching body when one advances. Each action bumps AT MOST ONE seq per
+  // set(), so ≤1 body runs per change and the branch order below is not significant. The activation body
+  // reads activeUri from the SAME snapshot; folder open / delete-fallback move the pointer without
+  // bumpActivation, so it doesn't run for them. The unsubscribe is captured + disposed in teardown (#980).
+  const unsubWorkspaceSeams = appStore.subscribe((s, prev) => {
+    if (s.entriesSeq !== prev.entriesSeq) history.reset(); // folder open / structural op re-read the tree
+    if (s.activationSeq !== prev.activationSeq) {
+      const uri = s.activeUri; // a file switch: repaint diagnostics, refresh doc views, follow context
+      editorSession.showDiagnostics(uri);
+      controller.invalidateDocViews();
+      workspace.renderTree();
+      void controller.followActiveFileContext();
+    }
+    if (s.workspaceEditSeq !== prev.workspaceEditSeq) {
+      controller.onDocEdited(); // a cross-file WorkspaceEdit: reload the model-derived surfaces
+      history.noteEdit({ immediate: true });
+    }
+    if (s.saveSeq !== prev.saveSeq) controller.refreshSourceControl(); // a save hit disk (#470)
   });
-  // Fired after a WorkspaceEdit was applied across the open buffers (the old applyWorkspaceEdit tail).
-  // The tree re-render for any patched non-active buffer already ran inside the workspace; ide.ts only
-  // reloads the model-derived doc surfaces here, exactly as before (which is unconditional — the active
-  // file's own edit path also reaches onDocEdited via the editor onChange).
-  workspace.onBuffersChanged(() => {
-    controller.onDocEdited();
-    history.noteEdit({ immediate: true });
-  });
-  // A save wrote buffer(s) to disk: the on-disk git status just changed, so live-refresh the Source
-  // Control panel when its tab is open (#470). A no-op otherwise — the next SC open re-fetches anyway.
-  workspace.onSaved(() => controller.refreshSourceControl());
 
   // Dismiss the diagram Export ▾ disclosure on an outside-click or when any overlay opens, so the
   // native <details> menu can't linger above a modal scrim (#534). Teardown runs on IDE unmount.
@@ -1291,7 +1289,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     openFolder: () => void openFolder(),
     search,
     requestNewModel: () => void overlays.requestNewModel(),
-    workspace: { saveAllDirty: () => void workspace.saveAllDirty(), buffers: workspace.buffers },
+    workspace: { saveAllDirty: () => void workspace.saveAllDirty(), buffers: () => workspace.buffers },
     copyShareLink: () => void exportShare.copyShareLink(),
     controller,
     generateProject: exportShare.generateProject,
@@ -1351,6 +1349,7 @@ export function init(hooks: IdeHooks = {}): () => void {
       canvasWrite: () => canvasWrite.dispose(),
       panels: () => panelHost.dispose(),
       reviewStoreSub: () => unsubReviewStore(),
+      workspaceSeams: () => unsubWorkspaceSeams(),
       autoSave: () => workspace.setAutoSave(false),
       exportMenuDismiss: () => teardownExportMenuDismiss(),
       editorKeys: () => disposeEditorKeys(),

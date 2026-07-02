@@ -72,10 +72,13 @@ type Story = StoryObj<typeof meta>;
 export const Unsaved: Story = {
   render: () => {
     const store = createAppStore();
-    store.getState().setBuffers({
-      a: buf('file:///ordering.koi', true),
-      b: buf('file:///billing.koi', true),
-      c: buf('file:///shipping.koi', false),
+    // Seed the store-owned buffer Map (#982), keyed by uri.
+    store.setState({
+      buffers: new Map([
+        ['file:///ordering.koi', buf('file:///ordering.koi', true)],
+        ['file:///billing.koi', buf('file:///billing.koi', true)],
+        ['file:///shipping.koi', buf('file:///shipping.koi', false)],
+      ]),
     });
     return mount(store);
   },

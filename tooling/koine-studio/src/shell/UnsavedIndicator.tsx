@@ -51,7 +51,11 @@ export function UnsavedIndicator(props: {
         host.hidden = true;
       }
     };
-    const countOf = (b: AppState['buffers']): number => Object.values(b).filter((x) => x.dirty).length;
+    const countOf = (b: AppState['buffers']): number => {
+      let n = 0;
+      for (const x of b.values()) if (x.dirty) n++;
+      return n;
+    };
     let last = countOf(store.getState().buffers);
     apply(last);
     // The slice methods close over the store's live `get`, so `prev.dirtyCount()` would read the

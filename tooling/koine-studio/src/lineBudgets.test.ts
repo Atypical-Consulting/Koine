@@ -52,7 +52,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // two createX deps calls, the emit lookups, and the one-line store mirror in applyEffectiveScoped,
   // ~18 LOC net. Ratchet to the real end-state plus a little headroom.
   // carried over from #757's ratchet — normative, do not recompute via the +2% rule.
-  { file: 'src/shell/ide.tsx', maxLines: 1365 },
+  // Lowered 1365 → 1364: #982 inverted workspace ownership — ide.tsx lost the refreshDirtyIndicator
+  // projection glue + the two setFolderRootToken pushes (Tasks 2/3) and the four on* seam registrations
+  // (Task 4), but the single consolidated seq subscription that replaced them roughly offset the savings
+  // (net −1 LOC). Ratchet to the measured end-state.
+  { file: 'src/shell/ide.tsx', maxLines: 1364 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.
@@ -70,10 +74,17 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
   // not mandate the split — #989 owns that.
   { file: 'src/shell/explorer.ts', maxLines: 1328 },
-  // Frozen 2026-07-02 at 1173 LOC, ceil(1173 × 1.02) = 1197. #982 ratchets this down as it decomposes
-  // workspaceController.ts. Freezing prevents further regrowth; it does not mandate the split — #982
-  // owns that.
-  { file: 'src/shell/workspaceController.ts', maxLines: 1197 },
+  // #982 decomposed workspaceController.ts into a thin facade + three sibling modules
+  // (workspaceBuffers / workspaceMutations / workspaceSave). The facade measures 775 LOC, so this
+  // ratchets 1197 → ceil(775 × 1.02) = 791. The three modules are frozen at their post-split sizes so no
+  // single one regrows toward a god-file: buffers 154 → 158, mutations 175 → 179, save 169 → 173 (each
+  // ceil(measured × 1.02)).
+  { file: 'src/shell/workspaceController.ts', maxLines: 791 },
+  { file: 'src/shell/workspaceBuffers.ts', maxLines: 158 },
+  { file: 'src/shell/workspaceMutations.ts', maxLines: 179 },
+  // 174 LOC after the #982 review fix (saveAllDirty re-reads live buffer text at write time so a keystroke
+  // on a not-yet-written buffer isn't persisted stale), ceil(174 × 1.02) = 178.
+  { file: 'src/shell/workspaceSave.ts', maxLines: 178 },
   // Frozen 2026-07-02 at 1017 LOC, ceil(1017 × 1.02) = 1038. #988 ratchets this down as it decomposes
   // persistence.ts. Freezing prevents further regrowth; it does not mandate the split — #988 owns that.
   { file: 'src/settings/persistence.ts', maxLines: 1038 },

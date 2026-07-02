@@ -71,6 +71,9 @@ export interface LifecycleBootDeps {
     canvasWrite(): void;
     panels(): void;
     reviewStoreSub(): void;
+    /** Release the workspace-slice seam subscription (activationSeq/workspaceEditSeq/entriesSeq/saveSeq
+     *  watcher) so it can't fire into a torn-down IDE. Appended after reviewStoreSub. (#982) */
+    workspaceSeams(): void;
     autoSave(): void;
     exportMenuDismiss(): void;
     /** Remove the global keydown listeners for Save (⌘S/Ctrl-S) and Undo/Redo registered
@@ -244,6 +247,7 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
       deps.disposers.canvasWrite();
       deps.disposers.panels();
       deps.disposers.reviewStoreSub();
+      deps.disposers.workspaceSeams();
       deps.disposers.autoSave();
       unsubRouteIntent();
       deps.disposers.exportMenuDismiss();
