@@ -11,6 +11,10 @@ import type { DiagramRenderer } from '@/diagrams/diagrams';
 import type { Graph as MxGraph, Cell as MxCell } from '@maxgraph/core';
 import type { Diagram, DiagramEdge, DiagramGraph, DiagramMember, DiagramNode, DocsFile } from '@/lsp/lsp';
 import { mergeGraphsForView, type EventFlowEdge, type EventFlowNode } from '@/model/modelTables';
+// Concept Colors (ADR 0003): the single-source palette. The canvas shape fill/stroke needs literal hex
+// (var() doesn't resolve inside SVG fill attrs), so it reads CONCEPT_COLORS[slug].dark — the SAME hex the
+// explorer/editor render as `var(--koi-ddd-<slug>)`, so one concept is one color everywhere.
+import { CONCEPT_COLORS, CONCEPT_SLUGS } from '@/model/conceptColors.generated';
 import { diagramToMermaid } from '@/export/diagramExport';
 import { buildEmptyState } from '@/diagrams/emptyState';
 import { loadDiagramPositions, loadDiagramZoom, saveDiagramPositions, saveDiagramZoom } from '@/settings/persistence';
@@ -44,48 +48,46 @@ import { createBrowserLayoutStore } from '@/diagrams/layoutStore';
 import { koiConfirm, koiPrompt } from '@/shared/overlay';
 import { prefixedId } from '@/shared/ids';
 
-// The DDD palette as literal hex (theme-independent — abstracts/_ddd.scss never redefines it per theme),
-// used for the maxGraph cell SHAPE fill/stroke. The shape is what the Outline minimap draws and what
-// receives pointer events; the HTML label (.koi-node, pointer-events:none) sits opaque on top in the main
-// view. Keeping these literal avoids relying on var() resolving inside SVG fill attributes.
+/** The neutral slate fallback for a node kind with no concept color (state nodes, unknown kinds). */
+const SLATE = '#94a3b8';
+
+// The DDD palette as literal hex (theme-independent — the maxGraph cell SHAPE fill/stroke can't use var(),
+// which doesn't resolve inside SVG fill attributes). DERIVED from the single-source Concept Colors palette
+// (design/concept-colors.json → CONCEPT_COLORS): every value is CONCEPT_COLORS[slug].dark, the SAME hex the
+// explorer/editor paint as `var(--koi-ddd-<slug>)`. The two alias keys the graph emits (`aggregate-root`,
+// `value-object`) map onto the aggregate/value hues; state-machine node kinds (state/initial/final) and a
+// bounded `context` stay structural slate/value-blue (a context hue is a deferred follow-up).
 const DDD_HEX: Record<string, string> = {
-  'aggregate-root': '#8b87f5',
-  aggregate: '#8b87f5',
-  entity: '#34d399',
-  'value-object': '#5aa9f0',
-  value: '#5aa9f0',
-  enum: '#fbbf24',
-  event: '#f472b6',
-  'integration-event': '#2dd4bf',
-  service: '#fb923c',
-  repository: '#94a3b8',
-  state: '#94a3b8',
-  initial: '#94a3b8',
-  final: '#94a3b8',
-  context: '#5aa9f0',
+  ...Object.fromEntries(CONCEPT_SLUGS.map((slug) => [slug, CONCEPT_COLORS[slug].dark])),
+  'aggregate-root': CONCEPT_COLORS.aggregate.dark,
+  'value-object': CONCEPT_COLORS.value.dark,
+  state: SLATE,
+  initial: SLATE,
+  final: SLATE,
+  context: CONCEPT_COLORS.value.dark,
 };
 
 /** The shape colour for a node kind (drives the minimap + hit-testing). Falls back to slate. */
-function kindColor(kind: string): string {
-  return DDD_HEX[kind] ?? '#94a3b8';
+export function kindColor(kind: string): string {
+  return DDD_HEX[kind] ?? SLATE;
 }
 
-// The classic event-storming sticky palette for the Event Flow canvas (#270): a blue command, a yellow
-// aggregate, an orange domain event, a lilac policy, a teal integration event. Kept SEPARATE from DDD_HEX
-// (the domain canvas's palette) on purpose — the two are different visual languages, e.g. an aggregate is
-// purple on the domain class diagram but yellow in event storming — so colouring one never disturbs the
-// other. Literal hex like DDD_HEX (var() doesn't resolve inside SVG fill/stroke attrs).
-const EVENT_FLOW_HEX: Record<EventFlowNode['kind'], string> = {
-  command: '#5aa9f0', // blue
-  aggregate: '#fbbf24', // yellow
-  'domain-event': '#fb923c', // orange
-  policy: '#c4b5fd', // lilac
-  'integration-event': '#2dd4bf', // teal
+// The Event Flow canvas (#270) now speaks the ONE concept palette (ADR 0003 retired the separate
+// event-storming sticky hues, `EVENT_FLOW_HEX`): a card takes its concept's color, so an aggregate is the
+// same indigo here as on the domain canvas and in the explorer. The docs page carries the Event-Storming ↔
+// Koine mapping table for orientation. Literal hex (var() doesn't resolve inside SVG fill/stroke attrs).
+const EVENT_FLOW_SLUG: Record<EventFlowNode['kind'], (typeof CONCEPT_SLUGS)[number]> = {
+  command: 'command',
+  aggregate: 'aggregate',
+  'domain-event': 'event',
+  policy: 'policy',
+  'integration-event': 'integration-event',
 };
 
-/** The event-storming card colour for a flow card kind. Falls back to slate. */
-function eventFlowColor(kind: EventFlowNode['kind']): string {
-  return EVENT_FLOW_HEX[kind] ?? '#94a3b8';
+/** The event-flow card colour for a flow card kind, drawn from the concept palette. Falls back to slate. */
+export function eventFlowColor(kind: EventFlowNode['kind']): string {
+  const slug = EVENT_FLOW_SLUG[kind];
+  return slug ? CONCEPT_COLORS[slug].dark : SLATE;
 }
 
 // Canvas-only annotation styling (#255). Literal hex like DDD_HEX — var() doesn't resolve inside SVG

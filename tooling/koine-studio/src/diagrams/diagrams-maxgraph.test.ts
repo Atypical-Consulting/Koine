@@ -13,8 +13,11 @@ import {
   createMaxGraphRenderer,
   renderContextMapGraph,
   routeContextMapClick,
+  kindColor,
+  eventFlowColor,
 } from '@/diagrams/diagrams-maxgraph';
 import type { EventFlowEdge, EventFlowNode } from '@/model/modelTables';
+import { CONCEPT_COLORS } from '@/model/conceptColors.generated';
 
 // The diagram's rename/delete gestures now route through Koine's own modal (koiPrompt/koiConfirm),
 // not window.prompt/confirm. Stub them so the tests drive the async dialog deterministically.
@@ -1291,5 +1294,34 @@ describe('event flow layout persistence (#270)', () => {
     } finally {
       handle2.dispose();
     }
+  });
+});
+
+// Concept Colors (ADR 0003): the canvas palette is DERIVED from the single source (CONCEPT_COLORS), and
+// the event-flow view adopts the same concept colors — the separate `EVENT_FLOW_HEX` sticky palette is
+// retired. These lock that unification so the canvas can never drift from the explorer/editor hues.
+describe('concept palette on the canvas', () => {
+  test('kindColor derives from CONCEPT_COLORS, including the aggregate-root / value-object aliases', () => {
+    expect(kindColor('aggregate')).toBe(CONCEPT_COLORS.aggregate.dark);
+    expect(kindColor('aggregate-root')).toBe(CONCEPT_COLORS.aggregate.dark);
+    expect(kindColor('entity')).toBe(CONCEPT_COLORS.entity.dark);
+    expect(kindColor('value')).toBe(CONCEPT_COLORS.value.dark);
+    expect(kindColor('value-object')).toBe(CONCEPT_COLORS.value.dark);
+    expect(kindColor('enum')).toBe(CONCEPT_COLORS.enum.dark);
+  });
+
+  test('a state-machine / unknown node kind falls back to slate (no concept hue)', () => {
+    expect(kindColor('state')).toBe('#94a3b8');
+    expect(kindColor('initial')).toBe('#94a3b8');
+    expect(kindColor('totally-unknown')).toBe('#94a3b8');
+  });
+
+  test('event-flow cards take concept colors (EVENT_FLOW_HEX retired): command is now concept-red, not blue', () => {
+    expect(eventFlowColor('command')).toBe(CONCEPT_COLORS.command.dark);
+    expect(eventFlowColor('command')).not.toBe('#5aa9f0'); // the old event-storming blue is gone
+    expect(eventFlowColor('aggregate')).toBe(CONCEPT_COLORS.aggregate.dark);
+    expect(eventFlowColor('domain-event')).toBe(CONCEPT_COLORS.event.dark);
+    expect(eventFlowColor('policy')).toBe(CONCEPT_COLORS.policy.dark);
+    expect(eventFlowColor('integration-event')).toBe(CONCEPT_COLORS['integration-event'].dark);
   });
 });
