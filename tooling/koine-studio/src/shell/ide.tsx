@@ -15,8 +15,7 @@ import {
 } from '@/shell/ideUtils';
 import { createEditorSession } from '@/shell/editorSession';
 import { createInspectorController } from '@/shell/inspectorController';
-import { LeftRail } from '@atypical/koine-ui';
-import { RightStrip } from '@/shell/RightStrip';
+import { LeftRail, RightStrip } from '@atypical/koine-ui';
 import { createCanvasWrite } from '@/shell/canvasWrite';
 import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
