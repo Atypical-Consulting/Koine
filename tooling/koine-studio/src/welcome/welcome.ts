@@ -45,7 +45,22 @@ export interface WelcomeCallbacks {
    * there. Optional: callers with nowhere to route settings can omit it, and the gear no-ops.
    */
   onOpenSettings?(): void;
+  /**
+   * Clone the git repository at `url` — fired by the Home "Clone repository" inline form (#1005), which
+   * only renders when the host reports the `canClone` capability. The caller (main.ts) picks a parent
+   * folder, runs `Platform.gitClone`, records the clone as a recent, and opens it. The form awaits this:
+   * a REJECTION is surfaced inline (an error under the URL, the form left open to retry), and a RESOLVE
+   * means the caller has taken over navigation. Optional: hosts that can't clone omit it and no row shows.
+   */
+  onClone?(url: string): Promise<void>;
 }
+
+/**
+ * A repository URL the Home clone form accepts: an http(s), scp-style `git@host:…`, or `ssh://` URL,
+ * each followed by at least one non-space character. Deliberately permissive — the real validation is
+ * the clone attempt itself; this only gates the button so an obviously-empty/garbage value can't submit.
+ */
+const CLONE_URL_RE = /^(https?:\/\/|git@|ssh:\/\/)\S+/;
 
 /** Canonical difficulty ordering — starters first, advanced last. Drives grouping and chip order. */
 export const DIFFICULTY_ORDER: Template['difficulty'][] = ['starter', 'beginner', 'intermediate', 'advanced'];
@@ -191,6 +206,12 @@ interface BuildWelcomeOpts {
    * appears in both the warm (`warm: true`) and cold (`warm` absent, a prior snapshot on disk) cases.
    */
   warm?: boolean;
+  /**
+   * Whether this host can clone a git repository (#1005) — true on the desktop (real `git`), false in
+   * the browser. Threaded from `Platform.canUseGit` by the caller. Gates the "Clone repository" Start
+   * row and its inline form: rendered ONLY when true, mirroring how `canOpenFolders` gates "Open folder…".
+   */
+  canClone?: boolean;
 }
 
 /** What {@link buildHome} returns: the root element plus the seams {@link mountHome} re-exports. */
@@ -519,6 +540,127 @@ function buildHome(
       },
     }),
   );
+
+  // Clone repository (#1005) — a Start row that reveals an inline URL form, rendered ONLY when the host
+  // can clone (`canClone`, from Platform.canUseGit) so the browser tab never shows an action it can't
+  // honour (mirrors how "Open folder…" self-gates on canOpenFolders). The whole block is one wrapper the
+  // toggle listens on; the trigger is a real button (keyboard-operable — its click, mouse OR Enter/Space,
+  // bubbles up to toggle) and the form is its sibling below. Every click inside the form is contained
+  // (stopPropagation) so interacting with the field/button never bubbles up to re-collapse the row.
+  if (opts.canClone) {
+    const cloneFormId = `koi-welcome-clone-form-${Math.random().toString(36).slice(2, 8)}`;
+    let cloneOpen = false;
+
+    const cloneRow = document.createElement('div');
+    cloneRow.className = 'koi-welcome-clone';
+    cloneRow.dataset.action = 'clone';
+
+    // The visible row: same anatomy + styling as a makeAction Start button (icon tile + label/desc),
+    // built inline so it carries NO own click handler — its click bubbles to cloneRow, the single toggle.
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'koi-welcome-action koi-welcome-clone-trigger';
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.setAttribute('aria-controls', cloneFormId);
+    const triggerIcon = document.createElement('span');
+    triggerIcon.className = 'koi-welcome-action-icon';
+    triggerIcon.setAttribute('aria-hidden', 'true');
+    triggerIcon.innerHTML = ICON_BRANCH;
+    const triggerText = document.createElement('span');
+    triggerText.className = 'koi-welcome-action-text';
+    const triggerLabel = document.createElement('span');
+    triggerLabel.className = 'koi-welcome-action-label';
+    triggerLabel.textContent = 'Clone repository';
+    const triggerDesc = document.createElement('span');
+    triggerDesc.className = 'koi-welcome-action-desc';
+    triggerDesc.textContent = 'Clone a git repository by URL';
+    triggerText.append(triggerLabel, triggerDesc);
+    trigger.append(triggerIcon, triggerText);
+
+    const cloneForm = document.createElement('div');
+    cloneForm.className = 'koi-welcome-clone-form';
+    cloneForm.id = cloneFormId;
+    cloneForm.hidden = true;
+    // Contain every click inside the form so none bubbles to cloneRow's toggle (which would collapse the
+    // form mid-interaction). This is the single guard the "click inside must not re-toggle" rule needs.
+    cloneForm.addEventListener('click', (e) => e.stopPropagation());
+
+    const controls = document.createElement('div');
+    controls.className = 'koi-welcome-clone-controls';
+
+    const urlInput = document.createElement('input');
+    urlInput.type = 'text'; // NOT type=url: scp-style `git@host:…` URLs aren't valid <input type=url> values
+    urlInput.className = 'koi-welcome-clone-url';
+    urlInput.placeholder = 'https://github.com/user/repo.git';
+    urlInput.setAttribute('aria-label', 'Repository URL to clone');
+    urlInput.autocomplete = 'off';
+    urlInput.spellcheck = false;
+
+    const cloneSubmit = document.createElement('button');
+    cloneSubmit.type = 'button';
+    cloneSubmit.className = 'koi-welcome-clone-submit';
+    cloneSubmit.textContent = 'Clone';
+    cloneSubmit.disabled = true; // enabled once the URL validates (see below)
+
+    controls.append(urlInput, cloneSubmit);
+
+    const hint = document.createElement('p');
+    hint.className = 'koi-welcome-clone-hint';
+    hint.textContent = 'HTTPS or SSH URL — cloned into a folder you choose.';
+
+    const errorEl = document.createElement('p');
+    errorEl.className = 'koi-welcome-clone-error';
+    errorEl.setAttribute('role', 'alert');
+    errorEl.hidden = true;
+
+    cloneForm.append(controls, hint, errorEl);
+    cloneRow.append(trigger, cloneForm);
+
+    const isValidUrl = (): boolean => CLONE_URL_RE.test(urlInput.value.trim());
+
+    function toggleCloneForm(): void {
+      cloneOpen = !cloneOpen;
+      cloneForm.hidden = !cloneOpen;
+      trigger.setAttribute('aria-expanded', String(cloneOpen));
+      if (cloneOpen) urlInput.focus();
+    }
+
+    async function submitClone(): Promise<void> {
+      const url = urlInput.value.trim();
+      if (!isValidUrl()) return;
+      errorEl.hidden = true;
+      errorEl.textContent = '';
+      cloneSubmit.disabled = true;
+      cloneSubmit.textContent = 'Cloning…';
+      try {
+        await cb.onClone?.(url);
+        // Resolved: onClone owns navigation (it opens the freshly-cloned folder), tearing this Home
+        // down — so there's nothing more to do on the happy path.
+      } catch (err) {
+        // Rejected: surface the reason inline (via textContent — never innerHTML for user/host strings)
+        // and leave the form open so the user can fix the URL and retry.
+        errorEl.textContent = err instanceof Error && err.message ? err.message : 'Clone failed. Check the URL and try again.';
+        errorEl.hidden = false;
+        cloneSubmit.textContent = 'Clone';
+        cloneSubmit.disabled = !isValidUrl();
+      }
+    }
+
+    urlInput.addEventListener('input', () => {
+      cloneSubmit.disabled = !isValidUrl();
+    });
+    urlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && isValidUrl()) {
+        e.preventDefault();
+        void submitClone();
+      }
+    });
+    cloneSubmit.addEventListener('click', () => void submitClone());
+    cloneRow.addEventListener('click', () => toggleCloneForm());
+
+    actions.appendChild(cloneRow);
+  }
+
   launch.appendChild(actions);
 
   // Recent folders — populated immediately on mount via refreshRecent(). The header (title + count
@@ -1164,9 +1306,9 @@ export function mountHome(
   cb: WelcomeCallbacks,
   templates: readonly Template[] = TEMPLATES,
   canOpenFolders = true,
-  opts: { warm?: boolean } = {},
+  opts: { warm?: boolean; canClone?: boolean } = {},
 ): HomeHandle {
-  const home = buildHome(cb, templates, canOpenFolders, { warm: opts.warm });
+  const home = buildHome(cb, templates, canOpenFolders, { warm: opts.warm, canClone: opts.canClone });
   home.refreshRecent();
   container.appendChild(home.root);
   return { destroy: home.destroy, refreshRecent: home.refreshRecent, recover: home.recover };

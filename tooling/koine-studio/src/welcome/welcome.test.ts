@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi, type Mock } from 'vitest';
 import { mountHome, filterTemplates, DIFFICULTY_ORDER, type WelcomeCallbacks } from '@/welcome/welcome';
 import type { Template } from '@/welcome/templates';
 
@@ -502,6 +502,128 @@ describe('Home dense recents (#1005)', () => {
       btn.focus();
       expect(document.activeElement).toBe(btn);
     }
+  });
+});
+
+describe('Home clone row (#1005)', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = '';
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  type CloneFn = NonNullable<WelcomeCallbacks['onClone']>;
+
+  /** Mount Home with `canClone` on and a mock `onClone`; returns the root + the spy. */
+  function mountWithClone(onClone: Mock<CloneFn> = vi.fn<CloneFn>().mockResolvedValue(undefined)): {
+    root: HTMLElement;
+    onClone: Mock<CloneFn>;
+  } {
+    const cb: WelcomeCallbacks = { ...makeCallbacks(), onClone };
+    mountHome(container, cb, SAMPLE, true, { canClone: true });
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+    return { root, onClone };
+  }
+
+  const trigger = (root: HTMLElement) => root.querySelector<HTMLButtonElement>('.koi-welcome-clone-trigger')!;
+  const form = (root: HTMLElement) => root.querySelector<HTMLElement>('.koi-welcome-clone-form')!;
+  const urlInput = (root: HTMLElement) => root.querySelector<HTMLInputElement>('.koi-welcome-clone-url')!;
+  const submitBtn = (root: HTMLElement) => root.querySelector<HTMLButtonElement>('.koi-welcome-clone-submit')!;
+
+  /** Open the form and type `url` into the input (dispatching input so validation runs). */
+  function openAndType(root: HTMLElement, url: string): void {
+    trigger(root).click();
+    const input = urlInput(root);
+    input.value = url;
+    input.dispatchEvent(new Event('input'));
+  }
+
+  test('the clone row is absent when canClone is not passed', () => {
+    mountHome(container, makeCallbacks(), SAMPLE, true, {});
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+    expect(root.querySelector('[data-action="clone"]')).toBeNull();
+  });
+
+  test('the clone row is absent when canClone is false', () => {
+    mountHome(container, makeCallbacks(), SAMPLE, true, { canClone: false });
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+    expect(root.querySelector('[data-action="clone"]')).toBeNull();
+  });
+
+  test('the clone row renders (git-branch icon + label) when canClone is true', () => {
+    const { root } = mountWithClone();
+    const row = root.querySelector<HTMLElement>('[data-action="clone"]');
+    expect(row).not.toBeNull();
+    expect(row!.textContent).toContain('Clone repository');
+    // The row carries the shared git-branch glyph (an inline SVG).
+    expect(row!.querySelector('svg')).not.toBeNull();
+  });
+
+  test('clicking the row reveals the inline form (hidden until then)', () => {
+    const { root } = mountWithClone();
+    expect(form(root).hidden).toBe(true);
+    trigger(root).click();
+    expect(form(root).hidden).toBe(false);
+    // Toggling again collapses it.
+    trigger(root).click();
+    expect(form(root).hidden).toBe(true);
+  });
+
+  test('the Clone button is disabled for an invalid URL and enabled for a valid one', () => {
+    const { root } = mountWithClone();
+    trigger(root).click();
+    const submit = submitBtn(root);
+    expect(submit.disabled).toBe(true); // empty → disabled
+
+    const input = urlInput(root);
+    input.value = 'not a url';
+    input.dispatchEvent(new Event('input'));
+    expect(submit.disabled).toBe(true); // junk → still disabled
+
+    input.value = 'https://github.com/x/y.git';
+    input.dispatchEvent(new Event('input'));
+    expect(submit.disabled).toBe(false); // a real https clone URL → enabled
+  });
+
+  test('submitting a valid URL calls onClone with it', () => {
+    const { root, onClone } = mountWithClone();
+    openAndType(root, 'https://github.com/x/y.git');
+    submitBtn(root).click();
+    expect(onClone).toHaveBeenCalledWith('https://github.com/x/y.git');
+  });
+
+  test('Enter in the URL input submits when valid (scp-style git@ URL)', () => {
+    const { root, onClone } = mountWithClone();
+    openAndType(root, 'git@github.com:x/y.git');
+    urlInput(root).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(onClone).toHaveBeenCalledWith('git@github.com:x/y.git');
+  });
+
+  test('when onClone rejects, an inline error shows and the form stays open to retry', async () => {
+    const onClone = vi.fn<CloneFn>().mockRejectedValue(new Error('Repository not found'));
+    const { root } = mountWithClone(onClone);
+    openAndType(root, 'https://github.com/x/y.git');
+    submitBtn(root).click();
+    await new Promise((r) => setTimeout(r, 0)); // let the rejected promise settle + re-render
+
+    const err = root.querySelector<HTMLElement>('.koi-welcome-clone-error');
+    expect(err).not.toBeNull();
+    expect(err!.hidden).toBe(false);
+    expect(err!.textContent).toContain('Repository not found');
+    // The form is left open so the user can fix the URL and try again.
+    expect(form(root).hidden).toBe(false);
+  });
+
+  test('a click inside the URL input does not collapse the open form', () => {
+    const { root } = mountWithClone();
+    trigger(root).click();
+    expect(form(root).hidden).toBe(false);
+    // A bubbling click landing in the input must be contained — it must NOT re-toggle (collapse) the row.
+    urlInput(root).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(form(root).hidden).toBe(false);
   });
 });
 

@@ -568,6 +568,106 @@
   }
 }
 
+/* --- clone repository (#1005): a Start row that reveals an inline URL form ------ */
+/* The wrapper is one flow item in the actions column, stacking the trigger row above its form. The
+   trigger reuses .koi-welcome-action styling; the form drops in below when the row is toggled open. */
+.koi-welcome-clone {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-2);
+}
+
+.koi-welcome-clone-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-1-5);
+  padding: var(--koi-space-2-5) var(--koi-space-3);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  background: color-mix(in srgb, var(--koi-fg) 3%, var(--koi-surface));
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+/* URL field + Clone button on one row: the input flexes, the button keeps its intrinsic width. */
+.koi-welcome-clone-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+}
+
+.koi-welcome-clone-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--koi-paper);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-1-5) var(--koi-space-2);
+  font-family: var(--koi-font-mono); /* a URL reads as monospace */
+  font-size: var(--koi-text-sm);
+
+  &::placeholder {
+    color: var(--koi-muted);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+    border-color: var(--koi-accent);
+  }
+}
+
+.koi-welcome-clone-submit {
+  flex: none;
+  background: var(--koi-accent);
+  color: var(--koi-on-accent);
+  border: 1px solid var(--koi-accent);
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-1-5) var(--koi-space-3);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--koi-dur-fast) ease, opacity var(--koi-dur-fast) ease;
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--koi-accent) 88%, #fff);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+.koi-welcome-clone-hint {
+  margin: 0;
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  color: var(--koi-muted);
+}
+
+/* Inline clone failure — the host's error text under the field; hidden until a clone rejects. */
+.koi-welcome-clone-error {
+  margin: 0;
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  color: var(--koi-error);
+
+  &[hidden] {
+    display: none;
+  }
+}
+
 .koi-welcome-action-icon {
   flex: none;
   display: inline-flex;

@@ -90,7 +90,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1105 → 1197: #1005 dense recents — the compact recent rows (teal monogram + name/language tag +
   // git branch + relative time) with a header count pill, an always-available filter and a View all/Show
   // less collapse, split into a buildRecentRow helper; ceil(1173 × 1.02) = 1197.
-  { file: 'src/welcome/welcome.ts', maxLines: 1197 },
+  // Raised 1197 → 1342: #1005 clone row — the "Clone repository" Start row + its inline URL form (monospace
+  // input, validated Clone button, busy/error states, stopPropagation guard) plus the onClone callback and
+  // canClone plumbing; ceil(1315 × 1.02) = 1342.
+  { file: 'src/welcome/welcome.ts', maxLines: 1342 },
 ];
 
 describe('line-budget guard', () => {

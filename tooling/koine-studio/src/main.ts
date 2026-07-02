@@ -13,9 +13,10 @@ import '@/styles/main.scss';
 import { init } from '@/shell/ide';
 import { mountHome, type WelcomeCallbacks, type HomeHandle } from '@/welcome/welcome';
 import { appStore } from '@/store';
+import { getPlatform } from '@/host';
 import { type Route, routeFromHash, hashFromRoute, resolveInitialRoute } from '@/store/slices/route';
 import { hasPersistedWorkspace, markWorkspaceOpened } from '@/shell/workspaceFlag';
-import { loadSettings } from '@/settings/persistence';
+import { loadSettings, pushRecentFolder } from '@/settings/persistence';
 import { setStartIntent, type StartIntent } from '@/shell/bootIntent';
 import { readModelFromHash } from '@/export/share';
 import { connectInstallAffordance, createInstallController } from '@/shell/pwaInstall';
@@ -56,6 +57,18 @@ function homeCallbacks(): WelcomeCallbacks {
     onOpenSettings: () => {
       appStore.getState().navigate('editor');
       appStore.getState().showSettings();
+    },
+    // Clone repository (#1005): only wired on hosts that can clone (Home renders the row on canUseGit).
+    // Pick a parent folder, run the desktop git clone, remember the clone as a recent (tagging it with
+    // the current emit target so its dense row shows a language), then open it via the same go() flow
+    // onOpenRecent uses. A cancelled folder pick is a quiet no-op; a gitClone rejection propagates so the
+    // Home form can show its inline error and stay open for a retry (it is never swallowed here).
+    onClone: async (url) => {
+      const parent = await getPlatform().pickFolder('Choose a folder to clone the repository into');
+      if (parent === null) return; // user dismissed the folder picker — nothing to do
+      const clonedPath = await getPlatform().gitClone(url, parent);
+      pushRecentFolder(clonedPath, { language: appStore.getState().emitTarget });
+      go({ kind: 'open-recent', path: clonedPath });
     },
   };
 }
@@ -198,6 +211,9 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
       if (!home) {
         home = mountHome(homeRoot, homeCallbacks(), undefined, undefined, {
           warm: ideStarted,
+          // Surface the Clone-repository row only where the host can actually clone (#1005): desktop
+          // git yes, browser no — the same capability the Source Control panel gates on.
+          canClone: getPlatform().canUseGit,
         });
       }
     }
