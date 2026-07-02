@@ -13,6 +13,7 @@
     "start": "astro dev",
     "prebuild": "node scripts/build-samples.mjs && node scripts/build-wasm.mjs && node scripts/og-image.mjs && node scripts/build-docs.mjs && node scripts/build-studio.mjs",
     "build": "astro build",
+    "build:check": "node scripts/build-samples.mjs && node scripts/build-docs.mjs && astro build",
     "preview": "astro preview",
     "astro": "astro",
     "test": "vitest run",

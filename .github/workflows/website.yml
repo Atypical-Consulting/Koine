@@ -66,3 +66,48 @@ jobs:
       - name: Run website unit tests (vitest, Node env)
         working-directory: ./website
         run: npm test
+
+  # Gate PRs on a *real* static build (`astro build`), not just vitest. The vitest job above never
+  # runs `astro build`, so a build-time break — like the `/blog/rss.xml` × `trailingSlash: 'always'`
+  # route failure (#948) — sailed through PR checks green and only turned deploy-docs.yml red after
+  # merge. This job closes that gap: any PR that breaks the static build now fails here.
+  #
+  # It is a lightweight smoke, not the full deploy build. It generates only the content the static
+  # build needs — the Playground sample manifest (build-samples, Node-only) and the domain-reference
+  # docs (build-docs, which shells out to the Koine CLI) — then runs `astro build` (npm run
+  # build:check). It deliberately skips the heavy wasm/AOT compiler, the Studio bundle, and the OG
+  # image that deploy-docs.yml publishes: those are runtime assets copied from public/ and are not
+  # required for the static build to succeed. So this needs the .NET SDK (for the docs emitter) but
+  # NOT the slow browser-wasm workloads.
+  website-build:
+    name: website-build
+    runs-on: ubuntu-latest
+    # build-docs restores + builds the Koine CLI on first run; astro build is seconds. 15 min is ample.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      # The docs emitter (scripts/build-docs.mjs) runs `dotnet run --project src/Koine.Cli`, so the
+      # static build needs the .NET SDK — but it never touches Koine.Wasm, so skip the (slow) wasm
+      # workloads via the composite's install-wasm-workloads: 'false'.
+      - name: Setup .NET (no wasm)
+        uses: ./.github/actions/setup-dotnet-wasm
+        with:
+          install-wasm-workloads: 'false'
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          # Astro 7 / Starlight require Node >= 22.12 (matches deploy-docs.yml).
+          node-version: 24
+          cache: npm
+          # Single workspace lockfile at the repo root (tooling/*, website).
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies (workspace root)
+        run: npm ci
+
+      - name: Build the static site (astro build smoke)
+        working-directory: ./website
+        run: npm run build:check
