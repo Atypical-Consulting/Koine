@@ -768,6 +768,41 @@ describe('createWorkspaceController — saveAllDirty', () => {
     expect(lsp.format).toHaveBeenCalledTimes(1);
     expect(platform.writes.length).toBe(1);
   });
+
+  // Regression (#982): buffers are now REPLACED per edit (immutable), so a save-all loop that snapshots
+  // the buffer OBJECTS up front would write stale text for a buffer edited mid-save. It must re-read each
+  // buffer's LIVE text at write time (as the old in-place saveAllDirtyBuffers did).
+  test('persists each buffer’s LATEST text — a keystroke on a not-yet-written buffer during an earlier write is not lost', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'A0\n');
+    platform.files.set('b.koi', 'B0\n');
+    const trace: string[] = [];
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp(trace), editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const bUri = uriOf('b.koi');
+    // Dirty the active A (via the editor) and the background B (uri-keyed sync).
+    editor.setDoc('A1\n');
+    ws.syncActiveBuffer('A1\n');
+    ws.syncBuffer(bUri, 'B1\n');
+
+    // Gate A's disk write (a.koi sorts first) so B can be edited while A is in flight.
+    const origWrite = platform.writeTextFile.bind(platform);
+    let releaseA!: () => void;
+    const aGate = new Promise<void>((res) => (releaseA = res));
+    platform.writeTextFile = async (path: string, contents: string) => {
+      if (path === `${ROOT}/a.koi`) await aGate;
+      return origWrite(path, contents);
+    };
+
+    const save = ws.saveAllDirty();
+    ws.syncBuffer(bUri, 'B2\n'); // the user keeps typing in B while A's write is in flight
+    releaseA();
+    await save;
+
+    // B is persisted with its LATEST text (B2), not the B1 snapshot captured when Save-all began.
+    expect(platform.writes.find((w) => w.path === `${ROOT}/b.koi`)!.contents).toBe('B2\n');
+  });
 });
 
 describe('createWorkspaceController — applyWorkspaceEdit', () => {
@@ -1211,6 +1246,29 @@ describe('createWorkspaceController — multi-root', () => {
 
     expect(ws.rootsList()).toEqual([ROOT_A]);
     expect(ws.folderRootToken()).toBe(ROOT_A); // back-compat: primary root === folderRootToken
+  });
+
+  // Regression (#982): the reset must not publish an intermediate folderRootToken='' when switching
+  // folders — the folder-derived <DocsPanelHost> subscribes only to folderRootToken, so an A→''→B flash
+  // would clear it through an empty key. The switch must be a single A→B transition.
+  test('switching folders publishes folderRootToken as a single old→new transition (no "" flash)', async () => {
+    const store = createAppStore();
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    platform.seed(ROOT_B, 'b.koi', 'context B {}\n');
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { store }));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+    expect(store.getState().folderRootToken).toBe(ROOT_A);
+
+    const seen: string[] = [];
+    const unsub = store.subscribe((s, prev) => {
+      if (s.folderRootToken !== prev.folderRootToken) seen.push(s.folderRootToken);
+    });
+    await ws.openFolderPath(ROOT_B, { recent: false });
+    unsub();
+
+    expect(seen).toEqual([ROOT_B]); // straight A→B — no transient ''
+    expect(store.getState().folderRootToken).toBe(ROOT_B);
   });
 
   test('addRoot unions a second folder’s .koi buffers without closing the first', async () => {

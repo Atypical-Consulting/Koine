@@ -463,28 +463,31 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     // timer is re-armed for the new file on setDoc below, which would otherwise drop them.
     lsp.flush();
     const leaving = st().buffers.get(st().activeUri);
-    if (leaving) st().upsertBuffer({ ...leaving, text: editor.getDoc() });
+    // Capture the leaving file's latest editor text before the swap. The onChange sync has usually
+    // already written it, so skip the Map copy when the buffer is already current.
+    if (leaving && leaving.text !== editor.getDoc()) st().upsertBuffer({ ...leaving, text: editor.getDoc() });
     const next = st().buffers.get(uri);
     if (!next) return;
     // Move activeUri BEFORE the doc swap (so the setDoc-triggered onChange sees the new active — the old
-    // `activeUriValue = uri` at :481), but fire the activation seam AFTER the swap (the old
-    // `onActiveChanged` at :484): the silent set moves activeUri with no bump; the loud set re-affirms
-    // the same uri and bumps activationSeq, running ide.ts's activation subscriber once the doc is live.
-    st().setActive(uri, { silent: true });
+    // `activeUriValue = uri` at :481), then fire the activation seam AFTER it (the old `onActiveChanged`
+    // at :484): setActive moves the pointer, bumpActivation runs ide.ts's activation subscriber once the
+    // doc is live.
+    st().setActive(uri);
     lsp.setActive(uri);
     editor.setDoc(next.text);
-    st().setActive(uri);
+    st().bumpActivation();
   }
 
   // After the active buffer is deleted, fall back to another open file, or open a new blank model
   // when the workspace is now empty. NOTE: this repaints the next file through showDiagnostics +
   // invalidateDocViews ONLY — it deliberately does NOT fire onActiveChanged (no followActiveFileContext
   // / tree render here), matching the old activateFallback; handleDelete's trailing refreshEntries
-  // re-renders the tree. So the re-point uses setActive({ silent: true }) — no activationSeq bump.
+  // re-renders the tree. So the re-point moves the active pointer with setActive but never bumpActivation
+  // — no activation seam fires.
   function activateFallback(): void {
     const next = Array.from(st().buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath))[0];
     if (next) {
-      st().setActive(next.uri, { silent: true });
+      st().setActive(next.uri);
       lsp.setActive(next.uri);
       editor.setDoc(next.text);
       deps.showDiagnostics(next.uri);
@@ -570,14 +573,16 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     }
 
     // Re-opening a folder is a RESET to a single root: close every previously open file first and drop
-    // the multi-root state (every prior root's buffers + cached entries).
+    // the multi-root state (every prior root's buffers + cached entries). NB: `roots` is NOT cleared to
+    // [] here — it is set to [folder] in ONE transition below (or [] on the all-reads-failed path), so a
+    // folder switch is a single folderRootToken change (old → new) rather than old → '' → new, which
+    // would flash the folder-derived <DocsPanelHost> through an empty key.
     save.clearAutoSaveTimer(); // a pending auto-save belongs to the workspace we're leaving — drop it
     for (const uri of Array.from(st().buffers.keys())) {
       lsp.closeDoc(uri);
       st().removeBuffer(uri);
     }
     entriesByRoot.clear();
-    st().setRoots([]);
     deps.clearDiagnostics();
 
     // Read + open every file as one workspace (cross-file refs resolve via didOpen). Read text
@@ -598,17 +603,19 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     populateBuffers(folder, records);
 
     // Every read failed after a non-empty listing (files deleted / permissions revoked
-    // between list and read).
+    // between list and read). The workspace is now empty, so clear the roots too.
     if (st().buffers.size === 0) {
+      st().setRoots([]);
       deps.setStatus('could not read any files in folder', 'error');
       return { ok: false, reason: 'unreadable' };
     }
 
     st().setRoots([folder]);
-    // Activate the first file (sorted by relPath). Folder open is SILENT — it must not bump
-    // activationSeq (the :489 contract); ide.ts drives the folder-open effects via onFolderOpened.
+    // Activate the first file (sorted by relPath). Folder open moves the active pointer but must NOT
+    // fire the activation seam (the :489 contract — no bumpActivation); ide.ts drives the folder-open
+    // effects via onFolderOpened.
     const first = Array.from(st().buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath))[0];
-    st().setActive(first.uri, { silent: true });
+    st().setActive(first.uri);
     lsp.setActive(first.uri);
     editor.setDoc(first.text);
     deps.hideWelcome?.(); // dismiss the start screen only now that the open has succeeded

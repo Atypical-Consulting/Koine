@@ -17,8 +17,8 @@ const make = () => createStore<WorkspaceSlice>((set, get) => createWorkspaceSlic
 
 // The workspace slice is the single owner of buffers/activeUri/roots/dirty (#982). These tests assert
 // the pure state transitions in isolation: immutable Map semantics (a new Map per change), atomic
-// rekey+activeUri, the becameDirty contract, folderRootToken derived from roots, and the silent/loud
-// activation seq. Effects (LSP, disk, diagnostics) live in the shell modules and are not exercised here.
+// rekey+activeUri, the becameDirty contract, folderRootToken derived from roots, and the setActive (move)
+// / bumpActivation (seam) split. Effects (LSP, disk, diagnostics) live in the shell modules, not here.
 describe('workspace slice — owner API (#982)', () => {
   test('upsertBuffer inserts into a NEW Map (reference inequality)', () => {
     const s = make();
@@ -47,7 +47,7 @@ describe('workspace slice — owner API (#982)', () => {
   test('rekeyBuffer re-keys in a NEW Map and re-points activeUri when the old uri was active (one set)', () => {
     const s = make();
     s.getState().upsertBuffer(buf('file://old', { dirty: true, text: 'x' }));
-    s.getState().setActive('file://old', { silent: true });
+    s.getState().setActive('file://old');
     const before = s.getState().buffers;
     s.getState().rekeyBuffer('file://old', buf('file://new', { dirty: true, text: 'x' }));
     const after = s.getState().buffers;
@@ -63,7 +63,7 @@ describe('workspace slice — owner API (#982)', () => {
     const s = make();
     s.getState().upsertBuffer(buf('file://a'));
     s.getState().upsertBuffer(buf('file://b'));
-    s.getState().setActive('file://a', { silent: true });
+    s.getState().setActive('file://a');
     s.getState().rekeyBuffer('file://b', buf('file://b2'));
     expect(s.getState().activeUri).toBe('file://a');
     expect(s.getState().buffers.has('file://b2')).toBe(true);
@@ -117,14 +117,19 @@ describe('workspace slice — owner API (#982)', () => {
     expect(s.getState().folderRootToken).toBe('');
   });
 
-  test('setActive bumps activationSeq unless {silent:true}', () => {
+  test('setActive moves activeUri WITHOUT firing the seam; bumpActivation fires it (no uri change)', () => {
     const s = make();
     const seq0 = s.getState().activationSeq;
+    // setActive is a pure pointer move — it never bumps activationSeq (folder-open / delete-fallback
+    // move the active file silently; a real switch pairs setActive with bumpActivation).
     s.getState().setActive('file://a');
     expect(s.getState().activeUri).toBe('file://a');
-    expect(s.getState().activationSeq).toBe(seq0 + 1);
-    // silent: activeUri still moves, but the seq is untouched (the folder-open / delete-fallback contract).
-    s.getState().setActive('file://b', { silent: true });
+    expect(s.getState().activationSeq).toBe(seq0);
+    s.getState().setActive('file://b');
+    expect(s.getState().activeUri).toBe('file://b');
+    expect(s.getState().activationSeq).toBe(seq0);
+    // bumpActivation fires the activation seam and leaves activeUri untouched.
+    s.getState().bumpActivation();
     expect(s.getState().activeUri).toBe('file://b');
     expect(s.getState().activationSeq).toBe(seq0 + 1);
   });

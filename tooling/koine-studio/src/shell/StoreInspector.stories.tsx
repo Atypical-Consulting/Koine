@@ -49,7 +49,7 @@ export const Populated: Story = {
     s.setSelection({ qualifiedName: 'Ordering.Order', context: 'Ordering' });
     s.setBottom('events');
     s.setRight('source-control');
-    s.setActive('file:///ordering.koi', { silent: true });
+    s.setActive('file:///ordering.koi');
     // Seed the store-owned buffer Map (#982), keyed by uri.
     store.setState({
       buffers: new Map([

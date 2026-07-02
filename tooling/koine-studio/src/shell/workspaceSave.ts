@@ -99,16 +99,21 @@ export function createWorkspaceSave(ctx: WorkspaceModuleCtx) {
       // Write every dirty buffer (mirrors dirty.ts's saveAllDirtyBuffers, but through slice actions so
       // the cleared dirty flags publish to the UI): a failed write leaves that buffer dirty and is
       // reported; a keystroke landing mid-write keeps its buffer dirty (markSaved only when the buffer
-      // still holds exactly what hit disk).
+      // still holds exactly what hit disk). Snapshot the SET of dirty uris, then re-read each buffer's
+      // LIVE text at write time — a keystroke on a not-yet-written buffer during an earlier buffer's write
+      // replaces its object in the store, so reading from a frozen buffer snapshot would persist stale
+      // text (the old in-place saveAllDirtyBuffers read the latest text at write time).
+      const dirtyUris = [...st().buffers.values()].filter((b) => b.dirty).map((b) => b.uri);
       let failures = 0;
       let saved = 0;
-      for (const buf of [...st().buffers.values()]) {
-        if (!buf.dirty) continue;
+      for (const uri of dirtyUris) {
+        const buf = st().buffers.get(uri);
+        if (!buf || !buf.dirty) continue; // saved or removed since the snapshot
         const written = buf.text;
         try {
           await platform.writeTextFile(buf.path, written);
-          const after = st().buffers.get(buf.uri);
-          if (after && after.text === written) st().markSaved([buf.uri]);
+          const after = st().buffers.get(uri);
+          if (after && after.text === written) st().markSaved([uri]);
           saved++;
         } catch (e) {
           failures++;

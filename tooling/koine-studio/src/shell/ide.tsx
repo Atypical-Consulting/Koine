@@ -849,11 +849,11 @@ export function init(hooks: IdeHooks = {}): () => void {
   });
 
   // The workspace-slice seams (#982): the controller signals transitions by bumping the slice's seq
-  // fields (activationSeq/workspaceEditSeq/entriesSeq/saveSeq) at exactly the points the old on* callbacks
-  // fired; subscribe ONCE and run the matching body when one advances (one sub, not four, keeps the
-  // per-keystroke hot path to a single comparison). The activation body reads activeUri from the SAME
-  // snapshot; folder open / delete-fallback are silent (no bump), so it doesn't run for them (the old
-  // activateFallback contract). The unsubscribe is captured + disposed in the teardown below (#980).
+  // fields (activationSeq/workspaceEditSeq/entriesSeq/saveSeq) at the points the old on* callbacks fired;
+  // subscribe ONCE and run the matching body when one advances. Each action bumps AT MOST ONE seq per
+  // set(), so ≤1 body runs per change and the branch order below is not significant. The activation body
+  // reads activeUri from the SAME snapshot; folder open / delete-fallback move the pointer without
+  // bumpActivation, so it doesn't run for them. The unsubscribe is captured + disposed in teardown (#980).
   const unsubWorkspaceSeams = appStore.subscribe((s, prev) => {
     if (s.entriesSeq !== prev.entriesSeq) history.reset(); // folder open / structural op re-read the tree
     if (s.activationSeq !== prev.activationSeq) {
@@ -1289,7 +1289,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     openFolder: () => void openFolder(),
     search,
     requestNewModel: () => void overlays.requestNewModel(),
-    workspace: { saveAllDirty: () => void workspace.saveAllDirty(), buffers: workspace.buffers },
+    workspace: { saveAllDirty: () => void workspace.saveAllDirty(), buffers: () => workspace.buffers },
     copyShareLink: () => void exportShare.copyShareLink(),
     controller,
     generateProject: exportShare.generateProject,

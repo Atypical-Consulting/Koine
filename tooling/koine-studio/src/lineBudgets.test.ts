@@ -82,7 +82,9 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   { file: 'src/shell/workspaceController.ts', maxLines: 791 },
   { file: 'src/shell/workspaceBuffers.ts', maxLines: 158 },
   { file: 'src/shell/workspaceMutations.ts', maxLines: 179 },
-  { file: 'src/shell/workspaceSave.ts', maxLines: 173 },
+  // 174 LOC after the #982 review fix (saveAllDirty re-reads live buffer text at write time so a keystroke
+  // on a not-yet-written buffer isn't persisted stale), ceil(174 × 1.02) = 178.
+  { file: 'src/shell/workspaceSave.ts', maxLines: 178 },
   // Frozen 2026-07-02 at 1017 LOC, ceil(1017 × 1.02) = 1038. #988 ratchets this down as it decomposes
   // persistence.ts. Freezing prevents further regrowth; it does not mandate the split — #988 owns that.
   { file: 'src/settings/persistence.ts', maxLines: 1038 },

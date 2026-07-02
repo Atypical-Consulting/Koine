@@ -57,8 +57,13 @@ export interface WorkspaceSlice {
   syncBufferText(uri: string, text: string): boolean;
   /** Clear the dirty flag on the given uris post-write (new Map); skips already-clean ones. */
   markSaved(uris: readonly string[]): void;
-  /** Point `activeUri` at `uri`; bumps `activationSeq` unless `opts.silent` (folder open / fallback). */
-  setActive(uri: string, opts?: { silent?: boolean }): void;
+  /** Move `activeUri` to `uri`. This ONLY moves the pointer — it never fires the activation seam, so
+   *  folder-open / delete-fallback (which must not signal activation) call it alone, and a real file
+   *  switch calls it (before the doc swap) then {@link bumpActivation} (after it). */
+  setActive(uri: string): void;
+  /** Fire the activation seam: bump `activationSeq` only (no uri change). Paired with a prior
+   *  {@link setActive} so the activeUri moves before the editor doc swap but the seam fires after it. */
+  bumpActivation(): void;
   /** Replace `roots` and derive `folderRootToken` (`roots[0] ?? ''`) atomically. */
   setRoots(roots: readonly string[]): void;
 
@@ -130,11 +135,8 @@ export function createWorkspaceSlice(
       }
       if (changed) set({ buffers: next });
     },
-    setActive: (uri, opts) => {
-      const patch: Partial<WorkspaceSlice> = { activeUri: uri };
-      if (!opts?.silent) patch.activationSeq = get().activationSeq + 1;
-      set(patch);
-    },
+    setActive: (uri) => set({ activeUri: uri }),
+    bumpActivation: () => set({ activationSeq: get().activationSeq + 1 }),
     setRoots: (roots) => {
       const copy = [...roots];
       set({ roots: copy, folderRootToken: copy[0] ?? '' });
