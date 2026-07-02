@@ -975,6 +975,13 @@ describe('createWorkspaceController — listWorkspaceFiles', () => {
 // Idle auto-save (#268): when enabled, an edit arms a ~1000ms debounce; on fire it reuses the exact
 // saveAllDirty path (format-on-save → write every dirty buffer → didSave → tree refresh). Driven with
 // fake timers + the FakePlatform write spy, mirroring historyController.test.ts's debounce style.
+//
+// #982 Task 3 audit (2026-07): this suite ALREADY pins every autosave scenario the ownership inversion
+// must preserve — debounce re-arm ('the idle timer resets on each edit'), cancel-on-disable ('disabling
+// auto-save cancels a pending persist'), yield-to-manual-save ('a manual save cancels a pending
+// auto-save'), no-arm-when-clean ('does not arm when nothing is dirty'), and cancel-on-reopen
+// ('reopening a folder cancels a pending auto-save'). No gap was found, so no new autosave test is added;
+// these describes are the regression bar for the state that moves into workspaceSave.ts (#982 Task 5).
 describe('createWorkspaceController — idle auto-save', () => {
   test('writes dirty buffers after the idle delay, skips clean ones, fires didSave', async () => {
     vi.useFakeTimers();
@@ -1406,5 +1413,177 @@ describe('createWorkspaceController — multi-root', () => {
     expect(ws.rootsList()).toEqual([ROOT_A]);
     expect(ws.buffers.size).toBe(1);
     expect(lsp.closeDoc).not.toHaveBeenCalled();
+  });
+});
+
+// Rekey on rename/move (#982 Task 1 pin): re-keying open buffers on a file/folder rename or a cross-root
+// move was UNTESTED before the workspace-ownership inversion, yet it is the subtlest transition the slice
+// must reproduce atomically (new Map + re-pointed activeUri in one setState). These pins lock the current
+// behavior — preserved unsaved text + dirty flag, re-pointed active buffer, paired lsp.closeDoc/openDoc,
+// diagnostics moved via renameDiagnostics, rootToken re-derived on a cross-root move — so a regression in
+// Task 3's rekeyBuffers-through-the-slice rewrite fails loudly. Buffers are dirtied through the real sync
+// path (editor.setDoc + syncActiveBuffer), never a direct field write, so the pins survive the move to an
+// immutable, store-owned buffer Map unchanged.
+describe('createWorkspaceController — rekey on rename/move (pin, #982)', () => {
+  test('renaming a dirty active file re-keys its buffer, preserves the unsaved text + dirty flag, and re-points active', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const renameDiagnostics = vi.fn();
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { renameDiagnostics }));
+    await ws.openFolderPath(ROOT, { recent: false });
+
+    const oldUri = uriOf('a.koi');
+    expect(ws.activeUri()).toBe(oldUri);
+    // Dirty the active buffer through the real onChange path (not a direct field write).
+    const edited = 'context A { value V { x: Int } }\n';
+    editor.setDoc(edited);
+    ws.syncActiveBuffer(edited);
+    expect(ws.buffers.get(oldUri)!.dirty).toBe(true);
+    lsp.closeDoc.mockClear();
+    lsp.openDoc.mockClear();
+    lsp.setActive.mockClear();
+
+    await ws.handleRename({ token: `${ROOT}/a.koi`, name: 'a.koi', relPath: 'a.koi', kind: 'file' }, 'renamed.koi');
+
+    const newUri = uriOf('renamed.koi');
+    // The old key is gone; the buffer now lives under the new uri with every identity field re-derived.
+    expect(ws.buffers.has(oldUri)).toBe(false);
+    const buf = ws.buffers.get(newUri)!;
+    expect(buf).toBeDefined();
+    expect(buf.uri).toBe(newUri);
+    expect(buf.path).toBe(`${ROOT}/renamed.koi`);
+    expect(buf.relPath).toBe('renamed.koi');
+    expect(buf.name).toBe('renamed.koi');
+    // The unsaved edit + dirty flag survive the re-key.
+    expect(buf.text).toBe(edited);
+    expect(buf.dirty).toBe(true);
+    // The active buffer follows the rename, and the LSP is re-pointed at the new uri.
+    expect(ws.activeUri()).toBe(newUri);
+    expect(lsp.setActive).toHaveBeenCalledWith(newUri);
+    // The LSP doc was closed under the old uri and reopened under the new one (paired, text preserved).
+    expect(lsp.closeDoc).toHaveBeenCalledWith(oldUri);
+    expect(lsp.openDoc).toHaveBeenCalledWith(newUri, edited);
+    // The cached diagnostics moved with the buffer.
+    expect(renameDiagnostics).toHaveBeenCalledWith(oldUri, newUri);
+  });
+
+  test('renaming a folder re-keys every open buffer beneath it, leaving siblings untouched', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('sub/x.koi', 'context X {}\n');
+    platform.files.set('sub/y.koi', 'context Y {}\n');
+    platform.files.set('top.koi', 'context Top {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const renameDiagnostics = vi.fn();
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { renameDiagnostics }));
+    await ws.openFolderPath(ROOT, { recent: false });
+    expect(ws.buffers.size).toBe(3);
+
+    await ws.handleRename({ token: `${ROOT}/sub`, name: 'sub', relPath: 'sub', kind: 'dir' }, 'renamed');
+
+    // Both files under sub/ moved to renamed/; the sibling top.koi is untouched.
+    expect(ws.buffers.has(uriOf('sub/x.koi'))).toBe(false);
+    expect(ws.buffers.has(uriOf('sub/y.koi'))).toBe(false);
+    expect(ws.buffers.has(uriOf('renamed/x.koi'))).toBe(true);
+    expect(ws.buffers.has(uriOf('renamed/y.koi'))).toBe(true);
+    expect(ws.buffers.has(uriOf('top.koi'))).toBe(true);
+    // The re-keyed buffers' relPath fields are re-derived under the new folder name.
+    expect(ws.buffers.get(uriOf('renamed/x.koi'))!.relPath).toBe('renamed/x.koi');
+    expect(ws.buffers.get(uriOf('renamed/y.koi'))!.relPath).toBe('renamed/y.koi');
+    // Each re-keyed buffer's diagnostics moved to its new uri.
+    expect(renameDiagnostics).toHaveBeenCalledWith(uriOf('sub/x.koi'), uriOf('renamed/x.koi'));
+    expect(renameDiagnostics).toHaveBeenCalledWith(uriOf('sub/y.koi'), uriOf('renamed/y.koi'));
+  });
+
+  test('moving a dirty file across roots re-keys it and re-derives its rootToken', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    platform.seed(ROOT_B, 'keep.koi', 'context Keep {}\n');
+    // The fake leaves moveEntry unimplemented (it rejects); supply a minimal cross-root move for this pin
+    // — it returns the new token under the destination root, mirroring the host's reparent.
+    platform.moveEntry = (async (_token: string, destRoot: string, relPath: string): Promise<string> =>
+      `${destRoot}/${relPath}`) as unknown as FakePlatform['moveEntry'];
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const renameDiagnostics = vi.fn();
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { renameDiagnostics }));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+    await ws.addRoot(ROOT_B);
+
+    const oldUri = uriUnder(ROOT_A, 'a.koi');
+    expect(ws.activeUri()).toBe(oldUri);
+    expect(ws.buffers.get(oldUri)!.rootToken).toBe(ROOT_A);
+    // Dirty it through the real path before the move.
+    const edited = 'context A { entity E {} }\n';
+    editor.setDoc(edited);
+    ws.syncActiveBuffer(edited);
+    lsp.closeDoc.mockClear();
+    lsp.openDoc.mockClear();
+
+    await ws.handleMove(
+      { token: `${ROOT_A}/a.koi`, name: 'a.koi', relPath: 'a.koi', kind: 'file' },
+      ROOT_B,
+    );
+
+    const newUri = uriUnder(ROOT_B, 'a.koi');
+    expect(ws.buffers.has(oldUri)).toBe(false);
+    const buf = ws.buffers.get(newUri)!;
+    expect(buf).toBeDefined();
+    // The cross-root move re-derives the owning root from the new path (was ROOT_A, now ROOT_B).
+    expect(buf.rootToken).toBe(ROOT_B);
+    // The unsaved edit + dirty flag survive the move.
+    expect(buf.text).toBe(edited);
+    expect(buf.dirty).toBe(true);
+    // Active follows the move; the LSP doc was closed under the old uri and reopened under the new one.
+    expect(ws.activeUri()).toBe(newUri);
+    expect(lsp.closeDoc).toHaveBeenCalledWith(oldUri);
+    expect(lsp.openDoc).toHaveBeenCalledWith(newUri, edited);
+    expect(renameDiagnostics).toHaveBeenCalledWith(oldUri, newUri);
+  });
+});
+
+// Dirty-projection freshness (#982 Task 1 pin → Task 3 parity bar): TODAY the store copy of buffers +
+// activeUri is only correct because refreshDirtyIndicator is pushed on every dirty transition. This pins
+// WHERE that push fires — an edit's renderTree, the assistant's applyFileEdit, and a save that clears
+// dirty. When Task 3 deletes this dep and makes publishing inherent to the slice actions, this is the
+// parity bar the store must meet WITHOUT the manual push (Task 3 re-expresses it as a store-freshness
+// assertion; the intent — the projection is fresh after each transition — is unchanged).
+describe('createWorkspaceController — dirty-projection freshness (pin, #982)', () => {
+  test('refreshDirtyIndicator fires on the edit → renderTree, applyFileEdit, and save dirty-transitions', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const refreshDirtyIndicator = vi.fn();
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { refreshDirtyIndicator }));
+    await ws.openFolderPath(ROOT, { recent: false });
+
+    // 1) An edit dirties the active buffer; ide.tsx repaints the tree on the becameDirty transition,
+    //    and renderTree is the refreshDirtyIndicator choke point.
+    const edited = 'context A { value V {} }\n';
+    editor.setDoc(edited);
+    expect(ws.syncActiveBuffer(edited)).toBe(true);
+    refreshDirtyIndicator.mockClear();
+    ws.renderTree();
+    expect(refreshDirtyIndicator).toHaveBeenCalled();
+
+    // 2) applyFileEdit (the assistant's multi-file apply) refreshes the projection after writing a buffer.
+    refreshDirtyIndicator.mockClear();
+    await ws.applyFileEdit('a.koi', 'context A { entity E {} }\n');
+    expect(refreshDirtyIndicator).toHaveBeenCalled();
+
+    // 3) A save clears the dirty flag and repaints (renderTree → refreshDirtyIndicator).
+    editor.setDoc('context A { changed }\n');
+    ws.syncActiveBuffer('context A { changed }\n');
+    refreshDirtyIndicator.mockClear();
+    await ws.saveActive();
+    expect(refreshDirtyIndicator).toHaveBeenCalled();
   });
 });
