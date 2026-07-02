@@ -147,7 +147,7 @@ export interface IdeHooks {
 // --- the composition-root contract (#757) --------------------------------------------------------
 // init() is a THIN composition root: it constructs the shared handles (platform / lsp / editor session /
 // workspace / inspector controller / store), news up the feature controllers below, and returns the
-// aggregate teardown. It must STAY thin — a vitest line budget (ide.budget.test.ts) fails CI if it
+// aggregate teardown. It must STAY thin — a vitest line budget (lineBudgets.test.ts) fails CI if it
 // regrows. When you add a Studio feature, EXTEND the controller that owns its surface, don't grow init():
 //
 //   commandWiring.ts  — command palette + command list (getCommands) + toolbar command buttons + global
@@ -183,7 +183,7 @@ export function init(hooks: IdeHooks = {}): () => void {
   // Render the header monogram from the shared template ('h' = a stable gradient id) so the welcome,
   // about, and header marks all flow from logo.ts and can't drift apart on the next tweak.
   const brandLogo = document.querySelector('.brand-logo');
-  if (brandLogo) brandLogo.innerHTML = koineMark('h'); // eslint-disable-line no-restricted-syntax -- static, trusted brand monogram from logo.ts (koineMark returns a fixed SVG); same-line keeps the ide.budget line count
+  if (brandLogo) brandLogo.innerHTML = koineMark('h'); // eslint-disable-line no-restricted-syntax -- static, trusted brand monogram from logo.ts (koineMark returns a fixed SVG); same-line keeps the lineBudgets line count
 
   // Apply the persisted theme + appearance (accent, reduced motion, editor metrics) before
   // CodeMirror is created so the editor picks up the right tokens / size on first paint.
