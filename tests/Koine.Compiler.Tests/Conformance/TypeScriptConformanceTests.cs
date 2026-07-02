@@ -295,6 +295,43 @@ public class TypeScriptConformanceTests
     }
 
     /// <summary>
+    /// Issue #879 (follow-up to #832, which demand-generated <c>operator /</c> for the C# emitter):
+    /// a plain value object divided by a numeric scalar — <c>half: Money = fee / 2</c> — must emit a
+    /// real <c>divide</c> method, mirroring the existing demand-generated <c>multiply</c>. Before the
+    /// fix <c>OperatorNeedsAnalyzer.BuildScalarDivisionNeeds</c> was recorded but never consumed
+    /// by the TS emitter, and the translator fell through to a bare JS <c>/</c> on a class instance
+    /// (TS2362); the derived member's type-check fails until both the emission and the translator
+    /// routing land.
+    /// </summary>
+    [Fact]
+    public void Value_object_divided_by_a_scalar_typechecks_under_tsc()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    fee: Money\n" +
+            "  }\n" +
+            "  readmodel FeeSplit from Order {\n" +
+            "    half: Money = fee / 2\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("divide");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue("value-object / scalar should type-check under --strict:\n" + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
     /// The outcome contract <see cref="TestSupport.RequireOrSkip"/> relies on: a missing toolchain
     /// yields a <see cref="TestSupport.TypeScriptCheck.Skipped"/> result whose <c>ToolchainAvailable</c>
     /// and <c>Ok</c> are both <c>false</c> — so it can never be mistaken for a real pass.

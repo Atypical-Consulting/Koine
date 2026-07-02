@@ -64,7 +64,8 @@ public sealed partial class RustEmitter : IEmitter
             // stay semantically aligned: a value object only gets an additive `Add` where the model
             // `sum`s it, or a scalar `Mul` where the model multiplies it by a scalar.
             CSharp.OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
-            CSharp.OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index));
+            CSharp.OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
+            CSharp.OperatorNeedsAnalyzer.BuildScalarDivisionNeeds(model, index));
 
         var files = new List<EmittedFile>
         {

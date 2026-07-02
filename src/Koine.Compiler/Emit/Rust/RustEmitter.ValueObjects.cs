@@ -68,6 +68,14 @@ public sealed partial class RustEmitter
             {
                 WriteScalarMul(sb, name, stored, scalars);
             }
+            // `Div` is the division dual of `Mul` (#879, follow-up to the C# emitter's #832):
+            // demand-generated only where the model actually divides this value object by a scalar
+            // (fee / 2), never emitted unconditionally.
+            if (emit.ScalarDivNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? divScalars)
+                && stored.Any(m => m.Type.Name is "Int" or "Decimal"))
+            {
+                WriteScalarDiv(sb, name, stored, divScalars);
+            }
             if (emit.AdditiveNeeds.Contains(vo.Name))
             {
                 WriteAdditiveAdd(sb, name, stored);
@@ -230,6 +238,28 @@ public sealed partial class RustEmitter
         }
     }
 
+    /// <summary>A scalar <c>Div</c> (e.g. <c>fee / 2</c>): the division dual of <see cref="WriteScalarMul"/>, dividing each numeric field, carrying the rest.</summary>
+    private void WriteScalarDiv(StringBuilder sb, string name, IReadOnlyList<Member> fields, IReadOnlySet<string> scalars)
+    {
+        foreach (var (rustFactor, isDecimal) in ScalarFactors(scalars))
+        {
+            sb.Append('\n');
+            sb.Append("impl std::ops::Div<").Append(rustFactor).Append("> for ").Append(name).Append(" {\n");
+            sb.Append(Indent).Append("type Output = ").Append(name).Append(";\n");
+            sb.Append(Indent).Append("fn div(self, divisor: ").Append(rustFactor).Append(") -> ").Append(name).Append(" {\n");
+            sb.Append(Indent).Append(Indent).Append(name).Append(" {\n");
+            foreach (Member m in fields)
+            {
+                var f = RustNaming.Field(m.Name);
+                sb.Append(Indent).Append(Indent).Append(Indent).Append(f).Append(": ")
+                  .Append(DivideField(m, "self." + f, "divisor", isDecimal)).Append(",\n");
+            }
+            sb.Append(Indent).Append(Indent).Append("}\n");
+            sb.Append(Indent).Append("}\n");
+            sb.Append("}\n");
+        }
+    }
+
     /// <summary>An additive <c>Add</c> (for <c>sum</c> folds): adds numeric fields pairwise, carries the rest from self.</summary>
     private void WriteAdditiveAdd(StringBuilder sb, string name, IReadOnlyList<Member> fields)
     {
@@ -316,6 +346,17 @@ public sealed partial class RustEmitter
         {
             "Decimal" => factorIsDecimal ? $"{fieldExpr} * {factor}" : $"{fieldExpr} * Decimal::from({factor})",
             "Int" => factorIsDecimal ? fieldExpr : $"{fieldExpr} * {factor}",
+            _ => fieldExpr,
+        };
+    }
+
+    /// <summary>Divides one field expression by a divisor, coercing across Int/Decimal as needed — the division dual of <see cref="ScaleField"/>.</summary>
+    private static string DivideField(Member m, string fieldExpr, string divisor, bool divisorIsDecimal)
+    {
+        return m.Type.Name switch
+        {
+            "Decimal" => divisorIsDecimal ? $"{fieldExpr} / {divisor}" : $"{fieldExpr} / Decimal::from({divisor})",
+            "Int" => divisorIsDecimal ? fieldExpr : $"{fieldExpr} / {divisor}",
             _ => fieldExpr,
         };
     }
