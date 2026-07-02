@@ -136,7 +136,7 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
     // Restore focus: prefer the captured opener (if still in the DOM); fall back to the gear
     // button, then body. `settingsOpener` is typed `HTMLElement | null` so the instanceof guard
     // is redundant — only the DOM-presence check is needed.
-    const target = (opener !== null && document.contains(opener) ? opener : null) ?? document.getElementById('btn-prefs') ?? document.body;
+    const target = (opener !== null && document.contains(opener) ? opener : null) ?? document.getElementById('btn-prefs') ?? document.body; // eslint-disable-line no-restricted-properties -- optional link in a focus-restore fallback chain ending in `?? document.body`; a missing gear button must fall through, not throw
     target.focus();
   }
 

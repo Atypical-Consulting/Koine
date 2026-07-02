@@ -61,8 +61,8 @@ function homeCallbacks(): WelcomeCallbacks {
  * The IDE shell (`init()`) is started lazily, the first time the editor route is active, and is never
  * torn down on a later Home↔Editor swap (the shell's LSP/workspace stay alive; only visibility toggles).
  */
-export function bootStudio(homeRoot: HTMLElement | null = document.getElementById('home-root')): () => void {
-  const appEl = document.getElementById('app');
+export function bootStudio(homeRoot: HTMLElement | null = document.getElementById('home-root')): () => void { // eslint-disable-line no-restricted-properties -- #home-root is optional by design (typed HTMLElement | null; every use is `if (homeRoot)` guarded), so a hard throw would break boot on a host that omits it
+  const appEl = document.getElementById('app'); // eslint-disable-line no-restricted-properties -- #app is route-hidden chrome read nullably (every use is `if (appEl)` guarded); throwing would wrongly hard-fail boot
 
   // Perceivability signal for the toolbar affordances (#573). The install/update affordances live in the
   // toolbar inside #app, which is route-hidden until the editor route. Their shared live region is
@@ -85,9 +85,9 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
   // toolbar's dismissible Install button once the editor is shown. The toolbar nodes live inside #app
   // (present but hidden until the editor route), so they resolve at boot. A no-op where the event never
   // fires (Safari/iOS, already installed, or a prior dismissal persisted in localStorage).
-  const installRoot = document.getElementById('install-affordance');
-  const installButton = document.getElementById('btn-install');
-  const installDismiss = document.getElementById('btn-install-dismiss');
+  const installRoot = document.getElementById('install-affordance'); // eslint-disable-line no-restricted-properties -- install affordance is optional; the `installRoot && installButton && installDismiss` ternary no-ops when absent (Safari/iOS, already installed)
+  const installButton = document.getElementById('btn-install'); // eslint-disable-line no-restricted-properties -- see install-affordance above: optional, guarded by the null-checking ternary
+  const installDismiss = document.getElementById('btn-install-dismiss'); // eslint-disable-line no-restricted-properties -- see install-affordance above: optional, guarded by the null-checking ternary
   const disposeInstall =
     installRoot && installButton && installDismiss
       ? connectInstallAffordance(createInstallController(), {
@@ -106,9 +106,9 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
   // a stale offline cache. Wired here at boot for the same reason as the install affordance: the
   // toolbar nodes live inside #app (present but hidden until the editor route) and resolve now, and
   // registration shouldn't wait on the lazy editor init().
-  const swUpdateRoot = document.getElementById('sw-update');
-  const swReloadButton = document.getElementById('btn-sw-reload');
-  const swDismissButton = document.getElementById('btn-sw-dismiss');
+  const swUpdateRoot = document.getElementById('sw-update'); // eslint-disable-line no-restricted-properties -- SW-update affordance is optional; the `swUpdateRoot && swReloadButton && swDismissButton` ternary no-ops when absent (no SW / Tauri desktop)
+  const swReloadButton = document.getElementById('btn-sw-reload'); // eslint-disable-line no-restricted-properties -- see sw-update above: optional, guarded by the null-checking ternary
+  const swDismissButton = document.getElementById('btn-sw-dismiss'); // eslint-disable-line no-restricted-properties -- see sw-update above: optional, guarded by the null-checking ternary
   const updateController = createUpdateController();
   const disposeSwUpdate =
     swUpdateRoot && swReloadButton && swDismissButton

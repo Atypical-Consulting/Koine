@@ -21,6 +21,11 @@ export default tseslint.config(
       '@typescript-eslint/no-misused-promises': 'error',
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'error',
+      'no-restricted-properties': ['error', {
+        object: 'document',
+        property: 'getElementById',
+        message: 'Use domById (src/shared/domById.ts) so a missing #id throws loudly instead of a silent null.',
+      }],
     },
   },
   // Tests & stories: the deliberate fire-and-forget promises in vitest fixtures and Storybook play
@@ -28,6 +33,10 @@ export default tseslint.config(
   // TODO(2026-07-02): await the test/stories promises and drop this `off`; tracked as a PR follow-up.
   {
     files: ['src/**/*.{test,stories}.{ts,tsx}', 'src/test-setup*.ts'],
-    rules: { '@typescript-eslint/no-floating-promises': 'off' },
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'off',
+      // Tests legitimately probe optional-absence in fixture DOM (getElementById → null is the assertion).
+      'no-restricted-properties': 'off',
+    },
   },
 );

@@ -363,7 +363,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // `settingsOpen`, NOT a deck surface. OPTIONAL like the bottom-sheet host — absent from the desktop-only
   // test fixtures — so look it up defensively; without it applyCenterChrome simply skips the overlay
   // toggle. The page body is populated by the settings page host (ide.tsx).
-  const settingsPanelEl = document.getElementById('center-panel-settings');
+  const settingsPanelEl = document.getElementById('center-panel-settings'); // eslint-disable-line no-restricted-properties -- annotate-only; #979 owns fixing this controller's required/optional lookup semantics (here: defensive, skips the overlay toggle when absent)
   // Right-rail host: the element inspector (Properties). Fixed — never torn down on a model reload.
   const inspectorHost = domById('inspector-host');
   // Below $bp-narrow the inspector lives in a bottom sheet instead of the fixed #right rail (#221). The
@@ -371,7 +371,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // controller keeps the original right-rail behaviour untouched (no sheet, no resize listener). When it
   // exists the sheet is built once here; renderSelectedInspector mounts Properties into its body on a
   // narrow viewport, and a selection raises it to half.
-  const sheetHostEl = document.getElementById('inspector-sheet-host');
+  const sheetHostEl = document.getElementById('inspector-sheet-host'); // eslint-disable-line no-restricted-properties -- annotate-only; #979 owns this controller's lookup semantics (here: guarded by `sheetHostEl ? … : null`)
   const inspectorSheet: InspectorSheet | null = sheetHostEl ? createInspectorSheet(sheetHostEl) : null;
   // The host the Properties panel is currently rendered into (sheet body on a narrow viewport, else the
   // fixed #inspector-host). Tracked so renderSelectedInspector can unmount the PRIOR host's Preact tree
@@ -932,7 +932,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // never both claim the rail). The segmented control's two buttons live in #rail-axis-switch.
   const RAIL_AXIS_KEY = 'koine.studio.railAxis';
   type RailAxis = 'domain' | 'files';
-  const filesPane = document.getElementById('rail-files');
+  const filesPane = document.getElementById('rail-files'); // eslint-disable-line no-restricted-properties -- annotate-only; this is the #rail-files split-brain (#979 owns reconciling this optional lookup with layout.ts's required domById)
   const axisButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('#rail-axis-switch [data-axis]'));
   // The collapsed-rail spine (#left-strip, #730) carries the same Domain/Files toggles; keep their pressed
   // state in lockstep with the expanded segmented control so the active axis reads the same in both states.
@@ -1487,7 +1487,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // carries only a title header naming the active tool window. selectRightView keeps #right-title in sync
   // and shows the matching view — there's no tab row to mark. (Guarded lookup so DOM fixtures that omit
   // the header don't crash the controller.)
-  const rightTitleEl = document.getElementById('right-title');
+  const rightTitleEl = document.getElementById('right-title'); // eslint-disable-line no-restricted-properties -- annotate-only; #979 owns this controller's lookup semantics (here: guarded so fixtures omitting the header don't crash)
   const rightViewLabels: Record<RightView, string> = {
     props: 'Properties',
     assistant: 'AI Chat',
@@ -1597,8 +1597,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // layoutStore (persistence), like rightCollapsed. The head's collapse button tucks it; the spine's expand
   // control re-opens it, and its Domain/Files toggles re-open straight to that axis (setLeftCollapsed(false)
   // + setAxis). Navigation is persistent, so this defaults OPEN — the collapse is an on-demand reclaim.
-  const railCollapseBtn = document.getElementById('rail-collapse');
-  const leftStripEl = document.getElementById('left-strip');
+  const railCollapseBtn = document.getElementById('rail-collapse'); // eslint-disable-line no-restricted-properties -- annotate-only; #979 owns this controller's lookup semantics
+  const leftStripEl = document.getElementById('left-strip'); // eslint-disable-line no-restricted-properties -- annotate-only; #979 owns this controller's lookup semantics
   function applyLeftCollapsed(collapsed: boolean): void {
     // DOM/ARIA only; the collapsed grid (shrink the leftrail track, hide its resizer, #center reclaims the
     // width) is CSS keyed off this class on #split — the morph that swaps the head/navigator for #left-strip
