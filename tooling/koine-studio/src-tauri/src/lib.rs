@@ -15,6 +15,7 @@
 // the retry budget is exhausted (or after a clean stop).
 
 use std::io::{self, BufRead, BufReader, Read, Write};
+use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
@@ -155,45 +156,85 @@ fn should_restart(shutting_down: bool, attempts_made: u32, max_retries: u32) -> 
 
 // --- sidecar resolution -----------------------------------------------------
 
-/// Resolve how to launch the language server.
-/// `KOINE_LSP` (a self-contained sidecar binary) takes precedence; otherwise fall
-/// back to the Debug DLL via `dotnet`, resolved relative to this crate.
-fn resolve_sidecar_command() -> Command {
-    if let Ok(bin) = std::env::var("KOINE_LSP") {
-        let mut c = Command::new(bin);
-        c.arg("lsp");
-        c
-    } else {
-        // CARGO_MANIFEST_DIR = .../tooling/koine-studio/src-tauri
-        // -> ../../../src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll
-        let dll = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll"
-        );
-        let mut c = Command::new("dotnet");
-        c.arg(dll).arg("lsp");
-        c
+/// How to launch the `koine` tooling backend that powers both the LSP sidecar and the
+/// MCP server.
+#[derive(Debug, PartialEq)]
+enum KoineLauncher {
+    /// A self-contained `koine` executable (env override or the bundled externalBin).
+    Bin(PathBuf),
+    /// Dev fallback: `dotnet <repo>/src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll`.
+    DevDll,
+}
+
+/// Choose how to launch `koine`, in priority order: an explicit env override, then the
+/// binary the Tauri bundler dropped next to the app executable, then the dev Debug DLL.
+fn pick_koine_launcher(env_bin: Option<String>, bundled: Option<PathBuf>) -> KoineLauncher {
+    match (env_bin, bundled) {
+        (Some(b), _) => KoineLauncher::Bin(PathBuf::from(b)),
+        (None, Some(p)) => KoineLauncher::Bin(p),
+        (None, None) => KoineLauncher::DevDll,
     }
 }
 
-/// Resolve how to launch the MCP HTTP server. Mirrors [`resolve_sidecar_command`]: `KOINE_MCP`
-/// then `KOINE_LSP` (the same self-contained `koine` binary) take precedence; otherwise fall back
-/// to the Debug DLL via `dotnet`. The server is asked to bind a loopback OS-assigned port (`--port
-/// 0`) and announce it on stderr, which `mcp_endpoint` scrapes.
+/// The Tauri bundler drops `externalBin: ["binaries/koine"]` next to the app
+/// executable as plain `koine[.exe]` — probe for it there.
+fn bundled_koine_path() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let p = exe
+        .parent()?
+        .join(format!("koine{}", std::env::consts::EXE_SUFFIX));
+    p.is_file().then_some(p)
+}
+
+/// Resolve how to launch the language server, tried in order: the `KOINE_LSP` env override (a
+/// self-contained `koine` binary), then the bundled `koine` binary dropped next to the app
+/// executable by the Tauri bundler, then the Debug DLL via `dotnet` resolved relative to this crate.
+fn resolve_sidecar_command() -> Command {
+    match pick_koine_launcher(std::env::var("KOINE_LSP").ok(), bundled_koine_path()) {
+        KoineLauncher::Bin(bin) => {
+            let mut c = Command::new(bin);
+            c.arg("lsp");
+            c
+        }
+        KoineLauncher::DevDll => {
+            // CARGO_MANIFEST_DIR = .../tooling/koine-studio/src-tauri
+            // -> ../../../src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll
+            let dll = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll"
+            );
+            let mut c = Command::new("dotnet");
+            c.arg(dll).arg("lsp");
+            c
+        }
+    }
+}
+
+/// Resolve how to launch the MCP HTTP server. Mirrors [`resolve_sidecar_command`], tried in order:
+/// the `KOINE_MCP` (then `KOINE_LSP`) env override (the same self-contained `koine` binary), then
+/// the bundled `koine` binary dropped next to the app executable by the Tauri bundler, then the
+/// Debug DLL via `dotnet`. The server is asked to bind a loopback OS-assigned port (`--port 0`) and
+/// announce it on stderr, which `mcp_endpoint` scrapes.
 fn resolve_mcp_command() -> Command {
     let mcp_args = ["mcp", "--http", "--port", "0"];
-    if let Ok(bin) = std::env::var("KOINE_MCP").or_else(|_| std::env::var("KOINE_LSP")) {
-        let mut c = Command::new(bin);
-        c.args(mcp_args);
-        c
-    } else {
-        let dll = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll"
-        );
-        let mut c = Command::new("dotnet");
-        c.arg(dll).args(mcp_args);
-        c
+    let env_bin = std::env::var("KOINE_MCP")
+        .or_else(|_| std::env::var("KOINE_LSP"))
+        .ok();
+    match pick_koine_launcher(env_bin, bundled_koine_path()) {
+        KoineLauncher::Bin(bin) => {
+            let mut c = Command::new(bin);
+            c.args(mcp_args);
+            c
+        }
+        KoineLauncher::DevDll => {
+            let dll = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll"
+            );
+            let mut c = Command::new("dotnet");
+            c.arg(dll).args(mcp_args);
+            c
+        }
     }
 }
 
@@ -1871,6 +1912,7 @@ pub fn run() {
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use std::path::PathBuf;
 
     #[test]
     fn round_trip_ascii() {
@@ -2012,6 +2054,25 @@ mod tests {
         // The tag without a URL (e.g. a future status line) is not an endpoint.
         assert_eq!(parse_mcp_endpoint("[koine-mcp] starting"), None);
         assert_eq!(parse_mcp_endpoint(""), None);
+    }
+
+    // --- sidecar launcher selection (pure) ----------------------------------
+
+    #[test]
+    fn pick_koine_launcher_prefers_env_override() {
+        let l = pick_koine_launcher(Some("/opt/koine".into()), Some(PathBuf::from("/app/koine")));
+        assert_eq!(l, KoineLauncher::Bin(PathBuf::from("/opt/koine")));
+    }
+
+    #[test]
+    fn pick_koine_launcher_uses_bundled_when_no_env() {
+        let l = pick_koine_launcher(None, Some(PathBuf::from("/app/koine")));
+        assert_eq!(l, KoineLauncher::Bin(PathBuf::from("/app/koine")));
+    }
+
+    #[test]
+    fn pick_koine_launcher_falls_back_to_dev_dll() {
+        assert_eq!(pick_koine_launcher(None, None), KoineLauncher::DevDll);
     }
 
     // --- workspace filesystem tests -----------------------------------------
