@@ -205,6 +205,7 @@ const Koine.Compiler.Diagnostics.DiagnosticCodes.SpecCallTargetMismatch = "KOI10
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateSpecPredicate = "KOI1007" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectScalarArithmetic = "KOI0215" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectScalarArithmeticNoNumericField = "KOI0216" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.NarrowingConversionInDerivedMember = "KOI0217" -> string!
 Koine.Compiler.Ast.EntityDecl.IdentityNameSpan.get -> Koine.Compiler.Ast.SourceSpan
 Koine.Compiler.Ast.EntityDecl.IdentityNameSpan.init -> void
 Koine.Compiler.Ast.EntityDecl.IdentityStrategySpan.get -> Koine.Compiler.Ast.SourceSpan
