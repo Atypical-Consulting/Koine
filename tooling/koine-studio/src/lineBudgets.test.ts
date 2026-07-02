@@ -52,7 +52,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // two createX deps calls, the emit lookups, and the one-line store mirror in applyEffectiveScoped,
   // ~18 LOC net. Ratchet to the real end-state plus a little headroom.
   // carried over from #757's ratchet — normative, do not recompute via the +2% rule.
-  { file: 'src/shell/ide.tsx', maxLines: 1365 },
+  // Lowered 1365 → 1364: #982 inverted workspace ownership — ide.tsx lost the refreshDirtyIndicator
+  // projection glue + the two setFolderRootToken pushes (Tasks 2/3) and the four on* seam registrations
+  // (Task 4), but the single consolidated seq subscription that replaced them roughly offset the savings
+  // (net −1 LOC). Ratchet to the measured end-state.
+  { file: 'src/shell/ide.tsx', maxLines: 1364 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.
@@ -70,12 +74,18 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
   // not mandate the split — #989 owns that.
   { file: 'src/shell/explorer.ts', maxLines: 1328 },
-  // Frozen 2026-07-02 at 1173 LOC, ceil(1173 × 1.02) = 1197. #982 ratchets this down as it decomposes
-  // workspaceController.ts. Freezing prevents further regrowth; it does not mandate the split — #982
-  // owns that.
-  // Raised 1197 → 1241: #1005 captures git branch + emit language onto recents at the folder-open site
-  // (non-blocking git-status follow-up) — ~20 LOC of genuine new capture, not regrowth; ceil(1216×1.02)=1241.
-  { file: 'src/shell/workspaceController.ts', maxLines: 1241 },
+  // #982 decomposed workspaceController.ts into a thin facade + three sibling modules
+  // (workspaceBuffers / workspaceMutations / workspaceSave). The facade measured 775 LOC post-split.
+  // Raised 791 → 849: #1005 re-homes its Home resume/recents capture onto the facade after the #982 merge
+  // — the rememberLastSession snapshot helper (reading the store slice), the folder-open branch/language
+  // capture, and the save/dirty facade wraps — 832 LOC, ceil(832 × 1.02) = 849. The three modules stay
+  // frozen at their post-split sizes so no single one regrows toward a god-file.
+  { file: 'src/shell/workspaceController.ts', maxLines: 849 },
+  { file: 'src/shell/workspaceBuffers.ts', maxLines: 158 },
+  { file: 'src/shell/workspaceMutations.ts', maxLines: 179 },
+  // 174 LOC after the #982 review fix (saveAllDirty re-reads live buffer text at write time so a keystroke
+  // on a not-yet-written buffer isn't persisted stale), ceil(174 × 1.02) = 178.
+  { file: 'src/shell/workspaceSave.ts', maxLines: 178 },
   // Frozen 2026-07-02 at 1017 LOC, ceil(1017 × 1.02) = 1038. #988 ratchets this down as it decomposes
   // persistence.ts. Freezing prevents further regrowth; it does not mandate the split — #988 owns that.
   // Raised 1038 → 1099: #1005's Home resume card needs a persisted last-session snapshot — a new

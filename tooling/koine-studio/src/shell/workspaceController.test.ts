@@ -13,6 +13,7 @@
 // controller calls them but does not own the cache (it lives in editorSession).
 import { afterEach, beforeEach, describe, expect, it, test, vi } from 'vitest';
 import { createWorkspaceController, type WorkspaceControllerDeps } from '@/shell/workspaceController';
+import { createAppStore } from '@/store/index';
 import { pathToFileUri } from '@/shell/ideUtils';
 import type { FsEntry, GitLogEntry, GitStatus, KoiFile, McpEndpoint, Platform, SourceDoc } from '@/host/types';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
@@ -289,7 +290,9 @@ function makeDeps(
     editor: editor as unknown as WorkspaceControllerDeps['editor'],
     explorer: { renderRoots: vi.fn() },
     setStatus: vi.fn(),
-    refreshDirtyIndicator: vi.fn(),
+    // #982: the controller writes workspace state THROUGH the store (its single owner). Each test gets a
+    // fresh vanilla store; the parity test passes its own via `overrides.store` so it can read it back.
+    store: createAppStore(),
     showDiagnostics: vi.fn(),
     invalidateDocViews: vi.fn(),
     dropDiagnostics: vi.fn(),
@@ -523,19 +526,19 @@ describe('createWorkspaceController — reset', () => {
 });
 
 describe('createWorkspaceController — activateFile', () => {
-  test('flushes the leaving file BEFORE swapping the doc, then fires onActiveChanged', async () => {
+  test('flushes the leaving file BEFORE swapping the doc, then bumps activationSeq (the activation seam)', async () => {
+    const store = createAppStore();
     const platform = new FakePlatform();
     platform.files.set('a.koi', 'context A {}\n');
     platform.files.set('b.koi', 'context B {}\n');
     const trace: string[] = [];
     const lsp = makeLsp(trace);
     const editor = makeEditor(trace);
-    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
-    const active: string[] = [];
-    ws.onActiveChanged((uri) => active.push(uri));
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { store }));
 
     await ws.openFolderPath(ROOT, { recent: false });
     const bUri = uriOf('b.koi');
+    const seq0 = store.getState().activationSeq; // folder open is silent — no bump
     // Clear the boot-time setDoc so the trace below captures only the switch.
     trace.length = 0;
     ws.activateFile(bUri);
@@ -544,24 +547,27 @@ describe('createWorkspaceController — activateFile', () => {
     // flush() must run before the editor doc swap (the leaving file's debounced edits are sent first).
     expect(trace).toEqual(['flush', 'setDoc']);
     expect(editor.setDoc).toHaveBeenLastCalledWith('context B {}\n');
-    // The active-changed seam fired with the new uri (ide.ts wires showDiagnostics + doc-view refresh).
-    expect(active).toEqual([bUri]);
+    // The active-changed seam is now a slice bump: activationSeq advanced by exactly one and the slice
+    // holds the new active uri (ide.ts subscribes to activationSeq → showDiagnostics + doc-view refresh).
+    expect(store.getState().activationSeq).toBe(seq0 + 1);
+    expect(store.getState().activeUri).toBe(bUri);
   });
 
   test('activating the already-active file is a no-op', async () => {
+    const store = createAppStore();
     const platform = new FakePlatform();
     platform.files.set('a.koi', 'context A {}\n');
     const trace: string[] = [];
     const lsp = makeLsp(trace);
     const editor = makeEditor(trace);
-    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { store }));
     await ws.openFolderPath(ROOT, { recent: false });
-    const active: string[] = [];
-    ws.onActiveChanged((uri) => active.push(uri));
+    const seq0 = store.getState().activationSeq;
 
     ws.activateFile(ws.activeUri());
 
-    expect(active).toEqual([]);
+    // No switch: activationSeq is untouched and flush never ran.
+    expect(store.getState().activationSeq).toBe(seq0);
     expect(lsp.flush).not.toHaveBeenCalled();
   });
 });
@@ -765,6 +771,41 @@ describe('createWorkspaceController — saveAllDirty', () => {
     expect(lsp.format).toHaveBeenCalledTimes(1);
     expect(platform.writes.length).toBe(1);
   });
+
+  // Regression (#982): buffers are now REPLACED per edit (immutable), so a save-all loop that snapshots
+  // the buffer OBJECTS up front would write stale text for a buffer edited mid-save. It must re-read each
+  // buffer's LIVE text at write time (as the old in-place saveAllDirtyBuffers did).
+  test('persists each buffer’s LATEST text — a keystroke on a not-yet-written buffer during an earlier write is not lost', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'A0\n');
+    platform.files.set('b.koi', 'B0\n');
+    const trace: string[] = [];
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp(trace), editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const bUri = uriOf('b.koi');
+    // Dirty the active A (via the editor) and the background B (uri-keyed sync).
+    editor.setDoc('A1\n');
+    ws.syncActiveBuffer('A1\n');
+    ws.syncBuffer(bUri, 'B1\n');
+
+    // Gate A's disk write (a.koi sorts first) so B can be edited while A is in flight.
+    const origWrite = platform.writeTextFile.bind(platform);
+    let releaseA!: () => void;
+    const aGate = new Promise<void>((res) => (releaseA = res));
+    platform.writeTextFile = async (path: string, contents: string) => {
+      if (path === `${ROOT}/a.koi`) await aGate;
+      return origWrite(path, contents);
+    };
+
+    const save = ws.saveAllDirty();
+    ws.syncBuffer(bUri, 'B2\n'); // the user keeps typing in B while A's write is in flight
+    releaseA();
+    await save;
+
+    // B is persisted with its LATEST text (B2), not the B1 snapshot captured when Save-all began.
+    expect(platform.writes.find((w) => w.path === `${ROOT}/b.koi`)!.contents).toBe('B2\n');
+  });
 });
 
 describe('createWorkspaceController — applyWorkspaceEdit', () => {
@@ -802,7 +843,8 @@ describe('createWorkspaceController — applyWorkspaceEdit', () => {
 });
 
 describe('createWorkspaceController — handleDelete', () => {
-  test('closing the active file falls back to another open buffer (showDiagnostics + invalidateDocViews, no onActiveChanged)', async () => {
+  test('closing the active file falls back to another open buffer (showDiagnostics + invalidateDocViews, no activationSeq bump)', async () => {
+    const store = createAppStore();
     const platform = new FakePlatform();
     platform.files.set('a.koi', 'context A {}\n');
     platform.files.set('b.koi', 'context B {}\n');
@@ -813,12 +855,11 @@ describe('createWorkspaceController — handleDelete', () => {
     const invalidateDocViews = vi.fn();
     const dropDiagnostics = vi.fn();
     const ws = createWorkspaceController(
-      makeDeps(platform, lsp, editor, { showDiagnostics, invalidateDocViews, dropDiagnostics }),
+      makeDeps(platform, lsp, editor, { store, showDiagnostics, invalidateDocViews, dropDiagnostics }),
     );
     await ws.openFolderPath(ROOT, { recent: false });
-    // a.koi is active; track onActiveChanged so we can prove the fallback does NOT fire it.
-    const active: string[] = [];
-    ws.onActiveChanged((uri) => active.push(uri));
+    // a.koi is active; capture activationSeq so we can prove the fallback does NOT bump it.
+    const seq0 = store.getState().activationSeq;
     showDiagnostics.mockClear();
     invalidateDocViews.mockClear();
 
@@ -830,11 +871,12 @@ describe('createWorkspaceController — handleDelete', () => {
     expect(ws.buffers.has(aUri)).toBe(false);
     expect(dropDiagnostics).toHaveBeenCalledWith(aUri);
     expect(ws.activeUri()).toBe(bUri);
-    // The fallback repaints via showDiagnostics + invalidateDocViews, and deliberately does NOT fire
-    // the heavier onActiveChanged seam (no followActiveFileContext) — matching the old activateFallback.
+    // The fallback repaints via showDiagnostics + invalidateDocViews, and re-points SILENTLY — no
+    // activationSeq bump (so ide.ts's activation subscriber, incl. followActiveFileContext, does not run),
+    // matching the old activateFallback narrow-effect contract.
     expect(showDiagnostics).toHaveBeenCalledWith(bUri);
     expect(invalidateDocViews).toHaveBeenCalled();
-    expect(active).toEqual([]);
+    expect(store.getState().activationSeq).toBe(seq0);
   });
 
   test('deleting the last file empties the workspace and asks ide.ts for a new model', async () => {
@@ -978,6 +1020,13 @@ describe('createWorkspaceController — listWorkspaceFiles', () => {
 // Idle auto-save (#268): when enabled, an edit arms a ~1000ms debounce; on fire it reuses the exact
 // saveAllDirty path (format-on-save → write every dirty buffer → didSave → tree refresh). Driven with
 // fake timers + the FakePlatform write spy, mirroring historyController.test.ts's debounce style.
+//
+// #982 Task 3 audit (2026-07): this suite ALREADY pins every autosave scenario the ownership inversion
+// must preserve — debounce re-arm ('the idle timer resets on each edit'), cancel-on-disable ('disabling
+// auto-save cancels a pending persist'), yield-to-manual-save ('a manual save cancels a pending
+// auto-save'), no-arm-when-clean ('does not arm when nothing is dirty'), and cancel-on-reopen
+// ('reopening a folder cancels a pending auto-save'). No gap was found, so no new autosave test is added;
+// these describes are the regression bar for the state that moves into workspaceSave.ts (#982 Task 5).
 describe('createWorkspaceController — idle auto-save', () => {
   test('writes dirty buffers after the idle delay, skips clean ones, fires didSave', async () => {
     vi.useFakeTimers();
@@ -1004,7 +1053,9 @@ describe('createWorkspaceController — idle auto-save', () => {
 
       expect(platform.writes.map((w) => w.path)).toContain(`${ROOT}/b.koi`);
       expect(platform.writes.map((w) => w.path)).not.toContain(`${ROOT}/a.koi`); // clean, skipped
-      expect(b.dirty).toBe(false);
+      // Re-read from the store: markSaved replaces the buffer object (immutable owner, #982), so the
+      // `b` captured before the save is stale — the assertion (b is clean after autosave) is unchanged.
+      expect(ws.buffers.get(uriOf('b.koi'))!.dirty).toBe(false);
       expect(lsp.didSave).toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
@@ -1198,6 +1249,29 @@ describe('createWorkspaceController — multi-root', () => {
 
     expect(ws.rootsList()).toEqual([ROOT_A]);
     expect(ws.folderRootToken()).toBe(ROOT_A); // back-compat: primary root === folderRootToken
+  });
+
+  // Regression (#982): the reset must not publish an intermediate folderRootToken='' when switching
+  // folders — the folder-derived <DocsPanelHost> subscribes only to folderRootToken, so an A→''→B flash
+  // would clear it through an empty key. The switch must be a single A→B transition.
+  test('switching folders publishes folderRootToken as a single old→new transition (no "" flash)', async () => {
+    const store = createAppStore();
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    platform.seed(ROOT_B, 'b.koi', 'context B {}\n');
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { store }));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+    expect(store.getState().folderRootToken).toBe(ROOT_A);
+
+    const seen: string[] = [];
+    const unsub = store.subscribe((s, prev) => {
+      if (s.folderRootToken !== prev.folderRootToken) seen.push(s.folderRootToken);
+    });
+    await ws.openFolderPath(ROOT_B, { recent: false });
+    unsub();
+
+    expect(seen).toEqual([ROOT_B]); // straight A→B — no transient ''
+    expect(store.getState().folderRootToken).toBe(ROOT_B);
   });
 
   test('addRoot unions a second folder’s .koi buffers without closing the first', async () => {
@@ -1409,5 +1483,269 @@ describe('createWorkspaceController — multi-root', () => {
     expect(ws.rootsList()).toEqual([ROOT_A]);
     expect(ws.buffers.size).toBe(1);
     expect(lsp.closeDoc).not.toHaveBeenCalled();
+  });
+});
+
+// Rekey on rename/move (#982 Task 1 pin): re-keying open buffers on a file/folder rename or a cross-root
+// move was UNTESTED before the workspace-ownership inversion, yet it is the subtlest transition the slice
+// must reproduce atomically (new Map + re-pointed activeUri in one setState). These pins lock the current
+// behavior — preserved unsaved text + dirty flag, re-pointed active buffer, paired lsp.closeDoc/openDoc,
+// diagnostics moved via renameDiagnostics, rootToken re-derived on a cross-root move — so a regression in
+// Task 3's rekeyBuffers-through-the-slice rewrite fails loudly. Buffers are dirtied through the real sync
+// path (editor.setDoc + syncActiveBuffer), never a direct field write, so the pins survive the move to an
+// immutable, store-owned buffer Map unchanged.
+describe('createWorkspaceController — rekey on rename/move (pin, #982)', () => {
+  test('renaming a dirty active file re-keys its buffer, preserves the unsaved text + dirty flag, and re-points active', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const renameDiagnostics = vi.fn();
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { renameDiagnostics }));
+    await ws.openFolderPath(ROOT, { recent: false });
+
+    const oldUri = uriOf('a.koi');
+    expect(ws.activeUri()).toBe(oldUri);
+    // Dirty the active buffer through the real onChange path (not a direct field write).
+    const edited = 'context A { value V { x: Int } }\n';
+    editor.setDoc(edited);
+    ws.syncActiveBuffer(edited);
+    expect(ws.buffers.get(oldUri)!.dirty).toBe(true);
+    lsp.closeDoc.mockClear();
+    lsp.openDoc.mockClear();
+    lsp.setActive.mockClear();
+
+    await ws.handleRename({ token: `${ROOT}/a.koi`, name: 'a.koi', relPath: 'a.koi', kind: 'file' }, 'renamed.koi');
+
+    const newUri = uriOf('renamed.koi');
+    // The old key is gone; the buffer now lives under the new uri with every identity field re-derived.
+    expect(ws.buffers.has(oldUri)).toBe(false);
+    const buf = ws.buffers.get(newUri)!;
+    expect(buf).toBeDefined();
+    expect(buf.uri).toBe(newUri);
+    expect(buf.path).toBe(`${ROOT}/renamed.koi`);
+    expect(buf.relPath).toBe('renamed.koi');
+    expect(buf.name).toBe('renamed.koi');
+    // The unsaved edit + dirty flag survive the re-key.
+    expect(buf.text).toBe(edited);
+    expect(buf.dirty).toBe(true);
+    // The active buffer follows the rename, and the LSP is re-pointed at the new uri.
+    expect(ws.activeUri()).toBe(newUri);
+    expect(lsp.setActive).toHaveBeenCalledWith(newUri);
+    // The LSP doc was closed under the old uri and reopened under the new one (paired, text preserved).
+    expect(lsp.closeDoc).toHaveBeenCalledWith(oldUri);
+    expect(lsp.openDoc).toHaveBeenCalledWith(newUri, edited);
+    // The cached diagnostics moved with the buffer.
+    expect(renameDiagnostics).toHaveBeenCalledWith(oldUri, newUri);
+  });
+
+  test('renaming a folder re-keys every open buffer beneath it, leaving siblings untouched', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('sub/x.koi', 'context X {}\n');
+    platform.files.set('sub/y.koi', 'context Y {}\n');
+    platform.files.set('top.koi', 'context Top {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const renameDiagnostics = vi.fn();
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { renameDiagnostics }));
+    await ws.openFolderPath(ROOT, { recent: false });
+    expect(ws.buffers.size).toBe(3);
+
+    await ws.handleRename({ token: `${ROOT}/sub`, name: 'sub', relPath: 'sub', kind: 'dir' }, 'renamed');
+
+    // Both files under sub/ moved to renamed/; the sibling top.koi is untouched.
+    expect(ws.buffers.has(uriOf('sub/x.koi'))).toBe(false);
+    expect(ws.buffers.has(uriOf('sub/y.koi'))).toBe(false);
+    expect(ws.buffers.has(uriOf('renamed/x.koi'))).toBe(true);
+    expect(ws.buffers.has(uriOf('renamed/y.koi'))).toBe(true);
+    expect(ws.buffers.has(uriOf('top.koi'))).toBe(true);
+    // The re-keyed buffers' relPath fields are re-derived under the new folder name.
+    expect(ws.buffers.get(uriOf('renamed/x.koi'))!.relPath).toBe('renamed/x.koi');
+    expect(ws.buffers.get(uriOf('renamed/y.koi'))!.relPath).toBe('renamed/y.koi');
+    // Each re-keyed buffer's diagnostics moved to its new uri.
+    expect(renameDiagnostics).toHaveBeenCalledWith(uriOf('sub/x.koi'), uriOf('renamed/x.koi'));
+    expect(renameDiagnostics).toHaveBeenCalledWith(uriOf('sub/y.koi'), uriOf('renamed/y.koi'));
+  });
+
+  test('moving a dirty file across roots re-keys it and re-derives its rootToken', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    platform.seed(ROOT_B, 'keep.koi', 'context Keep {}\n');
+    // The fake leaves moveEntry unimplemented (it rejects); supply a minimal cross-root move for this pin
+    // — it returns the new token under the destination root, mirroring the host's reparent.
+    platform.moveEntry = (async (_token: string, destRoot: string, relPath: string): Promise<string> =>
+      `${destRoot}/${relPath}`) as unknown as FakePlatform['moveEntry'];
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const renameDiagnostics = vi.fn();
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { renameDiagnostics }));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+    await ws.addRoot(ROOT_B);
+
+    const oldUri = uriUnder(ROOT_A, 'a.koi');
+    expect(ws.activeUri()).toBe(oldUri);
+    expect(ws.buffers.get(oldUri)!.rootToken).toBe(ROOT_A);
+    // Dirty it through the real path before the move.
+    const edited = 'context A { entity E {} }\n';
+    editor.setDoc(edited);
+    ws.syncActiveBuffer(edited);
+    lsp.closeDoc.mockClear();
+    lsp.openDoc.mockClear();
+
+    await ws.handleMove(
+      { token: `${ROOT_A}/a.koi`, name: 'a.koi', relPath: 'a.koi', kind: 'file' },
+      ROOT_B,
+    );
+
+    const newUri = uriUnder(ROOT_B, 'a.koi');
+    expect(ws.buffers.has(oldUri)).toBe(false);
+    const buf = ws.buffers.get(newUri)!;
+    expect(buf).toBeDefined();
+    // The cross-root move re-derives the owning root from the new path (was ROOT_A, now ROOT_B).
+    expect(buf.rootToken).toBe(ROOT_B);
+    // The unsaved edit + dirty flag survive the move.
+    expect(buf.text).toBe(edited);
+    expect(buf.dirty).toBe(true);
+    // Active follows the move; the LSP doc was closed under the old uri and reopened under the new one.
+    expect(ws.activeUri()).toBe(newUri);
+    expect(lsp.closeDoc).toHaveBeenCalledWith(oldUri);
+    expect(lsp.openDoc).toHaveBeenCalledWith(newUri, edited);
+    expect(renameDiagnostics).toHaveBeenCalledWith(oldUri, newUri);
+  });
+});
+
+// Store-ownership parity (#982 Task 3): the workspace slice is now the SINGLE owner — the facade reads
+// through it and writes through its actions, with NO refreshDirtyIndicator projection. This is the
+// parity bar that supersedes the Task-1 dirty-projection pin: drive the controller (built over a real
+// createAppStore()) through open → edit → rename → save and assert after EACH step that the slice and
+// the facade never diverge. The dep count carries no refreshDirtyIndicator — it no longer exists.
+describe('createWorkspaceController — store ownership parity (#982)', () => {
+  test('the workspace slice mirrors the facade through open → edit → rename → save', async () => {
+    const store = createAppStore();
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { store }));
+
+    // open: the slice holds the buffer Map, active uri, and roots the facade exposes.
+    await ws.openFolderPath(ROOT, { recent: false });
+    expect(store.getState().buffers).toBe(ws.buffers); // the facade getter IS the slice's Map (one truth)
+    expect(store.getState().activeUri).toBe(ws.activeUri());
+    expect(store.getState().folderRootToken).toBe(ws.folderRootToken());
+    expect(store.getState().roots).toEqual(ws.rootsList());
+    expect(ws.activeUri()).toBe(uriOf('a.koi'));
+
+    // edit: dirty the active buffer through the real sync path — the slice sees it with no manual push.
+    const edited = 'context A { value V {} }\n';
+    editor.setDoc(edited);
+    ws.syncActiveBuffer(edited);
+    expect(store.getState().buffers.get(uriOf('a.koi'))!.dirty).toBe(true);
+    expect(store.getState().dirtyCount()).toBe(1);
+
+    // rename: the re-key lands atomically in the slice (new uri, active re-pointed, dirty text preserved).
+    await ws.handleRename({ token: `${ROOT}/a.koi`, name: 'a.koi', relPath: 'a.koi', kind: 'file' }, 'renamed.koi');
+    expect(store.getState().activeUri).toBe(uriOf('renamed.koi'));
+    expect(store.getState().activeUri).toBe(ws.activeUri());
+    expect(store.getState().buffers.has(uriOf('a.koi'))).toBe(false);
+    expect(store.getState().buffers.get(uriOf('renamed.koi'))!.dirty).toBe(true);
+
+    // save: markSaved clears dirty in the slice — again with no projection step.
+    await ws.saveActive();
+    expect(store.getState().buffers.get(uriOf('renamed.koi'))!.dirty).toBe(false);
+    expect(store.getState().dirtyCount()).toBe(0);
+    // Never diverged: the facade getter and the slice are the same Map throughout.
+    expect(store.getState().buffers).toBe(ws.buffers);
+  });
+});
+
+// Seq seams (#982 Task 4): the four callback seams became monotonic slice fields — activationSeq /
+// workspaceEditSeq / entriesSeq / saveSeq — bumped at EXACTLY the points the old callbacks fired
+// (workspaceController.ts:484/:918/:370/:941,:949,:1023,:1078). ide.ts subscribes to them. These tests
+// pin each bump point (and the critical NON-bump: folder open must stay silent on activationSeq).
+describe('createWorkspaceController — seq seams (#982)', () => {
+  test('openFolderPath does NOT bump activationSeq (the folder-open :489 contract) but bumps entriesSeq', async () => {
+    const store = createAppStore();
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { store }));
+    const seqA0 = store.getState().activationSeq;
+    const seqE0 = store.getState().entriesSeq;
+
+    await ws.openFolderPath(ROOT, { recent: false });
+
+    // Folder open activates the first file SILENTLY — activationSeq must not advance…
+    expect(store.getState().activationSeq).toBe(seqA0);
+    // …but the explorer tree was re-read, so entriesSeq advances (ide.ts resets history off it).
+    expect(store.getState().entriesSeq).toBeGreaterThan(seqE0);
+    expect(store.getState().activeUri).toBe(uriOf('a.koi')); // the active file still moved
+  });
+
+  test('applyWorkspaceEdit bumps workspaceEditSeq', async () => {
+    const store = createAppStore();
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'AAAA\n');
+    platform.files.set('b.koi', 'BBBB\n');
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { store }));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const seq0 = store.getState().workspaceEditSeq;
+
+    ws.applyWorkspaceEdit({
+      changes: {
+        [uriOf('b.koi')]: [
+          { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, newText: 'Y' },
+        ],
+      },
+    });
+
+    expect(store.getState().workspaceEditSeq).toBe(seq0 + 1);
+  });
+
+  test('a structural op (rename) bumps entriesSeq via refreshEntries', async () => {
+    const store = createAppStore();
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { store }));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const seq0 = store.getState().entriesSeq;
+
+    await ws.handleRename({ token: `${ROOT}/a.koi`, name: 'a.koi', relPath: 'a.koi', kind: 'file' }, 'renamed.koi');
+
+    expect(store.getState().entriesSeq).toBeGreaterThan(seq0);
+  });
+
+  test('each disk-writing save path bumps saveSeq (saveActive, saveAllDirty, applyFileEdit)', async () => {
+    const store = createAppStore();
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const editor = makeEditor([]);
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), editor, { store }));
+    await ws.openFolderPath(ROOT, { recent: false });
+
+    // saveActive: dirty the active buffer through the real sync path, then save.
+    editor.setDoc('context A { v1 }\n');
+    ws.syncActiveBuffer('context A { v1 }\n');
+    let seq = store.getState().saveSeq;
+    await ws.saveActive();
+    expect(store.getState().saveSeq).toBe(seq + 1);
+
+    // saveAllDirty: dirty the non-active b.koi, then Save all.
+    ws.syncBuffer(uriOf('b.koi'), 'context B { v }\n');
+    seq = store.getState().saveSeq;
+    await ws.saveAllDirty();
+    expect(store.getState().saveSeq).toBe(seq + 1);
+
+    // applyFileEdit: writing a full body to an open file hits disk.
+    seq = store.getState().saveSeq;
+    await ws.applyFileEdit('a.koi', 'context A { v3 }\n');
+    expect(store.getState().saveSeq).toBe(seq + 1);
   });
 });

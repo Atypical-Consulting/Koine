@@ -27,7 +27,9 @@ export interface CommandWiringDeps {
   openFolder(): void;
   search: { focus(): void; toggle(): void };
   requestNewModel(): void;
-  workspace: { saveAllDirty(): void; buffers: ReadonlyMap<string, { uri: string; relPath: string }> };
+  // `buffers` is a THUNK, not a value: the workspace slice REPLACES its buffer Map on every mutation
+  // (#982), so a value captured once at construction would freeze at the initial empty Map. Read live.
+  workspace: { saveAllDirty(): void; buffers(): ReadonlyMap<string, { uri: string; relPath: string }> };
   copyShareLink(): void;
   controller: {
     runCheck(): void;
@@ -148,7 +150,7 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
 
     // Surface every open file as a "Go to File" entry so the palette doubles as a
     // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open.
-    for (const buf of Array.from(deps.workspace.buffers.values()).sort((a, b) => a.relPath.localeCompare(b.relPath))) {
+    for (const buf of Array.from(deps.workspace.buffers().values()).sort((a, b) => a.relPath.localeCompare(b.relPath))) {
       cmds.push({ id: 'goto:' + buf.uri, title: buf.relPath, group: 'Go to File', run: () => deps.openUri(buf.uri) });
     }
 
