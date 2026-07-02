@@ -29,6 +29,10 @@ Colors follow your active color scheme through standard TextMate scopes — `key
 `storage.type`, `entity.name.type`, `support.type`, `string.quoted`, `string.regexp`, `comment`,
 `constant.numeric`, and `keyword.operator` — so it looks at home in whatever theme you use.
 
+Beyond generic scopes, Koine colors each *DDD concept* — an aggregate, a value object, an enum — with
+its own hue, the same one the Studio explorer and canvas use, driven by the language server's kind
+modifiers. See [Concept Colors](/guides/concept-colors/) for the palette and how it works.
+
 ### JetBrains Rider (and IntelliJ-based IDEs)
 
 Rider reads TextMate bundles directly — no plugin or build step needed.
