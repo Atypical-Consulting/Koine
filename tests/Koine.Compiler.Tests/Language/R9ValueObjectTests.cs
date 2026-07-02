@@ -621,4 +621,58 @@ public class R9ValueObjectTests
             """;
         Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.ValueObjectScalarArithmeticNoNumericField);
     }
+
+    [Fact]
+    public void Derived_member_narrowing_decimal_body_into_an_int_declared_type_is_rejected()
+    {
+        // `total: Int = base * 1.5` — the body infers to Decimal, the member is declared Int; no target
+        // implicitly narrows Decimal to Int (C#'s CS0266). The model must be rejected before any emitter
+        // runs, with the diagnostic spanned to the offending derived member and naming it.
+        const string src = """
+            context Shop {
+              value Sums {
+                base:  Decimal
+                total: Int = base * 1.5
+              }
+            }
+            """;
+        var narrowing = Diagnose(src).ShouldHaveSingleItem();
+        narrowing.Code.ShouldBe(DiagnosticCodes.NarrowingConversionInDerivedMember);
+        narrowing.Severity.ShouldBe(DiagnosticSeverity.Error);
+        narrowing.Message.ShouldContain("total");
+        narrowing.Line.ShouldBe(4);   // the `total: Int = base * 1.5` line, not the whole value block
+    }
+
+    [Fact]
+    public void Derived_member_widening_int_body_into_a_decimal_declared_type_is_allowed()
+    {
+        // `total: Decimal = a + b` over two Int fields is the LEGAL widening case (C# widens int → decimal
+        // for free); it must NOT be flagged — the Rust emitter inserts the conversion instead.
+        const string src = """
+            context Shop {
+              value Sums {
+                a: Int
+                b: Int
+                total: Decimal = a + b
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NarrowingConversionInDerivedMember);
+    }
+
+    [Fact]
+    public void Derived_member_with_a_same_type_numeric_body_is_allowed()
+    {
+        // Int → Int (and Decimal → Decimal) derived members are unchanged: no narrowing, no diagnostic.
+        const string src = """
+            context Shop {
+              value Sums {
+                a: Int
+                b: Int
+                total: Int = a + b
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NarrowingConversionInDerivedMember);
+    }
 }
