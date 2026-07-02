@@ -1785,10 +1785,15 @@ fn mcp_endpoint(port: u16, state: State<'_, McpState>) -> Result<Option<McpEndpo
 /// Stop the MCP sidecar, forget its scraped URL, and drop the cached endpoint info so the next
 /// `mcp_endpoint` re-spawns a fresh server. Idempotent and safe when nothing is running. Takes
 /// `state.resolving` so a stop can't interleave with an in-flight `mcp_endpoint` resolve, then routes
-/// the teardown through the shared [`teardown_sidecar`] helper.
+/// the teardown through the shared [`teardown_sidecar`] helper. Best-effort: it always reaps the child
+/// and returns `Ok(())`.
 #[tauri::command]
 fn mcp_stop(state: State<'_, McpState>) -> Result<(), String> {
-    let _resolving = state.resolving.lock().map_err(|e| e.to_string())?;
+    // `resolving` guards a `()` — no data invariant to corrupt — so recover from a poisoned lock and
+    // proceed rather than bail: a Stop must ALWAYS tear the sidecar down (reap the child, clear the
+    // cache), even after an unrelated panic. Mirrors the `unwrap_or_else(|e| e.into_inner())` recovery
+    // used elsewhere in this file, and preserves the pre-#947 guarantee that `mcp_stop` never fails.
+    let _resolving = state.resolving.lock().unwrap_or_else(|e| e.into_inner());
     teardown_sidecar(&state);
     Ok(())
 }
