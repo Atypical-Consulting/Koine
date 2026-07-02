@@ -888,6 +888,9 @@ function buildHome(
       toggle.addEventListener('click', () => {
         recentExpanded = !recentExpanded;
         renderRecent();
+        // renderRecent() rebuilds recentBody, destroying THIS button — move focus to its rebuilt twin so a
+        // keyboard user keeps their place (the toggle persists: expand/collapse doesn't change the count).
+        recentBody.querySelector<HTMLButtonElement>('.koi-welcome-recent-toggle')?.focus();
       });
       recentBody.appendChild(toggle);
     }

@@ -480,6 +480,20 @@ describe('Home dense recents (#1005)', () => {
     expect(toggle().textContent).toContain('View all');
   });
 
+  test('the View all / Show less toggle keeps keyboard focus across its re-render (#1005 review)', () => {
+    seedRecents(Array.from({ length: 8 }, (_, i) => ({ path: `/proj/folder-${i}` })));
+    mountHome(container, makeCallbacks());
+    const toggle = () => document.querySelector<HTMLButtonElement>('.koi-welcome-recent-toggle')!;
+
+    // Activating the toggle rebuilds the recents body (destroying the button); focus must land on the
+    // rebuilt twin so a keyboard user isn't dropped to <body>.
+    toggle().focus();
+    toggle().click();
+    expect(document.activeElement).toBe(toggle());
+    toggle().click();
+    expect(document.activeElement).toBe(toggle());
+  });
+
   test('shows no collapse toggle when six or fewer recents', () => {
     seedRecents(Array.from({ length: 4 }, (_, i) => ({ path: `/proj/folder-${i}` })));
     mountHome(container, makeCallbacks());
