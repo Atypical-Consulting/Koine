@@ -50,6 +50,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Koine.Compiler\Koine.Compiler.csproj" />
+    <!-- The emitters now live in their own Koine.Emit.<Target> assemblies (issue #861); the aggregator
+         brings all nine + Common transitively, and each emitter grants InternalsVisibleTo to this test
+         project so the emitter-option and naming internals stay reachable. -->
+    <ProjectReference Include="..\..\src\Koine.Emit.All\Koine.Emit.All.csproj" />
     <ProjectReference Include="..\..\src\Koine.Cli\Koine.Cli.csproj" />
     <!-- Referenced so the unified-emitter test can read Koine.Mcp's EmitterFactory.Targets and
          prove the CLI and MCP target lists no longer drift (issue #69, Task 5). -->

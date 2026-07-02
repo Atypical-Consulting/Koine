@@ -28,7 +28,7 @@ public sealed class PlatformApiTests
     public void Embeds_the_compiler_and_resolves_an_emitter_through_the_registry()
     {
         // Resolve the C# emitter through the public registry (built-in providers).
-        var registry = new EmitterRegistry();
+        var registry = new EmitterRegistry(BuiltInEmitterProviders.All);
         registry.IsSupported("csharp").ShouldBeTrue();
         registry.TryCreate("csharp", EmitterOptions.Empty, out IEmitter emitter).ShouldBeTrue();
 
@@ -54,7 +54,7 @@ public sealed class PlatformApiTests
         // A model whose type name is lowercase trips the consumer analyzer.
         var result = compiler.Compile(
             "context Catalog { value money { amount: Decimal } }",
-            new EmitterRegistry().TryCreate("csharp", EmitterOptions.Empty, out var e) ? e : throw new InvalidOperationException());
+            new EmitterRegistry(BuiltInEmitterProviders.All).TryCreate("csharp", EmitterOptions.Empty, out var e) ? e : throw new InvalidOperationException());
 
         result.Diagnostics.ShouldContain(d => d.Code == "CONSUMER001");
     }

@@ -21,7 +21,7 @@ public class RustEmitterTests
     [Fact]
     public void Rust_target_is_registered_in_the_unified_registry()
     {
-        var registry = new EmitterRegistry();
+        var registry = new EmitterRegistry(BuiltInEmitterProviders.All);
         registry.IsSupported("rust").ShouldBeTrue();
         registry.SupportedTargets.ShouldContain("rust");
     }
@@ -35,7 +35,7 @@ public class RustEmitterTests
     [Fact]
     public void Empty_options_resolve_a_rust_emitter()
     {
-        var registry = new EmitterRegistry();
+        var registry = new EmitterRegistry(BuiltInEmitterProviders.All);
         registry.TryCreate("rust", EmitterOptions.Empty, out var emitter).ShouldBeTrue();
         emitter.ShouldNotBeNull();
         emitter.TargetName.ShouldBe("rust");

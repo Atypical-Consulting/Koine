@@ -15,16 +15,28 @@ public sealed class EmitterRegistry
 {
     private readonly IReadOnlyDictionary<string, IEmitterProvider> _byTarget;
 
-    /// <summary>A registry of just the built-in providers.</summary>
-    public EmitterRegistry() : this(externalProviders: null) { }
+    /// <summary>
+    /// A registry of exactly <paramref name="builtInProviders"/> — the built-in emitter set the caller
+    /// supplies (pass <c>Koine.Compiler.Emit.BuiltInEmitterProviders.All</c> from the
+    /// <c>Koine.Emit.All</c> aggregator for the shipping targets). The core compiler no longer hardcodes
+    /// the built-ins (issue #861): each emitter lives in its own <c>Koine.Emit.&lt;Target&gt;</c>
+    /// assembly, so the list is injected from above rather than read from a static the compiler can't
+    /// reference without a cycle.
+    /// </summary>
+    public EmitterRegistry(IReadOnlyList<IEmitterProvider> builtInProviders)
+        : this(builtInProviders, externalProviders: null) { }
 
     /// <summary>
-    /// A registry of the built-in providers plus <paramref name="externalProviders"/> (appended after
-    /// the built-ins). A null/empty external list yields the built-in-only registry.
+    /// A registry of <paramref name="builtInProviders"/> plus <paramref name="externalProviders"/>
+    /// (appended after the built-ins, so a plugin can never shadow a built-in target). A null/empty
+    /// external list yields the built-in-only registry.
     /// </summary>
-    public EmitterRegistry(IEnumerable<IEmitterProvider>? externalProviders)
+    public EmitterRegistry(
+        IReadOnlyList<IEmitterProvider> builtInProviders,
+        IEnumerable<IEmitterProvider>? externalProviders)
     {
-        var providers = new List<IEmitterProvider>(BuiltInEmitterProviders.All);
+        ArgumentNullException.ThrowIfNull(builtInProviders);
+        var providers = new List<IEmitterProvider>(builtInProviders);
         if (externalProviders is not null)
         {
             providers.AddRange(externalProviders);

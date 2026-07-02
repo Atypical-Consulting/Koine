@@ -16,7 +16,7 @@ namespace Koine.Mcp;
 /// </summary>
 internal static class EmitterFactory
 {
-    private static readonly EmitterRegistry BuiltIn = new();
+    private static readonly EmitterRegistry BuiltIn = new(BuiltInEmitterProviders.All);
 
     /// <summary>The output targets the server understands, in display order (== the CLI's built-ins).</summary>
     public static IReadOnlyList<string> Targets => BuiltIn.SupportedTargets;

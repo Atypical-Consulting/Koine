@@ -1,0 +1,13 @@
+#nullable enable
+Koine.Compiler.Emit.Php.PhpEmitter
+Koine.Compiler.Emit.Php.PhpEmitter.CacheDiscriminator.get -> string!
+Koine.Compiler.Emit.Php.PhpEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.Php.PhpEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.Php.PhpEmitter.PhpEmitter() -> void
+Koine.Compiler.Emit.Php.PhpEmitter.TargetName.get -> string!
+Koine.Compiler.Emit.PhpEmitterProvider
+Koine.Compiler.Emit.PhpEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! options) -> Koine.Compiler.Emit.IEmitter!
+Koine.Compiler.Emit.PhpEmitterProvider.DisplayName.get -> string!
+Koine.Compiler.Emit.PhpEmitterProvider.FileExtension.get -> string!
+Koine.Compiler.Emit.PhpEmitterProvider.PhpEmitterProvider() -> void
+Koine.Compiler.Emit.PhpEmitterProvider.Target.get -> string!

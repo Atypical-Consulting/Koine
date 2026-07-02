@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Koine.Compiler</RootNamespace>
+  </PropertyGroup>
+
+  <!-- The CSharp emitter, extracted from Koine.Compiler into its own assembly (issue #861) so a
+       consumer can take just this target. Namespace stays Koine.Compiler.Emit.CSharp (assembly
+       name != namespace) to keep the extraction reference-only. Packable per-target. -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Koine.Emit.CSharp</PackageId>
+    <Description>The C# backend for the Koine DSL compiler — emits idiomatic, self-contained C# (value objects, entities, aggregates, invariants, CQRS, state machines, repositories) from a Koine bounded-context model. The primary, most complete Koine target.</Description>
+    <PackageTags>ddd;domain-driven-design;dsl;compiler;code-generation;koine;emitter;csharp</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Koine.Emit.Common\Koine.Emit.Common.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Koine.Compiler.Tests" />
+  </ItemGroup>
+
+</Project>

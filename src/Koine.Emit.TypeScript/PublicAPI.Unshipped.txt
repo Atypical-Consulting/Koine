@@ -1,0 +1,13 @@
+#nullable enable
+Koine.Compiler.Emit.TypeScript.TypeScriptEmitter
+Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.CacheDiscriminator.get -> string!
+Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.TargetName.get -> string!
+Koine.Compiler.Emit.TypeScript.TypeScriptEmitter.TypeScriptEmitter() -> void
+Koine.Compiler.Emit.TypeScriptEmitterProvider
+Koine.Compiler.Emit.TypeScriptEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! options) -> Koine.Compiler.Emit.IEmitter!
+Koine.Compiler.Emit.TypeScriptEmitterProvider.DisplayName.get -> string!
+Koine.Compiler.Emit.TypeScriptEmitterProvider.FileExtension.get -> string!
+Koine.Compiler.Emit.TypeScriptEmitterProvider.Target.get -> string!
+Koine.Compiler.Emit.TypeScriptEmitterProvider.TypeScriptEmitterProvider() -> void

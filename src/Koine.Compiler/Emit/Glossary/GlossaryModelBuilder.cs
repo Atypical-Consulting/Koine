@@ -7,7 +7,7 @@ namespace Koine.Compiler.Emit.Glossary;
 /// <see cref="KoineModel"/> in declaration order. The same <see cref="Walk"/> is the single source
 /// of truth for an entry's qualified id, so the glossary view and the doc-comment editor
 /// (<c>SetDocEditor</c>) address the very same node by the very same id. Kind names match the
-/// glossary markdown emitter (<see cref="GlossaryEmitter"/>).
+/// glossary markdown emitter (<c>GlossaryEmitter</c>, now in the Koine.Emit.Glossary assembly).
 /// </summary>
 public static class GlossaryModelBuilder
 {

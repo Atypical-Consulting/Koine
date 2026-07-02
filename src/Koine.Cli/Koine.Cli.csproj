@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Koine.Compiler\Koine.Compiler.csproj" />
+    <ProjectReference Include="..\Koine.Emit.All\Koine.Emit.All.csproj" />
     <!-- `koine mcp` hosts the MCP server in-process by reusing Koine.Mcp's StdioHost / HttpHost
          (one implementation, shared with the standalone koine-mcp tool). This pulls in the ASP.NET
          Core framework reference transitively, used only by the HTTP host. -->

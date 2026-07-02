@@ -1,0 +1,13 @@
+#nullable enable
+Koine.Compiler.Emit.CSharp.CSharpEmitter
+Koine.Compiler.Emit.CSharp.CSharpEmitter.CSharpEmitter() -> void
+Koine.Compiler.Emit.CSharp.CSharpEmitter.CacheDiscriminator.get -> string!
+Koine.Compiler.Emit.CSharp.CSharpEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.CSharp.CSharpEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.CSharp.CSharpEmitter.TargetName.get -> string!
+Koine.Compiler.Emit.CSharpEmitterProvider
+Koine.Compiler.Emit.CSharpEmitterProvider.CSharpEmitterProvider() -> void
+Koine.Compiler.Emit.CSharpEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! options) -> Koine.Compiler.Emit.IEmitter!
+Koine.Compiler.Emit.CSharpEmitterProvider.DisplayName.get -> string!
+Koine.Compiler.Emit.CSharpEmitterProvider.FileExtension.get -> string!
+Koine.Compiler.Emit.CSharpEmitterProvider.Target.get -> string!

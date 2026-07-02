@@ -9,7 +9,7 @@ namespace Koine.Compiler.Emit;
 /// text escaping so both emitters stay byte-consistent rather than carrying near-identical copies.
 /// Target-agnostic: consumes only the <see cref="KoineModel"/>.
 /// </summary>
-internal static class MarkdownDoc
+public static class MarkdownDoc
 {
     /// <summary>Renders a Koine type reference in source syntax (target-agnostic).</summary>
     public static string KoineType(TypeRef t)

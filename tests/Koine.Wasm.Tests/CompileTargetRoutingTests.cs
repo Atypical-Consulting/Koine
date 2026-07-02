@@ -55,7 +55,7 @@ public class CompileTargetRoutingTests
 
     /// <summary>Every target the registry resolves — drives the theory so a new provider auto-extends coverage.</summary>
     public static IEnumerable<object[]> KnownTargets() =>
-        new EmitterRegistry().SupportedTargets.Select(t => new object[] { t });
+        new EmitterRegistry(BuiltInEmitterProviders.All).SupportedTargets.Select(t => new object[] { t });
 
     [Theory]
     [MemberData(nameof(KnownTargets))]
@@ -63,7 +63,7 @@ public class CompileTargetRoutingTests
     {
         // The registry is the single source of truth Compile must agree with: resolve the emitter it
         // should pick, and assert Compile reports THAT emitter's TargetName (never a silent csharp).
-        new EmitterRegistry().TryCreate(target, EmitterOptions.Empty, out var emitter).ShouldBeTrue();
+        new EmitterRegistry(BuiltInEmitterProviders.All).TryCreate(target, EmitterOptions.Empty, out var emitter).ShouldBeTrue();
 
         var result = JsonNode.Parse(Compile(Source, target))!;
 

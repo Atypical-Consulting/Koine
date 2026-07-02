@@ -1,0 +1,3 @@
+#nullable enable
+Koine.Compiler.Emit.BuiltInEmitterProviders
+static Koine.Compiler.Emit.BuiltInEmitterProviders.All.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.IEmitterProvider!>!

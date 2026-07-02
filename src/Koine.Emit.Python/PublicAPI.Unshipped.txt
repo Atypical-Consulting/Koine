@@ -1,0 +1,13 @@
+#nullable enable
+Koine.Compiler.Emit.Python.PythonEmitter
+Koine.Compiler.Emit.Python.PythonEmitter.CacheDiscriminator.get -> string!
+Koine.Compiler.Emit.Python.PythonEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.Python.PythonEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.Emit.Python.PythonEmitter.PythonEmitter() -> void
+Koine.Compiler.Emit.Python.PythonEmitter.TargetName.get -> string!
+Koine.Compiler.Emit.PythonEmitterProvider
+Koine.Compiler.Emit.PythonEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! options) -> Koine.Compiler.Emit.IEmitter!
+Koine.Compiler.Emit.PythonEmitterProvider.DisplayName.get -> string!
+Koine.Compiler.Emit.PythonEmitterProvider.FileExtension.get -> string!
+Koine.Compiler.Emit.PythonEmitterProvider.PythonEmitterProvider() -> void
+Koine.Compiler.Emit.PythonEmitterProvider.Target.get -> string!
