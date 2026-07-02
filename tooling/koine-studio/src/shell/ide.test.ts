@@ -247,6 +247,9 @@ class FakePlatform implements Platform {
   gitInit(): Promise<void> {
     return this.gitUnavailable();
   }
+  gitClone(): Promise<string> {
+    return this.gitUnavailable();
+  }
   writeTextFile(path: string, contents: string): Promise<void> {
     this.files.set(this.relOf(path), contents);
     return Promise.resolve();
