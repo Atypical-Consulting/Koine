@@ -1,5 +1,10 @@
 import type { JSX } from 'preact';
-import type { RightView } from '@/store/slices/uiChrome';
+
+/** The right-rail view a stripe button opens/closes. Mirrors Koine Studio's `RightView` union
+ *  (`tooling/koine-studio/src/store/slices/uiChrome.ts`) but is declared locally so this
+ *  component carries no import from Studio's store — @atypical/koine-ui stays store-free. Keep
+ *  this list in sync with `RightView` if a right-rail tool window is ever added or removed. */
+type RightStripView = 'props' | 'assistant' | 'source-control';
 
 // RightStrip: the right-edge tool-window stripe's buttons as a Preact component (#759, finishing the #193
 // migration — replaces the imperative `rightStripMarkup()` string builder injected via innerHTML at boot).
@@ -15,7 +20,7 @@ import type { RightView } from '@/store/slices/uiChrome';
 
 /** One stripe toggle: the RightView it controls, its accessible name/tooltip, and its 16×16 line icon. */
 interface StripeButton {
-  view: RightView;
+  view: RightStripView;
   /** Accessible name (aria-label) + the custom left-pointing hover/focus tooltip text (`data-tooltip`,
    *  styled in _inspector.scss). Rider shows the tool-window name on its stripe icons. */
   label: string;
