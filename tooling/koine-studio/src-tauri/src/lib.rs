@@ -1703,6 +1703,16 @@ fn spawn_and_wait_for_endpoint(state: &McpState, port: u16) -> Result<Option<Str
     Ok(None)
 }
 
+/// Whether a cached endpoint (resolved for `info.requested_port`) may be reused verbatim for a fresh
+/// request for `port`, or whether the sidecar must be moved (torn down + respawned). Reuse only on an
+/// exact, non-fallback match: a different `port` — the JSON-apply path (#947) — must move the server,
+/// and a lingering busy-port `fallback` must re-attempt the originally-requested port (self-heal once
+/// it frees up). Port `0` (OS-assigned) is a wildcard: a caller asking for "whatever's running" reuses
+/// a live non-fallback endpoint. The port is the sidecar's identity, so it belongs in the cache key.
+fn can_reuse_cached_endpoint(info: &McpEndpointInfo, port: u16) -> bool {
+    !info.fallback && (port == 0 || info.requested_port == port)
+}
+
 /// Lazily start the `koine mcp --http` sidecar (idempotent) on `port` and return the endpoint it bound
 /// (`0` = OS-assigned). If a specific (non-zero) `port` never comes up — the child exits, or the wait
 /// times out, with no announce line — it is most likely busy: the dead child is reaped and the server is
@@ -1718,11 +1728,22 @@ fn mcp_endpoint(port: u16, state: State<'_, McpState>) -> Result<Option<McpEndpo
     // second caller blocks here, then falls through to the cached-`info` fast path below.
     let _resolving = state.resolving.lock().map_err(|e| e.to_string())?;
 
-    // Idempotent fast path: a resolved endpoint is cached — reuse the running server verbatim.
+    // Idempotent fast path — reuse the running server verbatim ONLY when the cached endpoint still
+    // matches what's being asked for (same requested port, not a lingering busy-port fallback; port `0`
+    // is a wildcard). A port change — the JSON-apply path (#947) — or a stale fallback must MOVE the
+    // server: tear the sidecar down (via the non-reentrant `teardown_sidecar`, safe under the held
+    // `resolving` lock) and fall through to a fresh spawn on `port`.
+    let mut needs_teardown = false;
     if let Ok(g) = state.info.lock() {
         if let Some(info) = g.as_ref() {
-            return Ok(Some(info.clone()));
+            if can_reuse_cached_endpoint(info, port) {
+                return Ok(Some(info.clone()));
+            }
+            needs_teardown = true;
         }
+    }
+    if needs_teardown {
+        teardown_sidecar(&state);
     }
 
     // First attempt: the requested port.
@@ -2241,6 +2262,46 @@ mod tests {
             state.child.lock().unwrap().is_none(),
             "teardown must leave no child running"
         );
+    }
+
+    #[test]
+    fn cached_endpoint_reused_only_on_exact_nonfallback_match() {
+        // A resolved, non-fallback server on port 7900.
+        let info = McpEndpointInfo {
+            url: "http://127.0.0.1:7900/mcp".into(),
+            requested_port: 7900,
+            fallback: false,
+        };
+        // Same port asked again ⇒ reuse the running server verbatim (the happy path — no regression).
+        assert!(can_reuse_cached_endpoint(&info, 7900));
+        // A DIFFERENT port (the JSON-apply path, #947) ⇒ must NOT reuse; the sidecar has to move.
+        assert!(!can_reuse_cached_endpoint(&info, 7901));
+    }
+
+    #[test]
+    fn cached_fallback_endpoint_is_never_reused() {
+        // A busy-port fallback: requested 7900 but the sidecar bound an OS-assigned port instead.
+        let fb = McpEndpointInfo {
+            url: "http://127.0.0.1:50123/mcp".into(),
+            requested_port: 7900,
+            fallback: true,
+        };
+        // Even when asked for the SAME requested port, a lingering fallback must re-attempt
+        // (teardown + respawn) so it self-heals once the original port frees up — never returned stale.
+        assert!(!can_reuse_cached_endpoint(&fb, 7900));
+        assert!(!can_reuse_cached_endpoint(&fb, 7901));
+    }
+
+    #[test]
+    fn port_zero_wildcard_reuses_a_running_nonfallback_server() {
+        // A `0` (OS-assigned) request means "reuse whatever concrete port is already running", so a
+        // live non-fallback server matches (the wildcard guard from the spec's port-0 note).
+        let info = McpEndpointInfo {
+            url: "http://127.0.0.1:7900/mcp".into(),
+            requested_port: 7900,
+            fallback: false,
+        };
+        assert!(can_reuse_cached_endpoint(&info, 0));
     }
 
     // --- sidecar launcher selection (pure) ----------------------------------
