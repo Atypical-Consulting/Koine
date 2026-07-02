@@ -232,6 +232,14 @@ jobs:
       - name: Install npm dependencies (workspace root)
         run: npm ci
 
+      # Lint gate (#978): the flat-config ESLint gate over both frontend packages mechanically enforces
+      # the frontend safety conventions (void-prefixed promises, domById, escape-before-innerHTML, and
+      # the react-hooks rules) that tsc can't see. Runs on this single Linux leg only — lint findings are
+      # OS-independent, so triplicating it across the desktop matrix (whose `Build frontend (npm)` tsc
+      # gate is unchanged) would add cost, not coverage. Right after `npm ci`, beside the tsc gates.
+      - name: Lint frontend (npm)
+        run: npm run lint -w koine-studio -w @atypical/koine-ui
+
       # Pack verification for the extracted @atypical/koine-ui package (issue #905): proves on every
       # PR that its published tarball contains the right files (dist/ only, no source/test files).
       # `npm pack` always runs the package's own `prepack` (`npm run build`) first, so this alone

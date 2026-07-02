@@ -75,13 +75,45 @@ the developer building it can see it without flipping a flag. It reuses the thro
 (`src/shell/localStorageFlag.ts`) — no new storage primitive. Enable a capability for a session with
 `panelGate('my-surface').enable()` (writes `koine.studio.panel.my-surface`).
 
+## Machine-enforced conventions — the ESLint gate (#978)
+
+The four load-bearing safety conventions are no longer review-only. A flat-config ESLint gate
+(`eslint.config.mjs` in both `tooling/koine-studio` and `tooling/koine-ui`, run by `npm run lint` and
+CI-gated in `.github/workflows/koine-studio.yml`'s `studio-web` job) enforces them mechanically for all
+new code. It is deliberately narrow — these conventions, **not** a style regime; tsc + review stay
+authoritative for style:
+
+- **Void-prefixed floating promises** — `@typescript-eslint/no-floating-promises` / `no-misused-promises`
+  (type-checked): a fire-and-forget async call must be `await`ed, `.catch()`-ed, or explicitly `void`-ed.
+- **`domById` over bare `getElementById`** — `no-restricted-properties`: look up required chrome through
+  `src/shared/domById.ts` so a missing `#id` throws loudly instead of a silent `null`.
+- **Escape-before-`innerHTML`** — `no-restricted-syntax` bans `x.innerHTML = …`; use `textContent` / `el()`
+  / JSX, or `renderMarkdown` output behind a justified disable.
+- **react-hooks rules** — `react-hooks/rules-of-hooks` + `exhaustive-deps` (the plugin is source-level, so
+  it works on Preact's `preact/hooks` without a compat shim).
+
+### The disable protocol (every escape hatch is justified)
+
+- **Every `eslint-disable` carries a `-- <reason>` justification** on the same directive — no bare disables.
+- **The `innerHTML` allow-list has two tiers** in `eslint.config.mjs`:
+  - **Permanent islands** (`src/editor/**`, `src/diagrams/diagrams-maxgraph.ts`, `src/host/**`) — the
+    CodeMirror / maxGraph / host-seam non-goals above; imperative by design, off permanently.
+  - **Pending-migration islands** — one entry per file, **each naming the migration issue that deletes it**
+    (explorer → #989, aiPanel → #990, the self-contained panels → #991, the model/docs builders → #992).
+    This is a freeze-then-shrink budget (à la the #757 line budget): the ban catches any NEW `innerHTML`
+    site, and the entry is removed when its panel migrates to Preact/JSX. **Shrinking this allow-list is
+    the definition of done for the migration arc.**
+
 ## Inventory of imperative islands (grouped)
 
-> Census (post-#759): `grep -rE 'innerHTML|document\.createElement' src/shell | grep -v '\.test\.' | wc -l`
-> → **88** production sites. The remaining sites are the intentional imperative islands below (CodeMirror,
-> the file explorer, maxGraph, the assistant `aiPanel`, the `src/host` seam, and inspectorController's
-> direct DOM writes) — not chrome shells. (The all-files count is higher because the migrated panels'
-> tests now seed their hosts via Preact `render`/`createElement`.)
+> **Authoritative inventory:** the `no-restricted-syntax` (`innerHTML`) allow-list in `eslint.config.mjs`
+> is now the canonical, CI-checked census of pending-migration islands — one entry per file, each named
+> with the issue that retires it (#978). The hand-run grep below stays as a quick cross-check, not the
+> source of truth: `grep -rE 'innerHTML|document\.createElement' src/shell | grep -v '\.test\.' | wc -l`.
+> The remaining sites are the intentional imperative islands below (CodeMirror, the file explorer,
+> maxGraph, the assistant `aiPanel`, the `src/host` seam, and inspectorController's direct DOM writes) —
+> not chrome shells. (The all-files count is higher because the migrated panels' tests now seed their
+> hosts via Preact `render`/`createElement`.)
 
 - **Already Preact (reference patterns — do not redo):** `HistoryControls`, `UnsavedIndicator`,
   `CompilingIndicator`, `MobileZoneBar`, `StoreInspector`, `inspectorSheet`; `src/model/PropertiesPanel`,
