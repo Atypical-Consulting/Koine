@@ -16,8 +16,11 @@ export type BottomTab = 'problems' | 'events' | 'relationships' | 'terminal' | '
 export type RightView = 'props' | 'assistant' | 'source-control';
 // Compile-time proof RightView and koine-ui's RightStripView (the right-strip's rendered button set) stay
 // in lockstep: the right-strip switcher reads `data-rview` values the JSX emits, so a divergence between the
-// two unions would silently drop a switcher. These aliases fail tsc if either direction stops holding;
-// erased at build (no runtime effect — the `void` reference just satisfies no-unused-vars).
+// two unions would silently drop a switcher. The tuple annotation forces both `extends` directions to
+// resolve to `true`; if either stops holding, its alias becomes `never`, `[true, true]` no longer fits the
+// annotation, and tsc fails. The inert const + `void` is the idiomatic static-assert anchor — it has no
+// runtime effect (and the production bundle tree-shakes it), while keeping the type aliases "used" so the
+// no-unused-locals gate stays green.
 type _RVtoStrip = RightView extends RightStripView ? true : never;
 type _StripToRV = RightStripView extends RightView ? true : never;
 const _rightViewContract: [_RVtoStrip, _StripToRV] = [true, true];

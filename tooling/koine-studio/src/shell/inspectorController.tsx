@@ -43,7 +43,7 @@ import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/settings/persistence';
 import { renderDiagrams } from '@/diagrams/diagrams';
 import { domById, domQueryAll } from '@/shared/domById';
-import { LEFT_RAIL_IDS, RSTRIP_BTN_CLASS, axisButtonsSelector, lstripAxisButtonsSelector } from '@atypical/koine-ui';
+import { DATA_AXIS, DATA_LAXIS, DATA_RVIEW, LEFT_RAIL_IDS, RSTRIP_BTN_CLASS, axisButtonsSelector, lstripAxisButtonsSelector } from '@atypical/koine-ui';
 import { renderContextMapGraph, type ContextMapGraphHandle } from '@/diagrams/diagrams-maxgraph';
 import { buildContextMapGraph, type ContextMapEdge } from '@/diagrams/contextMapGraph';
 import { NODE_NAVIGATE_EVENT, setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
@@ -364,7 +364,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // `settingsOpen`, NOT a deck surface. OPTIONAL like the bottom-sheet host — absent from the desktop-only
   // test fixtures — so look it up defensively; without it applyCenterChrome simply skips the overlay
   // toggle. The page body is populated by the settings page host (ide.tsx).
-  const settingsPanelEl = document.getElementById('center-panel-settings'); // eslint-disable-line no-restricted-properties -- annotate-only; #979 owns fixing this controller's required/optional lookup semantics (here: defensive, skips the overlay toggle when absent)
+  const settingsPanelEl = document.getElementById('center-panel-settings'); // eslint-disable-line no-restricted-properties -- intentionally optional: defensive, skips the overlay toggle when the settings panel is absent
   // Right-rail host: the element inspector (Properties). Fixed — never torn down on a model reload.
   const inspectorHost = domById('inspector-host');
   // Below $bp-narrow the inspector lives in a bottom sheet instead of the fixed #right rail (#221). The
@@ -372,7 +372,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // controller keeps the original right-rail behaviour untouched (no sheet, no resize listener). When it
   // exists the sheet is built once here; renderSelectedInspector mounts Properties into its body on a
   // narrow viewport, and a selection raises it to half.
-  const sheetHostEl = document.getElementById('inspector-sheet-host'); // eslint-disable-line no-restricted-properties -- annotate-only; #979 owns this controller's lookup semantics (here: guarded by `sheetHostEl ? … : null`)
+  const sheetHostEl = document.getElementById('inspector-sheet-host'); // eslint-disable-line no-restricted-properties -- intentionally optional: guarded by `sheetHostEl ? … : null`
   const inspectorSheet: InspectorSheet | null = sheetHostEl ? createInspectorSheet(sheetHostEl) : null;
   // The host the Properties panel is currently rendered into (sheet body on a narrow viewport, else the
   // fixed #inspector-host). Tracked so renderSelectedInspector can unmount the PRIOR host's Preact tree
@@ -951,10 +951,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       filesPane.dataset.open = 'true';
       filesPane.querySelector('.rail-sect-head')?.setAttribute('aria-expanded', 'true');
     }
-    // `b.dataset.axis` / `.dataset.laxis` mirror DATA_AXIS / DATA_LAXIS — dataset keys are camelCased, so
-    // they can't be indexed by the hyphenated attribute-name constants.
-    for (const b of axisButtons) b.setAttribute('aria-selected', String(b.dataset.axis === axis));
-    for (const b of lstripAxisButtons) b.setAttribute('aria-pressed', String(b.dataset.laxis === axis));
+    // Read the axis through the same DATA_AXIS / DATA_LAXIS constants the JSX writes, so a rename of the
+    // attribute name stays in lockstep across the write side, the selectors, and these reads (#979).
+    for (const b of axisButtons) b.setAttribute('aria-selected', String(b.getAttribute(DATA_AXIS) === axis));
+    for (const b of lstripAxisButtons) b.setAttribute('aria-pressed', String(b.getAttribute(DATA_LAXIS) === axis));
   }
 
   function setAxis(axis: RailAxis): void {
@@ -967,7 +967,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   for (const b of axisButtons) {
-    b.addEventListener('click', () => setAxis((b.dataset.axis as RailAxis) ?? 'domain'));
+    b.addEventListener('click', () => setAxis((b.getAttribute(DATA_AXIS) as RailAxis | null) ?? 'domain'));
   }
 
   // The Domain navigator's TACTICAL leaf wiring (#453): a leaf click selects-and-jumps; its ⋯ overflow's
@@ -1490,7 +1490,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // carries only a title header naming the active tool window. selectRightView keeps #right-title in sync
   // and shows the matching view — there's no tab row to mark. (Guarded lookup so DOM fixtures that omit
   // the header don't crash the controller.)
-  const rightTitleEl = document.getElementById('right-title'); // eslint-disable-line no-restricted-properties -- annotate-only; #979 owns this controller's lookup semantics (here: guarded so fixtures omitting the header don't crash)
+  const rightTitleEl = document.getElementById('right-title'); // eslint-disable-line no-restricted-properties -- intentionally optional: guarded so fixtures omitting the header don't crash
   const rightViewLabels: Record<RightView, string> = {
     props: 'Properties',
     assistant: 'AI Chat',
@@ -1536,9 +1536,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     const active = appStore.getState().right;
     // A stripe button reads "pressed" only while the panel is OPEN and showing that view; collapsed → none
     // pressed (the last active view is still remembered in uiChrome.right for the next expand).
-    // `b.dataset.rview` mirrors DATA_RVIEW — a camelCased dataset key can't be indexed by the hyphenated constant.
+    // Read the view through the DATA_RVIEW constant the JSX writes, so a rename stays in lockstep (#979).
     for (const b of rstripButtons) {
-      b.setAttribute('aria-pressed', String(!collapsed && b.dataset.rview === active));
+      b.setAttribute('aria-pressed', String(!collapsed && b.getAttribute(DATA_RVIEW) === active));
     }
   }
   // Seed the runtime flag from persistence before any subscription is wired (so this seed doesn't echo),
@@ -1547,7 +1547,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   applyRightCollapsed(appStore.getState().rightCollapsed);
   for (const b of rstripButtons) {
     b.addEventListener('click', () => {
-      const view = b.dataset.rview as RightView;
+      const view = b.getAttribute(DATA_RVIEW) as RightView;
       const st = appStore.getState();
       if (st.rightCollapsed) {
         // Collapsed → expand straight to the clicked view (Rider's "click Git to jump to Source Control").
@@ -1567,7 +1567,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // reveal the inspector — without forcing the panel open against an explicit collapse.
   let notifyTimer: ReturnType<typeof setTimeout> | undefined;
   function notifyRstripProps(): void {
-    const btn = rstripButtons.find((b) => b.dataset.rview === 'props');
+    const btn = rstripButtons.find((b) => b.getAttribute(DATA_RVIEW) === 'props');
     if (!btn) return;
     // Remove then re-add so a repeated selection re-triggers the animation from the start, even if the
     // previous cycle hasn't finished. `void btn.offsetWidth` forces a style recalc so CSS sees the
@@ -1619,8 +1619,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // on the navigator you clicked (the plain expand control carries no data-laxis, so it just re-opens).
   for (const b of Array.from(leftStripEl.querySelectorAll<HTMLButtonElement>('button'))) {
     b.addEventListener('click', () => {
-      // `b.dataset.laxis` mirrors DATA_LAXIS — a camelCased dataset key can't be indexed by the hyphenated constant.
-      const axis = b.dataset.laxis as RailAxis | undefined;
+      // Read the axis through DATA_LAXIS (the plain expand control carries none → null, and is skipped
+      // below), keeping the read in lockstep with the JSX write side under a rename (#979).
+      const axis = b.getAttribute(DATA_LAXIS) as RailAxis | null;
       appStore.getState().setLeftCollapsed(false);
       if (axis) setAxis(axis);
     });
