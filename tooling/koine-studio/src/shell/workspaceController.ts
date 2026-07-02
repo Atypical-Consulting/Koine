@@ -28,6 +28,7 @@ import { pathToFileUri } from '@/shell/ideUtils';
 import { createWorkspaceSave } from './workspaceSave';
 import { createWorkspaceBuffers } from './workspaceBuffers';
 import { createWorkspaceMutations, nameOf } from './workspaceMutations';
+import { setLastSession } from '@/settings/persistence';
 import type { FsEntry, KoiFile, Platform } from '@/host';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
 import type { StoreApi } from 'zustand/vanilla';
@@ -118,8 +119,12 @@ export interface WorkspaceControllerDeps {
   /** Fired when the active buffer was deleted and the workspace is now empty: ide.ts opens a new model. */
   onWorkspaceEmptied(): void;
 
-  /** Persist a recently-opened folder (ide.ts's pushRecentFolder); skipped for transient workspaces. */
-  pushRecentFolder?(folder: string): void;
+  /**
+   * Persist a recently-opened folder (ide.ts's pushRecentFolder); skipped for transient workspaces.
+   * `meta` carries the optional #1005 tags (git `branch`, emit `language`); a bare call preserves any
+   * previously-captured tags on the entry.
+   */
+  pushRecentFolder?(folder: string, meta?: { branch?: string; language?: string }): void;
   /**
    * Persist the last-opened workspace so a cold boot can restore it (ide.ts's setLastWorkspace, #535).
    * Skipped for transient opens (shared-link imports / the default-workspace flow), exactly like
@@ -534,6 +539,25 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     deps.clearDiagnostics();
   }
 
+  // Persist a lightweight snapshot (project / active file / dirty count / now) for the Home resume card
+  // (#1005) on open / dirty-change / save. Best-effort/guarded, and a no-op with no folder open. Reads
+  // buffers/activeUri/roots through the store slice, the single owner since #982.
+  function rememberLastSession(): void {
+    const token = st().roots[0];
+    if (!token) return;
+    try {
+      const active = st().buffers.get(st().activeUri);
+      setLastSession({
+        project: platform.folderName(token) || token,
+        file: active?.relPath || undefined,
+        editedAt: Date.now(),
+        unsavedCount: [...st().buffers.values()].filter((b) => b.dirty).length,
+      });
+    } catch {
+      // best-effort — never let a resume-snapshot write break save / edit / close
+    }
+  }
+
   // Load + open every .koi file under `folder` as one workspace. Shared by the toolbar
   // button (which picks a folder first) and the welcome screen's recent-folder items
   // (which pass a known path directly).
@@ -624,7 +648,23 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     // (and stays on) Domain, the DDD navigator. The file tree is one click away (the Files axis button /
     // ⌘B), and the Domain navigator's "Reveal in Files" still switches deliberately.
     if (opts.recent ?? true) {
-      deps.pushRecentFolder?.(folder);
+      // #1005: tag the recent with the effective emit target now (synchronous), then — desktop only —
+      // enrich it with the git branch via a best-effort, non-blocking follow-up. `git status` must
+      // never delay or fail the open, so it is fired-and-forgotten and re-pushes the same entry
+      // (pushRecentFolder preserves the already-stored language on that bare-meta re-push).
+      const language = st().emitTarget;
+      deps.pushRecentFolder?.(folder, { language });
+      if (platform.canUseGit) {
+        void (async () => {
+          try {
+            const status = await platform.gitStatus(folder);
+            if (status.branch) deps.pushRecentFolder?.(folder, { branch: status.branch, language });
+          } catch {
+            // git unavailable / not a repository — leave the recent without a branch tag
+          }
+        })();
+      }
+      rememberLastSession(); // #1005: seed the Home resume snapshot (same `recent` gate as above)
       // Remember this as the last-opened workspace so a reload restores it (#535). Gated on the same
       // `recent` flag as pushRecentFolder, so transient opens (shared-link import via
       // openWorkspaceWith1File, the default-workspace flow) don't overwrite the pointer.
@@ -761,13 +801,23 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     openFileToken,
     activateFile,
     reset,
-    saveActive: save.saveActive,
+    // #1005: refresh the Home resume snapshot after a save (dirty count changed) and after a clean→dirty
+    // buffer sync. Wrapped at the facade — where rememberLastSession + the store live — so the extracted
+    // save/buffers modules stay unaware of the snapshot.
+    saveActive: async () => {
+      await save.saveActive();
+      rememberLastSession();
+    },
     saveAllDirty: save.saveAllDirty,
     setAutoSave: save.setAutoSave,
     scheduleAutoSave: save.scheduleAutoSave,
     anyDirty: buffers.anyDirty,
     syncActiveBuffer: buffers.syncActiveBuffer,
-    syncBuffer: buffers.syncBuffer,
+    syncBuffer: (uri: string, doc: string) => {
+      const becameDirty = buffers.syncBuffer(uri, doc);
+      if (becameDirty) rememberLastSession();
+      return becameDirty;
+    },
     handleNewFile: mutations.handleNewFile,
     handleNewFolder: mutations.handleNewFolder,
     handleDelete: mutations.handleDelete,

@@ -1,16 +1,99 @@
+@use '../abstracts' as a;
+
 /* --- welcome / start console (routed Home view) ---
-   A full-bleed start page: a two-column hero (the live `.koi` artifact + the get-to-work rail), then
-   the searchable example gallery. Mounted inside #home-root (a fixed full-window container) via
-   mountHome(); fills it with position:absolute so it stays in normal stacking. Everything derives from
-   the --koi-* tokens so light/dark adapt for free; the editor's own syntax hues colour the hero snippet. */
+   A truly full-bleed start page: an app top bar spanning the window, then a body that fills the rest —
+   a two-column split (the live `.koi` artifact on the left, the get-to-work rail on the right), plus the
+   searchable example gallery that swaps in over it. Mounted inside #home-root (a fixed full-window
+   container) via mountHome(); fills it with position:absolute so it stays in normal stacking. Everything
+   derives from the --koi-* tokens so light/dark adapt for free; the editor's own syntax hues colour the
+   hero snippet. */
 .koi-welcome {
   position: absolute; /* fill #home-root (the fixed full-window container) */
   inset: 0;
   z-index: auto; /* not an overlay — drop the overlay stacking context */
   display: flex;
-  overflow-y: auto;
+  flex-direction: column; /* the top bar sits above a flex-filling card; inner regions own the scroll */
+  overflow: hidden;
   background: var(--koi-paper);
-  padding: clamp(12px, 3vw, 32px);
+}
+
+/* --- app top bar: a full-width strip above the card ----------------------- */
+/* Spans the whole window and persists across the console↔gallery swap (it lives outside the card):
+   the brand on the left, the theme toggle + Settings gear on the right. A 1px brand-gradient hairline
+   (::after) at its bottom separates it from the body — a subtle nod to the accent→cyan lockup rather
+   than a flat rule. */
+.koi-home-topbar {
+  /* The SAME bar chrome as the editor's #toolbar, now via the shared `topbar-chrome` mixin (padding,
+     paper-2→paper gradient, --koi-line bottom border, accent-gradient hairline ::after) — so navigating
+     Home↔Editor never shifts the chrome. Only Home's own sizing + end-justification stay inline. */
+  @include a.topbar-chrome;
+  flex: none;
+  justify-content: space-between;
+}
+
+/* The left/right control slots. Left holds the brand lockup; right holds the icon buttons. */
+.koi-home-topbar-slot {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+  min-width: 0;
+}
+
+.koi-home-topbar-end {
+  justify-content: flex-end;
+}
+
+/* --- brand lockup: κ monogram tile + "Koine" / "STUDIO" wordmark ------------
+   Home REUSES the editor toolbar's global `.brand` lockup (layout/_toolbar.scss) — same markup
+   (`.brand-logo` + `.brand-text` > `.brand-name` / `.brand-eyebrow`), so it is pixel-identical to the
+   editor brand for free (30px logo radius 9, gap, -6px left pull, name/eyebrow type). The extra
+   `.koi-home-brand` class is only a stable hook to strip the ONE difference: unlike the editor's, this
+   lockup is NOT a nav button, so suppress the `.brand` hover/click affordance for this instance. */
+.koi-home-brand {
+  cursor: default;
+
+  &:hover {
+    background: transparent;
+  }
+}
+
+/* --- top-bar icon buttons (theme toggle, Settings gear) ------------------- */
+/* The same quiet treatment as the editor toolbar's .icon-btn: a 30×30 square, transparent until
+   hovered/focused, stroked 16×16 glyphs picking up the button's text color. */
+.koi-home-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  color: var(--koi-muted);
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
+  cursor: pointer;
+  transition: background var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease, border-color var(--koi-dur-fast) ease;
+
+  svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  &:hover {
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+    border-color: var(--koi-line);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
 }
 
 /* #home-root is the fixed full-window container the router switches between #app and Home. */
@@ -23,51 +106,46 @@
   }
 }
 
-/* margin:auto centers the card; a FIXED height keeps the modal the same size across both views (console
-   ↔ gallery) and across tab switches — the inner regions scroll instead of the box resizing. The card is
-   one persistent frame: the console and gallery views swap *inside* it, so it animates in once (koi-rise)
-   and never re-enters on a view switch. */
+/* Full-bleed body frame: fills the width and the space below the top bar (flex:1), with no max-width
+   centering, border, radius, shadow or rise-animation — it is just the frame the two views live in. The
+   console and gallery swap *inside* it; the inner regions own the scroll so the frame itself never
+   resizes. */
 .koi-welcome-card {
   position: relative;
-  margin: auto;
   display: flex;
   flex-direction: column;
+  flex: 1; /* fill the remaining height below the top bar */
+  min-height: 0; /* let the inner views own the scroll rather than growing the frame */
   width: 100%;
-  max-width: 1040px;
-  height: min(620px, calc(100dvh - 48px));
   background: var(--koi-paper-2);
-  border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius-lg);
-  box-shadow: var(--koi-shadow);
-  padding: clamp(20px, 3vw, 34px) clamp(20px, 3.4vw, 40px) clamp(22px, 3vw, 34px);
-  overflow: hidden; /* clips the gradient cap to the rounded corners; inner regions own the scroll */
-  animation: koi-rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
-
-  /* A 3px brand-gradient cap ties the console to the monogram — the one piece of chrome decoration,
-     replacing the old blueprint-grid + glow. */
-  &::before {
-    content: '';
-    position: absolute;
-    inset: 0 0 auto 0;
-    height: 3px;
-    background: var(--koi-accent-grad);
-  }
+  overflow: hidden; /* inner regions own the scroll */
 }
 
-/* The two swappable views inside the card (console ↔ gallery). Each fills the fixed card and owns its
-   inner scroll; only one is in flow at a time (the other is [hidden]). Switching from one to the other
-   replays a quiet fade so the content changes in place — the card frame itself never moves. This mirrors
-   the editor's own view-switch fade (see base/_animations.scss). */
+/* The two swappable views inside the card (console ↔ gallery). Each fills the frame and owns its inner
+   scroll; only one is in flow at a time (the other is [hidden]). The view carries the page inset that the
+   card used to own (now that the card is edge-to-edge). Switching from one to the other replays a quiet
+   fade so the content changes in place — the frame itself never moves. This mirrors the editor's own
+   view-switch fade (see base/_animations.scss). */
 .koi-welcome-view {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  /* LEFT inset only — no top/bottom (so the vertical divider runs floor-to-ceiling) and no RIGHT (so the
+     launch rail reaches the window's right edge and its scrollbar sits flush against the browser edge,
+     like a native panel). The columns own their remaining insets: the hero its top/bottom, the launch its
+     top/bottom AND its right content padding. The gallery view restores a full inset on itself below. */
+  padding: 0 0 0 clamp(20px, 3.4vw, 40px);
   animation: koi-fade 0.28s ease both;
 
   &[hidden] {
     display: none;
   }
+}
+
+/* The gallery view keeps the page inset the console body pushes into its columns. */
+.koi-gallery-view {
+  padding: clamp(20px, 3vw, 34px) clamp(20px, 3.4vw, 40px) clamp(22px, 3vw, 34px);
 }
 
 /* --- top bar -------------------------------------------------------------- */
@@ -79,30 +157,28 @@
   margin-bottom: clamp(20px, 3vw, 32px);
 }
 
-/* Resume editing — return to a live editor session (#392). A labelled pill, shown only when a session
-   exists; sits where the dismiss-✕ would, reading as the deliberate way back into the editor. */
-.koi-welcome-resume {
-  flex: none;
-  display: inline-flex;
+/* Resume-session card (#1005) — the rich "continue where you left off" affordance, pinned at the top of
+   the launch rail above the "Start" actions. The whole card is a button: a play tile (carrying a live
+   "ping" dot for a warm session) beside the last session's project · file, its relative edit time and
+   any unsaved count. Replaces the old "Resume editing" pill (#392). */
+.koi-home-resume {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  height: 30px;
-  padding: 0 var(--koi-space-3);
-  border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius-sm);
+  gap: var(--koi-space-3);
+  width: 100%;
+  text-align: left;
   background: var(--koi-surface);
   color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius);
+  padding: var(--koi-space-2-75) var(--koi-space-3-5);
   font-family: var(--koi-font-body);
-  font-size: 0.82rem;
-  font-weight: 600;
-  line-height: 1;
-  white-space: nowrap;
   cursor: pointer;
-  transition: background var(--koi-dur-mid) ease, color var(--koi-dur-mid) ease, border-color var(--koi-dur-mid) ease;
+  transition: background var(--koi-dur-mid) ease, border-color var(--koi-dur-mid) ease;
 
   &:hover {
     border-color: color-mix(in srgb, var(--koi-accent) 60%, var(--koi-line));
-    color: var(--koi-accent);
+    background: color-mix(in srgb, var(--koi-accent) 6%, var(--koi-surface));
   }
 
   &:focus-visible {
@@ -111,21 +187,171 @@
   }
 }
 
-/* --- hero: thesis (left) + launch rail (right) ---------------------------- */
-.koi-welcome-hero {
+/* The play tile — an accent-tinted square holding the ▶ glyph; the anchor for the corner ping dot. */
+.koi-home-resume-tile {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--koi-radius-sm);
+  background: color-mix(in srgb, var(--koi-accent) 14%, var(--koi-surface));
+  color: var(--koi-accent);
+
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+/* The live "ping" dot marks a still-live (warm) session: a solid GREEN dot at the tile's top-right that
+   radiates a fading halo (green reads as "live / connected", not the accent-blue chrome). The halo only
+   plays with the `is-live` class — JS omits that class under prefers-reduced-motion, and the global
+   reduced-motion collapse in _animations.scss neutralizes it too. */
+.koi-home-resume-ping {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--koi-radius-pill);
+  background: var(--koi-ddd-entity);
+  border: 2px solid var(--koi-surface);
+
+  &.is-live::after {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--koi-ddd-entity);
+    animation: koi-resume-ping 1.8s ease-out infinite;
+  }
+}
+
+@keyframes koi-resume-ping {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(2.4);
+  }
+}
+
+.koi-home-resume-body {
+  min-width: 0;
+  flex: 1 1 auto; /* take the middle so the trailing chevron sits at the far right */
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-0-5);
+}
+
+.koi-home-resume-eyebrow {
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--koi-accent); /* accent eyebrow — the "LAST SESSION" label leads with the brand hue */
+}
+
+/* The trailing right-chevron — a quiet "opens this session" disclosure on the far right of the card. */
+.koi-home-resume-chevron {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--koi-muted);
+  transition: transform var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease;
+
+  svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .koi-home-resume:hover & {
+    color: var(--koi-accent);
+    transform: translateX(2px);
+  }
+}
+
+/* project · file — one baseline-aligned row; the file truncates so a long path never grows the card. */
+.koi-home-resume-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--koi-space-1);
+  min-width: 0;
+  font-size: var(--koi-text-sm);
+  font-weight: 600;
+  color: var(--koi-fg);
+}
+
+.koi-home-resume-project {
+  white-space: nowrap;
+}
+
+.koi-home-resume-sep {
+  color: var(--koi-muted);
+}
+
+.koi-home-resume-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--koi-fg-muted);
+  font-weight: 500;
+}
+
+/* relative time · unsaved count — the quiet metadata line under the project. */
+.koi-home-resume-detail {
+  display: flex;
+  align-items: baseline;
+  gap: var(--koi-space-2);
+  font-size: var(--koi-text-xs);
+  color: var(--koi-muted);
+}
+
+.koi-home-resume-unsaved {
+  color: var(--koi-accent);
+}
+
+/* --- body: thesis (left) + launch rail (right), as a two-column split ------ */
+/* A grid with a flexible hero column on the left and a fixed 424px launch column on the right, divided
+   by a 1px hairline. The body fills the console view (flex:1); each column owns its own scroll so the
+   right rail (a long recent list) scrolls independently of the left. No column gap — the hairline is the
+   divider and each column insets its own content from it. */
+.koi-home-body {
   display: grid;
-  grid-template-columns: minmax(0, 1.18fr) minmax(0, 0.82fr);
-  gap: clamp(24px, 4vw, 56px);
-  align-items: start;
-  /* Fill the fixed card and scroll internally if the content (e.g. a long recent list, or a narrow
-     viewport) outgrows it, so the card itself never resizes. */
+  /* The launch rail is a fixed column. It reaches the browser's right edge (its scrollbar sits flush)
+     and carries its right content padding INTERNALLY, so the content box is narrower than the column —
+     468px (was 424px) restores enough content width for the dense recent rows (name + lang tag + branch
+     + relative time) to show in full instead of truncating "ordering"→"or…" / "inventory"→"invent…". */
+  grid-template-columns: minmax(0, 1fr) 468px;
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
 }
 
 .koi-welcome-lede {
   min-width: 0;
+  /* A flex column so the colophon (its last child) can pin to the bottom via margin-top:auto: the
+     eyebrow → statement → snippet stack sits at the top, the colophon settles as the column's footer. */
+  display: flex;
+  flex-direction: column;
+  /* Left column scrolls independently of the launch rail; inset from the dividing hairline on its right.
+     `hidden auto` (not a bare `overflow-y`) so a wide child can't raise a spurious horizontal scrollbar.
+     Owns the top/bottom inset (the view keeps the horizontal one) so the body grid — and the vertical
+     divider between the columns — runs edge-to-edge (top-bar hairline to the window bottom). */
+  overflow: hidden auto;
+  padding: clamp(20px, 3vw, 34px) clamp(24px, 4vw, 56px) clamp(22px, 3vw, 34px) 0;
 }
 
 .koi-welcome-eyebrow {
@@ -234,22 +460,46 @@
   color: var(--koi-muted);
 }
 
-/* The destination-language mark (C#) — same hue the toolbar uses for the C# target. */
+/* The destination-language marks — a tight cluster of one dot per emit target (C#, TS, Python, PHP). */
+.koi-welcome-emit-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+  flex: none;
+}
+
+/* Each dot takes its target's own --lang-* hue via the inline --emit-dot custom property (set in JS),
+   falling back to the C# hue; its soft halo derives from the same colour so the tint carries through. */
 .koi-welcome-emit-dot {
   flex: none;
   width: 8px;
   height: 8px;
   border-radius: 2px;
-  background: var(--lang-csharp);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lang-csharp) 22%, transparent);
+  background: var(--emit-dot, var(--lang-csharp));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--emit-dot, var(--lang-csharp)) 22%, transparent);
 }
 
 /* --- launch rail: actions + recent --------------------------------------- */
+/* The fixed right column of the body split. A 1px hairline on its left edge divides it from the hero;
+   it scrolls independently (a long recent list never grows the frame) and insets its content from the
+   dividing line. */
 .koi-welcome-launch {
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: clamp(18px, 2.4vw, 26px);
+  /* The full-height vertical divider between the hero and the launch rail. The body grid is edge-to-edge
+     (the columns carry the inset), so this border runs floor-to-ceiling and meets the top-bar hairline. */
+  border-left: 1px solid var(--koi-line);
+  /* `overflow: hidden auto` (not a bare `overflow-y: auto`): when only one axis is set to a non-visible
+     value the other computes to `auto`, so a sub-pixel-wide child would raise a spurious horizontal
+     scrollbar in the rail. Pin the x-axis hidden and keep only the vertical scroll. */
+  overflow: hidden auto;
+  /* The rail reaches the window's right edge (the view no longer pads the right), so its scrollbar sits
+     flush against the browser edge. The RIGHT padding here is INSIDE the scroll container — it insets the
+     content, not the scrollbar. Left inset holds content off the dividing hairline; top/bottom is the
+     page inset. */
+  padding: clamp(20px, 3vw, 34px) clamp(20px, 3.4vw, 40px) clamp(22px, 3vw, 34px) clamp(24px, 4vw, 56px);
 }
 
 .koi-welcome-rail-title {
@@ -262,9 +512,9 @@
   color: var(--koi-muted);
 }
 
-/* The "Start" heading row: title on the left, "Resume editing" aligned on its right when present
-   (issue #490). The launch rail's flex gap supplies the space below, so the title sheds its own
-   bottom margin here to keep the row tight and the two items sharing one baseline. */
+/* The "Start" heading row: just the rail title now (resuming moved to the richer card above, #1005).
+   The launch rail's flex gap supplies the space below, so the title sheds its own bottom margin here
+   to keep the row tight. */
 .koi-welcome-rail-head {
   display: flex;
   align-items: baseline;
@@ -329,6 +579,142 @@
   }
 }
 
+/* Per-action keyboard-shortcut keycaps (#1005): a group of small boxed keys pushed to the right edge of
+   a Start action (or the clone trigger) — one `.koi-welcome-key` per key in the chord (e.g. [⌘][N]).
+   Decorative (aria-hidden): the action's visible label already carries the accessible name. */
+.koi-welcome-keys {
+  flex: none;
+  margin-left: auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-0-5);
+}
+
+/* One small key cap. Same treatment vocabulary as `.deck-hint kbd` / `.koi-kbd` — monospace, a hairline
+   border with a slightly heavier bottom edge and a faint fill — but derived from currentColor (no literal
+   hex) so it reads correctly on BOTH the plain-surface actions and the accent-filled primary one. */
+.koi-welcome-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--koi-space-1);
+  box-sizing: border-box;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: currentColor;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-bottom-width: 2px;
+  border-radius: var(--koi-radius-sm);
+  opacity: 0.85;
+}
+
+/* --- clone repository (#1005): a Start row that reveals an inline URL form ------ */
+/* The wrapper is one flow item in the actions column, stacking the trigger row above its form. The
+   trigger reuses .koi-welcome-action styling; the form drops in below when the row is toggled open. */
+.koi-welcome-clone {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-2);
+}
+
+.koi-welcome-clone-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-1-5);
+  padding: var(--koi-space-2-5) var(--koi-space-3);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  background: color-mix(in srgb, var(--koi-fg) 3%, var(--koi-surface));
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+/* URL field + Clone button on one row: the input flexes, the button keeps its intrinsic width. */
+.koi-welcome-clone-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+}
+
+.koi-welcome-clone-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--koi-paper);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-1-5) var(--koi-space-2);
+  font-family: var(--koi-font-mono); /* a URL reads as monospace */
+  font-size: var(--koi-text-sm);
+
+  &::placeholder {
+    color: var(--koi-muted);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+    border-color: var(--koi-accent);
+  }
+}
+
+.koi-welcome-clone-submit {
+  flex: none;
+  background: var(--koi-accent);
+  color: var(--koi-on-accent);
+  border: 1px solid var(--koi-accent);
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-1-5) var(--koi-space-3);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--koi-dur-fast) ease, opacity var(--koi-dur-fast) ease;
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--koi-accent) 88%, #fff);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+.koi-welcome-clone-hint {
+  margin: 0;
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  color: var(--koi-muted);
+}
+
+/* Inline clone failure — the host's error text under the field; hidden until a clone rejects. */
+.koi-welcome-clone-error {
+  margin: 0;
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  color: var(--koi-error);
+
+  &[hidden] {
+    display: none;
+  }
+}
+
 .koi-welcome-action-icon {
   flex: none;
   display: inline-flex;
@@ -376,11 +762,109 @@
 }
 
 /* --- recent folders ------------------------------------------------------- */
-.koi-welcome-recent-list {
+/* Header row (ONE line): the "Recent" rail title + a live count pill on the left, the compact filter on
+   the right. Header + filter persist across re-renders (only the rows / toggle / clear-all rebuild). */
+.koi-welcome-recent-head {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+  margin-bottom: var(--koi-space-2);
+
+  .koi-welcome-rail-title {
+    margin-bottom: 0;
+  }
+}
+
+/* Left cluster: the "Recent" title + its count pill, kept together so the filter can right-align. */
+.koi-welcome-recent-head-title {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+  min-width: 0;
+}
+
+/* A quiet pill carrying the total recent count beside the title. */
+.koi-welcome-recent-count {
+  flex: none;
+  min-width: 1.4em;
+  padding: 1px var(--koi-space-1-5);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  font-weight: 600;
+  text-align: center;
+  color: var(--koi-muted);
+  background: color-mix(in srgb, var(--koi-fg) 7%, transparent);
+  border-radius: var(--koi-radius-pill);
+}
+
+/* Right cluster: a magnifier glyph over the compact search input, pushed to the far right of the header. */
+.koi-welcome-recent-filter-wrap {
+  flex: 0 1 auto;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+  min-width: 0;
+  max-width: 200px;
+  padding: 0 var(--koi-space-2);
+  background: var(--koi-surface);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+
+  &:focus-within {
+    border-color: var(--koi-accent);
+    outline: 2px solid var(--koi-accent);
+    outline-offset: 1px;
+  }
+
+  &[hidden] { display: none; }
+}
+
+.koi-welcome-recent-filter-icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--koi-muted);
+
+  svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+}
+
+.koi-welcome-recent-filter {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  background: transparent;
+  color: var(--koi-fg);
+  border: 0;
+  padding: var(--koi-space-1) 0;
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm);
+
+  &::placeholder { color: var(--koi-muted); }
+  &:focus-visible { outline: none; }
+}
+
+/* The rebuilt-per-render body: rows, then the View-all toggle + clear-all, or the empty copy. Stacked
+   left-aligned; the list stretches full-width while the trailing text buttons keep their own width. */
+.koi-welcome-recent-body {
   display: flex;
   flex-direction: column;
-  gap: var(--koi-space-1);
-  max-height: 240px;        /* the only remaining containment — the card is already height-safe */
+  align-items: flex-start;
+}
+
+.koi-welcome-recent-list {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-0-5);
+  max-height: 320px;        /* the only remaining containment — the card is already height-safe */
   overflow-y: auto;
   margin: 0 -6px;           /* let row hover-bg bleed to the rail edge */
   padding: 0 6px;
@@ -390,21 +874,122 @@
   display: flex;
   align-items: center;
   gap: var(--koi-space-1);
+
+  /* Collapsed rows past the cap are hidden imperatively (item.hidden) — override the flex display so
+     the attribute actually removes them from the flow. */
+  &[hidden] { display: none; }
 }
 
+/* The row's open affordance: ONE compact line — a teal monogram tile, the name + optional language tag
+   on the left, and (pushed right by the side group) an optional branch + relative time. Fills the row so
+   the whole thing is one large, vertically-centred click target (~38px). */
 .koi-welcome-recent-open {
   flex: 1 1 auto;
-  min-width: 0;             /* allow the name/path lines to ellipsis */
+  min-width: 0;             /* allow the name to ellipsis */
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2);
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--koi-radius-sm);
-  padding: var(--koi-space-1-75) var(--koi-space-2-5);
+  padding: var(--koi-space-1) var(--koi-space-2);
   color: var(--koi-fg);
   cursor: pointer;
 
   &:hover { background: var(--koi-surface); border-color: var(--koi-line); }
   &:focus-visible { outline: 2px solid var(--koi-accent); outline-offset: 1px; }
+}
+
+/* Teal monogram — the folder's LOWERCASE initial in an accent-cyan tile. */
+.koi-welcome-recent-mono {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--koi-radius-sm);
+  background: color-mix(in srgb, var(--koi-cyan) 16%, transparent);
+  color: var(--koi-cyan);
+  font-family: var(--koi-font-display);
+  font-size: var(--koi-text-sm);
+  font-weight: 700;
+  line-height: 1;
+  text-transform: lowercase;
+}
+
+.koi-welcome-recent-item-name {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm-plus);
+  color: var(--koi-fg);
+}
+
+/* A small emit-language tag (e.g. "C#") beside the name. */
+.koi-welcome-recent-lang {
+  flex: none;
+  padding: 0 var(--koi-space-1);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  color: var(--koi-muted);
+  background: color-mix(in srgb, var(--koi-fg) 6%, transparent);
+  border-radius: var(--koi-radius-2xs);
+}
+
+/* Right group: an optional teal branch chip + the relative open time, right-aligned via margin-left:auto. */
+.koi-welcome-recent-side {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+  min-width: 0;
+  padding-left: var(--koi-space-2);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  color: var(--koi-muted);
+}
+
+.koi-welcome-recent-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-0-5);
+  min-width: 0;
+  color: var(--koi-cyan);
+
+  svg {
+    width: 12px;
+    height: 12px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+}
+
+.koi-welcome-recent-branch-icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.koi-welcome-recent-branch-name {
+  min-width: 0;
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.koi-welcome-recent-time {
+  flex: none;
+  white-space: nowrap;      /* sits inside the right-aligned side group, after the branch */
 }
 
 .koi-welcome-recent-pin,
@@ -442,18 +1027,17 @@
   color: var(--koi-accent);
 }
 
-.koi-welcome-recent-filter {
-  width: 100%;
-  box-sizing: border-box;
-  margin-bottom: var(--koi-space-1-5);
-  background: var(--koi-surface);
-  color: var(--koi-fg);
-  border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius-sm);
-  padding: var(--koi-space-1-25) var(--koi-space-2);
-  font-family: var(--koi-font-body);
-  font-size: var(--koi-text-sm);
+/* View all / Show less — a quiet accent text toggle revealing or re-collapsing the rows past the cap. */
+.koi-welcome-recent-toggle {
+  margin-top: var(--koi-space-1-5);
+  background: transparent;
+  border: 0;
+  color: var(--koi-accent);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  cursor: pointer;
 
+  &:hover { text-decoration: underline; }
   &:focus-visible { outline: 2px solid var(--koi-accent); outline-offset: 1px; }
 }
 
@@ -470,23 +1054,6 @@
 
   &:hover { color: var(--koi-fg); text-decoration: underline; }
   &:focus-visible { outline: 2px solid var(--koi-accent); outline-offset: 1px; }
-}
-
-.koi-welcome-recent-item-name {
-  display: block;
-  font-family: var(--koi-font-body);
-  font-size: var(--koi-text-sm-plus);
-  color: var(--koi-fg);
-}
-
-.koi-welcome-recent-item-path {
-  display: block;
-  font-family: var(--koi-font-mono);
-  font-size: var(--koi-text-2xs);
-  color: var(--koi-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .koi-welcome-empty {
@@ -843,16 +1410,17 @@
 }
 
 /* --- Home colophon footer (issue #403): version + project links + byline ---
-   A quiet strip pinned to the bottom of the console card — deliberately distinct from the centered
-   Settings → About colophon (_about.scss): here it reads as a horizontal page footer, not a brand
-   tile. The hero scrolls above it (flex:1, overflow-y:auto); this stays put (flex:none). */
+   The hero lede's footer: pinned to the bottom of the left column via margin-top:auto, so the
+   eyebrow → statement → snippet stack sits at the top and this settles beneath it. Deliberately
+   distinct from the centered Settings → About colophon (_about.scss): here it reads as a horizontal
+   page footer, not a brand tile. The lede scrolls (overflow-y:auto), so a tall hero never hides it. */
 .koi-home-colophon {
   flex: none;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--koi-space-2) var(--koi-space-3);
-  margin-top: clamp(16px, 2vw, 24px);
+  margin-top: auto; /* push to the bottom of the flex-column lede */
   padding-top: var(--koi-space-3);
   border-top: 1px solid var(--koi-line);
   color: var(--koi-muted);
@@ -936,11 +1504,28 @@
   }
 }
 
-/* --- responsive: collapse the hero to one column, then tighten chrome ----- */
+/* --- responsive: collapse the body split to one column, then tighten chrome ----- */
 @media (max-width: 760px) {
-  .koi-welcome-hero {
+  /* Stack the two columns: the launch rail drops below the hero. The vertical dividing hairline and its
+     side inset give way to a top border + a scrolling column so the whole body flows naturally. */
+  .koi-home-body {
     grid-template-columns: 1fr;
     gap: clamp(20px, 5vw, 28px);
+    overflow-y: auto;
+  }
+
+  /* Stacked: no vertical divider, so both columns get symmetric horizontal inset (the divider-side inset
+     collapses). The launch's top border replaces the vertical one. */
+  .koi-welcome-lede {
+    overflow-y: visible;
+    padding: clamp(20px, 3vw, 34px) clamp(20px, 3.4vw, 40px) 0;
+  }
+
+  .koi-welcome-launch {
+    border-left: none;
+    border-top: 1px solid var(--koi-line);
+    overflow-y: visible;
+    padding: clamp(20px, 5vw, 28px) clamp(20px, 3.4vw, 40px) clamp(22px, 3vw, 34px);
   }
 
   /* Stack the colophon so it doesn't crowd the hero: chip → links → byline, top-aligned. */

@@ -21,6 +21,9 @@ import {
   getLastWorkspace,
   setLastWorkspace,
   clearLastWorkspace,
+  getLastSession,
+  setLastSession,
+  type LastSession,
   loadDiagramZoom,
   saveDiagramZoom,
   loadDiagramPositions,
@@ -483,6 +486,52 @@ describe('recent folders mutations', () => {
   });
 });
 
+describe('recent folder metadata (#1005)', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('stores branch + language when passed as meta', () => {
+    pushRecentFolder('/p', { branch: 'main', language: 'csharp' });
+    expect(getRecentFolders()[0]).toMatchObject({ path: '/p', branch: 'main', language: 'csharp' });
+  });
+
+  it('leaves branch + language undefined for a bare push', () => {
+    pushRecentFolder('/q');
+    const entry = getRecentFolders()[0];
+    expect(entry.branch).toBeUndefined();
+    expect(entry.language).toBeUndefined();
+  });
+
+  it('preserves prior branch + language on a bare re-push', () => {
+    pushRecentFolder('/p', { branch: 'feat/x', language: 'typescript' });
+    pushRecentFolder('/p'); // re-open WITHOUT meta must not wipe the tags
+    expect(getRecentFolders()[0]).toMatchObject({ path: '/p', branch: 'feat/x', language: 'typescript' });
+  });
+
+  it('overrides a single field while preserving the other on re-push with partial meta', () => {
+    pushRecentFolder('/p', { branch: 'main', language: 'csharp' });
+    pushRecentFolder('/p', { branch: 'release' }); // only branch supplied
+    expect(getRecentFolders()[0]).toMatchObject({ path: '/p', branch: 'release', language: 'csharp' });
+  });
+
+  it('passes through branch + language present on stored object entries', () => {
+    localStorage.setItem(KEY, JSON.stringify([
+      { path: '/tagged', openedAt: 5, branch: 'dev', language: 'rust' },
+    ]));
+    expect(getRecentFolders()[0]).toMatchObject({ path: '/tagged', branch: 'dev', language: 'rust' });
+  });
+
+  it('tolerates legacy string[] and object entries lacking the fields (no throw, fields undefined)', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/legacy', { path: '/obj', openedAt: 3 }]));
+    const got = getRecentFolders();
+    const legacy = got.find((r) => r.path === '/legacy')!;
+    const obj = got.find((r) => r.path === '/obj')!;
+    expect(legacy.branch).toBeUndefined();
+    expect(legacy.language).toBeUndefined();
+    expect(obj.branch).toBeUndefined();
+    expect(obj.language).toBeUndefined();
+  });
+});
+
 describe('legacy scratch migration helpers', () => {
   beforeEach(() => localStorage.clear());
 
@@ -591,6 +640,74 @@ describe('last-opened workspace pointer (#535)', () => {
   test('ignores an empty token (never persists "")', () => {
     setLastWorkspace('');
     expect(getLastWorkspace()).toBeNull();
+  });
+});
+
+describe('last-session snapshot for the resume card (#1005)', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('round-trips a full record through set/get', () => {
+    const session: LastSession = { project: 'billing', file: 'sales/order.koi', editedAt: 1_700_000_000_000, unsavedCount: 3 };
+    setLastSession(session);
+    expect(getLastSession()).toEqual(session);
+  });
+
+  test('round-trips a record with only the required fields (no file / unsavedCount)', () => {
+    const session: LastSession = { project: 'ordering', editedAt: 42 };
+    setLastSession(session);
+    expect(getLastSession()).toEqual(session);
+  });
+
+  test('returns null when nothing has been stored', () => {
+    expect(getLastSession()).toBeNull();
+  });
+
+  test('returns null for a garbage/legacy value (a bare string)', () => {
+    localStorage.setItem('koine.studio.lastSession', JSON.stringify('example-billing'));
+    expect(getLastSession()).toBeNull();
+  });
+
+  test('returns null for an object with no valid string project', () => {
+    localStorage.setItem('koine.studio.lastSession', JSON.stringify({ file: 'a.koi', editedAt: 5 }));
+    expect(getLastSession()).toBeNull();
+    localStorage.setItem('koine.studio.lastSession', JSON.stringify({ project: 42, editedAt: 5 }));
+    expect(getLastSession()).toBeNull();
+    localStorage.setItem('koine.studio.lastSession', JSON.stringify({ project: '' }));
+    expect(getLastSession()).toBeNull();
+  });
+
+  test('returns null for malformed JSON / an array', () => {
+    localStorage.setItem('koine.studio.lastSession', '{not json');
+    expect(getLastSession()).toBeNull();
+    localStorage.setItem('koine.studio.lastSession', '[1,2,3]');
+    expect(getLastSession()).toBeNull();
+  });
+
+  test('returns null when editedAt is missing / non-numeric / non-positive (corrupt snapshot)', () => {
+    // Real writes always stamp Date.now(); a record without a usable timestamp is corrupt/legacy and
+    // would render an absurd relative time ("~56 years ago"), so the reader rejects it (#1005 review).
+    localStorage.setItem('koine.studio.lastSession', JSON.stringify({ project: 'p' }));
+    expect(getLastSession()).toBeNull();
+    localStorage.setItem('koine.studio.lastSession', JSON.stringify({ project: 'p', editedAt: 'soon' }));
+    expect(getLastSession()).toBeNull();
+    localStorage.setItem('koine.studio.lastSession', JSON.stringify({ project: 'p', editedAt: 0 }));
+    expect(getLastSession()).toBeNull();
+  });
+
+  test('drops a wrong-typed file / unsavedCount rather than echoing garbage', () => {
+    localStorage.setItem(
+      'koine.studio.lastSession',
+      JSON.stringify({ project: 'p', editedAt: 1, file: 99, unsavedCount: 'many' }),
+    );
+    expect(getLastSession()).toEqual({ project: 'p', editedAt: 1 });
+  });
+
+  test('setLastSession(null) clears a stored snapshot', () => {
+    setLastSession({ project: 'billing', editedAt: 1 });
+    expect(getLastSession()).not.toBeNull();
+    setLastSession(null);
+    expect(getLastSession()).toBeNull();
+    expect(localStorage.getItem('koine.studio.lastSession')).toBeNull();
   });
 });
 

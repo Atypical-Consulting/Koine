@@ -1100,6 +1100,50 @@ fn git_log(dir: String, rel_path: Option<String>) -> Result<Vec<GitLogEntry>, St
     Ok(entries)
 }
 
+/// Clone the repository at `url` into `parent_dir` (`git clone <url> <dest>` run inside
+/// `parent_dir`), returning the absolute path of the created directory. `dir_name` names the
+/// destination folder when given — it must be a single path segment (non-empty, no `/`, `\`, or
+/// `..`) so the clone can never escape `parent_dir`; otherwise the name is derived from the url's
+/// last path segment with a trailing `.git` stripped (`…/repo.git` and `git@h:o/repo.git` → `repo`).
+/// `Err` (git's stderr) when the url is unreachable, and `Err` up front when `dir_name` — or the
+/// derived name — is unusable.
+#[tauri::command]
+fn git_clone(url: String, parent_dir: String, dir_name: Option<String>) -> Result<String, String> {
+    let dest_name = clone_dest_name(&url, dir_name.as_deref())?;
+
+    // `--` terminates option parsing so a url or dest whose first char is `-` (e.g. a repo named `-x`)
+    // is treated as a positional argument, not a git flag.
+    run_git(&parent_dir, &["clone", "--", &url, &dest_name])?;
+
+    Ok(std::path::Path::new(&parent_dir)
+        .join(&dest_name)
+        .to_string_lossy()
+        .into_owned())
+}
+
+/// Resolve the destination folder name for a clone: the caller-supplied `dir_name`, else the url's last
+/// path segment — split on `/` (paths/URLs), `\` (a Windows local-path clone SOURCE, e.g.
+/// `C:\repos\app`) and `:` (scp-like `git@host:owner/repo.git`) — with a trailing `.git` stripped.
+/// Validated to a single non-empty segment with no separators and no `..`, so a clone can never escape
+/// `parent_dir` (a url ending in `/..` would otherwise derive `".."` and target the grandparent).
+fn clone_dest_name(url: &str, dir_name: Option<&str>) -> Result<String, String> {
+    let dest = match dir_name {
+        Some(name) => name.to_string(),
+        None => {
+            let last = url
+                .trim_end_matches(|c: char| c == '/' || c == '\\')
+                .rsplit(|c: char| c == '/' || c == '\\' || c == ':')
+                .next()
+                .unwrap_or("");
+            last.strip_suffix(".git").unwrap_or(last).to_string()
+        }
+    };
+    if dest.is_empty() || dest.contains('/') || dest.contains('\\') || dest.contains("..") {
+        return Err(format!("invalid clone directory name: {dest:?}"));
+    }
+    Ok(dest)
+}
+
 // --- workspace explorer tree + mutations ------------------------------------
 
 /// One node in the workspace explorer tree under an opened folder — every
@@ -2056,7 +2100,8 @@ pub fn run() {
             git_init,
             git_branches,
             git_checkout,
-            git_log
+            git_log,
+            git_clone
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -3260,6 +3305,78 @@ mod tests {
         // ...but is, once `git_init` has run against it.
         git_init(plain.path()).unwrap();
         assert!(!git_status(plain.path()).unwrap().branch.is_empty(), "status now reports a branch");
+    }
+
+    #[test]
+    fn git_clone_copies_a_source_repo_into_a_fresh_parent() {
+        // A source repo with one commit (cloning an unborn/empty repo warns but still succeeds;
+        // a commit makes the assertion meaningful and matches the real "clone a project" flow).
+        let source = init_repo();
+        source.write("readme.txt", "hello\n");
+        source.git(&["add", "readme.txt"]);
+        source.git(&["commit", "-m", "init"]);
+
+        // Clone by an explicit name into a fresh parent dir (local path url — offline, no network).
+        let parent = TempRepo::new();
+        let dest = git_clone(source.path(), parent.path(), Some("cloned".to_string())).unwrap();
+
+        let dest_path = std::path::Path::new(&dest);
+        assert!(dest_path.ends_with("cloned"), "returns the clone path: {dest}");
+        assert!(dest_path.exists(), "the clone dir exists: {dest}");
+        assert!(dest_path.join(".git").exists(), "and is a work tree: {dest}");
+
+        // With no explicit name, the dir is derived from the url's last path segment.
+        let parent2 = TempRepo::new();
+        let derived = git_clone(source.path(), parent2.path(), None).unwrap();
+        let expected = std::path::Path::new(&source.path())
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let derived_path = std::path::Path::new(&derived);
+        assert!(derived_path.ends_with(&expected), "derived name is the source's last segment: {derived}");
+        assert!(derived_path.join(".git").exists(), "derived clone is a work tree: {derived}");
+    }
+
+    #[test]
+    fn git_clone_rejects_a_traversing_dir_name_and_a_bogus_url() {
+        let source = init_repo();
+        source.write("r.txt", "x\n");
+        source.git(&["add", "r.txt"]);
+        source.git(&["commit", "-m", "init"]);
+        let parent = TempRepo::new();
+
+        // A dir name that could escape the parent is rejected before git runs (offline, fast).
+        assert!(git_clone(source.path(), parent.path(), Some("a/b".to_string())).is_err());
+        assert!(git_clone(source.path(), parent.path(), Some("..".to_string())).is_err());
+        assert!(git_clone(source.path(), parent.path(), Some(String::new())).is_err());
+
+        // The SAME validation applies to a url-DERIVED name: a url ending in `/..` derives dest `".."`,
+        // which must be rejected too (not just the explicit-dir-name branch).
+        assert!(git_clone("https://example.com/owner/..".to_string(), parent.path(), None).is_err());
+
+        // clone_dest_name derives the repo name across url styles AND platform separators (a Windows
+        // local-path clone source uses `\` — this was the windows-latest CI failure) and rejects any
+        // name that could escape parent_dir. Pure + platform-independent, so it runs on every OS.
+        assert_eq!(clone_dest_name("https://example.com/owner/repo.git", None).unwrap(), "repo");
+        assert_eq!(clone_dest_name("git@host:owner/repo.git", None).unwrap(), "repo");
+        assert_eq!(clone_dest_name("https://h/o/repo/", None).unwrap(), "repo"); // trailing slash trimmed
+        assert_eq!(clone_dest_name("/tmp/koine_git_test_1", None).unwrap(), "koine_git_test_1");
+        assert_eq!(clone_dest_name(r"C:\Users\RUNNER~1\Temp\koine_git_test_2", None).unwrap(), "koine_git_test_2");
+        assert_eq!(clone_dest_name("ignored", Some("myclone")).unwrap(), "myclone");
+        assert!(clone_dest_name("https://h/o/..", None).is_err());
+        assert!(clone_dest_name("x", Some("a/b")).is_err());
+        assert!(clone_dest_name("x", Some(r"a\b")).is_err());
+        assert!(clone_dest_name("x", Some("..")).is_err());
+        assert!(clone_dest_name("x", Some("")).is_err());
+
+        // A non-existent local url fails fast (git rejects the missing path — no network).
+        assert!(git_clone(
+            "/no/such/path/repo.git".to_string(),
+            parent.path(),
+            None
+        )
+        .is_err());
     }
 
     // --- PTY teardown / pty_start race (#810) --------------------------------

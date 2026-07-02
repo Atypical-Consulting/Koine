@@ -184,6 +184,9 @@ class FakePlatform implements Platform {
   gitInit(): Promise<void> {
     return this.gitUnavailable();
   }
+  gitClone(): Promise<string> {
+    return this.gitUnavailable();
+  }
   writeTextFile(path: string, contents: string): Promise<void> {
     const rel = this.relOf(path);
     if (this.failWrites.has(rel)) return Promise.reject(new Error(`write failed: ${path}`));

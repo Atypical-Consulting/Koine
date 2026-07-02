@@ -164,6 +164,9 @@ const WORKSPACE_DECK_KEY = 'koine.studio.workspaceDeck';
 // The most-recently opened workspace token (#535), so a reload can restore it instead of silently
 // reverting to the empty default. Only OPFS-internal tokens are auto-restored at boot (see ide.ts).
 const LAST_WORKSPACE_KEY = 'koine.studio.lastWorkspace';
+// A lightweight snapshot of the last active editing session (project / active file / dirty count /
+// timestamp), so the Home screen can offer a "continue where you left off" resume card (#1005).
+const LAST_SESSION_KEY = 'koine.studio.lastSession';
 // Editor keybinding overrides (#266): a small Partial<Record<BindingId, string>> of user remaps.
 const KEYBINDINGS_KEY = 'koine.studio.keybindings';
 // Per-workspace active context scope (#146): the folder's storage key is appended (see loadActiveContext).
@@ -503,6 +506,10 @@ export interface RecentFolder {
   path: string;
   openedAt: number;
   pinned?: boolean;
+  /** Git branch the folder was last opened on (desktop only; absent in the browser or for non-repos). */
+  branch?: string;
+  /** Effective emit target when the folder was last opened (e.g. `'csharp'`, `'typescript'`). */
+  language?: string;
 }
 
 /** Pinned first (by openedAt desc), then unpinned by openedAt desc. */
@@ -548,6 +555,10 @@ export function getRecentFolders(): RecentFolder[] {
             openedAt: typeof r.openedAt === 'number' ? r.openedAt : 0,
             pinned: !!r.pinned,
           };
+          // Pass through the #1005 metadata only when present as non-empty strings; legacy entries
+          // that predate these fields simply read back without them.
+          if (typeof r.branch === 'string' && r.branch.length > 0) entry.branch = r.branch;
+          if (typeof r.language === 'string' && r.language.length > 0) entry.language = r.language;
         }
       }
       if (entry && !seen.has(entry.path)) {
@@ -569,13 +580,22 @@ function persistRecents(items: RecentFolder[]): void {
 /**
  * Record a folder as most-recently used: upsert (move to front, preserving any prior pinned
  * state), cap, persist. Empty paths are ignored.
+ *
+ * `meta` carries the optional #1005 tags (git `branch`, emit `language`). A supplied field
+ * overwrites; an omitted one falls back to the prior entry's value, so a bare re-push
+ * (`pushRecentFolder(path)`) refreshes recency WITHOUT wiping metadata captured earlier.
  */
-export function pushRecentFolder(path: string): void {
+export function pushRecentFolder(path: string, meta?: { branch?: string; language?: string }): void {
   if (typeof path !== 'string' || path.length === 0) return;
   const existing = getRecentFolders();
   const prior = existing.find((r) => r.path === path);
   const rest = existing.filter((r) => r.path !== path);
-  persistRecents([{ path, openedAt: Date.now(), pinned: prior?.pinned ?? false }, ...rest]);
+  const entry: RecentFolder = { path, openedAt: Date.now(), pinned: prior?.pinned ?? false };
+  const branch = meta?.branch ?? prior?.branch;
+  const language = meta?.language ?? prior?.language;
+  if (typeof branch === 'string' && branch.length > 0) entry.branch = branch;
+  if (typeof language === 'string' && language.length > 0) entry.language = language;
+  persistRecents([entry, ...rest]);
 }
 
 /** Drop a single recent folder by path. */
@@ -714,6 +734,66 @@ export function clearLastWorkspace(): void {
   } catch {
     // storage unavailable — nothing to clear
   }
+}
+
+// --- last-session snapshot (Home resume card, #1005) -------------------------
+// A single lightweight snapshot of what the user was last working on (project / active file / dirty
+// count / timestamp), so the Home screen can offer a "continue where you left off" card. Distinct from
+// LAST_WORKSPACE_KEY (a bare re-open token): this carries display metadata, not the boot pointer. The
+// read is guarded like getRecentFolders so a corrupt/legacy/hand-edited key never throws or feeds junk.
+
+/** A lightweight snapshot of the last active editing session, for the Home resume card (#1005). */
+export interface LastSession {
+  /** The workspace/project name or token the user was last in. */
+  project: string;
+  /** The active file (relative path) when the snapshot was taken, if any. */
+  file?: string;
+  /** Epoch-ms of the last edit/save/open captured. */
+  editedAt: number;
+  /** How many open buffers were unsaved at capture time, if known. */
+  unsavedCount?: number;
+}
+
+/**
+ * The last-session snapshot, or null when none is stored. Tolerant of an absent, unparseable,
+ * non-object, array, or legacy value, and of a record missing a valid string `project` (all → null).
+ * A missing/non-finite/non-positive `editedAt` also → null: real writes always stamp `Date.now()`, so a
+ * record without a usable timestamp is corrupt/legacy and would otherwise render an absurd relative time
+ * ("~56 years ago") on the resume card. Optional `file` / `unsavedCount` pass through only when the
+ * right type. Never throws.
+ */
+export function getLastSession(): LastSession | null {
+  const raw = readRaw(LAST_SESSION_KEY);
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const o = parsed as Record<string, unknown>;
+    if (typeof o.project !== 'string' || o.project.length === 0) return null;
+    if (typeof o.editedAt !== 'number' || !Number.isFinite(o.editedAt) || o.editedAt <= 0) return null;
+    const session: LastSession = {
+      project: o.project,
+      editedAt: o.editedAt,
+    };
+    if (typeof o.file === 'string') session.file = o.file;
+    if (typeof o.unsavedCount === 'number' && Number.isFinite(o.unsavedCount)) session.unsavedCount = o.unsavedCount;
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist (or, with null, forget) the last-session snapshot. Best-effort — swallows storage errors. */
+export function setLastSession(s: LastSession | null): void {
+  if (s === null) {
+    try {
+      localStorage.removeItem(LAST_SESSION_KEY);
+    } catch {
+      // storage unavailable — nothing to clear
+    }
+    return;
+  }
+  writeRaw(LAST_SESSION_KEY, JSON.stringify(s));
 }
 
 // --- diagram canvas zoom (#145) ----------------------------------------------
