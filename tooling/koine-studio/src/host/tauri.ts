@@ -484,6 +484,11 @@ export class TauriPlatform implements Platform {
     return invoke('git_init', { dir: folderToken }) as Promise<void>;
   }
 
+  /** Clone `url` into `parentDir` (`dirName` names the folder; defaults to the repo name); returns the cloned path. */
+  gitClone(url: string, parentDir: string, dirName?: string): Promise<string> {
+    return invoke('git_clone', { url, parentDir, dirName }) as Promise<string>;
+  }
+
   readTextFile(path: string): Promise<string> {
     return invoke<string>('read_text_file', { path });
   }

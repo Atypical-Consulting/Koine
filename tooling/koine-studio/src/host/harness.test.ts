@@ -35,4 +35,9 @@ describe('BrowserPlatform git capability', () => {
     const platform: Platform = new BrowserPlatform();
     await expect(platform.gitInit('any-folder-token')).rejects.toBeInstanceOf(Error);
   });
+
+  it('degrades gitClone to an async rejection, same as every other git* stub', async () => {
+    const platform: Platform = new BrowserPlatform();
+    await expect(platform.gitClone('https://x/y/repo.git', '/parent', 'repo')).rejects.toBeInstanceOf(Error);
+  });
 });

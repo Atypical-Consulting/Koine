@@ -414,6 +414,13 @@ export interface Platform {
    */
   gitInit(folderToken: string): Promise<void>;
 
+  /**
+   * Clone the repo at `url` into `parentDir`, returning the cloned directory's absolute path.
+   * `dirName` names the destination folder (defaults to the url's repo name). Desktop only; the
+   * browser stub rejects. Callers MUST check {@link canUseGit} first.
+   */
+  gitClone(url: string, parentDir: string, dirName?: string): Promise<string>;
+
   /** Read a file's UTF-8 text by its token. */
   readTextFile(path: string): Promise<string>;
 

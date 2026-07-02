@@ -175,6 +175,10 @@ export class BrowserPlatform implements Platform {
     return this.gitUnavailable();
   }
 
+  gitClone(): Promise<string> {
+    return this.gitUnavailable();
+  }
+
   readTextFile(path: string): Promise<string> {
     return fs.readTextFile(path);
   }

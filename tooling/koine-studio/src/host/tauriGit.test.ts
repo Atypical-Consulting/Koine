@@ -91,4 +91,27 @@ describe('TauriPlatform git surface', () => {
     await new TauriPlatform().gitInit('/work');
     expect(invokeMock).toHaveBeenCalledWith('git_init', { dir: '/work' });
   });
+
+  it('gitClone invokes git_clone with { url, parentDir, dirName } and returns the cloned dir path', async () => {
+    invokeMock.mockResolvedValue('/parent/repo');
+
+    const result = await new TauriPlatform().gitClone('https://x/y/repo.git', '/parent', 'repo');
+
+    expect(invokeMock).toHaveBeenCalledWith('git_clone', {
+      url: 'https://x/y/repo.git',
+      parentDir: '/parent',
+      dirName: 'repo',
+    });
+    expect(result).toBe('/parent/repo');
+  });
+
+  it('gitClone without a dirName passes dirName: undefined (host derives the repo name)', async () => {
+    invokeMock.mockResolvedValue('/parent/repo');
+    await new TauriPlatform().gitClone('https://x/y/repo.git', '/parent');
+    expect(invokeMock).toHaveBeenCalledWith('git_clone', {
+      url: 'https://x/y/repo.git',
+      parentDir: '/parent',
+      dirName: undefined,
+    });
+  });
 });
