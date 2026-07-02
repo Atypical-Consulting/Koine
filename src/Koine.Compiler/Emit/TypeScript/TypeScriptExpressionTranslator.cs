@@ -429,12 +429,13 @@ internal sealed class TypeScriptExpressionTranslator
 
     /// <summary>
     /// Renders Decimal / value-object arithmetic via the runtime's method surface
-    /// (<c>.add</c>/<c>.subtract</c>/<c>.multiply</c>) instead of a JS operator. Equality and
-    /// comparison still use the inline operators. Returns false for ordinary numeric arithmetic.
+    /// (<c>.add</c>/<c>.subtract</c>/<c>.multiply</c>/<c>.divide</c>) instead of a JS operator.
+    /// Equality and comparison still use the inline operators. Returns false for ordinary numeric
+    /// arithmetic.
     /// </summary>
     private bool TryWriteValueArithmetic(BinaryExpr bin, StringBuilder sb)
     {
-        if (bin.Op is not (BinaryOp.Add or BinaryOp.Sub or BinaryOp.Mul))
+        if (bin.Op is not (BinaryOp.Add or BinaryOp.Sub or BinaryOp.Mul or BinaryOp.Div))
         {
             return false;
         }
@@ -453,7 +454,9 @@ internal sealed class TypeScriptExpressionTranslator
         // below takes the Decimal-receiver path and emits `new Decimal('0.9').multiply(this.money)`,
         // which treats the value object as a `Decimal | number` factor — a `tsc` type error and a
         // wrong runtime value (#788). Only `Mul` admits a scalar; `Decimal * Decimal` keeps its
-        // left-receiver order via the path below, where neither side is value-like.
+        // left-receiver order via the path below, where neither side is value-like. Division is
+        // non-commutative and the validator rejects `scalar / value-object` (#878), so `Div` never
+        // takes this reversed branch.
         if (bin.Op == BinaryOp.Mul && rightValue && !leftValue)
         {
             Write(bin.Right, sb);
@@ -472,15 +475,17 @@ internal sealed class TypeScriptExpressionTranslator
         {
             BinaryOp.Add => "add",
             BinaryOp.Sub => "subtract",
+            BinaryOp.Div => "divide",
             _ => "multiply"
         };
 
         Write(bin.Left, sb);
         sb.Append('.').Append(method).Append('(');
-        // A value-object scalar multiply (Money * quantity) takes a plain `number`, so a Decimal
-        // literal scalar (e.g. 0.9) renders as a bare number, not a `new Decimal(...)`. A Decimal *
-        // Decimal/Int (true decimal arithmetic) passes the operand through unchanged.
-        if (bin.Op == BinaryOp.Mul && leftValue)
+        // A value-object scalar multiply/divide (Money * quantity, fee / 2) takes a plain `number`,
+        // so a Decimal literal scalar (e.g. 0.9) renders as a bare number, not a `new Decimal(...)`.
+        // Decimal * Decimal/Int or Decimal / Decimal/Int (true decimal arithmetic) passes the operand
+        // through unchanged.
+        if (bin.Op is BinaryOp.Mul or BinaryOp.Div && leftValue)
         {
             WriteScalarArgument(bin.Right, sb);
         }

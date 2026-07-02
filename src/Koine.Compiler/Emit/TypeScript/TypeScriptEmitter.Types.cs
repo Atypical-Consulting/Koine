@@ -73,6 +73,14 @@ public sealed partial class TypeScriptEmitter
                 WriteScalarOp(sb, name, ctorMembers);
             }
 
+            // `divide` is the division dual of `multiply` (#879, follow-up to the C# emitter's #832):
+            // demand-generated only where the model actually divides this value object by a scalar
+            // (fee / 2), never emitted unconditionally.
+            if (emit.ScalarDivNeeds.ContainsKey(vo.Name) && ctorMembers.Any(m => m.Type.Name is "Int" or "Decimal"))
+            {
+                WriteScalarDivOp(sb, name, ctorMembers);
+            }
+
             // `add` is demand-generated when the VO is folded with `sum` (AdditiveNeeds) OR appears in a
             // plain binary `value + value` (#834); `subtract` is demand-generated for a plain
             // `value - value` (#834 — never generated for plain VOs before). The translator already
@@ -229,6 +237,51 @@ public sealed partial class TypeScriptEmitter
 
         sb.Append('\n');
         sb.Append(Indent).Append("multiply(factor: number): ").Append(name).Append(" {\n");
+        sb.Append(Indent).Append(Indent).Append("return new ").Append(name).Append('(')
+          .Append(string.Join(", ", ordered.Select(Arg))).Append(");\n");
+        sb.Append(Indent).Append("}\n");
+    }
+
+    /// <summary>
+    /// A value object's scalar <c>divide</c> method (e.g. <c>fee / 2</c>): the division dual of
+    /// <see cref="WriteScalarOp"/>, dividing each numeric field by the scalar and carrying the rest.
+    /// </summary>
+    private void WriteScalarDivOp(StringBuilder sb, string name, IReadOnlyList<Member> ctorMembers)
+    {
+        if (RefOnly)
+        {
+            WriteRefStubMethod(sb, $"divide(divisor: number): {name}");
+            return;
+        }
+
+        var numeric = new HashSet<string>(ctorMembers.Where(m => m.Type.Name is "Int" or "Decimal").Select(m => m.Name), StringComparer.Ordinal);
+        var ordered = OrderCtorParams(ctorMembers).ToList();
+
+        string Arg(Member m)
+        {
+            var field = "this." + TypeScriptNaming.ToCamelCase(m.Name);
+            if (!numeric.Contains(m.Name))
+            {
+                return field;
+            }
+            // A Decimal divides exactly (rounded to the runtime's guard precision) via the runtime
+            // divisor; an Int field divides by `/`, rounded to stay an integer.
+            return m.Type.Name == "Decimal"
+                ? $"{field}.divide(new Decimal(divisor.toString()))"
+                : $"Math.round({field} / divisor)";
+        }
+
+        sb.Append('\n');
+        sb.Append(Indent).Append("divide(divisor: number): ").Append(name).Append(" {\n");
+        // A Decimal field routes its own divisor through the runtime's Decimal.divide, which already
+        // guards a zero divisor — but an Int-only value object never reaches that path, and JS `/`
+        // silently yields Infinity/NaN rather than throwing (unlike every other numeric target, whose
+        // host language raises on integer division by zero). Guard once, up front, so both field
+        // shapes fail the same way instead of an Int-only VO silently constructing a corrupt instance.
+        sb.Append(Indent).Append(Indent).Append("if (divisor === 0) {\n");
+        sb.Append(Indent).Append(Indent).Append(Indent)
+          .Append("throw new DomainInvariantViolationError('").Append(name).Append("', 'division by zero');\n");
+        sb.Append(Indent).Append(Indent).Append("}\n");
         sb.Append(Indent).Append(Indent).Append("return new ").Append(name).Append('(')
           .Append(string.Join(", ", ordered.Select(Arg))).Append(");\n");
         sb.Append(Indent).Append("}\n");

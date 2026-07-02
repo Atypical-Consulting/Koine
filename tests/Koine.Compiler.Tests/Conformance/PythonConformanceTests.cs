@@ -589,6 +589,54 @@ public class PythonConformanceTests
     }
 
     /// <summary>
+    /// Issue #879 (follow-up to #832, which demand-generated <c>operator /</c> for the C# emitter):
+    /// a plain value object divided by a numeric scalar — <c>half: Money = base / 2</c> — must emit a
+    /// real <c>__truediv__</c>, mirroring the existing demand-generated <c>__mul__</c>. Before the fix
+    /// <c>OperatorNeedsAnalyzer.BuildScalarDivisionNeeds</c> was recorded but never consumed by the
+    /// Python emitter, so <c>base / 2</c> raised <c>TypeError: unsupported operand type(s)</c> at
+    /// runtime (Python already lowers <c>/</c> to the native operator — see
+    /// <c>PythonExpressionTranslator.BinaryOperatorFor</c> — so only the emission was missing, not the
+    /// translator routing).
+    /// </summary>
+    [Fact]
+    public void Value_object_divided_by_a_scalar_typechecks_and_runs()
+    {
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0 "an amount cannot be negative"
+              }
+              value Line {
+                base: Money
+                half: Money = base / 2
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("__truediv__");
+
+        AssertStrictlyTypeChecks(result.Files);
+
+        const string driver = """
+            from decimal import Decimal
+            from shop.value_objects.money import Money
+            from shop.value_objects.line import Line
+
+            line = Line(Money(Decimal("10")))
+            assert line.half.amount == Decimal("5"), line.half.amount
+            """;
+
+        TestSupport.PythonCheck run = TestSupport.RunPython(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+        run.Ok.ShouldBeTrue(
+            "value-object / scalar should evaluate (10/2==5):\n" + string.Join("\n", run.Errors));
+    }
+
+    /// <summary>
     /// Issue #834: a plain (non-quantity) value object used directly in binary arithmetic —
     /// <c>combined: Money = base + base</c> / <c>diff: Money = base - base</c> — must emit real
     /// <c>__add__</c> / <c>__sub__</c> dunders so the native <c>+</c>/<c>-</c> the translator lowers to
