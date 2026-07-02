@@ -241,26 +241,27 @@ public sealed class SemanticTokenProvider
 
     /// <summary>
     /// The concept-kind modifier bit for a declared type NAME → <c>(1 &lt;&lt; bit)</c>, for every
-    /// <see cref="TypeDecl"/> subtype that names a DDD concept. Types with no distinct kind (e.g.
-    /// generated ID value objects, which have no <see cref="TypeDecl"/>) simply never appear here and
-    /// carry the neutral <see cref="SemanticTokenType.Type"/> color. The mapped subtypes match
-    /// <see cref="ModelIndex.Classify"/>'s <c>TypeKind</c> cases.
+    /// declared type whose DDD kind maps to a concept color. Classification routes through
+    /// <see cref="ModelIndex.Classify"/> — the compiler's single authority for "what kind is this type"
+    /// — so the editor coloring can never disagree with how the validator/emitter classify the same
+    /// name. Types with no concept kind (primitives, collections, generated ID value objects) never
+    /// appear here and keep the neutral <see cref="SemanticTokenType.Type"/> color.
     /// </summary>
     private static IReadOnlyDictionary<string, int> CollectConceptKindBits(ModelIndex index)
     {
         var map = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (TypeDecl t in index.AllTypes())
         {
-            SemanticTokenModifier? kind = t switch
+            SemanticTokenModifier? kind = index.Classify(t.Name) switch
             {
-                AggregateDecl => SemanticTokenModifier.Aggregate,
-                EntityDecl => SemanticTokenModifier.Entity,
-                ValueObjectDecl => SemanticTokenModifier.ValueObject,
-                EnumDecl => SemanticTokenModifier.Enumeration,
-                EventDecl => SemanticTokenModifier.DomainEvent,
-                IntegrationEventDecl => SemanticTokenModifier.IntegrationEvent,
-                ReadModelDecl => SemanticTokenModifier.ReadModel,
-                QueryDecl => SemanticTokenModifier.Query,
+                TypeKind.Aggregate => SemanticTokenModifier.Aggregate,
+                TypeKind.Entity => SemanticTokenModifier.Entity,
+                TypeKind.Value => SemanticTokenModifier.ValueObject,
+                TypeKind.Enum => SemanticTokenModifier.Enumeration,
+                TypeKind.Event => SemanticTokenModifier.DomainEvent,
+                TypeKind.IntegrationEvent => SemanticTokenModifier.IntegrationEvent,
+                TypeKind.ReadModel => SemanticTokenModifier.ReadModel,
+                TypeKind.Query => SemanticTokenModifier.Query,
                 _ => null,
             };
             if (kind is { } k)

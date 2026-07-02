@@ -51,12 +51,16 @@ import { prefixedId } from '@/shared/ids';
 /** The neutral slate fallback for a node kind with no concept color (state nodes, unknown kinds). */
 const SLATE = '#94a3b8';
 
-// The DDD palette as literal hex (theme-independent — the maxGraph cell SHAPE fill/stroke can't use var(),
-// which doesn't resolve inside SVG fill attributes). DERIVED from the single-source Concept Colors palette
-// (design/concept-colors.json → CONCEPT_COLORS): every value is CONCEPT_COLORS[slug].dark, the SAME hex the
-// explorer/editor paint as `var(--koi-ddd-<slug>)`. The two alias keys the graph emits (`aggregate-root`,
-// `value-object`) map onto the aggregate/value hues; state-machine node kinds (state/initial/final) and a
-// bounded `context` stay structural slate/value-blue (a context hue is a deferred follow-up).
+// The DDD palette as literal hex — the maxGraph cell SHAPE fill/stroke can't use var(), which doesn't
+// resolve inside SVG fill attributes. DERIVED from the single-source Concept Colors palette
+// (design/concept-colors.json → CONCEPT_COLORS): every value is CONCEPT_COLORS[slug].dark, the canonical
+// concept hue — which equals `var(--koi-ddd-<slug>)` under the DEFAULT dark theme. (Under the opt-in light
+// theme the var resolves to the contrast-tuned light variant while these SVG shapes keep the dark hue, so
+// the Outline minimap / shape borders show the canonical hue there; making the canvas re-render with the
+// light variant on theme toggle is a tracked follow-up.) The two alias keys the graph emits
+// (`aggregate-root`, `value-object`) map onto the aggregate/value hues; state-machine node kinds
+// (state/initial/final) and a bounded `context` stay structural slate/value-blue (a context hue is a
+// deferred follow-up).
 const DDD_HEX: Record<string, string> = {
   ...Object.fromEntries(CONCEPT_SLUGS.map((slug) => [slug, CONCEPT_COLORS[slug].dark])),
   'aggregate-root': CONCEPT_COLORS.aggregate.dark,

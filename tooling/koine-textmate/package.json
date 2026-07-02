@@ -264,6 +264,25 @@
           "*.factory:koine": "#f59e0b",
           "*.stateMachine:koine": "#06b6d4",
           "*.specification:koine": "#c084fc"
+        },
+        "[*Light*]": {
+          "rules": {
+            "*.aggregate:koine": "#4f46e5",
+            "*.entity:koine": "#047857",
+            "*.valueObject:koine": "#2563eb",
+            "*.enumeration:koine": "#b45309",
+            "*.domainEvent:koine": "#db2777",
+            "*.integrationEvent:koine": "#0f766e",
+            "*.command:koine": "#dc2626",
+            "*.query:koine": "#0369a1",
+            "*.readModel:koine": "#4d7c0f",
+            "*.service:koine": "#c2410c",
+            "*.repository:koine": "#475569",
+            "*.policy:koine": "#a21caf",
+            "*.factory:koine": "#a16207",
+            "*.stateMachine:koine": "#0e7490",
+            "*.specification:koine": "#7c3aed"
+          }
         }
       }
     }

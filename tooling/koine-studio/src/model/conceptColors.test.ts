@@ -75,18 +75,27 @@ describe('VS Code extension concept-color rules (koine-textmate) vs palette', ()
       semanticTokenModifiers?: { id: string }[];
       semanticTokenScopes?: { language: string; scopes: Record<string, string[]> }[];
       configurationDefaults?: {
-        'editor.semanticTokenColorCustomizations'?: { rules?: Record<string, string> };
+        'editor.semanticTokenColorCustomizations'?: {
+          rules?: Record<string, string>;
+          '[*Light*]'?: { rules?: Record<string, string> };
+        };
       };
     };
   };
 
-  test('every `*.<modifier>:koine` default rule hex equals the concept dark value', () => {
-    const rules = pkg.contributes.configurationDefaults?.['editor.semanticTokenColorCustomizations']?.rules ?? {};
+  test('default (dark) rules use the concept dark hex; the [*Light*] override uses the light hex', () => {
+    const custom = pkg.contributes.configurationDefaults?.['editor.semanticTokenColorCustomizations'] ?? {};
+    const darkRules = custom.rules ?? {};
+    const lightRules = custom['[*Light*]']?.rules ?? {};
     for (const c of source.concepts) {
-      expect(rules[`*.${c.modifier}:koine`], `rule for ${c.modifier}`).toBe(c.dark);
+      // Dark themes (the common default): the saturated dark hex.
+      expect(darkRules[`*.${c.modifier}:koine`], `dark rule for ${c.modifier}`).toBe(c.dark);
+      // Light themes: the contrast-tuned light variant (the dark hex is near-invisible on white).
+      expect(lightRules[`*.${c.modifier}:koine`], `light rule for ${c.modifier}`).toBe(c.light);
     }
     // No stray rules beyond the 15 concepts (a removed concept would leave a dangling rule).
-    expect(Object.keys(rules)).toHaveLength(source.concepts.length);
+    expect(Object.keys(darkRules)).toHaveLength(source.concepts.length);
+    expect(Object.keys(lightRules)).toHaveLength(source.concepts.length);
   });
 
   test('the extension declares every concept modifier and maps a scope for each', () => {
