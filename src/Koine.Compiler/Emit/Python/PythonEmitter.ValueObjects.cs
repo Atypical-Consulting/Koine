@@ -413,7 +413,6 @@ public sealed partial class PythonEmitter
     private void WriteScalarDivOp(StringBuilder sb, string name, IReadOnlyList<Member> fields, IReadOnlySet<string> scalars)
     {
         var numeric = new HashSet<string>(fields.Where(m => m.Type.Name is "Int" or "Decimal").Select(m => m.Name), StringComparer.Ordinal);
-        var isInt = new HashSet<string>(fields.Where(m => m.Type.Name == "Int").Select(m => m.Name), StringComparer.Ordinal);
         var factorType = ScalarUnion(scalars);
 
         string Arg(Member m)
@@ -423,7 +422,7 @@ public sealed partial class PythonEmitter
             {
                 return field;
             }
-            return isInt.Contains(m.Name) ? $"int({field} / divisor)" : $"{field} / divisor";
+            return m.Type.Name == "Int" ? $"int({field} / divisor)" : $"{field} / divisor";
         }
 
         sb.Append('\n');

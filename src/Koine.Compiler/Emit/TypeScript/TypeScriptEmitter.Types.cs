@@ -273,6 +273,15 @@ public sealed partial class TypeScriptEmitter
 
         sb.Append('\n');
         sb.Append(Indent).Append("divide(divisor: number): ").Append(name).Append(" {\n");
+        // A Decimal field routes its own divisor through the runtime's Decimal.divide, which already
+        // guards a zero divisor — but an Int-only value object never reaches that path, and JS `/`
+        // silently yields Infinity/NaN rather than throwing (unlike every other numeric target, whose
+        // host language raises on integer division by zero). Guard once, up front, so both field
+        // shapes fail the same way instead of an Int-only VO silently constructing a corrupt instance.
+        sb.Append(Indent).Append(Indent).Append("if (divisor === 0) {\n");
+        sb.Append(Indent).Append(Indent).Append(Indent)
+          .Append("throw new DomainInvariantViolationError('").Append(name).Append("', 'division by zero');\n");
+        sb.Append(Indent).Append(Indent).Append("}\n");
         sb.Append(Indent).Append(Indent).Append("return new ").Append(name).Append('(')
           .Append(string.Join(", ", ordered.Select(Arg))).Append(");\n");
         sb.Append(Indent).Append("}\n");

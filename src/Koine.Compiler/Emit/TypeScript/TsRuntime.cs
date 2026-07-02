@@ -247,21 +247,28 @@ internal static class TsRuntime
 
           /**
            * Extra decimal places (beyond the dividend's own scale) `divide` rounds to. Unlike
-           * add/subtract/multiply, division rarely terminates exactly, so — mirroring the
-           * BCMath-backed PHP Decimal's fixed division scale — this picks a fixed guard precision
-           * rather than exposing a caller-supplied one.
+           * add/subtract/multiply, division rarely terminates exactly, so this picks a fixed guard
+           * precision rather than exposing a caller-supplied one — the same fixed-precision idea as
+           * the BCMath-backed PHP Decimal's division, though not byte-identical: PHP's `bcdiv` uses an
+           * ABSOLUTE scale (a fixed total number of fractional digits, truncated) set once on the
+           * value, whereas this guards RELATIVE to each divide's own dividend scale and rounds
+           * half-away-from-zero — so the two runtimes' division results can differ in their last digit
+           * and place count. Each target's Decimal is a self-contained runtime; only value-object
+           * scalar division's demand-gated EMISSION is shared across targets, not the arithmetic
+           * itself (mirroring how C#'s native `decimal` and Rust's `rust_decimal` also diverge from
+           * both).
            */
           private static readonly DIVISION_GUARD_DIGITS = 10;
 
           divide(other: Decimal | number): Decimal {
             const right = typeof other === 'number' ? Decimal.fromInt(other) : other;
             const rightScale = Decimal.scaleOf(right);
-            if (right.toBigIntScaled(rightScale) === 0n) {
+            const denominator = right.toBigIntScaled(rightScale);
+            if (denominator === 0n) {
               throw new DomainInvariantViolationError('Decimal', 'division by zero');
             }
             const resultScale = Decimal.scaleOf(this) + Decimal.DIVISION_GUARD_DIGITS;
             const numerator = this.toBigIntScaled(resultScale + rightScale);
-            const denominator = right.toBigIntScaled(rightScale);
             const negative = (numerator < 0n) !== (denominator < 0n);
             const absNumerator = numerator < 0n ? -numerator : numerator;
             const absDenominator = denominator < 0n ? -denominator : denominator;
