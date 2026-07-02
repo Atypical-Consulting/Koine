@@ -844,6 +844,14 @@ public class LspServerTests
         tokenTypes.ShouldBe(SemanticTokenProvider.TokenTypeNames);
         tokenModifiers.ShouldBe(SemanticTokenProvider.TokenModifierNames);
         full.ShouldBeTrue();
+
+        // Concept Colors (ADR 0004): the wire legend carries the append-only 16-modifier list —
+        // bit 0 `declaration`, bits 1–15 the DDD concept kinds. Locking the shape here catches any
+        // accidental shrink/reorder that would silently mis-color every client that caches the legend.
+        tokenModifiers.Length.ShouldBe(16);
+        tokenModifiers[0].ShouldBe("declaration");
+        tokenModifiers[1].ShouldBe("aggregate");
+        tokenModifiers[^1].ShouldBe("specification");
     }
 
     [Fact]

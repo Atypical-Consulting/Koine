@@ -22,6 +22,7 @@
     "./styles.css": "./dist/styles.css"
   },
   "scripts": {
+    "gen:colors": "node scripts/gen-concept-colors.mjs",
     "build": "tsc && vite build",
     "prepack": "npm run build",
     "test": "vitest run",

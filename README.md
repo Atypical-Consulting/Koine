@@ -92,6 +92,12 @@ surface below is a click away in the [live Studio](https://atypical-consulting.g
 > Both run the **same** parser, validator, and emitters as the `koine` CLI — what you see in the
 > browser is exactly what the build produces.
 
+**Concept Colors** — *one DDD concept, one color, everywhere.* An aggregate is the same indigo, a
+value object the same blue, an enum the same amber in the explorer, on the canvas, in the code editor,
+in the playground, and in VS Code — driven by one palette and the language server's concept-kind
+signal, so the association carries from the tree straight into the source. See the
+[Concept Colors guide](https://atypical-consulting.github.io/Koine/guides/concept-colors/).
+
 📖 **Full docs → <https://atypical-consulting.github.io/Koine/>** — getting started, a six-part
 tutorial, the complete language reference, the feature catalogue, and the CLI. (Source in
 [`website/`](website/); run locally with `cd website && npm install && npm run dev`.)

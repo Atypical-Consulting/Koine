@@ -226,6 +226,30 @@ describe('lifecycleBoot', () => {
       expect(deps.confirmReplaceWork).toHaveBeenCalled();
       expect(deps.openRecentFolder).toHaveBeenCalledWith('/proj');
     });
+
+    // Regression (desktop "Model request failed: LSP not started"): on a Home-first cold boot the IDE is
+    // lazy-initialised INSIDE main.ts's route→editor `set()` notification, and Set.forEach visits the
+    // freshly-registered route-intent listener during that same transition. If it consumed the intent
+    // there it would run the model-index request UNGATED, before lsp.start() resolves — which on desktop
+    // (a dotnet sidecar that's seconds from answering `initialize`) deterministically hits "LSP not
+    // started". The listener must ignore the boot transition and leave the intent to the gated boot ladder.
+    it('does NOT consume the start-intent on the cold-boot transition (Set.forEach mid-iteration fire)', async () => {
+      takeStartIntentMock.mockReturnValue({ kind: 'open-example', template: { id: 'billing' } as never });
+      const deps = makeDeps();
+      createLifecycleBoot(deps);
+
+      // Simulate the boot transition firing the listener synchronously, BEFORE the boot notification has
+      // drained (no `await flush()` yet) — i.e. still inside the same task, exactly as Set.forEach does.
+      routeCallback()({ route: 'editor' }, { route: 'home' });
+      expect(takeStartIntentMock).not.toHaveBeenCalled(); // the subscription stood down during boot
+      expect(deps.openExample).not.toHaveBeenCalled();
+
+      // The gated boot ladder (lsp.start().then(...)) is the sole consumer: it runs the intent exactly
+      // once, after the server is up.
+      await flush();
+      expect(deps.openExample).toHaveBeenCalledOnce();
+      expect(deps.openExample).toHaveBeenCalledWith({ id: 'billing' });
+    });
   });
 
   it('teardown disposes every controller in the preserved order, then the route-intent sub', () => {
