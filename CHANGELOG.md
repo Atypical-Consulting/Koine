@@ -6,6 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Koine is pre-1.0, so minor versions
 may include breaking changes.
 
+## [0.245.0](https://github.com/Atypical-Consulting/Koine/compare/v0.244.0...v0.245.0) (2026-07-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **emit:** extract each emitter into its own Koine.Emit.<Target> project ([#861](https://github.com/Atypical-Consulting/Koine/issues/861)) (#968)
+
+### Features
+
+* demand-generate value-object / scalar division in TS, Python, and Rust emitters ([#879](https://github.com/Atypical-Consulting/Koine/issues/879)) ([#933](https://github.com/Atypical-Consulting/Koine/issues/933)) ([5d09c3a](https://github.com/Atypical-Consulting/Koine/commit/5d09c3a744257c5aaec74cb4187e01f8e86f8d7a))
+* **design-sync:** ship Koine Studio panels as live components via a Preact→React adapter ([#913](https://github.com/Atypical-Consulting/Koine/issues/913)) ([3dabd10](https://github.com/Atypical-Consulting/Koine/commit/3dabd1083c3676ca9423a09a7343d797cdb9f9dc))
+* **emit:** extract each emitter into its own Koine.Emit.&lt;Target&gt; project ([#861](https://github.com/Atypical-Consulting/Koine/issues/861)) ([#968](https://github.com/Atypical-Consulting/Koine/issues/968)) ([9169d5e](https://github.com/Atypical-Consulting/Koine/commit/9169d5ed98b253e25b8ff40d16e24c07305e02ef))
+* **studio:** add an Initialize Repository button to the Source Control panel ([#911](https://github.com/Atypical-Consulting/Koine/issues/911)) ([05af580](https://github.com/Atypical-Consulting/Koine/commit/05af58035a86b39cbfd499bbd4fe4dc9a4dd5cec))
+* **studio:** adopt Concept Colors — one DDD concept, one color everywhere ([#936](https://github.com/Atypical-Consulting/Koine/issues/936)) ([#941](https://github.com/Atypical-Consulting/Koine/issues/941)) ([dfe7a94](https://github.com/Atypical-Consulting/Koine/commit/dfe7a943532deeb024d270d80d3a774d87fd4288))
+* **studio:** default desktop workspace root to Documents/Koine ([#915](https://github.com/Atypical-Consulting/Koine/issues/915)) ([#949](https://github.com/Atypical-Consulting/Koine/issues/949)) ([78633da](https://github.com/Atypical-Consulting/Koine/commit/78633dafa62bc1beaf87ea4d532423f03a7c5d77))
+* **studio:** extract Studio's reusable UI into @atypical/koine-ui ([#905](https://github.com/Atypical-Consulting/Koine/issues/905)) ([#932](https://github.com/Atypical-Consulting/Koine/issues/932)) ([7011c55](https://github.com/Atypical-Consulting/Koine/commit/7011c55531484a736c344b28d11b2de5f0507ce1))
+* **studio:** redesign the top bar & status bar chrome (chrome v2) ([#923](https://github.com/Atypical-Consulting/Koine/issues/923)) ([#924](https://github.com/Atypical-Consulting/Koine/issues/924)) ([8f338a3](https://github.com/Atypical-Consulting/Koine/commit/8f338a3315c954697214cce8fd1e94137e0eac15))
+* **studio:** ship-ready desktop MCP exposure and expandable tool-call cards ([#934](https://github.com/Atypical-Consulting/Koine/issues/934)) ([#935](https://github.com/Atypical-Consulting/Koine/issues/935)) ([8fd3cef](https://github.com/Atypical-Consulting/Koine/commit/8fd3cefad47bd81cca08048e6ae068272720ad84))
+
+
+### Bug Fixes
+
+* **design-sync:** drop orphan .d.ts and classify structural tokens ([#920](https://github.com/Atypical-Consulting/Koine/issues/920)) ([bb805e4](https://github.com/Atypical-Consulting/Koine/commit/bb805e46567943a42a834c177d649e54d0da5924))
+* **emit-php:** parenthesise (new Decimal('n'))-&gt;… for a Decimal-literal receiver in WriteAsDecimal ([#907](https://github.com/Atypical-Consulting/Koine/issues/907)) ([#963](https://github.com/Atypical-Consulting/Koine/issues/963)) ([cdc2553](https://github.com/Atypical-Consulting/Koine/commit/cdc255312d76fa4d4dc1f586ab005a2d92840ad6))
+* **emit-php:** parenthesise WriteAsDecimal fallthrough arm's new-chaining for Int members ([#849](https://github.com/Atypical-Consulting/Koine/issues/849)) ([#903](https://github.com/Atypical-Consulting/Koine/issues/903)) ([05579dd](https://github.com/Atypical-Consulting/Koine/commit/05579ddb91a5443ee6c77460c105b7874c5bad69))
+* **emit-rust:** coerce a derived member's body to its declared numeric type ([#961](https://github.com/Atypical-Consulting/Koine/issues/961)) ([#967](https://github.com/Atypical-Consulting/Koine/issues/967)) ([fc83bcf](https://github.com/Atypical-Consulting/Koine/commit/fc83bcf5feb4f319cf807c43b87d3ce9ca1c7fca))
+* **emit-rust:** map over Option for optional numeric fields scaled/divided by a scalar ([#960](https://github.com/Atypical-Consulting/Koine/issues/960)) ([#964](https://github.com/Atypical-Consulting/Koine/issues/964)) ([3cf4425](https://github.com/Atypical-Consulting/Koine/commit/3cf4425ebaee8e14c2cc92ea860749d565662b47))
+* **emit-rust:** scale & divide an Int field by a Decimal scalar via coerce-and-truncate ([#937](https://github.com/Atypical-Consulting/Koine/issues/937)) ([#952](https://github.com/Atypical-Consulting/Koine/issues/952)) ([9a1ae00](https://github.com/Atypical-Consulting/Koine/commit/9a1ae00c0df2a6e84423503b5e417ecd0071d8ad))
+* **scripts:** preserve caller's working directory in ps1 scripts ([#912](https://github.com/Atypical-Consulting/Koine/issues/912)) ([cabb776](https://github.com/Atypical-Consulting/Koine/commit/cabb77628b77eab91f28d2ce4dd13c3bb865e3ea))
+* **semantics:** reject reversed scalar / value-object division ([#878](https://github.com/Atypical-Consulting/Koine/issues/878)) ([#906](https://github.com/Atypical-Consulting/Koine/issues/906)) ([2565bec](https://github.com/Atypical-Consulting/Koine/commit/2565becf05bce00fedda1200175b197e91f06556))
+* **semantics:** reject scalar arithmetic on a value object with no numeric field ([#939](https://github.com/Atypical-Consulting/Koine/issues/939)) ([#951](https://github.com/Atypical-Consulting/Koine/issues/951)) ([11d2feb](https://github.com/Atypical-Consulting/Koine/commit/11d2feb63fe49456ec6cea6f97c5b2f85b3d4266))
+* **studio:** gate cold-boot start-intent on lsp.start() to fix "LSP not started" ([#955](https://github.com/Atypical-Consulting/Koine/issues/955)) ([d3a6044](https://github.com/Atypical-Consulting/Koine/commit/d3a604418c73ddc5554ad3d4ca1b7ae5878a43e4))
+* **studio:** intermittent Windows CI failure in inspectorController.test.ts ([#848](https://github.com/Atypical-Consulting/Koine/issues/848)) ([#904](https://github.com/Atypical-Consulting/Koine/issues/904)) ([bbf54b5](https://github.com/Atypical-Consulting/Koine/commit/bbf54b5b86cb214bbb0004a309e636df2388fd24))
+* **studio:** key mcp_endpoint cache on the requested port ([#947](https://github.com/Atypical-Consulting/Koine/issues/947)) ([#953](https://github.com/Atypical-Consulting/Koine/issues/953)) ([847fcf1](https://github.com/Atypical-Consulting/Koine/commit/847fcf10d9ecbc65f5a363429e7eea742b11c175))
+* **studio:** paint Concept Colors & semantic tokens over the grammar highlighter ([#962](https://github.com/Atypical-Consulting/Koine/issues/962)) ([bd01db0](https://github.com/Atypical-Consulting/Koine/commit/bd01db0c9b9d404c155888e51d7052fd685f973b))
+* **studio:** reject the zero-byte placeholder when resolving the bundled koine sidecar ([#969](https://github.com/Atypical-Consulting/Koine/issues/969)) ([225bf74](https://github.com/Atypical-Consulting/Koine/commit/225bf74f21e52af208ba9892f6235e395a142e23))
+* **studio:** repair 30 verified bugs across shell, hosts, editor, AI, and panels ([#930](https://github.com/Atypical-Consulting/Koine/issues/930)) ([badb772](https://github.com/Atypical-Consulting/Koine/commit/badb772b622575d9e3f241fbb3fc625b5c47f17b))
+* **studio:** sync desktop/package version with the Koine release version ([#957](https://github.com/Atypical-Consulting/Koine/issues/957)) ([3faf88e](https://github.com/Atypical-Consulting/Koine/commit/3faf88e10e9d257005c06893251b98d5e6af2029))
+* **website:** serve /blog/rss.xml under trailingSlash:always to unblock the docs deploy ([#948](https://github.com/Atypical-Consulting/Koine/issues/948)) ([#954](https://github.com/Atypical-Consulting/Koine/issues/954)) ([6c94b1a](https://github.com/Atypical-Consulting/Koine/commit/6c94b1a0513620cb041874bc06248be2e5157d4a))
+
 ## [0.244.0](https://github.com/Atypical-Consulting/Koine/compare/v0.243.0...v0.244.0) (2026-07-01)
 
 
