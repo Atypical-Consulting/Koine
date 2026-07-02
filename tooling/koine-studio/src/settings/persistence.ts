@@ -506,6 +506,10 @@ export interface RecentFolder {
   path: string;
   openedAt: number;
   pinned?: boolean;
+  /** Git branch the folder was last opened on (desktop only; absent in the browser or for non-repos). */
+  branch?: string;
+  /** Effective emit target when the folder was last opened (e.g. `'csharp'`, `'typescript'`). */
+  language?: string;
 }
 
 /** Pinned first (by openedAt desc), then unpinned by openedAt desc. */
@@ -551,6 +555,10 @@ export function getRecentFolders(): RecentFolder[] {
             openedAt: typeof r.openedAt === 'number' ? r.openedAt : 0,
             pinned: !!r.pinned,
           };
+          // Pass through the #1005 metadata only when present as non-empty strings; legacy entries
+          // that predate these fields simply read back without them.
+          if (typeof r.branch === 'string' && r.branch.length > 0) entry.branch = r.branch;
+          if (typeof r.language === 'string' && r.language.length > 0) entry.language = r.language;
         }
       }
       if (entry && !seen.has(entry.path)) {
@@ -572,13 +580,22 @@ function persistRecents(items: RecentFolder[]): void {
 /**
  * Record a folder as most-recently used: upsert (move to front, preserving any prior pinned
  * state), cap, persist. Empty paths are ignored.
+ *
+ * `meta` carries the optional #1005 tags (git `branch`, emit `language`). A supplied field
+ * overwrites; an omitted one falls back to the prior entry's value, so a bare re-push
+ * (`pushRecentFolder(path)`) refreshes recency WITHOUT wiping metadata captured earlier.
  */
-export function pushRecentFolder(path: string): void {
+export function pushRecentFolder(path: string, meta?: { branch?: string; language?: string }): void {
   if (typeof path !== 'string' || path.length === 0) return;
   const existing = getRecentFolders();
   const prior = existing.find((r) => r.path === path);
   const rest = existing.filter((r) => r.path !== path);
-  persistRecents([{ path, openedAt: Date.now(), pinned: prior?.pinned ?? false }, ...rest]);
+  const entry: RecentFolder = { path, openedAt: Date.now(), pinned: prior?.pinned ?? false };
+  const branch = meta?.branch ?? prior?.branch;
+  const language = meta?.language ?? prior?.language;
+  if (typeof branch === 'string' && branch.length > 0) entry.branch = branch;
+  if (typeof language === 'string' && language.length > 0) entry.language = language;
+  persistRecents([entry, ...rest]);
 }
 
 /** Drop a single recent folder by path. */

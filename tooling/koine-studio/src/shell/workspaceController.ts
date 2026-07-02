@@ -21,6 +21,7 @@ import { dirtyCount, saveAllDirtyBuffers } from '@/shell/dirty';
 import { matchesInclude } from '@/shell/workspaceSearch';
 import { pathToFileUri } from '@/shell/ideUtils';
 import { setLastSession } from '@/settings/persistence';
+import { appStore } from '@/store';
 import { basename } from '@/shared/path';
 import type { FsEntry, KoiFile, Platform } from '@/host';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
@@ -112,8 +113,12 @@ export interface WorkspaceControllerDeps {
   /** Fired when the active buffer was deleted and the workspace is now empty: ide.ts opens a new model. */
   onWorkspaceEmptied(): void;
 
-  /** Persist a recently-opened folder (ide.ts's pushRecentFolder); skipped for transient workspaces. */
-  pushRecentFolder?(folder: string): void;
+  /**
+   * Persist a recently-opened folder (ide.ts's pushRecentFolder); skipped for transient workspaces.
+   * `meta` carries the optional #1005 tags (git `branch`, emit `language`); a bare call preserves any
+   * previously-captured tags on the entry.
+   */
+  pushRecentFolder?(folder: string, meta?: { branch?: string; language?: string }): void;
   /**
    * Persist the last-opened workspace so a cold boot can restore it (ide.ts's setLastWorkspace, #535).
    * Skipped for transient opens (shared-link imports / the default-workspace flow), exactly like
@@ -601,7 +606,22 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     // (and stays on) Domain, the DDD navigator. The file tree is one click away (the Files axis button /
     // ⌘B), and the Domain navigator's "Reveal in Files" still switches deliberately.
     if (opts.recent ?? true) {
-      deps.pushRecentFolder?.(folder);
+      // #1005: tag the recent with the effective emit target now (synchronous), then — desktop only —
+      // enrich it with the git branch via a best-effort, non-blocking follow-up. `git status` must
+      // never delay or fail the open, so it is fired-and-forgotten and re-pushes the same entry
+      // (pushRecentFolder preserves the already-stored language on that bare-meta re-push).
+      const language = appStore.getState().emitTarget;
+      deps.pushRecentFolder?.(folder, { language });
+      if (platform.canUseGit) {
+        void (async () => {
+          try {
+            const status = await platform.gitStatus(folder);
+            if (status.branch) deps.pushRecentFolder?.(folder, { branch: status.branch, language });
+          } catch {
+            // git unavailable / not a repository — leave the recent without a branch tag
+          }
+        })();
+      }
       // Remember this as the last-opened workspace so a reload restores it (#535). Gated on the same
       // `recent` flag as pushRecentFolder, so transient opens (shared-link import via
       // openWorkspaceWith1File, the default-workspace flow) don't overwrite the pointer.

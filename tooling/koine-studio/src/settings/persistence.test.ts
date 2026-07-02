@@ -486,6 +486,52 @@ describe('recent folders mutations', () => {
   });
 });
 
+describe('recent folder metadata (#1005)', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('stores branch + language when passed as meta', () => {
+    pushRecentFolder('/p', { branch: 'main', language: 'csharp' });
+    expect(getRecentFolders()[0]).toMatchObject({ path: '/p', branch: 'main', language: 'csharp' });
+  });
+
+  it('leaves branch + language undefined for a bare push', () => {
+    pushRecentFolder('/q');
+    const entry = getRecentFolders()[0];
+    expect(entry.branch).toBeUndefined();
+    expect(entry.language).toBeUndefined();
+  });
+
+  it('preserves prior branch + language on a bare re-push', () => {
+    pushRecentFolder('/p', { branch: 'feat/x', language: 'typescript' });
+    pushRecentFolder('/p'); // re-open WITHOUT meta must not wipe the tags
+    expect(getRecentFolders()[0]).toMatchObject({ path: '/p', branch: 'feat/x', language: 'typescript' });
+  });
+
+  it('overrides a single field while preserving the other on re-push with partial meta', () => {
+    pushRecentFolder('/p', { branch: 'main', language: 'csharp' });
+    pushRecentFolder('/p', { branch: 'release' }); // only branch supplied
+    expect(getRecentFolders()[0]).toMatchObject({ path: '/p', branch: 'release', language: 'csharp' });
+  });
+
+  it('passes through branch + language present on stored object entries', () => {
+    localStorage.setItem(KEY, JSON.stringify([
+      { path: '/tagged', openedAt: 5, branch: 'dev', language: 'rust' },
+    ]));
+    expect(getRecentFolders()[0]).toMatchObject({ path: '/tagged', branch: 'dev', language: 'rust' });
+  });
+
+  it('tolerates legacy string[] and object entries lacking the fields (no throw, fields undefined)', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/legacy', { path: '/obj', openedAt: 3 }]));
+    const got = getRecentFolders();
+    const legacy = got.find((r) => r.path === '/legacy')!;
+    const obj = got.find((r) => r.path === '/obj')!;
+    expect(legacy.branch).toBeUndefined();
+    expect(legacy.language).toBeUndefined();
+    expect(obj.branch).toBeUndefined();
+    expect(obj.language).toBeUndefined();
+  });
+});
+
 describe('legacy scratch migration helpers', () => {
   beforeEach(() => localStorage.clear());
 

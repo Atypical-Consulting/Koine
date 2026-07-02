@@ -73,7 +73,9 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Frozen 2026-07-02 at 1173 LOC, ceil(1173 × 1.02) = 1197. #982 ratchets this down as it decomposes
   // workspaceController.ts. Freezing prevents further regrowth; it does not mandate the split — #982
   // owns that.
-  { file: 'src/shell/workspaceController.ts', maxLines: 1197 },
+  // Raised 1197 → 1241: #1005 captures git branch + emit language onto recents at the folder-open site
+  // (non-blocking git-status follow-up) — ~20 LOC of genuine new capture, not regrowth; ceil(1216×1.02)=1241.
+  { file: 'src/shell/workspaceController.ts', maxLines: 1241 },
   // Frozen 2026-07-02 at 1017 LOC, ceil(1017 × 1.02) = 1038. #988 ratchets this down as it decomposes
   // persistence.ts. Freezing prevents further regrowth; it does not mandate the split — #988 owns that.
   // Raised 1038 → 1099: #1005's Home resume card needs a persisted last-session snapshot — a new
