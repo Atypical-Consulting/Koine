@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent, render } from '@testing-library/preact';
 import { axe } from 'vitest-axe';
-import { ExportMenu } from '@/diagrams/ExportMenu';
+import { ExportMenu } from './ExportMenu';
 
 afterEach(() => {
   document.body.innerHTML = '';

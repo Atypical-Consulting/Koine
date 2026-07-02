@@ -10,10 +10,20 @@ export default defineConfig({
   plugins: [
     dts({
       include: ['src'],
-      exclude: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+      exclude: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/**/*.stories.tsx'],
       rollupTypes: true,
     }),
   ],
+  // Transpile JSX with Preact's automatic runtime (issue #905, Task 4 — the moved presentational
+  // components are the first .tsx in this package). Vite 8 / Vitest 4 use oxc (not esbuild) as the
+  // default transformer, so this has to live under `oxc.jsx` rather than `esbuild.jsx` — matches
+  // koine-studio's own vitest.config.ts note on the same gotcha.
+  oxc: {
+    jsx: {
+      runtime: 'automatic',
+      importSource: 'preact',
+    },
+  },
   build: {
     lib: {
       entry: fileURLToPath(new URL('./src/index.ts', import.meta.url)),
@@ -33,7 +43,9 @@ export default defineConfig({
   test: {
     // The DOM/utility primitives (issue #905, Task 3) build and mount real elements
     // (document.createElement, event listeners, focus) — happy-dom gives them a DOM to run
-    // against, matching koine-studio's own vitest environment for this same code.
+    // against, matching koine-studio's own vitest environment for this same code. The moved
+    // presentational components (Task 4) render through @testing-library/preact into the same DOM.
     environment: 'happy-dom',
+    setupFiles: ['./src/test-setup.ts'],
   },
 });

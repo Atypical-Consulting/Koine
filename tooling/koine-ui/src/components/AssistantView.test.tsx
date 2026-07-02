@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { render } from '@testing-library/preact';
 import { axe } from 'vitest-axe';
-import { AssistantView, ASSISTANT_MOUNT_CLASS } from '@/shell/AssistantView';
+import { AssistantView, ASSISTANT_MOUNT_CLASS } from './AssistantView';
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -12,7 +12,7 @@ describe('AssistantView', () => {
     const { container } = render(<AssistantView />);
     const mounts = container.querySelectorAll(`.${ASSISTANT_MOUNT_CLASS}`);
     expect(mounts).toHaveLength(1);
-    // Empty in production — createAssistantPanel populates it; the migration must not pre-fill it.
+    // Empty in production — the host populates it; the component must not pre-fill it.
     expect(mounts[0].childElementCount).toBe(0);
   });
 

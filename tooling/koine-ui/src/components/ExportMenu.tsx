@@ -1,10 +1,11 @@
-// The diagram Export ▾ floating menu (#271/#534), extracted from CanvasPalette as a dedicated, tested
-// Preact component (#759 — consolidating the floating-menu pattern, cf. #547). It is a native
-// `<details class="koi-export">` disclosure: compact, keyboard-accessible without an ARIA menu pattern,
-// and closing on its own `<summary>`. Picking an item closes the menu (here) and fires the callback;
-// the two remaining dismissal paths a transient menu needs — outside-click and overlay-open — stay the
-// document-level `installExportMenuDismiss` seam (`src/shell/exportMenuDismiss.ts`), an intentional
-// imperative listener that no per-component effect should duplicate.
+// The diagram Export ▾ floating menu (Koine Studio issues #271/#534), extracted from CanvasPalette as a
+// dedicated, tested Preact component (#759 — consolidating the floating-menu pattern, cf. #547), and
+// moved here verbatim (issue #905, Task 4). It is a native `<details class="koi-export">` disclosure:
+// compact, keyboard-accessible without an ARIA menu pattern, and closing on its own `<summary>`. Picking
+// an item closes the menu (here) and fires the callback; the two remaining dismissal paths a transient
+// menu needs — outside-click and overlay-open — stay a document-level imperative listener in the
+// consuming app (Koine Studio's `src/shell/exportMenuDismiss.ts`), an intentional seam no per-component
+// effect should duplicate.
 
 /** The canvas export targets — the live diagram itself, never a `.koi` construct, so never context-gated. */
 export type ExportFormat = 'svg' | 'png' | 'plantuml';

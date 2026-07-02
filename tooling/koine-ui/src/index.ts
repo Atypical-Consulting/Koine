@@ -27,3 +27,13 @@ export * from './primitives/commandRegistry';
 // named explicitly here instead (Command itself is already covered by the commandRegistry
 // export above).
 export { createCommandPalette, type PaletteHandle } from './primitives/palette';
+
+// --- Store-free presentational components (issue #905, Task 4) ------------------------------
+// Moved from koine-studio's src/shell/**; each still takes plain props/callbacks, no store or Tauri
+// coupling. DeckBar's app-specific surface REGISTRY (Koine Studio's Canvas/Code/Output/Docs data) stays
+// in the app — DeckBar takes a generic `surfaces` prop instead (see DeckBar.tsx's header note).
+export { DeckCard, type DeckCardProps, type DeckCardSurface, type DeckCardFacet } from './components/DeckCard';
+export { DeckBar, type DeckBarProps, type DeckBarMode } from './components/DeckBar';
+export { ExportMenu, type ExportFormat } from './components/ExportMenu';
+export { AssistantView, ASSISTANT_MOUNT_CLASS } from './components/AssistantView';
+export { LeftRail } from './components/LeftRail';

@@ -1,17 +1,18 @@
 import type { JSX } from 'preact';
 
-// LeftRail: the left sidebar's inner markup as a Preact component (#759, finishing the #193 migration —
-// replaces the imperative `leftRailMarkup()` string builder injected via innerHTML at boot). index.html
-// keeps <aside id="leftrail"> a thin shell; ide.tsx renders this into it before any rail el(...) lookup.
+// LeftRail: a left sidebar's inner markup as a Preact component — Koine Studio's #759 migration off an
+// imperative `leftRailMarkup()` string builder injected via innerHTML at boot. Moved here verbatim
+// (issue #905, Task 4). The host keeps its `<aside id="leftrail">` a thin shell; it renders this into it
+// before any imperative lookup into the ids below.
 //
 // The rail is a DDD "Domain" navigator: a labelled Domain·Files axis switch over one navigator host. The
-// Domain axis is the default; the Files axis holds the workspace .koi tree. The axis show/hide wiring,
-// the collapse control, and the collapsed-state spine toggles are all owned by inspectorController, which
-// captures these ids/nodes after mount — so LeftRail renders ONCE and never re-renders (no store
-// subscription), and the imperative children that mount into #rail-domain-pane (the Domain navigator) and
-// #filetree-body (the file explorer) are never reconciled away. Those two hosts stay empty here, filled
-// imperatively after mount — the explorer/maxGraph/outline islands are NOT migrated (a #759 non-goal).
-// Every id the controller queries is preserved verbatim, so behaviour is unchanged from the string builder.
+// Domain axis is the default; the Files axis holds a workspace tree. The axis show/hide wiring, the
+// collapse control, and the collapsed-state spine toggles are all owned by the consuming app (in Koine
+// Studio, `inspectorController`), which captures these ids/nodes after mount — so LeftRail renders ONCE
+// and never re-renders (no store subscription), and the imperative children that mount into
+// `#rail-domain-pane` (a Domain navigator) and `#filetree-body` (a file explorer) are never reconciled
+// away. Those two hosts stay empty here, filled imperatively after mount by the consuming app. Every id
+// a host queries is preserved verbatim, so behaviour is unchanged from the original string builder.
 
 /** The collapse chevron (points left — tuck the rail to its spine). */
 const collapseIcon: JSX.Element = <path d="M9.5 4 5.5 8l4 4" />;
@@ -32,8 +33,8 @@ const filesIcon: JSX.Element = <path d="M2.4 4.6c0-.6.4-1 1-1h2.5l1.1 1.3h5.6c.6
 export function LeftRail(): JSX.Element {
   return (
     <>
-      {/* Rail head: the Domain·Files axis switch + the collapse control on one row (both wired in
-          inspectorController). The axis switch chooses which navigator the rail shows; the collapse button
+      {/* Rail head: the Domain·Files axis switch + the collapse control on one row (both wired by the
+          consuming host). The axis switch chooses which navigator the rail shows; the collapse button
           tucks the whole rail to its icon spine (#left-strip below). */}
       <div class="rail-head">
         <div id="rail-axis-switch" class="rail-axis-switch" role="tablist" aria-label="Navigator axis">
@@ -75,14 +76,14 @@ export function LeftRail(): JSX.Element {
         </button>
       </div>
       <div id="rail-navigator-body" class="rail-navigator-body">
-        {/* Domain axis: the DDD construct/context navigator. The ModelOutlinePanel mounts into this host
-            (inspectorController.loadModel); a later task swaps in the strategic/tactical renderers. Visible
-            by default — left empty here, filled imperatively. */}
+        {/* Domain axis: the DDD construct/context navigator. A navigator panel mounts into this host
+            (imperatively, by the consuming host); a later task swaps in the strategic/tactical renderers.
+            Visible by default — left empty here, filled imperatively. */}
         <div id="rail-domain-pane" class="rail-pane" role="tabpanel" aria-labelledby="rail-axis-domain" />
-        {/* Files axis: the workspace .koi tree, hidden until the Files axis is selected. The #filetree-*
+        {/* Files axis: a workspace file tree, hidden until the Files axis is selected. The #filetree-*
             ids are the file explorer's mount (#filetree-body) and the workspace-name label
-            (#filetree-title); ide.tsx's boot wires both — #filetree-body is left empty here, filled by the
-            explorer island. */}
+            (#filetree-title); the consuming host's boot wires both — #filetree-body is left empty here,
+            filled by the explorer island. */}
         <section
           class="rail-sect rail-files-pane"
           id="rail-files"
@@ -102,10 +103,10 @@ export function LeftRail(): JSX.Element {
           <div class="rail-sect-body" id="filetree-body" />
         </section>
       </div>
-      {/* Collapsed-state icon spine (#730): shown only when #split carries .left-collapsed (CSS morph in
-          _leftrail.scss hides the head + navigator and reveals this). Mirrors the right rail's stripe idiom;
-          the expand control re-opens to the current axis, the Domain/Files toggles re-open straight to that
-          axis. Wired in inspectorController alongside the axis switch + collapse button. */}
+      {/* Collapsed-state icon spine: shown only when the host's split container carries a collapsed
+          state class (CSS morph hides the head + navigator and reveals this). Mirrors a right-rail
+          stripe idiom; the expand control re-opens to the current axis, the Domain/Files toggles re-open
+          straight to that axis. Wired by the consuming host alongside the axis switch + collapse button. */}
       <nav id="left-strip" class="left-strip" aria-label="Navigator (collapsed)">
         <button
           type="button"

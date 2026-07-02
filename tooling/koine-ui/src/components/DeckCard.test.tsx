@@ -1,11 +1,11 @@
 import { describe, expect, test, vi } from 'vitest';
 import { fireEvent, render } from '@testing-library/preact';
 import { axe } from 'vitest-axe';
-import { DeckCard } from '@/shell/deck/DeckCard';
-import { DECK_SURFACES } from '@/shell/deck/surfaces';
+import { DeckCard } from './DeckCard';
+import { SAMPLE_SURFACES_BY_ID } from './deckFixtures';
 
 const base = {
-  surface: DECK_SURFACES.output,
+  surface: SAMPLE_SURFACES_BY_ID.output,
   activeFacet: 'generated' as string | null,
   inPair: false,
   isSelected: false,
@@ -27,7 +27,7 @@ describe('DeckCard', () => {
 
   test('a surface with a single view shows no facet strip', () => {
     const { container } = render(
-      <DeckCard {...base} surface={DECK_SURFACES.visual} activeFacet={null}>
+      <DeckCard {...base} surface={SAMPLE_SURFACES_BY_ID.visual} activeFacet={null}>
         body
       </DeckCard>,
     );

@@ -1,18 +1,20 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
-import { DeckBar } from '@/shell/deck/DeckBar';
+import { DeckBar } from './DeckBar';
+import { SAMPLE_SURFACES } from './deckFixtures';
 
-// The slim bar above the deck stage: Overview toggle + the Canvas·Code·Output·Docs filmstrip + the
-// keyboard hint. Pure-props (the app uses DeckBarConnected); each story sets a different deck state so
-// the chip states (primary/secondary, the revealed "open beside") are all visible. The bar is
-// full-width chrome, so the stories render fullscreen on the studio background.
+// The slim bar above a deck stage: Overview toggle + the surface filmstrip + the keyboard hint.
+// Pure-props (a connected wrapper binds it to app state); each story sets a different deck state so the
+// chip states (primary/secondary, the revealed "open beside") are all visible. The bar is full-width
+// chrome, so the stories render fullscreen on the studio background.
 const meta = {
-  title: 'Panels/Deck/DeckBar',
+  title: 'Components/Deck/DeckBar',
   component: DeckBar,
   parameters: { layout: 'fullscreen' },
   args: {
     mode: 'focus',
     primary: 'visual',
     secondary: null,
+    surfaces: SAMPLE_SURFACES,
     onOverview: () => {},
     onFocus: () => {},
     onOpenBeside: () => {},

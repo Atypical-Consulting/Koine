@@ -1,14 +1,15 @@
 import { describe, expect, test, vi } from 'vitest';
 import { fireEvent, render } from '@testing-library/preact';
 import { axe } from 'vitest-axe';
-import { DeckBar } from '@/shell/deck/DeckBar';
+import { DeckBar } from './DeckBar';
+import { SAMPLE_SURFACES } from './deckFixtures';
 
 const noop = { onOverview: () => {}, onFocus: () => {}, onOpenBeside: () => {} };
 
 describe('DeckBar', () => {
   test('marks the shown surfaces (primary + secondary) as pressed', () => {
     const { container } = render(
-      <DeckBar mode="focus" primary="technical" secondary="visual" {...noop} />,
+      <DeckBar mode="focus" primary="technical" secondary="visual" surfaces={SAMPLE_SURFACES} {...noop} />,
     );
     const chips = container.querySelectorAll('.deck-chip');
     const pressed = Array.from(chips).filter((c) => c.getAttribute('aria-pressed') === 'true');
@@ -17,7 +18,7 @@ describe('DeckBar', () => {
 
   test('"open beside" appears only for surfaces not currently shown, in focus mode', () => {
     const { container } = render(
-      <DeckBar mode="focus" primary="technical" secondary="visual" {...noop} />,
+      <DeckBar mode="focus" primary="technical" secondary="visual" surfaces={SAMPLE_SURFACES} {...noop} />,
     );
     // Code + Canvas are shown → 2 chips, so only Output + Docs carry the ⊞.
     expect(container.querySelectorAll('.deck-cmp')).toHaveLength(2);
@@ -25,7 +26,7 @@ describe('DeckBar', () => {
 
   test('no "open beside" in overview', () => {
     const { container } = render(
-      <DeckBar mode="overview" primary="visual" secondary="technical" {...noop} />,
+      <DeckBar mode="overview" primary="visual" secondary="technical" surfaces={SAMPLE_SURFACES} {...noop} />,
     );
     expect(container.querySelectorAll('.deck-cmp')).toHaveLength(0);
   });
@@ -34,7 +35,15 @@ describe('DeckBar', () => {
     const onFocus = vi.fn();
     const onOpenBeside = vi.fn();
     const { container } = render(
-      <DeckBar mode="focus" primary="visual" secondary={null} onOverview={() => {}} onFocus={onFocus} onOpenBeside={onOpenBeside} />,
+      <DeckBar
+        mode="focus"
+        primary="visual"
+        secondary={null}
+        surfaces={SAMPLE_SURFACES}
+        onOverview={() => {}}
+        onFocus={onFocus}
+        onOpenBeside={onOpenBeside}
+      />,
     );
     // The Code chip (second in order) — focus it.
     const codeChip = container.querySelectorAll('.deck-chip')[1] as HTMLButtonElement;
@@ -49,7 +58,15 @@ describe('DeckBar', () => {
   test('overview toggle reflects mode and fires its callback', () => {
     const onOverview = vi.fn();
     const { container } = render(
-      <DeckBar mode="overview" primary="visual" secondary={null} onOverview={onOverview} onFocus={() => {}} onOpenBeside={() => {}} />,
+      <DeckBar
+        mode="overview"
+        primary="visual"
+        secondary={null}
+        surfaces={SAMPLE_SURFACES}
+        onOverview={onOverview}
+        onFocus={() => {}}
+        onOpenBeside={() => {}}
+      />,
     );
     const over = container.querySelector('.deck-over') as HTMLButtonElement;
     expect(over.getAttribute('aria-pressed')).toBe('true');
@@ -59,7 +76,7 @@ describe('DeckBar', () => {
 
   test('has no accessibility violations', async () => {
     const { container } = render(
-      <DeckBar mode="focus" primary="technical" secondary="visual" {...noop} />,
+      <DeckBar mode="focus" primary="technical" secondary="visual" surfaces={SAMPLE_SURFACES} {...noop} />,
     );
     expect(await axe(container)).toHaveNoViolations();
   });
