@@ -111,12 +111,13 @@ wrong abstraction:
 | JS → Rust command | `lsp_send` | `{ message: string }` (a JSON-RPC frame body) |
 | Rust → JS event | `lsp://message` | `string` — one JSON-RPC message body |
 | Rust → JS event | `lsp://exit` | `i32` — `0` clean, `-1` error |
-| JS → Rust command | `mcp_endpoint` | — → `string \| null` (lazily starts the `koine mcp --http` sidecar; resolves the loopback URL it announces) |
+| JS → Rust command | `mcp_endpoint` | `{ port: number }` → `{ url, fallback } \| null` (lazily starts the `koine mcp --http` sidecar on `port`; resolves the loopback URL it announces, with `fallback: true` when a busy `port` forced an OS-assigned one) |
 | JS → Rust command | `mcp_stop` | — (stops the MCP sidecar; idempotent) |
 
 The **MCP HTTP sidecar** is independent of the LSP one: `mcp_endpoint` spawns `koine mcp --http
---port 0`, scrapes the `[koine-mcp] http://127.0.0.1:PORT/mcp` line off its stderr, and hands the
-URL to the **Settings → MCP** panel.
+--port <mcpPort>` (the configured port, default 56463; `0` = OS-assigned), scrapes the
+`[koine-mcp] http://127.0.0.1:PORT/mcp` line off its stderr, and hands the URL to the
+**Settings → MCP** panel. See [Sidecar resolution order](#sidecar-resolution-order) below.
 
 That panel (`src/settings/prefs.ts`, data-driven off `src/mcp/mcp.ts`) is where the user wires an LLM to Koine:
 
@@ -126,7 +127,7 @@ That panel (`src/settings/prefs.ts`, data-driven off `src/mcp/mcp.ts`) is where 
   exact copy-paste config per client: the stdio `{ "command": "koine-mcp" }` form for spawn-style
   clients, the `{ "url": … }` block for URL clients, each with a config-file hint.
 - **Test connection** — Studio acts as a minimal Streamable-HTTP MCP client (`probeMcp` in `mcp.ts`:
-  `initialize` → `tools/list`) and reports `Connected ✓ — 5 tools` / `Not reachable`, confirming the
+  `initialize` → `tools/list`) and reports `Connected ✓ — 6 tools` / `Not reachable`, confirming the
   endpoint an LLM will hit is live.
 
 The web build can't host a server, so it passes `mcpHostable: false`: the toggle is disabled and the
@@ -190,14 +191,32 @@ cd tooling/koine-studio
 npm run tauri dev
 ```
 
-When `KOINE_LSP` is unset, the host falls back to
-`dotnet <repo>/src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll lsp` (resolved relative to the
-crate at compile time). Both branches set `DOTNET_NOLOGO=1` / `DOTNET_CLI_TELEMETRY_OPTOUT=1`
-to keep stdout pure JSON-RPC.
+### Sidecar resolution order
 
-The **MCP HTTP sidecar** resolves the same way: `KOINE_MCP` (falling back to `KOINE_LSP`, since it is
-the same `koine` binary) runs `<bin> mcp --http --port 0`; otherwise it falls back to the Debug DLL
-via `dotnet`.
+Both the LSP sidecar (`resolve_sidecar_command`) and the MCP HTTP sidecar (`resolve_mcp_command`) in
+`src-tauri/src/lib.rs` pick how to launch the `koine` backend through the same
+`pick_koine_launcher` / `bundled_koine_path` helpers, tried in this order:
+
+1. **Env override** — `KOINE_LSP` for the LSP, `KOINE_MCP` (falling back to `KOINE_LSP`, since it is the
+   same `koine` binary) for the MCP server. Points at a self-contained `koine[.exe]` executable, e.g. a
+   packaged sidecar — no .NET SDK needed.
+2. **Bundled binary** — the `koine[.exe]` the Tauri bundler drops next to the app executable via
+   `externalBin: ["binaries/koine"]`. This is the path a packaged/installed Studio uses.
+3. **Dev Debug DLL** — `dotnet <repo>/src/Koine.Cli/bin/Debug/net10.0/Koine.Cli.dll` (path resolved
+   relative to the crate at compile time). The `dotnet` fallback for a checkout with no override and no
+   bundled binary — build the CLI first so the DLL exists.
+
+The `dotnet` branch sets `DOTNET_NOLOGO=1` / `DOTNET_CLI_TELEMETRY_OPTOUT=1` to keep stdout pure
+JSON-RPC. The LSP is launched as `<koine> lsp`; the MCP server as `<koine> mcp --http --port <mcpPort>`.
+
+### MCP port (`mcpPort` setting)
+
+The MCP sidecar binds a **fixed loopback port** so client configs survive Studio restarts. It defaults to
+**56463** (the persisted `mcpPort` setting in `src/settings/persistence.ts` / `settingsSchema.ts`, edited
+via **Settings → MCP → Port** in `prefs.ts`); set it to **`0`** to have the OS assign a free port instead.
+If the configured port is already busy, `mcp_endpoint` reaps the failed child and retries **once** on an
+OS-assigned port (`0`), returning a `fallback` flag so the Settings panel warns that any copied client
+config still pointing at the configured port needs updating.
 
 ## Develop / verify
 

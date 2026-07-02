@@ -18,10 +18,11 @@ matches what the CLI produces. The server lives in `src/Koine.Mcp` and speaks tw
 | Tool | What it does |
 |------|--------------|
 | `koine_validate` | Parse + full semantic checks over one or many `.koi` files; returns diagnostics with stable codes and 1-based line/column spans. The loop-closer: fix and re-validate until `ok`. |
-| `koine_compile` | Run the full pipeline through a target emitter — `csharp` (default), `typescript`, `python`, `glossary`, or `docs` — and return the generated files. |
+| `koine_compile` | Run the full pipeline through a target emitter — `csharp` (default), `typescript`, `python`, `php`, `rust`, `glossary`, `docs`, `asyncapi`, or `openapi` — and return the generated files. |
+| `koine_coverage` | Report which of a model's declared types a chosen `target` actually emits — every value / entity / aggregate / enum / event / read model / query, each `Covered` or `Missing`, plus `Total` / `Covered` / `IsComplete` rollups — so an agent can confirm a target fully realizes the model. Accepts the same targets as `koine_compile`. |
 | `koine_format` | Canonically format a single `.koi` source string. |
 | `koine_reference` | A compact cheatsheet of every construct, the type system, and the expression/invariant sublanguage. Call with no topic for the whole thing, or a topic slug (e.g. `value`, `aggregate`, `expressions`, `context-map`) for one section. |
-| `koine_examples` | Real, compilable example models — `billing` (small) and the six-context `shop-*` domain — to learn the syntax and idioms. |
+| `koine_examples` | Real, compilable example models — `billing` (small) and the six-context `pizzeria-*` domain — to learn the syntax and idioms. |
 
 The reference and examples are also exposed as **resources** (`koine://reference`,
 `koine://reference/{topic}`, `koine://examples/{name}`) for clients that surface those.
@@ -83,7 +84,7 @@ To run it straight from a checkout instead of the installed tool:
 ## Over HTTP (LM Studio, any client by URL)
 
 stdio is ideal when the client *spawns* the server, but some clients — **LM Studio**, browser-based
-MCP clients — would rather point at a **URL**. The same five tools are served over the SDK's
+MCP clients — would rather point at a **URL**. The same six tools are served over the SDK's
 **Streamable HTTP / SSE** transport, so there are no DLL paths to wire up:
 
 ```bash
@@ -124,12 +125,18 @@ server for you and helps you connect any client:
 
 - **Enable MCP server** — a toggle that launches the `koine mcp --http` sidecar (and stops it when you
   switch it off). It's opt-in, so no background server runs until you turn it on.
+- **Port** — the sidecar binds a fixed loopback port so copied client configs keep working across
+  restarts. The default is **56463**, stored as the `mcpPort` setting; set it to **`0`** to let the OS
+  assign a free port instead. Changing it restarts the sidecar on the new port. If the configured port
+  is already busy, the host falls back **once** to an OS-assigned port and shows a warning
+  (*"Port 56463 was busy — serving on … . Update any copied client configs."*), since a recipe you
+  already pasted still points at the busy port.
 - **Client** — pick **Claude Desktop**, **LM Studio**, **Cursor**, **VS Code**, or **Generic**, and the
   panel shows the exact copy-paste snippet for that client (the stdio `koine-mcp` command for Claude
   Desktop, the HTTP `url` block for the rest) plus where its config file lives. A **Copy `mcp.json`**
   button next to the endpoint covers the quick URL case.
 - **Test connection** — Studio probes the running endpoint as an MCP client (`initialize` →
-  `tools/list`) and reports **Connected ✓ — 5 tools** or **Not reachable**, so you can confirm an LLM
+  `tools/list`) and reports **Connected ✓ — 6 tools** or **Not reachable**, so you can confirm an LLM
   will actually reach Koine before switching to your assistant.
 
 The browser build can't host a server, so the toggle is disabled there — the recipes still render;
@@ -140,7 +147,8 @@ just run the `koine mcp --http` recipe above from a terminal and paste the URL.
 1. `koine_reference` / `koine_examples` — learn the syntax (models rarely know Koine cold).
 2. Draft the `.koi` model.
 3. `koine_validate` — read diagnostics, fix, repeat until `ok` is `true`.
-4. `koine_compile` — inspect the generated C# (or TypeScript / Python / glossary / docs).
+4. `koine_compile` — inspect the generated C# (or TypeScript / Python / PHP / Rust / glossary / docs /
+   AsyncAPI / OpenAPI). `koine_coverage` on the same target confirms every declared type was emitted.
 
 Because a green compile is snapshot- *and* Roslyn-tested in this repo, `koine_compile` returning
 `success` means the emitted C# actually builds.
