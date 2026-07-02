@@ -53,6 +53,32 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // ~18 LOC net. Ratchet to the real end-state plus a little headroom.
   // carried over from #757's ratchet — normative, do not recompute via the +2% rule.
   { file: 'src/shell/ide.tsx', maxLines: 1365 },
+  // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
+  // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
+  // regrowth; it does not mandate the split — #985 owns that.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2332 },
+  // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
+  // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
+  { file: 'src/settings/prefs.ts', maxLines: 2250 },
+  // Frozen 2026-07-02 at 1745 LOC, ceil(1745 × 1.02) = 1780. #986 ratchets this down as it decomposes
+  // editor.ts. Freezing prevents further regrowth; it does not mandate the split — #986 owns that.
+  { file: 'src/editor/editor.ts', maxLines: 1780 },
+  // Frozen 2026-07-02 at 1354 LOC, ceil(1354 × 1.02) = 1382. #990 ratchets this down as it decomposes
+  // aiPanel.ts. Freezing prevents further regrowth; it does not mandate the split — #990 owns that.
+  { file: 'src/ai/aiPanel.ts', maxLines: 1382 },
+  // Frozen 2026-07-02 at 1301 LOC (grown from the audit's 1284 @ fc83bcf5), ceil(1301 × 1.02) = 1328.
+  // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
+  // not mandate the split — #989 owns that.
+  { file: 'src/shell/explorer.ts', maxLines: 1328 },
+  // Frozen 2026-07-02 at 1173 LOC, ceil(1173 × 1.02) = 1197. #982 ratchets this down as it decomposes
+  // workspaceController.ts. Freezing prevents further regrowth; it does not mandate the split — #982
+  // owns that.
+  { file: 'src/shell/workspaceController.ts', maxLines: 1197 },
+  // Frozen 2026-07-02 at 1017 LOC, ceil(1017 × 1.02) = 1038. #988 ratchets this down as it decomposes
+  // persistence.ts. Freezing prevents further regrowth; it does not mandate the split — #988 owns that.
+  { file: 'src/settings/persistence.ts', maxLines: 1038 },
+  // Frozen 2026-07-02 at 890 LOC, ceil(890 × 1.02) = 908. Frozen pending its Preact-migration tranche.
+  { file: 'src/welcome/welcome.ts', maxLines: 908 },
 ];
 
 describe('line-budget guard', () => {
