@@ -29,8 +29,26 @@ describe('tokens.css', () => {
     expect(css).toContain('--koi-fg: #1c2230;');
   });
 
-  test('defines the theme-independent DDD-construct hue tokens', () => {
-    expect(css).toContain('--koi-ddd-aggregate:');
-    expect(css).toContain('--koi-ddd-entity:');
+  test('the DDD-construct hue tokens are generated from the Concept Colors palette (ADR 0004)', () => {
+    // The --koi-ddd-* hues moved out of tokens.css into concept-colors.generated.css, emitted from the
+    // single source design/concept-colors.json by `npm run gen:colors`. tokens.css must no longer hand-
+    // define them (that would be a second, drift-prone source), and the generated file must match the
+    // palette exactly (dark values). styles.css @imports the generated file so the vars still resolve.
+    expect(css).not.toContain('--koi-ddd-aggregate:'); // relocated out of tokens.css
+
+    const generatedCss = readFileSync(
+      fileURLToPath(new URL('./concept-colors.generated.css', import.meta.url)),
+      'utf8',
+    );
+    const { concepts } = JSON.parse(
+      readFileSync(fileURLToPath(new URL('../../../design/concept-colors.json', import.meta.url)), 'utf8'),
+    ) as { concepts: { slug: string; dark: string }[] };
+
+    expect(concepts).toHaveLength(15);
+    for (const c of concepts) {
+      expect(generatedCss, `--koi-ddd-${c.slug} in the generated palette`).toContain(
+        `--koi-ddd-${c.slug}: ${c.dark};`,
+      );
+    }
   });
 });

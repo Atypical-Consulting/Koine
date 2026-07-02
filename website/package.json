@@ -3,6 +3,7 @@
   "type": "module",
   "version": "0.0.1",
   "scripts": {
+    "gen:colors": "node scripts/gen-concept-colors.mjs",
     "build:wasm": "node scripts/build-wasm.mjs",
     "build:og": "node scripts/og-image.mjs",
     "build:docs": "node scripts/build-docs.mjs",

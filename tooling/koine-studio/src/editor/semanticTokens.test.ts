@@ -8,6 +8,7 @@ import {
   type SemanticTokensFn,
 } from '@/editor/editor';
 import type { SemanticTokens } from '@/lsp/lsp';
+import { CONCEPT_SLUGS } from '@/model/conceptColors.generated';
 
 // The pure decode for LSP semantic tokens (issue #329, Task 4): the 5-int delta stream
 // `[deltaLine, deltaStartChar, length, tokenType, tokenModifiers]` → absolute, offset-resolved tokens
@@ -130,6 +131,48 @@ describe('decodeSemanticTokens', () => {
 
 // CodeMirror glue for the semanticTokensExtension ViewPlugin, driven against a REAL EditorView (the
 // @codemirror/* packages construct fine under happy-dom — see inlayHints.test.ts). The raw delta stream
+// Concept Colors (ADR 0004): modifier bits 1–15 are DDD concept kinds. The decoder appends a
+// `cm-st-k-<slug>` class per the CONCEPT_SLUGS bit order (bit i+1 ⇒ CONCEPT_SLUGS[i]); the kind class
+// wins the color over the base `cm-st-<type>` rule. Bit 0 stays `declaration`.
+describe('decodeSemanticTokens — concept-kind modifiers', () => {
+  const DECLARATION = 1 << 0;
+  const AGGREGATE = 1 << 1;
+  const VALUE_OBJECT = 1 << 3; // CONCEPT_SLUGS[2] === 'value'
+  const ENUMERATION = 1 << 4; // CONCEPT_SLUGS[3] === 'enum'
+
+  test('CONCEPT_SLUGS mirrors the C# modifier bit order (aggregate is bit 1)', () => {
+    expect(CONCEPT_SLUGS[0]).toBe('aggregate');
+    expect(CONCEPT_SLUGS[2]).toBe('value');
+    expect(CONCEPT_SLUGS[3]).toBe('enum');
+    expect(CONCEPT_SLUGS).toHaveLength(15);
+  });
+
+  test('a value-object declaration gets cm-st-type cm-st-declaration cm-st-k-value', () => {
+    const tokens = decodeSemanticTokens([0, 6, 5, 0, DECLARATION | VALUE_OBJECT], doc); // 'Money' 6..11, type
+    expect(tokens).toEqual([{ from: 6, to: 11, cls: 'cm-st-type cm-st-declaration cm-st-k-value' }]);
+  });
+
+  test('a value-object reference (no declaration bit) gets cm-st-type cm-st-k-value', () => {
+    const tokens = decodeSemanticTokens([0, 6, 5, 0, VALUE_OBJECT], doc);
+    expect(tokens).toEqual([{ from: 6, to: 11, cls: 'cm-st-type cm-st-k-value' }]);
+  });
+
+  test('the enumeration bit on an enum token yields cm-st-k-enum', () => {
+    const tokens = decodeSemanticTokens([2, 0, 4, 1, DECLARATION | ENUMERATION], doc); // line 2 'enum' 0..4
+    expect(tokens[0].cls).toBe('cm-st-enum cm-st-declaration cm-st-k-enum');
+  });
+
+  test('the aggregate bit maps to cm-st-k-aggregate', () => {
+    const tokens = decodeSemanticTokens([0, 6, 5, 0, AGGREGATE], doc);
+    expect(tokens[0].cls).toBe('cm-st-type cm-st-k-aggregate');
+  });
+
+  test('an unknown high modifier bit adds no kind class (defensive)', () => {
+    const tokens = decodeSemanticTokens([0, 6, 5, 0, 1 << 20], doc);
+    expect(tokens[0].cls).toBe('cm-st-type');
+  });
+});
+
 // is only valid for the doc it was requested against, so a response resolving AFTER a doc change must be
 // dropped rather than decoded against the newer doc (that would paint shifted/foreign highlights).
 function makeView(provider: SemanticTokensFn, debounceMs: number): EditorView {
