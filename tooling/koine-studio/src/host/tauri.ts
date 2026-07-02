@@ -330,14 +330,28 @@ export class TauriPlatform implements Platform {
     return dir;
   }
 
-  // Cold-boot may silently re-open a materialized template/example dir (`<appData>/workspaces/<id>`)
-  // because, unlike the browser's File System Access handles, a desktop path needs no permission
-  // gesture to read. The default workspace (`<appData>/Untitled`) is excluded — it has its own
-  // defaultWorkspace re-open flow — as is any externally *picked* folder, which stays a manual Recents
-  // click. Without this, a desktop template token (an absolute path, not a browser `example-*` slug)
+  // Cold-boot may silently re-open a materialized template/example dir because, unlike the browser's
+  // File System Access handles, a desktop path needs no permission gesture to read. A token is
+  // auto-restorable when it lives under the current `<documentDir>/Koine` root (#915) OR — for
+  // back-compat — the legacy `<appData>/workspaces` root, so an upgrading user's already-open desktop
+  // token still cold-boot restores. Two exclusions stay a manual Recents click: the default workspace
+  // (`<documentDir>/Koine/Untitled` — it has its own defaultWorkspace re-open flow; note it now shares
+  // the root with materialized workspaces, so it must be excluded explicitly, where the legacy
+  // `<appData>/Untitled` fell outside `<appData>/workspaces` naturally) and any externally *picked*
+  // folder. Without this, a desktop template token (an absolute path, not a browser `example-*` slug)
   // matched nothing and every reload reverted to the blank default.
   async isAutoRestorableToken(token: string): Promise<boolean> {
-    const root = await join(await appDataDir(), WORKSPACES_SUBDIR);
+    const root = await this.workspacesRoot();
+    // The default scratch workspace now sits under the same root as materialized workspaces (#915), so
+    // exclude it explicitly — it re-opens via defaultWorkspace, not auto-restore.
+    if (token === (await join(root, 'Untitled'))) return false;
+    const legacyRoot = await join(await appDataDir(), WORKSPACES_SUBDIR);
+    return this.isUnderRoot(token, root) || this.isUnderRoot(token, legacyRoot);
+  }
+
+  // A token is "under" a root when it is the root itself or a descendant of it, tolerating either path
+  // separator so a Windows (`\`) or POSIX (`/`) absolute path both match.
+  private isUnderRoot(token: string, root: string): boolean {
     return token === root || token.startsWith(`${root}/`) || token.startsWith(`${root}\\`);
   }
 

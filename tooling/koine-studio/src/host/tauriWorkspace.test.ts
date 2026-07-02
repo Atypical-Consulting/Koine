@@ -34,20 +34,29 @@ beforeEach(() => {
 describe('TauriPlatform.isAutoRestorableToken', () => {
   const p = new TauriPlatform();
 
-  // The bug: a desktop template token is an absolute `<appData>/workspaces/<id>` path, not a browser
-  // `example-*` slug, so the old hardcoded test matched nothing and reloads reverted to the blank model.
-  it('vouches for a materialized template dir under <appData>/workspaces/', async () => {
+  // #915: cold boot must silently re-open a materialized workspace under the NEW `<documentDir>/Koine/`
+  // root — an absolute path, not a browser `example-*` slug.
+  it('vouches for a materialized workspace under the new <documentDir>/Koine/ root', async () => {
+    expect(await p.isAutoRestorableToken('/documents/Koine/pizzeria')).toBe(true);
+  });
+
+  // Back-compat: pre-#915 desktop tokens live under `<appData>/workspaces/` and must STILL cold-boot
+  // restore (union with the new root) so an upgrading user doesn't lose their auto-reopen.
+  it('vouches for a legacy materialized dir under <appData>/workspaces/ (back-compat)', async () => {
     expect(await p.isAutoRestorableToken('/appdata/workspaces/pizzeria')).toBe(true);
   });
 
-  it('declines the default workspace (<appData>/Untitled has its own re-open flow)', async () => {
+  it('declines the new default workspace (<documentDir>/Koine/Untitled has its own re-open flow)', async () => {
+    expect(await p.isAutoRestorableToken('/documents/Koine/Untitled')).toBe(false);
+  });
+
+  it('declines the legacy default workspace (<appData>/Untitled has its own re-open flow)', async () => {
     expect(await p.isAutoRestorableToken('/appdata/Untitled')).toBe(false);
   });
 
   it('declines an externally picked folder (stays a manual Recents click)', async () => {
     expect(await p.isAutoRestorableToken('/Users/me/projects/billing')).toBe(false);
   });
-
 });
 
 // #915: the desktop workspace root moved from the hidden `<appData>/workspaces/<name>` to the
@@ -60,6 +69,14 @@ describe('TauriPlatform workspace root (<documentDir>/Koine, #915)', () => {
   it('materializeWorkspace mints under <documentDir>/Koine/', async () => {
     const token = await p.materializeWorkspace('pizzeria', [{ relPath: 'menu.koi', contents: '' }]);
     expect(token).toBe('/documents/Koine/pizzeria');
+  });
+
+  // The mint side and the recognize side must agree: materializeWorkspace returns exactly the token
+  // isAutoRestorableToken later accepts (both derive from the shared workspacesRoot()).
+  it('materializeWorkspace mints exactly the token it later vouches for', async () => {
+    const token = await p.materializeWorkspace('pizzeria', [{ relPath: 'menu.koi', contents: '' }]);
+    expect(token).toBe('/documents/Koine/pizzeria');
+    expect(await p.isAutoRestorableToken(token as string)).toBe(true);
   });
 
   it('defaultWorkspace resolves the scratch model under <documentDir>/Koine/Untitled', async () => {
