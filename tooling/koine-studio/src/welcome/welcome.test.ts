@@ -699,6 +699,44 @@ describe('Home hero snippet', () => {
   });
 });
 
+describe('Home hero — multi-target caption + colophon', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  test('the emit caption names all four target languages, with one tinted dot per language', () => {
+    mountHome(container, makeCallbacks(), SAMPLE);
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+
+    const emit = root.querySelector<HTMLElement>('.koi-welcome-snippet-emit');
+    expect(emit).not.toBeNull();
+    // The caption reads Koine's multi-target reach, not the old C#-only line.
+    const text = emit!.textContent ?? '';
+    for (const lang of ['C#', 'TypeScript', 'Python', 'PHP']) {
+      expect(text).toContain(lang);
+    }
+    // Four language dots — one per emit target — grouped under .koi-welcome-emit-dots.
+    const dots = emit!.querySelectorAll('.koi-welcome-emit-dots .koi-welcome-emit-dot');
+    expect(dots.length).toBe(4);
+  });
+
+  test('the colophon now sits inside the hero lede, still carrying its four links + credit', () => {
+    mountHome(container, makeCallbacks(), SAMPLE);
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+
+    // Relocated into the hero's left column (still inside the console view, inside the body grid).
+    const colophon = root.querySelector<HTMLElement>('.koi-welcome-lede .koi-home-colophon');
+    expect(colophon).not.toBeNull();
+    // Still the same colophon markup: the four project links + the byline survive the move.
+    expect(colophon!.querySelectorAll('.koi-home-colophon-link').length).toBe(4);
+    expect(colophon!.querySelector('.koi-home-colophon-credit')?.textContent).toContain('Philippe Matray');
+  });
+});
+
 // The search input is debounced; tests enable fake timers and flush the debounce window.
 function setSearch(root: HTMLElement, value: string): void {
   vi.useFakeTimers();

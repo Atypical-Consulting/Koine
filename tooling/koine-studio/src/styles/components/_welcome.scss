@@ -234,6 +234,10 @@
 
 .koi-welcome-lede {
   min-width: 0;
+  /* A flex column so the colophon (its last child) can pin to the bottom via margin-top:auto: the
+     eyebrow → statement → snippet stack sits at the top, the colophon settles as the column's footer. */
+  display: flex;
+  flex-direction: column;
   /* Left column scrolls independently of the launch rail; inset from the dividing hairline on its right. */
   overflow-y: auto;
   padding-right: clamp(24px, 4vw, 56px);
@@ -345,14 +349,23 @@
   color: var(--koi-muted);
 }
 
-/* The destination-language mark (C#) — same hue the toolbar uses for the C# target. */
+/* The destination-language marks — a tight cluster of one dot per emit target (C#, TS, Python, PHP). */
+.koi-welcome-emit-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+  flex: none;
+}
+
+/* Each dot takes its target's own --lang-* hue via the inline --emit-dot custom property (set in JS),
+   falling back to the C# hue; its soft halo derives from the same colour so the tint carries through. */
 .koi-welcome-emit-dot {
   flex: none;
   width: 8px;
   height: 8px;
   border-radius: 2px;
-  background: var(--lang-csharp);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lang-csharp) 22%, transparent);
+  background: var(--emit-dot, var(--lang-csharp));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--emit-dot, var(--lang-csharp)) 22%, transparent);
 }
 
 /* --- launch rail: actions + recent --------------------------------------- */
@@ -960,16 +973,17 @@
 }
 
 /* --- Home colophon footer (issue #403): version + project links + byline ---
-   A quiet strip pinned to the bottom of the console card — deliberately distinct from the centered
-   Settings → About colophon (_about.scss): here it reads as a horizontal page footer, not a brand
-   tile. The hero scrolls above it (flex:1, overflow-y:auto); this stays put (flex:none). */
+   The hero lede's footer: pinned to the bottom of the left column via margin-top:auto, so the
+   eyebrow → statement → snippet stack sits at the top and this settles beneath it. Deliberately
+   distinct from the centered Settings → About colophon (_about.scss): here it reads as a horizontal
+   page footer, not a brand tile. The lede scrolls (overflow-y:auto), so a tall hero never hides it. */
 .koi-home-colophon {
   flex: none;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--koi-space-2) var(--koi-space-3);
-  margin-top: clamp(16px, 2vw, 24px);
+  margin-top: auto; /* push to the bottom of the flex-column lede */
   padding-top: var(--koi-space-3);
   border-top: 1px solid var(--koi-line);
   color: var(--koi-muted);

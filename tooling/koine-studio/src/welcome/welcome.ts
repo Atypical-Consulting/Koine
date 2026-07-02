@@ -328,12 +328,22 @@ function buildHome(
 
   const emit = document.createElement('p');
   emit.className = 'koi-welcome-snippet-emit';
-  const emitDot = document.createElement('span');
-  emitDot.className = 'koi-welcome-emit-dot';
-  emitDot.setAttribute('aria-hidden', 'true');
+  // Four language dots — one per emit target — each tinted with that target's own --lang-* token (the
+  // tokens ship in @atypical/koine-ui; we only reference them). Together they show Koine's multi-target
+  // reach at a glance, so the caption reads "one model → many languages", not C# alone.
+  const emitDots = document.createElement('span');
+  emitDots.className = 'koi-welcome-emit-dots';
+  emitDots.setAttribute('aria-hidden', 'true');
+  for (const lang of ['csharp', 'typescript', 'python', 'php']) {
+    const dot = document.createElement('span');
+    dot.className = 'koi-welcome-emit-dot';
+    // The dot (and its halo, in SCSS) derive from this custom property so each language keeps its hue.
+    dot.style.setProperty('--emit-dot', `var(--lang-${lang})`);
+    emitDots.appendChild(dot);
+  }
   const emitText = document.createElement('span');
-  emitText.textContent = 'Emits idiomatic C# — value object, guards, equality.';
-  emit.append(emitDot, emitText);
+  emitText.textContent = 'One model → idiomatic C#, TypeScript, Python & PHP.';
+  emit.append(emitDots, emitText);
 
   figure.append(snipBar, pre, emit);
   lede.append(eyebrow, statement, figure);
@@ -449,8 +459,8 @@ function buildHome(
   // --- colophon footer: version + project links + byline (issue #403) --------
   // The onboarding essentials a newcomer needs at first contact — what version am I on, where are the
   // docs, who made this — surfaced from the shared colophon (settings/about.ts shows the same content).
-  // It sits in the persistent console view, a sibling below the body grid (Task 3 later moves it into
-  // the hero's left footer).
+  // It is pinned to the bottom of the hero's left column (.koi-welcome-lede) via margin-top:auto, so the
+  // lede pushes it down as its own footer; the lede owns the scroll, so a long hero never hides it.
   const colophonChip = document.createElement('span');
   colophonChip.className = 'koi-home-colophon-chip';
   colophonChip.hidden = true; // filled lazily by fillVersionChip; stays hidden until a version resolves
@@ -500,7 +510,8 @@ function buildHome(
     return footer;
   }
 
-  consoleView.appendChild(buildColophonFooter());
+  // Append the colophon as the hero lede's last child — its footer, pinned to the bottom (see SCSS).
+  lede.appendChild(buildColophonFooter());
 
   function renderRecent(): void {
     recentBody.innerHTML = '';
