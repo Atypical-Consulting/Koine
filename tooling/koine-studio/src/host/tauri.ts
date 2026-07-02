@@ -324,10 +324,51 @@ export class TauriPlatform implements Platform {
   // The persistent default workspace: <documentDir>/Koine/Untitled (#915). Seed model.koi only when the
   // folder holds no .koi yet, so a reload restores the user's model instead of overwriting it.
   async defaultWorkspace(seed: string): Promise<string | null> {
+    // First boot after the #915 move: best-effort migrate any pre-existing legacy workspaces into the
+    // new root BEFORE seeding Untitled here — seeding would make the root non-empty and skip migration.
+    await this.migrateLegacyWorkspaces();
     const dir = await join(await this.workspacesRoot(), 'Untitled');
     const existing = await this.listKoiFiles(dir).catch(() => [] as KoiFile[]);
     if (existing.length === 0) await this.createFile(dir, 'model.koi', seed);
     return dir;
+  }
+
+  // Guard so the one-time legacy move runs at most once per process; set BEFORE any work so a failure
+  // neither retries nor loops.
+  private legacyMigrationAttempted = false;
+
+  // Best-effort, one-time migration (#915) of a user's pre-existing desktop workspaces from the legacy
+  // `<appData>` roots into the new `<documentDir>/Koine` root, so an upgrading user finds their projects
+  // in the discoverable location too. It ONLY migrates into a still-EMPTY new root (never merges over
+  // workspaces already there), and every filesystem call is wrapped so a failure is swallowed and boot
+  // continues — the safety net if it does nothing is that legacy tokens stay auto-restorable
+  // (isAutoRestorableToken), so old workspaces still open from Recents.
+  private async migrateLegacyWorkspaces(): Promise<void> {
+    if (this.legacyMigrationAttempted) return;
+    this.legacyMigrationAttempted = true;
+    try {
+      const root = await this.workspacesRoot();
+      // Only migrate into a pristine new root. list_entries rejects when the dir doesn't exist yet,
+      // which the catch treats as "empty" so a first-ever boot still migrates.
+      const existing = await this.listEntries(root).catch(() => [] as FsEntry[]);
+      if (existing.length > 0) return;
+
+      const appData = await appDataDir();
+      // Move each legacy materialized workspace to <documentDir>/Koine/<name>.
+      const legacyWorkspaces = await join(appData, WORKSPACES_SUBDIR);
+      const legacy = await this.listEntries(legacyWorkspaces).catch(() => [] as FsEntry[]);
+      for (const entry of legacy) {
+        if (entry.kind !== 'dir') continue;
+        await this.moveEntry(entry.token, root, entry.name, false).catch(() => undefined);
+      }
+
+      // Move the legacy default scratch workspace to <documentDir>/Koine/Untitled if it holds anything.
+      const legacyUntitled = await join(appData, 'Untitled');
+      const untitled = await this.listEntries(legacyUntitled).catch(() => [] as FsEntry[]);
+      if (untitled.length > 0) await this.moveEntry(legacyUntitled, root, 'Untitled', false).catch(() => undefined);
+    } catch {
+      // best effort — never block boot on a migration failure; legacy tokens remain restorable
+    }
   }
 
   // Cold-boot may silently re-open a materialized template/example dir because, unlike the browser's
