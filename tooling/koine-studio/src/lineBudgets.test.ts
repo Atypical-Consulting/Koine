@@ -87,7 +87,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // relocated colophon all add real imperative construction to welcome.ts; ceil(992 × 1.02) = 1012.
   // Raised 1012 → 1105: #1005 resume card — the rich last-session card (play tile + ping dot + project ·
   // file + relative time + unsaved count) plus the timeAgo/prefersReducedMotion helpers; ceil(1083 × 1.02) = 1105.
-  { file: 'src/welcome/welcome.ts', maxLines: 1105 },
+  // Raised 1105 → 1197: #1005 dense recents — the compact recent rows (teal monogram + name/language tag +
+  // git branch + relative time) with a header count pill, an always-available filter and a View all/Show
+  // less collapse, split into a buildRecentRow helper; ceil(1173 × 1.02) = 1197.
+  { file: 'src/welcome/welcome.ts', maxLines: 1197 },
 ];
 
 describe('line-budget guard', () => {

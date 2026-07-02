@@ -344,7 +344,7 @@ describe('welcome recent management', () => {
     vi.unstubAllGlobals();
   });
 
-  test('shows a filter only when the list is long, and filters by text', () => {
+  test('the header filter narrows the list by text (#1005: always available)', () => {
     const many = Array.from({ length: 10 }, (_, i) => `/proj/folder-${i}`);
     localStorage.setItem(KEY, JSON.stringify(many));
     mountHome(container, makeCallbacks());
@@ -376,12 +376,14 @@ describe('welcome recent management', () => {
     expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(10);
   });
 
-  test('the filter is not perceivable while the list is short', () => {
+  test('the filter is always available even while the list is short (#1005)', () => {
     localStorage.setItem(KEY, JSON.stringify(['/a', '/b']));
     mountHome(container, makeCallbacks());
     const filter = document.querySelector('.koi-welcome-recent-filter') as HTMLInputElement | null;
-    // Absent or present-but-hidden — either way it must not show below the threshold.
-    expect(filter?.hidden ?? true).toBe(true);
+    // #1005: the recent filter is header-mounted and always available — present and perceivable
+    // regardless of how few recents there are (it no longer waits for a length threshold).
+    expect(filter).not.toBeNull();
+    expect(filter!.hidden).toBe(false);
   });
 
   test('clear-all empties the list', async () => {
@@ -398,6 +400,108 @@ describe('welcome recent management', () => {
     await new Promise((r) => setTimeout(r, 0)); // let koiConfirm's promise resolve + re-render
 
     expect(document.querySelector('.koi-welcome-empty')).not.toBeNull();
+  });
+});
+
+describe('Home dense recents (#1005)', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = '';
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  /** Seed structured RecentFolder records (with optional branch/language/openedAt) into storage. */
+  function seedRecents(
+    items: Array<{ path: string; openedAt?: number; branch?: string; language?: string; pinned?: boolean }>,
+  ): void {
+    const now = Date.now();
+    localStorage.setItem(KEY, JSON.stringify(items.map((r, i) => ({ openedAt: now - i * 60_000, ...r }))));
+  }
+
+  test('each row shows a teal monogram, the folder name and a relative time', () => {
+    seedRecents([{ path: '/proj/billing', openedAt: Date.now() - 8 * 60_000 }]);
+    mountHome(container, makeCallbacks());
+    const item = document.querySelector<HTMLElement>('.koi-welcome-recent-item')!;
+    // Monogram is the folder's initial (decorative); the name is its basename; the time is relative.
+    expect(item.querySelector('.koi-welcome-recent-mono')?.textContent).toBe('B');
+    expect(item.querySelector('.koi-welcome-recent-item-name')?.textContent).toBe('billing');
+    expect(item.querySelector('.koi-welcome-recent-time')?.textContent).toMatch(/min ago/);
+  });
+
+  test('a language tag and a git branch render when the recent carries them', () => {
+    seedRecents([{ path: '/proj/api', branch: 'main', language: 'csharp' }]);
+    mountHome(container, makeCallbacks());
+    const item = document.querySelector<HTMLElement>('.koi-welcome-recent-item')!;
+    // The language id maps to its emit-target display label (csharp → C#).
+    expect(item.querySelector('.koi-welcome-recent-lang')?.textContent).toBe('C#');
+    const branch = item.querySelector<HTMLElement>('.koi-welcome-recent-branch');
+    expect(branch).not.toBeNull();
+    expect(branch!.textContent).toContain('main');
+  });
+
+  test('the language tag and branch are omitted when the recent lacks them', () => {
+    seedRecents([{ path: '/proj/plain' }]);
+    mountHome(container, makeCallbacks());
+    const item = document.querySelector<HTMLElement>('.koi-welcome-recent-item')!;
+    expect(item.querySelector('.koi-welcome-recent-lang')).toBeNull();
+    expect(item.querySelector('.koi-welcome-recent-branch')).toBeNull();
+  });
+
+  test('a count pill shows the total number of recents', () => {
+    seedRecents([{ path: '/a' }, { path: '/b' }, { path: '/c' }]);
+    mountHome(container, makeCallbacks());
+    expect(document.querySelector('.koi-welcome-recent-count')?.textContent).toBe('3');
+  });
+
+  test('collapses to six rows, with a View all / Show less toggle, past six recents', () => {
+    seedRecents(Array.from({ length: 8 }, (_, i) => ({ path: `/proj/folder-${i}` })));
+    mountHome(container, makeCallbacks());
+
+    const visible = () => document.querySelectorAll('.koi-welcome-recent-item:not([hidden])').length;
+    const toggle = () => document.querySelector<HTMLButtonElement>('.koi-welcome-recent-toggle')!;
+
+    // Collapsed: all eight rows are in the DOM, but only the first six show; the rest hide behind the toggle.
+    expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(8);
+    expect(visible()).toBe(6);
+    expect(toggle().textContent).toContain('View all');
+
+    // Expand → every row shows, the toggle flips to "Show less".
+    toggle().click();
+    expect(visible()).toBe(8);
+    expect(toggle().textContent).toContain('Show less');
+
+    // Collapse again → back to six.
+    toggle().click();
+    expect(visible()).toBe(6);
+    expect(toggle().textContent).toContain('View all');
+  });
+
+  test('shows no collapse toggle when six or fewer recents', () => {
+    seedRecents(Array.from({ length: 4 }, (_, i) => ({ path: `/proj/folder-${i}` })));
+    mountHome(container, makeCallbacks());
+    expect(document.querySelector('.koi-welcome-recent-toggle')).toBeNull();
+    expect(document.querySelectorAll('.koi-welcome-recent-item:not([hidden])').length).toBe(4);
+  });
+
+  test('pin, copy and remove stay present and keyboard-focusable on each row', () => {
+    seedRecents([{ path: '/proj/billing' }]);
+    mountHome(container, makeCallbacks());
+    const item = document.querySelector<HTMLElement>('.koi-welcome-recent-item')!;
+    const pin = item.querySelector<HTMLButtonElement>('.koi-welcome-recent-pin')!;
+    const copy = item.querySelector<HTMLButtonElement>('.koi-welcome-recent-copy')!;
+    const remove = item.querySelector<HTMLButtonElement>('.koi-welcome-recent-remove')!;
+    // The controls keep their existing accessible names.
+    expect(pin.getAttribute('aria-label')).toBe('Pin billing');
+    expect(copy.getAttribute('aria-label')).toBe('Copy path of billing');
+    expect(remove.getAttribute('aria-label')).toBe('Remove billing from recent folders');
+    // Each is a real, focusable button (keyboard-reachable even though hover-revealed).
+    for (const btn of [pin, copy, remove]) {
+      btn.focus();
+      expect(document.activeElement).toBe(btn);
+    }
   });
 });
 
@@ -808,10 +912,12 @@ describe('Home hero — multi-target caption + colophon', () => {
   });
 });
 
-// The search input is debounced; tests enable fake timers and flush the debounce window.
+// The search input is debounced; tests enable fake timers and flush the debounce window. Target the
+// gallery's own search box by class — the always-available recent filter (#1005) is also a
+// type=search input and sits earlier in the DOM, so a bare input[type=search] would now match it.
 function setSearch(root: HTMLElement, value: string): void {
   vi.useFakeTimers();
-  const input = root.querySelector<HTMLInputElement>('input[type="search"]')!;
+  const input = root.querySelector<HTMLInputElement>('.koi-welcome-search-input')!;
   input.value = value;
   input.dispatchEvent(new Event('input', { bubbles: true }));
   vi.advanceTimersByTime(200);

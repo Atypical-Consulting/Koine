@@ -615,11 +615,61 @@
 }
 
 /* --- recent folders ------------------------------------------------------- */
-.koi-welcome-recent-list {
+/* Header row: the "Recent" rail title + a live count pill; the header-mounted filter sits below it.
+   Header + filter persist across re-renders (only the rows / toggle / clear-all rebuild). */
+.koi-welcome-recent-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--koi-space-2);
+
+  .koi-welcome-rail-title {
+    margin-bottom: 0;
+  }
+}
+
+/* A quiet pill carrying the total recent count beside the title. */
+.koi-welcome-recent-count {
+  flex: none;
+  min-width: 1.4em;
+  padding: 1px var(--koi-space-1-5);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  font-weight: 600;
+  text-align: center;
+  color: var(--koi-muted);
+  background: color-mix(in srgb, var(--koi-fg) 7%, transparent);
+  border-radius: var(--koi-radius-pill);
+}
+
+.koi-welcome-recent-filter {
+  width: 100%;
+  box-sizing: border-box;
+  margin: var(--koi-space-2) 0 var(--koi-space-1-5);
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-1-25) var(--koi-space-2);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm);
+
+  &:focus-visible { outline: 2px solid var(--koi-accent); outline-offset: 1px; }
+}
+
+/* The rebuilt-per-render body: rows, then the View-all toggle + clear-all, or the empty copy. Stacked
+   left-aligned; the list stretches full-width while the trailing text buttons keep their own width. */
+.koi-welcome-recent-body {
   display: flex;
   flex-direction: column;
-  gap: var(--koi-space-1);
-  max-height: 240px;        /* the only remaining containment — the card is already height-safe */
+  align-items: flex-start;
+}
+
+.koi-welcome-recent-list {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-0-5);
+  max-height: 320px;        /* the only remaining containment — the card is already height-safe */
   overflow-y: auto;
   margin: 0 -6px;           /* let row hover-bg bleed to the rail edge */
   padding: 0 6px;
@@ -629,21 +679,134 @@
   display: flex;
   align-items: center;
   gap: var(--koi-space-1);
+
+  /* Collapsed rows past the cap are hidden imperatively (item.hidden) — override the flex display so
+     the attribute actually removes them from the flow. */
+  &[hidden] { display: none; }
 }
 
+/* The row's open affordance: a teal monogram tile + a two-line main column (name/lang, then
+   branch/time). Fills the row so the whole thing is one large click target. */
 .koi-welcome-recent-open {
   flex: 1 1 auto;
-  min-width: 0;             /* allow the name/path lines to ellipsis */
+  min-width: 0;             /* allow the name line to ellipsis */
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2-5);
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--koi-radius-sm);
-  padding: var(--koi-space-1-75) var(--koi-space-2-5);
+  padding: var(--koi-space-1-5) var(--koi-space-2);
   color: var(--koi-fg);
   cursor: pointer;
 
   &:hover { background: var(--koi-surface); border-color: var(--koi-line); }
   &:focus-visible { outline: 2px solid var(--koi-accent); outline-offset: 1px; }
+}
+
+/* Teal monogram — the folder's initial in an accent-cyan tile. */
+.koi-welcome-recent-mono {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--koi-radius-sm);
+  background: color-mix(in srgb, var(--koi-cyan) 16%, transparent);
+  color: var(--koi-cyan);
+  font-family: var(--koi-font-display);
+  font-size: var(--koi-text-sm);
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.koi-welcome-recent-main {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* Line 1: name (truncates) + language tag. */
+.koi-welcome-recent-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--koi-space-1-5);
+  min-width: 0;
+}
+
+.koi-welcome-recent-item-name {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm-plus);
+  color: var(--koi-fg);
+}
+
+/* A small emit-language tag (e.g. "C#") beside the name. */
+.koi-welcome-recent-lang {
+  flex: none;
+  padding: 0 var(--koi-space-1);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  color: var(--koi-muted);
+  background: color-mix(in srgb, var(--koi-fg) 6%, transparent);
+  border-radius: var(--koi-radius-2xs);
+}
+
+/* Line 2: an optional teal branch chip + the relative open time (pushed to the right). */
+.koi-welcome-recent-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+  min-width: 0;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  color: var(--koi-muted);
+}
+
+.koi-welcome-recent-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-0-5);
+  min-width: 0;
+  color: var(--koi-cyan);
+
+  svg {
+    width: 12px;
+    height: 12px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+}
+
+.koi-welcome-recent-branch-icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.koi-welcome-recent-branch-name {
+  min-width: 0;
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.koi-welcome-recent-time {
+  flex: none;
+  margin-left: auto;        /* push the time to the right edge of the meta line */
+  white-space: nowrap;
 }
 
 .koi-welcome-recent-pin,
@@ -681,18 +844,17 @@
   color: var(--koi-accent);
 }
 
-.koi-welcome-recent-filter {
-  width: 100%;
-  box-sizing: border-box;
-  margin-bottom: var(--koi-space-1-5);
-  background: var(--koi-surface);
-  color: var(--koi-fg);
-  border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius-sm);
-  padding: var(--koi-space-1-25) var(--koi-space-2);
-  font-family: var(--koi-font-body);
-  font-size: var(--koi-text-sm);
+/* View all / Show less — a quiet accent text toggle revealing or re-collapsing the rows past the cap. */
+.koi-welcome-recent-toggle {
+  margin-top: var(--koi-space-1-5);
+  background: transparent;
+  border: 0;
+  color: var(--koi-accent);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  cursor: pointer;
 
+  &:hover { text-decoration: underline; }
   &:focus-visible { outline: 2px solid var(--koi-accent); outline-offset: 1px; }
 }
 
@@ -709,23 +871,6 @@
 
   &:hover { color: var(--koi-fg); text-decoration: underline; }
   &:focus-visible { outline: 2px solid var(--koi-accent); outline-offset: 1px; }
-}
-
-.koi-welcome-recent-item-name {
-  display: block;
-  font-family: var(--koi-font-body);
-  font-size: var(--koi-text-sm-plus);
-  color: var(--koi-fg);
-}
-
-.koi-welcome-recent-item-path {
-  display: block;
-  font-family: var(--koi-font-mono);
-  font-size: var(--koi-text-2xs);
-  color: var(--koi-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .koi-welcome-empty {

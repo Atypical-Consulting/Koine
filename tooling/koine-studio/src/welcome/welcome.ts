@@ -12,8 +12,10 @@ import {
   pinRecentFolder,
   clearRecentFolders,
   getLastSession,
+  type RecentFolder,
 } from '@/settings/persistence';
 import { getPlatform } from '@/host';
+import { BUILTIN_EMIT_TARGETS } from '@/shared/emitTargets';
 import { registerOverlay, koiConfirm } from '@atypical/koine-ui';
 import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, fillVersionChip, wireExternalLink } from '@/shared/colophon';
 import { TEMPLATES, type Template } from '@/welcome/templates';
@@ -48,8 +50,8 @@ export interface WelcomeCallbacks {
 /** Canonical difficulty ordering — starters first, advanced last. Drives grouping and chip order. */
 export const DIFFICULTY_ORDER: Template['difficulty'][] = ['starter', 'beginner', 'intermediate', 'advanced'];
 
-/** Recents past this count gain a free-text filter input above the list. */
-const FILTER_THRESHOLD = 8;
+/** The recent list shows this many rows collapsed; a "View all" toggle then reveals the rest. */
+const RECENT_COLLAPSE_LIMIT = 6;
 
 /** The active gallery filters. Any field left undefined/empty is treated as "no constraint". */
 export interface TemplateFilter {
@@ -135,6 +137,12 @@ const ICON_SETTINGS =
   '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h11M2.5 10.5h11"/><circle cx="6" cy="5.5" r="1.7"/><circle cx="10" cy="10.5" r="1.7"/></svg>';
 /** A filled play triangle — the resume-session card's tile (#1005), the "continue where you left off" cue. */
 const ICON_PLAY = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.4v9.2L12.5 8z" fill="currentColor" stroke="none"/></svg>';
+/** A git-branch glyph — marks the branch a recent folder was last opened on (teal, in the dense row). */
+const ICON_BRANCH =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4.5" cy="4" r="1.4"/><circle cx="4.5" cy="12" r="1.4"/><circle cx="11.5" cy="5.5" r="1.4"/><path d="M4.5 5.4v5.2M4.5 8.4c0-1.8 1-2.9 3.4-2.9h1"/></svg>';
+
+/** Emit-target id → short display label (e.g. `csharp` → `C#`), for the dense recent row's language tag. */
+const LANG_LABELS = new Map(BUILTIN_EMIT_TARGETS.map((t) => [t.id, t.displayName]));
 
 /** Build a start action as a button with an icon, a label and a one-line description. */
 function makeAction(opts: {
@@ -223,6 +231,9 @@ function buildHome(
   // Live recent-folders filter query — closure-scoped so it survives renderRecent() re-renders but
   // resets per Home instance.
   let recentQuery = '';
+  // Whether the recent list is expanded past its collapsed cap (View all / Show less). Sticky per Home
+  // instance so a re-render (filter keystroke, pin, remove) preserves the user's expand choice.
+  let recentExpanded = false;
 
   const root = document.createElement('div');
   root.className = 'koi-welcome koi-welcome-embedded';
@@ -510,16 +521,25 @@ function buildHome(
   );
   launch.appendChild(actions);
 
-  // Recent folders — populated immediately on mount via refreshRecent(). The heading and the
-  // free-text filter are created once here (like the gallery's search input) and persist across
-  // renderRecent() rebuilds: the filter re-renders the list on every keystroke, so rebuilding the
-  // input itself would tear down the element being typed into and drop keyboard focus.
+  // Recent folders — populated immediately on mount via refreshRecent(). The header (title + count
+  // pill) and the free-text filter are created once here (like the gallery's search input) and persist
+  // across renderRecent() rebuilds: the filter re-renders the list on every keystroke, so rebuilding
+  // the input itself would tear down the element being typed into and drop keyboard focus.
   const recent = document.createElement('div');
   recent.className = 'koi-welcome-recent';
+
+  // Header row: the "Recent" title + a live count pill (total recents). The pill text and the header's
+  // count/filter visibility are updated per render; the elements themselves never rebuild.
+  const recentHead = document.createElement('div');
+  recentHead.className = 'koi-welcome-recent-head';
 
   const recentHeading = document.createElement('h2');
   recentHeading.className = 'koi-welcome-rail-title';
   recentHeading.textContent = 'Recent';
+
+  const recentCount = document.createElement('span');
+  recentCount.className = 'koi-welcome-recent-count';
+  recentHead.append(recentHeading, recentCount);
 
   const recentFilterId = `koi-welcome-recent-filter-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -538,12 +558,13 @@ function buildHome(
     renderRecent();
   });
 
-  // Only this container is rebuilt per render (empty copy / rows / clear-all). The filter label +
-  // input above are attached before it only while the history is long enough to warrant them.
+  // Only this container is rebuilt per render (rows / View-all toggle / clear-all, or the empty copy).
+  // The header + filter above it are built once and always mounted — a filter keystroke re-renders the
+  // rows WITHOUT tearing down the input being typed into (they hide, not detach, on an empty list).
   const recentBody = document.createElement('div');
   recentBody.className = 'koi-welcome-recent-body';
 
-  recent.append(recentHeading, recentBody);
+  recent.append(recentHead, recentFilterLabel, recentFilter, recentBody);
   launch.appendChild(recent);
   body.appendChild(launch);
 
@@ -609,22 +630,19 @@ function buildHome(
 
     const all = getRecentFolders();
 
-    // Past a handful of recents, show the free-text filter (name or full path). The input is the
-    // persistent one built above: attach/detach it here rather than rebuilding it, and never move
-    // it while it is already connected — either would drop the focus of a user mid-typing.
-    const showFilter = all.length > FILTER_THRESHOLD;
-    if (showFilter && !recentFilter.isConnected) {
-      recent.insertBefore(recentFilterLabel, recentBody);
-      recent.insertBefore(recentFilter, recentBody);
-    } else if (!showFilter) {
-      recentFilterLabel.remove();
-      recentFilter.remove();
-    }
+    // The count pill and the header filter only make sense once there's history: keep them out of the
+    // way (and out of the a11y tree) on an empty list, where the empty-state copy tells the whole
+    // story. They are hidden, never detached — so a mid-typing filter keystroke never loses focus.
+    const hasAny = all.length > 0;
+    recentCount.textContent = hasAny ? String(all.length) : '';
+    recentCount.hidden = !hasAny;
+    recentFilter.hidden = !hasAny;
+    recentFilterLabel.hidden = !hasAny;
     // Sync the value only when a render was triggered by something other than the input itself
     // (e.g. clear-all resetting the query) — same-value writes could still move the caret.
     if (recentFilter.value !== recentQuery) recentFilter.value = recentQuery;
 
-    if (!all.length) {
+    if (!hasAny) {
       const empty = document.createElement('p');
       empty.className = 'koi-welcome-empty';
       empty.textContent = 'Folders you open will show up here.';
@@ -639,67 +657,28 @@ function buildHome(
 
     const list = document.createElement('div');
     list.className = 'koi-welcome-recent-list';
-    for (const entry of folders) {
-      const path = entry.path;
-      const item = document.createElement('div');
-      item.className = 'koi-welcome-recent-item';
-      if (entry.pinned) item.classList.add('is-pinned');
-
-      const open = document.createElement('button');
-      open.type = 'button';
-      open.className = 'koi-welcome-recent-open';
-      open.title = path; // full path on hover
-      const name = document.createElement('span');
-      name.className = 'koi-welcome-recent-item-name';
-      name.textContent = basename(path);
-      const full = document.createElement('span');
-      full.className = 'koi-welcome-recent-item-path';
-      full.textContent = path;
-      open.append(name, full);
-      open.addEventListener('click', () => {
-        cb.onOpenRecent(path);
-      });
-      item.appendChild(open);
-
-      const pin = document.createElement('button');
-      pin.type = 'button';
-      pin.className = 'koi-welcome-recent-pin';
-      pin.setAttribute('aria-pressed', String(!!entry.pinned));
-      pin.setAttribute('aria-label', `${entry.pinned ? 'Unpin' : 'Pin'} ${basename(path)}`);
-      pin.title = entry.pinned ? 'Unpin' : 'Pin';
-      pin.textContent = '★';
-      pin.addEventListener('click', () => {
-        pinRecentFolder(path, !entry.pinned);
-        renderRecent();
-      });
-      item.appendChild(pin);
-
-      const copy = document.createElement('button');
-      copy.type = 'button';
-      copy.className = 'koi-welcome-recent-copy';
-      copy.setAttribute('aria-label', `Copy path of ${basename(path)}`);
-      copy.title = 'Copy path';
-      copy.textContent = '⧉';
-      copy.addEventListener('click', () => {
-        void navigator.clipboard?.writeText(path).catch(() => {});
-      });
-      item.appendChild(copy);
-
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'koi-welcome-recent-remove';
-      remove.setAttribute('aria-label', `Remove ${basename(path)} from recent folders`);
-      remove.title = 'Remove from recent folders';
-      remove.textContent = '✕';
-      remove.addEventListener('click', () => {
-        removeRecentFolder(path);
-        renderRecent();
-      });
-      item.appendChild(remove);
-
-      list.appendChild(item);
-    }
+    folders.forEach((entry, i) => {
+      const row = buildRecentRow(entry);
+      // Collapsed: rows past the cap stay in the DOM (so a filter-count assertion still sees them) but
+      // hide behind the "View all" toggle — the SCSS overrides the row's flex display for [hidden].
+      if (!recentExpanded && i >= RECENT_COLLAPSE_LIMIT) row.hidden = true;
+      list.appendChild(row);
+    });
     recentBody.appendChild(list);
+
+    // View all / Show less — only when the (filtered) list is longer than the collapsed cap.
+    if (folders.length > RECENT_COLLAPSE_LIMIT) {
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'koi-welcome-recent-toggle';
+      toggle.setAttribute('aria-expanded', String(recentExpanded));
+      toggle.textContent = recentExpanded ? 'Show less' : `View all ${folders.length}`;
+      toggle.addEventListener('click', () => {
+        recentExpanded = !recentExpanded;
+        renderRecent();
+      });
+      recentBody.appendChild(toggle);
+    }
 
     // Clear-all sits below the list whenever there's any history (independent of an active filter).
     const clear = document.createElement('button');
@@ -715,10 +694,121 @@ function buildHome(
         if (!ok) return;
         clearRecentFolders();
         recentQuery = '';
+        recentExpanded = false;
         renderRecent();
       });
     });
     recentBody.appendChild(clear);
+  }
+
+  /**
+   * Build one dense recent row: a teal monogram tile (the folder's initial), a two-line main column —
+   * the name plus an optional emit-language tag, then an optional git branch and the relative open time
+   * — and the hover/focus-revealed pin, copy and remove controls (their aria-labels/behaviour unchanged
+   * from the previous list). Absent branch/language fields are simply omitted.
+   */
+  function buildRecentRow(entry: RecentFolder): HTMLElement {
+    const path = entry.path;
+    const name = basename(path);
+
+    const item = document.createElement('div');
+    item.className = 'koi-welcome-recent-item';
+    if (entry.pinned) item.classList.add('is-pinned');
+
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'koi-welcome-recent-open';
+    open.title = path; // full path on hover (the row no longer prints the whole path inline)
+    open.addEventListener('click', () => {
+      cb.onOpenRecent(path);
+    });
+
+    // Teal monogram — the folder's initial in an accent-cyan tile; decorative (the name carries the label).
+    const mono = document.createElement('span');
+    mono.className = 'koi-welcome-recent-mono';
+    mono.setAttribute('aria-hidden', 'true');
+    mono.textContent = (name.charAt(0) || '?').toUpperCase();
+
+    const main = document.createElement('span');
+    main.className = 'koi-welcome-recent-main';
+
+    // Line 1: the folder name + an optional emit-language tag (id mapped to its short label).
+    const line = document.createElement('span');
+    line.className = 'koi-welcome-recent-line';
+    const nameEl = document.createElement('span');
+    nameEl.className = 'koi-welcome-recent-item-name';
+    nameEl.textContent = name;
+    line.appendChild(nameEl);
+    if (entry.language) {
+      const lang = document.createElement('span');
+      lang.className = 'koi-welcome-recent-lang';
+      lang.textContent = LANG_LABELS.get(entry.language) ?? entry.language;
+      line.appendChild(lang);
+    }
+
+    // Line 2: an optional git branch (teal glyph + name) then the relative open time.
+    const metaLine = document.createElement('span');
+    metaLine.className = 'koi-welcome-recent-meta';
+    if (entry.branch) {
+      const branch = document.createElement('span');
+      branch.className = 'koi-welcome-recent-branch';
+      branch.title = `Branch: ${entry.branch}`;
+      const glyph = document.createElement('span');
+      glyph.className = 'koi-welcome-recent-branch-icon';
+      glyph.setAttribute('aria-hidden', 'true');
+      glyph.innerHTML = ICON_BRANCH;
+      const branchName = document.createElement('span');
+      branchName.className = 'koi-welcome-recent-branch-name';
+      branchName.textContent = entry.branch;
+      branch.append(glyph, branchName);
+      metaLine.appendChild(branch);
+    }
+    const time = document.createElement('span');
+    time.className = 'koi-welcome-recent-time';
+    time.textContent = timeAgo(entry.openedAt, Date.now());
+    metaLine.appendChild(time);
+
+    main.append(line, metaLine);
+    open.append(mono, main);
+    item.appendChild(open);
+
+    const pin = document.createElement('button');
+    pin.type = 'button';
+    pin.className = 'koi-welcome-recent-pin';
+    pin.setAttribute('aria-pressed', String(!!entry.pinned));
+    pin.setAttribute('aria-label', `${entry.pinned ? 'Unpin' : 'Pin'} ${name}`);
+    pin.title = entry.pinned ? 'Unpin' : 'Pin';
+    pin.textContent = '★';
+    pin.addEventListener('click', () => {
+      pinRecentFolder(path, !entry.pinned);
+      renderRecent();
+    });
+    item.appendChild(pin);
+
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'koi-welcome-recent-copy';
+    copy.setAttribute('aria-label', `Copy path of ${name}`);
+    copy.title = 'Copy path';
+    copy.textContent = '⧉';
+    copy.addEventListener('click', () => {
+      void navigator.clipboard?.writeText(path).catch(() => {});
+    });
+    item.appendChild(copy);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'koi-welcome-recent-remove';
+    remove.setAttribute('aria-label', `Remove ${name} from recent folders`);
+    remove.title = 'Remove from recent folders';
+    remove.textContent = '✕';
+    remove.addEventListener('click', () => {
+      removeRecentFolder(path);
+      renderRecent();
+    });
+    item.appendChild(remove);
+
+    return item;
   }
 
   // --- example gallery: search + difficulty-grouped cards -------------------
