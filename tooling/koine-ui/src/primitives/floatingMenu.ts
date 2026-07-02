@@ -12,8 +12,8 @@
 // so a single Escape dismisses only the top-most layer (the exact bug overlay.ts was written to prevent)
 // even when a modal is also open.
 
-import { el } from '@/shared/el';
-import { registerOverlay } from '@/shared/overlay';
+import { el } from './el';
+import { registerOverlay } from './overlay';
 
 /** One actionable row in a floating menu. */
 export interface FloatingMenuItem {

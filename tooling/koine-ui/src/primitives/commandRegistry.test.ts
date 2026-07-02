@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { createCommandRegistry, type Command } from '@/shared/commandRegistry';
+import { createCommandRegistry, type Command } from './commandRegistry';
 
 // ---------------------------------------------------------------------------
 // Helpers

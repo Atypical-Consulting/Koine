@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { el } from '@/shared/el';
+import { el } from './el';
 
 describe('el', () => {
   test('creates an element of the requested tag', () => {

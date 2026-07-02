@@ -10,7 +10,7 @@
 //     footer) plus backdrop-click-to-close, focus capture/restore, and stack registration —
 //     shared by Preferences, About, and the keyboard-shortcuts Help dialog.
 
-import { el } from '@/shared/el';
+import { el } from './el';
 
 type CloseFn = () => void;
 

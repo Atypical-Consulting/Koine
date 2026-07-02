@@ -7,7 +7,7 @@ import type { Diagram, DiagramEdge, DiagramGraph, DiagramMember, DiagramNode } f
 
 // The diagram renderer routes its rename/delete gestures through Koine's modal overlay; stub it so importing
 // buildCanvas (and constructing a canvas) stays side-effect-free in this DOM-driven test.
-vi.mock('@/shared/overlay', () => ({ koiPrompt: vi.fn(), koiConfirm: vi.fn() }));
+vi.mock('@atypical/koine-ui', () => ({ koiPrompt: vi.fn(), koiConfirm: vi.fn() }));
 
 // happy-dom returns 0 from getBoundingClientRect; maxGraph reads the container rect on construction. Shim it
 // so the graph constructs with a sane size (mirrors diagrams-maxgraph.test.ts) and assert on the STRING.

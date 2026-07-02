@@ -18,8 +18,8 @@ import type { EventFlowEdge, EventFlowNode } from '@/model/modelTables';
 
 // The diagram's rename/delete gestures now route through Koine's own modal (koiPrompt/koiConfirm),
 // not window.prompt/confirm. Stub them so the tests drive the async dialog deterministically.
-vi.mock('@/shared/overlay', () => ({ koiPrompt: vi.fn(), koiConfirm: vi.fn() }));
-import { koiPrompt, koiConfirm } from '@/shared/overlay';
+vi.mock('@atypical/koine-ui', () => ({ koiPrompt: vi.fn(), koiConfirm: vi.fn() }));
+import { koiPrompt, koiConfirm } from '@atypical/koine-ui';
 import {
   isDiagramEditing,
   DIAGRAM_ANNOTATION_CREATE_EVENT,

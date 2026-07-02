@@ -1,3 +1,10 @@
+// @vitest-environment node
+//
+// Pinned to the `node` environment (rather than the package default `happy-dom` — see
+// vite.config.ts's `test.environment`, added for the DOM primitives in issue #905 Task 3):
+// this test reads tokens.css straight off disk via `import.meta.url` + node:fs, which needs a
+// real file:// URL. happy-dom's `import.meta.url` is not of scheme file and breaks
+// fileURLToPath() below.
 import { describe, expect, test } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

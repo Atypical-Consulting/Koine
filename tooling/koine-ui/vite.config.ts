@@ -30,4 +30,10 @@ export default defineConfig({
     },
     sourcemap: true,
   },
+  test: {
+    // The DOM/utility primitives (issue #905, Task 3) build and mount real elements
+    // (document.createElement, event listeners, focus) — happy-dom gives them a DOM to run
+    // against, matching koine-studio's own vitest environment for this same code.
+    environment: 'happy-dom',
+  },
 });

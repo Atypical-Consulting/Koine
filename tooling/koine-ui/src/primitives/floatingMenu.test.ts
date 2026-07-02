@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { registerOverlay } from '@/shared/overlay';
-import { createFloatingMenu, type FloatingMenuItem } from '@/shared/floatingMenu';
+import { registerOverlay } from './overlay';
+import { createFloatingMenu, type FloatingMenuItem } from './floatingMenu';
 
 // A trigger button (with an inner <span>, to exercise the contains() subtree guard) mounted on body.
 function trigger(): { btn: HTMLButtonElement; inner: HTMLSpanElement } {

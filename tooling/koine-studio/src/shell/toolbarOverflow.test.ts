@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import type { Command } from '@/shared/palette';
+import type { Command } from '@atypical/koine-ui';
 import {
   buildOverflowItems,
   closeOverflowMenu,

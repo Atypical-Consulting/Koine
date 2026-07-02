@@ -4,11 +4,11 @@
 // Up/Down move (wrapping), Enter runs the selected command then closes. Esc is handled
 // centrally by the shared overlay stack (./overlay). The palette does NOT bind Cmd-K itself —
 // the app wires the global shortcut.
-import { registerOverlay } from '@/shared/overlay';
+import { registerOverlay } from './overlay';
 
 // Command is defined in commandRegistry.ts (the SSOT). Imported for this module's own use AND
-// re-exported so all existing importers (`import type { Command } from '@/shared/palette'`) keep working.
-import type { Command } from '@/shared/commandRegistry';
+// re-exported so all existing importers (`import type { Command } from '@atypical/koine-ui'`) keep working.
+import type { Command } from './commandRegistry';
 export type { Command };
 
 export interface PaletteHandle {

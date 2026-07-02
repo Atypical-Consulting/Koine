@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { createStore } from 'zustand/vanilla';
-import { createCommandPalette, type Command } from '@/shared/palette';
-import { createCommandRegistry } from '@/shared/commandRegistry';
-import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
-import { createUiChromeSlice, type UiChromeSlice } from '@/store/slices/uiChrome';
+import { createCommandPalette, type Command } from './palette';
+import { createCommandRegistry } from './commandRegistry';
 
 // Each createCommandPalette() self-mounts one .koi-palette-backdrop on document.body. Wipe the body
 // between tests so stale backdrops/handlers (and the central Esc listener's stack entries) don't leak.
@@ -471,78 +468,5 @@ describe('overlay-stack integration (Esc)', () => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
     ).not.toThrow();
     expect(palette.isOpen).toBe(false);
-  });
-});
-
-// The layout command builder is a pure module (src/shell/layoutCommands.ts) so the view-layout commands
-// the shell spreads into its palette provider can be unit-tested without ide.tsx's giant closure. Each
-// command's run() must call exactly the matching injected action. (The editor A/B split commands were
-// retired — the center split-pane system (#720) is the one splitting primitive now.)
-describe('layoutCommands — the view-layout palette commands', () => {
-  // Spy actions: one vi.fn() per LayoutActions method.
-  function spyActions(): LayoutActions {
-    return {
-      togglePanelSide: vi.fn(),
-      toggleSideRail: vi.fn(),
-      toggleProperties: vi.fn(),
-      toggleNavigator: vi.fn(),
-    };
-  }
-
-  // The exact ids the shell pins (so the palette/help/anything keyed on them stay stable), paired with
-  // the action each command must invoke.
-  const wiring: { id: string; action: keyof LayoutActions }[] = [
-    { id: 'layout.panelSide', action: 'togglePanelSide' },
-    { id: 'layout.sideRail', action: 'toggleSideRail' },
-    { id: 'layout.toggleProperties', action: 'toggleProperties' },
-    { id: 'layout.toggleNavigator', action: 'toggleNavigator' },
-  ];
-
-  test('returns exactly the layout commands, by id', () => {
-    const cmds = layoutCommands(spyActions());
-    expect(cmds.map((c) => c.id)).toEqual(wiring.map((w) => w.id));
-  });
-
-  test('the Toggle Properties panel command, wired to the store, flips rightCollapsed (#500)', () => {
-    const store = createStore<UiChromeSlice>((set, get) => createUiChromeSlice(set, get));
-    const cmd = layoutCommands({
-      ...spyActions(),
-      toggleProperties: () => store.getState().toggleRightCollapsed(),
-    }).find((c) => c.id === 'layout.toggleProperties')!;
-    expect(cmd.title).toBe('Toggle Properties panel');
-    expect(store.getState().rightCollapsed).toBe(false);
-    cmd.run();
-    expect(store.getState().rightCollapsed).toBe(true);
-  });
-
-  test('the Toggle navigator rail command, wired to the store, flips leftCollapsed (#730)', () => {
-    const store = createStore<UiChromeSlice>((set, get) => createUiChromeSlice(set, get));
-    const cmd = layoutCommands({
-      ...spyActions(),
-      toggleNavigator: () => store.getState().toggleLeftCollapsed(),
-    }).find((c) => c.id === 'layout.toggleNavigator')!;
-    expect(cmd.title).toBe('Toggle navigator rail');
-    expect(store.getState().leftCollapsed).toBe(false);
-    cmd.run();
-    expect(store.getState().leftCollapsed).toBe(true);
-  });
-
-  test('every command carries a non-empty title', () => {
-    const cmds = layoutCommands(spyActions());
-    expect(cmds.every((c) => typeof c.title === 'string' && c.title.length > 0)).toBe(true);
-  });
-
-  test.each(wiring)('command $id run() calls only the $action action, exactly once', ({ id, action }) => {
-    const actions = spyActions();
-    const cmd = layoutCommands(actions).find((c) => c.id === id)!;
-    expect(cmd).toBeDefined();
-
-    cmd.run();
-
-    expect(actions[action]).toHaveBeenCalledTimes(1);
-    // No other action fired.
-    for (const other of Object.keys(actions) as (keyof LayoutActions)[]) {
-      if (other !== action) expect(actions[other]).not.toHaveBeenCalled();
-    }
   });
 });

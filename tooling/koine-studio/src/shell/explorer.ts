@@ -14,8 +14,7 @@
 // the prompting; the actual fs work happens in the host via the ExplorerCallbacks. Dirty dot, active
 // state and the error/warning badge mirror ide.ts/renderTree so the visual language stays consistent.
 import type { FsEntry } from '@/host';
-import { createFloatingMenu } from '@/shared/floatingMenu';
-import { createModal, type ModalHandle } from '@/shared/overlay';
+import { createFloatingMenu, createModal, type ModalHandle } from '@atypical/koine-ui';
 
 export interface ExplorerCallbacks {
   onOpenFile(fileToken: string): void;
