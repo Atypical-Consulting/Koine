@@ -43,12 +43,13 @@
   }
 }
 
-/* On the Home route the editor's #toolbar still paints — it shares #app, kept visible by #368's
-   [hidden] override — but the model actions (New / Open / Undo / Redo) and the emit/Generate cluster do
-   nothing before a model is open, so trim them there. The .brand (logo), the ⌘K command bar, and
-   Settings stay: the controls that make sense on Home. The body[data-route] flag is set in main.ts
-   apply() so this is deliberate route-aware chrome, not an accident (issue #490). */
-body[data-route='home'] #toolbar :is(.iconset, #emit-target-host, .generate) {
+/* On the Home route, Home now paints its OWN full-bleed top bar (#1005: brand + theme toggle + settings,
+   `.koi-home-topbar`), which supersedes the earlier stopgap of keeping the editor's #toolbar visible on
+   Home to lend it a brand + global controls (#490). Both share the top of the window, so leaving the
+   editor toolbar on would stack two bars — hide it entirely on Home; it returns on the editor route.
+   The body[data-route] flag is set in main.ts apply() so this is deliberate route-aware chrome (#368 /
+   #490 / #1005). */
+body[data-route='home'] #toolbar {
   display: none;
 }
 
