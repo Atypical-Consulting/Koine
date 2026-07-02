@@ -1,0 +1,87 @@
+---
+title: "Concept Colors"
+description: "One DDD concept, one color — across the explorer, canvas, code editor, playground, and VS Code, driven by one palette and one signal from the compiler."
+---
+
+import ConceptPalette from '../../../components/ConceptPalette.astro';
+
+Koine's promise is *one ubiquitous language*. **Concept Colors** extends that promise to color:
+**one DDD concept, one color, everywhere.** A value object is the same blue in the Studio explorer, on
+the domain canvas, in the code editor, in the website playground, and in VS Code — so the color
+association you build scanning a tree or a diagram carries straight into the source, which is where it
+pays off.
+
+The rule of thumb is simple:
+
+> **Structure stays neutral; names carry the concept color.** Keywords, punctuation, strings, and
+> numbers stay in the muted syntax palette. Only the *names* of DDD concepts — an aggregate, a value
+> object, an enum, a domain event — take their concept hue, at both their declaration and every
+> reference.
+
+## The palette
+
+Every concept hue lives in exactly one place: [`design/concept-colors.json`](https://github.com/Atypical-Consulting/Koine/blob/main/design/concept-colors.json).
+Each surface consumes a *generated* artifact from it (CSS variables, a typed map, VS Code color rules),
+each guarded by a sync test — so nothing below can drift from the source. This very table is rendered
+from that palette at build time.
+
+<ConceptPalette />
+
+The **dark** value is the canonical hue (the one Studio's explorer and canvas have always used); the
+**light** value is a contrast-tuned variant that stays readable on a white background (≥ 4.5:1 against
+white). The **CSS variable** is what every web surface references (`color: var(--koi-ddd-<slug>)`); the
+**LSP modifier** is the signal the compiler puts on the wire (see below).
+
+## How it works
+
+The compiler never emits a color — it emits a *concept kind*. The Koine language server's semantic-token
+legend carries one **modifier per concept kind** (bits 1–15, after the `declaration` bit), advertised
+append-only so the base token types (`type`, `enum`, …) never shift:
+
+- A **declaration** name carries `declaration | <kind>`.
+- A **reference** resolves through the model index to its declaring kind and carries `<kind>` alone.
+- **Primitives** (`Decimal`, `String`, `List<…>`) carry no kind — they keep the neutral type color.
+
+Each editor decodes the kind bit into a `cm-st-k-<slug>` class themed `color: var(--koi-ddd-<slug>)`,
+applied after the base type color so the concept color wins. The full rationale, alternatives, and the
+append-only legend contract are recorded in
+[ADR 0003](https://github.com/Atypical-Consulting/Koine/blob/main/adr/0003-concept-colors-single-palette-and-lsp-kind-modifiers.md).
+
+## Where it shows up
+
+| Surface | Declarations | References | Mechanism |
+| --- | --- | --- | --- |
+| Studio explorer / inspector | ✅ | ✅ | `--koi-ddd-*` CSS vars |
+| Studio domain canvas / event flow | ✅ | ✅ | `CONCEPT_COLORS` (same hex) |
+| Studio code editor | ✅ | ✅ | LSP kind modifiers → `cm-st-k-<slug>` |
+| Website playground | ✅ | ✅ | LSP kind modifiers → `cm-st-k-<slug>` |
+| VS Code | ✅ | ✅ | LSP + `semanticTokenColorCustomizations` |
+| Rider (LSP4IJ) | ⬜ | ⬜ | inherits the base `type`/`enum` color (graceful fallback) |
+
+A client that doesn't understand the kind modifiers simply ignores them and renders domain names with
+the base `type`/`enum` color — exactly as before. Concept Colors is an *upgrade*, never a regression.
+
+## Event Storming ↔ Koine
+
+The domain canvas's Event Flow view used to speak the classic Event Storming sticky palette (a yellow
+aggregate, a blue command). That separate palette is retired — the flow now uses the *same* concept
+colors as everything else. For orientation, here's how the Event Storming vocabulary maps onto Koine's
+concepts:
+
+| Event Storming sticky | Koine concept | Concept color |
+| --- | --- | --- |
+| Command (blue) | `command` | command red |
+| Aggregate (yellow) | `aggregate` | aggregate indigo |
+| Domain Event (orange) | `event` (domain event) | domain-event pink |
+| Policy / Process (lilac) | `policy` | policy magenta |
+| External system / Integration | `integration event` | integration-event teal |
+| Read Model (green) | `readmodel` | read-model lime |
+
+## Not yet colored
+
+Deliberately deferred (follow-ups, not part of this pass): a distinct hue for **bounded contexts**
+(today they stay structural / neutral), Rider-side custom coloring beyond the LSP fallback, a Shiki
+theme for the static code blocks in these docs, and user-customizable palettes.
+
+See also: [Editor tooling](/guides/editor-tooling/) for the language server and the VS Code / Rider
+extensions that carry these colors.
