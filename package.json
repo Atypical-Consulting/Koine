@@ -1,0 +1,8 @@
+{
+  "name": "koine",
+  "private": true,
+  "workspaces": [
+    "tooling/*",
+    "website"
+  ]
+}

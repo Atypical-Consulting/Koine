@@ -1,0 +1,32 @@
+{
+  "name": "@atypical/koine-ui",
+  "private": false,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Framework-free design tokens and Preact UI primitives extracted from Koine Studio.",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./styles.css": "./dist/styles.css"
+  },
+  "scripts": {
+    "build": "tsc && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "preact": "^10"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.0",
+    "vite": "^8.0.0",
+    "vite-plugin-dts": "^5.0.3",
+    "vitest": "^4.1.9"
+  }
+}
