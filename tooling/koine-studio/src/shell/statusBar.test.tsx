@@ -132,11 +132,21 @@ describe('createStatusBar', () => {
     seed();
     const { store, active } = createCountingStore();
     const handle = createStatusBar({ store, platform: fakePlatform(), folderRootToken: () => null, onOpenProblems: () => {} });
-    expect(active()).toBeGreaterThan(0); // the folder-token sub + the two panels' own useStore subs
+    // The folder-token subscription is live, and both panels rendered their content into their hosts.
+    expect(active()).toBeGreaterThan(0);
+    expect(document.querySelector('#sb-docs-ring .sb-ring-label')).not.toBeNull();
+    expect(document.querySelector('#sb-emit .sb-emit-label')).not.toBeNull();
 
     handle.dispose();
-    await flush(); // Preact flushes the panels' hook cleanup asynchronously on render(null, host)
+    await flush();
+    // The folder-token subscription is released. (The panels subscribe to the store via a deferred
+    // preact/compat effect that never runs here — they are unmounted before it would — so the tally is
+    // driven by the folder-token sub; the DOM checks below are what actually guard the panel unmount.)
     expect(active()).toBe(0);
+    // Both Preact panels are unmounted: render(null, host) emptied their hosts, so their own store
+    // subscriptions and any window listeners are gone. (Dropping either render(null) fails this.)
+    expect(document.querySelector('#sb-docs-ring .sb-ring-label')).toBeNull();
+    expect(document.querySelector('#sb-emit .sb-emit-label')).toBeNull();
   });
 
   test('a disposed status bar no longer refreshes the branch on a folder-token change', async () => {
