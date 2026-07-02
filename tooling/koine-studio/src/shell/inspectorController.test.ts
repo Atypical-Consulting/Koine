@@ -18,6 +18,7 @@ import { createElement, render } from 'preact';
 import { LeftRail, RightStrip } from '@atypical/koine-ui';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
 import { createAppStore } from '@/store/index';
+import { createCountingStore } from '@/store/testing';
 import { domById } from '@/shared/domById';
 import * as maxgraphRenderer from '@/diagrams/diagrams-maxgraph';
 import type { ContextMapGraphHooks } from '@/diagrams/diagrams-maxgraph';
@@ -1501,6 +1502,62 @@ describe('createInspectorController — collapsed Properties panel + selection f
     expect(stripBtn('props').getAttribute('aria-pressed')).toBe('true');
 
     ctl.dispose();
+  });
+});
+
+describe('createInspectorController — teardown / disposal (#980)', () => {
+  test('dispose() synchronously releases every store subscription init() registered, across repeated boots', () => {
+    const { store, active } = createCountingStore();
+    const base = active(); // nothing subscribed yet
+
+    // init() registers its store subscriptions synchronously (seven of them); it also kicks off async
+    // panel loaders that subscribe only AFTER a macrotask. This test targets the invariant this issue
+    // fixes — dispose() releases every subscription that is live at dispose time — so it stays synchronous
+    // (no await between init and dispose): the loaders never get to subscribe, and the tally we compare is
+    // exactly init()'s own subscriptions in vs dispose()'s out. (The separate matter of in-flight loaders
+    // mounting panels after dispose is out of scope here — #985/#989 re-home that code.)
+    //
+    // Production reuses the app-wide singleton store, so boot onto the SAME store twice: a per-boot leak
+    // would accumulate. Before the fix, each dispose leaks 2 (center-persist + selection); after it, the
+    // tally returns to baseline each time.
+    for (let boot = 0; boot < 2; boot++) {
+      seedDom(); // fresh hosts per boot — a prior boot's dispose (render(null, centerBodyEl)) wipes them
+      const ctl = createInspectorController(makeDeps(makeLsp(), { store }));
+      ctl.init();
+      expect(active()).toBeGreaterThan(base); // sanity: init did subscribe
+      ctl.dispose();
+      expect(active()).toBe(base);
+    }
+  });
+
+  test('a disposed controller no longer persists the center pane on a store write (:466 leak)', () => {
+    const saveWorkspaceCenter = vi.fn();
+    const deps = makeDeps(makeLsp(), { saveWorkspaceCenter });
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.dispose();
+
+    // The center-persist subscription must be gone: a post-dispose center change writes nothing for a
+    // torn-down session.
+    saveWorkspaceCenter.mockClear();
+    deps.store.getState().setCenter('technical');
+    expect(saveWorkspaceCenter).not.toHaveBeenCalled();
+  });
+
+  test('a disposed controller no longer reveals/repaints on a selection change (:1140 leak)', () => {
+    const deps = makeDeps(makeLsp());
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.dispose();
+
+    // With the rail expanded on a non-Properties tool window, a live selection subscription would flip the
+    // right view to 'props' (reveal-on-select, #533) and repaint the inspector. After dispose it must do
+    // neither: the write neither throws nor moves the right view.
+    deps.store.getState().setRight('assistant');
+    expect(() =>
+      deps.store.getState().setSelection({ qualifiedName: 'Billing.Money', context: 'Billing' }),
+    ).not.toThrow();
+    expect(deps.store.getState().right).toBe('assistant');
   });
 });
 
