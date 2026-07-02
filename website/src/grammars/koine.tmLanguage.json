@@ -71,11 +71,67 @@
           "captures": {
             "1": { "name": "storage.type.koine" },
             "2": { "name": "storage.type.koine" },
-            "3": { "name": "entity.name.type.koine" }
+            "3": { "name": "entity.name.type.integration-event.koine" }
           }
         },
         {
-          "match": "\\b(context|value|quantity|entity|aggregate|enum|event|module|readmodel|query|service)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "match": "\\b(value|quantity)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.koine" },
+            "2": { "name": "entity.name.type.value.koine" }
+          }
+        },
+        {
+          "match": "\\b(entity)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.koine" },
+            "2": { "name": "entity.name.type.entity.koine" }
+          }
+        },
+        {
+          "match": "\\b(aggregate)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.koine" },
+            "2": { "name": "entity.name.type.aggregate.koine" }
+          }
+        },
+        {
+          "match": "\\b(enum)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.koine" },
+            "2": { "name": "entity.name.type.enum.koine" }
+          }
+        },
+        {
+          "match": "\\b(event)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.koine" },
+            "2": { "name": "entity.name.type.event.koine" }
+          }
+        },
+        {
+          "match": "\\b(readmodel)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.koine" },
+            "2": { "name": "entity.name.type.read-model.koine" }
+          }
+        },
+        {
+          "match": "\\b(query)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.koine" },
+            "2": { "name": "entity.name.type.query.koine" }
+          }
+        },
+        {
+          "match": "\\b(service)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.koine" },
+            "2": { "name": "entity.name.type.service.koine" }
+          }
+        },
+        {
+          "match": "\\b(context|module)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": { "name": "storage.type.koine" },
             "2": { "name": "entity.name.type.koine" }

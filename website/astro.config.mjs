@@ -170,6 +170,7 @@ export default defineConfig({
 						{ label: 'Architecture', slug: 'guides/architecture' },
 						{ label: 'Koine as a platform', slug: 'guides/platform' },
 						{ label: 'Editor tooling', slug: 'guides/editor-tooling' },
+						{ label: 'Concept Colors', slug: 'guides/concept-colors' },
 						{ label: 'Koine Studio', slug: 'guides/koine-studio' },
 						{ label: 'Local LLM in the Assistant', slug: 'guides/assistant-local-llm' },
 						{ label: 'MCP server', slug: 'guides/mcp-server' },

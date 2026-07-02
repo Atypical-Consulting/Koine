@@ -13,6 +13,13 @@ src/playground/samples/samples.generated.ts
 # generated living-documentation (produced by scripts/build-docs.mjs)
 .koine-docs/
 src/content/docs/reference/domain/
+# Concept Colors palette (produced by scripts/gen-concept-colors.mjs) — GENERATED but COMMITTED: the
+# guides/concept-colors docs page imports it and the playground sync test reads it, so it must ship. The
+# root .gitignore excludes any `generated/` dir; un-ignore the dir, re-ignore transient contents, keep the
+# one committed file. (Git can't re-include a file whose parent dir stays excluded — hence the dir line.)
+!src/generated/
+src/generated/*
+!src/generated/concept-colors.json
 
 # dependencies
 node_modules/
