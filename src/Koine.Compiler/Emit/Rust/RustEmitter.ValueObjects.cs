@@ -358,7 +358,9 @@ public sealed partial class RustEmitter
         return m.Type.Name switch
         {
             "Decimal" => divisorIsDecimal ? $"{fieldExpr} / {divisor}" : $"{fieldExpr} / Decimal::from({divisor})",
-            "Int" => divisorIsDecimal ? fieldExpr : $"{fieldExpr} / {divisor}",
+            "Int" => divisorIsDecimal
+                ? $"crate::koine_runtime::dec_to_i64(Decimal::from({fieldExpr}) / {divisor})"
+                : $"{fieldExpr} / {divisor}",
             _ => fieldExpr,
         };
     }

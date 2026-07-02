@@ -301,6 +301,43 @@ public class RustSnapshotTests
     }
 
     /// <summary>
+    /// Regression (#937), the division dual of the multiply case: an <c>Int</c> field divided by a
+    /// <c>Decimal</c> scalar must be coerced through <c>Decimal</c>, divided, and truncated back toward
+    /// zero to an <c>i64</c>. Before the fix (#933 mirrored the pre-existing multiply gap) the <c>Int</c>
+    /// field was passed through un-divided.
+    /// </summary>
+    [Fact]
+    public void Rust_int_field_divided_by_a_decimal_scalar_is_coerced_and_truncated()
+    {
+        const string model = """
+            context Shop {
+              value Tally {
+                total: Decimal
+                steps: Int
+                invariant steps >= 0 "steps cannot be negative"
+              }
+              entity Batch identified by BatchId {
+                tally: Tally
+              }
+              readmodel Split from Batch {
+                halved: Tally = tally / 2.0
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
+        shop.ShouldContain("impl std::ops::Div<Decimal> for Tally");
+        shop.ShouldContain("steps: crate::koine_runtime::dec_to_i64(Decimal::from(self.steps) / divisor)");
+        shop.ShouldNotContain("steps: self.steps,");
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
     /// Regression: a derived (computed) member is emitted as an accessor method, so a reference to it
     /// from another expression must render as a call <c>self.x()</c>, not a field read <c>self.x</c>.
     /// </summary>
