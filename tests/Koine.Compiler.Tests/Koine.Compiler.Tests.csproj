@@ -18,7 +18,7 @@
          layer's handlers/validators/DI/MediatR code (issue #129) and the EF Core Infrastructure layer
          (issue #128). The package DLLs are copied to the test output and thus appear in TPA. -->
     <PackageReference Include="FluentValidation" Version="12.1.1" />
-    <PackageReference Include="MediatR" Version="14.1.0" />
+    <PackageReference Include="MediatR" Version="14.2.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
     <!-- The SQLite in-memory provider backs the EF Core round-trip meta-test (issue #171): it
          materializes a generated aggregate that owns a value-object collection (OwnsMany) to prove
