@@ -277,6 +277,19 @@ public class PhpExpressionTests
     }
 
     [Fact]
+    public void Decimal_literal_left_of_arithmetic_parenthesises_new_chaining()
+    {
+        // When a Decimal LITERAL (not an int literal, not a member) is on the LEFT of arithmetic,
+        // WriteAsDecimal's IsDecimal(t) early-return arm writes it as-is via WriteLiteral, which emits
+        // a bare `new \Koine\Runtime\Decimal('5')`. That literal then becomes the method RECEIVER, so
+        // without surrounding parentheses the emitted `new X(...)->m()` is PHP 8.4+-only syntax; the
+        // emitter targets PHP 8.1+, so the construction must be parenthesised (issue #907 — the
+        // IsDecimal-early-return sibling of #815/#844's int-literal fix and #849's fallthrough fix).
+        var expr = new BinaryExpr(BinaryOp.Add, Decimal("5"), Id("quantity"));
+        Translate(expr).ShouldBe("(new \\Koine\\Runtime\\Decimal('5'))->add((new \\Koine\\Runtime\\Decimal($this->quantity)))");
+    }
+
+    [Fact]
     public void Decimal_negated_comparison_flips_via_compareTo()
     {
         // The invariant-guard path: `price >= 0` negated must still use compareTo, not `<`.
