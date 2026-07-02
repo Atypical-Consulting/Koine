@@ -46,7 +46,17 @@ function ensureWasmWorkload() {
 // The wasm SDK writes the browser AppBundle to bin/Release/net10.0/browser-wasm/AppBundle — the
 // directory that contains `_framework`. Search broadly and prefer the AppBundle/publish output.
 const searchRoot = join(repoRoot, 'src', 'Koine.Wasm', 'bin', 'Release');
-const srcDir = join(repoRoot, 'src', 'Koine.Wasm');
+// The source tree the freshness guard compares the published bundle against. It MUST be the whole
+// `src/` compiler closure, NOT just src/Koine.Wasm: Koine.Wasm is a thin interop shell that
+// ProjectReferences Koine.Compiler → Koine.Compiler.SourceGen, where virtually all emitted behaviour
+// lives. Scoping the scan to src/Koine.Wasm meant a compiler-only change — e.g. Concept Colors' new
+// semantic-token modifiers (#941), which touched only src/Koine.Compiler/Services/SemanticTokenProvider.cs
+// and no Koine.Wasm file — read as "no source newer than the bundle", so the guard reused a pre-change
+// bundle and the studio served a stale compiler that never emitted the new tokens (concept colors never
+// appeared). Scanning all of src/ (bin/ and obj/ skipped) covers every referenced project and any future
+// one; the deploy-reuse optimisation is unaffected — nothing under src/ changes between a single run's
+// 2–3 invocations, so the just-published bundle stays newest.
+const sourceRoot = join(repoRoot, 'src');
 
 function findFrameworkDirs(root) {
   const found = [];
@@ -75,8 +85,10 @@ function locateBundle() {
   );
 }
 
-// Newest mtime among the wasm SOURCES — *.cs / *.csproj plus main.js — skipping bin/ and obj/ so the
-// already-published bundle never counts as its own input.
+// Newest mtime among the compiler SOURCES under `src/` — *.cs / *.csproj plus main.js — skipping bin/
+// and obj/ so the already-published bundle never counts as its own input. Walks the whole tree so a
+// change in any project the wasm bundle transitively embeds (Koine.Compiler et al.) is seen, not just
+// src/Koine.Wasm's own files.
 function newestSourceMtime(dir) {
   let newest = 0;
   for (const entry of readdirSync(dir)) {
@@ -125,7 +137,7 @@ function bundleIsFresh(frameworkDir, sourceDir) {
 //    predev/prebuild) stays on the fast interpreter publish unless you opt in. AOT needs wasm-tools.
 const aot = /^(1|true|yes)$/i.test(process.env.KOINE_WASM_AOT ?? '');
 let bundleDir = locateBundle();
-if (bundleDir && bundleIsFresh(join(bundleDir, '_framework'), srcDir)) {
+if (bundleDir && bundleIsFresh(join(bundleDir, '_framework'), sourceRoot)) {
   console.log(`Koine wasm: reusing fresh bundle (${bundleDir})`);
 } else {
   console.log(`Koine wasm: publishing — AOT ${aot ? 'ON (KOINE_WASM_AOT)' : 'off (interpreter)'}`);
