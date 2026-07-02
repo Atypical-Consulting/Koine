@@ -8,7 +8,7 @@
 // can't silently drift. This module owns ONLY the decode → CodeMirror-decoration glue; the worker
 // facade lives in koine.ts (`semanticTokens()`).
 
-import { type Extension, StateEffect, type Text } from '@codemirror/state';
+import { type Extension, Prec, StateEffect, type Text } from '@codemirror/state';
 import {
   Decoration,
   type DecorationSet,
@@ -255,5 +255,11 @@ export function semanticTokensExtension(provider: SemanticTokensFn, debounceMs =
     },
     { decorations: (v) => v.decorations },
   );
-  return [plugin, semanticTokenTheme];
+  // Prec.highest is load-bearing: @codemirror/language registers its syntax highlighter at Prec.high
+  // (treeHighlighter), and when two mark decorations overlap the HIGHER-precedence one nests
+  // *innermost* — the inner element's `color` is what paints. At default precedence our semantic mark
+  // ends up the OUTER span, so the grammar's inner `.ͼ…` span overrides every semantic/concept color
+  // (identifiers render in the grammar's type hue, so enum amber / concept colors never showed).
+  // Raising the plugin above Prec.high makes the semantic span innermost, so its color wins.
+  return [Prec.highest(plugin), semanticTokenTheme];
 }
