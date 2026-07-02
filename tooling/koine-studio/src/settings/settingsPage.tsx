@@ -13,7 +13,7 @@ import { createJsonSettingsEditor, type JsonSettingsEditor } from '@/editor/edit
 import { settingsToJsonDoc, jsonDocToSettings, workspaceOverridesToJsonDoc, jsonDocToWorkspaceOverrides, SETTINGS_JSON_SCHEMA, WORKSPACE_SETTINGS_JSON_SCHEMA } from '@/settings/settingsSchema';
 import { loadSettings, saveSettings, loadWorkspaceOverrides, replaceWorkspaceOverrides } from '@/settings/persistence';
 import { setTheme } from '@/settings/theme';
-import { el } from '@/shared/el';
+import { el } from '@atypical/koine-ui';
 
 /** Which representation the page is showing. Persisted so the last-used one is restored on reopen. */
 export type SettingsEditorMode = 'visual' | 'json';

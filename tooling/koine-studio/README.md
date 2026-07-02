@@ -7,6 +7,14 @@ brokered over stdio by the Rust host. **`Mod`+`Shift`+`F`** opens a workspace-wi
 replace panel (case / whole-word / regex / include-glob) across every `.koi` file in the open
 folder, unsaved buffers included.
 
+Studio's design tokens, framework-free DOM/interaction primitives, and store-free presentational
+components (the pieces that don't need the Zustand store or a `Platform` host to render) live in a
+sibling workspace package, **[`@atypical/koine-ui`](../koine-ui/)** (issue
+[#905](https://github.com/Atypical-Consulting/Koine/issues/905)) — see that package's own README
+for the component catalogue and design-token reference. This repo is an npm workspaces root
+(`"workspaces": ["tooling/*", "website"]`), so `tooling/koine-studio/package.json` depends on it as
+`"@atypical/koine-ui": "*"`, resolved via npm's workspace symlink rather than the registry.
+
 ## Web Worker runtime (browser host)
 
 The WASM compiler (`src/Koine.Wasm`) runs inside a **dedicated Web Worker** (`src/host/browser/koine.worker.ts`)

@@ -15,7 +15,7 @@ import {
   type InspectorControllerLsp,
 } from '@/shell/inspectorController';
 import { createElement, render } from 'preact';
-import { LeftRail } from '@/shell/LeftRail';
+import { LeftRail } from '@atypical/koine-ui';
 import { RightStrip } from '@/shell/RightStrip';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
 import { createAppStore } from '@/store/index';

@@ -1,0 +1,689 @@
+/* @atypical/koine-ui — component styles for the presentational components moved in by issue #905,
+ * Task 4 (DeckCard, DeckBar, ExportMenu, AssistantView, LeftRail).
+ *
+ * These rules are COPIED (not moved) from Koine Studio's SCSS — Studio's own partials
+ * (`src/styles/components/_deck.scss`, `_diagrams-maxgraph.scss`, `src/styles/layout/_leftrail.scss`)
+ * are left completely untouched, so the app's rendering has zero regression risk from this move. Two
+ * reasons this is a copy rather than a split-and-delete:
+ *
+ *   1. Some of this styling is genuinely SHARED with components that are NOT moving — e.g.
+ *      `.koi-palette-btn` also styles Koine Studio's CanvasPalette, and `.deck-card`'s "overview" variant
+ *      is only reachable nested under DeckStage's `.deck-stage.overview` (DeckStage stays in the app: it
+ *      is store-connected). Deleting these selectors from Studio's SCSS to "move" them would risk
+ *      breaking the components staying behind.
+ *   2. AssistantView itself (`.koi-assistant-mount`) has NO dedicated CSS at all — the visual chrome a
+ *      consuming app puts inside it (`.koi-assistant`, `.koi-msg`, `.koi-changeset`, …) belongs to that
+ *      app's own imperative panel (an intentionally-not-moved island), not to this host component. No
+ *      AssistantView rules are copied here for that reason; its story's "WithAssistantContent" variant
+ *      illustrates the mount contract with unstyled placeholder markup.
+ *
+ * All rules reference the --koi-* custom properties from ./tokens.css, so they theme identically to the
+ * app copies. Written as plain CSS (Sass nesting flattened) since this package has no Sass toolchain.
+ */
+
+/* ---------------------------------------------------------------------------------------------------
+ * Deck — DeckCard + DeckBar (ported from Koine Studio's src/styles/components/_deck.scss). DeckStage's
+ * own chrome (.deck-stage / .deck-divider / .deck-swap) is NOT included — DeckStage is store-connected
+ * and stays in the consuming app.
+ * --------------------------------------------------------------------------------------------------- */
+
+.deck-bar,
+.deck-card {
+  --ease: cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+/* ---- Bar ---------------------------------------------------------------- */
+
+.deck-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--koi-paper-2);
+  border-bottom: 1px solid var(--koi-line);
+}
+
+.deck-over {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--koi-muted);
+  padding: 6px 13px;
+  border-radius: var(--koi-radius-sm);
+  border: 1px solid var(--koi-line);
+  transition:
+    color 0.24s var(--ease),
+    background 0.24s var(--ease),
+    border-color 0.24s var(--ease);
+}
+.deck-over svg {
+  width: 15px;
+  height: 15px;
+}
+.deck-over:hover {
+  color: var(--koi-fg);
+  border-color: var(--koi-accent);
+}
+.deck-over:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+.deck-over.on {
+  color: var(--koi-on-accent);
+  background: var(--koi-accent);
+  border-color: var(--koi-accent);
+}
+
+/* ---- Filmstrip ---------------------------------------------------------- */
+
+.deck-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.deck-chip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  color: var(--koi-muted);
+  border-radius: var(--koi-radius-pill);
+  border: 1px solid transparent;
+  transition:
+    color 0.24s var(--ease),
+    background 0.24s var(--ease),
+    border-color 0.24s var(--ease);
+}
+.deck-chip-wrap:hover {
+  color: var(--koi-fg);
+  background: color-mix(in srgb, var(--koi-fg) 7%, transparent);
+}
+.deck-chip-wrap.primary {
+  color: var(--koi-on-accent);
+  background: var(--koi-accent);
+}
+.deck-chip-wrap.secondary {
+  color: var(--koi-accent);
+  border-color: color-mix(in srgb, var(--koi-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+}
+
+.deck-chip {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: inherit;
+  padding: 6px 11px;
+  border-radius: var(--koi-radius-pill);
+}
+.deck-chip svg.ci {
+  width: 14px;
+  height: 14px;
+}
+.deck-chip:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+
+/* "Open beside" — revealed on chip-wrap hover, collapsed otherwise (width + opacity, no layout thrash). */
+.deck-cmp {
+  all: unset;
+  cursor: pointer;
+  width: 0;
+  height: 18px;
+  margin-right: 0;
+  border-radius: 4px;
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  color: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.22s var(--ease),
+    width 0.22s var(--ease),
+    margin 0.22s var(--ease),
+    background 0.18s var(--ease);
+}
+.deck-cmp .cmp-ico {
+  width: 13px;
+  height: 13px;
+}
+.deck-cmp:hover {
+  background: color-mix(in srgb, currentColor 22%, transparent);
+  opacity: 1;
+}
+
+.deck-chip-wrap:hover .deck-cmp,
+.deck-cmp:focus-visible {
+  width: 18px;
+  opacity: 0.9;
+  margin-right: 5px;
+  pointer-events: auto;
+}
+
+.deck-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--koi-muted);
+}
+.deck-hint kbd {
+  font-family: var(--koi-font-mono);
+  font-size: 10px;
+  background: var(--koi-paper);
+  border: 1px solid var(--koi-line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+/* ---- Card --------------------------------------------------------------- */
+
+.deck-card {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: var(--koi-paper);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-lg);
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(3, 7, 14, 0.26);
+  transform-origin: top left;
+  will-change: transform;
+  z-index: 2;
+}
+.deck-card.ghost {
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.deck-card.is-primary {
+  box-shadow:
+    0 12px 32px rgba(3, 7, 14, 0.32),
+    0 0 0 2px var(--koi-accent);
+}
+.deck-card.is-secondary {
+  box-shadow:
+    0 12px 32px rgba(3, 7, 14, 0.32),
+    0 0 0 2px color-mix(in srgb, var(--koi-accent) 55%, transparent);
+}
+
+.deck-stage.overview .deck-card {
+  cursor: zoom-in;
+}
+.deck-stage.overview .deck-card:hover {
+  border-color: color-mix(in srgb, var(--card-c, var(--koi-accent)) 60%, var(--koi-line));
+  box-shadow: 0 20px 44px rgba(3, 7, 14, 0.42);
+}
+
+.deck-head {
+  flex: 0 0 auto;
+  height: 31px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 6px 0 11px;
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--koi-line);
+  background: var(--koi-paper-2);
+  transition:
+    background 0.2s var(--ease),
+    box-shadow 0.2s var(--ease);
+}
+.deck-head .ci {
+  color: var(--card-c, var(--koi-accent));
+  display: inline-flex;
+}
+.deck-head .ci svg {
+  width: 15px;
+  height: 15px;
+}
+.deck-head .hlabel {
+  white-space: nowrap;
+}
+.deck-head .grow {
+  flex: 1 1 auto;
+  min-width: 4px;
+}
+.deck-head .tag {
+  color: var(--koi-muted);
+  font-weight: 400;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.deck-head .hbtn {
+  all: unset;
+  cursor: pointer;
+  width: 0;
+  height: 22px;
+  border-radius: 5px;
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  color: var(--koi-muted);
+  opacity: 0;
+  pointer-events: none;
+  margin-left: 0;
+  transition:
+    opacity 0.2s var(--ease),
+    width 0.2s var(--ease),
+    margin 0.2s var(--ease),
+    background 0.18s var(--ease),
+    color 0.18s var(--ease);
+}
+.deck-head .hbtn svg {
+  width: 13px;
+  height: 13px;
+}
+.deck-head .hbtn:hover {
+  color: var(--koi-fg);
+  background: var(--koi-line);
+}
+
+/* Selected pane in a 2-up: accent-tinted header + a 2px accent cap. */
+.deck-card.in-pair.is-selected .deck-head {
+  background: color-mix(in srgb, var(--koi-accent) 11%, var(--koi-paper-2));
+  box-shadow: inset 0 2px 0 var(--koi-accent);
+}
+
+.deck-card.in-pair:not(.is-selected) {
+  cursor: pointer;
+}
+.deck-card.in-pair:not(.is-selected) .deck-head:hover {
+  background: color-mix(in srgb, var(--koi-fg) 6%, var(--koi-paper-2));
+}
+
+/* The tag hides in a pair (the close button takes its place); the close button reveals in a pair. */
+.deck-card.in-pair .deck-head .tag {
+  display: none;
+}
+
+.deck-card.in-pair .deck-head .hbtn.close {
+  width: 22px;
+  opacity: 1;
+  pointer-events: auto;
+  margin-left: 4px;
+}
+
+/* ---- Facet sub-strip ---------------------------------------------------- */
+
+.deck-subs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  overflow: hidden;
+}
+
+.deck-sub {
+  all: unset;
+  cursor: pointer;
+  font-size: 10.5px;
+  color: color-mix(in srgb, var(--koi-fg) 22%, var(--koi-muted));
+  padding: 3px 8px;
+  border-radius: var(--koi-radius-pill);
+  white-space: nowrap;
+  transition:
+    color 0.22s var(--ease),
+    background 0.22s var(--ease);
+}
+.deck-sub:hover {
+  color: var(--koi-fg);
+}
+.deck-sub.on {
+  color: var(--koi-accent);
+  background: color-mix(in srgb, var(--koi-accent) 13%, transparent);
+}
+.deck-sub:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+
+.deck-stage.overview .deck-subs {
+  display: none;
+}
+
+/* ---- Body --------------------------------------------------------------- */
+
+.deck-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deck-card {
+    transition: none !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------------------------------
+ * ExportMenu (ported from Koine Studio's src/styles/components/_diagrams-maxgraph.scss). `.koi-palette-btn`
+ * is copied rather than moved — it's also Koine Studio's CanvasPalette base button chrome, which is NOT
+ * moving, so Studio's own copy stays authoritative there; this copy just gives ExportMenu's `<summary>`
+ * its base chrome when the component renders outside the app (this package's Storybook, or another
+ * consumer). `.koi-palette-label` has no dedicated rule upstream either (it just inherits), so none here.
+ * --------------------------------------------------------------------------------------------------- */
+
+.koi-palette-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--koi-fg);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.koi-palette-btn:hover:not(:disabled) {
+  background: var(--koi-paper-2);
+  border-color: var(--koi-line);
+}
+.koi-palette-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.koi-palette-btn:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+
+.koi-export {
+  position: relative;
+}
+.koi-export > summary {
+  list-style: none; /* hide the native triangle — the label carries its own ▾ */
+}
+.koi-export > summary::-webkit-details-marker {
+  display: none;
+}
+.koi-export[open] > summary {
+  background: var(--koi-paper-2);
+  border-color: var(--koi-line);
+}
+
+.koi-export-menu {
+  position: absolute;
+  z-index: var(--koi-z-raised);
+  top: calc(100% + 0.25rem);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 9rem;
+  padding: 0.25rem;
+  border: 1px solid var(--koi-line);
+  border-radius: 0.375rem;
+  background: var(--koi-surface);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 35%);
+}
+
+.koi-export-item {
+  display: block;
+  width: 100%;
+  padding: 0.3125rem 0.5rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--koi-fg);
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+}
+.koi-export-item:hover {
+  background: var(--koi-paper-2);
+}
+.koi-export-item:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: -1px;
+}
+
+/* ---------------------------------------------------------------------------------------------------
+ * LeftRail (ported from Koine Studio's src/styles/layout/_leftrail.scss). Fully self-contained — no other
+ * Studio component styles `.rail-*` / `.lstrip-*` / `#left-strip`, so this is the WHOLE partial, just
+ * flattened from Sass nesting to plain CSS. The `#split.left-collapsed …` cross-file rules that respond
+ * to the app's own shell-layout state are NOT included: they only apply inside that shell, not to an
+ * isolated `<aside id="leftrail">` host.
+ * --------------------------------------------------------------------------------------------------- */
+
+#leftrail {
+  display: flex;
+  flex-direction: column;
+  background: var(--koi-paper-2);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.rail-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: var(--koi-space-1);
+  margin: var(--koi-space-2) var(--koi-space-2) 0;
+}
+
+.rail-collapse {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  background: var(--koi-paper);
+  color: var(--koi-muted);
+  cursor: pointer;
+  transition: background var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease;
+}
+.rail-collapse:hover {
+  color: var(--koi-accent);
+  background: var(--koi-surface);
+}
+.rail-collapse:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+
+#rail-axis-switch {
+  flex: 1 1 auto;
+  display: flex;
+  gap: var(--koi-space-0-5);
+  padding: var(--koi-space-0-5);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  background: var(--koi-paper);
+}
+
+.rail-axis {
+  flex: 1 1 0;
+  padding: var(--koi-space-1-25) var(--koi-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-xs);
+  background: transparent;
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-align: center;
+  cursor: pointer;
+  transition: background var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease,
+    border-color var(--koi-dur-fast) ease;
+}
+.rail-axis:hover {
+  color: var(--koi-fg);
+}
+.rail-axis[aria-selected='true'] {
+  background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+  border-color: var(--koi-accent);
+  color: var(--koi-accent);
+}
+.rail-axis:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+
+.rail-navigator-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.rail-pane {
+  padding: var(--koi-space-1) var(--koi-space-2) var(--koi-space-3);
+}
+
+.rail-sect {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--koi-line);
+}
+
+/* The Files pane (`#rail-files`, a `.rail-sect`) is toggled via the standard `hidden` attribute. The
+   `display: flex` above is an AUTHOR rule, so it outranks the UA `[hidden] { display: none }` in the
+   cascade and the Files tree would leak into the Domain axis without this restore. */
+#rail-files[hidden] {
+  display: none;
+}
+
+.rail-sect-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--koi-space-2);
+  padding-right: var(--koi-space-3);
+}
+.rail-sect-head-row .rail-sect-head {
+  flex: 1 1 auto;
+}
+
+.rail-sect-head {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-1-5);
+  width: 100%;
+  padding: var(--koi-space-2) var(--koi-space-3);
+  background: transparent;
+  border: none;
+  color: var(--koi-muted);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--koi-dur-fast) ease;
+}
+.rail-sect-head::before {
+  content: '▾';
+  font-size: 0.8em;
+  line-height: 1;
+  transition: transform var(--koi-dur-fast) ease;
+}
+.rail-sect-head:hover {
+  color: var(--koi-fg);
+}
+
+.rail-sect-meta {
+  flex: 0 0 auto;
+  max-width: 45%;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--koi-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rail-sect[data-open='false'] .rail-sect-head::before {
+  transform: rotate(-90deg);
+}
+.rail-sect[data-open='false'] .rail-sect-body {
+  display: none;
+}
+
+.rail-sect-body {
+  padding: var(--koi-space-1) var(--koi-space-2) var(--koi-space-3);
+}
+
+#rail-files .rail-sect-body {
+  padding: 0;
+}
+#leftrail .explorer,
+#leftrail .explorer-tree {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .koi-domain-enter {
+    animation: koi-domain-drill var(--koi-dur-fast) ease both;
+  }
+}
+
+@keyframes koi-domain-drill {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+#left-strip {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--koi-space-1);
+  padding: var(--koi-space-2) var(--koi-space-1);
+}
+
+.lstrip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
+  background: transparent;
+  color: var(--koi-muted);
+  cursor: pointer;
+  transition: background var(--koi-dur-fast) ease, color var(--koi-dur-fast) ease,
+    border-color var(--koi-dur-fast) ease;
+}
+.lstrip-btn:hover {
+  color: var(--koi-accent);
+  background: var(--koi-surface);
+}
+.lstrip-btn:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+.lstrip-btn[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+  border-color: var(--koi-accent);
+  color: var(--koi-accent);
+}
+
+.lstrip-expand {
+  margin-bottom: var(--koi-space-1);
+  color: var(--koi-fg);
+}

@@ -11,6 +11,7 @@ survives long after the conversation or PR that produced it.
 |------|------------------------------------------------------------------------------------------|----------|
 | [0001](0001-record-architecture-decisions.md) | Record architecture decisions                                       | Accepted |
 | [0002](0002-conventional-commits-and-automated-semver.md) | Conventional Commits + automated semantic versioning via release-please | Accepted |
+| [0003](0003-npm-workspace-for-front-end-packages.md) | npm workspace root for the front-end packages | Accepted |
 
 ## When to write one
 

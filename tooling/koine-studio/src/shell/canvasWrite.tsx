@@ -41,7 +41,7 @@ import {
 import type { SourceSpan, StructuredEdit } from '@/lsp/lsp';
 import type { KoineLsp } from '@/lsp/lsp';
 import type { WorkspaceController } from '@/shell/workspaceController';
-import type { ConfirmDialog, PromptDialog } from '@/shared/overlay';
+import type { ConfirmDialog, PromptDialog } from '@atypical/koine-ui';
 
 // Starter shapes the empty-canvas doorways seed (the EMPTY_STATE_PICK_EVENT contract). Each is a strict
 // subset of a validated template (templates/starters/{ordering,contextmap}) so it always compiles green;

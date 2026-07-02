@@ -3,7 +3,7 @@
 // global chords from firing through a modal, the unsaved-work New guard (requestNewModel), and the
 // one-time memory-only banner. Pure structural lift: every closure keeps its exact logic; it just moves
 // out of init() and reaches the workspace (dirty check, blank-model reset) through the injected `deps`.
-import { createConfirmDialog, createPromptDialog, type ConfirmDialog, type PromptDialog } from '@/shared/overlay';
+import { createConfirmDialog, createPromptDialog, type ConfirmDialog, type PromptDialog } from '@atypical/koine-ui';
 import { createHelpOverlay } from '@/shared/help';
 import { helpRows } from '@/shell/ideUtils';
 import { formatChord } from '@/shared/platform';

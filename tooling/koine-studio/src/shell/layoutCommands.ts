@@ -8,7 +8,7 @@
 //
 // (The editor A/B split commands — split / toggleOrientation / closeGroup — were retired: the center
 // split-pane system (#720) is the one splitting primitive now.)
-import type { Command } from '@/shared/palette';
+import type { Command } from '@atypical/koine-ui';
 
 /** The layout effects ide.tsx injects; each maps 1:1 to one palette command's run(). */
 export interface LayoutActions {
