@@ -11,6 +11,7 @@ survives long after the conversation or PR that produced it.
 |------|------------------------------------------------------------------------------------------|----------|
 | [0001](0001-record-architecture-decisions.md) | Record architecture decisions                                       | Accepted |
 | [0002](0002-conventional-commits-and-automated-semver.md) | Conventional Commits + automated semantic versioning via release-please | Accepted |
+| [0003](0003-concept-colors-single-palette-and-lsp-kind-modifiers.md) | Concept Colors — single palette + LSP kind modifiers | Proposed |
 
 ## When to write one
 
