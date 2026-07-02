@@ -345,7 +345,9 @@ public sealed partial class RustEmitter
         return m.Type.Name switch
         {
             "Decimal" => factorIsDecimal ? $"{fieldExpr} * {factor}" : $"{fieldExpr} * Decimal::from({factor})",
-            "Int" => factorIsDecimal ? fieldExpr : $"{fieldExpr} * {factor}",
+            "Int" => factorIsDecimal
+                ? $"crate::koine_runtime::dec_to_i64(Decimal::from({fieldExpr}) * {factor})"
+                : $"{fieldExpr} * {factor}",
             _ => fieldExpr,
         };
     }

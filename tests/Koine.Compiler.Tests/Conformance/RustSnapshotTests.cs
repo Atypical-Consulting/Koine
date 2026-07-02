@@ -263,6 +263,44 @@ public class RustSnapshotTests
     }
 
     /// <summary>
+    /// Regression (#937): an <c>Int</c> field multiplied by a <c>Decimal</c> scalar must be coerced
+    /// through <c>Decimal</c>, scaled, and truncated back toward zero to an <c>i64</c> — matching the C#
+    /// emitter's checked <c>(int)(decimal)</c> cast. Before the fix the <c>Int</c> field was passed
+    /// through un-scaled (<c>steps: self.steps</c>), silently computing a wrong result with no diagnostic.
+    /// </summary>
+    [Fact]
+    public void Rust_int_field_scaled_by_a_decimal_scalar_is_coerced_and_truncated()
+    {
+        const string model = """
+            context Shop {
+              value Tally {
+                total: Decimal
+                steps: Int
+                invariant steps >= 0 "steps cannot be negative"
+              }
+              entity Batch identified by BatchId {
+                tally: Tally
+              }
+              readmodel Scaled from Batch {
+                scaled: Tally = tally * 1.5
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
+        shop.ShouldContain("impl std::ops::Mul<Decimal> for Tally");
+        // The Int field must be coerced through Decimal, scaled, and truncated back — not passed through.
+        shop.ShouldContain("steps: crate::koine_runtime::dec_to_i64(Decimal::from(self.steps) * factor)");
+        shop.ShouldNotContain("steps: self.steps,");
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
     /// Regression: a derived (computed) member is emitted as an accessor method, so a reference to it
     /// from another expression must render as a call <c>self.x()</c>, not a field read <c>self.x</c>.
     /// </summary>
