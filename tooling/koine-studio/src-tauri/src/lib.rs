@@ -1717,10 +1717,13 @@ fn can_reuse_cached_endpoint(info: &McpEndpointInfo, port: u16) -> bool {
 /// (`0` = OS-assigned). If a specific (non-zero) `port` never comes up — the child exits, or the wait
 /// times out, with no announce line — it is most likely busy: the dead child is reaped and the server is
 /// respawned ONCE on an OS-assigned port (`0`), flagged as a `fallback` so the UI can warn that copied
-/// client configs are stale. A resolved endpoint is cached in `McpState`, so a repeat call returns the
-/// running server verbatim (no re-spawn, no re-wait). The browser backend never calls this (its
-/// `Platform.mcpEndpoint` returns null without touching IPC), so a desktop-only affordance can gate
-/// purely on the resolved value.
+/// client configs are stale. A resolved endpoint is cached in `McpState`, **keyed on the requested
+/// port** ([`can_reuse_cached_endpoint`]): a repeat call for the SAME port reuses the running server
+/// verbatim (no re-spawn, no re-wait), but a call for a DIFFERENT port — the JSON-settings apply path,
+/// which changes `mcp.port` without an `mcp_stop` (#947) — tears the sidecar down and moves it to the
+/// new port; a lingering `fallback` likewise re-attempts the originally-requested port so it self-heals
+/// once that port frees up. The browser backend never calls this (its `Platform.mcpEndpoint` returns
+/// null without touching IPC), so a desktop-only affordance can gate purely on the resolved value.
 #[tauri::command]
 fn mcp_endpoint(port: u16, state: State<'_, McpState>) -> Result<Option<McpEndpointInfo>, String> {
     // Serialize resolution: the busy-port fallback reaps the child and respawns across two spawn/wait
