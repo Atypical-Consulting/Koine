@@ -200,9 +200,23 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
   // The IDE shell boots once and stays alive across Home↔Editor route swaps (main.ts toggles visibility,
   // it doesn't re-init). The boot ladder above consumes a start-intent only on that first boot — so a
   // start action taken on a *return* visit to Home would otherwise be dropped. Consume any queued intent
-  // on every later transition INTO the editor route. The first transition already happened before this
-  // listener exists, so it never double-fires with the ladder.
+  // on every later transition INTO the editor route.
+  //
+  // But this listener must NOT act on the cold-boot transition itself. On a Home-first boot the IDE is
+  // lazy-initialised the first time the editor route is reached, so createLifecycleBoot runs *inside*
+  // main.ts's `set({ route: 'editor' })` notification — and JS `Set.forEach` visits listeners added
+  // mid-iteration, so this freshly-registered listener DOES fire on that very transition. Running the
+  // intent here would be UNGATED (it doesn't await lsp.start()): on desktop the `koine lsp` sidecar is a
+  // dotnet process that takes seconds to answer `initialize`, so the model-index request beats it and the
+  // host's `lsp_send` reports "LSP not started". The gated boot ladder above already owns that first
+  // intent, so ignore transitions until the boot notification has drained (next microtask); only genuine
+  // *return* visits — real user actions in a later task — are handled here.
+  let booting = true;
+  queueMicrotask(() => {
+    booting = false;
+  });
   const unsubRouteIntent = appStore.subscribe((s, prev) => {
+    if (booting) return;
     if (s.route === 'editor' && prev.route !== 'editor') {
       const intent = takeStartIntent();
       // Guarded: unlike the cold boot above, the live editor behind the Home route can hold dirty
