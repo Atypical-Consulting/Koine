@@ -347,8 +347,9 @@
      eyebrow → statement → snippet stack sits at the top, the colophon settles as the column's footer. */
   display: flex;
   flex-direction: column;
-  /* Left column scrolls independently of the launch rail; inset from the dividing hairline on its right. */
-  overflow-y: auto;
+  /* Left column scrolls independently of the launch rail; inset from the dividing hairline on its right.
+     `hidden auto` (not a bare `overflow-y`) so a wide child can't raise a spurious horizontal scrollbar. */
+  overflow: hidden auto;
   padding-right: clamp(24px, 4vw, 56px);
 }
 
@@ -487,7 +488,10 @@
   flex-direction: column;
   gap: clamp(18px, 2.4vw, 26px);
   border-left: 1px solid var(--koi-line);
-  overflow-y: auto;
+  /* `overflow: hidden auto` (not a bare `overflow-y: auto`): when only one axis is set to a non-visible
+     value the other computes to `auto`, so a sub-pixel-wide child would raise a spurious horizontal
+     scrollbar in the rail. Pin the x-axis hidden and keep only the vertical scroll. */
+  overflow: hidden auto;
   padding-left: clamp(24px, 4vw, 56px);
 }
 

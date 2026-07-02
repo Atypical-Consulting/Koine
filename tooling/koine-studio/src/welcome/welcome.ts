@@ -148,9 +148,10 @@ const ICON_ARROW =
 /** A crescent moon — the top-bar theme toggle, in the same stroked 16×16 style as the actions above. */
 const ICON_THEME =
   '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 9.3A5.4 5.4 0 0 1 6.7 2.8 5.4 5.4 0 1 0 13.2 9.3z"/></svg>';
-/** Two sliders — the Settings gear, matching the toolbar's own Settings glyph (index.html #btn-prefs). */
+/** A cog — the Settings gear: a toothed wheel (eight trapezoidal teeth) around a centre hub, drawn in the
+ *  same stroked 16×16 style. A proper geared rim (not radial spokes, which read as a sun). */
 const ICON_SETTINGS =
-  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h11M2.5 10.5h11"/><circle cx="6" cy="5.5" r="1.7"/><circle cx="10" cy="10.5" r="1.7"/></svg>';
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.39 6.82L14.44 7.10L14.44 8.90L12.39 9.18L11.94 10.27L13.19 11.91L11.91 13.19L10.28 11.94L9.18 12.39L8.90 14.44L7.10 14.44L6.82 12.39L5.73 11.94L4.09 13.19L2.81 11.91L4.06 10.27L3.61 9.18L1.56 8.90L1.56 7.10L3.61 6.82L4.06 5.72L2.81 4.09L4.09 2.81L5.72 4.06L6.82 3.61L7.10 1.56L8.90 1.56L9.18 3.61L10.28 4.06L11.91 2.81L13.19 4.09L11.94 5.72Z"/><circle cx="8" cy="8" r="2.1"/></svg>';
 /** A filled play triangle — the resume-session card's tile (#1005), the "continue where you left off" cue. */
 const ICON_PLAY = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.4v9.2L12.5 8z" fill="currentColor" stroke="none"/></svg>';
 /** A git-branch glyph — marks the branch a recent folder was last opened on (teal, in the dense row). */
