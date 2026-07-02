@@ -16,6 +16,10 @@ const buf = (uri: string, dirty: boolean): Buffer => ({
   rootToken: '',
 });
 
+// Seed the whole store-owned buffer Map (#982): the slice keys buffers by uri, so build the Map from
+// each buffer's own uri and set it wholesale (the ownership-inversion equivalent of the old setBuffers).
+const seed = (...bufs: Buffer[]): Map<string, Buffer> => new Map(bufs.map((b) => [b.uri, b]));
+
 // The static index.html host the indicator drives: a <button id="unsaved-indicator" hidden>.
 function host(): HTMLButtonElement {
   const b = document.createElement('button');
@@ -48,19 +52,19 @@ describe('UnsavedIndicator', () => {
     expect(document.title).toBe('Koine Studio');
 
     // Two dirty buffers (plus a clean one): the pill shows "2 unsaved" and the title gains a bullet.
-    act(() => store.getState().setBuffers({ a: buf('a', true), b: buf('b', true), c: buf('c', false) }));
+    act(() => store.setState({ buffers: seed(buf('a', true), buf('b', true), buf('c', false)) }));
     expect(button.hidden).toBe(false);
     expect(button.textContent).toBe('2 unsaved');
     expect(button.getAttribute('aria-label')).toBe('Save 2 unsaved files');
     expect(document.title).toBe('• Koine Studio');
 
     // A single dirty buffer uses the singular aria-label.
-    act(() => store.getState().setBuffers({ a: buf('a', true), b: buf('b', false) }));
+    act(() => store.setState({ buffers: seed(buf('a', true), buf('b', false)) }));
     expect(button.textContent).toBe('1 unsaved');
     expect(button.getAttribute('aria-label')).toBe('Save 1 unsaved file');
 
     // Everything clean again: the pill hides and the title is unmarked.
-    act(() => store.getState().setBuffers({ a: buf('a', false), b: buf('b', false) }));
+    act(() => store.setState({ buffers: seed(buf('a', false), buf('b', false)) }));
     expect(button.hidden).toBe(true);
     expect(button.textContent).toBe('');
     expect(document.title).toBe('Koine Studio');
@@ -73,7 +77,7 @@ describe('UnsavedIndicator', () => {
 
     act(() => {
       render(<UnsavedIndicator store={store} host={button} baseTitle="Koine Studio" onSaveAll={onSaveAll} />);
-      store.getState().setBuffers({ a: buf('a', true) });
+      store.setState({ buffers: seed(buf('a', true)) });
     });
 
     button.click();
@@ -85,7 +89,7 @@ describe('UnsavedIndicator', () => {
     const store = createAppStore();
     act(() => {
       render(<UnsavedIndicator store={store} host={button} baseTitle="Koine Studio" onSaveAll={() => {}} />);
-      store.getState().setBuffers({ a: buf('a', true), b: buf('b', true) });
+      store.setState({ buffers: seed(buf('a', true), buf('b', true)) });
     });
     expect(await axe(button)).toHaveNoViolations();
   });

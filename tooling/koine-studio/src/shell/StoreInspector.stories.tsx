@@ -49,8 +49,14 @@ export const Populated: Story = {
     s.setSelection({ qualifiedName: 'Ordering.Order', context: 'Ordering' });
     s.setBottom('events');
     s.setRight('source-control');
-    s.setActiveUri('file:///ordering.koi');
-    s.setBuffers({ a: buf('file:///ordering.koi', true), b: buf('file:///billing.koi', false) });
+    s.setActive('file:///ordering.koi', { silent: true });
+    // Seed the store-owned buffer Map (#982), keyed by uri.
+    store.setState({
+      buffers: new Map([
+        ['file:///ordering.koi', buf('file:///ordering.koi', true)],
+        ['file:///billing.koi', buf('file:///billing.koi', false)],
+      ]),
+    });
     s.setDiagnostics('file:///ordering.koi', [err]);
     return <StoreInspector {...args} store={store} />;
   },

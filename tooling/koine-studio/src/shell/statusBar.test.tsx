@@ -92,7 +92,7 @@ describe('createStatusBar', () => {
     await flush(); // repoA's fetch is now in flight
 
     token = 'folderB';
-    store.getState().setFolderRootToken('folderB'); // quick switch to a non-git folder
+    store.getState().setRoots(['folderB']); // quick switch to a non-git folder
     await flush(); // B's refresh rejected → the segment hides
     const branchEl = document.getElementById('sb-branch') as HTMLElement;
     expect(branchEl.hidden).toBe(true);
@@ -120,7 +120,7 @@ describe('createStatusBar', () => {
     expect(gitStatus).not.toHaveBeenCalled();
 
     token = 'opened';
-    store.getState().setFolderRootToken('opened'); // the change the branch segment listens for
+    store.getState().setRoots(['opened']); // the change the branch segment listens for
     await flush();
     expect(gitStatus).toHaveBeenCalledWith('opened');
   });
@@ -165,7 +165,7 @@ describe('createStatusBar', () => {
 
     handle.dispose();
     token = 'other';
-    store.getState().setFolderRootToken('other'); // the disposed subscription must not react
+    store.getState().setRoots(['other']); // the disposed subscription must not react
     await flush();
     expect(gitStatus).not.toHaveBeenCalled();
   });

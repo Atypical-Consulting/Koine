@@ -23,21 +23,15 @@ import { pathToFileUri } from '@/shell/ideUtils';
 import { basename } from '@/shared/path';
 import type { FsEntry, KoiFile, Platform } from '@/host';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
+import type { Buffer } from '@/store/slices/workspace';
 
 /** Outcome of an openFolderPath attempt, so callers (recent-open recovery) can react to a failure. */
 export type OpenResult = { ok: true } | { ok: false; reason: 'unreadable' | 'empty' };
 
-/** A client-side open buffer keyed by its file:// uri. Structural match for dirty.ts's SaveableBuffer. */
-export interface Buffer {
-  uri: string;
-  path: string;
-  relPath: string;
-  name: string;
-  text: string;
-  dirty: boolean;
-  /** The workspace root (from {@link WorkspaceController.rootsList}) this buffer's file lives under. */
-  rootToken: string;
-}
+// The `Buffer` type now LIVES in the store layer (`@/store/slices/workspace`) — the workspace slice is
+// its single owner (#982). Re-export it here so the historyController / stories / tests that import
+// `Buffer` from this module keep compiling unchanged, and the shell keeps a local name for its own use.
+export type { Buffer };
 
 /** The slice of {@link import('@/lsp/lsp').KoineLsp} the workspace lifecycle drives (a spy in tests). */
 export interface WorkspaceLsp {

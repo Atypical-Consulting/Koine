@@ -250,8 +250,8 @@ export function init(hooks: IdeHooks = {}): () => void {
     unsavedHost,
   );
   function refreshDirtyIndicator(): void {
-    appStore.getState().setBuffers(Object.fromEntries(workspace.buffers));
-    appStore.getState().setActiveUri(workspace.activeUri());
+    // TASK-2 transitional projection (#982, deleted in Task 3): the controller still OWNS buffers/activeUri, so mirror its live Map + active uri into the Map-backed slice on every dirty transition (a fresh Map is the reference change the UnsavedIndicator/StoreInspector selectors gate on; activeUri is set raw — no activationSeq bump, since real activation still flows through onActiveChanged this task).
+    appStore.setState({ buffers: new Map(workspace.buffers), activeUri: workspace.activeUri() });
   }
 
   // Workspace-wide problems rollup beside the #sb-problems split (which is active-file only): a status-bar
@@ -344,7 +344,7 @@ export function init(hooks: IdeHooks = {}): () => void {
   // it). Without this, removing the primary root strands the Docs/layout/diagram stores on the dead key
   // (#174) and a per-workspace word-wrap/preview-target override goes stale until an unrelated event.
   function onRootSetChanged(): void {
-    appStore.getState().setFolderRootToken(workspace.folderRootToken());
+    appStore.getState().setRoots(workspace.rootsList());
     controller.invalidateDocViews();
     controller.invalidateDocsPanel();
     void controller.refreshContextList();
@@ -774,9 +774,9 @@ export function init(hooks: IdeHooks = {}): () => void {
     // the render paths, so the initial ensureLoaded is already scoped even before the dropdown
     // finishes repainting. The Docs surface is folder-derived, so a folder switch must drop it too.
     onFolderOpened: () => {
-      // Publish the new folder token into the workspace slice so the folder-derived <DocsPanelHost>
-      // reloads (it subscribes ONLY to folderRootToken, never to model edits — the #174 contract).
-      appStore.getState().setFolderRootToken(workspace.folderRootToken());
+      // Publish the new roots into the workspace slice so the folder-derived <DocsPanelHost> reloads (it
+      // subscribes ONLY to folderRootToken, which setRoots derives from roots[0] — the #174 contract).
+      appStore.getState().setRoots(workspace.rootsList());
       controller.restoreActiveContext();
       controller.invalidateDocViews();
       controller.invalidateDocsPanel();

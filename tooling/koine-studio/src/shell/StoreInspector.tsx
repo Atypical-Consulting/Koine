@@ -33,7 +33,8 @@ export function StoreInspector(props: { store: StoreApi<AppState> }) {
   // this identity selector repaints on ANY change — making the dump track the full store.
   const fullState = useStore(s, (st) => st);
 
-  const dirty = Object.values(buffers).filter((b) => b.dirty).length;
+  let dirty = 0;
+  for (const b of buffers.values()) if (b.dirty) dirty++;
   const { errors, warnings } = diagnosticsSummary(Object.values(byUri).flat());
   const docViewSummary = Object.entries(docViews)
     .map(([k, v]) => `${k}:${v.loaded ? 'ok' : 'stale'}#${v.token}`)
@@ -44,7 +45,13 @@ export function StoreInspector(props: { store: StoreApi<AppState> }) {
   // so only data shows.
   const rawState = JSON.stringify(
     fullState,
-    (_key, value) => (typeof value === 'function' ? undefined : value),
+    (_key, value) => {
+      if (typeof value === 'function') return undefined; // drop the setters — only data shows
+      // The store-owned buffer set is a Map (#982); JSON.stringify renders a Map as `{}`, so expand it to
+      // a plain object so the raw dump keeps showing the open buffers keyed by uri.
+      if (value instanceof Map) return Object.fromEntries(value);
+      return value;
+    },
     2,
   );
 
