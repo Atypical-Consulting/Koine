@@ -652,6 +652,185 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
   });
 });
 
+// --- expandable tool-call cards (Task 4): one native <details> per koine tool the assistant ran ---
+// The panel opens a live "pending" card on each tool-call START (above the reply bubble), then flips it
+// to ok/error on END — filling the chip summary, a formatted duration, and an expandable Arguments/Result
+// body. The cards join the turn's rollback list so a failed turn removes them with the user bubble.
+describe('tool-call cards (panel integration)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.mocked(runAssistant).mockReset();
+  });
+  afterEach(() => {
+    localStorage.clear();
+    vi.mocked(runAssistant).mockReset();
+  });
+
+  function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
+    return {
+      container,
+      getProvider: () => 'anthropic',
+      getBaseUrl: () => '',
+      getApiKey: () => 'sk',
+      getModel: () => '',
+      getContext: () => ({ fileName: 'm.koi', source: 'context X {}', diagnostics: [] }),
+      onApplyModel: () => {},
+      onOpenPrefs: () => {},
+      getWorkspaceKey: () => 'ws',
+      getSelection: () => null,
+      getUseTools: () => true,
+      getConstrainGrammar: () => false,
+      runCompilerTool: () => Promise.resolve('ok'),
+      ...over,
+    };
+  }
+
+  // Drive a normal generative send via the first quick action (offerApply defaults true).
+  function fire(container: HTMLElement): void {
+    container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
+  }
+
+  test('a start event opens a pending card, above the reply bubble, with a visually-hidden "running" label', async () => {
+    let finishTurn!: () => void;
+    const gate = new Promise<void>((res) => {
+      finishTurn = res;
+    });
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.onToolCallStart?.({ id: 1, name: 'koine_validate', argsJson: '{"source":"context X {}"}' });
+      await gate; // stay in-flight so the card is observable in its pending state
+      req.onText('done');
+      return 'done';
+    });
+    const container = document.createElement('div');
+    createAssistantPanel(opts(container));
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-tool[data-state="pending"]')).not.toBeNull());
+    const card = container.querySelector<HTMLDetailsElement>('.koi-assistant-tool')!;
+    // A native <details> disclosure (keyboard-accessible for free).
+    expect(card.tagName).toBe('DETAILS');
+    expect(card.querySelector('.koi-tool-name')?.textContent).toBe('koine_validate');
+    // The state is conveyed to assistive tech by a visually-hidden label, not colour alone.
+    expect(card.querySelector('.koi-tool-state')?.textContent).toBe('running');
+    // The status glyph is decorative (aria-hidden).
+    expect(card.querySelector('.koi-tool-glyph')?.getAttribute('aria-hidden')).toBe('true');
+
+    // The card sits ABOVE the streaming reply bubble in the transcript.
+    const transcript = container.querySelector('.koi-assistant-transcript')!;
+    const kids = [...transcript.children];
+    const reply = container.querySelector('.koi-msg-assistant')!;
+    expect(kids.indexOf(card)).toBeGreaterThanOrEqual(0);
+    expect(kids.indexOf(card)).toBeLessThan(kids.indexOf(reply));
+
+    finishTurn();
+    await vi.waitFor(() => expect(container.textContent).toContain('done'));
+  });
+
+  test('the matching end event flips the card to ok: summary, duration, and a pretty-printed body', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.onToolCallStart?.({ id: 1, name: 'koine_validate', argsJson: '{"source":"context X {}"}' });
+      req.onToolCallEnd?.({
+        id: 1,
+        name: 'koine_validate',
+        ok: true,
+        summary: 'ok: no diagnostics',
+        resultText: 'ok: true — no diagnostics. The model compiles.',
+        durationMs: 312,
+      });
+      req.onText('All good.');
+      return 'All good.';
+    });
+    const container = document.createElement('div');
+    createAssistantPanel(opts(container));
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-tool[data-state="ok"]')).not.toBeNull());
+    const card = container.querySelector('.koi-assistant-tool')!;
+    expect(card.querySelector('.koi-tool-state')?.textContent).toBe('succeeded');
+    expect(card.querySelector('.koi-tool-glyph')?.textContent).toBe('✓');
+    expect(card.querySelector('.koi-tool-summary')?.textContent).toBe('ok: no diagnostics');
+    expect(card.querySelector('.koi-tool-duration')?.textContent).toBe('312 ms');
+    // The expandable body carries the pretty-printed arguments and the raw result, one <pre> each.
+    const pres = card.querySelectorAll('pre');
+    expect(pres.length).toBe(2);
+    expect(pres[0].textContent).toContain('"source": "context X {}"'); // 2-space indent ⇒ ": " separator
+    expect(pres[1].textContent).toContain('ok: true — no diagnostics');
+  });
+
+  test('an ok:false end renders an error card with the error message in the body, and formats seconds', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.onToolCallStart?.({ id: 1, name: 'koine_compile', argsJson: '{"target":"csharp"}' });
+      req.onToolCallEnd?.({
+        id: 1,
+        name: 'koine_compile',
+        ok: false,
+        summary: 'failed',
+        resultText: '',
+        error: 'boom: the compiler exploded',
+        durationMs: 1400,
+      });
+      req.onText('That failed.');
+      return 'That failed.';
+    });
+    const container = document.createElement('div');
+    createAssistantPanel(opts(container));
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-tool[data-state="error"]')).not.toBeNull());
+    const card = container.querySelector('.koi-assistant-tool')!;
+    expect(card.querySelector('.koi-tool-state')?.textContent).toBe('failed');
+    expect(card.querySelector('.koi-tool-glyph')?.textContent).toBe('✕');
+    // Above 1000 ms the duration reads in seconds.
+    expect(card.querySelector('.koi-tool-duration')?.textContent).toBe('1.4 s');
+    // The error message is the body's result on the failure path.
+    expect(card.textContent).toContain('boom: the compiler exploded');
+  });
+
+  test('a result larger than 8 KB is clamped with a visible (truncated) note', async () => {
+    const big = 'x'.repeat(9 * 1024);
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.onToolCallStart?.({ id: 1, name: 'koine_validate', argsJson: '{}' });
+      req.onToolCallEnd?.({ id: 1, name: 'koine_validate', ok: true, summary: 'big', resultText: big, durationMs: 5 });
+      req.onText('done');
+      return 'done';
+    });
+    const container = document.createElement('div');
+    createAssistantPanel(opts(container));
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-tool[data-state="ok"]')).not.toBeNull());
+    const card = container.querySelector('.koi-assistant-tool')!;
+    const resultPre = card.querySelectorAll('pre')[1];
+    // The result <pre> is clamped to the 8 KB cap …
+    expect(resultPre.textContent!.length).toBe(8 * 1024);
+    // … and the truncation is announced with a visible note.
+    expect(card.querySelector('.koi-tool-truncated')?.textContent).toContain('(truncated)');
+  });
+
+  test('a turn rollback removes the tool cards (they join the rollback list)', async () => {
+    let failTurn!: (e: unknown) => void;
+    const gate = new Promise<string>((_res, rej) => {
+      failTurn = rej;
+    });
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.onToolCallStart?.({ id: 1, name: 'koine_validate', argsJson: '{}' });
+      req.onToolCallEnd?.({ id: 1, name: 'koine_validate', ok: true, summary: 's', resultText: 'r', durationMs: 1 });
+      return gate; // stay in-flight until the test rejects it (a real error, nothing streamed)
+    });
+    const container = document.createElement('div');
+    createAssistantPanel(opts(container));
+    fire(container);
+
+    // The card was created during the turn …
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-tool')).not.toBeNull());
+
+    // … then the turn fails with nothing streamed → full rollback removes the user bubble AND the cards.
+    failTurn(new Error('network boom'));
+    await vi.waitFor(() => expect(container.querySelector('.koi-msg-error')).not.toBeNull());
+    expect(container.querySelector('.koi-assistant-tool')).toBeNull();
+  });
+});
+
 // --- multi-file change set (#... agentic edits): the per-file review/apply panel ----------------
 describe('multi-file change set (agentic edits)', () => {
   beforeEach(() => {

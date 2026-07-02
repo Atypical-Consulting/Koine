@@ -74,6 +74,27 @@ async function loadOpenAi(): Promise<typeof OpenAiSdk> {
   return openaiPromise;
 }
 
+/** Emitted just before a tool executor runs, so the UI can open a live tool card. `id` is a per-turn
+ *  sequence (1, 2, …); `argsJson` is the raw JSON arguments string the model produced. */
+export interface ToolCallStart {
+  id: number;
+  name: string;
+  argsJson: string;
+}
+
+/** Emitted after a tool executor settles (success OR failure), so the UI can close/finalize the card.
+ *  On failure `ok` is false, `summary` is `'failed'`, `resultText` is empty, and `error` carries the
+ *  message; on success `summary`/`resultText` describe the tool's output. `durationMs` times the exec. */
+export interface ToolCallEnd {
+  id: number;
+  name: string;
+  ok: boolean;
+  summary: string;
+  resultText: string;
+  durationMs: number;
+  error?: string;
+}
+
 export interface AssistantRequest {
   provider: AiProvider;
   apiKey: string;
@@ -127,8 +148,10 @@ export interface AssistantRequest {
    * still see a write that broke the model. Fires only when {@link validateStaged} actually ran.
    */
   onStagedValidation?: (diagnostics: string) => void;
-  /** Notified each time the model invokes a tool, for transcript visibility (name + short status). */
-  onToolCall?: (name: string, summary: string) => void;
+  /** Notified BEFORE each tool executor runs, for live transcript/tool-card visibility. */
+  onToolCallStart?: (call: ToolCallStart) => void;
+  /** Notified AFTER each tool executor settles (success or failure), to finalize the tool card. */
+  onToolCallEnd?: (call: ToolCallEnd) => void;
 }
 
 /** Edit tools are offered only in workspace mode: the caller supplied BOTH a staging session and an
@@ -207,6 +230,9 @@ async function runToolLoop(req: AssistantRequest, adapter: ToolLoopAdapter): Pro
               : Promise.resolve(`Error: no executor available for tool ${name}.`)
       : undefined;
   let finalText = '';
+  // Per-turn tool-call sequence: the first call this turn is id 1, incremented across ALL rounds so a
+  // consumer (tool cards) can key each start/end pair uniquely for the whole turn.
+  let toolCallSeq = 0;
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     // Offer tools until the last allowed round, where we drop them so the model must answer in text —
     // a hard stop against a model that would otherwise keep requesting tools forever.
@@ -228,14 +254,35 @@ async function runToolLoop(req: AssistantRequest, adapter: ToolLoopAdapter): Pro
 
     const results: { id: string; content: string }[] = [];
     for (const c of r.toolCalls) {
+      // Assign the per-turn id and announce the call BEFORE running it, so a tool card opens live.
+      const id = ++toolCallSeq;
+      req.onToolCallStart?.({ id, name: c.name, argsJson: c.argsJson });
+      const started = performance.now();
       let result: string;
       try {
         result = await exec(c.name, c.argsJson);
+        req.onToolCallEnd?.({
+          id,
+          name: c.name,
+          ok: true,
+          summary: summarizeForChip(c.name, result),
+          resultText: result,
+          durationMs: performance.now() - started,
+        });
       } catch (e) {
-        // A failed tool is recoverable: hand the error back as the result so the model can adapt.
+        // Report the failure to the UI, then keep the loop's model-facing behavior unchanged: a failed
+        // tool is recoverable, so hand the error back as the result so the model can adapt (NOT rethrow).
+        req.onToolCallEnd?.({
+          id,
+          name: c.name,
+          ok: false,
+          summary: 'failed',
+          resultText: '',
+          error: String(e),
+          durationMs: performance.now() - started,
+        });
         result = `Error: ${e instanceof Error ? e.message : String(e)}`;
       }
-      req.onToolCall?.(c.name, summarizeForChip(c.name, result));
       results.push({ id: c.id, content: result });
     }
     adapter.recordToolRound(r, results);

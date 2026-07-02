@@ -15,12 +15,14 @@ import type {
   GitStatus,
   KoiFile,
   LspTransport,
+  McpEndpoint,
   Platform,
   SourceDoc,
   TerminalTransport,
 } from '@/host/types';
 import { buildLogLArgs, parseLogL, type ChangeEntry } from '@/host/gitHistory';
 import { saveMetaFor } from '@/host/saveMeta';
+import { loadSettings } from '@/settings/persistence';
 import { normalizeCompileTarget, normalizeMcpValidate, runEditToolStaging } from '@/ai/assistantTools';
 import type { EditSession } from '@/ai/editSession';
 import { mcpCall } from '@/mcp/mcp';
@@ -151,6 +153,17 @@ class TauriTerminalTransport implements TerminalTransport {
 // isAutoRestorableToken (which recognizes them at boot) so the two never drift.
 const WORKSPACES_SUBDIR = 'workspaces';
 
+/**
+ * The raw payload the Rust `mcp_endpoint` command serializes (camelCase). `requestedPort` is echoed back
+ * for diagnostics; the host-facing {@link McpEndpoint} keeps only `url` + `fallback` (the Settings UI reads
+ * the requested port back from the `mcpPort` setting for its fallback warning).
+ */
+interface McpEndpointInfo {
+  url: string;
+  requestedPort: number;
+  fallback: boolean;
+}
+
 export class TauriPlatform implements Platform {
   readonly kind = 'tauri' as const;
   readonly canHostMcp = true;
@@ -179,10 +192,15 @@ export class TauriPlatform implements Platform {
     return invoke<string>('app_version');
   }
 
-  // Lazily starts the `koine mcp --http` sidecar (the same `koine` binary brokered for `koine lsp`)
-  // and resolves the loopback endpoint it announces, or null if it can't be brought up.
-  mcpEndpoint(): Promise<string | null> {
-    return invoke<string | null>('mcp_endpoint');
+  // Lazily starts the `koine mcp --http` sidecar (the same `koine` binary brokered for `koine lsp`) on the
+  // configured `mcpPort` (0 = OS-assigned) and resolves the loopback endpoint it bound, or null if it can't
+  // be brought up. The Rust host falls back to an OS-assigned port if the requested one is busy; that shows
+  // up as `fallback: true` here. The raw McpEndpointInfo (which also echoes requestedPort) is mapped down to
+  // the host-facing { url, fallback } — the Settings UI reads the requested port from the setting itself.
+  async mcpEndpoint(): Promise<McpEndpoint | null> {
+    const port = loadSettings().mcpPort;
+    const info = await invoke<McpEndpointInfo | null>('mcp_endpoint', { port });
+    return info ? { url: info.url, fallback: info.fallback } : null;
   }
 
   // Kill the `koine mcp --http` sidecar (and clear its cached endpoint) so disabling MCP in Settings
@@ -195,8 +213,9 @@ export class TauriPlatform implements Platform {
   // panel offers to external clients) — mcpEndpoint() lazily starts it. The model's single-file
   // `{source[,target]}` args are translated into the MCP tools' multi-file `{files[,target]}` shape.
   async runCompilerTool(name: string, argsJson: string): Promise<string> {
-    const url = await this.mcpEndpoint();
-    if (!url) return 'Error: the Koine MCP server is not available. Enable MCP in Settings, then retry.';
+    const endpoint = await this.mcpEndpoint();
+    if (!endpoint) return 'Error: the Koine MCP server is not available. Enable MCP in Settings, then retry.';
+    const url = endpoint.url;
     let args: { source?: unknown; target?: unknown };
     try {
       args = JSON.parse(argsJson || '{}');
@@ -234,10 +253,10 @@ export class TauriPlatform implements Platform {
   // refactor pays a single whole-model compile instead of one per write. The MCP→browser `ok:`
   // normalization matches runCompilerTool, keeping ONE validation contract (issue #445).
   async validateStagedWorkspace(session: EditSession): Promise<string> {
-    const url = await this.mcpEndpoint();
-    if (!url) return '(could not validate: the Koine MCP server is not available)';
+    const endpoint = await this.mcpEndpoint();
+    if (!endpoint) return '(could not validate: the Koine MCP server is not available)';
     const files = session.list().map((p) => ({ path: p, source: session.read(p) ?? '' }));
-    return normalizeMcpValidate(await mcpCall(url, 'koine_validate', { files }));
+    return normalizeMcpValidate(await mcpCall(endpoint.url, 'koine_validate', { files }));
   }
 
   openExternal(url: string): void {

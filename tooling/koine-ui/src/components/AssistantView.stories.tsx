@@ -47,3 +47,82 @@ export const WithAssistantContent: Story = {
     </div>
   ),
 };
+
+/** The expandable tool-call cards `createAssistantPanel` builds above a reply while the assistant runs
+ *  koine tools — one native <details> per call, in each of the three states (pending / ok / error). The
+ *  ok + error cards render expanded so the axe pass also covers the Arguments/Result body contrast (the
+ *  unit-level axe pass misses color-contrast; this Chromium story is the gate). */
+export const WithToolCards: Story = {
+  render: () => (
+    <div style={{ height: '520px', display: 'flex' }}>
+      <AssistantView>
+        <div class="koi-assistant">
+          <div class="koi-assistant-transcript">
+            <div class="koi-msg koi-msg-user">Validate the current model, then compile it.</div>
+
+            <details class="koi-assistant-tool" data-state="pending">
+              <summary>
+                <span class="koi-tool-glyph" aria-hidden="true">
+                  …
+                </span>
+                <span class="koi-sr-only koi-tool-state">running</span>
+                <span class="koi-tool-name">koine_validate</span>
+                <span class="koi-tool-summary">…</span>
+                <span class="koi-tool-duration"></span>
+              </summary>
+            </details>
+
+            <details class="koi-assistant-tool" data-state="ok" open>
+              <summary>
+                <span class="koi-tool-glyph" aria-hidden="true">
+                  ✓
+                </span>
+                <span class="koi-sr-only koi-tool-state">succeeded</span>
+                <span class="koi-tool-name">koine_validate</span>
+                <span class="koi-tool-summary">ok: no diagnostics</span>
+                <span class="koi-tool-duration">312 ms</span>
+              </summary>
+              <dl class="koi-tool-detail">
+                <dt>Arguments</dt>
+                <dd>
+                  <pre>{'{\n  "source": "context Billing {}"\n}'}</pre>
+                </dd>
+                <dt>Result</dt>
+                <dd>
+                  <pre>ok: true — no diagnostics. The model compiles.</pre>
+                  <span class="koi-tool-truncated">(truncated)</span>
+                </dd>
+              </dl>
+            </details>
+
+            <details class="koi-assistant-tool" data-state="error" open>
+              <summary>
+                <span class="koi-tool-glyph" aria-hidden="true">
+                  ✕
+                </span>
+                <span class="koi-sr-only koi-tool-state">failed</span>
+                <span class="koi-tool-name">koine_compile</span>
+                <span class="koi-tool-summary">failed</span>
+                <span class="koi-tool-duration">1.4 s</span>
+              </summary>
+              <dl class="koi-tool-detail">
+                <dt>Arguments</dt>
+                <dd>
+                  <pre>{'{\n  "target": "csharp"\n}'}</pre>
+                </dd>
+                <dt>Result</dt>
+                <dd>
+                  <pre>Error: target "csharp" requires a model that parses</pre>
+                </dd>
+              </dl>
+            </details>
+
+            <div class="koi-msg koi-msg-assistant">
+              <div class="koi-md">The model validates cleanly, but compilation needs a fix first.</div>
+            </div>
+          </div>
+        </div>
+      </AssistantView>
+    </div>
+  ),
+};
