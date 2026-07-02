@@ -1355,6 +1355,7 @@ export function init(hooks: IdeHooks = {}): () => void {
       exportMenuDismiss: () => teardownExportMenuDismiss(),
       editorKeys: () => disposeEditorKeys(),
       statusBar: () => statusBar.dispose(),
+      explorer: () => explorer.dispose(),
     },
   });
 
