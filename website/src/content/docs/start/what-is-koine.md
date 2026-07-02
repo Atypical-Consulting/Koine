@@ -98,7 +98,7 @@ Because every invariant, identity rule, and state transition is generated from t
 
 ## What's in the box
 
-Koine is feature-complete through epic R15. The full tactical and strategic toolkit is supported: value objects, entities, aggregates, smart enums, derived/computed fields, regex and conditional invariants, optional fields and sets, commands, domain events, state machines, factories, quantities and ranges, specifications, domain and application services, repositories with finders, optimistic concurrency, read models, queries, multi-file imports and modules, context maps, and model versioning. The [Shop demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo) exercises every one of them in a compiling six-context domain.
+Koine ships the full tactical and strategic toolkit: value objects, entities, aggregates, smart enums, derived/computed fields, regex and conditional invariants, optional fields and sets, commands, domain events, state machines, factories, quantities and ranges, specifications, domain and application services, repositories with finders, optimistic concurrency, read models, queries, multi-file imports and modules, context maps, and model versioning. The [Shop demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo) exercises every one of them in a compiling six-context domain.
 
 ## Next steps
 
