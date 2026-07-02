@@ -100,6 +100,7 @@ public sealed partial class PythonEmitter : IEmitter
             // scalar) — shared with the C#/TS emitters so the three stay semantically aligned.
             OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
             OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
+            OperatorNeedsAnalyzer.BuildScalarDivisionNeeds(model, index),
             OperatorNeedsAnalyzer.BuildValueObjectArithmeticNeeds(model, index));
 
         var files = new List<EmittedFile>();

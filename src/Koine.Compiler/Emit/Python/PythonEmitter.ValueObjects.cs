@@ -111,6 +111,14 @@ public sealed partial class PythonEmitter
             {
                 WriteScalarOp(sb, name, ordered, scalars);
             }
+            // `__truediv__` is the division dual of `__mul__` (#879, follow-up to the C# emitter's
+            // #832): demand-generated only where the model actually divides this value object by a
+            // scalar (base / 2), never emitted unconditionally.
+            if (emit.ScalarDivNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? divScalars)
+                && ordered.Any(m => m.Type.Name is "Int" or "Decimal"))
+            {
+                WriteScalarDivOp(sb, name, ordered, divScalars);
+            }
             // `__add__` is demand-generated when the VO is folded with `sum` (AdditiveNeeds) OR appears
             // in a plain binary `base + base` (#834); `__sub__` is demand-generated for a plain
             // `base - base` (#834 — never generated for plain VOs before). Python lowers both call sites
@@ -390,6 +398,37 @@ public sealed partial class PythonEmitter
         sb.Append('\n');
         sb.Append(Indent).Append("def __rmul__(self, factor: ").Append(factorType).Append(") -> ").Append(name).Append(":\n");
         sb.Append(Indent).Append(Indent).Append("return self.__mul__(factor)\n");
+    }
+
+    /// <summary>
+    /// A value object's scalar <c>__truediv__(divisor)</c> (e.g. <c>fee / 2</c>): the division dual of
+    /// <see cref="WriteScalarOp"/>, dividing each numeric field by the divisor and carrying the rest.
+    /// Python's <c>/</c> is always true division (never <c>int</c>-valued, even <c>int / int</c>), so an
+    /// <c>Int</c> field's quotient is cast back with <c>int(...)</c> (truncating, like the C# emitter's
+    /// <c>(int)(...)</c> cast) to keep the constructed value object's field types exact — a bare
+    /// <c>field / divisor</c> would type as <c>float | Decimal</c> under <c>mypy --strict</c>, never
+    /// <c>int</c>. No reflected <c>__rtruediv__</c>: division is non-commutative and the validator
+    /// rejects <c>scalar / value-object</c> (#878), so the reversed order never reaches codegen.
+    /// </summary>
+    private void WriteScalarDivOp(StringBuilder sb, string name, IReadOnlyList<Member> fields, IReadOnlySet<string> scalars)
+    {
+        var numeric = new HashSet<string>(fields.Where(m => m.Type.Name is "Int" or "Decimal").Select(m => m.Name), StringComparer.Ordinal);
+        var factorType = ScalarUnion(scalars);
+
+        string Arg(Member m)
+        {
+            var field = "self." + PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(m.Name));
+            if (!numeric.Contains(m.Name))
+            {
+                return field;
+            }
+            return m.Type.Name == "Int" ? $"int({field} / divisor)" : $"{field} / divisor";
+        }
+
+        sb.Append('\n');
+        sb.Append(Indent).Append("def __truediv__(self, divisor: ").Append(factorType).Append(") -> ").Append(name).Append(":\n");
+        sb.Append(Indent).Append(Indent).Append("return ").Append(name).Append('(')
+          .Append(string.Join(", ", fields.Select(Arg))).Append(")\n");
     }
 
     /// <summary>

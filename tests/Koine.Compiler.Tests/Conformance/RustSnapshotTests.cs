@@ -226,6 +226,43 @@ public class RustSnapshotTests
     }
 
     /// <summary>
+    /// Issue #879 (follow-up to #832, which demand-generated <c>operator /</c> for the C# emitter):
+    /// a plain value object divided by a numeric scalar — <c>half: Money = fee / 2</c> — must emit a
+    /// real <c>impl std::ops::Div&lt;i64&gt;</c>, mirroring the existing demand-generated
+    /// <c>impl std::ops::Mul&lt;i64&gt;</c>. Before the fix
+    /// <c>OperatorNeedsAnalyzer.BuildScalarDivisionNeeds</c> was recorded but never consumed by the
+    /// Rust emitter, so the derived member referenced a <c>Div</c> impl that was never generated
+    /// (a compile error).
+    /// </summary>
+    [Fact]
+    public void Rust_value_object_divided_by_a_scalar_compiles()
+    {
+        const string model = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0 "an amount cannot be negative"
+              }
+              entity Order identified by OrderId {
+                fee: Money
+              }
+              readmodel FeeSplit from Order {
+                half: Money = fee / 2
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
+        shop.ShouldContain("impl std::ops::Div<i64> for Money");
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
     /// Regression: a derived (computed) member is emitted as an accessor method, so a reference to it
     /// from another expression must render as a call <c>self.x()</c>, not a field read <c>self.x</c>.
     /// </summary>
