@@ -37,3 +37,4 @@ export { DeckBar, type DeckBarProps, type DeckBarMode } from './components/DeckB
 export { ExportMenu, type ExportFormat } from './components/ExportMenu';
 export { AssistantView, ASSISTANT_MOUNT_CLASS } from './components/AssistantView';
 export { LeftRail } from './components/LeftRail';
+export { RightStrip } from './components/RightStrip';
