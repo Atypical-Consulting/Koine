@@ -6,7 +6,13 @@
 // can be opened, pinned (pinned entries float to the top and survive the cap), have its path copied, or
 // be removed; a search filter appears once the history grows past a threshold, a clear-all control
 // forgets everything, and the list scrolls within its own container so a long history never grows the card.
-import { getRecentFolders, removeRecentFolder, pinRecentFolder, clearRecentFolders } from '@/settings/persistence';
+import {
+  getRecentFolders,
+  removeRecentFolder,
+  pinRecentFolder,
+  clearRecentFolders,
+  getLastSession,
+} from '@/settings/persistence';
 import { getPlatform } from '@/host';
 import { registerOverlay, koiConfirm } from '@atypical/koine-ui';
 import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, fillVersionChip, wireExternalLink } from '@/shared/colophon';
@@ -24,11 +30,11 @@ export interface WelcomeCallbacks {
   /** Open one of the starter templates as a workspace. */
   onOpenExample(template: Template): void;
   /**
-   * Return to the user's editor session — fired by the "Resume editing" control, rendered only when
-   * there is something to resume ({@link BuildWelcomeOpts.canResume}). Unlike the start actions it sets
-   * no template/folder intent; what it resolves to is the caller's concern (issues #392 / #766): a pure
-   * route swap back into a still-live session, or a cold boot that restores the last workspace. Optional:
-   * Optional: callers that don't offer a resume path can omit it.
+   * Return to the user's editor session — fired by the rich resume-session card (#1005), rendered at the
+   * top of the launch rail whenever a persisted last-session snapshot exists (getLastSession). Unlike the
+   * start actions it sets no template/folder intent; what it resolves to is the caller's concern (issues
+   * #392 / #766): a pure route swap back into a still-live session, or a cold boot that restores the last
+   * workspace. Optional: callers that don't offer a resume path can omit it.
    */
   onResume?(): void;
   /**
@@ -73,6 +79,30 @@ export function filterTemplates(templates: readonly Template[], filter: Template
   });
 }
 
+/**
+ * A compact, human relative-time label for the resume card's last-edit stamp: "just now" under a
+ * minute, then "N min ago", "Nh ago", "Nd ago". Pure over an explicit `now` so it's deterministic to
+ * test. A future/clock-skewed `then` is clamped to "just now" rather than showing a negative age.
+ */
+function timeAgo(then: number, now: number): string {
+  const sec = Math.max(0, Math.floor((now - then) / 1000));
+  if (sec < 60) return 'just now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return `${Math.floor(hr / 24)}d ago`;
+}
+
+/** Whether the user asks for less motion — so the resume card's live ping never animates for them. */
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
 // The hero artifact: the canonical Money value object, lifted verbatim from the billing starter
 // (templates/starters/billing). Syntax-coloured with the editor's own token hues (--koi-hl-*) so the
 // snippet reads as real Koine, not a marketing mock. Content is fully static — no user input — so an
@@ -103,6 +133,8 @@ const ICON_THEME =
 /** Two sliders — the Settings gear, matching the toolbar's own Settings glyph (index.html #btn-prefs). */
 const ICON_SETTINGS =
   '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h11M2.5 10.5h11"/><circle cx="6" cy="5.5" r="1.7"/><circle cx="10" cy="10.5" r="1.7"/></svg>';
+/** A filled play triangle — the resume-session card's tile (#1005), the "continue where you left off" cue. */
+const ICON_PLAY = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.4v9.2L12.5 8z" fill="currentColor" stroke="none"/></svg>';
 
 /** Build a start action as a button with an icon, a label and a one-line description. */
 function makeAction(opts: {
@@ -145,12 +177,12 @@ function makeAction(opts: {
 
 interface BuildWelcomeOpts {
   /**
-   * There is a session or a previously-opened workspace to return to (issues #392 / #766): either the
-   * IDE is already live behind the route, or a prior visit left a workspace the caller can restore. When
-   * true, render a "Resume editing" control that fires {@link WelcomeCallbacks.onResume}. A pristine
-   * first-load Home leaves this false, so the control stays absent and Home stays clean.
+   * The editor is live *this session* (issue #392) — the IDE booted behind the route. This is the ONLY
+   * thing the caller still tells Home about resuming: whether to show the live "ping" dot on the resume
+   * card. The card itself self-gates on the persisted last-session snapshot (getLastSession), so it
+   * appears in both the warm (`warm: true`) and cold (`warm` absent, a prior snapshot on disk) cases.
    */
-  canResume?: boolean;
+  warm?: boolean;
 }
 
 /** What {@link buildHome} returns: the root element plus the seams {@link mountHome} re-exports. */
@@ -349,15 +381,85 @@ function buildHome(
   lede.append(eyebrow, statement, figure);
   body.appendChild(lede);
 
-  // Right: the launch rail — primary actions, then recent folders.
+  // Right: the launch rail — the resume card (when there's a session), then primary actions, then recents.
   const launch = document.createElement('div');
   launch.className = 'koi-welcome-launch';
 
-  // The launch rail's heading row: the "Start" title on the left and — when there is a session or a
-  // previously-opened workspace to return to — the "Resume editing" control aligned on its right (issue
-  // #490). The control is the purpose-built return-to-session affordance (issues #392 / #766); rendered
-  // only when `canResume`, so a pristine first-load Home stays clean. On embedded Home the card's own top bar is gone, so this row
-  // is the only place the control can live.
+  // The rich resume-session card (#1005): the "continue where you left off" affordance, pinned at the
+  // TOP of the launch rail above the "Start" actions (per the hi-fi mock). It self-gates on the persisted
+  // last-session snapshot (getLastSession) — kept fresh on every open/save/dirty-change (#1005 Task 4) —
+  // so it appears in BOTH the warm case (editor live this session) and the cold case (a prior visit left
+  // a snapshot). The whole card is the resume control (a real <button>, keyboard-operable), firing
+  // onResume; a live "ping" dot marks a warm session, and every unknown field is simply omitted.
+  const session = getLastSession();
+  if (session) {
+    const resumeCard = document.createElement('button');
+    resumeCard.type = 'button';
+    resumeCard.className = 'koi-home-resume';
+    resumeCard.dataset.action = 'resume';
+    resumeCard.title = 'Return to your editor session';
+    resumeCard.addEventListener('click', () => cb.onResume?.());
+
+    const tile = document.createElement('span');
+    tile.className = 'koi-home-resume-tile';
+    tile.setAttribute('aria-hidden', 'true');
+    tile.innerHTML = ICON_PLAY;
+    // The live "ping" dot appears only for a warm session (editor mounted this session). Under
+    // prefers-reduced-motion the dot still renders but drops its animating `is-live` class, so the CSS
+    // ping never plays (belt-and-suspenders with the global reduced-motion collapse).
+    if (opts.warm) {
+      const ping = document.createElement('span');
+      ping.className = 'koi-home-resume-ping';
+      if (!prefersReducedMotion()) ping.classList.add('is-live');
+      tile.appendChild(ping);
+    }
+
+    const bodyCol = document.createElement('span');
+    bodyCol.className = 'koi-home-resume-body';
+
+    const resumeEyebrow = document.createElement('span');
+    resumeEyebrow.className = 'koi-home-resume-eyebrow';
+    resumeEyebrow.textContent = 'Last session';
+
+    // project · file — the file bit is omitted entirely when the snapshot has no active file.
+    const meta = document.createElement('span');
+    meta.className = 'koi-home-resume-meta';
+    const project = document.createElement('span');
+    project.className = 'koi-home-resume-project';
+    project.textContent = session.project;
+    meta.appendChild(project);
+    if (session.file) {
+      const sep = document.createElement('span');
+      sep.className = 'koi-home-resume-sep';
+      sep.setAttribute('aria-hidden', 'true');
+      sep.textContent = '·';
+      const file = document.createElement('span');
+      file.className = 'koi-home-resume-file';
+      file.textContent = basename(session.file);
+      meta.append(sep, file);
+    }
+
+    // relative time · unsaved count — the unsaved bit is omitted when unknown or zero.
+    const detail = document.createElement('span');
+    detail.className = 'koi-home-resume-detail';
+    const time = document.createElement('span');
+    time.className = 'koi-home-resume-time';
+    time.textContent = timeAgo(session.editedAt, Date.now());
+    detail.appendChild(time);
+    if (session.unsavedCount && session.unsavedCount > 0) {
+      const unsaved = document.createElement('span');
+      unsaved.className = 'koi-home-resume-unsaved';
+      unsaved.textContent = `${session.unsavedCount} unsaved`;
+      detail.appendChild(unsaved);
+    }
+
+    bodyCol.append(resumeEyebrow, meta, detail);
+    resumeCard.append(tile, bodyCol);
+    launch.appendChild(resumeCard);
+  }
+
+  // The launch rail's heading row: the "Start" title. (The old right-aligned "Resume editing" pill is
+  // gone — resuming now lives in the richer card above, #1005.)
   const launchHead = document.createElement('div');
   launchHead.className = 'koi-welcome-rail-head';
 
@@ -365,17 +467,6 @@ function buildHome(
   launchTitle.className = 'koi-welcome-rail-title';
   launchTitle.textContent = 'Start';
   launchHead.appendChild(launchTitle);
-
-  if (opts.canResume) {
-    const resumeBtn = document.createElement('button');
-    resumeBtn.type = 'button';
-    resumeBtn.className = 'koi-welcome-resume';
-    resumeBtn.dataset.action = 'resume';
-    resumeBtn.title = 'Return to your editor session';
-    resumeBtn.textContent = 'Resume editing';
-    resumeBtn.addEventListener('click', () => cb.onResume?.());
-    launchHead.appendChild(resumeBtn);
-  }
 
   launch.appendChild(launchHead);
 
@@ -975,17 +1066,17 @@ function buildHome(
  * Mount the welcome screen as a routed, full-page Home view inside `container` — the Home half of
  * issue #368's distinct Home/Editor routes. No `document.body` overlay and no `hidden` toggle: the
  * card is shown the moment it mounts, recents rendered immediately. `destroy()` detaches it when the
- * router swaps to the editor. Pass `opts.canResume` when there is a session or a previously-opened
- * workspace to return to, so Home offers a "Resume editing" control back into it (issues #392 / #766).
+ * router swaps to the editor. Pass `opts.warm` when the editor is live this session so the resume card's
+ * live "ping" dot shows; the card itself self-gates on the persisted last-session snapshot (#392 / #1005).
  */
 export function mountHome(
   container: HTMLElement,
   cb: WelcomeCallbacks,
   templates: readonly Template[] = TEMPLATES,
   canOpenFolders = true,
-  opts: { canResume?: boolean } = {},
+  opts: { warm?: boolean } = {},
 ): HomeHandle {
-  const home = buildHome(cb, templates, canOpenFolders, { canResume: opts.canResume });
+  const home = buildHome(cb, templates, canOpenFolders, { warm: opts.warm });
   home.refreshRecent();
   container.appendChild(home.root);
   return { destroy: home.destroy, refreshRecent: home.refreshRecent, recover: home.recover };

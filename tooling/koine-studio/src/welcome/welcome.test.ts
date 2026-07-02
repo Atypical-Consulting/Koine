@@ -512,44 +512,115 @@ describe('Home colophon footer', () => {
   });
 });
 
-describe('mountHome — Resume editing control', () => {
-  test('with { canResume: true } renders a [data-action="resume"] control that fires onResume', () => {
+// The rich resume-session card (#1005) replaces the old "Resume editing" button. It self-gates on the
+// persisted last-session snapshot (getLastSession) — present in BOTH the warm case (editor live this
+// session) and the cold case (a prior visit left a snapshot) — so these tests seed that snapshot in
+// localStorage under its key to drive the card. `warm` only decides the live ping dot.
+const LAST_SESSION_KEY = 'koine.studio.lastSession';
+
+/** Seed the persisted last-session snapshot that getLastSession() (and thus the resume card) reads. */
+function seedLastSession(s: Record<string, unknown>): void {
+  localStorage.setItem(LAST_SESSION_KEY, JSON.stringify(s));
+}
+
+describe('mountHome — resume session card', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = '';
+  });
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  test('warm + a session record renders a [data-action="resume"] card, with a live ping dot, that fires onResume', () => {
+    seedLastSession({ project: 'billing', file: 'billing.koi', editedAt: Date.now() - 8 * 60_000, unsavedCount: 3 });
     const el = document.createElement('div');
     const cb: WelcomeCallbacks = { ...makeCallbacks(), onResume: vi.fn() };
-    mountHome(el, cb, SAMPLE, true, { canResume: true });
+    mountHome(el, cb, SAMPLE, true, { warm: true });
 
-    const resume = el.querySelector<HTMLButtonElement>('[data-action="resume"]');
-    expect(resume).not.toBeNull();
-    expect(resume!.tagName).toBe('BUTTON');
+    const card = el.querySelector<HTMLButtonElement>('[data-action="resume"]');
+    expect(card).not.toBeNull();
+    expect(card!.tagName).toBe('BUTTON');
+    // The warm ping dot is present and animating.
+    const ping = card!.querySelector('.koi-home-resume-ping');
+    expect(ping).not.toBeNull();
+    expect(ping!.classList.contains('is-live')).toBe(true);
+    // Project · file, relative time and the unsaved count all render.
+    expect(card!.querySelector('.koi-home-resume-project')?.textContent).toBe('billing');
+    expect(card!.querySelector('.koi-home-resume-file')?.textContent).toBe('billing.koi');
+    expect(card!.querySelector('.koi-home-resume-time')?.textContent).toMatch(/min ago/);
+    expect(card!.querySelector('.koi-home-resume-unsaved')?.textContent).toBe('3 unsaved');
 
-    resume!.click();
+    card!.click();
     expect(cb.onResume).toHaveBeenCalledTimes(1);
   });
 
-  test('the resume control sits on the "Start" rail-title row, not in the (absent) top bar', () => {
+  test('the card sits at the top of the launch rail, not on the "Start" rail-title row', () => {
+    seedLastSession({ project: 'billing', editedAt: Date.now() });
     const el = document.createElement('div');
-    const cb: WelcomeCallbacks = { ...makeCallbacks(), onResume: vi.fn() };
-    mountHome(el, cb, SAMPLE, true, { canResume: true });
+    mountHome(el, { ...makeCallbacks(), onResume: vi.fn() }, SAMPLE, true, { warm: true });
 
-    const resume = el.querySelector<HTMLButtonElement>('[data-action="resume"]')!;
-    const head = resume.closest('.koi-welcome-rail-head');
-    expect(head).not.toBeNull();
-    // It shares its row with the "Start" rail title.
-    expect(head!.querySelector('.koi-welcome-rail-title')?.textContent).toBe('Start');
-    // It is no longer parked in the welcome card's own top bar.
-    expect(resume.closest('.koi-welcome-bar')).toBeNull();
+    const card = el.querySelector<HTMLButtonElement>('[data-action="resume"]')!;
+    // It lives inside the launch rail as its first child — above the "Start" actions.
+    const launch = card.closest('.koi-welcome-launch');
+    expect(launch).not.toBeNull();
+    expect(launch!.firstElementChild).toBe(card);
+    // It no longer shares the "Start" rail-title row.
+    expect(card.closest('.koi-welcome-rail-head')).toBeNull();
   });
 
-  test('without canResume (pristine Home) there is no resume control', () => {
+  test('cold (no warm) + a session record renders the card WITHOUT a ping dot', () => {
+    seedLastSession({ project: 'ordering', file: 'ordering.koi', editedAt: Date.now() - 2 * 3600_000 });
     const el = document.createElement('div');
-    mountHome(el, makeCallbacks(), SAMPLE);
+    mountHome(el, makeCallbacks(), SAMPLE, true, {});
+
+    const card = el.querySelector<HTMLButtonElement>('[data-action="resume"]');
+    expect(card).not.toBeNull();
+    expect(card!.querySelector('.koi-home-resume-ping')).toBeNull();
+  });
+
+  test('unknown fields (no file / no unsavedCount) are omitted without crashing', () => {
+    seedLastSession({ project: 'library', editedAt: Date.now() - 26 * 3600_000 });
+    const el = document.createElement('div');
+    mountHome(el, makeCallbacks(), SAMPLE, true, { warm: true });
+
+    const card = el.querySelector<HTMLButtonElement>('[data-action="resume"]')!;
+    expect(card.querySelector('.koi-home-resume-project')?.textContent).toBe('library');
+    expect(card.querySelector('.koi-home-resume-file')).toBeNull();
+    expect(card.querySelector('.koi-home-resume-unsaved')).toBeNull();
+    // The relative time still renders (26h → "1d ago").
+    expect(card.querySelector('.koi-home-resume-time')?.textContent).toMatch(/\d+d ago/);
+  });
+
+  test('no session (getLastSession null) renders no card', () => {
+    const el = document.createElement('div');
+    mountHome(el, makeCallbacks(), SAMPLE, true, { warm: true });
     expect(el.querySelector('[data-action="resume"]')).toBeNull();
   });
 
-  test('with { canResume: false } there is no resume control', () => {
+  test('prefers-reduced-motion suppresses the ping animation (no is-live class)', () => {
+    seedLastSession({ project: 'billing', editedAt: Date.now() });
     const el = document.createElement('div');
-    mountHome(el, makeCallbacks(), SAMPLE, true, { canResume: false });
-    expect(el.querySelector('[data-action="resume"]')).toBeNull();
+    const original = window.matchMedia;
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query.includes('prefers-reduced-motion'),
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as unknown as typeof window.matchMedia;
+    try {
+      mountHome(el, { ...makeCallbacks(), onResume: vi.fn() }, SAMPLE, true, { warm: true });
+      const ping = el.querySelector('.koi-home-resume-ping');
+      // Warm, so the dot itself still renders — but it is NOT animating.
+      expect(ping).not.toBeNull();
+      expect(ping!.classList.contains('is-live')).toBe(false);
+    } finally {
+      window.matchMedia = original;
+    }
   });
 });
 

@@ -85,7 +85,9 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 908 → 1012: #1005 Home redesign — imperative-DOM growth; will tighten to real end-state LOC.
   // The full-bleed shell (top bar + brand + split grid), the multi-target emit caption and the
   // relocated colophon all add real imperative construction to welcome.ts; ceil(992 × 1.02) = 1012.
-  { file: 'src/welcome/welcome.ts', maxLines: 1012 },
+  // Raised 1012 → 1105: #1005 resume card — the rich last-session card (play tile + ping dot + project ·
+  // file + relative time + unsaved count) plus the timeAgo/prefersReducedMotion helpers; ceil(1083 × 1.02) = 1105.
+  { file: 'src/welcome/welcome.ts', maxLines: 1105 },
 ];
 
 describe('line-budget guard', () => {

@@ -188,36 +188,145 @@
   margin-bottom: clamp(20px, 3vw, 32px);
 }
 
-/* Resume editing — return to a live editor session (#392). A labelled pill, shown only when a session
-   exists; sits where the dismiss-✕ would, reading as the deliberate way back into the editor. */
-.koi-welcome-resume {
-  flex: none;
-  display: inline-flex;
+/* Resume-session card (#1005) — the rich "continue where you left off" affordance, pinned at the top of
+   the launch rail above the "Start" actions. The whole card is a button: a play tile (carrying a live
+   "ping" dot for a warm session) beside the last session's project · file, its relative edit time and
+   any unsaved count. Replaces the old "Resume editing" pill (#392). */
+.koi-home-resume {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  height: 30px;
-  padding: 0 var(--koi-space-3);
-  border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius-sm);
+  gap: var(--koi-space-3);
+  width: 100%;
+  text-align: left;
   background: var(--koi-surface);
   color: var(--koi-fg);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius);
+  padding: var(--koi-space-2-75) var(--koi-space-3-5);
   font-family: var(--koi-font-body);
-  font-size: 0.82rem;
-  font-weight: 600;
-  line-height: 1;
-  white-space: nowrap;
   cursor: pointer;
-  transition: background var(--koi-dur-mid) ease, color var(--koi-dur-mid) ease, border-color var(--koi-dur-mid) ease;
+  transition: background var(--koi-dur-mid) ease, border-color var(--koi-dur-mid) ease;
 
   &:hover {
     border-color: color-mix(in srgb, var(--koi-accent) 60%, var(--koi-line));
-    color: var(--koi-accent);
+    background: color-mix(in srgb, var(--koi-accent) 6%, var(--koi-surface));
   }
 
   &:focus-visible {
     outline: 2px solid var(--koi-accent);
     outline-offset: 1px;
   }
+}
+
+/* The play tile — an accent-tinted square holding the ▶ glyph; the anchor for the corner ping dot. */
+.koi-home-resume-tile {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--koi-radius-sm);
+  background: color-mix(in srgb, var(--koi-accent) 14%, var(--koi-surface));
+  color: var(--koi-accent);
+
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+/* The live "ping" dot marks a still-live (warm) session: a solid accent dot at the tile's top-right that
+   radiates a fading halo. The halo only plays with the `is-live` class — JS omits that class under
+   prefers-reduced-motion, and the global reduced-motion collapse in _animations.scss neutralizes it too. */
+.koi-home-resume-ping {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--koi-radius-pill);
+  background: var(--koi-accent);
+  border: 2px solid var(--koi-surface);
+
+  &.is-live::after {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--koi-accent);
+    animation: koi-resume-ping 1.8s ease-out infinite;
+  }
+}
+
+@keyframes koi-resume-ping {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(2.4);
+  }
+}
+
+.koi-home-resume-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-0-5);
+}
+
+.koi-home-resume-eyebrow {
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--koi-muted);
+}
+
+/* project · file — one baseline-aligned row; the file truncates so a long path never grows the card. */
+.koi-home-resume-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--koi-space-1);
+  min-width: 0;
+  font-size: var(--koi-text-sm);
+  font-weight: 600;
+  color: var(--koi-fg);
+}
+
+.koi-home-resume-project {
+  white-space: nowrap;
+}
+
+.koi-home-resume-sep {
+  color: var(--koi-muted);
+}
+
+.koi-home-resume-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--koi-fg-muted);
+  font-weight: 500;
+}
+
+/* relative time · unsaved count — the quiet metadata line under the project. */
+.koi-home-resume-detail {
+  display: flex;
+  align-items: baseline;
+  gap: var(--koi-space-2);
+  font-size: var(--koi-text-xs);
+  color: var(--koi-muted);
+}
+
+.koi-home-resume-unsaved {
+  color: var(--koi-accent);
 }
 
 /* --- body: thesis (left) + launch rail (right), as a two-column split ------ */
@@ -392,9 +501,9 @@
   color: var(--koi-muted);
 }
 
-/* The "Start" heading row: title on the left, "Resume editing" aligned on its right when present
-   (issue #490). The launch rail's flex gap supplies the space below, so the title sheds its own
-   bottom margin here to keep the row tight and the two items sharing one baseline. */
+/* The "Start" heading row: just the rail title now (resuming moved to the richer card above, #1005).
+   The launch rail's flex gap supplies the space below, so the title sheds its own bottom margin here
+   to keep the row tight. */
 .koi-welcome-rail-head {
   display: flex;
   align-items: baseline;

@@ -189,17 +189,15 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
     if (appEl) appEl.hidden = true;
     if (homeRoot) {
       homeRoot.hidden = false;
-      // Offer a one-click Resume whenever there's a session to return to. Two cases qualify: the IDE
-      // has booted this session (`ideStarted`, #392) — every Home entry after the first editor visit —
-      // OR a workspace was opened on a prior visit (`hasPersistedWorkspace()`), so a returning user gets
-      // Resume on a *cold-open* Home, before the IDE boots this session. `onResume` navigates to the
-      // editor, which boots the IDE and restores the last workspace — reproducing the old auto-skip fast
-      // path, now an explicit choice rather than a forced jump (#766). A pristine first-load Home (no
-      // flag, IDE not booted) stays clean. The two `undefined`s keep mountHome's `templates` and
+      // The resume-session card (#1005) self-gates on the persisted last-session snapshot, so Home no
+      // longer needs to be told *whether* to offer a resume — only whether the editor is live this
+      // session (`ideStarted`, #392), which drives the card's live "ping" dot. A cold-open Home still
+      // gets the card (the snapshot is on disk); `onResume` navigates to the editor, which boots the IDE
+      // and restores the last workspace (#766). The two `undefined`s keep mountHome's `templates` and
       // `canOpenFolders` defaults (a default param applies when the arg is undefined) — we only set opts.
       if (!home) {
         home = mountHome(homeRoot, homeCallbacks(), undefined, undefined, {
-          canResume: ideStarted || hasPersistedWorkspace(),
+          warm: ideStarted,
         });
       }
     }
