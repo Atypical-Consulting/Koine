@@ -231,10 +231,10 @@ export function init(hooks: IdeHooks = {}): () => void {
   // is captured once, clean.
   // The pill is now the <UnsavedIndicator> Preact panel (#193) bound to the existing static button: it
   // subscribes to the workspace slice's dirty count, sets the button's text/hidden/aria-label + the
-  // title bullet, and wires Save-all. So `refreshDirtyIndicator` here just projects the controller's
-  // live buffers Map into the slice on every dirty transition (edit, save, save-all, rename, swap) —
-  // the panel re-renders off the slice. (The button stays index.html's element, so the controller's
-  // `domById(...)` lookups and the test's getElementById are untouched.)
+  // title bullet, and wires Save-all. The workspace slice is the single owner of buffers/activeUri now
+  // (#982), so the panel re-renders inherently off every slice action — no manual projection push is
+  // needed. (The button stays index.html's element, so the controller's `domById(...)` lookups and the
+  // test's getElementById are untouched.)
   const baseTitle = document.title;
   const unsavedEl = domById('unsaved-indicator') as HTMLButtonElement;
   // <UnsavedIndicator> renders no tree of its own (it governs the static button via effects), so it
@@ -249,10 +249,6 @@ export function init(hooks: IdeHooks = {}): () => void {
     />,
     unsavedHost,
   );
-  function refreshDirtyIndicator(): void {
-    // TASK-2 transitional projection (#982, deleted in Task 3): the controller still OWNS buffers/activeUri, so mirror its live Map + active uri into the Map-backed slice on every dirty transition (a fresh Map is the reference change the UnsavedIndicator/StoreInspector selectors gate on; activeUri is set raw — no activationSeq bump, since real activation still flows through onActiveChanged this task).
-    appStore.setState({ buffers: new Map(workspace.buffers), activeUri: workspace.activeUri() });
-  }
 
   // Workspace-wide problems rollup beside the #sb-problems split (which is active-file only): a status-bar
   // badge summarising every file's diagnostics, hidden while the workspace is clean. Subscribes to the
@@ -344,7 +340,8 @@ export function init(hooks: IdeHooks = {}): () => void {
   // it). Without this, removing the primary root strands the Docs/layout/diagram stores on the dead key
   // (#174) and a per-workspace word-wrap/preview-target override goes stale until an unrelated event.
   function onRootSetChanged(): void {
-    appStore.getState().setRoots(workspace.rootsList());
+    // The controller already published the new roots into the slice (addRoot/removeRoot call setRoots),
+    // so this just re-syncs the folder-derived views + scoped behaviors (#982).
     controller.invalidateDocViews();
     controller.invalidateDocsPanel();
     void controller.refreshContextList();
@@ -751,7 +748,9 @@ export function init(hooks: IdeHooks = {}): () => void {
       setStatus(text, 'error');
       setTimeout(() => editorSession.updateStatus(editorSession.diagnosticsFor(workspace.activeUri())), 2000);
     },
-    refreshDirtyIndicator,
+    // The workspace slice is the single owner of buffers/activeUri/roots (#982); the controller reads +
+    // writes it through this store handle, so the UnsavedIndicator/StoreInspector repaint inherently.
+    store: appStore,
     showDiagnostics: (uri) => editorSession.showDiagnostics(uri),
     invalidateDocViews: () => controller.invalidateDocViews(),
     // Keep the diag-count gate in step with the diagnostics slice: a file that reopens with the same
@@ -774,9 +773,9 @@ export function init(hooks: IdeHooks = {}): () => void {
     // the render paths, so the initial ensureLoaded is already scoped even before the dropdown
     // finishes repainting. The Docs surface is folder-derived, so a folder switch must drop it too.
     onFolderOpened: () => {
-      // Publish the new roots into the workspace slice so the folder-derived <DocsPanelHost> reloads (it
-      // subscribes ONLY to folderRootToken, which setRoots derives from roots[0] — the #174 contract).
-      appStore.getState().setRoots(workspace.rootsList());
+      // openFolderPath already published the new roots into the slice (setRoots derives folderRootToken,
+      // so the folder-derived <DocsPanelHost> reloaded — the #174 contract). This just restores the
+      // bounded-context scope and refreshes the doc surfaces.
       controller.restoreActiveContext();
       controller.invalidateDocViews();
       controller.invalidateDocsPanel();

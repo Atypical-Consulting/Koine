@@ -13,6 +13,7 @@
 // controller calls them but does not own the cache (it lives in editorSession).
 import { afterEach, beforeEach, describe, expect, it, test, vi } from 'vitest';
 import { createWorkspaceController, type WorkspaceControllerDeps } from '@/shell/workspaceController';
+import { createAppStore } from '@/store/index';
 import { pathToFileUri } from '@/shell/ideUtils';
 import type { FsEntry, GitLogEntry, GitStatus, KoiFile, McpEndpoint, Platform, SourceDoc } from '@/host/types';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
@@ -286,7 +287,9 @@ function makeDeps(
     editor: editor as unknown as WorkspaceControllerDeps['editor'],
     explorer: { renderRoots: vi.fn() },
     setStatus: vi.fn(),
-    refreshDirtyIndicator: vi.fn(),
+    // #982: the controller writes workspace state THROUGH the store (its single owner). Each test gets a
+    // fresh vanilla store; the parity test passes its own via `overrides.store` so it can read it back.
+    store: createAppStore(),
     showDiagnostics: vi.fn(),
     invalidateDocViews: vi.fn(),
     dropDiagnostics: vi.fn(),
@@ -1008,7 +1011,9 @@ describe('createWorkspaceController — idle auto-save', () => {
 
       expect(platform.writes.map((w) => w.path)).toContain(`${ROOT}/b.koi`);
       expect(platform.writes.map((w) => w.path)).not.toContain(`${ROOT}/a.koi`); // clean, skipped
-      expect(b.dirty).toBe(false);
+      // Re-read from the store: markSaved replaces the buffer object (immutable owner, #982), so the
+      // `b` captured before the save is stale — the assertion (b is clean after autosave) is unchanged.
+      expect(ws.buffers.get(uriOf('b.koi'))!.dirty).toBe(false);
       expect(lsp.didSave).toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
@@ -1548,42 +1553,49 @@ describe('createWorkspaceController — rekey on rename/move (pin, #982)', () =>
   });
 });
 
-// Dirty-projection freshness (#982 Task 1 pin → Task 3 parity bar): TODAY the store copy of buffers +
-// activeUri is only correct because refreshDirtyIndicator is pushed on every dirty transition. This pins
-// WHERE that push fires — an edit's renderTree, the assistant's applyFileEdit, and a save that clears
-// dirty. When Task 3 deletes this dep and makes publishing inherent to the slice actions, this is the
-// parity bar the store must meet WITHOUT the manual push (Task 3 re-expresses it as a store-freshness
-// assertion; the intent — the projection is fresh after each transition — is unchanged).
-describe('createWorkspaceController — dirty-projection freshness (pin, #982)', () => {
-  test('refreshDirtyIndicator fires on the edit → renderTree, applyFileEdit, and save dirty-transitions', async () => {
+// Store-ownership parity (#982 Task 3): the workspace slice is now the SINGLE owner — the facade reads
+// through it and writes through its actions, with NO refreshDirtyIndicator projection. This is the
+// parity bar that supersedes the Task-1 dirty-projection pin: drive the controller (built over a real
+// createAppStore()) through open → edit → rename → save and assert after EACH step that the slice and
+// the facade never diverge. The dep count carries no refreshDirtyIndicator — it no longer exists.
+describe('createWorkspaceController — store ownership parity (#982)', () => {
+  test('the workspace slice mirrors the facade through open → edit → rename → save', async () => {
+    const store = createAppStore();
     const platform = new FakePlatform();
     platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
     const trace: string[] = [];
     const lsp = makeLsp(trace);
     const editor = makeEditor(trace);
-    const refreshDirtyIndicator = vi.fn();
-    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { refreshDirtyIndicator }));
-    await ws.openFolderPath(ROOT, { recent: false });
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { store }));
 
-    // 1) An edit dirties the active buffer; ide.tsx repaints the tree on the becameDirty transition,
-    //    and renderTree is the refreshDirtyIndicator choke point.
+    // open: the slice holds the buffer Map, active uri, and roots the facade exposes.
+    await ws.openFolderPath(ROOT, { recent: false });
+    expect(store.getState().buffers).toBe(ws.buffers); // the facade getter IS the slice's Map (one truth)
+    expect(store.getState().activeUri).toBe(ws.activeUri());
+    expect(store.getState().folderRootToken).toBe(ws.folderRootToken());
+    expect(store.getState().roots).toEqual(ws.rootsList());
+    expect(ws.activeUri()).toBe(uriOf('a.koi'));
+
+    // edit: dirty the active buffer through the real sync path — the slice sees it with no manual push.
     const edited = 'context A { value V {} }\n';
     editor.setDoc(edited);
-    expect(ws.syncActiveBuffer(edited)).toBe(true);
-    refreshDirtyIndicator.mockClear();
-    ws.renderTree();
-    expect(refreshDirtyIndicator).toHaveBeenCalled();
+    ws.syncActiveBuffer(edited);
+    expect(store.getState().buffers.get(uriOf('a.koi'))!.dirty).toBe(true);
+    expect(store.getState().dirtyCount()).toBe(1);
 
-    // 2) applyFileEdit (the assistant's multi-file apply) refreshes the projection after writing a buffer.
-    refreshDirtyIndicator.mockClear();
-    await ws.applyFileEdit('a.koi', 'context A { entity E {} }\n');
-    expect(refreshDirtyIndicator).toHaveBeenCalled();
+    // rename: the re-key lands atomically in the slice (new uri, active re-pointed, dirty text preserved).
+    await ws.handleRename({ token: `${ROOT}/a.koi`, name: 'a.koi', relPath: 'a.koi', kind: 'file' }, 'renamed.koi');
+    expect(store.getState().activeUri).toBe(uriOf('renamed.koi'));
+    expect(store.getState().activeUri).toBe(ws.activeUri());
+    expect(store.getState().buffers.has(uriOf('a.koi'))).toBe(false);
+    expect(store.getState().buffers.get(uriOf('renamed.koi'))!.dirty).toBe(true);
 
-    // 3) A save clears the dirty flag and repaints (renderTree → refreshDirtyIndicator).
-    editor.setDoc('context A { changed }\n');
-    ws.syncActiveBuffer('context A { changed }\n');
-    refreshDirtyIndicator.mockClear();
+    // save: markSaved clears dirty in the slice — again with no projection step.
     await ws.saveActive();
-    expect(refreshDirtyIndicator).toHaveBeenCalled();
+    expect(store.getState().buffers.get(uriOf('renamed.koi'))!.dirty).toBe(false);
+    expect(store.getState().dirtyCount()).toBe(0);
+    // Never diverged: the facade getter and the slice are the same Map throughout.
+    expect(store.getState().buffers).toBe(ws.buffers);
   });
 });
