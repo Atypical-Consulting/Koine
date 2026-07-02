@@ -41,6 +41,13 @@ describe("createModal chrome", () => {
     expect(backdrop.querySelector(".koi-modal")!.getAttribute("aria-label")).toBe("About Koine Studio");
     expect(backdrop.querySelector(".koi-modal-title")!.textContent).toBe("About");
   });
+
+  test("exposes the rendered footer element on the handle", () => {
+    const { backdrop, footer } = createModal({ title: "Preferences" });
+    // The handle's footer IS the .koi-modal-footer element inside the backdrop — no class-string query needed.
+    expect(footer).toBe(backdrop.querySelector(".koi-modal-footer"));
+    expect(footer).toBeInstanceOf(HTMLElement);
+  });
 });
 
 describe("createModal focus trap", () => {

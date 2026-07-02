@@ -1,4 +1,5 @@
 import type { JSX } from 'preact';
+import { DATA_AXIS, DATA_LAXIS, DATA_LEXPAND, LEFT_RAIL_IDS } from '../domIds';
 
 // LeftRail: a left sidebar's inner markup as a Preact component — Koine Studio's #759 migration off an
 // imperative `leftRailMarkup()` string builder injected via innerHTML at boot. Moved here verbatim
@@ -37,15 +38,15 @@ export function LeftRail(): JSX.Element {
           consuming host). The axis switch chooses which navigator the rail shows; the collapse button
           tucks the whole rail to its icon spine (#left-strip below). */}
       <div class="rail-head">
-        <div id="rail-axis-switch" class="rail-axis-switch" role="tablist" aria-label="Navigator axis">
+        <div id={LEFT_RAIL_IDS.axisSwitch} class="rail-axis-switch" role="tablist" aria-label="Navigator axis">
           <button
             type="button"
             class="rail-axis"
             id="rail-axis-domain"
             role="tab"
-            data-axis="domain"
+            {...{ [DATA_AXIS]: 'domain' }}
             aria-selected="true"
-            aria-controls="rail-domain-pane"
+            aria-controls={LEFT_RAIL_IDS.domainPane}
           >
             Domain
           </button>
@@ -54,16 +55,16 @@ export function LeftRail(): JSX.Element {
             class="rail-axis"
             id="rail-axis-files"
             role="tab"
-            data-axis="files"
+            {...{ [DATA_AXIS]: 'files' }}
             aria-selected="false"
-            aria-controls="rail-files"
+            aria-controls={LEFT_RAIL_IDS.filesPane}
           >
             Files
           </button>
         </div>
         <button
           type="button"
-          id="rail-collapse"
+          id={LEFT_RAIL_IDS.collapse}
           class="rail-collapse"
           title="Collapse the navigator"
           aria-label="Collapse the navigator"
@@ -79,39 +80,44 @@ export function LeftRail(): JSX.Element {
         {/* Domain axis: the DDD construct/context navigator. A navigator panel mounts into this host
             (imperatively, by the consuming host); a later task swaps in the strategic/tactical renderers.
             Visible by default — left empty here, filled imperatively. */}
-        <div id="rail-domain-pane" class="rail-pane" role="tabpanel" aria-labelledby="rail-axis-domain" />
+        <div id={LEFT_RAIL_IDS.domainPane} class="rail-pane" role="tabpanel" aria-labelledby="rail-axis-domain" />
         {/* Files axis: a workspace file tree, hidden until the Files axis is selected. The #filetree-*
             ids are the file explorer's mount (#filetree-body) and the workspace-name label
             (#filetree-title); the consuming host's boot wires both — #filetree-body is left empty here,
             filled by the explorer island. */}
         <section
           class="rail-sect rail-files-pane"
-          id="rail-files"
+          id={LEFT_RAIL_IDS.filesPane}
           data-open="true"
           role="tabpanel"
           aria-labelledby="rail-axis-files"
           hidden
         >
           <div class="rail-sect-head-row">
-            <button type="button" class="rail-sect-head" aria-expanded="true" aria-controls="filetree-body">
+            <button
+              type="button"
+              class="rail-sect-head"
+              aria-expanded="true"
+              aria-controls={LEFT_RAIL_IDS.filetreeBody}
+            >
               Files
             </button>
-            <span id="filetree-title" class="rail-sect-meta">
+            <span id={LEFT_RAIL_IDS.filetreeTitle} class="rail-sect-meta">
               Scratch
             </span>
           </div>
-          <div class="rail-sect-body" id="filetree-body" />
+          <div class="rail-sect-body" id={LEFT_RAIL_IDS.filetreeBody} />
         </section>
       </div>
       {/* Collapsed-state icon spine: shown only when the host's split container carries a collapsed
           state class (CSS morph hides the head + navigator and reveals this). Mirrors a right-rail
           stripe idiom; the expand control re-opens to the current axis, the Domain/Files toggles re-open
           straight to that axis. Wired by the consuming host alongside the axis switch + collapse button. */}
-      <nav id="left-strip" class="left-strip" aria-label="Navigator (collapsed)">
+      <nav id={LEFT_RAIL_IDS.leftStrip} class="left-strip" aria-label="Navigator (collapsed)">
         <button
           type="button"
           class="lstrip-btn lstrip-expand"
-          data-lexpand
+          {...{ [DATA_LEXPAND]: true }}
           title="Expand the navigator"
           aria-label="Expand the navigator"
           aria-controls="leftrail"
@@ -123,7 +129,7 @@ export function LeftRail(): JSX.Element {
         <button
           type="button"
           class="lstrip-btn"
-          data-laxis="domain"
+          {...{ [DATA_LAXIS]: 'domain' }}
           title="Domain"
           aria-label="Domain navigator"
           aria-pressed="true"
@@ -135,7 +141,7 @@ export function LeftRail(): JSX.Element {
         <button
           type="button"
           class="lstrip-btn"
-          data-laxis="files"
+          {...{ [DATA_LAXIS]: 'files' }}
           title="Files"
           aria-label="Files navigator"
           aria-pressed="false"

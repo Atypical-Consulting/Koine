@@ -8,7 +8,7 @@ import { fireEvent } from '@testing-library/preact';
 import { axe } from 'vitest-axe';
 import { render } from 'preact';
 import { createInspectorSheet, openInspectorSheet, type InspectorSheet } from '@/shell/inspectorSheet';
-import { LeftRail } from '@atypical/koine-ui';
+import { LeftRail, RightStrip } from '@atypical/koine-ui';
 import {
   createInspectorController,
   type InspectorAssistant,
@@ -273,6 +273,7 @@ const APP_HTML = `
           <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
         </div>
       </aside>
+      <div id="right-strip" class="pane" role="toolbar" aria-label="Tool windows" aria-orientation="vertical"></div>
     </main>
     <footer id="statusbar"><span class="sb-item" id="sb-context">Context: —</span></footer>
     <div id="inspector-sheet-host"></div>
@@ -383,9 +384,11 @@ async function flush(): Promise<void> {
 describe('inspectorController — bottom sheet on a narrow viewport', () => {
   beforeEach(() => {
     document.body.innerHTML = APP_HTML;
-    // The left rail is a Preact component now (#759, was leftRailMarkup): render it into the thin shell so
-    // the controller's rail domById() lookups resolve, as the boot does.
+    // The left rail + right-strip are Preact components now (#759, were leftRailMarkup / rightStripMarkup):
+    // render them into their thin shells so the controller's rail/`.rstrip-btn` lookups resolve, as the boot
+    // does. RightStrip is required because the controller's `.rstrip-btn` query now throws on an empty match (#979).
     render(<LeftRail />, document.getElementById('leftrail')!);
+    render(<RightStrip />, document.getElementById('right-strip')!);
     setViewport(500); // below $bp-narrow (640)
   });
 

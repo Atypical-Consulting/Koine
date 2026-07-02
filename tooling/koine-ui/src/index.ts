@@ -38,3 +38,8 @@ export { ExportMenu, type ExportFormat } from './components/ExportMenu';
 export { AssistantView, ASSISTANT_MOUNT_CLASS } from './components/AssistantView';
 export { LeftRail } from './components/LeftRail';
 export { RightStrip } from './components/RightStrip';
+
+// --- DOM contract shared with koine-studio (issue #979) -------------------------------------
+// The single source of truth for the ids/data-attributes/classes LeftRail.tsx & RightStrip.tsx render
+// and koine-studio queries. `export *` re-exports the values plus the `RightStripView` type.
+export * from './domIds';

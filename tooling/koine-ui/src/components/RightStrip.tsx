@@ -1,10 +1,5 @@
 import type { JSX } from 'preact';
-
-/** The right-rail view a stripe button opens/closes. Mirrors Koine Studio's `RightView` union
- *  (`tooling/koine-studio/src/store/slices/uiChrome.ts`) but is declared locally so this
- *  component carries no import from Studio's store — @atypical/koine-ui stays store-free. Keep
- *  this list in sync with `RightView` if a right-rail tool window is ever added or removed. */
-type RightStripView = 'props' | 'assistant' | 'source-control';
+import { DATA_RVIEW, RSTRIP_BTN_CLASS, type RightStripView } from '../domIds';
 
 // RightStrip: the right-edge tool-window stripe's buttons as a Preact component (#759, finishing the #193
 // migration — replaces the imperative `rightStripMarkup()` string builder injected via innerHTML at boot).
@@ -80,8 +75,8 @@ export function RightStrip(): JSX.Element {
       {STRIPE_BUTTONS.map(({ view, label, icon }) => (
         <button
           type="button"
-          class="rstrip-btn"
-          data-rview={view}
+          class={RSTRIP_BTN_CLASS}
+          {...{ [DATA_RVIEW]: view }}
           data-tooltip={label}
           aria-label={label}
           aria-controls="right"

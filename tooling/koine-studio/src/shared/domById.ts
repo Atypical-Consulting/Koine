@@ -8,3 +8,13 @@ export function domById<T extends HTMLElement = HTMLElement>(id: string): T {
   if (!node) throw new Error(`missing #${id}`);
   return node as T;
 }
+
+// The throw-on-empty sibling of `domById` for a `document.querySelectorAll` — for the fixed chrome
+// selectors a controller owns (the rail axis buttons, the right-strip tool buttons). Returns the matches
+// as an array; an empty match is a drifted layout / render-order bug, so it throws rather than returning an
+// empty NodeList that silently no-ops every downstream loop.
+export function domQueryAll<T extends Element = HTMLElement>(selector: string): T[] {
+  const nodes = document.querySelectorAll<T>(selector);
+  if (nodes.length === 0) throw new Error(`missing ${selector}`);
+  return Array.from(nodes);
+}

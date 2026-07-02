@@ -15,7 +15,7 @@ import {
 } from '@/shell/ideUtils';
 import { createEditorSession } from '@/shell/editorSession';
 import { createInspectorController } from '@/shell/inspectorController';
-import { LeftRail, RightStrip } from '@atypical/koine-ui';
+import { LEFT_RAIL_IDS, LeftRail, RightStrip } from '@atypical/koine-ui';
 import { createCanvasWrite } from '@/shell/canvasWrite';
 import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
@@ -445,8 +445,8 @@ export function init(hooks: IdeHooks = {}): () => void {
   // captured nodes + imperative aria-pressed writes are never reconciled away.
   render(<RightStrip />, domById<HTMLElement>('right-strip'));
 
-  const treeBodyEl = domById<HTMLElement>('filetree-body');
-  const treeTitleEl = domById<HTMLElement>('filetree-title');
+  const treeBodyEl = domById<HTMLElement>(LEFT_RAIL_IDS.filetreeBody);
+  const treeTitleEl = domById<HTMLElement>(LEFT_RAIL_IDS.filetreeTitle);
   const splitEl = domById<HTMLElement>('split');
 
   // The left-rail section disclosure, the file-tree (⌘B) toggle, and the #split layout (data-* mirror +

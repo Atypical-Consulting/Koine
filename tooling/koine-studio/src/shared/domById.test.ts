@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'vitest';
-import { domById } from '@/shared/domById';
+import { domById, domQueryAll } from '@/shared/domById';
 
 describe('domById', () => {
   afterEach(() => {
@@ -27,5 +27,35 @@ describe('domById', () => {
     // HTMLElement default), so the `tsc --noEmit` gate proves the generic flows through — and the
     // runtime check confirms it's the same node.
     expect(found.value).toBe('typed');
+  });
+});
+
+describe('domQueryAll', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  test('returns the matched elements as an array', () => {
+    const a = document.createElement('button');
+    a.className = 'tool';
+    const b = document.createElement('button');
+    b.className = 'tool';
+    document.body.append(a, b);
+    expect(domQueryAll('.tool')).toEqual([a, b]);
+  });
+
+  test('throws `missing <selector>` when nothing matches', () => {
+    expect(() => domQueryAll('.ghost')).toThrow('missing .ghost');
+  });
+
+  test('narrows to the requested element type', () => {
+    const input = document.createElement('input');
+    input.className = 'field';
+    input.value = 'typed';
+    document.body.appendChild(input);
+    const found = domQueryAll<HTMLInputElement>('.field');
+    // Reading `.value` only compiles if the array element is narrowed to HTMLInputElement, so the
+    // `tsc --noEmit` gate proves the generic flows through — and the runtime check confirms the node.
+    expect(found[0].value).toBe('typed');
   });
 });
