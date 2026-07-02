@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "gen:colors": "node scripts/gen-concept-colors.mjs",
     "generate:templates": "node scripts/generate-templates.mjs",
     "dev": "cross-env NODE_OPTIONS=--max-http-header-size=65536 vite",
     "predev": "node scripts/ensure-workspace-deps.mjs && node scripts/generate-templates.mjs",

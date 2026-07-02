@@ -1,6 +1,14 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { Text } from '@codemirror/state';
-import { buildSemanticDecorations, decodeSemanticTokens, SEMANTIC_TOKEN_TYPES } from './semanticTokens';
+import {
+  buildSemanticDecorations,
+  CONCEPT_KIND_SLUGS,
+  decodeSemanticTokens,
+  SEMANTIC_TOKEN_TYPES,
+} from './semanticTokens';
 
 // The pure decode for LSP semantic tokens (issue #367, the docs-site playground consumer): the 5-int
 // delta stream `[deltaLine, deltaStartChar, length, tokenType, tokenModifiers]` → absolute,
@@ -131,5 +139,43 @@ describe('buildSemanticDecorations (the path the editor ViewPlugin paints from)'
 
   test('an empty stream yields Decoration.none (size 0) — static grammar stays authoritative', () => {
     expect(buildSemanticDecorations([], doc).size).toBe(0);
+  });
+});
+
+// Concept Colors (ADR 0004): modifier bits 1–15 are DDD concept kinds; the decoder appends a
+// `cm-st-k-<slug>` class per CONCEPT_KIND_SLUGS (bit i+1 ⇒ CONCEPT_KIND_SLUGS[i]) so the playground paints
+// a name in its concept color. The mirror must not drift from the generated palette.
+describe('decodeSemanticTokens — concept-kind modifiers', () => {
+  const DECLARATION = 1 << 0;
+  const VALUE_OBJECT = 1 << 3; // CONCEPT_KIND_SLUGS[2] === 'value'
+  const ENUMERATION = 1 << 4; // CONCEPT_KIND_SLUGS[3] === 'enum'
+
+  test('CONCEPT_KIND_SLUGS matches src/generated/concept-colors.json (the sync guard)', () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const generatedPath = path.resolve(here, '..', 'generated', 'concept-colors.json');
+    const { concepts } = JSON.parse(readFileSync(generatedPath, 'utf8')) as {
+      concepts: { slug: string }[];
+    };
+    expect([...CONCEPT_KIND_SLUGS]).toEqual(concepts.map((c) => c.slug));
+    expect(CONCEPT_KIND_SLUGS).toHaveLength(15);
+    expect(CONCEPT_KIND_SLUGS[0]).toBe('aggregate');
+  });
+
+  test('a value-object declaration gets cm-st-type cm-st-declaration cm-st-k-value', () => {
+    const tokens = decodeSemanticTokens([0, 6, 5, 0, DECLARATION | VALUE_OBJECT], doc); // 'Money' 6..11
+    expect(tokens).toEqual([{ from: 6, to: 11, cls: 'cm-st-type cm-st-declaration cm-st-k-value' }]);
+  });
+
+  test('a value-object reference (no declaration bit) gets cm-st-type cm-st-k-value', () => {
+    expect(decodeSemanticTokens([0, 6, 5, 0, VALUE_OBJECT], doc)[0].cls).toBe('cm-st-type cm-st-k-value');
+  });
+
+  test('the enumeration bit on an enum token yields cm-st-k-enum', () => {
+    const tokens = decodeSemanticTokens([2, 0, 4, 1, DECLARATION | ENUMERATION], doc); // line 2 'enum'
+    expect(tokens[0].cls).toBe('cm-st-enum cm-st-declaration cm-st-k-enum');
+  });
+
+  test('an unknown high modifier bit adds no kind class (defensive)', () => {
+    expect(decodeSemanticTokens([0, 6, 5, 0, 1 << 20], doc)[0].cls).toBe('cm-st-type');
   });
 });

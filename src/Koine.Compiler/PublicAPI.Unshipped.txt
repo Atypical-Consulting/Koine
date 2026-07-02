@@ -361,3 +361,18 @@ static Koine.Compiler.Emit.Grammar.GbnfExporter.Export() -> string!
 static Koine.Compiler.Services.KoineCompilation.Reconcile(Koine.Compiler.Services.KoineCompilation? previous, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files) -> Koine.Compiler.Services.KoineCompilation!
 Koine.Compiler.Services.VersionInfo
 static Koine.Compiler.Services.VersionInfo.Display(System.Reflection.Assembly! assembly) -> string!
+Koine.Compiler.Services.SemanticTokenModifier.Aggregate = 1 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Entity = 2 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.ValueObject = 3 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Enumeration = 4 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.DomainEvent = 5 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.IntegrationEvent = 6 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Command = 7 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Query = 8 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.ReadModel = 9 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Service = 10 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Repository = 11 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Policy = 12 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Factory = 13 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.StateMachine = 14 -> Koine.Compiler.Services.SemanticTokenModifier
+Koine.Compiler.Services.SemanticTokenModifier.Specification = 15 -> Koine.Compiler.Services.SemanticTokenModifier
