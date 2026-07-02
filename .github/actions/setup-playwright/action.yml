@@ -34,10 +34,17 @@ runs:
         key: ${{ runner.os }}-playwright-${{ hashFiles(inputs.cache-key-files) }}
         restore-keys: ${{ runner.os }}-playwright-
 
-    # On a cache hit Chromium is already present, so `install` only re-runs `--with-deps`
-    # (the Linux system libs, a no-op on macOS/Windows). On a miss it downloads Chromium
-    # into the cached path above.
+    # On a cache hit Chromium is already present, so `install` just verifies it; on a miss
+    # it downloads Chromium into the cached path above. `--with-deps` is Linux-only: it
+    # apt-installs the system libs Chromium needs. On Windows it is NOT a no-op — it triggers
+    # a Media Foundation feature install via DISM that costs ~3 min per run for a codec the
+    # Storybook story/a11y tests never use — so we pass it only on Linux.
     - name: Install Playwright Chromium
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: npx playwright install --with-deps chromium
+      run: |
+        if [ "$RUNNER_OS" = "Linux" ]; then
+          npx playwright install --with-deps chromium
+        else
+          npx playwright install chromium
+        fi
