@@ -15,6 +15,7 @@ vi.mock('@/settings/persistence', () => ({ getLastWorkspace: getLastWorkspaceMoc
 
 import { createLifecycleBoot, type LifecycleBootDeps } from '@/shell/lifecycleBoot';
 import { clearModelHash } from '@/export/share';
+import { appStore } from '@/store/index';
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -30,11 +31,13 @@ function makeDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
     shared: null,
     legacyScratch: null,
     seed: 'SEED',
-    importSharedWorkspace: vi.fn(async () => undefined),
+    importSharedWorkspace: vi.fn(async () => true),
     openWorkspaceWith1File: vi.fn(async () => undefined),
     openFolderPath: vi.fn(async () => ({ ok: true })),
     // Default to the browser host's rule; desktop-path tests override this with their own predicate.
     isAutoRestorableToken: vi.fn(async (t: string) => t === '(default)' || t.startsWith('example-')),
+    hasOpenWorkspace: vi.fn(() => false),
+    confirmReplaceWork: vi.fn(async () => true),
     openHostDefaultWorkspaceFlow: vi.fn(async () => ({ opened: true })),
     setStatus: vi.fn(),
     setOutput: vi.fn(),
@@ -94,6 +97,42 @@ describe('lifecycleBoot', () => {
     await flush();
     expect(deps.newModel).toHaveBeenCalledOnce();
     expect(deps.openHostDefaultWorkspaceFlow).not.toHaveBeenCalled();
+    // Cold boot: no unsaved work can exist yet, so the intent runs UNguarded (no confirm round-trip).
+    expect(deps.confirmReplaceWork).not.toHaveBeenCalled();
+  });
+
+  // Regression: a workspace-share link whose import opens NOTHING (all relPaths filtered as unsafe, a
+  // failed materialize, or a thrown import) used to leave the editor with zero buffers behind it —
+  // every ⌘S was a silent no-op. The branch must fall through to the default workspace instead.
+  it('falls through to the default workspace when a shared-workspace import opens nothing', async () => {
+    const deps = makeDeps({
+      shared: { kind: 'workspace', files: [{ relPath: '../escape.koi', text: 'x' }] } as never,
+      importSharedWorkspace: vi.fn(async () => false),
+      seed: 'THE_SEED',
+    });
+    createLifecycleBoot(deps);
+    await flush();
+    expect(clearModelHash).toHaveBeenCalled();
+    expect(deps.openHostDefaultWorkspaceFlow).toHaveBeenCalledWith('THE_SEED');
+  });
+
+  it('falls through to the default workspace when the shared-workspace import throws', async () => {
+    const deps = makeDeps({
+      shared: { kind: 'workspace', files: [{ relPath: 'a.koi', text: 'x' }] } as never,
+      importSharedWorkspace: vi.fn(async () => Promise.reject(new Error('materialize failed'))),
+      seed: 'THE_SEED',
+    });
+    createLifecycleBoot(deps);
+    await flush();
+    expect(deps.setStatus).toHaveBeenCalledWith('could not open shared workspace', 'error');
+    expect(deps.openHostDefaultWorkspaceFlow).toHaveBeenCalledWith('THE_SEED');
+  });
+
+  it('does NOT open the default after a shared-workspace import that succeeded', async () => {
+    const deps = makeDeps({ shared: { kind: 'workspace', files: [{ relPath: 'a.koi', text: 'x' }] } as never });
+    createLifecycleBoot(deps);
+    await flush();
+    expect(deps.openHostDefaultWorkspaceFlow).not.toHaveBeenCalled();
   });
 
   it('restores the last OPFS-internal example workspace when there is no intent', async () => {
@@ -137,6 +176,56 @@ describe('lifecycleBoot', () => {
     createLifecycleBoot(deps);
     await flush();
     expect(deps.openHostDefaultWorkspaceFlow).toHaveBeenCalledWith('THE_SEED');
+  });
+
+  // Regression: the intent-less restore ladder runs only after lsp.start() resolves — a multi-second
+  // window in the browser during which the user can already open a real folder. That workspace must
+  // not be torn down and replaced by the restored/default one.
+  it('skips the restore/default ladder entirely when a workspace was opened while connecting', async () => {
+    getLastWorkspaceMock.mockReturnValue('/Users/x/some/picked/project');
+    const deps = makeDeps({ hasOpenWorkspace: vi.fn(() => true) });
+    createLifecycleBoot(deps);
+    await flush();
+    expect(deps.openFolderPath).not.toHaveBeenCalled();
+    expect(deps.openHostDefaultWorkspaceFlow).not.toHaveBeenCalled();
+  });
+
+  // Regression: a RETURN visit to Home reaches the route-intent subscription with the IDE still alive
+  // (dirty buffers can exist), but the intent used to run the RAW unguarded actions — "New model" from
+  // Home silently wiped unsaved work (and the default workspace on disk) with no confirmation.
+  describe('route-intent subscription (return visits)', () => {
+    // The store is mocked, so drive the subscription callback lifecycleBoot registered directly.
+    function routeCallback(): (s: { route: string }, prev: { route: string }) => void {
+      const sub = vi.mocked((appStore as unknown as { subscribe: ReturnType<typeof vi.fn> }).subscribe);
+      return sub.mock.calls[sub.mock.calls.length - 1][0];
+    }
+
+    it('asks confirmReplaceWork before running a destructive return-visit intent', async () => {
+      const deps = makeDeps({ confirmReplaceWork: vi.fn(async () => false) });
+      createLifecycleBoot(deps);
+      await flush(); // let the (intent-less) boot ladder settle first
+
+      takeStartIntentMock.mockReturnValue({ kind: 'new' });
+      routeCallback()({ route: 'editor' }, { route: 'home' });
+      await flush();
+
+      expect(deps.confirmReplaceWork).toHaveBeenCalled();
+      // The user declined — no reset, no workspace swap.
+      expect(deps.newModel).not.toHaveBeenCalled();
+    });
+
+    it('runs the return-visit intent once the user confirms (or nothing is dirty)', async () => {
+      const deps = makeDeps(); // confirmReplaceWork resolves true (nothing dirty / confirmed)
+      createLifecycleBoot(deps);
+      await flush();
+
+      takeStartIntentMock.mockReturnValue({ kind: 'open-recent', path: '/proj' });
+      routeCallback()({ route: 'editor' }, { route: 'home' });
+      await flush();
+
+      expect(deps.confirmReplaceWork).toHaveBeenCalled();
+      expect(deps.openRecentFolder).toHaveBeenCalledWith('/proj');
+    });
   });
 
   it('teardown disposes every controller in the preserved order, then the route-intent sub', () => {

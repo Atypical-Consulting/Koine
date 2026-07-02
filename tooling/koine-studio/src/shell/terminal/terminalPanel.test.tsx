@@ -315,6 +315,66 @@ describe('createTerminalPanel', () => {
     panel.dispose();
   });
 
+  it('a restarted shell re-issues the size sync even though the panel grid is unchanged', async () => {
+    const flush = () => new Promise<void>((r) => setTimeout(r, 0));
+    const parent = document.createElement('div');
+    const transport = makeTransport();
+    const platform = { canRunShell: true, createTerminal: () => transport } as unknown as Platform;
+
+    const panel = createTerminalPanel({ parent, platform, cwd: () => null });
+    await flush(); // start() resolved → the post-start fit sent the initial pty_resize
+    expect(transport.resize).toHaveBeenCalledTimes(1);
+
+    // The shell exits and the user restarts (Enter). The new PTY opens at the host default (80×24),
+    // but the panel's grid is unchanged — without resetting the sent-size memo the post-start fit
+    // skipped the resize and the fresh shell stayed at the PTY default.
+    transport.emitExit(0);
+    termInstances[0].emitKeystroke('\r');
+    await flush();
+    expect(transport.resize).toHaveBeenCalledTimes(2);
+
+    panel.dispose();
+  });
+
+  it('a failed shell spawn surfaces in the pane and arms Enter-to-retry instead of dying silently', async () => {
+    const flush = () => new Promise<void>((r) => setTimeout(r, 0));
+    const parent = document.createElement('div');
+    const transport = makeTransport();
+    (transport.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('failed to open pty'));
+    const platform = { canRunShell: true, createTerminal: () => transport } as unknown as Platform;
+
+    const panel = createTerminalPanel({ parent, platform, cwd: () => null });
+    const term = termInstances[0];
+    await flush();
+
+    // The failure is written into the terminal (onExit never fires for a shell that never started)…
+    expect(term.write).toHaveBeenCalledWith(expect.stringContaining('failed to start shell'));
+    // …ordinary keystrokes are NOT sent to the dead PTY…
+    term.emitKeystroke('x');
+    expect(transport.write).not.toHaveBeenCalled();
+    // …and Enter retries the spawn through the existing restart path.
+    term.emitKeystroke('\r');
+    expect(transport.start).toHaveBeenCalledTimes(2);
+    await flush(); // drain the retry's (also rejected) start so it can't leak past the test
+
+    panel.dispose();
+  });
+
+  it('a rejecting PTY write is swallowed rather than surfacing as an unhandled rejection', async () => {
+    const flush = () => new Promise<void>((r) => setTimeout(r, 0));
+    const parent = document.createElement('div');
+    const transport = makeTransport();
+    (transport.write as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('PTY not started'));
+    const platform = { canRunShell: true, createTerminal: () => transport } as unknown as Platform;
+
+    const panel = createTerminalPanel({ parent, platform, cwd: () => null });
+    termInstances[0].emitKeystroke('ls');
+    await flush(); // an unguarded rejection here would fail the run as an unhandled error
+
+    expect(transport.write).toHaveBeenCalledWith('ls');
+    panel.dispose();
+  });
+
   it('stops the transport on dispose', () => {
     const transport = makeTransport();
     const platform = { canRunShell: true, createTerminal: () => transport } as unknown as Platform;

@@ -485,8 +485,13 @@ export function inlayHintsExtension(provider: InlayHintsFn, debounceMs = 200): E
 
       update(u: ViewUpdate): void {
         // Keep existing widgets attached to their text through an edit so they don't flash at a
-        // clamped offset during the debounce window before the fresh fetch lands.
-        if (u.docChanged) this.decorations = this.decorations.map(u.changes);
+        // clamped offset during the debounce window before the fresh fetch lands. Bump the token
+        // too: an in-flight answer describes the PRE-edit doc, so resolving its positions against
+        // the new doc would paint shifted hints — drop it and let the debounced refetch repaint.
+        if (u.docChanged) {
+          this.seq++;
+          this.decorations = this.decorations.map(u.changes);
+        }
         // Coalesce rapid viewport/doc changes into one debounced fetch.
         if (u.viewportChanged || u.docChanged) this.scheduleFetch(u.view);
         // Rebuild from the freshest hints once an async fetch resolved (it dispatched the redraw
@@ -673,7 +678,10 @@ export function semanticTokensExtension(provider: SemanticTokensFn, debounceMs =
       update(u: ViewUpdate): void {
         // Keep existing decorations attached to their text through an edit so highlighting tracks the
         // buffer (no flash at a clamped offset) during the debounce window before the fresh fetch lands.
+        // Bump the token too: an in-flight answer's delta stream describes the PRE-edit doc, so decoding
+        // it against the new doc would paint shifted marks — drop it and let the debounced refetch repaint.
         if (u.docChanged) {
+          this.seq++;
           this.decorations = this.decorations.map(u.changes);
           this.scheduleFetch(u.view);
         }

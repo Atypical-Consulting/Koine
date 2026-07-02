@@ -531,6 +531,22 @@ describe('renderContextMapGraph', () => {
     }
   });
 
+  test('mounting with NO saved zoom does not auto-save one — the fit-on-open fallback survives repaints (#769)', async () => {
+    const graph: DiagramGraph = {
+      nodes: [ctx('A'), ctx('B')],
+      edges: [{ from: 'A', to: 'B', label: 'Customer/Supplier', arrowKind: 'association' }],
+    };
+    const container = makeContainer();
+    const handle = await renderContextMapGraph(container, graph, () => true);
+    try {
+      // The user never chose a zoom, so none may be persisted: the NEXT mount must still read "nothing
+      // saved" and fall back to fit() — not restore a construction-time auto-saved 100%.
+      expect(loadDiagramZoom('koi-context-map')).toBeNull();
+    } finally {
+      handle?.dispose();
+    }
+  });
+
   test('renders READ-ONLY even when global editing is ON, without mutating the editing flag', async () => {
     setDiagramEditing(true);
     const graph: DiagramGraph = {
@@ -1216,6 +1232,16 @@ describe('renderEventFlowGraph', () => {
       // Must persist to its own key, never to the domain canvas's key
       expect(loadDiagramZoom('koi-event-flow')).not.toBeNull();
       expect(loadDiagramZoom('koi-domain-diagram')).toBeNull();
+    } finally {
+      handle?.dispose();
+    }
+  });
+
+  test('mounting with NO saved zoom does not auto-save one — the fit-on-open fallback survives repaints (#769)', async () => {
+    const container = makeContainer();
+    const handle = await renderEventFlowGraph(container, EVENT_FLOW, () => true);
+    try {
+      expect(loadDiagramZoom('koi-event-flow')).toBeNull();
     } finally {
       handle?.dispose();
     }

@@ -215,6 +215,27 @@ describe('reviewStore — persistence', () => {
     expect(store.list().map((t) => t.id)).toEqual(['review-b']); // re-discovered under B, not stuck on A
   });
 
+  it('load notifies subscribers so the Review panel repaints after a folder switch', async () => {
+    const { platform, files } = fakeFs();
+    // Folder A has no reviews.json; folder B holds one thread. The long-lived Review panel repaints
+    // only via subscribe, so hydrating B's threads must notify like every other mutation does.
+    const seed = (id: string, file: string) =>
+      JSON.stringify({ version: 1, threads: [{ id, file, span: span(file), status: 'open', comments: [] }] });
+    files.set('B/.koine/reviews.json', seed('review-b', 'b.koi'));
+
+    let root = 'A';
+    const store = createReviewStore(platform, () => root);
+    await store.load(); // folder A: empty set
+
+    const cb = vi.fn();
+    store.subscribe(cb);
+
+    root = 'B'; // open a different folder
+    await store.load();
+    expect(store.list().map((t) => t.id)).toEqual(['review-b']);
+    expect(cb).toHaveBeenCalled(); // subscribers saw the replaced thread set
+  });
+
   it('loads as empty when the file is missing (no .koine yet) without throwing', async () => {
     const { platform } = fakeFs();
     const store = createReviewStore(platform, () => FOLDER);

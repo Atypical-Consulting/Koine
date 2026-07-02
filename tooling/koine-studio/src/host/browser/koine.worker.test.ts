@@ -65,6 +65,7 @@ describe('WorkerClient (workerClient.ts)', () => {
     const factory = makeWorkerFactory();
     const client = createWorkerClient(factory);
     const fake = factory.instances[0];
+    fake.deliver({ type: 'ready' });
 
     // Start the call (don't await yet — we need to deliver the reply first).
     const pending = client.call('Echo', ['hello']);
@@ -85,6 +86,7 @@ describe('WorkerClient (workerClient.ts)', () => {
     const factory = makeWorkerFactory();
     const client = createWorkerClient(factory);
     const fake = factory.instances[0];
+    fake.deliver({ type: 'ready' });
 
     const pending = client.call('Explode', []);
 
@@ -98,6 +100,7 @@ describe('WorkerClient (workerClient.ts)', () => {
     const factory = makeWorkerFactory();
     const client = createWorkerClient(factory);
     const fake = factory.instances[0];
+    fake.deliver({ type: 'ready' });
 
     const pending = client.call('Echo', ['x']);
     const req = fake.postMessage.mock.calls[0][0] as { id: number };
@@ -183,6 +186,7 @@ describe('WorkerClient (workerClient.ts)', () => {
     const factory = makeWorkerFactory();
     const client = createWorkerClient(factory);
     const fake = factory.instances[0];
+    fake.deliver({ type: 'ready' });
 
     const p1 = client.call('A', []);
     const p2 = client.call('B', []);
@@ -218,6 +222,7 @@ describe('WorkerClient (workerClient.ts)', () => {
     const factory = makeWorkerFactory();
     const client = createWorkerClient(factory);
     const fake = factory.instances[0];
+    fake.deliver({ type: 'ready' });
 
     // Start call A and call B.
     const promiseA = client.call('SlowOp', ['data-a']);
@@ -256,6 +261,7 @@ describe('WorkerClient (workerClient.ts)', () => {
     const factory = makeWorkerFactory();
     const client = createWorkerClient(factory);
     const fake = factory.instances[0];
+    fake.deliver({ type: 'ready' });
 
     const ac = new AbortController();
     const p = client.call('SlowOp', ['x'], { signal: ac.signal });
@@ -416,17 +422,18 @@ describe('WorkerClient (workerClient.ts)', () => {
     client.terminateAndRespawn();
 
     // The fresh generation FAILS to boot: it posts no `ready`, no `boot-failure`, and never replies to
-    // calls. Without a per-call timeout, any call posted now hangs forever (the bug).
+    // calls. Without a per-call timeout, any call made now hangs forever (the bug).
     const newWorker = factory.instances[1];
 
     const p = client.call('Hover', ['x'], { timeoutMs: 20 });
-    const req = newWorker.postMessage.mock.calls[0][0] as { id: number };
 
     // It must REJECT with a timeout error rather than hang.
     await expect(p).rejects.toThrow(/timed out|timeout/i);
 
-    // The pending entry must be removed: a late reply for that id must not double-settle or throw.
-    expect(() => newWorker.deliver({ id: req.id, ok: true, result: 'too-late' })).not.toThrow();
+    // The request was never posted (the client defers posts until the generation is ready), and the
+    // pending entry was removed: a late reply must not double-settle or throw.
+    expect(newWorker.postMessage).not.toHaveBeenCalled();
+    expect(() => newWorker.deliver({ id: 1, ok: true, result: 'too-late' })).not.toThrow();
   });
 
   it('call() with a timeout still resolves normally when the reply arrives in time (timer is cleared)', async () => {
@@ -472,6 +479,67 @@ describe('WorkerClient (workerClient.ts)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Boot-window buffering: a call made while a (re)spawned worker is still booting must not be
+  // dropped. The worker installs its message listener only AFTER the .NET boot resolves
+  // (koine.worker.ts, issue #357), so a request posted during the boot window dispatches into a
+  // listener-less worker and is lost forever — e.g. Stop (terminateAndRespawn) followed by a
+  // keystroke/Compile within the fresh worker's boot.
+  // ---------------------------------------------------------------------------
+
+  it('a call made while a respawned worker is still booting is posted on `ready`, not dropped', async () => {
+    const factory = makeWorkerFactory();
+    const client = createWorkerClient(factory);
+    const oldWorker = factory.instances[0];
+    oldWorker.deliver({ type: 'ready' });
+    await client.whenReady();
+
+    // Stop → respawn; the fresh worker has not booted yet.
+    client.terminateAndRespawn();
+    const newWorker = factory.instances[1];
+
+    // Call during the boot window (e.g. the transport's DiagnoseWorkspace on a keystroke).
+    const p = client.call('DiagnoseWorkspace', ['model']);
+
+    // Nothing may be posted yet — the booting worker has no message listener to receive it.
+    expect(newWorker.postMessage).not.toHaveBeenCalled();
+
+    // Boot completes: the buffered request is posted and the call round-trips normally.
+    newWorker.deliver({ type: 'ready' });
+    await client.whenReady();
+    await Promise.resolve(); // flush the deferred post (readyPromise.then)
+
+    expect(newWorker.postMessage).toHaveBeenCalledOnce();
+    const req = newWorker.postMessage.mock.calls[0][0] as { id: number; method: string; args: unknown[] };
+    expect(req).toMatchObject({ method: 'DiagnoseWorkspace', args: ['model'] });
+    newWorker.deliver({ id: req.id, ok: true, result: '[]' });
+    await expect(p).resolves.toBe('[]');
+  });
+
+  it('a boot-window call superseded by a second respawn is rejected and never posted to any worker', async () => {
+    const factory = makeWorkerFactory();
+    const client = createWorkerClient(factory);
+    factory.instances[0].deliver({ type: 'ready' });
+    await client.whenReady();
+
+    // First respawn, then a call while generation 2 is still booting.
+    client.terminateAndRespawn();
+    const bootingWorker = factory.instances[1];
+    const p = client.call('EmitPreview', ['model']);
+
+    // Second respawn before generation 2 ever boots: the call is cancelled.
+    client.terminateAndRespawn();
+    await expect(p).rejects.toThrow(/cancel/i);
+
+    // Generation 3 boots — the stale deferred post must not fire on either worker.
+    const freshWorker = factory.instances[2];
+    freshWorker.deliver({ type: 'ready' });
+    await client.whenReady();
+    await Promise.resolve();
+    expect(bootingWorker.postMessage).not.toHaveBeenCalled();
+    expect(freshWorker.postMessage).not.toHaveBeenCalled();
   });
 
   it('call({ timeoutMs: 0 }) opts out — a long-running call is never timed out', async () => {

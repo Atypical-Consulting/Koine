@@ -40,6 +40,18 @@ describe('MobileZoneBar', () => {
     fireEvent.keyDown(code, { key: 'End' });
     expect(onSelect).toHaveBeenLastCalledWith('props');
   });
+  test('arrow keys move DOM focus with the selection (roving tabindex moves focus, not just aria-selected)', () => {
+    const store = createAppStore();
+    const onSelect = vi.fn();
+    const { container } = render(<MobileZoneBar store={store} onSelect={onSelect} />);
+    const code = tabs(container).find((t) => t.dataset.zone === 'code')!;
+    code.focus();
+    fireEvent.keyDown(code, { key: 'ArrowRight' });
+    // Without the focus move, focus stays stranded on the old tab (demoted to tabIndex=-1 on the
+    // re-render) and the next Enter/Space would re-activate the OLD zone.
+    expect(onSelect).toHaveBeenLastCalledWith('diagram');
+    expect(document.activeElement).toBe(tabs(container).find((t) => t.dataset.zone === 'diagram'));
+  });
   test('has no axe violations', async () => {
     const store = createAppStore();
     const { container } = render(<MobileZoneBar store={store} onSelect={() => {}} />);

@@ -340,6 +340,47 @@ describe('browser fs file management', () => {
     expect((domain.entries.get('shipment.koi') as MockFile).contents).toBe('context Shipping {}');
   });
 
+  it('moveEntry falls back to copy+delete when the native file move() rejects (cross-FS: OPFS ↔ local)', async () => {
+    // Chromium's FileSystemHandle.move() exists but rejects when the move crosses file systems
+    // (an OPFS-backed workspace ↔ a picked local folder). moveEntry must fall through to its
+    // copy+delete path instead of surfacing the rejection as a dead-end "could not move".
+    const root = sampleRoot();
+    const billing = root.entries.get('billing') as MockDir;
+    const order = billing.entries.get('order.koi') as MockFile & { move?: () => Promise<void> };
+    order.move = vi.fn(async () => {
+      throw new DOMException('cannot move between file systems', 'NotSupportedError');
+    });
+    __setFolderForTest('workspace', root as never);
+    await listEntries('workspace');
+
+    const newToken = await moveEntry('workspace/billing/order.koi', 'workspace', 'empty/order.koi');
+    expect(newToken).toBe('workspace/empty/order.koi');
+    expect(order.move).toHaveBeenCalledOnce(); // the native move was preferred...
+    expect(billing.entries.has('order.koi')).toBe(false); // ...but the fallback moved it anyway
+    const empty = root.entries.get('empty') as MockDir;
+    expect((empty.entries.get('order.koi') as MockFile).contents).toBe('context Billing {}');
+  });
+
+  it('moveEntry falls back to copy+delete when the native directory move() rejects', async () => {
+    const root = sampleRoot();
+    const shipping = root.entries.get('shipping') as MockDir & { move?: () => Promise<void> };
+    shipping.move = vi.fn(async () => {
+      throw new DOMException('cannot move between file systems', 'NotSupportedError');
+    });
+    __setFolderForTest('workspace', root as never);
+    await listEntries('workspace');
+
+    const newToken = await moveEntry('workspace/shipping', 'workspace', 'empty/shipping');
+    expect(newToken).toBe('workspace/empty/shipping');
+    expect(shipping.move).toHaveBeenCalledOnce();
+    expect(root.entries.has('shipping')).toBe(false);
+
+    const empty = root.entries.get('empty') as MockDir;
+    const moved = empty.entries.get('shipping') as MockDir;
+    const domain = moved.entries.get('domain') as MockDir;
+    expect((domain.entries.get('shipment.koi') as MockFile).contents).toBe('context Shipping {}');
+  });
+
   it('rejects malformed names and paths', async () => {
     const root = sampleRoot();
     __setFolderForTest('workspace', root as never);

@@ -58,6 +58,25 @@ describe('saveAllDirtyBuffers', () => {
     expect(b.dirty).toBe(false); // was already clean — untouched
   });
 
+  // Regression: dirty was cleared unconditionally AFTER the awaited write, so an edit landing while
+  // the write was in flight (auto-save + typing) got marked saved even though it never hit disk.
+  test('an edit landing during the awaited write leaves that buffer dirty', async () => {
+    const a = buf('/a', true, 'v1');
+    const m = map(['a', a]);
+    const saved = await saveAllDirtyBuffers(m, {
+      write: async (x) => {
+        // A keystroke lands while the write is in flight — the buffer moves past what is being written.
+        x.text = 'v2';
+        x.dirty = true;
+      },
+      onError: () => {
+        throw new Error('no error expected');
+      },
+    });
+    expect(saved).toBe(1); // the v1 write itself succeeded
+    expect(a.dirty).toBe(true); // but v2 never hit disk — the buffer still counts as unsaved
+  });
+
   test('a failing write keeps that buffer dirty, reports it, and still saves the rest', async () => {
     const a = buf('/a', true);
     const bad = buf('/bad', true);

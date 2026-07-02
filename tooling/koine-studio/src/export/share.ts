@@ -42,11 +42,30 @@ function decodeBase64(b64: string): string {
   return decodeURIComponent(escape(atob(b64.replace(/-/g, '+').replace(/_/g, '/'))));
 }
 
+/**
+ * The canonical public web deployment of Koine Studio — the docs-site embed that deploy-docs.yml
+ * publishes at `/Koine/studio/`. Share links minted on a host whose own origin no one else can open
+ * are based here instead, so the fragment still lands on a Studio that can read it.
+ */
+export const PUBLIC_STUDIO_URL = 'https://atypical-consulting.github.io/Koine/studio/';
+
+/**
+ * The base URL a share link is appended to: the live window's own origin + path + search on a web
+ * host (so a link opens the same deployment that made it), but {@link PUBLIC_STUDIO_URL} on the
+ * Tauri desktop host, whose window origin — `tauri://localhost` on macOS/Linux, `http://tauri.localhost`
+ * on Windows — resolves to nothing in a recipient's browser. Detected from `window.location` (not a
+ * Platform capability) because this module is pure data + window.location by design.
+ */
+function shareBaseUrl(): string {
+  const { protocol, hostname, origin, pathname, search } = window.location;
+  const isWebOrigin = (protocol === 'http:' || protocol === 'https:') && hostname !== 'tauri.localhost';
+  return isWebOrigin ? `${origin}${pathname}${search}` : PUBLIC_STUDIO_URL;
+}
+
 // Retained as the legacy single-file link encoder used by the backward-compatibility decode test; no longer called by the app, which now shares whole workspaces.
-/** A full shareable URL (origin + path + `#model=…`) for the given single model source. */
+/** A full shareable URL (base + `#model=…`) for the given single model source. */
 export function buildShareUrl(source: string): string {
-  const { origin, pathname, search } = window.location;
-  return `${origin}${pathname}${search}#${HASH_KEY}=${encodeBase64(source)}`;
+  return `${shareBaseUrl()}#${HASH_KEY}=${encodeBase64(source)}`;
 }
 
 /**
@@ -58,10 +77,9 @@ export function buildWorkspaceShareUrl(
   files: { relPath: string; text: string }[],
   active?: string
 ): string {
-  const { origin, pathname, search } = window.location;
   const payload: WorkspaceShare = { v: 1, files, ...(active !== undefined ? { active } : {}) };
   const encoded = encodeBase64(JSON.stringify(payload));
-  return `${origin}${pathname}${search}#${HASH_KEY}=${encoded}`;
+  return `${shareBaseUrl()}#${HASH_KEY}=${encoded}`;
 }
 
 /**

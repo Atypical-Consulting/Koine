@@ -101,12 +101,29 @@ describe('exportShare', () => {
 
   it('importSharedWorkspace drops path-escaping files and opens the safe ones in folder mode', async () => {
     const { deps, platform, workspace } = makeDeps();
-    await createExportShare(deps).importSharedWorkspace([
+    const opened = await createExportShare(deps).importSharedWorkspace([
       { relPath: 'model.koi', text: 'a' },
       { relPath: '../escape.koi', text: 'b' },
     ]);
     const materializeArg = (platform.materializeWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][1] as Array<{ relPath: string }>;
     expect(materializeArg.map((f) => f.relPath)).toEqual(['model.koi']); // the `..` file was filtered out
     expect(workspace.openFolderPath).toHaveBeenCalledWith('tok', { recent: false });
+    expect(opened).toBe(true); // a workspace is open — the boot ladder must NOT fall back to the default
+  });
+
+  // importSharedWorkspace reports whether it actually opened a workspace, so the boot ladder can fall
+  // back to the default instead of stranding the editor with zero buffers (every save a silent no-op).
+  it('importSharedWorkspace returns false when every relPath is filtered as unsafe', async () => {
+    const { deps, platform } = makeDeps();
+    const opened = await createExportShare(deps).importSharedWorkspace([{ relPath: '../escape.koi', text: 'b' }]);
+    expect(platform.materializeWorkspace).not.toHaveBeenCalled();
+    expect(opened).toBe(false);
+  });
+
+  it('importSharedWorkspace returns false when the host cannot materialize a workspace', async () => {
+    const { deps, setStatus } = makeDeps({ platform: { materializeWorkspace: vi.fn(async () => null) } });
+    const opened = await createExportShare(deps).importSharedWorkspace([{ relPath: 'model.koi', text: 'a' }]);
+    expect(setStatus).toHaveBeenCalledWith('could not open shared workspace', 'error');
+    expect(opened).toBe(false);
   });
 });

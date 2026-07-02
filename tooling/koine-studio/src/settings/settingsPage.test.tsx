@@ -171,6 +171,38 @@ describe('createSettingsPage', () => {
     expect(setTheme).toHaveBeenCalledWith('light');
   });
 
+  it('a pending (debounced) valid JSON edit is flushed, not dropped, on a JSON→Visual swap', () => {
+    handle = createSettingsPage({ header, body }, cb);
+    jsonRadio(header).click();
+    typeJson(body, '{ "theme": "light" }');
+    // Swap back to Visual INSIDE the debounce window: the document is valid (no diagnostics were shown),
+    // so the user reasonably believes it saved — it must persist and live-apply, not be silently dropped.
+    visualRadio(header).click();
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+    expect(saveSettings.mock.calls.at(-1)![0].theme).toBe('light');
+    expect(setTheme).toHaveBeenCalledWith('light');
+  });
+
+  it('destroy() (the Esc/✕ close path) flushes a pending valid JSON edit', () => {
+    handle = createSettingsPage({ header, body }, cb);
+    jsonRadio(header).click();
+    typeJson(body, '{ "fontSize": 15 }');
+    handle.destroy();
+    handle = undefined;
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+    expect(saveSettings.mock.calls.at(-1)![0].fontSize).toBe(15);
+    expect(cb.onChange).toHaveBeenCalled();
+  });
+
+  it('an INVALID pending draft is still abandoned (never persisted) on a JSON→Visual swap', () => {
+    handle = createSettingsPage({ header, body }, cb);
+    jsonRadio(header).click();
+    typeJson(body, '{ "theme": ');
+    visualRadio(header).click();
+    expect(saveSettings).not.toHaveBeenCalled();
+    expect(cb.onChange).not.toHaveBeenCalled();
+  });
+
   it('refresh() re-seeds the JSON editor when settings changed from another surface', () => {
     localStorage.setItem(MODE_KEY, 'json');
     handle = createSettingsPage({ header, body }, cb);

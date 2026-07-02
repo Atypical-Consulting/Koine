@@ -36,11 +36,17 @@ export interface LifecycleBootDeps {
   legacyScratch: string | null;
   /** The Billing SEED — the default-workspace seed when there's no legacy scratch. */
   seed: string;
-  importSharedWorkspace(files: { relPath: string; text: string }[], active?: string): Promise<void>;
+  /** Returns whether a workspace was actually opened, so the boot ladder can fall back to the default. */
+  importSharedWorkspace(files: { relPath: string; text: string }[], active?: string): Promise<boolean>;
   openWorkspaceWith1File(text: string): Promise<void>;
   openFolderPath(folder: string, opts?: { recent?: boolean; userInitiated?: boolean }): Promise<{ ok: boolean }>;
   /** Host capability: may the cold-boot ladder silently re-open this persisted last-workspace token? */
   isAutoRestorableToken(token: string): Promise<boolean>;
+  /** True when a workspace is already open (the user opened one while the server was still connecting),
+   *  so the intent-less restore ladder must not tear it down. */
+  hasOpenWorkspace(): boolean;
+  /** Overlays.confirmReplaceWork — resolves true when nothing is dirty or the user confirmed the loss. */
+  confirmReplaceWork(title: string, confirmLabel: string): Promise<boolean>;
   /** Open the host's persistent default workspace (workspace.openDefaultWorkspaceFlow). */
   openHostDefaultWorkspaceFlow(seed: string): Promise<{ opened: boolean }>;
   setStatus(text: string, kind: 'green' | 'error'): void;
@@ -100,8 +106,12 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
   }
 
   // Perform the action the user chose on the Home route (#368), handed across via the start-intent. No
-  // unsaved work can exist at a fresh boot, so these skip the confirm-and-replace guard (newModel directly).
-  async function runStartIntent(intent: StartIntent): Promise<void> {
+  // unsaved work can exist at a fresh boot, so the boot ladder skips the confirm-and-replace guard
+  // (newModel directly). A RETURN visit to Home reaches this with the IDE still alive behind the route
+  // — dirty buffers can exist — so the route-intent subscription passes `guarded` and every destructive
+  // action asks first, matching the in-editor New/open paths.
+  async function runStartIntent(intent: StartIntent, opts: { guarded?: boolean } = {}): Promise<void> {
+    if (opts.guarded && !(await deps.confirmReplaceWork('Replace your work?', 'Discard & continue'))) return;
     switch (intent.kind) {
       case 'new':
         await deps.newModel();
@@ -137,14 +147,19 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
       // The workspace opens once the server is up so each file's didOpen resolves cross-file refs.
       // Isolated try/finally per branch: an open failure must not masquerade as a connection failure.
       if (shared?.kind === 'workspace') {
+        let opened = false;
         try {
-          await deps.importSharedWorkspace(shared.files, shared.active);
+          opened = await deps.importSharedWorkspace(shared.files, shared.active);
         } catch (e) {
           console.error('importing shared workspace failed:', e);
           deps.setStatus('could not open shared workspace', 'error');
         } finally {
           clearModelHash();
         }
+        // An import that opened nothing (every relPath filtered as unsafe, a failed materialize, or a
+        // thrown import) must not strand the editor with zero buffers behind it — every save would be a
+        // silent no-op. Fall through to the default workspace, like a plain boot.
+        if (!opened) await openDefaultWorkspaceFlow(legacyScratch ?? seed);
       } else if (shared?.kind === 'single') {
         try {
           await deps.openWorkspaceWith1File(shared.text);
@@ -164,7 +179,10 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
         const intent = takeStartIntent();
         if (intent) {
           await runStartIntent(intent);
-        } else {
+        } else if (!deps.hasOpenWorkspace()) {
+          // The restore is only a fallback for an EMPTY editor: the toolbar is interactive while the
+          // server connects (a multi-second window in the browser), so a folder the user opened during
+          // that window must not be torn down and replaced by the restored/default workspace.
           const last = getLastWorkspace();
           const restorable = !!last && last !== DEFAULT_WS_TOKEN && (await deps.isAutoRestorableToken(last));
           const restoredExample = restorable ? (await deps.openFolderPath(last as string, { recent: false })).ok : false;
@@ -187,7 +205,9 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
   const unsubRouteIntent = appStore.subscribe((s, prev) => {
     if (s.route === 'editor' && prev.route !== 'editor') {
       const intent = takeStartIntent();
-      if (intent) void runStartIntent(intent);
+      // Guarded: unlike the cold boot above, the live editor behind the Home route can hold dirty
+      // buffers, and every start intent replaces the workspace (New even resets it on disk).
+      if (intent) void runStartIntent(intent, { guarded: true });
     }
   });
 

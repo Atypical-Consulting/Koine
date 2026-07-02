@@ -901,6 +901,55 @@ describe("keyboard settings", () => {
         expect(resolveKeybindings().format).toBe("Mod-s");
     });
 
+    // The Reassign flow can hand a command's DEFAULT chord to another command (the prior owner
+    // becomes Unbound). Recording that default back — or resetting to it — must then re-run the
+    // conflict scan rather than silently double-binding the chord on two rows.
+    it("recording a command's own default re-prompts when another command now owns it (post-Reassign)", () => {
+        const onKeybindingsChanged = vi.fn();
+        openPrefs({ onKeybindingsChanged });
+        // Give format's default (Mod-s) to rename via the Reassign flow: format becomes Unbound.
+        record("rename", { key: "s", ctrlKey: true });
+        reassignBtn("rename").click();
+        expect(resolveKeybindings().rename).toBe("Mod-s");
+        expect(resolveKeybindings().format).toBe("");
+
+        // Recording Mod-s back onto format clashes with rename — defer, don't silently double-bind.
+        onKeybindingsChanged.mockClear();
+        record("format", { key: "s", ctrlKey: true });
+        const conflict = conflictOf("format");
+        expect(conflict.hidden).toBe(false);
+        expect(conflict.textContent).toContain("Rename symbol");
+        expect(loadKeybindingOverrides().format).toBe(""); // still unbound until confirmed
+        expect(onKeybindingsChanged).not.toHaveBeenCalled();
+
+        // Confirm: rename unbinds and format's override is DROPPED (default wins, store stays clean).
+        reassignBtn("format").click();
+        expect(loadKeybindingOverrides().format).toBeUndefined();
+        expect(resolveKeybindings().format).toBe("Mod-s");
+        expect(loadKeybindingOverrides().rename).toBe("");
+        expect(chordOf("rename").textContent).toBe("Unbound");
+        expect(onKeybindingsChanged).toHaveBeenCalled();
+    });
+
+    it("per-row Reset re-prompts when another command now owns this command's default (post-Reassign)", () => {
+        const onKeybindingsChanged = vi.fn();
+        openPrefs({ onKeybindingsChanged });
+        record("rename", { key: "s", ctrlKey: true });
+        reassignBtn("rename").click();
+
+        // Reset targets format's default Mod-s, which rename now owns — prompt, no silent write.
+        onKeybindingsChanged.mockClear();
+        resetBtn("format").click();
+        expect(conflictOf("format").hidden).toBe(false);
+        expect(loadKeybindingOverrides().format).toBe(""); // unchanged until confirmed
+        expect(onKeybindingsChanged).not.toHaveBeenCalled();
+
+        reassignBtn("format").click();
+        expect(loadKeybindingOverrides().format).toBeUndefined();
+        expect(resolveKeybindings().format).toBe("Mod-s");
+        expect(loadKeybindingOverrides().rename).toBe("");
+    });
+
     it("suspend disarms the recorder, so no leaked listener rebinds a hidden row", () => {
         const onKeybindingsChanged = vi.fn();
         const pane = openPrefs({ onKeybindingsChanged });

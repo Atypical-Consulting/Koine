@@ -274,12 +274,14 @@ export class KoineLsp {
   /**
    * Full-text sync for `uri`, debounced ~250ms. Dropped until the document has been opened so a
    * didChange can never precede didOpen (edits made during the connect window are safe: didOpen
-   * carries the editor's current full text). The debounce is shared and re-armed per call, so it
-   * always flushes the most recent edit to whichever uri was last changed.
+   * carries the editor's current full text). The debounce timer is shared across uris, so when the
+   * uri switches mid-window (e.g. the assistant's multi-file apply calling changeDoc per file), the
+   * previous uri's pending didChange is flushed first rather than dropped.
    */
   changeDoc(uri: string, text: string): void {
     const doc = this.docs.get(uri);
     if (!doc) return; // not opened yet — drop
+    if (this.pendingUri !== undefined && this.pendingUri !== uri) this.flush();
     doc.text = text;
     this.pendingUri = uri;
     clearTimeout(this.changeTimer);

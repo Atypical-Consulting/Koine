@@ -24,6 +24,7 @@ import { koineMark } from '@/shared/logo';
 import { basename } from '@/shared/path';
 import { domById } from '@/shared/domById';
 import { createLifecycleBoot } from '@/shell/lifecycleBoot';
+import { createFormatActive } from '@/shell/formatActive';
 import { initTheme, onThemeChange } from '@/settings/theme';
 import {
   peekLegacyScratch,
@@ -1270,16 +1271,14 @@ export function init(hooks: IdeHooks = {}): () => void {
   // controller.init()'s construction. The diagnostics strip content (#diag-body / #diag-count) is still
   // owned by editorSession; the controller only toggles which bottom panel is visible.
 
-  // Format the active document via the LSP and apply the edits (shared by the palette command
-  // and format-on-save). Degrades silently if the request fails.
-  async function formatActive(): Promise<void> {
-    try {
-      const edits = await lsp.format();
-      editor.applyEdits(edits);
-    } catch (e) {
-      console.error('format failed:', e);
-    }
-  }
+  // Format the active document via the LSP (shared by the palette command); a response landing after
+  // a file switch or fresh keystrokes is discarded instead of garbling the newer doc (formatActive.ts).
+  const formatActive = createFormatActive({
+    format: () => lsp.format(),
+    getDoc: () => editor.getDoc(),
+    applyEdits: (edits) => editor.applyEdits(edits),
+    activeUri: () => workspace.activeUri(),
+  });
 
   // The command surface — the palette, the command list (getCommands), the toolbar command buttons
   // (Home / New / Generate / Save-to-disk / Theme / Settings + the mobile overflow ⋮), and the global
@@ -1331,6 +1330,8 @@ export function init(hooks: IdeHooks = {}): () => void {
     openWorkspaceWith1File: (text) => workspace.openWorkspaceWith1File(text),
     openFolderPath: (folder, opts) => workspace.openFolderPath(folder, opts),
     isAutoRestorableToken: (token) => platform.isAutoRestorableToken(token),
+    hasOpenWorkspace: () => workspace.rootsList().length > 0 || workspace.buffers.size > 0,
+    confirmReplaceWork: (title, label) => overlays.confirmReplaceWork(title, label),
     openHostDefaultWorkspaceFlow: (seed) => workspace.openDefaultWorkspaceFlow(seed),
     setStatus,
     setOutput: (content, lang) => output.setContent(content, lang),

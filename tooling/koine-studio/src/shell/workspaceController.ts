@@ -989,22 +989,35 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     saveQueued = true;
     clearAutoSaveTimer(); // an explicit save subsumes any pending idle auto-save
     try {
+      // Capture the save target up front: the format round-trip awaits, and the user can switch buffers
+      // (or keep typing) while it is in flight — the response and the write must target the buffer that
+      // was active at REQUEST time, never whatever the editor shows when the response lands.
+      const uri = activeUriValue;
       // Format first (mirrors the editor's Mod-S) when format-on-save is enabled, then persist.
       if (deps.getFormatOnSave()) {
+        const docAtRequest = editor.getDoc();
         try {
           const edits = await lsp.format();
-          editor.applyEdits(edits);
+          // Stale response: the active buffer or the doc changed while the format was in flight —
+          // applying the edits now would silently garble the other/newer doc (positions.ts clamps
+          // out-of-range edits instead of throwing).
+          if (activeUriValue === uri && editor.getDoc() === docAtRequest) editor.applyEdits(edits);
         } catch (e) {
           console.error('format on save failed:', e);
         }
       }
-      const buf = buffers.get(activeUriValue);
+      const buf = buffers.get(uri);
       if (!buf) return;
-      buf.text = editor.getDoc();
-      lsp.changeDoc(activeUriValue, buf.text);
+      if (activeUriValue === uri) {
+        buf.text = editor.getDoc();
+        lsp.changeDoc(uri, buf.text);
+      }
       try {
-        await platform.writeTextFile(buf.path, buf.text);
-        buf.dirty = false;
+        const written = buf.text;
+        await platform.writeTextFile(buf.path, written);
+        // Keystrokes landing while the write is in flight mutate buf.text — only mark clean when the
+        // buffer still holds exactly what hit disk.
+        if (buf.text === written) buf.dirty = false;
         lsp.didSave();
         renderTree();
         onSavedCb?.(); // #470: the on-disk git status changed — refresh the SC panel if its tab is open
@@ -1030,8 +1043,13 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     clearAutoSaveTimer(); // a manual Save all subsumes any pending idle auto-save (no-op when auto-save fired this)
     try {
       if (deps.getFormatOnSave()) {
+        // Same stale-response guard as saveActive: a buffer switch or fresh keystrokes during the
+        // format round-trip make the edits target the wrong/an older doc — discard them.
+        const uri = activeUriValue;
+        const docAtRequest = editor.getDoc();
         try {
-          editor.applyEdits(await lsp.format());
+          const edits = await lsp.format();
+          if (activeUriValue === uri && editor.getDoc() === docAtRequest) editor.applyEdits(edits);
         } catch (e) {
           console.error('format on save failed:', e);
         }

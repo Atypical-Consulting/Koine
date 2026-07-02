@@ -319,9 +319,40 @@ function buildHome(
   );
   launch.appendChild(actions);
 
-  // Recent folders — populated immediately on mount via refreshRecent().
+  // Recent folders — populated immediately on mount via refreshRecent(). The heading and the
+  // free-text filter are created once here (like the gallery's search input) and persist across
+  // renderRecent() rebuilds: the filter re-renders the list on every keystroke, so rebuilding the
+  // input itself would tear down the element being typed into and drop keyboard focus.
   const recent = document.createElement('div');
   recent.className = 'koi-welcome-recent';
+
+  const recentHeading = document.createElement('h2');
+  recentHeading.className = 'koi-welcome-rail-title';
+  recentHeading.textContent = 'Recent';
+
+  const recentFilterId = `koi-welcome-recent-filter-${Math.random().toString(36).slice(2, 8)}`;
+
+  const recentFilterLabel = document.createElement('label');
+  recentFilterLabel.className = 'koi-sr-only';
+  recentFilterLabel.htmlFor = recentFilterId;
+  recentFilterLabel.textContent = 'Filter recent folders';
+
+  const recentFilter = document.createElement('input');
+  recentFilter.type = 'search';
+  recentFilter.id = recentFilterId;
+  recentFilter.className = 'koi-welcome-recent-filter';
+  recentFilter.placeholder = 'Filter recent folders…';
+  recentFilter.addEventListener('input', () => {
+    recentQuery = recentFilter.value;
+    renderRecent();
+  });
+
+  // Only this container is rebuilt per render (empty copy / rows / clear-all). The filter label +
+  // input above are attached before it only while the history is long enough to warrant them.
+  const recentBody = document.createElement('div');
+  recentBody.className = 'koi-welcome-recent-body';
+
+  recent.append(recentHeading, recentBody);
   launch.appendChild(recent);
   hero.appendChild(launch);
 
@@ -381,44 +412,31 @@ function buildHome(
   consoleView.appendChild(buildColophonFooter());
 
   function renderRecent(): void {
-    recent.innerHTML = '';
-
-    const heading = document.createElement('h2');
-    heading.className = 'koi-welcome-rail-title';
-    heading.textContent = 'Recent';
-    recent.appendChild(heading);
+    recentBody.innerHTML = '';
 
     const all = getRecentFolders();
+
+    // Past a handful of recents, show the free-text filter (name or full path). The input is the
+    // persistent one built above: attach/detach it here rather than rebuilding it, and never move
+    // it while it is already connected — either would drop the focus of a user mid-typing.
+    const showFilter = all.length > FILTER_THRESHOLD;
+    if (showFilter && !recentFilter.isConnected) {
+      recent.insertBefore(recentFilterLabel, recentBody);
+      recent.insertBefore(recentFilter, recentBody);
+    } else if (!showFilter) {
+      recentFilterLabel.remove();
+      recentFilter.remove();
+    }
+    // Sync the value only when a render was triggered by something other than the input itself
+    // (e.g. clear-all resetting the query) — same-value writes could still move the caret.
+    if (recentFilter.value !== recentQuery) recentFilter.value = recentQuery;
+
     if (!all.length) {
       const empty = document.createElement('p');
       empty.className = 'koi-welcome-empty';
       empty.textContent = 'Folders you open will show up here.';
-      recent.appendChild(empty);
+      recentBody.appendChild(empty);
       return;
-    }
-
-    // Past a handful of recents, offer a free-text filter (name or full path). The query is
-    // closure-scoped so it persists across the input-driven re-renders.
-    if (all.length > FILTER_THRESHOLD) {
-      const filterId = `koi-welcome-recent-filter-${Math.random().toString(36).slice(2, 8)}`;
-
-      const filterLabel = document.createElement('label');
-      filterLabel.className = 'koi-sr-only';
-      filterLabel.htmlFor = filterId;
-      filterLabel.textContent = 'Filter recent folders';
-
-      const filter = document.createElement('input');
-      filter.type = 'search';
-      filter.id = filterId;
-      filter.className = 'koi-welcome-recent-filter';
-      filter.placeholder = 'Filter recent folders…';
-      filter.value = recentQuery;
-      filter.addEventListener('input', () => {
-        recentQuery = filter.value;
-        renderRecent();
-      });
-      recent.appendChild(filterLabel);
-      recent.appendChild(filter);
     }
 
     const q = recentQuery.trim().toLowerCase();
@@ -488,7 +506,7 @@ function buildHome(
 
       list.appendChild(item);
     }
-    recent.appendChild(list);
+    recentBody.appendChild(list);
 
     // Clear-all sits below the list whenever there's any history (independent of an active filter).
     const clear = document.createElement('button');
@@ -507,7 +525,7 @@ function buildHome(
         renderRecent();
       });
     });
-    recent.appendChild(clear);
+    recentBody.appendChild(clear);
   }
 
   // --- example gallery: search + difficulty-grouped cards -------------------

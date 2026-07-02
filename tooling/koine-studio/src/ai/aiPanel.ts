@@ -125,7 +125,9 @@ export interface AssistantPanel {
   /**
    * Re-point the panel at the current workspace's conversation when the folder changed: reload the
    * transcript from storage and rebuild the bubbles. A no-op when the workspace key is unchanged, so
-   * the host can call it on every tab show without recreating the panel.
+   * the host can call it on every tab show without recreating the panel. Deferred until the in-flight
+   * request settles when one is streaming (a mid-stream rebuild would detach the streaming bubble and
+   * swap the transcript array out from under the turn being committed).
    */
   syncWorkspace(): void;
   /**
@@ -355,6 +357,9 @@ function renderChangeSet(
   // refreshApply() (re-enabling Apply on a retired panel) nor overwrite the "superseded" notice. The
   // reverse of the `applied` guard above, keeping "superseded" a terminal state.
   let invalidated = false;
+  // Whether an onApply is currently pending. refreshApply folds it in so an accept-checkbox toggle
+  // during the in-flight window can't re-enable Apply and start a second, concurrent apply.
+  let inFlight = false;
 
   const applyBtn = document.createElement('button');
   applyBtn.type = 'button';
@@ -374,7 +379,7 @@ function renderChangeSet(
   function refreshApply(): void {
     const n = accepted.size;
     applyBtn.textContent = `Apply ${n} file${n === 1 ? '' : 's'}`;
-    applyBtn.disabled = n === 0;
+    applyBtn.disabled = n === 0 || inFlight;
   }
 
   for (const file of staged) {
@@ -440,6 +445,7 @@ function renderChangeSet(
   }
 
   applyBtn.addEventListener('click', () => {
+    if (inFlight) return; // belt-and-braces re-entrancy guard alongside the disabled button
     const list = staged.filter((f) => accepted.has(f));
     if (!list.length) return;
 
@@ -468,8 +474,10 @@ function renderChangeSet(
     // instant Apply is clicked; the async result below refines it to the final "Applied N" message.
     if (drifted.length) status.textContent = `Applying ${clean.length} clean file${clean.length === 1 ? '' : 's'}.${skipped}`;
 
+    inFlight = true;
     applyBtn.disabled = true; // guard the in-flight window
     void Promise.resolve(handlers.onApply(clean)).then((result) => {
+      inFlight = false;
       // A panel superseded WHILE this apply was in flight is terminal (#684): a late settle must not
       // un-retire it. Covers both the { failed } and the success branch below — no status overwrite,
       // no refreshApply() re-enabling Apply on a panel the user can no longer act on.
@@ -493,6 +501,7 @@ function renderChangeSet(
       status.textContent = `Applied ${clean.length} file${clean.length === 1 ? '' : 's'}.` + skipped;
       discardBtn.remove();
     }).catch((e) => {
+      inFlight = false;
       // A panel superseded mid-apply stays terminal (#684): a late rejection must not re-enable Apply
       // or replace the "superseded" notice with an "Apply failed" one that invites a retry on a retired
       // change set.
@@ -895,12 +904,36 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
   // Restore the current workspace's conversation on first paint.
   rebuildTranscript();
 
+  // Whether a workspace sync arrived while a request was streaming; send()'s finally replays it.
+  let pendingSync = false;
+
+  // Re-point the panel at the current workspace's conversation when the folder changed. Deferred
+  // while a request is in flight: rebuilding the transcript mid-stream would detach the streaming
+  // bubble (addToolStatus inserts before it) and reassign `messages` out from under the in-flight
+  // turn, cross-wiring one workspace's transcript into another's storage key.
+  function syncWorkspace(): void {
+    if (busy()) {
+      pendingSync = true;
+      return;
+    }
+    pendingSync = false;
+    const key = opts.getWorkspaceKey();
+    if (key === loadedKey) return;
+    loadedKey = key;
+    messages = loadChat(key);
+    rebuildTranscript();
+  }
+
   async function send(
     text: string,
     ctxOverride?: AssistantContext,
-    sendOpts?: { offerApply?: boolean },
+    sendOpts?: { offerApply?: boolean; fromInput?: boolean },
   ): Promise<void> {
     const offerApply = sendOpts?.offerApply ?? true;
+    // Whether the prompt came from the textarea (Send button / Ctrl+Enter). Quick actions and
+    // Explain pass their own built prompt, so they must not clear — or, on rollback, overwrite —
+    // a draft the user typed but hasn't sent.
+    const fromInput = sendOpts?.fromInput ?? false;
     const prompt = text.trim();
     if (!prompt || busy()) return;
 
@@ -933,7 +966,12 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     activeChangeSet?.invalidate('superseded');
     activeChangeSet = null;
 
-    input.value = '';
+    // Re-point at the CURRENT workspace before this turn touches history: the folder can switch in
+    // place while the AI rail stays visible (the host only calls syncWorkspace on tab re-show), and
+    // this turn must never be pushed onto the previous folder's transcript.
+    syncWorkspace();
+
+    if (fromInput) input.value = '';
     const userBubble = addBubble('user');
     userBubble.textContent = prompt;
     messages.push({ role: 'user', content: prompt });
@@ -960,18 +998,20 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
 
     // Acquire the busy lock synchronously — BEFORE the first await — so a second rapid send (Enter
     // twice, or Enter then a quick action) can't slip past the busy() guard while getContext, now
-    // async, is in flight. Capture the workspace key now too, so a folder switch mid-stream can't
-    // persist this turn under the wrong workspace.
+    // async, is in flight. Capture the workspace key AND the transcript array now, together, so a
+    // folder switch mid-stream can't persist this turn under the wrong workspace or push it onto
+    // another workspace's history (`messages` is the live binding syncWorkspace reassigns).
     aborter = new AbortController();
     setBusy(true);
     const workspaceKey = opts.getWorkspaceKey();
+    const turnMessages = messages;
     // Commit a finished assistant turn to history + storage under the captured key, carrying the apply
     // opt-out so a replay of an explanatory turn stays apply-free.
     const commitAssistantTurn = (content: string): void => {
       const turn: ChatMessage = { role: 'assistant', content };
       if (!offerApply) turn.offerApply = false;
-      messages.push(turn);
-      saveChat(workspaceKey, messages);
+      turnMessages.push(turn);
+      saveChat(workspaceKey, turnMessages);
     };
     let full = '';
     try {
@@ -1134,10 +1174,12 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       } else {
         // Aborted with nothing, or a real error: roll the whole turn back from BOTH history and
         // transcript (no dangling user turn or orphaned tool lines), and restore the prompt to retry.
-        messages.pop();
+        turnMessages.pop();
         userBubble.remove();
         for (const n of toolNodes) n.remove();
-        input.value = prompt;
+        // Restore the prompt for a retry only when it came from the input; a quick action's canned
+        // prompt must not overwrite a draft the user typed but hasn't sent.
+        if (fromInput) input.value = prompt;
         if (aborted) {
           replyBubble.classList.add('koi-msg-error');
           replyBubble.textContent = 'Stopped.';
@@ -1171,16 +1213,18 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     } finally {
       aborter = null;
       setBusy(false);
+      // Replay a workspace sync that arrived mid-stream, now that the transcript is quiescent.
+      if (pendingSync) syncWorkspace();
       input.focus();
     }
   }
 
-  sendBtn.addEventListener('click', () => void send(input.value));
+  sendBtn.addEventListener('click', () => void send(input.value, undefined, { fromInput: true }));
   stopBtn.addEventListener('click', () => aborter?.abort());
   input.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
-      void send(input.value);
+      void send(input.value, undefined, { fromInput: true });
     }
   });
 
@@ -1188,13 +1232,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     focusInput() {
       input.focus();
     },
-    syncWorkspace() {
-      const key = opts.getWorkspaceKey();
-      if (key === loadedKey) return;
-      loadedKey = key;
-      messages = loadChat(key);
-      rebuildTranscript();
-    },
+    syncWorkspace,
     explainSelection() {
       void runExplain();
     },

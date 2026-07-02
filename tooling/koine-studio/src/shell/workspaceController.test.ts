@@ -593,6 +593,75 @@ describe('createWorkspaceController — saveActive', () => {
     expect(lsp.didSave).toHaveBeenCalled();
   });
 
+  // Regression: lsp.format() targets the buffer active at REQUEST time, but nothing re-checked the
+  // active uri when the response landed — a file switch during the round-trip applied a.koi's edits
+  // into b.koi's document (positions.ts clamps them silently) and then wrote b.koi to disk, while
+  // a.koi (the file the user saved) was never written.
+  test('a format response landing after a file switch is discarded and the ORIGINAL buffer is saved', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    let releaseFormat!: () => void;
+    const staleEdits: TextEdit[] = [
+      { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 7 } }, newText: 'GARBLED' },
+    ];
+    lsp.format.mockReturnValue(new Promise<TextEdit[]>((res) => (releaseFormat = () => res(staleEdits))));
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { getFormatOnSave: () => true }));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const aUri = ws.activeUri(); // a.koi (first by relPath)
+    editor.setDoc('context A { edited }\n');
+    ws.syncActiveBuffer('context A { edited }\n');
+
+    const save = ws.saveActive();
+    ws.activateFile(uriOf('b.koi')); // the user clicks b.koi while the format request is in flight
+    releaseFormat();
+    await save;
+
+    // The stale edits — computed for a.koi — were NOT applied into b.koi's document…
+    expect(editor.applyEdits).not.toHaveBeenCalled();
+    // …and the buffer written is the one active at request time (a.koi), with ITS text; b.koi untouched.
+    expect(platform.writes).toHaveLength(1);
+    expect(platform.writes[0].path).toBe(`${ROOT}/a.koi`);
+    expect(platform.writes[0].contents).toBe('context A { edited }\n');
+    expect(ws.buffers.get(aUri)!.dirty).toBe(false);
+  });
+
+  // Regression: the dirty flag was cleared unconditionally AFTER the awaited disk write, so keystrokes
+  // landing while the write was in flight were marked saved even though they never hit disk.
+  test('keystrokes landing while the disk write is in flight keep the buffer dirty', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    // Gate the write so an edit can land while it is in flight.
+    const origWrite = platform.writeTextFile.bind(platform);
+    let releaseWrite!: () => void;
+    const gate = new Promise<void>((res) => (releaseWrite = res));
+    platform.writeTextFile = async (path: string, contents: string) => {
+      await gate;
+      return origWrite(path, contents);
+    };
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const aUri = ws.activeUri();
+    editor.setDoc('context A { v1 }\n');
+    ws.syncActiveBuffer('context A { v1 }\n');
+
+    const save = ws.saveActive(); // synchronous until the awaited (gated) write
+    editor.setDoc('context A { v2 }\n');
+    ws.syncActiveBuffer('context A { v2 }\n'); // a keystroke lands mid-write
+    releaseWrite();
+    await save;
+
+    // v1 hit disk, but the buffer now holds v2 — it must still count as unsaved.
+    expect(platform.writes[0].contents).toBe('context A { v1 }\n');
+    expect(ws.buffers.get(aUri)!.dirty).toBe(true);
+  });
+
   test('the saveQueued guard drops a concurrent second call', async () => {
     const platform = new FakePlatform();
     platform.files.set('a.koi', 'context A {}\n');
@@ -642,6 +711,35 @@ describe('createWorkspaceController — saveAllDirty', () => {
     expect(ws.buffers.get(bUri)!.dirty).toBe(false);
     expect(ws.buffers.get(cUri)!.dirty).toBe(true);
     expect(setStatus).toHaveBeenCalledWith(expect.stringContaining('Save failed for 1 file'), 'error');
+  });
+
+  // Same stale-format-response regression as saveActive, on the Save-all path (which is also the
+  // auto-save path): edits computed for the file active at request time must not be applied into
+  // whatever document the editor shows when the response lands.
+  test('a format response landing after a file switch is discarded (Save all / auto-save path)', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    let releaseFormat!: () => void;
+    lsp.format.mockReturnValue(
+      new Promise<TextEdit[]>((res) =>
+        (releaseFormat = () =>
+          res([{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 7 } }, newText: 'GARBLED' }])),
+      ),
+    );
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { getFormatOnSave: () => true }));
+    await ws.openFolderPath(ROOT, { recent: false });
+    ws.buffers.get(ws.activeUri())!.dirty = true;
+
+    const save = ws.saveAllDirty();
+    ws.activateFile(uriOf('b.koi')); // switch while the format request is in flight
+    releaseFormat();
+    await save;
+
+    expect(editor.applyEdits).not.toHaveBeenCalled();
   });
 
   test('the saveAllQueued guard drops a concurrent second call', async () => {

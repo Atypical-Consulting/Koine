@@ -133,6 +133,20 @@ describe('Domain navigator a11y — tactical', () => {
     expect(menu).toBeTruthy();
     expect(menu!.textContent).toContain('Reveal in Files');
   });
+
+  it('the ContextMenu key on an AGGREGATE row is a no-op — it must not open an owned child’s ⋯ menu', () => {
+    const el = renderTactical(orderingCtxNode(), noopTacticalHandlers());
+    document.body.appendChild(el);
+
+    // Focus the aggregate treeitem itself (it carries no ⋯ overflow of its own).
+    const agg = el.querySelector<HTMLElement>('.koi-agg')!;
+    agg.tabIndex = 0;
+    agg.focus();
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ContextMenu', bubbles: true }));
+
+    // A descendant lookup would find (and open) the FIRST OWNED LEAF's menu — the wrong target.
+    expect(document.querySelector('.koi-tactical-menu')).toBeNull();
+  });
 });
 
 // --- the per-level filter narrows the active level (reuses the outlineFilter slice) --------------
@@ -182,5 +196,47 @@ describe('Domain navigator a11y — per-level filter', () => {
     expect(host.querySelector('[data-name="Money"]')).toBeTruthy();
     expect(host.querySelector('[data-name="Currency"]')).toBeNull();
     expect(host.querySelector('[data-name="OrderPlaced"]')).toBeNull();
+  });
+});
+
+// --- drill/climb keeps keyboard focus inside the navigator (WCAG 2.4.3) ---------------------------
+// Activating a context row (or the breadcrumb) repaints the level, tearing the focused row out of the
+// DOM — which drops focus to <body> unless the paint moves it into the fresh level.
+describe('Domain navigator a11y — focus continuity across drill/climb', () => {
+  it('keeps focus in the navigator when drilling into a context and climbing back', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = createAppStore();
+    mountDomainNavigator(host, store, fakeLsp());
+    await flush();
+
+    // Keyboard flow: the context row has focus, then Enter activates it (a <button> treeitem clicks natively).
+    const row = host.querySelector<HTMLElement>('[data-ctx="Ordering"]')!;
+    row.focus();
+    row.click();
+    await flush();
+
+    // The tactical level painted — focus must land inside it (on the breadcrumb, the level's first
+    // row), not drop to <body> and restart the Tab order at the app chrome.
+    const back = host.querySelector<HTMLElement>('.koi-breadcrumb-back')!;
+    expect(document.activeElement).toBe(back);
+
+    // Climb back out: focus lands on the strategic level's first treeitem, not <body>.
+    back.click();
+    await flush();
+    expect(document.activeElement).toBe(host.querySelector('[data-ctx="Ordering"]'));
+  });
+
+  it('a filter keystroke repaint does NOT steal focus from the filter input', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = createAppStore();
+    mountDomainNavigator(host, store, fakeLsp());
+    await flush();
+
+    const filter = host.querySelector<HTMLInputElement>('input.koi-domain-filter')!;
+    filter.focus();
+    store.getState().setOutlineFilter('Bill'); // same-altitude repaint (what typing triggers)
+    expect(document.activeElement).toBe(filter);
   });
 });

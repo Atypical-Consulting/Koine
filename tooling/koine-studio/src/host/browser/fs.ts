@@ -738,9 +738,13 @@ export async function moveEntry(
   if (isDir) {
     const src = await resolveDir(token);
     if (copy !== true && typeof src.move === 'function') {
-      await src.move(destParent, destLeaf);
-      purgeRegistries(token);
-      return reRegister(destParent, destLeaf, true, destToken);
+      // move() can reject even where it exists — Chromium can't move an entry between file systems
+      // (OPFS workspace ↔ picked local folder); fall through to copy+delete, which can.
+      try {
+        await src.move(destParent, destLeaf);
+        purgeRegistries(token);
+        return reRegister(destParent, destLeaf, true, destToken);
+      } catch { /* fall through to copy+delete */ }
     }
     const dest = await destParent.getDirectoryHandle(destLeaf, { create: true });
     await copyDirInto(src, dest, destFolderToken, newRelPath);
@@ -748,9 +752,11 @@ export async function moveEntry(
   } else {
     const src = await resolveFile(token);
     if (copy !== true && typeof src.move === 'function') {
-      await src.move(destParent, destLeaf);
-      purgeRegistries(token);
-      return reRegister(destParent, destLeaf, false, destToken);
+      try {
+        await src.move(destParent, destLeaf);
+        purgeRegistries(token);
+        return reRegister(destParent, destLeaf, false, destToken);
+      } catch { /* fall through to copy+delete */ }
     }
     fileHandles.set(destToken, await copyFileInto(src, destParent, destLeaf));
   }

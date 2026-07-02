@@ -242,3 +242,61 @@ describe('SourceControlPanel — save-all-before-commit prompt (#470)', () => {
     expect(git.gitCommit).not.toHaveBeenCalled();
   });
 });
+
+describe('SourceControlPanel — inline diff request identity', () => {
+  // makeGit with a gitDiff whose resolution the TEST controls per path — so one row's fetch can be held
+  // pending while another row is toggled, reproducing a slow `git diff` on a large file.
+  function makeDiffGit(files: GitFile[]) {
+    const pending = new Map<string, (text: string) => void>();
+    const git = {
+      ...makeGit(files),
+      gitDiff: vi.fn(
+        (_token: string, relPath: string, _staged: boolean) =>
+          new Promise<string>((resolve) => {
+            pending.set(relPath, resolve);
+          }),
+      ),
+    };
+    return { git, pending };
+  }
+
+  const twoFiles: GitFile[] = [
+    { relPath: 'a.koi', staged: false, status: 'modified' },
+    { relPath: 'b.koi', staged: false, status: 'modified' },
+  ];
+
+  test("a late diff resolve from a previously-clicked row never overwrites the open row's diff", async () => {
+    const { git, pending } = makeDiffGit(twoFiles);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    // Open a.koi (its fetch stays pending — a slow `git diff`), then open b.koi before it lands.
+    fireEvent.click(await view.findByRole('button', { name: 'a.koi modified' }));
+    fireEvent.click(view.getByRole('button', { name: 'b.koi modified' }));
+
+    pending.get('b.koi')!('diff for b.koi');
+    await waitFor(() => expect(view.getByLabelText('Diff for b.koi').textContent).toContain('diff for b.koi'));
+
+    // a's slow fetch finally resolves — it must be discarded, not painted into b's expanded row.
+    pending.get('a.koi')!('diff for a.koi');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(view.getByLabelText('Diff for b.koi').textContent).toContain('diff for b.koi');
+    expect(view.container.textContent).not.toContain('diff for a.koi');
+  });
+
+  test("opening another row clears the previous row's diff while the new fetch is in flight", async () => {
+    const { git, pending } = makeDiffGit(twoFiles);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    fireEvent.click(await view.findByRole('button', { name: 'a.koi modified' }));
+    pending.get('a.koi')!('diff for a.koi');
+    await waitFor(() => expect(view.getByLabelText('Diff for a.koi').textContent).toContain('diff for a.koi'));
+
+    // b's freshly-expanded row must not display a's diff while its own fetch is pending.
+    fireEvent.click(view.getByRole('button', { name: 'b.koi modified' }));
+    const diffB = await view.findByLabelText('Diff for b.koi');
+    expect(diffB.textContent).toBe('No changes to show.');
+
+    pending.get('b.koi')!('diff for b.koi');
+    await waitFor(() => expect(view.getByLabelText('Diff for b.koi').textContent).toContain('diff for b.koi'));
+  });
+});
