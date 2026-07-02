@@ -27,16 +27,19 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--koi-space-3);
-  height: 52px;
-  padding: 0 clamp(16px, 3vw, 28px);
-  background: var(--koi-paper);
+  /* Match the editor's #toolbar exactly (see layout/_toolbar.scss) so the brand + controls sit at the
+     same position and the bar is the same height — navigating Home↔Editor never shifts the chrome:
+     the same padding, the same paper-2→paper gradient, the same --koi-line bottom border, and the same
+     accent-gradient hairline (::after). No fixed height — the padding + content set it, like #toolbar. */
+  padding: var(--koi-space-2-75) var(--koi-space-4);
+  background: linear-gradient(180deg, var(--koi-paper-2), color-mix(in srgb, var(--koi-paper-2) 80%, var(--koi-paper)));
+  border-bottom: 1px solid var(--koi-line);
 
   &::after {
     content: '';
     position: absolute;
-    inset: auto 0 0 0;
+    inset: auto 0 -1px 0;
     height: 1px;
-    /* The full accent→cyan gradient, held back to a hairline weight so it reads as a divider, not a bar. */
     background: var(--koi-accent-grad);
     opacity: 0.5;
   }
@@ -171,12 +174,21 @@
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
-  padding: clamp(20px, 3vw, 34px) clamp(20px, 3.4vw, 40px) clamp(22px, 3vw, 34px);
+  /* Horizontal page inset only — NO top/bottom — so the console body fills the card top-to-bottom and its
+     vertical hero|launch divider runs floor-to-ceiling (top-bar hairline to the window bottom). The
+     columns own the top/bottom inset (so content isn't flush); the gallery view restores a full inset on
+     itself below, since it has no full-height divider to preserve. */
+  padding: 0 clamp(20px, 3.4vw, 40px);
   animation: koi-fade 0.28s ease both;
 
   &[hidden] {
     display: none;
   }
+}
+
+/* The gallery view keeps the page inset the console body pushes into its columns. */
+.koi-gallery-view {
+  padding: clamp(20px, 3vw, 34px) clamp(20px, 3.4vw, 40px) clamp(22px, 3vw, 34px);
 }
 
 /* --- top bar -------------------------------------------------------------- */
@@ -374,9 +386,11 @@
   display: flex;
   flex-direction: column;
   /* Left column scrolls independently of the launch rail; inset from the dividing hairline on its right.
-     `hidden auto` (not a bare `overflow-y`) so a wide child can't raise a spurious horizontal scrollbar. */
+     `hidden auto` (not a bare `overflow-y`) so a wide child can't raise a spurious horizontal scrollbar.
+     Owns the top/bottom inset (the view keeps the horizontal one) so the body grid — and the vertical
+     divider between the columns — runs edge-to-edge (top-bar hairline to the window bottom). */
   overflow: hidden auto;
-  padding-right: clamp(24px, 4vw, 56px);
+  padding: clamp(20px, 3vw, 34px) clamp(24px, 4vw, 56px) clamp(22px, 3vw, 34px) 0;
 }
 
 .koi-welcome-eyebrow {
@@ -513,12 +527,16 @@
   display: flex;
   flex-direction: column;
   gap: clamp(18px, 2.4vw, 26px);
+  /* The full-height vertical divider between the hero and the launch rail. The body grid is edge-to-edge
+     (the columns carry the inset), so this border runs floor-to-ceiling and meets the top-bar hairline. */
   border-left: 1px solid var(--koi-line);
   /* `overflow: hidden auto` (not a bare `overflow-y: auto`): when only one axis is set to a non-visible
      value the other computes to `auto`, so a sub-pixel-wide child would raise a spurious horizontal
      scrollbar in the rail. Pin the x-axis hidden and keep only the vertical scroll. */
   overflow: hidden auto;
-  padding-left: clamp(24px, 4vw, 56px);
+  /* Owns the top/bottom inset (the view keeps the horizontal one); the left inset holds content off the
+     dividing hairline. */
+  padding: clamp(20px, 3vw, 34px) 0 clamp(22px, 3vw, 34px) clamp(24px, 4vw, 56px);
 }
 
 .koi-welcome-rail-title {
@@ -1533,17 +1551,18 @@
     overflow-y: auto;
   }
 
+  /* Stacked: no vertical divider, so both columns get symmetric horizontal inset (the divider-side inset
+     collapses). The launch's top border replaces the vertical one. */
   .koi-welcome-lede {
     overflow-y: visible;
-    padding-right: 0;
+    padding: clamp(20px, 3vw, 34px) clamp(20px, 3.4vw, 40px) 0;
   }
 
   .koi-welcome-launch {
     border-left: none;
     border-top: 1px solid var(--koi-line);
     overflow-y: visible;
-    padding-left: 0;
-    padding-top: clamp(20px, 5vw, 28px);
+    padding: clamp(20px, 5vw, 28px) clamp(20px, 3.4vw, 40px) clamp(22px, 3vw, 34px);
   }
 
   /* Stack the colophon so it doesn't crowd the hero: chip → links → byline, top-aligned. */
