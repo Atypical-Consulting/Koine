@@ -2,7 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.Docs;
+namespace Koine.Compiler;
 
 /// <summary>
 /// State-machine slice of <see cref="DocsEmitter"/>: renders each entity state machine as a Mermaid

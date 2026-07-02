@@ -2,7 +2,7 @@ using System.Text;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Ast.Bound;
 
-namespace Koine.Compiler.Emit.CSharp;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Translates the target-agnostic <see cref="Expr"/> sublanguage into C#

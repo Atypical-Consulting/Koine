@@ -1,7 +1,8 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.TypeScript;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The repository + unit-of-work slice of the TypeScript Infrastructure layer (issue #241): concrete

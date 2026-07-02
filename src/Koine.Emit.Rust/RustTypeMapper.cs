@@ -1,6 +1,6 @@
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.Rust;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Maps Koine <see cref="TypeRef"/>s to their Rust type strings.

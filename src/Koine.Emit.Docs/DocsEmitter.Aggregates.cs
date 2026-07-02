@@ -1,7 +1,7 @@
 using System.Text;
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.Docs;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Aggregate slice of <see cref="DocsEmitter"/>: the class-node renderers (the root entity stereotyped

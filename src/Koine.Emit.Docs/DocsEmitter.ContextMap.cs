@@ -1,7 +1,8 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.Docs;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Context-map slice of <see cref="DocsEmitter"/>: the strategic DDD map as a Mermaid <c>flowchart LR</c>.

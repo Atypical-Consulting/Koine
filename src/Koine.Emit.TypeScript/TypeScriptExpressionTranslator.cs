@@ -1,7 +1,7 @@
 using System.Text;
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.TypeScript;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Translates the target-agnostic <see cref="Expr"/> sublanguage into TypeScript expression

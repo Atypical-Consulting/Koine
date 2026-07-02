@@ -1,6 +1,7 @@
 using System.Text;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.CSharp;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The runtime-support slice of <see cref="CSharpEmitter"/>: the once-emitted base

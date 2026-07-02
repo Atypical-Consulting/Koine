@@ -1,6 +1,6 @@
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit;
+namespace Koine.Compiler;
 
 /// <summary>
 /// How a <c>create</c> factory obtains the new aggregate's identity (#324). The default is to mint a

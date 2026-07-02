@@ -1,6 +1,6 @@
-using Koine.Compiler.Emit.AsyncApi;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit;
+namespace Koine.Compiler;
 
 /// <summary>Provider for the AsyncAPI 3.0 emitter (no per-emit options).</summary>
 public sealed class AsyncApiEmitterProvider : IEmitterProvider

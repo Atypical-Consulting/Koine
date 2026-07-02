@@ -1,7 +1,8 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.Glossary;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Emits a Markdown ubiquitous-language glossary from a validated model, grouped

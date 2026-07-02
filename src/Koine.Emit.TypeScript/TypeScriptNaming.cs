@@ -1,4 +1,4 @@
-namespace Koine.Compiler.Emit.TypeScript;
+namespace Koine.Compiler;
 
 /// <summary>
 /// TypeScript-specific identifier casing helpers. Types are <c>PascalCase</c>,

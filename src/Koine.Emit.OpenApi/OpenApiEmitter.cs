@@ -1,6 +1,7 @@
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.OpenApi;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Emits an <a href="https://spec.openapis.org/oas/v3.1.0">OpenAPI 3.1</a> document per bounded context

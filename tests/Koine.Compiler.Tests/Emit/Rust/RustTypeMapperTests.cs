@@ -1,5 +1,4 @@
 using Koine.Compiler.Ast;
-using Koine.Compiler.Emit.Rust;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
@@ -13,7 +12,7 @@ public class RustTypeMapperTests
     private static ModelIndex EmptyIndex()
     {
         var result = new KoineCompiler().Compile(
-            "context C { value V { x: Int } }", new Emit.CSharp.CSharpEmitter());
+            "context C { value V { x: Int } }", new CSharpEmitter());
         return new SemanticModel(result.Model!).Index;
     }
 
@@ -21,7 +20,7 @@ public class RustTypeMapperTests
     {
         var result = new KoineCompiler().Compile(
             "context C { enum Bare { Active Inactive } enum Data(n: Int) { One(1) } value V { b: Bare d: Data } }",
-            new Emit.CSharp.CSharpEmitter());
+            new CSharpEmitter());
         return new SemanticModel(result.Model!).Index;
     }
 

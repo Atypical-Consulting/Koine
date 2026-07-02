@@ -1,7 +1,7 @@
 using System.Text;
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.Rust;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The events/CQRS slice of <see cref="RustEmitter"/>. A Koine <c>event</c> (and cross-boundary

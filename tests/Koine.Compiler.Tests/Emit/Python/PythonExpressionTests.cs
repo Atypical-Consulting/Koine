@@ -1,5 +1,4 @@
 using Koine.Compiler.Ast;
-using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;

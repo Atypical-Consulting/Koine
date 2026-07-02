@@ -1,12 +1,13 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Koine.Compiler;
 using static Koine.Wasm.Tests.WireParityHarness;
 
 namespace Koine.Wasm.Tests;
 
 /// <summary>
 /// Dual-backend wire parity for the structured diagram graphs (issue #93, task 2). The same
-/// <see cref="Koine.Compiler.Emit.Docs.DocsEmitter"/> graph must serialize <b>field-for-field
+/// <see cref="DocsEmitter"/> graph must serialize <b>field-for-field
 /// identically</b> over the stdio LSP server (<see cref="LspServer"/>, hand-written camelCase dict
 /// keys) and the in-browser WASM JSExport surface (<see cref="Koine.Wasm.CompilerInterop"/>,
 /// source-gen CamelCase DTOs). This suite is the guard the later Studio tasks (renderer, jump-to-source)

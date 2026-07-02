@@ -1,6 +1,6 @@
 using System.ComponentModel;
 using Koine.Cli.Infrastructure;
-using Koine.Compiler.Emit.Docs;
+using Koine.Compiler;
 using Koine.Compiler.Emit.Glossary;
 using Koine.Compiler.Services;
 using Spectre.Console.Cli;

@@ -1,6 +1,6 @@
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.TypeScript;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Maps Koine <see cref="TypeRef"/>s to their TypeScript type names per the R16.2 type

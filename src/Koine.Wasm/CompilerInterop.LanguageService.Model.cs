@@ -1,10 +1,10 @@
 using System.Runtime.InteropServices.JavaScript;
 using System.Runtime.Versioning;
 using System.Text.Json;
+using Koine.Compiler;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
-using Koine.Compiler.Emit.Docs;
 using Koine.Compiler.Emit.Glossary;
 using Koine.Compiler.Emit.Grammar;
 using Koine.Compiler.Formatting;
@@ -231,7 +231,7 @@ public static partial class CompilerInterop
 
     /// <summary>
     /// Living-documentation files (Mermaid-in-Markdown) for the merged workspace, reusing the same
-    /// <see cref="Koine.Compiler.Emit.Docs.DocsEmitter"/> as <c>koine build … --target docs</c>. A model
+    /// <see cref="DocsEmitter"/> as <c>koine build … --target docs</c>. A model
     /// that fails to parse degrades to <c>{ files: [] }</c> rather than throwing. Returns
     /// <c>{ files: [{ path, contents }] }</c>.
     /// </summary>

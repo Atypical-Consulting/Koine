@@ -98,8 +98,9 @@ The whole thing is orchestrated by `Services/KoineCompiler.cs`.
 > (`IEmitter`, `IEmitterProvider`, `EmitterOptions`, `EmitterRegistry`, `EmitterLoader`) — the
 > orchestrator needs them — plus target-agnostic model utilities the core also consumes
 > (`ExprDescriber`, `Emit/Glossary/GlossaryModelBuilder`). The `Koine.Emit.All` aggregator owns
-> `BuiltInEmitterProviders.All` and is what the CLI / MCP / Wasm / tests reference. **Namespaces stay
-> `Koine.Compiler.Emit.*`** (assembly name ≠ namespace), so adding a target is a new
+> `BuiltInEmitterProviders.All` and is what the CLI / MCP / Wasm / tests reference. **Emitter
+> implementations live in the root `Koine.Compiler` namespace** (assembly name ≠ namespace); only the
+> emit **contracts** stay under `Koine.Compiler.Emit`. So adding a target is a new
 > `Koine.Emit.<Target>` project, never a change to `Ast/` or the contracts.
 
 - **`Ast/`** is the target-agnostic semantic model (`SemanticModel`, `Nodes`, `Expressions`,
@@ -113,8 +114,9 @@ The whole thing is orchestrated by `Services/KoineCompiler.cs`.
   `UsingCollector`, `CSharpEmitterOptions` (plus `OperatorNeedsAnalyzer`, now in `Koine.Emit.Common`
   since the five code emitters share it). `Koine.Emit.Glossary` emits the ubiquitous-language glossary;
   `Koine.Emit.{TypeScript,Python,Php,Rust}` are the additional language emitters; `Koine.Emit.Docs`,
-  `Koine.Emit.AsyncApi`, `Koine.Emit.OpenApi` emit living docs and API specs. All namespaces remain
-  `Koine.Compiler.Emit.*`.
+  `Koine.Emit.AsyncApi`, `Koine.Emit.OpenApi` emit living docs and API specs. All these emitter
+  implementations live in the root `Koine.Compiler` namespace (the emit contracts stay under
+  `Koine.Compiler.Emit`).
 - **`Services/`** also hosts the editor/tooling backend reused by `koine lsp`: `WorkspaceIndex`,
   `KoineLanguageService`, `SemanticTokenProvider`, `TokenLocator`, `RefactorService`,
   `CompatibilityChecker`.

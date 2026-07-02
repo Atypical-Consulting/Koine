@@ -1,5 +1,3 @@
-using Koine.Compiler.Emit.Php;
-
 namespace Koine.Compiler.Tests;
 
 /// <summary>

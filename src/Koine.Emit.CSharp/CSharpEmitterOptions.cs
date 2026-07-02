@@ -1,4 +1,4 @@
-namespace Koine.Compiler.Emit.CSharp;
+namespace Koine.Compiler;
 
 /// <summary>
 /// How a Koine <c>Instant</c> field is rendered in emitted C# (R16.1). The default
@@ -99,8 +99,8 @@ internal enum RegexMode
 /// unbounded and become a ReDoS sink (issue #641). A timed-out match surfaces as a contained
 /// <c>RegexMatchTimeoutException</c> from the constructor, not a hang.</para>
 /// <para><see cref="RegexMode"/> selects how a <c>matches</c> invariant's regex guard is evaluated:
-/// <see cref="CSharp.RegexMode.Inline"/> (the default) emits the inline <c>Regex.IsMatch(…)</c> call,
-/// byte-identical to today; <see cref="CSharp.RegexMode.SourceGenerated"/> emits the opt-in cached,
+/// <see cref="Compiler.RegexMode.Inline"/> (the default) emits the inline <c>Regex.IsMatch(…)</c> call,
+/// byte-identical to today; <see cref="Compiler.RegexMode.SourceGenerated"/> emits the opt-in cached,
 /// allocation-free <c>[GeneratedRegex]</c> partial-method form (issue #795). The same
 /// <see cref="RegexMatchTimeoutMs"/> flows into both, so match semantics are identical — only the
 /// evaluation strategy differs.</para>

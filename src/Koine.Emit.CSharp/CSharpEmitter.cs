@@ -2,8 +2,9 @@ using System.Buffers;
 using System.Text;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Ast.Bound;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.CSharp;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The C# backend. Turns a validated <see cref="KoineModel"/> into a set of C#

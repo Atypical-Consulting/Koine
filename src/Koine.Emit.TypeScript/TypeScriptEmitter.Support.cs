@@ -1,8 +1,9 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.TypeScript;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The orchestration support for <see cref="TypeScriptEmitter"/>: per-run state, file layout

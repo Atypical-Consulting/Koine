@@ -1,6 +1,6 @@
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.OpenApi;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The <c>paths</c> layer of the OpenAPI emitter: the behavioral surface of a bounded context becomes

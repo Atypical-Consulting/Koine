@@ -1,8 +1,8 @@
 using System.Text;
 using Koine.Compiler.Ast;
-using Koine.Compiler.Emit.CSharp;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.TypeScript;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The TypeScript backend (R16.2). Turns a validated <see cref="KoineModel"/> into idiomatic,

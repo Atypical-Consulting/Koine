@@ -1,5 +1,4 @@
 using Koine.Compiler.Ast;
-using Koine.Compiler.Emit.Python;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
@@ -14,7 +13,7 @@ public class PythonTypeMapperTests
     // enum classification. For all primitive/collection tests we just need an empty index.
     private static ModelIndex EmptyIndex()
     {
-        var result = new KoineCompiler().Compile("context C { value V { x: Int } }", new Emit.CSharp.CSharpEmitter());
+        var result = new KoineCompiler().Compile("context C { value V { x: Int } }", new CSharpEmitter());
         return new SemanticModel(result.Model!).Index;
     }
 
@@ -22,7 +21,7 @@ public class PythonTypeMapperTests
     {
         var result = new KoineCompiler().Compile(
             "context C { enum Status { Active Inactive } value V { s: Status } }",
-            new Emit.CSharp.CSharpEmitter());
+            new CSharpEmitter());
         return new SemanticModel(result.Model!).Index;
     }
 

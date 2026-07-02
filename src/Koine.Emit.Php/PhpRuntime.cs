@@ -1,4 +1,4 @@
-namespace Koine.Compiler.Emit.Php;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The once-emitted PHP runtime support, the analogue of the C# emitter's <c>Koine.Runtime</c>

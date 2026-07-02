@@ -1,8 +1,9 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.Python;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Orchestration support for <see cref="PythonEmitter"/>: per-run state, the Python package/file

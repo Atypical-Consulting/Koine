@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Koine.Compiler;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Formatting;
 using Koine.Compiler.Services;
@@ -1838,7 +1839,7 @@ internal sealed class LspServer
 
     /// <summary>
     /// Emits the ubiquitous-language glossary (markdown) for the whole merged workspace, reusing
-    /// the same <see cref="Koine.Compiler.Emit.Glossary.GlossaryEmitter"/> as <c>koine build … --glossary</c>.
+    /// the same <see cref="GlossaryEmitter"/> as <c>koine build … --glossary</c>.
     /// The request is workspace-scoped; the <c>uri</c> is a conventional anchor only. A null model
     /// (any file has a syntax error) degrades to <c>{ "markdown": "" }</c> rather than throwing.
     /// </summary>
@@ -1851,7 +1852,7 @@ internal sealed class LspServer
             return new Dictionary<string, object?> { ["markdown"] = "" };
         }
 
-        var markdown = new Compiler.Emit.Glossary.GlossaryEmitter().Emit(model)[0].Contents;
+        var markdown = new GlossaryEmitter().Emit(model)[0].Contents;
         return new Dictionary<string, object?> { ["markdown"] = markdown };
     }
 
@@ -2221,7 +2222,7 @@ internal sealed class LspServer
 
     /// <summary>
     /// Emits the living-documentation files (Mermaid-in-Markdown) for the whole merged workspace,
-    /// reusing the same <see cref="Koine.Compiler.Emit.Docs.DocsEmitter"/> as
+    /// reusing the same <see cref="DocsEmitter"/> as
     /// <c>koine build … --target docs</c>. A null model (any file has a syntax error) degrades to
     /// <c>{ "files": [] }</c> rather than throwing. Returns <c>{ files: [{ path, contents }] }</c>.
     /// </summary>
@@ -2234,7 +2235,7 @@ internal sealed class LspServer
             return new Dictionary<string, object?> { ["files"] = Array.Empty<object>() };
         }
 
-        var emitter = new Compiler.Emit.Docs.DocsEmitter();
+        var emitter = new DocsEmitter();
         var diagramsByFile = emitter.EmitDiagrams(model);
         var files = emitter.Emit(model)
             .Select(f => (object)new Dictionary<string, object?>
@@ -2256,8 +2257,8 @@ internal sealed class LspServer
     // keys serialize verbatim. These MUST match the WASM W* DTOs (source-gen CamelCase) and the
     // lsp.ts interfaces field-for-field; the parity test guards that they do.
 
-    /// <summary>Maps one <see cref="Koine.Compiler.Emit.Docs.DiagramDescriptor"/> to its wire dict.</summary>
-    internal static Dictionary<string, object?> MapDiagram(Compiler.Emit.Docs.DiagramDescriptor d) => new()
+    /// <summary>Maps one <see cref="DiagramDescriptor"/> to its wire dict.</summary>
+    internal static Dictionary<string, object?> MapDiagram(DiagramDescriptor d) => new()
     {
         ["caption"] = d.Caption,
         ["kind"] = d.Kind,
@@ -2265,19 +2266,19 @@ internal sealed class LspServer
         ["graph"] = MapGraph(d.Graph),
     };
 
-    /// <summary>Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramGraph"/> to its <c>{ nodes, edges }</c> wire dict.</summary>
-    private static Dictionary<string, object?> MapGraph(Compiler.Emit.Docs.DiagramGraph g) => new()
+    /// <summary>Maps a <see cref="DiagramGraph"/> to its <c>{ nodes, edges }</c> wire dict.</summary>
+    private static Dictionary<string, object?> MapGraph(DiagramGraph g) => new()
     {
         ["nodes"] = g.Nodes.Select(MapNode).ToArray(),
         ["edges"] = g.Edges.Select(MapEdge).ToArray(),
     };
 
     /// <summary>
-    /// Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramNode"/> (its span stays raw 1-based). Class nodes
+    /// Maps a <see cref="DiagramNode"/> (its span stays raw 1-based). Class nodes
     /// (aggregate/value object/enum/event/entity) carry a <c>stereotype</c> + UML <c>members</c>; the
     /// state/context/integration nodes carry <c>null</c>/<c>[]</c> for both and stay simple boxes.
     /// </summary>
-    private static Dictionary<string, object?> MapNode(Compiler.Emit.Docs.DiagramNode n) => new()
+    private static Dictionary<string, object?> MapNode(DiagramNode n) => new()
     {
         ["id"] = n.Id,
         ["label"] = n.Label,
@@ -2290,15 +2291,15 @@ internal sealed class LspServer
         ["doc"] = n.Doc,
     };
 
-    /// <summary>Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramMember"/> to its <c>{ text, kind }</c> wire dict.</summary>
-    private static Dictionary<string, object?> MapMember(Compiler.Emit.Docs.DiagramMember m) => new()
+    /// <summary>Maps a <see cref="DiagramMember"/> to its <c>{ text, kind }</c> wire dict.</summary>
+    private static Dictionary<string, object?> MapMember(DiagramMember m) => new()
     {
         ["text"] = m.Text,
         ["kind"] = m.Kind,
     };
 
-    /// <summary>Maps a <see cref="Koine.Compiler.Emit.Docs.DiagramEdge"/> (<c>label</c> may be null).</summary>
-    private static Dictionary<string, object?> MapEdge(Compiler.Emit.Docs.DiagramEdge e) => new()
+    /// <summary>Maps a <see cref="DiagramEdge"/> (<c>label</c> may be null).</summary>
+    private static Dictionary<string, object?> MapEdge(DiagramEdge e) => new()
     {
         ["from"] = e.From,
         ["to"] = e.To,

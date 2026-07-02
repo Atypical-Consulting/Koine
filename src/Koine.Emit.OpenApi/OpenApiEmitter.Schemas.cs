@@ -1,6 +1,6 @@
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.OpenApi;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The <c>components/schemas</c> layer of the OpenAPI emitter: value objects, read models, and enums

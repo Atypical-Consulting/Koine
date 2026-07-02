@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Koine.Compiler.Emit.Python;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Python-specific identifier casing and keyword-escaping helpers. Types are <c>PascalCase</c>,
