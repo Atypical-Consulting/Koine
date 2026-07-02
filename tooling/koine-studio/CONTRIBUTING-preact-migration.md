@@ -87,22 +87,30 @@ authoritative for style:
   (type-checked): a fire-and-forget async call must be `await`ed, `.catch()`-ed, or explicitly `void`-ed.
 - **`domById` over bare `getElementById`** — `no-restricted-properties`: look up required chrome through
   `src/shared/domById.ts` so a missing `#id` throws loudly instead of a silent `null`.
-- **Escape-before-`innerHTML`** — `no-restricted-syntax` bans `x.innerHTML = …`; use `textContent` / `el()`
-  / JSX, or `renderMarkdown` output behind a justified disable.
+- **Escape-before-`innerHTML`** — `no-restricted-syntax` bans the HTML-injection sinks `x.innerHTML =` /
+  `x.outerHTML =` / `insertAdjacentHTML(…)`; use `textContent` / `el()` / JSX, or `renderMarkdown` output
+  behind a justified disable.
 - **react-hooks rules** — `react-hooks/rules-of-hooks` + `exhaustive-deps` (the plugin is source-level, so
   it works on Preact's `preact/hooks` without a compat shim).
 
 ### The disable protocol (every escape hatch is justified)
 
-- **Every `eslint-disable` carries a `-- <reason>` justification** on the same directive — no bare disables.
+This is a **review convention**, not a lint rule — the gate enforces the four rules above, not the *shape*
+of disable comments (no `require-description` rule is configured). Reviewers hold the line on it:
+
+- **Every `eslint-disable` should carry a `-- <reason>` justification** — no bare disables. New directives
+  use the same-line `-- reason` form; a few pre-#978 directives (e.g. the `react-hooks/exhaustive-deps`
+  ones in `DeckStage.tsx` / `searchController.tsx`) put the reason on the preceding line — that's fine.
 - **The `innerHTML` allow-list has two tiers** in `eslint.config.mjs`:
   - **Permanent islands** (`src/editor/**`, `src/diagrams/diagrams-maxgraph.ts`, `src/host/**`) — the
     CodeMirror / maxGraph / host-seam non-goals above; imperative by design, off permanently.
-  - **Pending-migration islands** — one entry per file, **each naming the migration issue that deletes it**
-    (explorer → #989, aiPanel → #990, the self-contained panels → #991, the model/docs builders → #992).
-    This is a freeze-then-shrink budget (à la the #757 line budget): the ban catches any NEW `innerHTML`
-    site, and the entry is removed when its panel migrates to Preact/JSX. **Shrinking this allow-list is
-    the definition of done for the migration arc.**
+  - **Pending-migration islands** — one entry per already-imperative panel (a few related panels may share
+    one entry), **each naming the migration issue that retires it** (explorer → #989, aiPanel → #990, the
+    self-contained panels welcome/about/generate-project → #991, the model/docs builders → #992; settings
+    `prefs.ts` and `inspectorController.tsx` span the arc — the config lists their exact issue set). This
+    is a **file-level** allow-list, not a per-file count budget: it freezes the *set of files* permitted to
+    use `innerHTML` — any new file, and all non-island prod, stays fully gated — and shrinks as each panel
+    migrates. **Shrinking this allow-list to empty is the definition of done for the migration arc.**
 
 ## Inventory of imperative islands (grouped)
 

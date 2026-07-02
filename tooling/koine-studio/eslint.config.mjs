@@ -26,13 +26,23 @@ export default tseslint.config(
         property: 'getElementById',
         message: 'Use domById (src/shared/domById.ts) so a missing #id throws loudly instead of a silent null.',
       }],
-      'no-restricted-syntax': ['error', {
-        // Any `x.innerHTML = …` (and `+=`). The escape-before-innerHTML contract (editor/markdown.ts)
-        // lives outside the type system, so the sink is banned by default: use textContent / el() / JSX,
-        // or renderMarkdown output behind a justified same-line disable, or an allow-listed island below.
-        selector: "AssignmentExpression[left.property.name='innerHTML']",
-        message: 'Assigning innerHTML is an XSS sink. Use textContent/el()/JSX; renderMarkdown output only, behind a justified disable; imperative islands are allow-listed in eslint.config.mjs.',
-      }],
+      'no-restricted-syntax': [
+        'error',
+        {
+          // Any `x.innerHTML = …` / `x.outerHTML = …` (and `+=`). The escape-before-innerHTML contract
+          // (editor/markdown.ts) lives outside the type system, so these HTML-injection sinks are banned
+          // by default: use textContent / el() / JSX, or renderMarkdown output behind a justified
+          // same-line disable, or an allow-listed island below.
+          selector: "AssignmentExpression[left.property.name=/^(inner|outer)HTML$/]",
+          message: 'Assigning innerHTML/outerHTML is an XSS sink. Use textContent/el()/JSX; renderMarkdown output only, behind a justified disable; imperative islands are allow-listed in eslint.config.mjs.',
+        },
+        {
+          // The same sink in call form. No prod site exists today (grep-verified); banned so a new one
+          // can't slip in past the assignment ban above.
+          selector: "CallExpression[callee.property.name='insertAdjacentHTML']",
+          message: 'insertAdjacentHTML is an XSS sink. Use textContent/el()/JSX or an allow-listed island; only already-trusted/escaped markup, behind a justified disable.',
+        },
+      ],
     },
   },
   // Permanent imperative islands (CONTRIBUTING non-goals): CodeMirror (editor), maxGraph
@@ -43,9 +53,12 @@ export default tseslint.config(
     rules: { 'no-restricted-syntax': 'off' },
   },
   // ── Pending-migration imperative islands ──────────────────────────────────────────────────────────
-  // Each entry FREEZES a panel's innerHTML count where it is (the ban still catches any NEW site) and is
-  // DELETED when the named migration issue converts that panel to Preact/JSX — the same freeze-then-shrink
-  // doctrine as the #757 line budget. The allow-list shrinks as the imperative-island arc lands.
+  // Each entry EXEMPTS one already-imperative panel from the innerHTML ban until the named migration issue
+  // converts it to Preact/JSX, then the entry is DELETED. This is a FILE-level allow-list, not a per-file
+  // count budget: it freezes the *set of files* permitted to use innerHTML — any NEW file, and all
+  // non-island prod, stays fully gated — and shrinks as the arc lands. (A file that's already listed can
+  // still add innerHTML while listed; that's the accepted cost of a zero-rewrite adoption, à la #757's
+  // freeze-then-shrink direction.)
   {
     files: ['src/shell/explorer.ts'], // retired by #989 (file explorer → store-bound Preact tree)
     rules: { 'no-restricted-syntax': 'off' },
