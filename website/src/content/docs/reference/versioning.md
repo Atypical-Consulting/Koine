@@ -11,7 +11,7 @@ Koine makes that contract explicit: you stamp a context with a **version**, anno
 members arrived (`@since`) or fell out of favour (`@deprecated`), and run
 `koine check --baseline` to catch breaking changes **before** they ship.
 
-This is epic R15. None of it changes your runtime behaviour — `version` and `@since` are
+This is Koine's model-versioning support. None of it changes your runtime behaviour — `version` and `@since` are
 pure metadata that surface in the [glossary](/Koine/guides/cli/) and drive
 diagnostics; only `@deprecated` emits anything to C# (an `[Obsolete]` attribute).
 

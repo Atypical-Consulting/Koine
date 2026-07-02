@@ -165,7 +165,7 @@ export default defineConfig({
 				{
 					label: 'Guides',
 					items: [
-						{ label: 'Feature catalogue (R1–R17)', slug: 'guides/feature-catalogue' },
+						{ label: 'Feature catalogue', slug: 'guides/feature-catalogue' },
 						{ label: 'CLI reference', slug: 'guides/cli' },
 						{ label: 'Architecture', slug: 'guides/architecture' },
 						{ label: 'Koine as a platform', slug: 'guides/platform' },

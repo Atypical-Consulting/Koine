@@ -268,6 +268,7 @@ const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateSpecPredicate = "KOI10
 const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityFieldReferencesMessageType = "KOI1605" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityReferencesForeignAggregate = "KOI1602" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.FactoryNeedsGeneratableIdentity = "KOI0808" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.NarrowingConversionInDerivedMember = "KOI0217" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.SpecCallTargetMismatch = "KOI1006" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectReferencesEntity = "KOI1601" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectScalarArithmetic = "KOI0215" -> string!

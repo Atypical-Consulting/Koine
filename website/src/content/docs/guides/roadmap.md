@@ -1,46 +1,94 @@
 ---
 title: "Roadmap"
-description: "What Koine ships today (R1–R18: full DDD toolkit; C#, TypeScript, Python, PHP (tactical + strategic/CQRS), and Rust (multi-context + CQRS) emitters; editor tooling; and model-as-spec coverage) and what comes next."
+description: "An honest status report on Koine — the capabilities you can rely on today (the full DDD toolkit; C#, TypeScript, Python, PHP, and Rust emitters; and editor tooling), with per-target maturity and what comes next."
 ---
 
-Koine is built as a sequence of **epics** (R1–R18), each a cohesive slice of Domain-Driven Design
-capability. The compiler ships the **full tactical and strategic toolkit (R1–R15)**, the
-**R16 multi-target emitters** (C#, TypeScript, Python, PHP, and Rust — PHP now covering the tactical
-core *and* the strategic/CQRS layer, Rust now covering multi-context references and the CQRS read side,
-with Python covering the full tactical-and-strategic construct set), the
-**R17 editor tooling** — the TextMate grammar, the `koine lsp` language server, and the
-`fmt`/`init`/`watch` commands — and **R18 model-as-spec coverage** (`koine coverage` proves
-declared == emitted). Every construct described in the reference is implemented, tested,
-and demonstrated in the [pizzeria demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo).
+Koine ships the **full tactical and strategic Domain-Driven Design toolkit**, emitters for five
+languages, and first-class editor tooling. This page is the honest status report — organized by
+**what you can do**, with a per-target maturity matrix so you know exactly what to rely on now and
+what is still ahead. Every construct below is implemented, tested, and demonstrated in the
+[pizzeria demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo).
 
-This page is the honest status report — what you can rely on now, and what is still ahead.
+## What you can do today
 
-## Shipped: R1–R15
+Everything below is live in the compiler and exercised by the demo. Each capability links to the
+reference page that documents it in depth.
 
-Everything below is live in the compiler and exercised by the demo. Each row links to the reference
-page that documents it in depth.
+### Model values & shapes
 
-| Epic | Capability | Reference |
-|------|-----------|-----------|
-| R1 | Expression sublanguage: conditionals, string/collection ops, lambdas, `Instant` comparison | [Expressions](/Koine/reference/expressions/) |
-| R2 | Optional fields (`?`), `??`, presence checks; `Set<T>` and `Map<K,V>` | [Value objects](/Koine/reference/value-objects/) |
-| R3 | Stable diagnostic codes (`KOI…`), parser error recovery, "did you mean", soft keywords, scoped enum members | [CLI](/Koine/guides/cli/) |
-| R4 | `///` doc comments and a generated Markdown glossary | [CLI](/Koine/guides/cli/) |
-| R5 | `command` with `requires` preconditions and `field -> value` state transitions | [Commands, events & state](/Koine/reference/commands-events-state/) |
-| R6 | `event` types, `emit` from commands, the `IDomainEvent` contract | [Commands, events & state](/Koine/reference/commands-events-state/) |
-| R7 | `states` blocks: legal transition graphs with optional `when` guards | [Commands, events & state](/Koine/reference/commands-events-state/) |
-| R8 | `create` factories with preconditions and creation events | [Factories](/Koine/reference/factories/) |
-| R9 | Richer value objects: data-carrying enums, `quantity` with unit-checked arithmetic, `Range<T>` | [Enums](/Koine/reference/enums/), [Value objects](/Koine/reference/value-objects/) |
-| R10 | `spec`, `service` with `operation`, and `policy` reactions | [Specs, services & policies](/Koine/reference/specs-services-policies/) |
-| R11 | Identity strategies (guid/natural/sequence), per-root repositories, `versioned` aggregates | [Repositories & concurrency](/Koine/reference/repositories-concurrency/) |
-| R12 | `IUnitOfWork`, `usecase` services, `readmodel` projections, `query` objects + `IQueryHandler` | [Application & CQRS](/Koine/reference/application-cqrs/) |
-| R13 | Compile a directory, `import` and qualified cross-context refs, `module` sub-namespaces | [Multi-file, imports & modules](/Koine/reference/multi-file-imports-modules/) |
-| R14 | `contextmap` with typed relationships, shared-kernel/ACL enforcement, integration events | [Context maps & integration](/Koine/reference/context-maps-integration/) |
-| R15 | `context … version n`, `@since(n)` / `@deprecated("…")`, and `koine check --baseline` compatibility diffing | [CLI](/Koine/guides/cli/) |
+| What you can do | Reference |
+|-----------------|-----------|
+| An expression sublanguage: conditionals, string/collection ops, lambdas, `Instant` comparison | [Expressions](/Koine/reference/expressions/) |
+| Optional fields (`?`), `??`, presence checks; `Set<T>` and `Map<K,V>` | [Value objects](/Koine/reference/value-objects/) |
+| Data-carrying enums, `quantity` with unit-checked arithmetic, `Range<T>` | [Enums](/Koine/reference/enums/), [Value objects](/Koine/reference/value-objects/) |
 
-### A taste of the shipped surface
+### Give models behavior
 
-The features compose. Here is R5–R7 (commands, events, a state machine) and R15 (versioning) in one
+| What you can do | Reference |
+|-----------------|-----------|
+| `command` with `requires` preconditions and `field -> value` state transitions | [Commands, events & state](/Koine/reference/commands-events-state/) |
+| `event` types, `emit` from commands, the `IDomainEvent` contract | [Commands, events & state](/Koine/reference/commands-events-state/) |
+| `states` blocks: legal transition graphs with optional `when` guards | [Commands, events & state](/Koine/reference/commands-events-state/) |
+| `create` factories with preconditions and creation events | [Factories](/Koine/reference/factories/) |
+
+### Encode rules & coordination
+
+| What you can do | Reference |
+|-----------------|-----------|
+| `spec` predicates, `service` with `operation`, and `policy` reactions | [Specs, services & policies](/Koine/reference/specs-services-policies/) |
+
+### Persist & query
+
+| What you can do | Reference |
+|-----------------|-----------|
+| Identity strategies (guid/natural/sequence), per-root repositories, `versioned` aggregates | [Repositories & concurrency](/Koine/reference/repositories-concurrency/) |
+| `IUnitOfWork`, `usecase` services, `readmodel` projections, `query` objects + `IQueryHandler` | [Application & CQRS](/Koine/reference/application-cqrs/) |
+
+### Design across bounded contexts
+
+| What you can do | Reference |
+|-----------------|-----------|
+| Compile a directory, `import` and qualified cross-context refs, `module` sub-namespaces | [Multi-file, imports & modules](/Koine/reference/multi-file-imports-modules/) |
+| `contextmap` with typed relationships, shared-kernel/ACL enforcement, integration events | [Context maps & integration](/Koine/reference/context-maps-integration/) |
+
+### Evolve safely
+
+| What you can do | Reference |
+|-----------------|-----------|
+| `context … version n`, `@since(n)` / `@deprecated("…")`, and `koine check --baseline` compatibility diffing | [CLI](/Koine/guides/cli/) |
+
+### Work in your editor
+
+| What you can do | Reference |
+|-----------------|-----------|
+| Stable diagnostic codes (`KOI…`), parser error recovery, "did you mean", soft keywords, scoped enum members | [CLI](/Koine/guides/cli/) |
+| `///` doc comments and a generated Markdown glossary | [CLI](/Koine/guides/cli/) |
+| A TextMate grammar, the `koine lsp` language server, and `fmt` / `init` / `watch` | [Editor tooling](/Koine/guides/editor-tooling/) |
+| `koine coverage` — proof that every declaration in your model is emitted | [Model as spec](/Koine/guides/model-as-spec/) |
+
+## Generate to your stack
+
+The parser and semantic model are strictly **target-agnostic**, so the same `.koi` model compiles to
+five languages. C# is the primary, most complete target; the others cover progressively more of the
+construct set. Point `koine build` at `--target csharp | typescript | python | php | rust` (see the
+[CLI reference](/Koine/guides/cli/#koine-build)).
+
+### Maturity by target
+
+Each target is verified by compiling (or type-checking) its emitted output in CI — a green build is
+the proof, not a promise.
+
+| Target | Coverage today | Proven by |
+|--------|----------------|-----------|
+| **C#** | Complete — every construct in the [feature catalogue](/Koine/guides/feature-catalogue/): tactical through strategic, application/CQRS, and versioning | Roslyn compile **and execute** |
+| **Python** | Full tactical **and** strategic/CQRS layer — value objects, smart enums, entities, events, read models, queries, policies, and context-map/ACL translators | `mypy --strict` + `ast.parse` |
+| **PHP** | Full tactical **and** strategic/CQRS layer | `phpstan` + `php -l` |
+| **Rust** | Tactical core plus multi-context references and the CQRS read side — value objects, smart enums, entities/aggregates, factories, events, query DTOs, read-model projections, and repository traits | `cargo check` |
+| **TypeScript** | Tactical core — value objects, identity-equal entities, smart enums as typed `const` objects, `*Id` branded primitives | `tsc --noEmit --strict` |
+
+## A taste of the shipped surface
+
+The features compose. Here is behavior (commands, events, a state machine) and model versioning in one
 aggregate, all generating compiling C# today:
 
 ```koine
@@ -91,65 +139,18 @@ For the complete, copy-pasteable showcase, browse the
 and the [emitted C#](https://github.com/Atypical-Consulting/Koine/tree/main/demo/Pizzeria.Domain/Generated)
 the demo produces from them.
 
-## Shipped: R16 — Multi-target emitters
+## What's next
 
-R16 is the capstone that proves the `IEmitter` seam is genuinely target-agnostic. All five emitter
-targets — C#, TypeScript, Python, PHP, and Rust — are delivered.
+- **Broaden TypeScript** to the strategic/CQRS layer, for parity with Python and PHP.
+- **A structured multi-target config block** — `targets.<name> = { … }` for per-target namespace maps,
+  `Instant` mapping, and output layout — is sketched in the scaffolded `koine.config` but not yet wired
+  up (see the [CLI reference](/Koine/guides/cli/)).
+- **Deeper Rust coverage** as the emitter matures beyond its current tactical-plus-CQRS surface.
 
-- **R16.1 — C# emitter configuration.** ✅ **Delivered** — a `koine.config` options object to remap
-  contexts to concrete namespaces, choose the `Instant` mapping (`DateTimeOffset` default or NodaTime),
-  and control output layout.
-- **R16.2 — TypeScript emitter.** ✅ **Delivered** — `koine build model.koi --target typescript`
-  producing idiomatic TypeScript: value objects, identity-equal entities, smart enums as typed
-  `const` objects, `*Id` branded primitives. Output passes `tsc --noEmit --strict`.
-- **R16.3 — Python emitter (tactical core + strategic/CQRS layer).** ✅ **Delivered** — `koine build
-  model.koi --target python` producing dependency-free Python 3.11+ across the full construct set:
-  - `@dataclass(frozen=True)` value objects with invariant checks
-  - `enum.Enum` smart enums (including data-carrying enums with associated fields)
-  - Identity-equal entities with `Guid`/natural/sequence ID strategies
-  - Frozen-dataclass domain events
-  - `typing.Protocol` repository and service interfaces
-  - **Phase 2 (strategic/CQRS layer):** read models (frozen-dataclass DTO + a pure `to_m(src)`
-    projection), queries (DTO + a `QueryHandler` `Protocol` seam), policies (event→command reactor
-    `Protocol`), state-machine reachability guards inside command methods, and context-map/ACL
-    translator `Protocol`s with qualified cross-context imports.
-  - Output is `mypy --strict`-clean and passes `ast.parse` syntax checking.
-- **R16.4 — Rust emitter.** ✅ **Delivered** (Phase 2: multi-context + CQRS) — `--target rust` emits an
-  idiomatic crate: value objects as structs with smart constructors returning `Result<_, DomainError>`
-  (never panics), smart enums as exhaustively-matched Rust `enum`s (with `Match`/`Switch`/`from_name`/
-  `from_value` lookups), entities and aggregates with invariant-checked behaviors and command returns,
-  factories that mint identities, domain events raised into a `Vec`-friendly `DomainEvent` collection,
-  query DTOs and read-model projections, and repositories as `trait`s. **Multi-context** models compile
-  end-to-end via `crate::<module>` qualification (the six-context `pizzeria` template included). Depends
-  only on `rust_decimal` (money) and `regex` (`matches`), plus `uuid` when a model uses a factory; a
-  `cargo check` meta-test proves the emitted crate compiles.
-- **R16.5 — Conformance harness.** ✅ **Delivered** — a suite that runs every fixture through each
-  registered emitter and compiles the output (Roslyn for C#, `tsc` for TS, `mypy` for Python), plus an
-  `AstPurityTests` guard that fails the build if anything under `Ast/` references a target-specific concept.
-
-## Shipped: R17 — Editor tooling & developer experience
-
-R17 closes the gap between "a compiler exists" and "developers enjoy writing `.koi`". **All three
-stories are now delivered.**
-
-- **R17.1 — TextMate grammar.** ✅ **Delivered** — syntax highlighting for VS Code and Rider.
-  See [`tooling/README.md`](https://github.com/Atypical-Consulting/Koine/blob/main/tooling/README.md).
-- **R17.2 — Language Server.** ✅ **Delivered** — a `koine lsp` server, reusing the compiler for
-  diagnostics, hover, completion, and cross-file go-to-definition, backed by a workspace index over
-  all `.koi` files. See the [editor tooling](/Koine/guides/editor-tooling/) guide.
-- **R17.3 — `koine fmt`, `init`, and `watch`.** ✅ **Delivered** — a canonical, idempotent
-  token-stream formatter (with `--check` for CI), a one-command project scaffold (`koine init`, with
-  `--force`), and a `koine watch` mode that re-emits on every change for fast feedback. See the
-  [CLI reference](/Koine/guides/cli/#koine-fmt).
-
-## The full gap analysis
-
-Every epic above is written up as actionable user stories — with personas, *As a … I want … so that …*
-statements, testable acceptance criteria, and priorities — in
-[`USER-STORIES.md`](https://github.com/Atypical-Consulting/Koine/blob/main/USER-STORIES.md). It also
-documents the sequencing rationale: R1–R4 sharpen the existing surface, R5–R10 add tactical behaviour,
-R11–R12 add the persistence and application layers, R13–R15 unlock strategic design, R16–R17 deliver
-the multi-target emitters and editor tooling, and R18 adds model-as-spec coverage.
+Every capability above is written up as actionable user stories — with personas, *As a … I want … so
+that …* statements, testable acceptance criteria, and priorities — in
+[`USER-STORIES.md`](https://github.com/Atypical-Consulting/Koine/blob/main/USER-STORIES.md), the
+contributor roadmap.
 
 ## Where to go next
 

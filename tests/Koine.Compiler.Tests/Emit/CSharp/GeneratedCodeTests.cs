@@ -367,24 +367,42 @@ public class GeneratedCodeTests
     public void Source_generated_matches_form_has_identical_semantics_to_the_inline_form()
     {
         // Issue #795: the source-generated form is a pure optimization — it must accept/reject EXACTLY what
-        // the inline form does AND keep the same ReDoS timeout. Compile the SAME model both ways and assert
-        // parity across a normal input matrix plus a catastrophic-backtracking input that must time out under
-        // both forms (surfacing RegexMatchTimeoutException, not hanging).
+        // the inline form does. Compile the SAME model both ways and assert parity across a normal input matrix.
+        // Issue #888: the accept/reject semantics don't depend on the match-timeout, so emit these fixtures
+        // with a GENEROUS budget — a benign, matching input must never surface RegexMatchTimeoutException just
+        // because the test host is loaded (the match-timeout is a wall-clock deadline, not regex work). The
+        // ReDoS guard's tight-budget behaviour is proven separately in
+        // Matches_invariant_still_times_out_on_a_catastrophic_pattern_under_a_tight_budget.
         const string src =
             "context C {\n  value Token {\n    raw: String\n" +
             "    invariant raw matches /^(a+)+$/  \"must be all a's\"\n  }\n}\n";
-        // A small (but non-trivial) timeout: normal inputs match/fail in microseconds, while the catastrophic
-        // input below backtracks far past the budget under either evaluation strategy.
-        var baseOptions = CSharpEmitterOptions.Empty with { RegexMatchTimeoutMs = 100 };
+        var parityOptions = CSharpEmitterOptions.Empty with { RegexMatchTimeoutMs = GenerousMatchTimeoutMs };
 
-        var inline = CompileMatchType(src, baseOptions with { RegexMode = RegexMode.Inline }, "C.Token", runRegexGenerator: false);
-        var sourceGen = CompileMatchType(src, baseOptions with { RegexMode = RegexMode.SourceGenerated }, "C.Token", runRegexGenerator: true);
+        var inline = CompileMatchType(src, parityOptions with { RegexMode = RegexMode.Inline }, "C.Token", runRegexGenerator: false);
+        var sourceGen = CompileMatchType(src, parityOptions with { RegexMode = RegexMode.SourceGenerated }, "C.Token", runRegexGenerator: true);
 
         foreach ((var value, var valid) in new[] { ("a", true), ("aaaa", true), ("aaab", false), ("b", false), ("", false) })
         {
             Accepts(inline, value).ShouldBe(valid, $"inline rejected/accepted '{value}' unexpectedly");
             Accepts(sourceGen, value).ShouldBe(valid, $"source-generated diverged from inline on '{value}'");
         }
+    }
+
+    [Fact]
+    public void Matches_invariant_still_times_out_on_a_catastrophic_pattern_under_a_tight_budget()
+    {
+        // Issue #888 guard: de-flaking the parity test (whose benign matrix now runs under a GENEROUS
+        // match-timeout so a loaded host can't trip a microsecond match) must NOT silently disable the
+        // ReDoS safeguard. Prove the guard still fires: a catastrophic-backtracking input under a TIGHT
+        // match-timeout must surface a contained RegexMatchTimeoutException (not hang) under BOTH the
+        // inline and source-generated forms.
+        const string src =
+            "context C {\n  value Token {\n    raw: String\n" +
+            "    invariant raw matches /^(a+)+$/  \"must be all a's\"\n  }\n}\n";
+        var tight = CSharpEmitterOptions.Empty with { RegexMatchTimeoutMs = 100 };
+
+        var inline = CompileMatchType(src, tight with { RegexMode = RegexMode.Inline }, "C.Token", runRegexGenerator: false);
+        var sourceGen = CompileMatchType(src, tight with { RegexMode = RegexMode.SourceGenerated }, "C.Token", runRegexGenerator: true);
 
         var evil = new string('a', 48) + "!"; // exponential backtracking on `(a+)+`
         AssertTimesOut(inline, evil);
@@ -427,6 +445,15 @@ public class GeneratedCodeTests
         var (asm, errors) = TestSupport.Compile(result.Files, runRegexGenerator: true);
         (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
     }
+
+    /// <summary>
+    /// A deliberately generous match-timeout (10 minutes) for meta-tests that compile + execute a benign
+    /// <c>matches</c> fixture. The accept/reject assertions don't depend on the timeout, so a budget far
+    /// beyond any realistic host-load stall keeps them deterministic (issue #888) — a benign, matching input
+    /// can never surface a <c>RegexMatchTimeoutException</c> just because the test host is contended. The real
+    /// ReDoS budget is exercised separately with a tight timeout + a catastrophic pattern.
+    /// </summary>
+    private const int GenerousMatchTimeoutMs = 600_000;
 
     /// <summary>Emits <paramref name="src"/> with <paramref name="options"/>, Roslyn-compiles it (optionally running the regex source generator), and returns the named type.</summary>
     private static Type CompileMatchType(string src, CSharpEmitterOptions options, string typeName, bool runRegexGenerator)

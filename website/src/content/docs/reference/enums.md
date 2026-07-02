@@ -210,7 +210,7 @@ carries an in-range ordinal, so a match always hits an arm — you never write a
 ## 8.5 Members with associated data
 
 An enum can carry data alongside each member. Give the enum a **signature** — a parenthesized list
-of typed fields — then supply a matching argument list for each member (R9.1):
+of typed fields — then supply a matching argument list for each member:
 
 ```koine
 context Catalog {
@@ -282,7 +282,7 @@ members genuinely carry data.
 ## 8.6 Scoped member resolution
 
 When you compare against an enum-typed field, you can write the member **bare** — without qualifying
-it by the enum name. Koine resolves the bare member against the type of the field or operand (R3.5).
+it by the enum name. Koine resolves the bare member against the type of the field or operand.
 This keeps expressions readable and lets two enums share member names without clashing:
 
 ```koine

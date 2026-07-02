@@ -580,6 +580,10 @@ internal sealed class RustExpressionTranslator
     /// <summary>True when an expression's inferred type is optional — used to decide <c>Some(...)</c> wrapping.</summary>
     public bool IsOptional(Expr expr) => _resolver.Infer(expr, EffectiveScope())?.IsOptional == true;
 
+    /// <summary>The semantic type an expression infers to in this value object's scope (locals included) —
+    /// used to reconcile a derived member's body type with its declared type (numeric widening, #961).</summary>
+    public TypeRef? InferType(Expr expr) => _resolver.Infer(expr, EffectiveScope());
+
     /// <summary>
     /// Translates an expression to an owned value for a <c>return</c>/<c>Ok(...)</c> position: a non-Copy
     /// place (a field/local such as the entity <c>id</c>, or a <c>.field()</c> accessor result) is cloned

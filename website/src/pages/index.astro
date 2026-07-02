@@ -12,17 +12,16 @@ const orderingStudioHref = ordering
   ? `${base}/studio/#model=${encodeCode(ordering.code)}`
   : `${base}/studio/`;
 
+// Grouped by what you can do with Koine, not by internal release order.
 const features = [
-  { r: 'R1–R2', title: 'Expressions & shapes', body: 'Conditionals, string ops, collection lambdas, optionals, sets & maps.' },
-  { r: 'R3–R4', title: 'Diagnostics & docs', body: 'Stable error codes, multi-error parsing, doc comments → XML + glossary.' },
-  { r: 'R5–R7', title: 'Behavior', body: 'Commands mutate state, domain events record intent, state machines guard transitions.' },
-  { r: 'R8–R9', title: 'Creation & values', body: 'Named factories, smart enums with data, quantities, ranges.' },
-  { r: 'R10', title: 'Specs, services, policies', body: 'Reusable predicates, stateless domain services, reactive policies.' },
-  { r: 'R11', title: 'Identity & persistence', body: 'Four identity strategies, repositories, optimistic concurrency.' },
-  { r: 'R12', title: 'Application & CQRS', body: 'Unit of work, application services, read models, query handlers.' },
-  { r: 'R13–R14', title: 'Strategic design', body: 'Multi-file modules, imports, context maps, integration events, ACL.' },
-  { r: 'R15', title: 'Evolution', body: 'Versioning, deprecation, and breaking-change detection.' },
-  { r: 'R16–R18', title: 'Targets, tooling & coverage', body: 'C#/TypeScript/Python/PHP/Rust emitters, LSP, formatter, scaffolding, watch, model-as-spec coverage.' },
+  { title: 'Model values & shapes', body: 'Value objects, optionals, sets & maps, smart enums that carry data, quantities with unit-checked arithmetic, ranges, derived fields, and regex & conditional invariants.' },
+  { title: 'Give models behavior', body: 'Commands with preconditions, domain events that record intent, state machines with guarded transitions, and named factories.' },
+  { title: 'Encode rules & coordination', body: 'Reusable specifications, stateless domain & application services, and reactive policies.' },
+  { title: 'Persist & query', body: 'Identity strategies, repositories with finders, optimistic concurrency, unit of work, read models, and CQRS queries.' },
+  { title: 'Design across bounded contexts', body: 'Multi-file models, imports & modules, context maps, shared kernel / anti-corruption layers, and integration events.' },
+  { title: 'Evolve safely', body: 'Model versioning, @since / @deprecated annotations, and breaking-change detection.' },
+  { title: 'Generate to your stack', body: 'Idiomatic C#, TypeScript, Python, PHP, and Rust — each with an honest maturity level.' },
+  { title: 'Work in your editor', body: 'Diagnostics & doc comments, an LSP, a formatter, init scaffolding, watch mode, and coverage that proves every declaration emits.' },
 ];
 
 const pillars = [
@@ -127,9 +126,10 @@ const pillars = [
   <!-- Feature map -->
   <section class="band">
     <div class="band__head">
-      <h2>The complete toolkit, R1–R18</h2>
+      <h2>The complete DDD toolkit</h2>
       <p>
-        Fifteen releases of tactical and strategic DDD, shipped — see the
+        From value objects to context maps to multi-language output — the tactical and strategic
+        building blocks of Domain-Driven Design, all shipped. See the
         <a href={`${base}/guides/feature-catalogue/`}>full feature catalogue</a>.
       </p>
     </div>
@@ -137,7 +137,6 @@ const pillars = [
       {
         features.map((f) => (
           <article class="cell">
-            <span class="cell__r">{f.r}</span>
             <h3>{f.title}</h3>
             <p>{f.body}</p>
           </article>
@@ -155,8 +154,8 @@ const pillars = [
           The parser and semantic model are strictly target-agnostic. Koine emits idiomatic
           <strong>C#</strong>, <strong>TypeScript</strong>, <strong>Python</strong>,
           <strong>PHP</strong>, and <strong>Rust</strong> today — flip the target in Studio and watch
-          the same model recompile. Rust ships its tactical core (Phase 1); the
-          <a href={`${base}/guides/roadmap/`}>roadmap</a> tracks Phase 2.
+          the same model recompile. C# is the most complete target; the
+          <a href={`${base}/guides/roadmap/`}>roadmap</a> tracks each language's maturity.
         </p>
         <a class="btn btn--primary" href={orderingStudioHref}>Explore the Ordering model in Studio ▸</a>
       </div>
@@ -349,12 +348,7 @@ const pillars = [
       background: var(--koi-surface);
       padding: 1.2rem 1.3rem;
     }
-    .cell__r {
-      font: 700 0.72rem/1 var(--koi-font-mono);
-      letter-spacing: 0.04em;
-      color: var(--koi-accent);
-    }
-    .cell h3 { font-size: 1.05rem; margin: 0.5rem 0 0.35rem; }
+    .cell h3 { font-size: 1.05rem; margin: 0 0 0.35rem; color: var(--koi-accent); }
     .cell p { color: var(--koi-muted); margin: 0; font-size: 0.92rem; line-height: 1.5; }
 
     /* Teaser */

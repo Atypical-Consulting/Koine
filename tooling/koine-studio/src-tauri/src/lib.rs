@@ -207,7 +207,19 @@ fn bundled_koine_path() -> Option<PathBuf> {
     let p = exe
         .parent()?
         .join(format!("koine{}", std::env::consts::EXE_SUFFIX));
-    p.is_file().then_some(p)
+    launchable_sidecar(p)
+}
+
+/// Whether a bundled-sidecar candidate is actually launchable. A dev checkout keeps a
+/// gitignored ZERO-BYTE placeholder at `binaries/koine-<triple>` (tauri_build's externalBin
+/// existence check requires the file), and the build copies it next to the dev executable as
+/// `koine` — where it would shadow the Debug-DLL fallback and make every LSP/MCP spawn fail
+/// with EACCES. An empty file can never be a real sidecar, so treat it as absent.
+fn launchable_sidecar(p: PathBuf) -> Option<PathBuf> {
+    match std::fs::metadata(&p) {
+        Ok(m) if m.is_file() && m.len() > 0 => Some(p),
+        _ => None,
+    }
 }
 
 /// Resolve how to launch the language server, tried in order: the `KOINE_LSP` env override (a
@@ -2374,6 +2386,43 @@ mod tests {
     #[test]
     fn pick_koine_launcher_falls_back_to_dev_dll() {
         assert_eq!(pick_koine_launcher(None, None), KoineLauncher::DevDll);
+    }
+
+    // Regression (#955 follow-up, the real desktop "LSP not started"): the gitignored zero-byte
+    // `binaries/koine-<triple>` placeholder (required by tauri_build's externalBin existence check)
+    // is copied next to the dev executable as `koine`, where the old `is_file()` probe picked it as
+    // the bundled sidecar — shadowing the Debug-DLL fallback and making every spawn fail EACCES.
+    #[test]
+    fn launchable_sidecar_rejects_the_zero_byte_placeholder() {
+        let dir = std::env::temp_dir().join(format!("koine_studio_sidecar_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let stub = dir.join("koine");
+        std::fs::write(&stub, b"").unwrap();
+
+        assert_eq!(launchable_sidecar(stub), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn launchable_sidecar_accepts_a_nonempty_binary() {
+        let dir = std::env::temp_dir().join(format!("koine_studio_sidecar_real_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("koine");
+        std::fs::write(&bin, b"#!/bin/sh\n").unwrap();
+
+        assert_eq!(launchable_sidecar(bin.clone()), Some(bin));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn launchable_sidecar_rejects_a_missing_file() {
+        let p = std::env::temp_dir().join(format!("koine_studio_sidecar_missing_{}", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(launchable_sidecar(p), None);
     }
 
     // --- workspace filesystem tests -----------------------------------------

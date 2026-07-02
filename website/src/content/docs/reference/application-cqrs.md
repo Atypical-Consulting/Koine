@@ -354,13 +354,13 @@ context Ordering version 1 {
     }
   }
 
-  /// R12.2 — the application/use-case service interface.
+  /// The application/use-case service interface.
   service OrderingService {
     usecase PlaceOrder(customer: CustomerId, lines: List<OrderLine>): OrderId
     usecase CancelOrder(order: OrderId)
   }
 
-  /// R12.3 — a flat read model + projection mapper.
+  /// A flat read model + projection mapper.
   readmodel OrderSummary from Order {
     id
     customer
@@ -368,7 +368,7 @@ context Ordering version 1 {
     lineCount: Int = lines.count
   }
 
-  /// R12.4 — a query DTO over the read model.
+  /// A query DTO over the read model.
   query OrdersByStatus(status: OrderStatus): List<OrderSummary>
 }
 ```
