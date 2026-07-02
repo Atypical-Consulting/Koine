@@ -1,6 +1,5 @@
 using System.Reflection;
 using System.Text.Json.Nodes;
-using Koine.Compiler;
 using Koine.Compiler.Emit;
 
 namespace Koine.Wasm.Tests;
