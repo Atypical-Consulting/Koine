@@ -241,16 +241,16 @@ jobs:
       - name: Install npm dependencies (workspace root)
         run: npm ci
 
-      # Build+pack verification for the extracted @atypical/koine-ui package (issue #905): proves
-      # on every PR that the package Koine Studio (and the docs-site) now depend on builds cleanly
-      # and that its published tarball contains the right files (dist/ only, no source/test files).
-      # `--dry-run` never touches a registry — no publish, no credentials needed. Actual
+      # Pack verification for the extracted @atypical/koine-ui package (issue #905): proves on every
+      # PR that its published tarball contains the right files (dist/ only, no source/test files).
+      # `npm pack` always runs the package's own `prepack` (`npm run build`) first, so this alone
+      # proves both "builds cleanly" and "packs cleanly" — a separate `npm run build` here would just
+      # rebuild the same unchanged output the root `postinstall` hook already built during `npm ci`
+      # above. `--dry-run` never touches a registry — no publish, no credentials needed. Actual
       # publish-on-release is a separate follow-up (needs a release trigger/token decision).
-      - name: Build + pack @atypical/koine-ui
+      - name: Pack @atypical/koine-ui
         working-directory: tooling/koine-ui
-        run: |
-          npm run build
-          npm pack --dry-run
+        run: npm pack --dry-run
 
       # (a) Publish + bundle the in-browser compiler, then (b) typecheck and bundle the web frontend.
       # Built at the DEPLOY's sub-path base (/Koine/studio/) so the boot smoke-test below exercises the
