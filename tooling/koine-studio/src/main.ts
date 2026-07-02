@@ -202,15 +202,17 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
     if (appEl) appEl.hidden = true;
     if (homeRoot) {
       homeRoot.hidden = false;
-      // The resume-session card (#1005) self-gates on the persisted last-session snapshot, so Home no
-      // longer needs to be told *whether* to offer a resume — only whether the editor is live this
-      // session (`ideStarted`, #392), which drives the card's live "ping" dot. A cold-open Home still
-      // gets the card (the snapshot is on disk); `onResume` navigates to the editor, which boots the IDE
-      // and restores the last workspace (#766). The two `undefined`s keep mountHome's `templates` and
-      // `canOpenFolders` defaults (a default param applies when the arg is undefined) — we only set opts.
+      // The resume-session card (#1005). `warm` (= `ideStarted`, #392) drives the card's live "ping" dot.
+      // `canResume` guarantees the returning-user one-click Resume that #766 requires — true when the
+      // editor booted this session OR a prior visit left the workspace-opened flag — so the card shows
+      // even before Task 4's snapshot is written (with a snapshot it renders full metadata; without one
+      // it degrades to a minimal "Resume editing" card). `onResume` navigates to the editor, which boots
+      // the IDE and restores the last workspace (#766). The two `undefined`s keep mountHome's `templates`
+      // and `canOpenFolders` defaults (a default param applies when the arg is undefined).
       if (!home) {
         home = mountHome(homeRoot, homeCallbacks(), undefined, undefined, {
           warm: ideStarted,
+          canResume: ideStarted || hasPersistedWorkspace(),
           // Surface the Clone-repository row only where the host can actually clone (#1005): desktop
           // git yes, browser no — the same capability the Source Control panel gates on.
           canClone: getPlatform().canUseGit,

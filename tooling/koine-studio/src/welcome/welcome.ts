@@ -212,6 +212,14 @@ interface BuildWelcomeOpts {
    * row and its inline form: rendered ONLY when true, mirroring how `canOpenFolders` gates "Open folder…".
    */
   canClone?: boolean;
+  /**
+   * There is a session to return to even if no rich snapshot exists (#766): the editor booted this
+   * session, or a prior visit left the workspace-opened flag. The resume card shows whenever this is
+   * true OR a {@link getLastSession} snapshot exists — with a snapshot it renders the full metadata,
+   * without one it degrades to a minimal "Resume editing" card. Keeps the returning-user one-click
+   * Resume that #766 guarantees, independent of whether Task 4's snapshot happens to be present.
+   */
+  canResume?: boolean;
 }
 
 /** What {@link buildHome} returns: the root element plus the seams {@link mountHome} re-exports. */
@@ -418,13 +426,15 @@ function buildHome(
   launch.className = 'koi-welcome-launch';
 
   // The rich resume-session card (#1005): the "continue where you left off" affordance, pinned at the
-  // TOP of the launch rail above the "Start" actions (per the hi-fi mock). It self-gates on the persisted
-  // last-session snapshot (getLastSession) — kept fresh on every open/save/dirty-change (#1005 Task 4) —
-  // so it appears in BOTH the warm case (editor live this session) and the cold case (a prior visit left
-  // a snapshot). The whole card is the resume control (a real <button>, keyboard-operable), firing
-  // onResume; a live "ping" dot marks a warm session, and every unknown field is simply omitted.
+  // TOP of the launch rail above the "Start" actions (per the hi-fi mock). It shows whenever there is a
+  // persisted last-session snapshot (getLastSession — kept fresh on every open/save/dirty-change, Task 4)
+  // OR the caller signals a resumable session (`opts.canResume`, the #766 returning-user guarantee). With
+  // a snapshot it renders full metadata (project · file · relative time · unsaved); without one it
+  // degrades to a minimal "Resume editing" card so the returning-user one-click Resume never disappears.
+  // The whole card is the resume control (a real <button>, keyboard-operable), firing onResume; a live
+  // "ping" dot marks a warm session, and every unknown field is simply omitted.
   const session = getLastSession();
-  if (session) {
+  if (session || opts.canResume) {
     const resumeCard = document.createElement('button');
     resumeCard.type = 'button';
     resumeCard.className = 'koi-home-resume';
@@ -452,15 +462,19 @@ function buildHome(
     const resumeEyebrow = document.createElement('span');
     resumeEyebrow.className = 'koi-home-resume-eyebrow';
     resumeEyebrow.textContent = 'Last session';
+    bodyCol.appendChild(resumeEyebrow);
 
     // project · file — the file bit is omitted entirely when the snapshot has no active file.
     const meta = document.createElement('span');
     meta.className = 'koi-home-resume-meta';
     const project = document.createElement('span');
     project.className = 'koi-home-resume-project';
-    project.textContent = session.project;
+    // With a snapshot we show the real project name; without one (the #766 fallback — a returning user
+    // whose one-click Resume is owed even before Task 4's snapshot is written) the card degrades to a
+    // minimal "Resume editing" label and omits the file/time/unsaved detail entirely.
+    project.textContent = session ? session.project : 'Resume editing';
     meta.appendChild(project);
-    if (session.file) {
+    if (session?.file) {
       const sep = document.createElement('span');
       sep.className = 'koi-home-resume-sep';
       sep.setAttribute('aria-hidden', 'true');
@@ -470,22 +484,25 @@ function buildHome(
       file.textContent = basename(session.file);
       meta.append(sep, file);
     }
+    bodyCol.appendChild(meta);
 
-    // relative time · unsaved count — the unsaved bit is omitted when unknown or zero.
-    const detail = document.createElement('span');
-    detail.className = 'koi-home-resume-detail';
-    const time = document.createElement('span');
-    time.className = 'koi-home-resume-time';
-    time.textContent = timeAgo(session.editedAt, Date.now());
-    detail.appendChild(time);
-    if (session.unsavedCount && session.unsavedCount > 0) {
-      const unsaved = document.createElement('span');
-      unsaved.className = 'koi-home-resume-unsaved';
-      unsaved.textContent = `${session.unsavedCount} unsaved`;
-      detail.appendChild(unsaved);
+    if (session) {
+      // relative time · unsaved count — the unsaved bit is omitted when unknown or zero.
+      const detail = document.createElement('span');
+      detail.className = 'koi-home-resume-detail';
+      const time = document.createElement('span');
+      time.className = 'koi-home-resume-time';
+      time.textContent = timeAgo(session.editedAt, Date.now());
+      detail.appendChild(time);
+      if (session.unsavedCount && session.unsavedCount > 0) {
+        const unsaved = document.createElement('span');
+        unsaved.className = 'koi-home-resume-unsaved';
+        unsaved.textContent = `${session.unsavedCount} unsaved`;
+        detail.appendChild(unsaved);
+      }
+      bodyCol.appendChild(detail);
     }
 
-    bodyCol.append(resumeEyebrow, meta, detail);
     resumeCard.append(tile, bodyCol);
     launch.appendChild(resumeCard);
   }
@@ -1306,9 +1323,13 @@ export function mountHome(
   cb: WelcomeCallbacks,
   templates: readonly Template[] = TEMPLATES,
   canOpenFolders = true,
-  opts: { warm?: boolean; canClone?: boolean } = {},
+  opts: { warm?: boolean; canClone?: boolean; canResume?: boolean } = {},
 ): HomeHandle {
-  const home = buildHome(cb, templates, canOpenFolders, { warm: opts.warm, canClone: opts.canClone });
+  const home = buildHome(cb, templates, canOpenFolders, {
+    warm: opts.warm,
+    canClone: opts.canClone,
+    canResume: opts.canResume,
+  });
   home.refreshRecent();
   container.appendChild(home.root);
   return { destroy: home.destroy, refreshRecent: home.refreshRecent, recover: home.recover };

@@ -818,10 +818,26 @@ describe('mountHome — resume session card', () => {
     expect(card.querySelector('.koi-home-resume-time')?.textContent).toMatch(/\d+d ago/);
   });
 
-  test('no session (getLastSession null) renders no card', () => {
+  test('no session and not resumable renders no card', () => {
     const el = document.createElement('div');
     mountHome(el, makeCallbacks(), SAMPLE, true, { warm: true });
     expect(el.querySelector('[data-action="resume"]')).toBeNull();
+  });
+
+  test('canResume without a snapshot renders a minimal "Resume editing" card (#766 fallback)', () => {
+    // A returning user whose one-click Resume is owed (workspace-opened / editor booted) but whose
+    // Task-4 snapshot is not present: the card still shows, degraded to a bare "Resume editing" label
+    // with no file / time / unsaved detail, and still fires onResume.
+    const el = document.createElement('div');
+    const cb: WelcomeCallbacks = { ...makeCallbacks(), onResume: vi.fn() };
+    mountHome(el, cb, SAMPLE, true, { canResume: true });
+    const card = el.querySelector<HTMLButtonElement>('[data-action="resume"]');
+    expect(card).not.toBeNull();
+    expect(card!.querySelector('.koi-home-resume-project')?.textContent).toBe('Resume editing');
+    expect(card!.querySelector('.koi-home-resume-file')).toBeNull();
+    expect(card!.querySelector('.koi-home-resume-detail')).toBeNull();
+    card!.click();
+    expect(cb.onResume).toHaveBeenCalledTimes(1);
   });
 
   test('prefers-reduced-motion suppresses the ping animation (no is-live class)', () => {
