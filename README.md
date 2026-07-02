@@ -590,7 +590,7 @@ as a CI gate). See the
 
 ## Status & roadmap
 
-Koine is at **v0.17.x** and has shipped through **R1–R18** of the roadmap: the full tactical *and*
+Koine is at **v0.17.x** and ships the full tactical *and*
 strategic DDD toolkit, four more emitter targets (**TypeScript**, **Python**, **PHP 8.1**, and
 **Rust**) alongside C# — **PHP** now covering the tactical core *and* the strategic/CQRS layer,
 **Rust** now covering multi-context references and the CQRS read side — a **docs** target that emits living
