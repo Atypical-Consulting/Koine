@@ -561,4 +561,64 @@ public class R9ValueObjectTests
             """;
         Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.ValueObjectScalarArithmetic);
     }
+
+    [Fact]
+    public void Scalar_multiply_on_a_value_object_with_no_numeric_field_is_rejected()
+    {
+        // `tag * 2` — Label has only a String field, so no target can generate a scalar operator.
+        const string src = """
+            context Shop {
+              value Label { text: String }
+              entity Item identified by ItemId { tag: Label }
+              readmodel ItemSummary from Item { scaled: Label = tag * 2 }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectScalarArithmeticNoNumericField);
+    }
+
+    [Fact]
+    public void Scalar_divide_on_a_value_object_with_no_numeric_field_is_rejected()
+    {
+        // `tag / 2` — the supported value-object / scalar direction, but Label has nothing numeric to scale.
+        const string src = """
+            context Shop {
+              value Label { text: String }
+              entity Item identified by ItemId { tag: Label }
+              readmodel ItemSummary from Item { scaled: Label = tag / 2 }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectScalarArithmeticNoNumericField);
+    }
+
+    [Fact]
+    public void Scalar_arithmetic_on_a_value_object_with_a_numeric_field_is_allowed()
+    {
+        // Money has a numeric field; `* 2` and `/ 2` scale it — must NOT be flagged by the new rule.
+        const string src = """
+            context Shop {
+              value Money { amount: Decimal  invariant amount >= 0 }
+              entity Order identified by OrderId { fee: Money }
+              readmodel FeeSplit from Order {
+                doubled: Money = fee * 2
+                half:    Money = fee / 2
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.ValueObjectScalarArithmeticNoNumericField);
+    }
+
+    [Fact]
+    public void Scalar_arithmetic_on_a_mixed_value_object_with_at_least_one_numeric_field_is_allowed()
+    {
+        // Priced has a non-numeric (String label) AND a numeric (Decimal amount) field: amount scales,
+        // label copies. At least one numeric stored field => the new rule must NOT fire.
+        const string src = """
+            context Shop {
+              value Priced { label: String  amount: Decimal  invariant amount >= 0 }
+              entity Order identified by OrderId { fee: Priced }
+              readmodel FeeSplit from Order { doubled: Priced = fee * 2 }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.ValueObjectScalarArithmeticNoNumericField);
+    }
 }

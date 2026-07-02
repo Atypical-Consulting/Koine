@@ -239,13 +239,18 @@ internal sealed class ExpressionChecker
     /// value-object type, so without this check they slip through to the emitters as non-compiling
     /// code. Rejecting them here keeps the reversed-additive path (#804, follow-up to the
     /// reversed-multiply fixes #788/#797) and the reversed-division path (#878) unreachable across
-    /// every emitter. Multiplication is exempt in both directions: scalar multiply is a first-class,
-    /// commutative value-object operation. (Direct same-type <c>+</c>/<c>-</c> that no <c>sum</c> fold
-    /// generated an operator for is tracked separately, not here — #833.)
+    /// every emitter. Scalar multiply/divide of a value object is a first-class, supported operation
+    /// (multiply is commutative; <c>vo / scalar</c> scales down) — EXCEPT when the value object has no
+    /// numeric stored field to scale: every emitter demand-generates the scalar operator only for a
+    /// value object with a numeric field, so scaling a purely non-numeric value object references an
+    /// operator no target emits (CS0019). Those supported scaling forms are therefore rejected with
+    /// <see cref="DiagnosticCodes.ValueObjectScalarArithmeticNoNumericField"/> (KOI0216, #939) when the
+    /// value object declares zero stored numeric fields. (Direct same-type <c>+</c>/<c>-</c> that no
+    /// <c>sum</c> fold generated an operator for is tracked separately, not here — #833.)
     /// </summary>
     private void CheckValueObjectScalarArithmetic(BinaryExpr b, TypeScope scope)
     {
-        if (b.Op is not (BinaryOp.Add or BinaryOp.Sub or BinaryOp.Div))
+        if (b.Op is not (BinaryOp.Add or BinaryOp.Sub or BinaryOp.Mul or BinaryOp.Div))
         {
             return;
         }
@@ -261,15 +266,27 @@ internal sealed class ExpressionChecker
             return;
         }
 
-        // Division is directional: `value-object / scalar` (voOnLeft) is the supported
-        // scaling-down form (#832) and must stay clean — only the reversed
-        // `scalar / value-object` (voOnRight) is meaningless and gets rejected.
-        if (b.Op == BinaryOp.Div && voOnLeft)
+        TypeRef vo = voOnLeft ? left! : right!;
+
+        // Supported SCALING forms: `vo * scalar` / `scalar * vo` (multiply is commutative) and
+        // `vo / scalar` (division scales down; the reversed `scalar / vo` is an unsupported form
+        // handled by the KOI0215 path below). Every emitter demand-generates the scalar operator
+        // ONLY when the value object has a numeric field to scale (CSharpEmitter.NumericFields =
+        // bound.StoredFields where Int/Decimal); with none it silently no-ops and the emitted
+        // `vo * / scalar` references an operator that was never generated (C# CS0019). Reject here.
+        var isScaling = b.Op == BinaryOp.Mul || (b.Op == BinaryOp.Div && voOnLeft);
+        if (isScaling)
         {
+            if (!HasNumericStoredField(vo))
+            {
+                Report(DiagnosticCodes.ValueObjectScalarArithmeticNoNumericField,
+                    $"cannot scale value object '{vo.Name}' by a scalar; it has no numeric field to multiply or divide", b);
+            }
+
             return;
         }
 
-        TypeRef vo = voOnLeft ? left! : right!;
+        // Unsupported forms: additive `vo +/- scalar` (either direction) and reversed `scalar / vo`.
         var verb = b.Op switch
         {
             BinaryOp.Add => "add a scalar to",
@@ -281,6 +298,23 @@ internal sealed class ExpressionChecker
             : "a value object scales by a scalar with '*', not '+'/'-'";
         Report(DiagnosticCodes.ValueObjectScalarArithmetic,
             $"cannot {verb} value object '{vo.Name}'; {tail}", b);
+    }
+
+    /// <summary>
+    /// True when <paramref name="vo"/> is a value object declaring at least one STORED numeric
+    /// (Int/Decimal) field — the same set the emitters scale (CSharpEmitter.NumericFields over
+    /// bound.StoredFields). Derived/computed members are excluded via MemberAnalysis.IsDerived so the
+    /// validator and every emitter classify members identically.
+    /// </summary>
+    private bool HasNumericStoredField(TypeRef vo)
+    {
+        if (!_index.TryGetDecl(vo.Name, out TypeDecl decl) || decl is not ValueObjectDecl v)
+        {
+            return false;
+        }
+
+        var names = v.Members.Select(m => m.Name).ToList();
+        return v.Members.Any(m => !MemberAnalysis.IsDerived(m, names) && TypeResolver.IsNumeric(m.Type));
     }
 
     private void CheckArithmeticNullSafety(BinaryExpr b, TypeScope scope)
