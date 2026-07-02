@@ -694,8 +694,9 @@ internal sealed class PhpExpressionTranslator
 
     /// <summary>
     /// Writes an operand coerced to a runtime <c>Decimal</c> expression. A Decimal operand is
-    /// emitted as-is; an integer literal <c>n</c> becomes <c>new \Koine\Runtime\Decimal('n')</c>;
-    /// any other (e.g. an <c>Int</c> member) is wrapped as <c>new \Koine\Runtime\Decimal(e)</c>.
+    /// emitted as-is (a Decimal <em>literal</em> is parenthesised so it's a safe method receiver);
+    /// an integer literal <c>n</c> becomes <c>new \Koine\Runtime\Decimal('n')</c>; any other (e.g.
+    /// an <c>Int</c> member) is wrapped as <c>new \Koine\Runtime\Decimal(e)</c>.
     /// </summary>
     private void WriteAsDecimal(Expr expr, StringBuilder sb)
     {
@@ -703,7 +704,25 @@ internal sealed class PhpExpressionTranslator
 
         if (IsDecimal(t))
         {
-            Write(expr, sb);
+            // A Decimal LITERAL dispatches to WriteLiteral, which emits a bare
+            // `new \Koine\Runtime\Decimal('n')`. When this arm's operand is the method RECEIVER (the
+            // left operand of arithmetic), that construction must be parenthesised so
+            // `(new \Koine\Runtime\Decimal('n'))->method()` parses on the documented PHP 8.1+ floor —
+            // bare `new X(...)->m()` is PHP 8.4+-only syntax (#907, the IsDecimal-early-return sibling
+            // of #815/#844's int-literal fix and #849's fallthrough fix). A Decimal MEMBER or nested
+            // Decimal arithmetic sub-expression renders as a safe non-`new` receiver
+            // (`$this->price->add(…)` / an already-parenthesised nested call), so it is written as-is.
+            if (expr is LiteralExpr { Kind: LiteralKind.Decimal })
+            {
+                sb.Append('(');
+                Write(expr, sb);
+                sb.Append(')');
+            }
+            else
+            {
+                Write(expr, sb);
+            }
+
             return;
         }
 

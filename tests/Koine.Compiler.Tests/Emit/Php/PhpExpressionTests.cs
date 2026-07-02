@@ -221,10 +221,14 @@ public class PhpExpressionTests
     [Fact]
     public void Decimal_equality_lowers_to_equals()
     {
+        // The Decimal-literal argument to `equals(...)` is parenthesised — `(new \…\Decimal('0'))` —
+        // uniformly, matching the int-literal argument to `compareTo(...)` above (#907 brings the
+        // IsDecimal-early-return arm in line with #815/#849's uniform wrap). Parens in argument
+        // position are harmless valid PHP; only the receiver position actually requires them.
         var eq = new BinaryExpr(BinaryOp.Eq, Id("price"), Decimal("0"));
         var ne = new BinaryExpr(BinaryOp.Neq, Id("price"), Decimal("0"));
-        Translate(eq).ShouldBe("$this->price->equals(new \\Koine\\Runtime\\Decimal('0'))");
-        Translate(ne).ShouldBe("!$this->price->equals(new \\Koine\\Runtime\\Decimal('0'))");
+        Translate(eq).ShouldBe("$this->price->equals((new \\Koine\\Runtime\\Decimal('0')))");
+        Translate(ne).ShouldBe("!$this->price->equals((new \\Koine\\Runtime\\Decimal('0')))");
     }
 
     [Fact]
@@ -274,6 +278,19 @@ public class PhpExpressionTests
         // (issue #849 — the fallthrough-arm sibling of #815/#844's int-literal fix).
         var expr = new BinaryExpr(BinaryOp.Add, Id("quantity"), Id("price"));
         Translate(expr).ShouldBe("(new \\Koine\\Runtime\\Decimal($this->quantity))->add($this->price)");
+    }
+
+    [Fact]
+    public void Decimal_literal_left_of_arithmetic_parenthesises_new_chaining()
+    {
+        // When a Decimal LITERAL (not an int literal, not a member) is on the LEFT of arithmetic,
+        // WriteAsDecimal's IsDecimal(t) early-return arm writes it as-is via WriteLiteral, which emits
+        // a bare `new \Koine\Runtime\Decimal('5')`. That literal then becomes the method RECEIVER, so
+        // without surrounding parentheses the emitted `new X(...)->m()` is PHP 8.4+-only syntax; the
+        // emitter targets PHP 8.1+, so the construction must be parenthesised (issue #907 — the
+        // IsDecimal-early-return sibling of #815/#844's int-literal fix and #849's fallthrough fix).
+        var expr = new BinaryExpr(BinaryOp.Add, Decimal("5"), Id("quantity"));
+        Translate(expr).ShouldBe("(new \\Koine\\Runtime\\Decimal('5'))->add((new \\Koine\\Runtime\\Decimal($this->quantity)))");
     }
 
     [Fact]
