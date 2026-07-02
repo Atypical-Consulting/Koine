@@ -59,7 +59,9 @@ jobs:
           # Astro 7 / Starlight require Node >= 22.12.
           node-version: 24
           cache: npm
-          cache-dependency-path: website/package-lock.json
+          # The repo root is the npm workspace root (tooling/*, website); the workspace's
+          # single lockfile lives there, not per-member.
+          cache-dependency-path: package-lock.json
 
       # NOTE: no explicit wasm-publish step here on purpose. The Astro build below runs the website
       # `prebuild` chain (npm run build → prebuild → scripts/build-wasm.mjs), which publishes the AOT
@@ -68,14 +70,20 @@ jobs:
       # Net: the AOT bundle is published exactly once per deploy. Don't re-add an explicit publish
       # step — the guard would just skip it.
       #
-      # (This step replaced `withastro/action@v6` so the boot smoke-test below can run BETWEEN the
+      # (These steps replaced `withastro/action@v6` so the boot smoke-test below can run BETWEEN the
       # build and the Pages artifact upload — the action does build+upload in one shot, leaving no
       # seam to gate on. The explicit npm ci + build + upload-pages-artifact chain is equivalent.)
+      #
+      # npm workspaces keep a single lockfile at the repo root, so `npm ci` must run there (it
+      # resolves `@atypical/koine-ui` via the workspace symlink, not the registry, and its
+      # postinstall script builds koine-ui's dist/) — hence a separate root-level install step
+      # ahead of the website-scoped `npm run build` below.
+      - name: Install npm dependencies (workspace root)
+        run: npm ci
+
       - name: Build site
         working-directory: ./website
-        run: |
-          npm ci
-          npm run build
+        run: npm run build
 
       # The compiler worker must actually boot in a real browser before we publish. The website's
       # vitest suite MOCKS the worker, so without this gate a worker-boot regression ships green — which
@@ -87,7 +95,7 @@ jobs:
         uses: ./.github/actions/setup-playwright
         with:
           working-directory: ./website
-          cache-key-files: website/package-lock.json
+          cache-key-files: package-lock.json
 
       - name: Boot smoke-test — the real Playground compiler boots in a browser (#492)
         working-directory: ./website

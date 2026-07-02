@@ -48,10 +48,16 @@ jobs:
           # Astro 7 / Starlight require Node >= 22.12 (matches deploy-docs.yml).
           node-version: 24
           cache: npm
-          cache-dependency-path: website/package-lock.json
+          # The repo root is the npm workspace root (tooling/*, website); the workspace's
+          # single lockfile lives there, not per-member.
+          cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
-        working-directory: ./website
+      # npm workspaces keep a single lockfile at the repo root, so `npm ci` must run
+      # there (it resolves `@atypical/koine-ui` via the workspace symlink, not the
+      # registry, and its postinstall script builds koine-ui's dist/). The test step
+      # below still runs from website/; npm's ancestor node_modules walk finds the
+      # root-installed deps normally.
+      - name: Install dependencies (workspace root)
         run: npm ci
 
       - name: Run website unit tests (vitest, Node env)

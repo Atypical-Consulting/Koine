@@ -4,5 +4,8 @@
   "workspaces": [
     "tooling/*",
     "website"
-  ]
+  ],
+  "scripts": {
+    "postinstall": "npm run build --workspace=@atypical/koine-ui"
+  }
 }

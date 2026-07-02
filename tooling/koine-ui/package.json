@@ -5,6 +5,12 @@
   "type": "module",
   "description": "Framework-free design tokens and Preact UI primitives extracted from Koine Studio.",
   "license": "MIT",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "sideEffects": [
+    "*.css"
+  ],
   "files": [
     "dist"
   ],
@@ -17,6 +23,7 @@
   },
   "scripts": {
     "build": "tsc && vite build",
+    "prepack": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "storybook": "storybook dev -p 6007",
