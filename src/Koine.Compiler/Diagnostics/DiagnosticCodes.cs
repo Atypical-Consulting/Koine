@@ -79,6 +79,7 @@ public static class DiagnosticCodes
     public const string AmbiguousEnumMember = "KOI0213";
     public const string DuplicateLetBinding = "KOI0214";
     public const string ValueObjectScalarArithmetic = "KOI0215";
+    public const string ValueObjectScalarArithmeticNoNumericField = "KOI0216";
 
     // ---- Determinism / value rules (KOI0300–0399) -------------------------
     public const string NowAsStoredDefault = "KOI0301";
@@ -269,6 +270,7 @@ public static class DiagnosticCodes
             [AmbiguousEnumMember] = D(AmbiguousEnumMember, "A bare enum member belongs to more than one enum; qualify it.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
             [DuplicateLetBinding] = D(DuplicateLetBinding, "A let binding name is declared more than once in the same let.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
             [ValueObjectScalarArithmetic] = D(ValueObjectScalarArithmetic, "A scalar was added to or subtracted from a value object, or a scalar was divided by a value object; a value object scales with '*'/'/', not '+'/'-', and never divides a scalar.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
+            [ValueObjectScalarArithmeticNoNumericField] = D(ValueObjectScalarArithmeticNoNumericField, "A value object with no numeric (Int/Decimal) stored field was multiplied or divided by a scalar; there is no field to scale, so no target emits a scalar operator for it.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
 
             // ---- Determinism / value rules -----------------------------------
             [NowAsStoredDefault] = D(NowAsStoredDefault, "'now' cannot be used as a stored (constructor) default.", DiagnosticCategory.Determinism, DiagnosticSeverity.Error),
