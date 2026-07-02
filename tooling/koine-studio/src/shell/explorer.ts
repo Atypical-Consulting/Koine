@@ -66,6 +66,16 @@ export interface Explorer {
    * mutates the workspace, so a missing match can't regress any file op.
    */
   revealByContext(context: string): void;
+  /**
+   * Teardown seam (#980). The explorer is a pre-Preact island with no owner-driven unmount, so nothing
+   * released its deferred work between shell boots. dispose() clears the pending filter debounce (so a
+   * queued `applyFilter → renderRoots` can't fire into a torn-down host), closes any open floating menu
+   * (idempotent), and detaches `el`. Detaching `el` removes the persistent tree/filter-input listeners'
+   * targets from the document — the tree-level dragover/dragleave/drop, the tree contextmenu, and the
+   * filter input/keydown handlers all hang off nodes inside `el`; row-level listeners already die with
+   * the innerHTML rebuilds.
+   */
+  dispose(): void;
 }
 
 /** One context-menu action, shown in the right-click / "…" / empty-space menu. */
@@ -1245,7 +1255,14 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     row.scrollIntoView?.({ block: 'nearest' });
   }
 
-  return { el: root, render, renderRoots, revealByContext };
+  // Teardown seam (#980) — see the Explorer.dispose() JSDoc for the listener-detachment strategy.
+  function dispose(): void {
+    clearTimeout(filterTimer); // the 110 ms filter debounce must not fire applyFilter after teardown
+    closeMenu(); // idempotent: closes any open floating menu (else a no-op)
+    root.remove(); // detach el — removes the persistent tree/filter-input listeners' targets from the DOM
+  }
+
+  return { el: root, render, renderRoots, revealByContext, dispose };
 }
 
 /** The folder name shown in a group header: the root token's last non-empty path segment. */

@@ -77,6 +77,12 @@ export interface LifecycleBootDeps {
      *  directly in ide.tsx init(). Without this, repeated init()/teardown cycles in vitest
      *  accumulate stale window listeners. (#789) */
     editorKeys(): void;
+    /** Release the status bar's folder-token subscription and unmount its two Preact panels so they
+     *  don't survive a teardown. Appended after editorKeys — order-independent of the others. (#980) */
+    statusBar(): void;
+    /** Clear the explorer's pending filter debounce, close its floating menu, and detach its root el so
+     *  its persistent listeners and deferred applyFilter can't fire after teardown. (#980) */
+    explorer(): void;
   };
 }
 
@@ -242,6 +248,8 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
       unsubRouteIntent();
       deps.disposers.exportMenuDismiss();
       deps.disposers.editorKeys();
+      deps.disposers.statusBar();
+      deps.disposers.explorer();
     },
   };
 }

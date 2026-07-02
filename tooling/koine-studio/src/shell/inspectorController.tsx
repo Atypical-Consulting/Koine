@@ -463,7 +463,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // no-churn guard so re-selecting the same pane doesn't touch storage. The center tabs (Visual / Code /
   // Documentation) are the only switcher now, so what they land on is what a reload restores.
   let persistedCenter: CenterView = initialCenter;
-  appStore.subscribe((s, prev) => {
+  // Captured + unsubscribed on dispose (like unsubscribeActiveContext / unsubscribeDirtyCount) so a
+  // deferred center change can't persist on behalf of a torn-down session after dispose().
+  const unsubscribeCenterPersist = appStore.subscribe((s, prev) => {
     if (s.center === prev.center) return;
     // Never persist a TRANSIENT view (e.g. the gear-launched Settings page): a reload must not restore it
     // (isValidCenter rejects it), and writing it would clobber the user's real last view — so opening
@@ -1137,7 +1139,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // diagram click can select an element while the Model tab is closed; opening it then shows the right
   // inspector). Subscribe to the whole store but act only when the `selection` field actually changes
   // reference — so an unrelated slice write (a setBottom / setActiveContext) doesn't trigger this.
-  appStore.subscribe((state, prev) => {
+  // Captured + unsubscribed on dispose (like the sibling subscriptions) so a deferred selection change
+  // can't repaint the inspector / re-apply scope into a torn-down host after dispose().
+  const unsubscribeSelection = appStore.subscribe((state, prev) => {
     if (state.selection === prev.selection) return;
     const sel = state.selection;
     // Jump-to-source works across scope, but a selection landing OUTSIDE the active context would
@@ -2231,6 +2235,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     unsubscribeDeck();
     render(null, centerBodyEl);
     render(null, deckBarEl);
+    // Drop the center-persist subscription (#980) — its callback calls deps.saveWorkspaceCenter, which
+    // must not persist the center on behalf of a torn-down session after dispose.
+    unsubscribeCenterPersist();
+    // Drop the selection subscription (#980) — its callback repaints the inspector / re-applies scope,
+    // which must not fire into a torn-down host after dispose.
+    unsubscribeSelection();
     // The viewport-resize listener is registered unconditionally now (#475 re-evaluates the strip default
     // on a narrow↔wide cross even without the inspector sheet), so always detach it; the sheet teardown is
     // still sheet-gated.

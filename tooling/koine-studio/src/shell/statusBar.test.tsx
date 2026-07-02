@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { createAppStore } from '@/store/index';
+import { createCountingStore } from '@/store/testing';
 import type { Platform } from '@/host';
 import { createStatusBar } from '@/shell/statusBar';
 
@@ -122,5 +123,71 @@ describe('createStatusBar', () => {
     store.getState().setFolderRootToken('opened'); // the change the branch segment listens for
     await flush();
     expect(gitStatus).toHaveBeenCalledWith('opened');
+  });
+
+  // #980: the status bar had no teardown seam — its :56 folder-token subscription and its two Preact
+  // panels (DocsCoverageRing, EmitEcho) survived every boot. dispose() must release all three, and the
+  // disposed flag must stop an in-flight branch refresh from writing into a torn-down bar.
+  test('dispose() releases the folder-token subscription and unmounts both panels', async () => {
+    seed();
+    const { store, active } = createCountingStore();
+    const handle = createStatusBar({ store, platform: fakePlatform(), folderRootToken: () => null, onOpenProblems: () => {} });
+    // The folder-token subscription is live, and both panels rendered their content into their hosts.
+    expect(active()).toBeGreaterThan(0);
+    expect(document.querySelector('#sb-docs-ring .sb-ring-label')).not.toBeNull();
+    expect(document.querySelector('#sb-emit .sb-emit-label')).not.toBeNull();
+
+    handle.dispose();
+    await flush();
+    // The folder-token subscription is released. (The panels subscribe to the store via a deferred
+    // preact/compat effect that never runs here — they are unmounted before it would — so the tally is
+    // driven by the folder-token sub; the DOM checks below are what actually guard the panel unmount.)
+    expect(active()).toBe(0);
+    // Both Preact panels are unmounted: render(null, host) emptied their hosts, so their own store
+    // subscriptions and any window listeners are gone. (Dropping either render(null) fails this.)
+    expect(document.querySelector('#sb-docs-ring .sb-ring-label')).toBeNull();
+    expect(document.querySelector('#sb-emit .sb-emit-label')).toBeNull();
+  });
+
+  test('a disposed status bar no longer refreshes the branch on a folder-token change', async () => {
+    seed();
+    const store = createAppStore();
+    const gitStatus = vi.fn(async () => ({ branch: 'main', files: [] }));
+    let token: string | null = 'opened';
+    const handle = createStatusBar({
+      store,
+      platform: fakePlatform({ canUseGit: true, gitStatus }),
+      folderRootToken: () => token,
+      onOpenProblems: () => {},
+    });
+    await flush();
+    gitStatus.mockClear();
+
+    handle.dispose();
+    token = 'other';
+    store.getState().setFolderRootToken('other'); // the disposed subscription must not react
+    await flush();
+    expect(gitStatus).not.toHaveBeenCalled();
+  });
+
+  test('an in-flight gitStatus that resolves after dispose() does not touch the branch segment', async () => {
+    seed();
+    const store = createAppStore();
+    let resolve!: (v: { branch: string; files: never[] }) => void;
+    const gitStatus = vi.fn(() => new Promise((r) => (resolve = r as never)));
+    const handle = createStatusBar({
+      store,
+      platform: fakePlatform({ canUseGit: true, gitStatus: gitStatus as never }),
+      folderRootToken: () => 'root', // never changes — the existing token guard does NOT bail here
+      onOpenProblems: () => {},
+    });
+    // The initial refreshBranch is now suspended on the gitStatus await.
+    handle.dispose();
+    resolve({ branch: 'main', files: [] }); // resolves AFTER dispose
+    await flush();
+
+    const branchEl = document.getElementById('sb-branch') as HTMLElement;
+    expect(branchEl.hidden).toBe(true); // the disposed flag bailed before the DOM write
+    expect(document.querySelector('#sb-branch [data-role="branch-name"]')!.textContent).not.toBe('main');
   });
 });

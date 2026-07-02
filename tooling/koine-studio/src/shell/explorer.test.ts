@@ -586,6 +586,28 @@ describe('explorer', () => {
     expect(visibleNames(ex)).toContain('shared.koi'); // tree restored
   });
 
+  // --- teardown (#980) --------------------------------------------------------
+
+  it('dispose() clears the pending filter debounce so applyFilter cannot fire after teardown, and detaches el', () => {
+    vi.useFakeTimers();
+    const cb = makeCallbacks();
+    const ex = createExplorer(cb);
+    document.body.appendChild(ex.el);
+    ex.render(sampleTree(), 'ROOT');
+    const before = visibleNames(ex); // the full, unfiltered tree
+
+    // Arm the 110 ms debounce with a non-matching value but do NOT advance timers — the filter is pending.
+    const input = ex.el.querySelector<HTMLInputElement>('.explorer-filter')!;
+    input.value = 'zzz-nothing';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+
+    ex.dispose();
+    // The pending applyFilter must never run: advancing past the debounce neither throws nor re-filters.
+    expect(() => vi.advanceTimersByTime(200)).not.toThrow();
+    expect(visibleNames(ex)).toEqual(before); // tree unchanged — applyFilter → renderRoots did not fire
+    expect(ex.el.isConnected).toBe(false); // el.remove() detached the tree (and its persistent listeners)
+  });
+
   // --- collapse all ----------------------------------------------------------
 
   it('collapse-all collapses every directory, expand-all re-opens them', () => {
