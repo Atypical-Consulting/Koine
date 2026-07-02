@@ -42,7 +42,8 @@ import type {
 import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/settings/persistence';
 import { renderDiagrams } from '@/diagrams/diagrams';
-import { domById } from '@/shared/domById';
+import { domById, domQueryAll } from '@/shared/domById';
+import { LEFT_RAIL_IDS, RSTRIP_BTN_CLASS, axisButtonsSelector, lstripAxisButtonsSelector } from '@atypical/koine-ui';
 import { renderContextMapGraph, type ContextMapGraphHandle } from '@/diagrams/diagrams-maxgraph';
 import { buildContextMapGraph, type ContextMapEdge } from '@/diagrams/contextMapGraph';
 import { NODE_NAVIGATE_EVENT, setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
@@ -344,7 +345,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // node — it self-fetches its strategic data and reads the store for altitude + scope — so loadModel
   // mounts it once and thereafter just reloads it. (The former Overview counts surface was removed with
   // the section stack.)
-  const domainPane = domById('rail-domain-pane');
+  const domainPane = domById(LEFT_RAIL_IDS.domainPane);
   // The mounted Domain navigator (#453), created lazily on the first loadModel and reused thereafter — so
   // a model reload re-fetches its strategic data rather than re-mounting (which would drop its store
   // subscription + breadcrumb state). Disposed on tear-down to drop that subscription.
@@ -397,7 +398,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (!narrow && inspectorSheet.isOpen()) inspectorSheet.setDetent('peek');
     renderSelectedInspector(); // re-mount into the now-correct host (sheet body vs #inspector-host)
   }
-  window.addEventListener('resize', onViewportResize);
+  // The `resize` listener is registered at the END of construction (just before `return`), not here: the
+  // required DOM-host lookups below (`domById`/`domQueryAll`) THROW on a drifted layout, and registering a
+  // global window listener before they run would leak a half-initialized closure into the page on failure.
   // The active bounded-context scope is surfaced in the status-bar "Context" segment (chrome v2, #923
   // removed the redundant top-bar breadcrumb strip; the left Domain navigator drives scope switching).
   const sbContextEl = domById('sb-context');
@@ -932,24 +935,24 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // never both claim the rail). The segmented control's two buttons live in #rail-axis-switch.
   const RAIL_AXIS_KEY = 'koine.studio.railAxis';
   type RailAxis = 'domain' | 'files';
-  const filesPane = document.getElementById('rail-files'); // eslint-disable-line no-restricted-properties -- annotate-only; this is the #rail-files split-brain (#979 owns reconciling this optional lookup with layout.ts's required domById)
-  const axisButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('#rail-axis-switch [data-axis]'));
+  const filesPane = domById(LEFT_RAIL_IDS.filesPane); // required contract (#979): ide.tsx renders LeftRail before this controller, so absence is a programmer error
+  const axisButtons = domQueryAll<HTMLButtonElement>(axisButtonsSelector);
   // The collapsed-rail spine (#left-strip, #730) carries the same Domain/Files toggles; keep their pressed
   // state in lockstep with the expanded segmented control so the active axis reads the same in both states.
-  const lstripAxisButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('#left-strip [data-laxis]'));
+  const lstripAxisButtons = domQueryAll<HTMLButtonElement>(lstripAxisButtonsSelector);
 
   // Paint the active axis: surface its pane, hide the other, and reflect the segmented control. Showing
   // Files also force-expands its section (its own collapse is ide.ts's #rail-sect chrome) so a reveal
   // always lands on a visible row.
   function applyAxis(axis: RailAxis): void {
     domainPane.hidden = axis !== 'domain';
-    if (filesPane) {
-      filesPane.hidden = axis !== 'files';
-      if (axis === 'files') {
-        filesPane.dataset.open = 'true';
-        filesPane.querySelector('.rail-sect-head')?.setAttribute('aria-expanded', 'true');
-      }
+    filesPane.hidden = axis !== 'files';
+    if (axis === 'files') {
+      filesPane.dataset.open = 'true';
+      filesPane.querySelector('.rail-sect-head')?.setAttribute('aria-expanded', 'true');
     }
+    // `b.dataset.axis` / `.dataset.laxis` mirror DATA_AXIS / DATA_LAXIS — dataset keys are camelCased, so
+    // they can't be indexed by the hyphenated attribute-name constants.
     for (const b of axisButtons) b.setAttribute('aria-selected', String(b.dataset.axis === axis));
     for (const b of lstripAxisButtons) b.setAttribute('aria-pressed', String(b.dataset.laxis === axis));
   }
@@ -1523,7 +1526,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // (applyDiagCollapsed). The active view stays owned by uiChrome.right / selectRightView; collapse is a
   // SEPARATE, independent flag, so re-expanding always restores the last view rather than a blank panel.
   const rstripSplitEl = domById('split');
-  const rstripButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('#right-strip .rstrip-btn'));
+  const rstripButtons = domQueryAll<HTMLButtonElement>(`#right-strip .${RSTRIP_BTN_CLASS}`);
   function applyRightCollapsed(collapsed: boolean): void {
     // DOM/ARIA only — persistence happens once per actual collapse transition (in the subscription
     // below), not on every right-view switch that also runs this repaint. The collapsed grid (hide
@@ -1533,6 +1536,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     const active = appStore.getState().right;
     // A stripe button reads "pressed" only while the panel is OPEN and showing that view; collapsed → none
     // pressed (the last active view is still remembered in uiChrome.right for the next expand).
+    // `b.dataset.rview` mirrors DATA_RVIEW — a camelCased dataset key can't be indexed by the hyphenated constant.
     for (const b of rstripButtons) {
       b.setAttribute('aria-pressed', String(!collapsed && b.dataset.rview === active));
     }
@@ -1597,24 +1601,25 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // layoutStore (persistence), like rightCollapsed. The head's collapse button tucks it; the spine's expand
   // control re-opens it, and its Domain/Files toggles re-open straight to that axis (setLeftCollapsed(false)
   // + setAxis). Navigation is persistent, so this defaults OPEN — the collapse is an on-demand reclaim.
-  const railCollapseBtn = document.getElementById('rail-collapse'); // eslint-disable-line no-restricted-properties -- annotate-only; #979 owns this controller's lookup semantics
-  const leftStripEl = document.getElementById('left-strip'); // eslint-disable-line no-restricted-properties -- annotate-only; #979 owns this controller's lookup semantics
+  const railCollapseBtn = domById(LEFT_RAIL_IDS.collapse);
+  const leftStripEl = domById(LEFT_RAIL_IDS.leftStrip);
   function applyLeftCollapsed(collapsed: boolean): void {
     // DOM/ARIA only; the collapsed grid (shrink the leftrail track, hide its resizer, #center reclaims the
     // width) is CSS keyed off this class on #split — the morph that swaps the head/navigator for #left-strip
     // lives in _leftrail.scss. Persistence happens once per transition in the subscription below.
     rstripSplitEl.classList.toggle('left-collapsed', collapsed);
-    railCollapseBtn?.setAttribute('aria-expanded', String(!collapsed));
+    railCollapseBtn.setAttribute('aria-expanded', String(!collapsed));
   }
   // Seed the runtime flag from persistence before the subscription is wired (so the seed doesn't echo),
   // then paint the DOM/ARIA once for the restored state — mirroring the right-collapse seed above.
   appStore.getState().setLeftCollapsed(loadLayout().leftCollapsed);
   applyLeftCollapsed(appStore.getState().leftCollapsed);
-  railCollapseBtn?.addEventListener('click', () => appStore.getState().setLeftCollapsed(true));
+  railCollapseBtn.addEventListener('click', () => appStore.getState().setLeftCollapsed(true));
   // Every spine button re-opens the rail; the Domain/Files toggles additionally set that axis so you land
   // on the navigator you clicked (the plain expand control carries no data-laxis, so it just re-opens).
-  for (const b of Array.from(leftStripEl?.querySelectorAll<HTMLButtonElement>('button') ?? [])) {
+  for (const b of Array.from(leftStripEl.querySelectorAll<HTMLButtonElement>('button'))) {
     b.addEventListener('click', () => {
+      // `b.dataset.laxis` mirrors DATA_LAXIS — a camelCased dataset key can't be indexed by the hyphenated constant.
       const axis = b.dataset.laxis as RailAxis | undefined;
       appStore.getState().setLeftCollapsed(false);
       if (axis) setAxis(axis);
@@ -2231,6 +2236,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     window.removeEventListener('resize', onViewportResize);
     inspectorSheet?.destroy();
   }
+
+  // Construction has fully succeeded (every required host resolved) — only now register the global
+  // `resize` listener, so a throwing lookup above can never leak a half-built closure onto `window`.
+  window.addEventListener('resize', onViewportResize);
 
   return {
     selection,

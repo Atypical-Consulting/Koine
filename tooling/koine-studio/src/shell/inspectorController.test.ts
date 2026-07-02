@@ -666,6 +666,14 @@ describe('createInspectorController — rail axis switch (#453)', () => {
     expect(domainPane.hidden).toBe(false);
     expect(filesPane.hidden).toBe(true);
   });
+
+  // #979: #rail-files is a REQUIRED contract element — ide.tsx renders LeftRail synchronously before any
+  // controller exists, so its absence is always a programmer error. Construction must throw loudly (via
+  // domById) rather than silently degrade, resolving the former optional/required split-brain with layout.ts.
+  test('construction throws `missing #rail-files` when the Files pane is absent', () => {
+    document.getElementById('rail-files')!.remove();
+    expect(() => createInspectorController(makeDeps(makeLsp()))).toThrow('missing #rail-files');
+  });
 });
 
 describe('createInspectorController — Domain navigator doorways + cross-axis glue (#453)', () => {

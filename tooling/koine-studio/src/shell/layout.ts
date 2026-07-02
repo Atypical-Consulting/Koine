@@ -11,6 +11,7 @@ import { initEdgeResizer } from '@/shell/resize';
 import { loadLayout, saveLayout, type LayoutState } from '@/shell/layoutStore';
 import { type LayoutActions } from '@/shell/layoutCommands';
 import { domById } from '@/shared/domById';
+import { LEFT_RAIL_IDS } from '@atypical/koine-ui';
 
 export interface LayoutControllerDeps {
   /** The #split grid host whose data-* attributes drive the layout reflow + the resizers' target. */
@@ -34,7 +35,7 @@ export interface LayoutController {
 
 export function createLayoutController(deps: LayoutControllerDeps): LayoutController {
   const { splitEl } = deps;
-  const filesSect = domById<HTMLElement>('rail-files');
+  const filesSect = domById<HTMLElement>(LEFT_RAIL_IDS.filesPane);
 
   // View-only state (orientation / panel side / side-rail side / whether the split is open and on which
   // uri), persisted in localStorage via layoutStore — it NEVER round-trips into the .koi model. On boot

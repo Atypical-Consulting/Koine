@@ -1,4 +1,5 @@
 import type { StoreApi } from 'zustand/vanilla';
+import type { RightStripView } from '@atypical/koine-ui';
 
 export type CenterView = 'visual' | 'technical' | 'output' | 'docs';
 // Code is authoring-only now: the editor + the scenario runner. The compiler-PRODUCED artifacts
@@ -13,6 +14,14 @@ export type BottomTab = 'problems' | 'events' | 'relationships' | 'terminal' | '
 // Code/Canvas while you work, rather than competing for the main stage as a center tab. (Rules + Notes
 // were retired in #730: invariants show in Properties, Notes lives in the Deck's Docs surface.)
 export type RightView = 'props' | 'assistant' | 'source-control';
+// Compile-time proof RightView and koine-ui's RightStripView (the right-strip's rendered button set) stay
+// in lockstep: the right-strip switcher reads `data-rview` values the JSX emits, so a divergence between the
+// two unions would silently drop a switcher. These aliases fail tsc if either direction stops holding;
+// erased at build (no runtime effect — the `void` reference just satisfies no-unused-vars).
+type _RVtoStrip = RightView extends RightStripView ? true : never;
+type _StripToRV = RightStripView extends RightView ? true : never;
+const _rightViewContract: [_RVtoStrip, _StripToRV] = [true, true];
+void _rightViewContract;
 
 /** The four zones the narrow-viewport (mobile) shell shows one at a time, switched by the bottom
  *  MobileZoneBar. Code → #center + selectCenter('technical'); Diagram → #center + selectCenter('visual');
