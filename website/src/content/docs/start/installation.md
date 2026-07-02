@@ -156,11 +156,11 @@ koine --version
 ```
 
 :::note[Feature status]
-Koine ships **R1–R15, the R16 multi-target emitters** (TypeScript, Python, PHP, and Rust alongside
-C#), **the R17 developer tooling** (`koine fmt`, `init`, `watch`, and the `lsp` language server),
-**and R18 model-as-spec coverage** (`koine coverage`). The Rust emitter covers multi-context models
-and the CQRS read side (Phase 2); details are on the
-[roadmap](/Koine/guides/roadmap/#r16--multi-target-emitters).
+Koine ships **the full tactical and strategic DDD toolkit**, **multi-target emitters** (C#,
+TypeScript, Python, PHP, and Rust), **developer tooling** (`koine fmt`, `init`, `watch`, and the
+`lsp` language server), and **model-as-spec coverage** (`koine coverage`). The Rust emitter covers
+multi-context models and the CQRS read side; per-target maturity is on the
+[roadmap](/Koine/guides/roadmap/#generate-to-your-stack).
 :::
 
 ## Next steps

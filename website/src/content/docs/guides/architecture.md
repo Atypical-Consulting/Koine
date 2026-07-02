@@ -13,7 +13,7 @@ This page walks the pipeline stage by stage, explains the notable design decisio
 .koi source file(s)
   → Lexer / Parser           (ANTLR, from Grammar/KoineLexer.g4 + KoineParser.g4)
   → KoineModelBuilderVisitor  (Parsing/) → builds the semantic model
-  → merge same-named contexts (R13.1 — open/additive contexts)
+  → merge same-named contexts (open/additive contexts)
   → semantic model            (Ast/ + ModelIndex) — target-agnostic, NO C# concepts
   → SemanticValidator         (Semantics/) → diagnostics with file/line/column
   → IEmitter                  (Emit/) → CSharpEmitter (Emit/CSharp/)
@@ -43,7 +43,7 @@ Helpers in `Ast/` keep the model self-describing without leaking a target:
 
 ### 3. Merge
 
-When you run `koine build` on a directory, every `.koi` file under it is parsed separately and then **merged into one model** (R13.1). Contexts of the same name are *open and additive*: their declarations, imports, specs, services, policies, and integration wiring concatenate in first-seen order. Each declaration keeps the filename it came from, so a later diagnostic still points at the right file. See [multi-file models](/Koine/reference/multi-file-imports-modules/).
+When you run `koine build` on a directory, every `.koi` file under it is parsed separately and then **merged into one model**. Contexts of the same name are *open and additive*: their declarations, imports, specs, services, policies, and integration wiring concatenate in first-seen order. Each declaration keeps the filename it came from, so a later diagnostic still points at the right file. See [multi-file models](/Koine/reference/multi-file-imports-modules/).
 
 ### 4. Semantic validation
 
@@ -123,7 +123,7 @@ The editor experience is split into two reusable, LSP-free pieces so the same lo
 
 The compiler's correctness rests on two complementary kinds of test in `tests/Koine.Compiler.Tests/`:
 
-- **[Verify](https://github.com/VerifyTests/Verify) snapshots.** Each epic's fixtures emit C# that is snapshotted to a `.verified.cs` file. Any change to the emitted shape shows up as a reviewable diff, so emission is pinned exactly.
+- **[Verify](https://github.com/VerifyTests/Verify) snapshots.** Each feature's fixtures emit C# that is snapshotted to a `.verified.cs` file. Any change to the emitted shape shows up as a reviewable diff, so emission is pinned exactly.
 - **A Roslyn compile meta-test.** This is the load-bearing one: it takes the emitted C# and **compiles it in-memory with Roslyn** (and, for several fixtures, executes it). A snapshot can look right and still not compile; this test guarantees every shipped example is real, working C#. It's why every full `.koi` snippet in this documentation is copy-paste valid.
 
 On top of these sit ordinary parsing and semantic unit tests that assert specific diagnostics (codes, messages, positions) for malformed models.

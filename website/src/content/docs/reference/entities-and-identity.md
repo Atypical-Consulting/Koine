@@ -159,7 +159,7 @@ identity strategy in use; see [§6.5](#65-identity-strategies) for per-strategy 
 
 By default an identity is a `Guid` that the client generates. But not every key is a Guid: SKUs are
 strings from a supplier catalogue, invoice numbers are store-assigned sequences. The `as` clause
-after `identified by XId` selects one of four strategies (introduced in epic R11). Omit it entirely
+after `identified by XId` selects one of four strategies. Omit it entirely
 to get the Guid default.
 
 | Strategy | Declaration | Backing type | `New()`? | Validation |

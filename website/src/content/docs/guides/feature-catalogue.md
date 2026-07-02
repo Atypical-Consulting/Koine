@@ -1,13 +1,14 @@
 ---
-title: "Feature catalogue (R1–R18)"
+title: "Feature catalogue"
 description: "Every shipped Koine construct mapped to its .koi syntax, what it emits, and where the demo uses it."
 ---
 
-This is the everything-at-a-glance page: every construct Koine ships through epic **R15** — plus the
-**R17 developer tooling** — the short `.koi` syntax for it, the C# (or Markdown) it emits, and a pointer into the canonical
+This is the everything-at-a-glance page: every construct Koine ships — the full tactical and strategic
+toolkit plus the developer tooling — with the short `.koi` syntax for it, the C# (or Markdown) it emits,
+and a pointer into the canonical
 [pizzeria demo](https://github.com/Atypical-Consulting/Koine/tree/main/demo) (which compiles the
 [`templates/pizzeria`](https://github.com/Atypical-Consulting/Koine/tree/main/templates/pizzeria)
-template). Tables are grouped by epic. Each family links to its reference page for the full story.
+template). Tables are grouped by capability. Each family links to its reference page for the full story.
 
 :::tip
 Everything in `templates/pizzeria/*.koi` exercises **every row below**. The fastest way to learn a
@@ -15,7 +16,7 @@ construct is to grep its demo location and read the surrounding `.koi`, then loo
 under `demo/Pizzeria.Domain/Generated/`.
 :::
 
-## Tactical building blocks (v0 + R1)
+## Tactical building blocks
 
 The core DDD vocabulary: types, fields, invariants, and the expression language. See
 [value objects](/Koine/reference/value-objects/), [entities and identity](/Koine/reference/entities-and-identity/),
@@ -38,7 +39,7 @@ The core DDD vocabulary: types, fields, invariants, and the expression language.
 | Collection ops + lambdas | `lines.sum(l => l.lineTotal)`, `.count`, `.all`, `.distinctBy` | LINQ (`.Sum`, `.Count`, `.All`, `.DistinctBy`); pulls `using System.Linq;` | `Order.total`, `Order` invariants |
 | Multiple contexts → namespaces | `context Catalog { … }` | one C# namespace + folder per context | all six contexts |
 
-## Optionality, sets & docs (R2, R4)
+## Optionality, sets & docs
 
 See [value objects](/Koine/reference/value-objects/) and [contexts and types](/Koine/reference/contexts-and-types/).
 
@@ -49,7 +50,7 @@ See [value objects](/Koine/reference/value-objects/) and [contexts and types](/K
 | Doc comment | `/// summary text` | a C# XML `<summary>` on the member/type | `ordering.koi`, `menu.koi`, `payment.koi` |
 | Glossary | `koine build … --glossary pizzeria.md` | a Markdown glossary grouped by context (each heading shows its `version`) then type | the `--glossary` flag |
 
-## Commands, events & state (R5–R7)
+## Commands, events & state
 
 See [commands, events & state](/Koine/reference/commands-events-state/).
 
@@ -66,7 +67,7 @@ token — keep the two characters adjacent (`status -> Placed`, never `status - 
 two assignment-like arrows: `=` (declaration default) and `->` (state effect).
 :::
 
-## Factories (R8)
+## Factories
 
 The aggregate's only public construction path. See [factories](/Koine/reference/factories/).
 
@@ -84,7 +85,7 @@ the aggregate doesn't exist yet. A factory parameter named `id` is rejected (it 
 identity local).
 :::
 
-## Richer value objects (R9)
+## Richer value objects
 
 See [enums](/Koine/reference/enums/) and [value objects](/Koine/reference/value-objects/).
 
@@ -95,7 +96,7 @@ See [enums](/Koine/reference/enums/) and [value objects](/Koine/reference/value-
 | Quantity | `quantity Weight { amount: Decimal  unit: MassUnit }` | a value object with unit-checked `+`/`-` (throws on mixed units) and scalar `*`/`/` that preserve the unit | `Portion` |
 | `Range<T>` | `window: Range<Instant>` | the runtime `Koine/Runtime/Range.cs` (`Contains`, `Overlaps`, start≤end guard); element must be `Int`, `Decimal`, or `Instant` | `HappyHour.window` |
 
-## Specifications, services & policies (R10)
+## Specifications, services & policies
 
 See [specs, services & policies](/Koine/reference/specs-services-policies/).
 
@@ -106,7 +107,7 @@ See [specs, services & policies](/Koine/reference/specs-services-policies/).
 | Domain service (seam) | `service Calc { operation run(a: Int): Int }` | an `abstract class` with abstract method seams | (any bodyless operation) |
 | Policy | `policy PostToLedger when ChargeCaptured then Books.record(…)` | `IPostToLedgerPolicy` + an abstract `PostToLedgerPolicy` seam (the reaction is a doc sketch, not executed code) | `Payment.PostToLedger` |
 
-## Identity, repositories & concurrency (R11)
+## Identity, repositories & concurrency
 
 See [repositories & concurrency](/Koine/reference/repositories-concurrency/) and
 [entities and identity](/Koine/reference/entities-and-identity/).
@@ -126,7 +127,7 @@ must come before any `find`. A root member literally named `version` collides wi
 on a `versioned` aggregate.
 :::
 
-## Application layer & CQRS (R12)
+## Application layer & CQRS
 
 See [application layer & CQRS](/Koine/reference/application-cqrs/) and the
 [application-layer tutorial](/Koine/tutorials/application-layer/).
@@ -143,7 +144,7 @@ A query's result type is required and must be a read model (or `List<readmodel>`
 is emitted exactly once for the whole model.
 :::
 
-## Multi-file, imports & modules (R13)
+## Multi-file, imports & modules
 
 See [multi-file, imports & modules](/Koine/reference/multi-file-imports-modules/) and the
 [multiple contexts tutorial](/Koine/tutorials/multiple-contexts/).
@@ -156,7 +157,7 @@ See [multi-file, imports & modules](/Koine/reference/multi-file-imports-modules/
 | Qualified reference | `address: Menu.Topping` | a fully-qualified C# type, no `using` added | cross-context refs |
 | Module | `module Line { … }` | a `<Context>.<Module>` sub-namespace + sub-folder | `Kitchen.Line` |
 
-## Context maps & integration events (R14)
+## Context maps & integration events
 
 See [context maps & integration events](/Koine/reference/context-maps-integration/) and the
 [multiple contexts tutorial](/Koine/tutorials/multiple-contexts/). The map is **enforced** and
@@ -186,7 +187,7 @@ on its own publisher's event. The common single-publisher case keeps the bare `I
 unchanged. The same publisher-qualification applies in the TypeScript and PHP emitters; Python emits no
 per-subscription handler seam, so its same-named events simply live in their distinct context packages.
 
-## Model versioning & evolution (R15)
+## Model versioning & evolution
 
 See [model versioning](/Koine/reference/versioning/) and the
 [evolving a model tutorial](/Koine/tutorials/evolving-a-model/).
@@ -204,7 +205,7 @@ open-host value objects. Internal refactors are ignored. Adding an optional fiel
 non-breaking; removing a published field or making it required is breaking.
 :::
 
-## Developer tooling (R17)
+## Developer tooling
 
 Not language constructs, but the commands and editor support that make `.koi` pleasant to write. See
 the [CLI reference](/Koine/guides/cli/) and [editor tooling](/Koine/guides/editor-tooling/).

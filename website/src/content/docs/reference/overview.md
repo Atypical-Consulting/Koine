@@ -59,7 +59,7 @@ Each construct family has its own reference page. Start here and follow the link
 | `contextmap`, `integration event`, `publishes`/`subscribes`, `acl` | context maps, the seven roles, shared kernels, integration events | [Context maps & integration](/Koine/reference/context-maps-integration/) |
 | `version`, `@since`, `@deprecated`, `koine check` | model versioning, deprecation, compatibility checks | [Versioning & evolution](/Koine/reference/versioning/) |
 
-For a feature-by-feature tour mapped to the R1–R15 roadmap, see the [feature catalogue](/Koine/guides/feature-catalogue/). For the `koine build`/`koine check` flags, see the [CLI reference](/Koine/guides/cli/).
+For a feature-by-feature tour, see the [feature catalogue](/Koine/guides/feature-catalogue/). For the `koine build`/`koine check` flags, see the [CLI reference](/Koine/guides/cli/).
 
 ## 1.4 Primitive types
 

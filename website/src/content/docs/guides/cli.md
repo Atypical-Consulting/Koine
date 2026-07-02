@@ -213,8 +213,8 @@ The first one found wins; if none is found, no defaults are applied. A flag on t
 
 Every other key is **silently ignored**, which keeps the file forward-compatible — older tooling tolerates a newer config.
 
-:::note[`targets.*` is reserved for R16]
-A structured `targets.<name> = { … }` block (per-target namespace maps, `instantMode`, output layout) is sketched in the scaffolded config but **not yet implemented** — it is reserved for [R16](/Koine/guides/roadmap/#r16--multi-target-emitters) and ignored today. `koine init` writes a commented example of it for forward reference.
+:::note[`targets.*` is reserved for a future config block]
+A structured `targets.<name> = { … }` block (per-target namespace maps, `instantMode`, output layout) is sketched in the scaffolded config but **not yet implemented** — it is reserved for a [future multi-target config block](/Koine/guides/roadmap/#generate-to-your-stack) and ignored today. `koine init` writes a commented example of it for forward reference.
 :::
 
 ## `koine fmt`

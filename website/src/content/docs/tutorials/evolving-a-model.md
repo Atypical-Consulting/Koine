@@ -216,7 +216,7 @@ enforced compatibility gate. From here:
 
 - Browse the [reference](/Koine/reference/overview/) for the precise grammar of every construct, starting
   with [versioning & evolution](/Koine/reference/versioning/) for everything on this page.
-- See the [feature catalogue](/Koine/guides/feature-catalogue/) for the complete R1–R15 list.
+- See the [feature catalogue](/Koine/guides/feature-catalogue/) for the complete list.
 - Revisit [reading the output](/Koine/start/reading-the-output/) to map each construct to its
   emitted C#.
 
