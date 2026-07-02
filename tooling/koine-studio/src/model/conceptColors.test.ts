@@ -63,3 +63,39 @@ describe('concept colors — generated module vs source', () => {
     expect(new Set(modifiers).size).toBe(modifiers.length);
   });
 });
+
+// The VS Code extension (tooling/koine-textmate) hand-writes its default semantic-token color rules
+// (it has no generator), so this sync test guards them against the single-source palette: every
+// `*.<modifier>:koine` default hex must equal that concept's `dark`, and every concept must be covered.
+describe('VS Code extension concept-color rules (koine-textmate) vs palette', () => {
+  const pkg = JSON.parse(
+    readFileSync(path.join(repoRoot, 'tooling', 'koine-textmate', 'package.json'), 'utf8'),
+  ) as {
+    contributes: {
+      semanticTokenModifiers?: { id: string }[];
+      semanticTokenScopes?: { language: string; scopes: Record<string, string[]> }[];
+      configurationDefaults?: {
+        'editor.semanticTokenColorCustomizations'?: { rules?: Record<string, string> };
+      };
+    };
+  };
+
+  test('every `*.<modifier>:koine` default rule hex equals the concept dark value', () => {
+    const rules = pkg.contributes.configurationDefaults?.['editor.semanticTokenColorCustomizations']?.rules ?? {};
+    for (const c of source.concepts) {
+      expect(rules[`*.${c.modifier}:koine`], `rule for ${c.modifier}`).toBe(c.dark);
+    }
+    // No stray rules beyond the 15 concepts (a removed concept would leave a dangling rule).
+    expect(Object.keys(rules)).toHaveLength(source.concepts.length);
+  });
+
+  test('the extension declares every concept modifier and maps a scope for each', () => {
+    const declared = (pkg.contributes.semanticTokenModifiers ?? []).map((m) => m.id).sort();
+    expect(declared).toEqual(source.concepts.map((c) => c.modifier).sort());
+
+    const scopes = pkg.contributes.semanticTokenScopes?.[0]?.scopes ?? {};
+    for (const c of source.concepts) {
+      expect(scopes[`*.${c.modifier}`], `scope for ${c.modifier}`).toBeDefined();
+    }
+  });
+});

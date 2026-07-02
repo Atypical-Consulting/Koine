@@ -5,9 +5,20 @@
   "version": "0.3.0",
   "publisher": "atypical-consulting",
   "icon": "assets/icon.png",
-  "engines": { "vscode": "^1.75.0" },
-  "categories": ["Programming Languages", "Linters"],
-  "keywords": ["koine", "ddd", "domain-driven-design", "dsl", "language-server"],
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "keywords": [
+    "koine",
+    "ddd",
+    "domain-driven-design",
+    "dsl",
+    "language-server"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -18,7 +29,9 @@
     "url": "https://github.com/Atypical-Consulting/Koine/issues"
   },
   "main": "./out/extension.js",
-  "activationEvents": ["onLanguage:koine"],
+  "activationEvents": [
+    "onLanguage:koine"
+  ],
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
@@ -29,24 +42,57 @@
   },
   "contributes": {
     "commands": [
-      { "command": "koine.previewEmit", "title": "Preview Emitted Code", "category": "Koine" },
-      { "command": "koine.showGlossary", "title": "Show Glossary", "category": "Koine" },
-      { "command": "koine.showContextMap", "title": "Show Context Map", "category": "Koine" },
-      { "command": "koine.checkCompatibility", "title": "Check Compatibility (vs baseline)", "category": "Koine" }
+      {
+        "command": "koine.previewEmit",
+        "title": "Preview Emitted Code",
+        "category": "Koine"
+      },
+      {
+        "command": "koine.showGlossary",
+        "title": "Show Glossary",
+        "category": "Koine"
+      },
+      {
+        "command": "koine.showContextMap",
+        "title": "Show Context Map",
+        "category": "Koine"
+      },
+      {
+        "command": "koine.checkCompatibility",
+        "title": "Check Compatibility (vs baseline)",
+        "category": "Koine"
+      }
     ],
     "menus": {
       "commandPalette": [
-        { "command": "koine.previewEmit", "when": "editorLangId == koine" },
-        { "command": "koine.showGlossary", "when": "editorLangId == koine" },
-        { "command": "koine.showContextMap", "when": "editorLangId == koine" },
-        { "command": "koine.checkCompatibility", "when": "editorLangId == koine" }
+        {
+          "command": "koine.previewEmit",
+          "when": "editorLangId == koine"
+        },
+        {
+          "command": "koine.showGlossary",
+          "when": "editorLangId == koine"
+        },
+        {
+          "command": "koine.showContextMap",
+          "when": "editorLangId == koine"
+        },
+        {
+          "command": "koine.checkCompatibility",
+          "when": "editorLangId == koine"
+        }
       ]
     },
     "languages": [
       {
         "id": "koine",
-        "aliases": ["Koine", "koine"],
-        "extensions": [".koi"],
+        "aliases": [
+          "Koine",
+          "koine"
+        ],
+        "extensions": [
+          ".koi"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -67,15 +113,157 @@
         },
         "koine.server.args": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "markdownDescription": "Extra arguments inserted **before** the `lsp` subcommand. Use this when `#koine.server.path#` is `dotnet`, e.g. `[\"run\", \"--project\", \"src/Koine.Cli\", \"--\"]` or `[\"/abs/path/Koine.Cli.dll\"]`."
         },
         "koine.trace.server": {
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off",
           "description": "Traces the communication between VS Code and the Koine language server."
+        }
+      }
+    },
+    "semanticTokenModifiers": [
+      {
+        "id": "aggregate",
+        "description": "Aggregate (Concept Colors, ADR 0003)"
+      },
+      {
+        "id": "entity",
+        "description": "Entity (Concept Colors, ADR 0003)"
+      },
+      {
+        "id": "valueObject",
+        "description": "Value object (Concept Colors, ADR 0003)"
+      },
+      {
+        "id": "enumeration",
+        "description": "Enumeration (Concept Colors, ADR 0003)"
+      },
+      {
+        "id": "domainEvent",
+        "description": "Domain event (Concept Colors, ADR 0003)"
+      },
+      {
+        "id": "integrationEvent",
+        "description": "Integration event (Concept Colors, ADR 0003)"
+      },
+      {
+        "id": "command",
+        "description": "Command (Concept Colors, ADR 0003)"
+      },
+      {
+        "id": "query",
+        "description": "Query (Concept Colors, ADR 0003)"
+      },
+      {
+        "id": "readModel",
+        "description": "Read model (Concept Colors, ADR 0003)"
+      },
+      {
+        "id": "service",
+        "description": "Service (Concept Colors, ADR 0003)"
+      },
+      {
+        "id": "repository",
+        "description": "Repository (Concept Colors, ADR 0003)"
+      },
+      {
+        "id": "policy",
+        "description": "Policy (Concept Colors, ADR 0003)"
+      },
+      {
+        "id": "factory",
+        "description": "Factory (Concept Colors, ADR 0003)"
+      },
+      {
+        "id": "stateMachine",
+        "description": "State machine (Concept Colors, ADR 0003)"
+      },
+      {
+        "id": "specification",
+        "description": "Specification (Concept Colors, ADR 0003)"
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "koine",
+        "scopes": {
+          "*.aggregate": [
+            "entity.name.type.aggregate.koine"
+          ],
+          "*.entity": [
+            "entity.name.type.entity.koine"
+          ],
+          "*.valueObject": [
+            "entity.name.type.value.koine"
+          ],
+          "*.enumeration": [
+            "entity.name.type.enum.koine"
+          ],
+          "*.domainEvent": [
+            "entity.name.type.event.koine"
+          ],
+          "*.integrationEvent": [
+            "entity.name.type.integration-event.koine"
+          ],
+          "*.command": [
+            "entity.name.type.command.koine"
+          ],
+          "*.query": [
+            "entity.name.type.query.koine"
+          ],
+          "*.readModel": [
+            "entity.name.type.read-model.koine"
+          ],
+          "*.service": [
+            "entity.name.type.service.koine"
+          ],
+          "*.repository": [
+            "entity.name.type.repository.koine"
+          ],
+          "*.policy": [
+            "entity.name.type.policy.koine"
+          ],
+          "*.factory": [
+            "entity.name.type.factory.koine"
+          ],
+          "*.stateMachine": [
+            "entity.name.type.state-machine.koine"
+          ],
+          "*.specification": [
+            "entity.name.type.spec.koine"
+          ]
+        }
+      }
+    ],
+    "configurationDefaults": {
+      "editor.semanticTokenColorCustomizations": {
+        "enabled": true,
+        "rules": {
+          "*.aggregate:koine": "#8b87f5",
+          "*.entity:koine": "#34d399",
+          "*.valueObject:koine": "#5aa9f0",
+          "*.enumeration:koine": "#fbbf24",
+          "*.domainEvent:koine": "#f472b6",
+          "*.integrationEvent:koine": "#2dd4bf",
+          "*.command:koine": "#ef4444",
+          "*.query:koine": "#38bdf8",
+          "*.readModel:koine": "#a3e635",
+          "*.service:koine": "#fb923c",
+          "*.repository:koine": "#94a3b8",
+          "*.policy:koine": "#d946ef",
+          "*.factory:koine": "#f59e0b",
+          "*.stateMachine:koine": "#06b6d4",
+          "*.specification:koine": "#c084fc"
         }
       }
     }
