@@ -845,7 +845,7 @@ export function init(hooks: IdeHooks = {}): () => void {
 
   // The status-bar reactive wiring (#923): the docs-coverage ring + emit echo panels, the Problems-tab
   // click, and the git-branch segment. Extracted to keep init() thin (#757).
-  createStatusBar({
+  const statusBar = createStatusBar({
     store: appStore,
     platform,
     folderRootToken: () => workspace.folderRootToken(),
@@ -1354,6 +1354,7 @@ export function init(hooks: IdeHooks = {}): () => void {
       autoSave: () => workspace.setAutoSave(false),
       exportMenuDismiss: () => teardownExportMenuDismiss(),
       editorKeys: () => disposeEditorKeys(),
+      statusBar: () => statusBar.dispose(),
     },
   });
 
