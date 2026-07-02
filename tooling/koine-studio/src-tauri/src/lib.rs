@@ -1109,30 +1109,7 @@ fn git_log(dir: String, rel_path: Option<String>) -> Result<Vec<GitLogEntry>, St
 /// derived name — is unusable.
 #[tauri::command]
 fn git_clone(url: String, parent_dir: String, dir_name: Option<String>) -> Result<String, String> {
-    let dest_name = match dir_name {
-        Some(name) => name,
-        None => {
-            // The url's last path segment, splitting on both `/` (paths/URLs) and `:` (scp-like
-            // `git@host:owner/repo.git`), then stripping a trailing `.git`.
-            let last = url
-                .trim_end_matches('/')
-                .rsplit(|c: char| c == '/' || c == ':')
-                .next()
-                .unwrap_or("");
-            last.strip_suffix(".git").unwrap_or(last).to_string()
-        }
-    };
-
-    // Validate the destination — whether caller-supplied or url-derived — so the clone can never escape
-    // `parent_dir`: a single non-empty path segment with no separators and no `..` (a url ending in
-    // `/..` would otherwise derive `".."` and target the grandparent).
-    if dest_name.is_empty()
-        || dest_name.contains('/')
-        || dest_name.contains('\\')
-        || dest_name.contains("..")
-    {
-        return Err(format!("invalid clone directory name: {dest_name:?}"));
-    }
+    let dest_name = clone_dest_name(&url, dir_name.as_deref())?;
 
     // `--` terminates option parsing so a url or dest whose first char is `-` (e.g. a repo named `-x`)
     // is treated as a positional argument, not a git flag.
@@ -1142,6 +1119,29 @@ fn git_clone(url: String, parent_dir: String, dir_name: Option<String>) -> Resul
         .join(&dest_name)
         .to_string_lossy()
         .into_owned())
+}
+
+/// Resolve the destination folder name for a clone: the caller-supplied `dir_name`, else the url's last
+/// path segment — split on `/` (paths/URLs), `\` (a Windows local-path clone SOURCE, e.g.
+/// `C:\repos\app`) and `:` (scp-like `git@host:owner/repo.git`) — with a trailing `.git` stripped.
+/// Validated to a single non-empty segment with no separators and no `..`, so a clone can never escape
+/// `parent_dir` (a url ending in `/..` would otherwise derive `".."` and target the grandparent).
+fn clone_dest_name(url: &str, dir_name: Option<&str>) -> Result<String, String> {
+    let dest = match dir_name {
+        Some(name) => name.to_string(),
+        None => {
+            let last = url
+                .trim_end_matches(|c: char| c == '/' || c == '\\')
+                .rsplit(|c: char| c == '/' || c == '\\' || c == ':')
+                .next()
+                .unwrap_or("");
+            last.strip_suffix(".git").unwrap_or(last).to_string()
+        }
+    };
+    if dest.is_empty() || dest.contains('/') || dest.contains('\\') || dest.contains("..") {
+        return Err(format!("invalid clone directory name: {dest:?}"));
+    }
+    Ok(dest)
 }
 
 // --- workspace explorer tree + mutations ------------------------------------
@@ -3354,6 +3354,21 @@ mod tests {
         // The SAME validation applies to a url-DERIVED name: a url ending in `/..` derives dest `".."`,
         // which must be rejected too (not just the explicit-dir-name branch).
         assert!(git_clone("https://example.com/owner/..".to_string(), parent.path(), None).is_err());
+
+        // clone_dest_name derives the repo name across url styles AND platform separators (a Windows
+        // local-path clone source uses `\` — this was the windows-latest CI failure) and rejects any
+        // name that could escape parent_dir. Pure + platform-independent, so it runs on every OS.
+        assert_eq!(clone_dest_name("https://example.com/owner/repo.git", None).unwrap(), "repo");
+        assert_eq!(clone_dest_name("git@host:owner/repo.git", None).unwrap(), "repo");
+        assert_eq!(clone_dest_name("https://h/o/repo/", None).unwrap(), "repo"); // trailing slash trimmed
+        assert_eq!(clone_dest_name("/tmp/koine_git_test_1", None).unwrap(), "koine_git_test_1");
+        assert_eq!(clone_dest_name(r"C:\Users\RUNNER~1\Temp\koine_git_test_2", None).unwrap(), "koine_git_test_2");
+        assert_eq!(clone_dest_name("ignored", Some("myclone")).unwrap(), "myclone");
+        assert!(clone_dest_name("https://h/o/..", None).is_err());
+        assert!(clone_dest_name("x", Some("a/b")).is_err());
+        assert!(clone_dest_name("x", Some(r"a\b")).is_err());
+        assert!(clone_dest_name("x", Some("..")).is_err());
+        assert!(clone_dest_name("x", Some("")).is_err());
 
         // A non-existent local url fails fast (git rejects the missing path — no network).
         assert!(git_clone(
