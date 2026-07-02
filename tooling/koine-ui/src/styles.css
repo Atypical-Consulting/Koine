@@ -6,4 +6,5 @@
  * primitives moved in Task 3 are pure DOM/JS with no CSS of their own.
  */
 @import './tokens.css';
+@import './concept-colors.generated.css';
 @import './components.css';

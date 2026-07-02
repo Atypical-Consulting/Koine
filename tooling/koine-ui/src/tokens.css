@@ -185,28 +185,7 @@ html[data-theme='light'] {
 /* The dark theme is the :root default; data-theme='dark' needs no override block. */
 
 /* --- DDD concept palette ---------------------------------------------------------------------------
-   One source of truth for the colour of each DDD concept, shared by the Explorer icons (_model.scss)
-   and the diagram nodes (_diagrams.scss) so the two never disagree. Saturated mid-tones that read on
-   both the light and dark themes. Tweak a value here and both surfaces update together. */
-:root {
-  --koi-ddd-aggregate: #8b87f5; /* indigo — the boundary owner */
-  --koi-ddd-entity: #34d399; /* green */
-  --koi-ddd-value: #5aa9f0; /* blue */
-  --koi-ddd-enum: #fbbf24; /* amber */
-  --koi-ddd-event: #f472b6; /* pink — domain events */
-  --koi-ddd-integration-event: #2dd4bf; /* teal — cross-context events */
-  --koi-ddd-service: #fb923c; /* orange — domain services */
-  --koi-ddd-repository: #94a3b8; /* slate — repositories / types */
-  --koi-ddd-spec: #c084fc; /* violet — specifications / rules */
-
-  /* Behavioural & lifecycle constructs (#453). The model graph emits `states` today; commands, queries,
-     read models, policies and factories are Phase 2 — these hues are defined ahead of the rows so the
-     tactical tree (and a future Explorer bucket) lights up the moment they appear. Distinct from the
-     structural hues above. */
-  --koi-ddd-state-machine: #06b6d4; /* cyan — an entity/aggregate lifecycle (the `states` kind) */
-  --koi-ddd-command: #ef4444; /* red — an imperative command (intent to change state) */
-  --koi-ddd-query: #38bdf8; /* sky — a read query */
-  --koi-ddd-read-model: #a3e635; /* lime — a denormalised read model / projection */
-  --koi-ddd-policy: #d946ef; /* magenta — a policy / process manager (reacts to events) */
-  --koi-ddd-factory: #f59e0b; /* amber — a factory (constructs aggregates) */
-}
+   The --koi-ddd-<slug> concept hues moved to design/concept-colors.json (ADR 0004 — Concept Colors:
+   one concept, one color, everywhere) and are emitted into concept-colors.generated.css by
+   `npm run gen:colors`. styles.css @imports that generated file, so the vars still resolve here. Edit
+   the JSON and regenerate; never hand-write a concept hex. */

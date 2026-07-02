@@ -1,0 +1,23 @@
+/* GENERATED — do not edit. Source of truth: design/concept-colors.json (ADR 0004 — Concept Colors).
+   Regenerate with `npm run gen:colors` in tooling/koine-ui. */
+
+/* The DDD concept palette — one hue per DDD concept, shared by the Studio Explorer icons, the inspector
+   accent, the diagram nodes, and (via cm-st-k-<slug>) the code editor. Dark-only :root default; see the
+   generator header for why the canvas keeps the dark hue under the light theme too. */
+:root {
+  --koi-ddd-aggregate: #8b87f5;
+  --koi-ddd-entity: #34d399;
+  --koi-ddd-value: #5aa9f0;
+  --koi-ddd-enum: #fbbf24;
+  --koi-ddd-event: #f472b6;
+  --koi-ddd-integration-event: #2dd4bf;
+  --koi-ddd-command: #ef4444;
+  --koi-ddd-query: #38bdf8;
+  --koi-ddd-read-model: #a3e635;
+  --koi-ddd-service: #fb923c;
+  --koi-ddd-repository: #94a3b8;
+  --koi-ddd-policy: #d946ef;
+  --koi-ddd-factory: #f59e0b;
+  --koi-ddd-state-machine: #06b6d4;
+  --koi-ddd-spec: #c084fc;
+}

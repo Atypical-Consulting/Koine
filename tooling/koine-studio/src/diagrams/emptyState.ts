@@ -54,7 +54,7 @@ const CONCEPT_TILES: ReadonlyArray<{
     name: 'State machine',
     desc: 'The lifecycle a concept moves through — states and guarded transitions.',
     keyword: 'states',
-    color: 'var(--koi-ddd-enum)',
+    color: 'var(--koi-ddd-state-machine)',
   },
   {
     kind: 'contextMap',

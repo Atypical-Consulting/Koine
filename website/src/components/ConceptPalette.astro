@@ -1,0 +1,50 @@
+---
+// The Concept Colors palette table, rendered FROM the single source of truth so the docs can never
+// drift from the code: `src/generated/concept-colors.json` is emitted by `npm run gen:colors` from
+// `design/concept-colors.json` (ADR 0004). Each row shows the dark + light swatch, the concept, its
+// `--koi-ddd-<slug>` CSS var, and the LSP semantic-token modifier that carries it on the wire.
+import palette from '../generated/concept-colors.json';
+
+const { concepts } = palette as {
+  concepts: { slug: string; label: string; modifier: string; dark: string; light: string }[];
+};
+---
+
+<table class="koi-concept-palette">
+  <thead>
+    <tr>
+      <th>Dark</th>
+      <th>Light</th>
+      <th>Concept</th>
+      <th>CSS variable</th>
+      <th>LSP modifier</th>
+    </tr>
+  </thead>
+  <tbody>
+    {
+      concepts.map((c) => (
+        <tr>
+          <td><span class="koi-swatch" style={`background:${c.dark}`} title={c.dark} /></td>
+          <td><span class="koi-swatch" style={`background:${c.light}`} title={c.light} /></td>
+          <td>{c.label}</td>
+          <td><code>--koi-ddd-{c.slug}</code></td>
+          <td><code>{c.modifier}</code></td>
+        </tr>
+      ))
+    }
+  </tbody>
+</table>
+
+<style>
+  .koi-concept-palette code {
+    font-size: 0.85em;
+  }
+  .koi-swatch {
+    display: inline-block;
+    width: 1.4rem;
+    height: 1.4rem;
+    border-radius: 4px;
+    border: 1px solid var(--sl-color-gray-5, #888);
+    vertical-align: middle;
+  }
+</style>
