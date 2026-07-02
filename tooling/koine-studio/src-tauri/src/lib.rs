@@ -72,6 +72,11 @@ struct McpState {
     /// idempotent (returns the running server verbatim without re-spawning or re-waiting). Cleared by
     /// `mcp_stop`. Carries the `fallback` flag so the UI's busy-port warning survives a re-open.
     info: Mutex<Option<McpEndpointInfo>>,
+    /// serializes endpoint resolution. The busy-port fallback reaps the dead child and respawns across
+    /// two `spawn_and_wait_for_endpoint` calls; without this a second concurrent `mcp_endpoint` could
+    /// interleave between the reap and the respawn and the two callers would kill each other's servers.
+    /// Held for the whole of `mcp_endpoint`, so a second caller blocks then hits the cached-`info` path.
+    resolving: Mutex<()>,
 }
 
 /// State for the integrated terminal's pseudo-terminal (PTY). Unlike the LSP child this is a raw
@@ -1660,15 +1665,28 @@ fn spawn_and_wait_for_endpoint(state: &McpState, port: u16) -> Result<Option<Str
             }
         }
         if let Ok(mut g) = state.child.lock() {
-            if let Some(child) = g.as_mut() {
-                if matches!(child.try_wait(), Ok(Some(_))) {
-                    return Ok(None); // the child exited before announcing — stop waiting
+            let exited = matches!(g.as_mut().map(|c| c.try_wait()), Some(Ok(Some(_))));
+            if exited {
+                // The child exited before announcing (e.g. it couldn't bind a busy port). Reap it and
+                // clear the slot so a stale dead child can't poison the next attempt — which would see
+                // `child.is_some()`, skip the respawn, and wedge (notably for port 0, whose caller has
+                // no fallback retry to reap it).
+                if let Some(mut dead) = g.take() {
+                    let _ = dead.wait();
                 }
+                drop(g);
+                if let Ok(mut e) = state.endpoint.lock() {
+                    *e = None;
+                }
+                return Ok(None); // the child exited before announcing — stop waiting
             }
         }
         std::thread::sleep(Duration::from_millis(100));
     }
 
+    // Timed out with no announce line: the child is alive but wedged. Reap it (and clear the scraped
+    // endpoint) so the next attempt respawns from a clean slot instead of skipping on a stale child.
+    kill_mcp_child(state);
     Ok(None)
 }
 
@@ -1682,6 +1700,11 @@ fn spawn_and_wait_for_endpoint(state: &McpState, port: u16) -> Result<Option<Str
 /// purely on the resolved value.
 #[tauri::command]
 fn mcp_endpoint(port: u16, state: State<'_, McpState>) -> Result<Option<McpEndpointInfo>, String> {
+    // Serialize resolution: the busy-port fallback reaps the child and respawns across two spawn/wait
+    // calls, so two concurrent callers must not interleave (they would kill each other's servers). The
+    // second caller blocks here, then falls through to the cached-`info` fast path below.
+    let _resolving = state.resolving.lock().map_err(|e| e.to_string())?;
+
     // Idempotent fast path: a resolved endpoint is cached — reuse the running server verbatim.
     if let Ok(g) = state.info.lock() {
         if let Some(info) = g.as_ref() {
@@ -1702,10 +1725,10 @@ fn mcp_endpoint(port: u16, state: State<'_, McpState>) -> Result<Option<McpEndpo
         return Ok(Some(info));
     }
 
-    // The requested port didn't come up. A specific (non-zero) port is most likely busy — reap the dead
-    // child and retry once on an OS-assigned port, flagging the fallback.
+    // The requested port didn't come up — `spawn_and_wait_for_endpoint` already reaped the dead child,
+    // so the slot is clean. A specific (non-zero) port is most likely busy, so retry ONCE on an
+    // OS-assigned port, flagged as a fallback.
     if port != 0 {
-        kill_mcp_child(&state);
         if let Some(url) = spawn_and_wait_for_endpoint(&state, 0)? {
             let info = McpEndpointInfo {
                 url,
