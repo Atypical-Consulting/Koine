@@ -49,6 +49,14 @@ function homeCallbacks(): WelcomeCallbacks {
     // and the cold-boot ladder restores the last workspace via getLastWorkspace(): the old auto-skip,
     // now an explicit choice.
     onResume: () => appStore.getState().navigate('editor'),
+    // Settings gear on Home (#1005): Home can't render Settings itself (it's an editor-hosted overlay),
+    // so navigate to the editor first — showEditor() mounts the IDE synchronously on the route change —
+    // then flip the uiChrome `settingsOpen` flag, which the now-mounted editor renders reactively. The
+    // order matters: the overlay must be shown AFTER the editor exists to host it.
+    onOpenSettings: () => {
+      appStore.getState().navigate('editor');
+      appStore.getState().showSettings();
+    },
   };
 }
 

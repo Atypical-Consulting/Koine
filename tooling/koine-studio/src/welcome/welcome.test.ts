@@ -630,6 +630,63 @@ describe('Home full-bleed shell', () => {
   });
 });
 
+describe('Home top bar (brand + theme + settings)', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  // The theme toggle mutates document.documentElement's data-theme; wipe it around each case so a
+  // flip here can't leak into (or be seeded by) another suite sharing the global document.
+  afterEach(() => {
+    document.documentElement.removeAttribute('data-theme');
+  });
+
+  test('renders the brand lockup in the top bar with an accessible name (and no .koi-welcome-brand)', () => {
+    mountHome(container, makeCallbacks(), SAMPLE);
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+    const topbar = root.querySelector<HTMLElement>('.koi-home-topbar')!;
+
+    const brand = topbar.querySelector<HTMLElement>('.koi-home-brand');
+    expect(brand).not.toBeNull();
+    // Accessible name is exposed on the lockup; the decorative monogram SVG renders inside it.
+    expect(brand!.getAttribute('aria-label')).toBe('Koine Studio');
+    expect(brand!.querySelector('svg')).not.toBeNull();
+    // The single Home logo is the top-bar brand — the legacy card brand class stays absent everywhere.
+    expect(root.querySelector('.koi-welcome-brand')).toBeNull();
+  });
+
+  test('the theme button flips document.documentElement data-theme on click', () => {
+    mountHome(container, makeCallbacks(), SAMPLE);
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+    const themeBtn = root.querySelector<HTMLButtonElement>('.koi-home-topbar-end button[aria-label="Toggle theme"]');
+    expect(themeBtn).not.toBeNull();
+    expect(themeBtn!.type).toBe('button');
+
+    const before = document.documentElement.getAttribute('data-theme');
+    themeBtn!.click();
+    const after = document.documentElement.getAttribute('data-theme');
+    expect(after).not.toBe(before); // the flip changed the applied theme
+    expect(after === 'dark' || after === 'light').toBe(true);
+  });
+
+  test('the settings gear fires onOpenSettings on click', () => {
+    const onOpenSettings = vi.fn();
+    const cb: WelcomeCallbacks = { ...makeCallbacks(), onOpenSettings };
+    mountHome(container, cb, SAMPLE);
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+    const gear = root.querySelector<HTMLButtonElement>('.koi-home-topbar-end button[aria-label="Settings"]');
+    expect(gear).not.toBeNull();
+    expect(gear!.type).toBe('button');
+
+    gear!.click();
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('Home hero snippet', () => {
   test('collapses the spacing before the invariant message to a single space', () => {
     const el = document.createElement('div');

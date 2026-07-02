@@ -13,6 +13,8 @@ import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, fillVersionChi
 import { TEMPLATES, type Template } from '@/welcome/templates';
 import { wrapIndex } from '@/shared/wrapIndex';
 import { basename } from '@/shared/path';
+import { koineMark } from '@/shared/logo';
+import { toggleTheme } from '@/settings/theme';
 
 /** What the welcome actions delegate to; the host (ide.ts) performs the real work. */
 export interface WelcomeCallbacks {
@@ -29,6 +31,12 @@ export interface WelcomeCallbacks {
    * Optional: callers that don't offer a resume path can omit it.
    */
   onResume?(): void;
+  /**
+   * Open the Settings surface — fired by the top bar's gear button. Home can't render Settings itself
+   * (it's an editor-hosted overlay), so the caller (main.ts) routes to the editor and shows the overlay
+   * there. Optional: callers with nowhere to route settings can omit it, and the gear no-ops.
+   */
+  onOpenSettings?(): void;
 }
 
 /** Canonical difficulty ordering — starters first, advanced last. Drives grouping and chip order. */
@@ -89,6 +97,12 @@ const ICON_BACK =
 /** A right chevron — the quiet "opens this example" disclosure on each gallery card. */
 const ICON_ARROW =
   '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>';
+/** A crescent moon — the top-bar theme toggle, in the same stroked 16×16 style as the actions above. */
+const ICON_THEME =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 9.3A5.4 5.4 0 0 1 6.7 2.8 5.4 5.4 0 1 0 13.2 9.3z"/></svg>';
+/** Two sliders — the Settings gear, matching the toolbar's own Settings glyph (index.html #btn-prefs). */
+const ICON_SETTINGS =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h11M2.5 10.5h11"/><circle cx="6" cy="5.5" r="1.7"/><circle cx="10" cy="10.5" r="1.7"/></svg>';
 
 /** Build a start action as a button with an icon, a label and a one-line description. */
 function makeAction(opts: {
@@ -188,15 +202,75 @@ function buildHome(
   });
 
   // The app top bar region — a full-width strip above the card that persists across console↔gallery
-  // swaps (it lives outside the card so both views share it). It is intentionally EMPTY for now:
-  // Task 2 fills the left/right slots with the brand, theme toggle and settings. It carries no
-  // `.koi-welcome-brand` yet — a test asserts that class stays absent on Home until then.
+  // swaps (it lives outside the card so both views share it): the brand on the left, the theme toggle
+  // and Settings gear on the right. It uses a NEW `.koi-home-brand` class, never `.koi-welcome-brand`
+  // (a suppression test asserts the legacy card-brand class stays absent on Home).
   const topbar = document.createElement('header');
   topbar.className = 'koi-home-topbar';
   const topbarStart = document.createElement('div');
   topbarStart.className = 'koi-home-topbar-slot koi-home-topbar-start';
   const topbarEnd = document.createElement('div');
   topbarEnd.className = 'koi-home-topbar-slot koi-home-topbar-end';
+
+  // Brand lockup: the κ monogram tile + a "Koine" / "STUDIO" wordmark. The lockup carries the
+  // accessible name; the monogram SVG and the wordmark text are decorative (aria-hidden) so the name
+  // reads once, cleanly, as "Koine Studio". `koineMark('home')` gets a stable gradient id so this
+  // single copy never collides with another mark elsewhere in the document.
+  const brand = document.createElement('div');
+  brand.className = 'koi-home-brand';
+  brand.setAttribute('role', 'img');
+  brand.setAttribute('aria-label', 'Koine Studio');
+
+  const brandMark = document.createElement('span');
+  brandMark.className = 'koi-home-brand-mark';
+  brandMark.setAttribute('aria-hidden', 'true');
+  brandMark.innerHTML = koineMark('home');
+
+  const brandWord = document.createElement('span');
+  brandWord.className = 'koi-home-brand-word';
+  brandWord.setAttribute('aria-hidden', 'true');
+  const brandName = document.createElement('span');
+  brandName.className = 'koi-home-brand-name';
+  brandName.textContent = 'Koine';
+  const brandSub = document.createElement('span');
+  brandSub.className = 'koi-home-brand-sub';
+  brandSub.textContent = 'STUDIO';
+  brandWord.append(brandName, brandSub);
+
+  brand.append(brandMark, brandWord);
+  topbarStart.appendChild(brand);
+
+  // A quiet top-bar icon button (theme / settings), matching the toolbar's `.icon-btn` vocabulary.
+  function makeTopbarIconButton(opts: { icon: string; label: string; onClick: () => void }): HTMLButtonElement {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'koi-home-iconbtn';
+    btn.setAttribute('aria-label', opts.label);
+    btn.title = opts.label;
+    btn.innerHTML = opts.icon;
+    btn.addEventListener('click', opts.onClick);
+    return btn;
+  }
+
+  // Theme toggle: flips + applies + persists + notifies (theme.ts flips document root's data-theme).
+  topbarEnd.appendChild(
+    makeTopbarIconButton({
+      icon: ICON_THEME,
+      label: 'Toggle theme',
+      onClick: () => {
+        toggleTheme();
+      },
+    }),
+  );
+  // Settings gear: Home routes this to the editor's Settings overlay via the optional callback.
+  topbarEnd.appendChild(
+    makeTopbarIconButton({
+      icon: ICON_SETTINGS,
+      label: 'Settings',
+      onClick: () => cb.onOpenSettings?.(),
+    }),
+  );
+
   topbar.append(topbarStart, topbarEnd);
   root.appendChild(topbar);
 
