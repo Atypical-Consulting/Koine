@@ -1,5 +1,5 @@
 import { describe, expect, test, vi, beforeEach } from 'vitest';
-import { runAssistant, MAX_TOOL_ROUNDS, type AssistantRequest } from '@/ai/ai';
+import { runAssistant, MAX_TOOL_ROUNDS, type AssistantRequest, type ToolCallEnd } from '@/ai/ai';
 import { createEditSession, type EditSession } from '@/ai/editSession';
 
 // Mock the dynamically-imported OpenAI SDK: `new OpenAI()` exposes chat.completions.create, which we
@@ -165,7 +165,7 @@ describe('runOpenAiCompatible — agentic tool loop', () => {
           calls.push({ name, args });
           return Promise.resolve('ok: true — no diagnostics.');
         },
-        onToolCall: (name) => chips.push(name),
+        onToolCallEnd: (c) => chips.push(c.name),
       }),
     );
 
@@ -238,6 +238,49 @@ describe('runOpenAiCompatible — agentic tool loop', () => {
     expect(n).toBe(MAX_TOOL_ROUNDS);
   });
 
+  test('emits start and end events around each tool call', async () => {
+    const queue = [streamFrom(TOOLCALL), streamFrom(TEXT)];
+    h.createImpl = () => Promise.resolve(queue.shift());
+    const events: string[] = [];
+    await runAssistant(
+      baseReq({
+        runCompilerTool: () => Promise.resolve('ok: true — no diagnostics.'),
+        onToolCallStart: (c) => events.push(`start:${c.id}:${c.name}:${c.argsJson}`),
+        onToolCallEnd: (c) => events.push(`end:${c.id}:${c.name}:${c.ok}:${c.summary}`),
+      }),
+    );
+    // start fires BEFORE the executor, end AFTER — id counts up from 1, argsJson is the raw model input.
+    expect(events[0]).toMatch(/^start:1:koine_validate:\{/);
+    expect(events[1]).toMatch(/^end:1:koine_validate:true:/);
+  });
+
+  test('emits an ok:false end event with the error when the executor throws, then still feeds the error back to the model (unchanged)', async () => {
+    const queue = [streamFrom(TOOLCALL), streamFrom(TEXT)];
+    const sentTo: unknown[] = [];
+    h.createImpl = (p) => {
+      sentTo.push((p as { messages: unknown }).messages);
+      return Promise.resolve(queue.shift());
+    };
+    const ends: ToolCallEnd[] = [];
+    const out = await runAssistant(
+      baseReq({
+        runCompilerTool: () => Promise.reject(new Error('wasm boom')),
+        onToolCallEnd: (c) => ends.push(c),
+      }),
+    );
+    // The end event reports the failure for the UI to render a failed card…
+    expect(ends).toHaveLength(1);
+    expect(ends[0].ok).toBe(false);
+    expect(ends[0].summary).toBe('failed');
+    expect(ends[0].resultText).toBe('');
+    expect(ends[0].error).toContain('wasm boom');
+    // …but model-facing behavior is unchanged: the error is fed back and the loop returns the final text.
+    expect(out).toBe('All good ✓');
+    const second = sentTo[1] as { role: string; content?: string }[];
+    const toolMsg = second.find((m) => m.role === 'tool');
+    expect(toolMsg?.content).toContain('wasm boom');
+  });
+
   test('a thrown executor becomes an error string fed back to the model (no crash)', async () => {
     const queue = [streamFrom(TOOLCALL), streamFrom(TEXT)];
     const sentTo: unknown[] = [];
@@ -256,7 +299,7 @@ describe('runOpenAiCompatible — agentic tool loop', () => {
 });
 
 describe('runAnthropic — agentic tool loop', () => {
-  test('advertises Anthropic tools, runs koine_validate once, fires onToolCall, returns only the final text', async () => {
+  test('advertises Anthropic tools, runs koine_validate once, fires onToolCallEnd, returns only the final text', async () => {
     const params: Record<string, unknown>[] = [];
     const queue = [anthropicStream({ finalMessage: A_TOOLCALL }), anthropicStream(A_TEXT)];
     h.streamImpl = (p) => {
@@ -271,7 +314,7 @@ describe('runAnthropic — agentic tool loop', () => {
           calls.push({ name, args });
           return Promise.resolve('ok: true — no diagnostics.');
         },
-        onToolCall: (name) => chips.push(name),
+        onToolCallEnd: (c) => chips.push(c.name),
       }),
     );
 

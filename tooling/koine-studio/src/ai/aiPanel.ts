@@ -1119,7 +1119,9 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
               },
             }
           : {}),
-        onToolCall: addToolStatus,
+        // Minimal rewire onto the new lifecycle callback: keep the muted one-line status per tool call
+        // (FULL tool cards are a later task). The end event carries the same name + summary this needs.
+        onToolCallEnd: (c) => addToolStatus(c.name, c.summary),
       });
       commitAssistantTurn(full);
       if (editSession && editSession.staged().length > 0) {
