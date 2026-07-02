@@ -5,7 +5,14 @@
 //
 // Needs a user-supplied Anthropic API key (set in Preferences, stored locally). With no key it
 // shows a prompt to add one rather than calling the API.
-import { isLocalProviderUrl, runAssistant, type AiProvider, type ChatMessage } from '@/ai/ai';
+import {
+  isLocalProviderUrl,
+  runAssistant,
+  type AiProvider,
+  type ChatMessage,
+  type ToolCallEnd,
+  type ToolCallStart,
+} from '@/ai/ai';
 import {
   chooseMechanism,
   isGrammarCapable,
@@ -554,6 +561,31 @@ function renderChangeSet(
   };
 }
 
+/**
+ * The maximum number of characters of a tool's raw result rendered inside an expandable tool-call
+ * card. A tool like `koine_compile` can return a large blob; the card clamps its Result `<pre>` to
+ * this cap (with a visible `(truncated)` note) so one noisy result can't blow up the transcript.
+ */
+export const TOOL_RESULT_CLAMP: number = 8 * 1024;
+
+/** Format a tool's execution time for its card: `312 ms` under a second, `1.4 s` at/above 1000 ms. */
+function formatToolDuration(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
+}
+
+/**
+ * Pretty-print a tool's raw `argsJson` with a 2-space indent for the card's Arguments block; fall back
+ * to the raw string when it doesn't parse (a malformed / non-JSON args blob is still shown verbatim
+ * rather than dropped).
+ */
+function prettyToolArgs(argsJson: string): string {
+  try {
+    return JSON.stringify(JSON.parse(argsJson), null, 2);
+  } catch {
+    return argsJson;
+  }
+}
+
 export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPanel {
   // The transcript for the workspace this panel is currently pointed at. Restored from storage on
   // mount and re-pointed by syncWorkspace() when the folder changes; loadedKey tracks which one.
@@ -909,8 +941,8 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
 
   // Re-point the panel at the current workspace's conversation when the folder changed. Deferred
   // while a request is in flight: rebuilding the transcript mid-stream would detach the streaming
-  // bubble (addToolStatus inserts before it) and reassign `messages` out from under the in-flight
-  // turn, cross-wiring one workspace's transcript into another's storage key.
+  // bubble (addToolCard inserts tool cards before it) and reassign `messages` out from under the
+  // in-flight turn, cross-wiring one workspace's transcript into another's storage key.
   function syncWorkspace(): void {
     if (busy()) {
       pendingSync = true;
@@ -979,20 +1011,99 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     const replyBubble = addBubble('assistant');
     replyBubble.textContent = '…';
 
-    // A muted one-line note per tool call the model makes, inserted above the final reply so the user
-    // can see the assistant ran a koine tool (and its outcome) rather than answering blind. Tracked so
-    // a full turn rollback can remove them too (no orphaned tool lines above a removed user bubble).
+    // An expandable card per tool call the model makes, inserted above the final reply so the user can
+    // see the assistant ran a koine tool (and its arguments/result) rather than answering blind. Tracked
+    // so a full turn rollback removes them too (no orphaned tool cards above a removed user bubble), and
+    // keyed by the per-turn call id so the END event can find the card its START opened.
     const toolNodes: HTMLElement[] = [];
-    const addToolStatus = (name: string, summary: string): void => {
+    const toolCards = new Map<number, HTMLElement>();
+
+    // START: open a native <details> tool card in the "pending" state, above the reply bubble. The
+    // status glyph is decorative (aria-hidden); the meaning rides a visually-hidden "running" label and
+    // the data-state, so it never depends on colour alone (WCAG 2.1 AA 1.4.1). The raw argsJson (which
+    // rides the START, not the END, event) is stashed on the element so completeToolCard can render the
+    // Arguments block.
+    const addToolCard = (start: ToolCallStart): void => {
       // Any text streamed this round was a "thinking" preamble before the tool call — clear it so the
-      // tool line and the eventual answer render in chronological order (ai.ts keeps it out of history).
+      // card and the eventual answer render in chronological order (ai.ts keeps it out of history).
       full = '';
       replyBubble.textContent = '…';
-      const node = document.createElement('div');
-      node.className = 'koi-assistant-tool';
-      node.textContent = summary ? `${name} → ${summary}` : `ran ${name}`;
-      transcript.insertBefore(node, replyBubble);
-      toolNodes.push(node);
+
+      const card = document.createElement('details');
+      card.className = 'koi-assistant-tool';
+      card.dataset.state = 'pending';
+      card.dataset.args = start.argsJson;
+
+      const summary = document.createElement('summary');
+      const glyph = document.createElement('span');
+      glyph.className = 'koi-tool-glyph';
+      glyph.setAttribute('aria-hidden', 'true');
+      glyph.textContent = '…';
+      const state = document.createElement('span');
+      state.className = 'koi-sr-only koi-tool-state';
+      state.textContent = 'running';
+      const name = document.createElement('span');
+      name.className = 'koi-tool-name';
+      name.textContent = start.name;
+      const summaryText = document.createElement('span');
+      summaryText.className = 'koi-tool-summary';
+      summaryText.textContent = '…';
+      const duration = document.createElement('span');
+      duration.className = 'koi-tool-duration';
+      summary.append(glyph, state, name, summaryText, duration);
+      card.appendChild(summary);
+
+      transcript.insertBefore(card, replyBubble);
+      toolNodes.push(card);
+      toolCards.set(start.id, card);
+      transcript.scrollTop = transcript.scrollHeight;
+    };
+
+    // END: finalize the card its START opened — flip the state (ok/error), the glyph (✓/✕) and the
+    // visually-hidden label, set the chip summary + formatted duration, and build the expandable <dl>
+    // body: pretty-printed Arguments, and the clamped Result (or the error message on failure).
+    const completeToolCard = (end: ToolCallEnd): void => {
+      const card = toolCards.get(end.id);
+      if (!card) return;
+      card.dataset.state = end.ok ? 'ok' : 'error';
+
+      const glyph = card.querySelector('.koi-tool-glyph');
+      if (glyph) glyph.textContent = end.ok ? '✓' : '✕';
+      const state = card.querySelector('.koi-tool-state');
+      if (state) state.textContent = end.ok ? 'succeeded' : 'failed';
+      const summaryText = card.querySelector('.koi-tool-summary');
+      if (summaryText) summaryText.textContent = end.summary;
+      const duration = card.querySelector('.koi-tool-duration');
+      if (duration) duration.textContent = formatToolDuration(end.durationMs);
+
+      const dl = document.createElement('dl');
+      dl.className = 'koi-tool-detail';
+
+      const argsTerm = document.createElement('dt');
+      argsTerm.textContent = 'Arguments';
+      const argsDef = document.createElement('dd');
+      const argsPre = document.createElement('pre');
+      argsPre.textContent = prettyToolArgs(card.dataset.args ?? '');
+      argsDef.appendChild(argsPre);
+
+      const resultTerm = document.createElement('dt');
+      resultTerm.textContent = 'Result';
+      const resultDef = document.createElement('dd');
+      const resultPre = document.createElement('pre');
+      // On failure the executor sends an empty resultText + an `error` message — show that as the body.
+      const rawResult = end.ok ? end.resultText : end.error ?? 'failed';
+      const truncated = rawResult.length > TOOL_RESULT_CLAMP;
+      resultPre.textContent = truncated ? rawResult.slice(0, TOOL_RESULT_CLAMP) : rawResult;
+      resultDef.appendChild(resultPre);
+      if (truncated) {
+        const note = document.createElement('span');
+        note.className = 'koi-tool-truncated';
+        note.textContent = '(truncated)';
+        resultDef.appendChild(note);
+      }
+
+      dl.append(argsTerm, argsDef, resultTerm, resultDef);
+      card.appendChild(dl);
       transcript.scrollTop = transcript.scrollHeight;
     };
 
@@ -1119,9 +1230,10 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
               },
             }
           : {}),
-        // Minimal rewire onto the new lifecycle callback: keep the muted one-line status per tool call
-        // (FULL tool cards are a later task). The end event carries the same name + summary this needs.
-        onToolCallEnd: (c) => addToolStatus(c.name, c.summary),
+        // Expandable tool-call cards: open a live "pending" card on START (above the reply bubble),
+        // then finalize it on END (ok/error state, summary, duration, and the expandable body).
+        onToolCallStart: addToolCard,
+        onToolCallEnd: completeToolCard,
       });
       commitAssistantTurn(full);
       if (editSession && editSession.staged().length > 0) {
