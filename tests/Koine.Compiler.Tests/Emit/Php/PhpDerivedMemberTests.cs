@@ -70,8 +70,10 @@ public class PhpDerivedMemberTests
     public void Derived_member_composes_as_a_call_receiver()
     {
         // The #396 fatal: `discountedTotal == 0` must CALL the derived getter before `->equals(...)`.
+        // The Decimal-literal argument is now parenthesised uniformly (#907) — harmless in argument
+        // position — while the derived-getter receiver (`$target->discountedTotal()`) is unchanged.
         var expr = new BinaryExpr(BinaryOp.Eq, Id("discountedTotal"), Decimal("0"));
         Make("target").Translate(expr)
-            .ShouldBe("$target->discountedTotal()->equals(new \\Koine\\Runtime\\Decimal('0'))");
+            .ShouldBe("$target->discountedTotal()->equals((new \\Koine\\Runtime\\Decimal('0')))");
     }
 }

@@ -221,10 +221,14 @@ public class PhpExpressionTests
     [Fact]
     public void Decimal_equality_lowers_to_equals()
     {
+        // The Decimal-literal argument to `equals(...)` is parenthesised — `(new \…\Decimal('0'))` —
+        // uniformly, matching the int-literal argument to `compareTo(...)` above (#907 brings the
+        // IsDecimal-early-return arm in line with #815/#849's uniform wrap). Parens in argument
+        // position are harmless valid PHP; only the receiver position actually requires them.
         var eq = new BinaryExpr(BinaryOp.Eq, Id("price"), Decimal("0"));
         var ne = new BinaryExpr(BinaryOp.Neq, Id("price"), Decimal("0"));
-        Translate(eq).ShouldBe("$this->price->equals(new \\Koine\\Runtime\\Decimal('0'))");
-        Translate(ne).ShouldBe("!$this->price->equals(new \\Koine\\Runtime\\Decimal('0'))");
+        Translate(eq).ShouldBe("$this->price->equals((new \\Koine\\Runtime\\Decimal('0')))");
+        Translate(ne).ShouldBe("!$this->price->equals((new \\Koine\\Runtime\\Decimal('0')))");
     }
 
     [Fact]
