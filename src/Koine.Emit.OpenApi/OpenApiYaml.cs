@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Koine.Compiler.Emit.OpenApi;
+namespace Koine.Compiler;
 
 // ============================================================================
 // A tiny, deterministic YAML block-style document model + writer, just large

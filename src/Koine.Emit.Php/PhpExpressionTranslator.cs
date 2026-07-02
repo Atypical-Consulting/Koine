@@ -1,7 +1,7 @@
 using System.Text;
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.Php;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Translates the target-agnostic <see cref="Expr"/> sublanguage into PHP 8.1+ expression source,

@@ -1,6 +1,6 @@
-using Koine.Compiler.Emit.TypeScript;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit;
+namespace Koine.Compiler;
 
 /// <summary>Provider for the TypeScript backend. Maps the neutral options to <see cref="TsEmitterOptions"/>.</summary>
 public sealed class TypeScriptEmitterProvider : IEmitterProvider

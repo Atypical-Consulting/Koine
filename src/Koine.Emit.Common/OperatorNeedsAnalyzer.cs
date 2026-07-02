@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.CSharp;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Demand-driven analysis that decides which non-quantity value objects need generated

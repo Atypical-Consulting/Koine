@@ -1,7 +1,7 @@
 using Koine.Compiler.Ast;
-using Koine.Compiler.Emit.CSharp;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.Python;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The Python backend. Turns a validated <see cref="KoineModel"/> into idiomatic,

@@ -1,6 +1,6 @@
-using Koine.Compiler.Emit.Rust;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit;
+namespace Koine.Compiler;
 
 /// <summary>Provider for the Rust backend. Maps the neutral options to <see cref="RustEmitterOptions"/>.</summary>
 public sealed class RustEmitterProvider : IEmitterProvider

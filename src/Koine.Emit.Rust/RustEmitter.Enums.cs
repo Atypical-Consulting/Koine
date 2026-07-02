@@ -1,7 +1,7 @@
 using System.Text;
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.Rust;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The smart-enum slice of <see cref="RustEmitter"/>. A Koine <c>enum</c> emits as a data-free Rust

@@ -1,7 +1,8 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.Python;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The opt-in Infrastructure layer of <see cref="PythonEmitter"/> (issue #241), the Python analogue of

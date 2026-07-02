@@ -1,7 +1,8 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.Php;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The anti-corruption-layer slice of <see cref="PhpEmitter"/> (R14.2), the PHP analogue of the C#

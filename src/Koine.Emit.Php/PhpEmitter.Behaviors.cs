@@ -1,7 +1,8 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.Php;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The behavioral slice of <see cref="PhpEmitter"/>: an entity's <c>command</c>s (mutating

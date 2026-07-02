@@ -1,6 +1,6 @@
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.Php;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Maps Koine <see cref="TypeRef"/>s to their PHP type-hint strings per the type

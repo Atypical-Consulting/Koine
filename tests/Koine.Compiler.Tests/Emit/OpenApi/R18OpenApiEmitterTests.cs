@@ -1,4 +1,3 @@
-using Koine.Compiler.Emit.OpenApi;
 using Koine.Compiler.Services;
 using Xunit;
 

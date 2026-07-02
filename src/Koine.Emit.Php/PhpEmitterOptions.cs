@@ -1,4 +1,4 @@
-namespace Koine.Compiler.Emit.Php;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Per-emit configuration for the PHP backend, mapped from the CLI's

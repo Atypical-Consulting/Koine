@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <!-- The Python emitter, extracted from Koine.Compiler into its own assembly (issue #861) so a
-       consumer can take just this target. Namespace stays Koine.Compiler.Emit.Python (assembly
+       consumer can take just this target. Namespace is Koine.Compiler (assembly
        name != namespace) to keep the extraction reference-only. Packable per-target. -->
   <PropertyGroup>
     <IsPackable>true</IsPackable>

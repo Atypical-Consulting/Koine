@@ -1,6 +1,6 @@
-using Koine.Compiler.Emit.CSharp;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit;
+namespace Koine.Compiler;
 
 /// <summary>Provider for the C# backend. Maps the neutral options to <see cref="CSharpEmitterOptions"/>.</summary>
 public sealed class CSharpEmitterProvider : IEmitterProvider

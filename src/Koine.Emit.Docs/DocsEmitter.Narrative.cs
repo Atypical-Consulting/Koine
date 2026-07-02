@@ -1,7 +1,7 @@
 using System.Text;
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.Docs;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Narrative slice of <see cref="DocsEmitter"/>: per-context prose lifting the ubiquitous-language

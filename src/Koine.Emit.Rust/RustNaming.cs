@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Koine.Compiler.Emit.Rust;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Rust-specific identifier casing and keyword-escaping helpers. Types and enum variants are

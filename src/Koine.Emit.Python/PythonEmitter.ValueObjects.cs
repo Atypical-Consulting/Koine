@@ -1,7 +1,8 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.Python;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The value-object slice of <see cref="PythonEmitter"/>. A Koine <c>value</c> emits as a

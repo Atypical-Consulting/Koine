@@ -1,7 +1,8 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.AsyncApi;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Emits a single AsyncAPI 3.0 document describing a domain's cross-boundary

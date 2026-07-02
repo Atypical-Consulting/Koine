@@ -1,6 +1,6 @@
-using Koine.Compiler.Emit.Php;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit;
+namespace Koine.Compiler;
 
 /// <summary>Provider for the PHP backend. Maps the neutral options to <see cref="PhpEmitterOptions"/>.</summary>
 public sealed class PhpEmitterProvider : IEmitterProvider

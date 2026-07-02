@@ -1,6 +1,6 @@
-using Koine.Compiler.Emit.Glossary;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit;
+namespace Koine.Compiler;
 
 /// <summary>Provider for the ubiquitous-language glossary emitter (no per-emit options).</summary>
 public sealed class GlossaryEmitterProvider : IEmitterProvider

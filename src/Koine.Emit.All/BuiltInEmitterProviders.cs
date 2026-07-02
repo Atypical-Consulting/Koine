@@ -1,4 +1,6 @@
-namespace Koine.Compiler.Emit;
+using Koine.Compiler.Emit;
+
+namespace Koine.Compiler;
 
 /// <summary>
 /// The built-in <see cref="IEmitterProvider"/> set, in display order. This is the single source of

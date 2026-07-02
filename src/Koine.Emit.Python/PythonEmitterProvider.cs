@@ -1,6 +1,6 @@
-using Koine.Compiler.Emit.Python;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit;
+namespace Koine.Compiler;
 
 /// <summary>Provider for the Python backend. Maps the neutral options to <see cref="PythonEmitterOptions"/>.</summary>
 public sealed class PythonEmitterProvider : IEmitterProvider

@@ -1,7 +1,8 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.Docs;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Coverage slice of <see cref="DocsEmitter"/>: appends a "Coverage" section to each context

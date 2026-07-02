@@ -1,6 +1,7 @@
 using System.Text;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.CSharp;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The transactional-outbox slice of the EF Core Infrastructure layer (issue #128). For a context that

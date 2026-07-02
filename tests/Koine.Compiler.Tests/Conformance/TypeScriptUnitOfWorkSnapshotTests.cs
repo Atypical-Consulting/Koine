@@ -1,4 +1,3 @@
-using Koine.Compiler.Emit.TypeScript;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests.Conformance;

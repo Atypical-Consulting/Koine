@@ -1,7 +1,8 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.Docs;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Living-documentation emitter: turns the target-agnostic <see cref="KoineModel"/> into

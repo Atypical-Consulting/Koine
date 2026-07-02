@@ -1,7 +1,7 @@
 using System.Text;
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.Rust;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The aggregate/repository slice of <see cref="RustEmitter"/>. An aggregate's nested types are emitted

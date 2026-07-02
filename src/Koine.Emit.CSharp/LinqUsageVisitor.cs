@@ -1,6 +1,6 @@
 using Koine.Compiler.Ast;
 
-namespace Koine.Compiler.Emit.CSharp;
+namespace Koine.Compiler;
 
 /// <summary>
 /// Decides whether an expression uses a LINQ-backed operation, so the file's <c>using</c>

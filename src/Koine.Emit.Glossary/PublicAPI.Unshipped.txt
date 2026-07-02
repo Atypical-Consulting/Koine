@@ -1,11 +1,11 @@
 #nullable enable
-Koine.Compiler.Emit.Glossary.GlossaryEmitter
-Koine.Compiler.Emit.Glossary.GlossaryEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.Glossary.GlossaryEmitter.GlossaryEmitter() -> void
-Koine.Compiler.Emit.Glossary.GlossaryEmitter.TargetName.get -> string!
-Koine.Compiler.Emit.GlossaryEmitterProvider
-Koine.Compiler.Emit.GlossaryEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! options) -> Koine.Compiler.Emit.IEmitter!
-Koine.Compiler.Emit.GlossaryEmitterProvider.GlossaryEmitterProvider() -> void
-Koine.Compiler.Emit.GlossaryEmitterProvider.IsEmitTarget.get -> bool
-Koine.Compiler.Emit.GlossaryEmitterProvider.Target.get -> string!
-const Koine.Compiler.Emit.Glossary.GlossaryEmitter.FileName = "glossary.md" -> string!
+Koine.Compiler.GlossaryEmitter
+Koine.Compiler.GlossaryEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.GlossaryEmitter.GlossaryEmitter() -> void
+Koine.Compiler.GlossaryEmitter.TargetName.get -> string!
+Koine.Compiler.GlossaryEmitterProvider
+Koine.Compiler.GlossaryEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! options) -> Koine.Compiler.Emit.IEmitter!
+Koine.Compiler.GlossaryEmitterProvider.GlossaryEmitterProvider() -> void
+Koine.Compiler.GlossaryEmitterProvider.IsEmitTarget.get -> bool
+Koine.Compiler.GlossaryEmitterProvider.Target.get -> string!
+const Koine.Compiler.GlossaryEmitter.FileName = "glossary.md" -> string!

@@ -1,6 +1,6 @@
-using Koine.Compiler.Emit.OpenApi;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit;
+namespace Koine.Compiler;
 
 /// <summary>Provider for the OpenAPI 3.1 spec emitter (issue #126; no per-emit options).</summary>
 public sealed class OpenApiEmitterProvider : IEmitterProvider

@@ -1,4 +1,4 @@
-namespace Koine.Compiler.Emit.Python;
+namespace Koine.Compiler;
 
 /// <summary>
 /// A composable layer of the Python target, selected via <c>--layers</c> /

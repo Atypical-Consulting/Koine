@@ -1,23 +1,23 @@
 #nullable enable
-Koine.Compiler.Emit.FactoryIdBinding
-Koine.Compiler.Emit.FactoryIdBinding.AliasFrom.get -> string?
-Koine.Compiler.Emit.FactoryIdBinding.AliasFrom.init -> void
-Koine.Compiler.Emit.FactoryIdBinding.FactoryIdBinding() -> void
-Koine.Compiler.Emit.FactoryIdBinding.FactoryIdBinding(Koine.Compiler.Emit.FactoryIdSource Source, string? AliasFrom) -> void
-Koine.Compiler.Emit.FactoryIdBinding.Source.get -> Koine.Compiler.Emit.FactoryIdSource
-Koine.Compiler.Emit.FactoryIdBinding.Source.init -> void
-Koine.Compiler.Emit.FactoryIdSource
-Koine.Compiler.Emit.FactoryIdSource.Alias = 2 -> Koine.Compiler.Emit.FactoryIdSource
-Koine.Compiler.Emit.FactoryIdSource.Generate = 0 -> Koine.Compiler.Emit.FactoryIdSource
-Koine.Compiler.Emit.FactoryIdSource.ParamProvidesIdDirectly = 1 -> Koine.Compiler.Emit.FactoryIdSource
-Koine.Compiler.Emit.MarkdownDoc
-static Koine.Compiler.Emit.FactoryIdBinding.ResolveFactoryId(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory, System.Func<string!, string!>! emitParamName) -> Koine.Compiler.Emit.FactoryIdBinding
-static Koine.Compiler.Emit.MarkdownDoc.Cell(string? doc) -> string!
-static Koine.Compiler.Emit.MarkdownDoc.EnumValues(Koine.Compiler.Ast.EnumDecl! en) -> string!
-static Koine.Compiler.Emit.MarkdownDoc.EscapeMarkdown(string! s) -> string!
-static Koine.Compiler.Emit.MarkdownDoc.KoineType(Koine.Compiler.Ast.TypeRef! t) -> string!
-static Koine.Compiler.Emit.MarkdownDoc.Prose(string! text) -> string!
-static Koine.Compiler.Emit.MarkdownDoc.Tag(int? since, string? deprecated) -> string!
-static Koine.Compiler.Emit.MarkdownDoc.Tag(Koine.Compiler.Ast.TypeDecl! t) -> string!
-static Koine.Compiler.Emit.MarkdownDoc.WriteFields(System.Text.StringBuilder! sb, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>! members) -> void
-static Koine.Compiler.Emit.MarkdownDoc.WriteRules(System.Text.StringBuilder! sb, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Invariant!>! invariants) -> void
+Koine.Compiler.FactoryIdBinding
+Koine.Compiler.FactoryIdBinding.AliasFrom.get -> string?
+Koine.Compiler.FactoryIdBinding.AliasFrom.init -> void
+Koine.Compiler.FactoryIdBinding.FactoryIdBinding() -> void
+Koine.Compiler.FactoryIdBinding.FactoryIdBinding(Koine.Compiler.FactoryIdSource Source, string? AliasFrom) -> void
+Koine.Compiler.FactoryIdBinding.Source.get -> Koine.Compiler.FactoryIdSource
+Koine.Compiler.FactoryIdBinding.Source.init -> void
+Koine.Compiler.FactoryIdSource
+Koine.Compiler.FactoryIdSource.Alias = 2 -> Koine.Compiler.FactoryIdSource
+Koine.Compiler.FactoryIdSource.Generate = 0 -> Koine.Compiler.FactoryIdSource
+Koine.Compiler.FactoryIdSource.ParamProvidesIdDirectly = 1 -> Koine.Compiler.FactoryIdSource
+Koine.Compiler.MarkdownDoc
+static Koine.Compiler.FactoryIdBinding.ResolveFactoryId(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory, System.Func<string!, string!>! emitParamName) -> Koine.Compiler.FactoryIdBinding
+static Koine.Compiler.MarkdownDoc.Cell(string? doc) -> string!
+static Koine.Compiler.MarkdownDoc.EnumValues(Koine.Compiler.Ast.EnumDecl! en) -> string!
+static Koine.Compiler.MarkdownDoc.EscapeMarkdown(string! s) -> string!
+static Koine.Compiler.MarkdownDoc.KoineType(Koine.Compiler.Ast.TypeRef! t) -> string!
+static Koine.Compiler.MarkdownDoc.Prose(string! text) -> string!
+static Koine.Compiler.MarkdownDoc.Tag(int? since, string? deprecated) -> string!
+static Koine.Compiler.MarkdownDoc.Tag(Koine.Compiler.Ast.TypeDecl! t) -> string!
+static Koine.Compiler.MarkdownDoc.WriteFields(System.Text.StringBuilder! sb, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>! members) -> void
+static Koine.Compiler.MarkdownDoc.WriteRules(System.Text.StringBuilder! sb, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Invariant!>! invariants) -> void

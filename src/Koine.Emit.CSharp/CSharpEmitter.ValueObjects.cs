@@ -1,8 +1,9 @@
 using System.Text;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Ast.Bound;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.CSharp;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The value-object slice of <see cref="CSharpEmitter"/>: rendering a declared value

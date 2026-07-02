@@ -1,13 +1,13 @@
 #nullable enable
-Koine.Compiler.Emit.Rust.RustEmitter
-Koine.Compiler.Emit.Rust.RustEmitter.CacheDiscriminator.get -> string!
-Koine.Compiler.Emit.Rust.RustEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.Rust.RustEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
-Koine.Compiler.Emit.Rust.RustEmitter.RustEmitter() -> void
-Koine.Compiler.Emit.Rust.RustEmitter.TargetName.get -> string!
-Koine.Compiler.Emit.RustEmitterProvider
-Koine.Compiler.Emit.RustEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! options) -> Koine.Compiler.Emit.IEmitter!
-Koine.Compiler.Emit.RustEmitterProvider.DisplayName.get -> string!
-Koine.Compiler.Emit.RustEmitterProvider.FileExtension.get -> string!
-Koine.Compiler.Emit.RustEmitterProvider.RustEmitterProvider() -> void
-Koine.Compiler.Emit.RustEmitterProvider.Target.get -> string!
+Koine.Compiler.RustEmitter
+Koine.Compiler.RustEmitter.CacheDiscriminator.get -> string!
+Koine.Compiler.RustEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.RustEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.RustEmitter.RustEmitter() -> void
+Koine.Compiler.RustEmitter.TargetName.get -> string!
+Koine.Compiler.RustEmitterProvider
+Koine.Compiler.RustEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! options) -> Koine.Compiler.Emit.IEmitter!
+Koine.Compiler.RustEmitterProvider.DisplayName.get -> string!
+Koine.Compiler.RustEmitterProvider.FileExtension.get -> string!
+Koine.Compiler.RustEmitterProvider.RustEmitterProvider() -> void
+Koine.Compiler.RustEmitterProvider.Target.get -> string!

@@ -1,7 +1,8 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.Python;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The smart-enum slice of <see cref="PythonEmitter"/>. A Koine <c>enum</c> emits as a Python

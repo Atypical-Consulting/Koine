@@ -1,7 +1,8 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.CSharp;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The aggregate slice of <see cref="CSharpEmitter"/> (R11): emitting an aggregate's

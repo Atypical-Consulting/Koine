@@ -1,7 +1,7 @@
 using Koine.Compiler.Ast;
-using Koine.Compiler.Emit.CSharp;
+using Koine.Compiler.Emit;
 
-namespace Koine.Compiler.Emit.Php;
+namespace Koine.Compiler;
 
 /// <summary>
 /// The PHP backend. Turns a validated <see cref="KoineModel"/> into PHP 8.1+ code that
