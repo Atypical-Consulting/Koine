@@ -338,6 +338,130 @@ public class RustSnapshotTests
     }
 
     /// <summary>
+    /// A value object with two optional numeric fields (<c>Int?</c> + <c>Decimal?</c>) that is
+    /// scaled — <c>optional Int/Decimal × ...</c>.
+    /// </summary>
+    private const string OptionalNumericFixture = """
+        context Shop {
+          value Tally {
+            total: Decimal
+            steps: Int?
+            ratio: Decimal?
+            invariant total >= 0 "total cannot be negative"
+          }
+          entity Batch identified by BatchId {
+            tally: Tally
+          }
+          readmodel Scaled from Batch {
+            scaled: Tally = tally SCALAR
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Regression (#960): scaling a value object that has <b>optional</b> numeric fields by a
+    /// <c>Decimal</c> scalar must map over each <c>Option</c> so the operator never applies to
+    /// <c>Option&lt;T&gt;</c> directly. Covers <c>Int? × Decimal</c> (coerce-and-truncate inside the map)
+    /// and <c>Decimal? × Decimal</c>. Before the fix the emitter switched on the field's type name only,
+    /// ignoring <c>IsOptional</c>, and emitted <c>Decimal::from(self.steps)</c> — non-compiling Rust.
+    /// </summary>
+    [Fact]
+    public void Rust_optional_numeric_fields_scaled_by_a_decimal_scalar_map_over_the_option()
+    {
+        var model = OptionalNumericFixture.Replace("SCALAR", "* 1.5", StringComparison.Ordinal);
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
+        shop.ShouldContain("impl std::ops::Mul<Decimal> for Tally");
+        // Int? × Decimal: coerce-and-truncate inside the map; the operator never touches Option<i64>.
+        shop.ShouldContain("steps: self.steps.map(|v| crate::koine_runtime::dec_to_i64(Decimal::from(v) * factor))");
+        // Decimal? × Decimal: multiply inside the map.
+        shop.ShouldContain("ratio: self.ratio.map(|v| v * factor)");
+        // The broken emission applied the operator (or Decimal::from) directly to the Option.
+        shop.ShouldNotContain("Decimal::from(self.steps)");
+        shop.ShouldNotContain("ratio: self.ratio * factor");
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Regression (#960): scaling a value object with optional numeric fields by an <c>i64</c> scalar.
+    /// Covers <c>Int? × i64</c> (plain multiply inside the map) and <c>Decimal? × i64</c> (coerce the
+    /// factor to <c>Decimal</c> inside the map).
+    /// </summary>
+    [Fact]
+    public void Rust_optional_numeric_fields_scaled_by_an_int_scalar_map_over_the_option()
+    {
+        var model = OptionalNumericFixture.Replace("SCALAR", "* 2", StringComparison.Ordinal);
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
+        shop.ShouldContain("impl std::ops::Mul<i64> for Tally");
+        // Int? × i64: plain multiply inside the map.
+        shop.ShouldContain("steps: self.steps.map(|v| v * factor)");
+        // Decimal? × i64: coerce the factor to Decimal inside the map.
+        shop.ShouldContain("ratio: self.ratio.map(|v| v * Decimal::from(factor))");
+        shop.ShouldNotContain("steps: self.steps * factor");
+        shop.ShouldNotContain("ratio: self.ratio * Decimal::from(factor)");
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Regression (#960), the division dual: dividing a value object with optional numeric fields by a
+    /// <c>Decimal</c> scalar. Covers <c>Int? ÷ Decimal</c> (coerce-and-truncate inside the map) and
+    /// <c>Decimal? ÷ Decimal</c>.
+    /// </summary>
+    [Fact]
+    public void Rust_optional_numeric_fields_divided_by_a_decimal_scalar_map_over_the_option()
+    {
+        var model = OptionalNumericFixture.Replace("SCALAR", "/ 2.0", StringComparison.Ordinal);
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
+        shop.ShouldContain("impl std::ops::Div<Decimal> for Tally");
+        shop.ShouldContain("steps: self.steps.map(|v| crate::koine_runtime::dec_to_i64(Decimal::from(v) / divisor))");
+        shop.ShouldContain("ratio: self.ratio.map(|v| v / divisor)");
+        shop.ShouldNotContain("Decimal::from(self.steps)");
+        shop.ShouldNotContain("ratio: self.ratio / divisor");
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Regression (#960), the division dual by an <c>i64</c> scalar. Covers <c>Int? ÷ i64</c> (plain
+    /// divide inside the map) and <c>Decimal? ÷ i64</c> (coerce the divisor to <c>Decimal</c> inside the
+    /// map).
+    /// </summary>
+    [Fact]
+    public void Rust_optional_numeric_fields_divided_by_an_int_scalar_map_over_the_option()
+    {
+        var model = OptionalNumericFixture.Replace("SCALAR", "/ 2", StringComparison.Ordinal);
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
+        shop.ShouldContain("impl std::ops::Div<i64> for Tally");
+        shop.ShouldContain("steps: self.steps.map(|v| v / divisor)");
+        shop.ShouldContain("ratio: self.ratio.map(|v| v / Decimal::from(divisor))");
+        shop.ShouldNotContain("steps: self.steps / divisor");
+        shop.ShouldNotContain("ratio: self.ratio / Decimal::from(divisor)");
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
     /// Regression: a derived (computed) member is emitted as an accessor method, so a reference to it
     /// from another expression must render as a call <c>self.x()</c>, not a field read <c>self.x</c>.
     /// </summary>

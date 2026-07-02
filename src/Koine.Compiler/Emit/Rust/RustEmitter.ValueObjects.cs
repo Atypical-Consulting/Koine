@@ -342,27 +342,49 @@ public sealed partial class RustEmitter
     /// <summary>Scales one field expression by a factor, coercing across Int/Decimal as needed.</summary>
     private static string ScaleField(Member m, string fieldExpr, string factor, bool factorIsDecimal)
     {
-        return m.Type.Name switch
+        // An optional numeric field is Option<T>; the operator (and Decimal::from) can't apply to it
+        // directly, so map over it and run the exact non-optional coercion on the unwrapped value `v`.
+        var operand = m.Type.IsOptional ? "v" : fieldExpr;
+        var coercion = m.Type.Name switch
         {
-            "Decimal" => factorIsDecimal ? $"{fieldExpr} * {factor}" : $"{fieldExpr} * Decimal::from({factor})",
+            "Decimal" => factorIsDecimal ? $"{operand} * {factor}" : $"{operand} * Decimal::from({factor})",
             "Int" => factorIsDecimal
-                ? $"crate::koine_runtime::dec_to_i64(Decimal::from({fieldExpr}) * {factor})"
-                : $"{fieldExpr} * {factor}",
-            _ => fieldExpr,
+                ? $"crate::koine_runtime::dec_to_i64(Decimal::from({operand}) * {factor})"
+                : $"{operand} * {factor}",
+            _ => null,
         };
+        return WrapOptional(m, fieldExpr, coercion);
     }
 
     /// <summary>Divides one field expression by a divisor, coercing across Int/Decimal as needed — the division dual of <see cref="ScaleField"/>.</summary>
     private static string DivideField(Member m, string fieldExpr, string divisor, bool divisorIsDecimal)
     {
-        return m.Type.Name switch
+        var operand = m.Type.IsOptional ? "v" : fieldExpr;
+        var coercion = m.Type.Name switch
         {
-            "Decimal" => divisorIsDecimal ? $"{fieldExpr} / {divisor}" : $"{fieldExpr} / Decimal::from({divisor})",
+            "Decimal" => divisorIsDecimal ? $"{operand} / {divisor}" : $"{operand} / Decimal::from({divisor})",
             "Int" => divisorIsDecimal
-                ? $"crate::koine_runtime::dec_to_i64(Decimal::from({fieldExpr}) / {divisor})"
-                : $"{fieldExpr} / {divisor}",
-            _ => fieldExpr,
+                ? $"crate::koine_runtime::dec_to_i64(Decimal::from({operand}) / {divisor})"
+                : $"{operand} / {divisor}",
+            _ => null,
         };
+        return WrapOptional(m, fieldExpr, coercion);
+    }
+
+    /// <summary>
+    /// Renders a per-field coercion: a non-numeric field (<paramref name="coercion"/> is null) passes
+    /// through unchanged; an optional numeric field maps the coercion (written against a bound <c>v</c>)
+    /// over its <c>Option</c>; a non-optional numeric field returns the coercion directly (byte-identical
+    /// to the pre-optional behaviour).
+    /// </summary>
+    private static string WrapOptional(Member m, string fieldExpr, string? coercion)
+    {
+        if (coercion is null)
+        {
+            return fieldExpr;
+        }
+
+        return m.Type.IsOptional ? $"{fieldExpr}.map(|v| {coercion})" : coercion;
     }
 
     /// <summary>True when a stored member carries a constant default (an initializer that is not derived).</summary>
