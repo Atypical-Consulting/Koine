@@ -12,6 +12,15 @@
         {
           "type": "generic",
           "path": "Directory.Build.props"
+        },
+        {
+          "type": "generic",
+          "path": "tooling/koine-studio/src-tauri/Cargo.toml"
+        },
+        {
+          "type": "json",
+          "path": "tooling/koine-studio/src-tauri/tauri.conf.json",
+          "jsonpath": "$.version"
         }
       ]
     }

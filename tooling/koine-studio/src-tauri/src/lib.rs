@@ -2152,6 +2152,51 @@ mod tests {
         assert!(!app_version().is_empty());
     }
 
+    /// The desktop About dialog (`app_version` -> `CARGO_PKG_VERSION`), the packaged app
+    /// (`tauri.conf.json` `version`), and the browser/status-bar chip must all show the SAME
+    /// Koine release version, whose single source of truth is the repo-root
+    /// `Directory.Build.props` `<Version>` (bumped by release-please). These drifted once —
+    /// the crate sat at 0.17.7 while the release was 0.244.0, so the Settings/About chip on
+    /// desktop silently reported the stale value. Guard against that regression here (runs in
+    /// CI's `cargo test --locked`).
+    #[test]
+    fn studio_version_is_locked_to_the_koine_release_version() {
+        let manifest = env!("CARGO_MANIFEST_DIR");
+
+        let props = std::fs::read_to_string(format!("{manifest}/../../../Directory.Build.props"))
+            .expect("read repo-root Directory.Build.props");
+        // Match the real <Version>x.y.z</Version> element, not the `<Version>` mentioned in the
+        // comment above it: the true value contains no `<` between the tags (mirrors the
+        // `<Version>([^<]+)</Version>` regex vite.config.ts uses on the same file).
+        let release = props
+            .split("<Version>")
+            .filter_map(|seg| seg.split_once("</Version>").map(|(v, _)| v.trim()))
+            .find(|v| !v.contains('<'))
+            .map(str::to_string)
+            .expect("find <Version> in Directory.Build.props");
+
+        let tauri_conf = std::fs::read_to_string(format!("{manifest}/tauri.conf.json"))
+            .expect("read tauri.conf.json");
+        let tauri_version = tauri_conf
+            .split_once("\"version\"")
+            .and_then(|(_, rest)| rest.split_once(':'))
+            .and_then(|(_, rest)| rest.split_once('"'))
+            .and_then(|(_, rest)| rest.split_once('"'))
+            .map(|(v, _)| v.to_string())
+            .expect("find \"version\" in tauri.conf.json");
+
+        assert_eq!(
+            env!("CARGO_PKG_VERSION"),
+            release,
+            "Cargo.toml version must equal the Koine release version in Directory.Build.props \
+             (both are bumped by release-please)"
+        );
+        assert_eq!(
+            tauri_version, release,
+            "tauri.conf.json version must equal the Koine release version in Directory.Build.props"
+        );
+    }
+
     // --- MCP endpoint scrape (pure) -----------------------------------------
 
     #[test]

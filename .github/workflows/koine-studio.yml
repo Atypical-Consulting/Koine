@@ -133,6 +133,14 @@ jobs:
       - name: Build Rust host (cargo)
         working-directory: tooling/koine-studio/src-tauri
         run: |
+          # The crate version tracks the Koine release version (bumped by release-please in
+          # Cargo.toml + tauri.conf.json). release-please can't cleanly rewrite Cargo.lock — a
+          # typed TOML updater reformats it (breaking --locked) and cargo strips generic-updater
+          # comments — so on a release PR the lock's own-package version lags Cargo.toml. Refresh
+          # just that one entry offline (surgical: touches only koine-studio's version line, no
+          # network, no dependency churn) so `--locked` stays a real dependency-reproducibility
+          # gate without going red on a version-only drift.
+          cargo update -p koine-studio --offline
           cargo build --locked
           cargo test --locked
 
