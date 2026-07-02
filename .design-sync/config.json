@@ -1,0 +1,21 @@
+{
+  "pkg": "@atypical/koine-ui",
+  "projectId": "406e15e2-8b19-4d7a-a8f7-792ed8b6360b",
+  "globalName": "KoineUi",
+  "shape": "storybook",
+  "storybookConfigDir": "tooling/koine-ui/.storybook",
+  "storybookStatic": ".design-sync/sb-reference",
+  "buildCmd": "npm run build -w @atypical/koine-ui && node .design-sync/gen-adapter-entry.mjs",
+  "entry": "tooling/koine-ui/dist/_ds_adapter_entry.mjs",
+  "provider": { "component": "ThemeSurface" },
+  "readmeHeader": ".design-sync/conventions.md",
+  "extraFonts": [
+    "../../node_modules/@fontsource-variable/hanken-grotesk/wght.css",
+    "../../node_modules/@fontsource-variable/jetbrains-mono/wght.css"
+  ],
+  "overrides": {
+    "AssistantView": { "cardMode": "column", "skip": ["components-assistantview--empty-host"] },
+    "DeckBar": { "cardMode": "column" },
+    "DeckCard": { "cardMode": "column" }
+  }
+}
