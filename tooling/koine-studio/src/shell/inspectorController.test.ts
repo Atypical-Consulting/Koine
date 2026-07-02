@@ -946,6 +946,91 @@ describe('createInspectorController — Domain-navigator drill syncs the status 
   });
 });
 
+describe('createInspectorController — deck 2-up SECONDARY panes refresh on scope / theme / emit-target changes', () => {
+  // Regression: three refresh paths gated on the deck PRIMARY only (activeCenter()), so a surface
+  // visible as the SECONDARY pane of a 2-up (the blessed Code ⟷ Canvas preset) was marked stale but
+  // never reloaded — the visible canvas kept the previous scope/theme, the visible Generated pane the
+  // previous language, until an unrelated deck/facet change.
+  const codeCanvas2Up = { mode: 'focus', primary: 'technical', secondary: 'visual', ratio: 0.5, flipped: false } as const;
+
+  test('a scope change re-filters a canvas visible as the SECONDARY pane', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init(); // boots Visual primary — the diagrams load once
+    await flush();
+
+    deps.store.getState().setDeck(codeCanvas2Up); // Code primary, Canvas still visible as secondary
+    await flush();
+    const diagramsBefore = lsp.livingDocs.mock.calls.length;
+
+    deps.store.getState().setActiveContext('Billing'); // the Domain-navigator drill
+    await flush();
+
+    expect(lsp.livingDocs.mock.calls.length).toBeGreaterThan(diagramsBefore);
+    ctl.dispose();
+  });
+
+  test('a theme flip re-renders a canvas visible as the SECONDARY pane', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    await flush();
+
+    deps.store.getState().setDeck(codeCanvas2Up);
+    await flush();
+    const diagramsBefore = lsp.livingDocs.mock.calls.length;
+
+    ctl.onThemeChanged();
+    await flush();
+
+    expect(lsp.livingDocs.mock.calls.length).toBeGreaterThan(diagramsBefore);
+    ctl.dispose();
+  });
+
+  test('an emit-target change re-emits a Generated pane visible as the SECONDARY pane', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    await flush();
+
+    deps.store.getState().setDeck({ ...codeCanvas2Up, secondary: 'output' }); // Code + Generated 2-up
+    await flush();
+    const previewBefore = lsp.emitPreview.mock.calls.length;
+    expect(previewBefore).toBeGreaterThanOrEqual(1); // the newly-visible Output pane loaded on show
+
+    ctl.onPreviewTargetChanged('typescript');
+    await flush();
+
+    expect(lsp.emitPreview.mock.calls.length).toBeGreaterThan(previewBefore);
+    expect(lsp.emitPreview).toHaveBeenLastCalledWith('typescript');
+    ctl.dispose();
+  });
+});
+
+describe('createInspectorController — locked-down storage', () => {
+  // Regression: the DIAG_COLLAPSED boot read was the one unguarded localStorage access in the
+  // construction path — in a host where touching storage throws (Chromium with site data blocked) it
+  // threw out of the factory and aborted the whole IDE boot, while every sibling read degrades.
+  test('construction survives a throwing localStorage and defaults the bottom strip to expanded', () => {
+    const spy = vi.spyOn(window.localStorage, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError: storage is disabled');
+    });
+    try {
+      let ctl: ReturnType<typeof createInspectorController> | undefined;
+      expect(() => {
+        ctl = createInspectorController(makeDeps(makeLsp()));
+      }).not.toThrow();
+      expect(domById('diagnostics').classList.contains('collapsed')).toBe(false); // the '0' default
+      ctl?.dispose();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe('createInspectorController — Source Control live refresh-on-save (#470)', () => {
   // A git-capable platform: canUseGit true + the git surface as spies, so the mounted SourceControlPanel
   // actually fetches (gitStatus) and we can assert a re-fetch. The panel's fetch runs in its own

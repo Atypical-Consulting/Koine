@@ -254,6 +254,7 @@ export function createReviewStore(platform: Platform, folderToken: () => string 
       if (!folderToken()) return;
       const text = await sidecar.read();
       threads = text == null ? [] : parse(text);
+      notify(); // subscribers (e.g. the long-lived Review panel) repaint only via subscribe
     },
     list() {
       return [...threads];

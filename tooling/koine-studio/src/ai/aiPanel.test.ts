@@ -12,7 +12,7 @@ import {
 } from '@/ai/aiPanel';
 import { runAssistant } from '@/ai/ai';
 import { GRAMMAR_PROBE_GBNF, GRAMMAR_PROBE_SENTINEL, resetGrammarCapabilityCache } from '@/ai/grammarConstraint';
-import { saveChat } from '@/settings/persistence';
+import { loadChat, saveChat } from '@/settings/persistence';
 
 // Stream a fenced ```koine block as the reply so a generative turn would normally offer "Apply"; the
 // Explain path must suppress that affordance while still rendering the reply bubble.
@@ -278,6 +278,48 @@ describe('explain action (panel integration)', () => {
     await settle();
 
     expect(container.querySelector('.koi-assistant-apply')).not.toBeNull();
+  });
+
+  // Quick actions (and Explain) pass their own built prompt — they must neither clear a draft the
+  // user typed but hasn't sent, nor (on failure) overwrite that draft with the canned action text.
+  test('a quick action preserves a typed-but-unsent draft', async () => {
+    const container = document.createElement('div');
+    createAssistantPanel(makeOpts(container));
+    const input = container.querySelector<HTMLTextAreaElement>('.koi-assistant-input')!;
+    input.value = 'my half-written domain question';
+    container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
+    await settle();
+
+    expect(input.value).toBe('my half-written domain question');
+  });
+
+  test('a FAILED quick action does not replace the typed draft with the canned prompt', async () => {
+    const container = document.createElement('div');
+    createAssistantPanel(makeOpts(container));
+    const input = container.querySelector<HTMLTextAreaElement>('.koi-assistant-input')!;
+    input.value = 'my half-written domain question';
+    vi.mocked(runAssistant).mockRejectedValueOnce(new Error('endpoint unreachable'));
+    container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
+    await settle();
+
+    // The turn rolled back, but the draft is intact — NOT the quick action's boilerplate text.
+    expect(input.value).toBe('my half-written domain question');
+  });
+
+  test('a typed send still clears the input, and a failure restores the TYPED prompt', async () => {
+    const container = document.createElement('div');
+    createAssistantPanel(makeOpts(container));
+    const input = container.querySelector<HTMLTextAreaElement>('.koi-assistant-input')!;
+    input.value = 'typed question';
+    container.querySelector<HTMLButtonElement>('.koi-assistant-send')!.click();
+    await settle();
+    expect(input.value).toBe(''); // sent from the input ⇒ cleared
+
+    input.value = 'second question';
+    vi.mocked(runAssistant).mockRejectedValueOnce(new Error('boom'));
+    container.querySelector<HTMLButtonElement>('.koi-assistant-send')!.click();
+    await settle();
+    expect(input.value).toBe('second question'); // failed ⇒ restored for a retry
   });
 
   test('a persisted explain turn replays without Apply (suppression survives reload)', async () => {
@@ -877,6 +919,57 @@ describe('multi-file change set (agentic edits)', () => {
     expect(applyBtn.disabled).toBe(false);
     expect(applyBtn.textContent).not.toContain('✓');
     expect(container.querySelector('.koi-changeset-discard')).not.toBeNull();
+  });
+
+  // The in-flight window: the click handler disables Apply while onApply is pending, but every accept
+  // checkbox's change handler calls refreshApply(), which used to recompute disabled from the accepted
+  // count alone — re-enabling Apply mid-apply and letting a second click run a CONCURRENT apply.
+  test('toggling an accept checkbox mid-apply keeps Apply disabled (no second concurrent apply)', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      req.editSession?.stage('events.koi', 'integration event OrderPlaced {}');
+      req.onText('Two edits.');
+      return 'Two edits.';
+    });
+    // A deferred apply we settle by hand, so the checkbox can be toggled WHILE the apply is in flight.
+    let resolveApply!: (v: { failed: string[] }) => void;
+    const applyGate = new Promise<{ failed: string[] }>((res) => {
+      resolveApply = res;
+    });
+    const onApplyChangeSet = vi.fn(async () => applyGate);
+    const container = document.createElement('div');
+    createAssistantPanel(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        runEditTool: vi.fn(async () => 'ok'),
+        onApplyChangeSet,
+      }),
+    );
+
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    const applyBtn = container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    applyBtn.click();
+    await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+    expect(applyBtn.disabled).toBe(true); // the in-flight guard
+
+    // Second thoughts mid-apply: unchecking a file must NOT re-enable Apply while the first apply
+    // is still pending…
+    const check = container.querySelector<HTMLInputElement>('.koi-changeset-accept')!;
+    check.checked = false;
+    check.dispatchEvent(new Event('change'));
+    expect(applyBtn.disabled).toBe(true);
+
+    // …so a second click can't start a concurrent apply.
+    applyBtn.click();
+    expect(onApplyChangeSet).toHaveBeenCalledTimes(1);
+
+    // Once the in-flight apply settles, the panel reaches its normal terminal state, reporting the
+    // count that was actually written (both files were in flight when Apply was clicked).
+    resolveApply({ failed: [] });
+    await vi.waitFor(() => expect(applyBtn.textContent).toContain('✓'));
+    expect(applyBtn.textContent).toContain('2');
   });
 
   // #473 (Task 1): a stale change-set panel from a prior turn must not stay clickable after a NEW send —
@@ -1544,5 +1637,113 @@ describe('bare grammar-constrained candidate recovery at legacy entry points (#5
 
     await vi.waitFor(() => expect(container.querySelector('.koi-assistant-stopped')).not.toBeNull());
     await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
+  });
+});
+
+// --- workspace switching around send: the transcript array and the storage key must travel together --
+// The panel keeps a live `messages` binding that syncWorkspace() reassigns, while send() persists under
+// a key captured at send time. Before the fix the two could diverge in both directions: a folder switch
+// while the AI rail stayed visible (no syncWorkspace call) pushed the new turn onto the OLD folder's
+// array and saved it under the NEW key (wiping that folder's history and leaking the old conversation),
+// and a syncWorkspace() during an in-flight request swapped the array mid-turn so the finished reply was
+// committed into the other workspace's transcript.
+describe('workspace switching around send (per-workspace transcript integrity)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.mocked(runAssistant).mockReset();
+  });
+  afterEach(() => {
+    localStorage.clear();
+    vi.mocked(runAssistant).mockReset();
+  });
+
+  function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
+    return {
+      container,
+      getProvider: () => 'anthropic',
+      getBaseUrl: () => '',
+      getApiKey: () => 'sk',
+      getModel: () => '',
+      getContext: () => ({ fileName: 'm.koi', source: 'context X {}', diagnostics: [] }),
+      onApplyModel: () => {},
+      onOpenPrefs: () => {},
+      getWorkspaceKey: () => 'ws',
+      getSelection: () => null,
+      getUseTools: () => false,
+      getConstrainGrammar: () => false,
+      ...over,
+    };
+  }
+
+  // Type a prompt and send it via the Send button (the from-input path).
+  function typeSend(container: HTMLElement, text: string): void {
+    container.querySelector<HTMLTextAreaElement>('.koi-assistant-input')!.value = text;
+    container.querySelector<HTMLButtonElement>('.koi-assistant-send')!.click();
+  }
+
+  test('a send after an in-place folder switch lands on the NEW workspace transcript (no cross-workspace bleed)', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.onText('reply');
+      return 'reply';
+    });
+    // Folder B already has a saved conversation from an earlier session.
+    saveChat('B', [
+      { role: 'user', content: 'earlier B question' },
+      { role: 'assistant', content: 'earlier B answer' },
+    ]);
+    let key = 'A';
+    const container = document.createElement('div');
+    createAssistantPanel(opts(container, { getWorkspaceKey: () => key }));
+
+    typeSend(container, 'hello from A');
+    await vi.waitFor(() => expect(loadChat('A').length).toBe(2));
+
+    // The folder switches IN PLACE while the AI rail stays visible — the host never calls
+    // syncWorkspace() — and the user asks a question in the new folder.
+    key = 'B';
+    typeSend(container, 'hello from B');
+    await vi.waitFor(() => expect(loadChat('B').some((m) => m.content === 'reply')).toBe(true));
+
+    // B kept its OWN saved history plus the new turn; A's conversation did not bleed into it…
+    expect(loadChat('B').map((m) => m.content)).toEqual([
+      'earlier B question',
+      'earlier B answer',
+      'hello from B',
+      'reply',
+    ]);
+    // …and A's stored transcript is exactly its own turn.
+    expect(loadChat('A').map((m) => m.content)).toEqual(['hello from A', 'reply']);
+  });
+
+  test('syncWorkspace() mid-stream is deferred: the turn persists under its send-time workspace', async () => {
+    saveChat('B', [{ role: 'user', content: 'b history' }]);
+    let key = 'A';
+    let finish!: () => void;
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.onText('partial…');
+      await new Promise<void>((r) => {
+        finish = r;
+      });
+      return 'A reply';
+    });
+    const container = document.createElement('div');
+    const panel = createAssistantPanel(opts(container, { getWorkspaceKey: () => key }));
+
+    typeSend(container, 'question in A');
+    await vi.waitFor(() => expect(vi.mocked(runAssistant)).toHaveBeenCalled());
+
+    // Mid-stream the folder switches and the AI Chat view is re-shown → the host calls syncWorkspace().
+    key = 'B';
+    panel.syncWorkspace();
+
+    // The in-flight turn still settles into folder A's transcript, under A's key…
+    finish();
+    await vi.waitFor(() => expect(loadChat('A').map((m) => m.content)).toEqual(['question in A', 'A reply']));
+    // …folder B's stored conversation is untouched by A's turn…
+    expect(loadChat('B').map((m) => m.content)).toEqual(['b history']);
+    // …and the deferred sync then re-pointed the panel at B's transcript.
+    await vi.waitFor(() =>
+      expect(container.querySelector('.koi-assistant-transcript')?.textContent).toContain('b history'),
+    );
   });
 });

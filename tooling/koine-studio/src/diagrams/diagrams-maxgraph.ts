@@ -1022,7 +1022,10 @@ export function buildCanvas(
   }
 
   const onCreateAnnotation = (e: Event): void => {
-    if (!isDiagramEditing()) return;
+    // Gated on this canvas's OWN readOnly contract like every other authoring gesture: the event is
+    // document-wide, so a mounted read-only canvas (context map) would otherwise answer it too and its
+    // persist() would overwrite the domain canvas's saved layout with this canvas's cells.
+    if (readOnly || !isDiagramEditing()) return;
     const detail = (e as CustomEvent<DiagramAnnotationCreateDetail>).detail;
     if (detail?.kind === 'note') void createNote();
     else if (detail?.kind === 'group') void createGroup();
@@ -1112,13 +1115,18 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   const pct = document.createElement('span');
   pct.className = 'koi-canvas-zoom-pct';
   pct.setAttribute('aria-live', 'polite');
+  // Sync the % readout to the live scale WITHOUT persisting — for scales nobody chose (construction,
+  // the read-only fit-on-open fallback). Persisting those would erase the "nothing saved yet" signal
+  // that applyInitialZoom's read-only fit() fallback keys on, so the fallback could only ever fire once.
+  const showPct = (): void => {
+    pct.textContent = `${Math.round(graph.getView().scale * 100)}%`;
+  };
   const syncPct = (): void => {
-    const p = Math.round(graph.getView().scale * 100);
-    pct.textContent = `${p}%`;
+    showPct();
     // Each canvas type persists zoom under its own key (zoomKey). The readOnly save-guard that was here
     // before was only needed because all canvases shared one key ('koi-domain-diagram'); now that every
     // canvas gets its own key, every canvas can save and restore its zoom independently (#769).
-    saveDiagramZoom(zoomKey, p);
+    saveDiagramZoom(zoomKey, Math.round(graph.getView().scale * 100));
   };
 
   // Open the domain canvas at a PREDICTABLE zoom (#762): the per-diagram saved zoom if there is one, else
@@ -1131,8 +1139,9 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   // Read-only canvases (context-map, event-flow): if a saved zoom exists restore it; otherwise fit the
   // content to the viewport (the default "see everything" experience). Domain canvas: saved ?? default.
   const applyInitialZoom = (): void => {
-    // Read-only with no saved zoom: fall back to fit() so the content frames to the viewport.
-    if (saved === null && readOnly) { fit(); return; }
+    // Read-only with no saved zoom: fall back to fit() so the content frames to the viewport. The readout
+    // syncs display-only — persisting the fitted scale would count as a chosen zoom and kill the fallback.
+    if (saved === null && readOnly) { fit(); showPct(); return; }
     const target = saved ?? getDefaultCanvasZoom();
     try {
       graph.zoomTo(target / 100, false);
@@ -1183,7 +1192,7 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   }
 
   host.appendChild(controls);
-  syncPct();
+  showPct();
 
   // Ctrl/⌘ + wheel zooms the canvas; a plain wheel is left to scroll the page.
   const onWheel = (evt: WheelEvent): void => {

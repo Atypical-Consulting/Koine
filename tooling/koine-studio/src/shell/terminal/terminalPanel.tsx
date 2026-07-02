@@ -214,13 +214,25 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
     void transport.resize(term.cols, term.rows).catch(() => {});
   }
 
+  // A failed spawn (bad $SHELL, vanished cwd) must not leave a silently dead terminal: surface the
+  // error in the pane and arm the existing Enter-to-restart path (onExit never fires for a shell that
+  // never started, so `exited` would otherwise stay false and every keystroke would hit a dead PTY).
+  function onStartFailed(e: unknown): void {
+    exited = true;
+    term.write(`\r\n\x1b[2m[failed to start shell: ${String(e)} — press Enter to retry]\x1b[0m\r\n`);
+  }
+
   function restart(): void {
     exited = false;
     pendingChars = 0;
     flowPaused = false;
     flowEpoch++; // stale write callbacks from the prior shell must not touch the new session's counter
+    // The new PTY opens at the host default (80×24) while the panel's grid is unchanged — reset the
+    // sent-size memo so the post-start fit re-issues the resize instead of skipping it as a no-change.
+    sentCols = 0;
+    sentRows = 0;
     term.clear();
-    void transport.start(cwd(), shellArgs?.() ?? null).then(fit);
+    void transport.start(cwd(), shellArgs?.() ?? null).then(fit).catch(onStartFailed);
   }
 
   // Shell output → the view, WITH flow control (#441). xterm's write(chunk, cb) fires the callback once
@@ -263,7 +275,8 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
       if (data === '\r') restart();
       return;
     }
-    void transport.write(data);
+    // Best-effort like transport.resize: a write can reject against a PTY that failed to start.
+    void transport.write(data).catch(() => {});
   });
 
   // Reflow on any container size change (the bottom-panel resizer drag, a window resize, the first
@@ -282,7 +295,7 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
 
   // Attach listeners (done above) BEFORE starting so no early output is missed, then spawn the shell
   // and fit once it is up.
-  void transport.start(cwd(), shellArgs?.() ?? null).then(fit);
+  void transport.start(cwd(), shellArgs?.() ?? null).then(fit).catch(onStartFailed);
 
   return {
     fit() {

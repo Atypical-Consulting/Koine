@@ -105,6 +105,55 @@ describe('scenarioPanel', () => {
     expect(container.querySelector('.koi-scenario-message.is-error')?.textContent).toContain('not valid JSON');
   });
 
+  it('keeps hand-edited given/args JSON and the last results across a refresh that preserves the selection', async () => {
+    const container = document.createElement('div');
+    const lsp = mockLsp();
+    const panel = createScenarioPanel({ container, lsp });
+    await panel.refresh();
+
+    const [given, args] = Array.from(container.querySelectorAll<HTMLTextAreaElement>('.koi-scenario-json'));
+    given.value = '{ "lines": [{ "quantity": 2 }], "status": "Draft" }';
+    args.value = '{ "customer": "c-1" }';
+    container.querySelector<HTMLButtonElement>('.koi-scenario-run')!.click();
+    await flush();
+
+    // The controller re-shows the tab (or a model edit settles) → refresh with an unchanged catalog.
+    await panel.refresh();
+
+    expect(given.value).toContain('"quantity": 2');
+    expect(args.value).toContain('c-1');
+    expect(container.querySelector('.koi-scenario-badge.is-ok')).not.toBeNull();
+  });
+
+  it('re-scaffolds given/args and clears stale results when the target vanishes on refresh', async () => {
+    const nextCatalog: ScenarioCatalog = {
+      targets: [
+        {
+          name: 'Invoice',
+          operations: [{ name: 'issue', kind: 'command', params: [], returns: null }],
+          fields: [{ name: 'total', type: 'Decimal', optional: false }],
+        },
+      ],
+    };
+    const container = document.createElement('div');
+    const scenarioCatalog = vi.fn(async () => CATALOG);
+    const lsp = mockLsp({ scenarioCatalog });
+    const panel = createScenarioPanel({ container, lsp });
+    await panel.refresh();
+
+    const [given, args] = Array.from(container.querySelectorAll<HTMLTextAreaElement>('.koi-scenario-json'));
+    given.value = '{ "lines": [{ "quantity": 2 }], "status": "Draft" }';
+    container.querySelector<HTMLButtonElement>('.koi-scenario-run')!.click();
+    await flush();
+
+    scenarioCatalog.mockResolvedValueOnce(nextCatalog);
+    await panel.refresh();
+
+    expect(JSON.parse(given.value)).toEqual({ total: 0 });
+    expect(JSON.parse(args.value)).toEqual({});
+    expect(container.querySelector('.koi-scenario-badge')).toBeNull();
+  });
+
   it('shows an empty-state hint and disables Run when nothing is runnable', async () => {
     const container = document.createElement('div');
     const lsp = mockLsp({ scenarioCatalog: vi.fn(async () => ({ targets: [] })) });

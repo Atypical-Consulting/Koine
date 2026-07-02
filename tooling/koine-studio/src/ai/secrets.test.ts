@@ -137,3 +137,44 @@ describe('concurrent device-key creation (issue #634)', () => {
     }
   });
 });
+
+// A transient IndexedDB open failure (e.g. Chrome's intermittent "Internal error opening backing
+// store") must not poison the cached connection for the whole session: getOrCreateKey explicitly
+// refuses to memoize a failure so it can be retried, but before the fix openDb kept the rejected
+// connection promise cached, so every retry re-hit the same dead promise and a key saved AFTER
+// storage recovered was silently dropped.
+describe('transient IndexedDB open failure (connection retry)', () => {
+  test('a failed open is not cached: a later save in the same session persists the secret', async () => {
+    const realIndexedDB = indexedDB;
+    let failNext = true;
+    vi.stubGlobal('indexedDB', {
+      open(name: string, version?: number) {
+        if (!failNext) return realIndexedDB.open(name, version);
+        failNext = false;
+        // A minimal IDBOpenDBRequest that fails: only onerror ever fires, with a transient error.
+        const req = {
+          error: new Error('Internal error opening backing store'),
+          onupgradeneeded: null,
+          onsuccess: null,
+          onerror: null as (() => void) | null,
+        };
+        queueMicrotask(() => req.onerror?.());
+        return req as unknown as IDBOpenDBRequest;
+      },
+    });
+    try {
+      // A fresh module instance: no cached connection or device key inherited from sibling tests.
+      vi.resetModules();
+      const store = await import('@/ai/secrets');
+      // The boot-time attempt hits the transient failure — best-effort, nothing persisted, no throw.
+      await store.saveSecret('retry', 'lost-first-attempt');
+      // Storage has recovered; the user now pastes their key in Settings → Assistant. The save must
+      // reopen the connection instead of reusing the cached rejection…
+      await store.saveSecret('retry', 'sk-live-123');
+      // …so the secret round-trips within the same session.
+      expect(await store.loadSecret('retry')).toBe('sk-live-123');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

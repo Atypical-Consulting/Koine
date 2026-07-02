@@ -74,6 +74,26 @@ describe('inlay-hints editor extension', () => {
     view.destroy();
   });
 
+  it('drops a response resolving after a doc change instead of painting pre-edit positions', async () => {
+    // The first-paint fetch resolves AFTER an edit, inside the debounce window (no newer fetch has
+    // started yet): its positions describe the pre-edit doc, so the answer must be dropped — the
+    // debounced refetch repaints with fresh positions.
+    let call = 0;
+    const provider: InlayHintsFn = () => {
+      call++;
+      return call === 1
+        ? new Promise((r) => setTimeout(() => r([{ position: { line: 0, character: 11 }, label: ': STALE', kind: 1 }]), 10))
+        : Promise.resolve([{ position: { line: 0, character: 12 }, label: ': FRESH', kind: 1 }]);
+    };
+    const view = makeView(provider, 40); // debounce window wide enough for the stale answer to land inside it
+    view.dispatch({ changes: { from: 0, insert: 'X' } }); // invalidates the in-flight first-paint fetch
+    await new Promise((r) => setTimeout(r, 25)); // stale answer resolved; the debounced refetch hasn't fired yet
+    expect(widgets(view).map((w) => w.textContent)).not.toContain(': STALE');
+    await new Promise((r) => setTimeout(r, 40)); // let the debounced refetch land
+    expect(widgets(view).map((w) => w.textContent)).toEqual([': FRESH']);
+    view.destroy();
+  });
+
   it('ignores a stale fetch resolving after a newer one (the latest hints win)', async () => {
     // First fetch resolves slowly with stale hints; a doc edit triggers a second, fast fetch.
     let call = 0;

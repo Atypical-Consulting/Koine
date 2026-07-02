@@ -24,6 +24,10 @@ export function MobileZoneBar(props: { store: StoreApi<AppState>; onSelect: (z: 
     else if (e.key === 'End') next = last;
     else return;
     e.preventDefault();
+    // Roving tabindex (WAI-ARIA tabs): arrow keys must move DOM focus too — selecting alone would
+    // strand focus on the old tab, which the re-render demotes to tabIndex=-1.
+    const tablist = (e.currentTarget as HTMLElement).closest('[role="tablist"]');
+    tablist?.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus();
     props.onSelect(ZONES[next].zone);
   };
   return (

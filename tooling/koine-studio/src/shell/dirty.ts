@@ -8,9 +8,11 @@ export interface DirtyLike {
   dirty: boolean;
 }
 
-/** A persistable buffer: a real `path` is written to disk. */
+/** A persistable buffer: a real `path` is written to disk. `text` is the content `write` persists —
+ *  re-read after the awaited write so edits landing mid-write don't get marked saved. */
 export interface SaveableBuffer extends DirtyLike {
   path: string;
+  text: string;
 }
 
 /** Every buffer with unsaved changes, in the map's iteration order. */
@@ -73,9 +75,12 @@ export async function saveAllDirtyBuffers<T extends SaveableBuffer>(
 ): Promise<number> {
   let saved = 0;
   for (const buffer of dirtyBuffers(buffers)) {
+    const written = buffer.text;
     try {
       await deps.write(buffer);
-      buffer.dirty = false;
+      // Keystrokes landing while the write is in flight mutate buffer.text — only mark clean when the
+      // buffer still holds exactly what hit disk, so those edits stay flagged as unsaved.
+      if (buffer.text === written) buffer.dirty = false;
       saved++;
     } catch (error) {
       deps.onError(buffer, error);

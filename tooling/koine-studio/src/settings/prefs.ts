@@ -1090,9 +1090,28 @@ export function mountPreferencesPane(
         }
     }
 
+    // The rebindable command (≠ id) whose RESOLVED chord equals `chord` — the duplicate a commit
+    // without a conflict prompt would silently double-bind. Unbound ("") rows never count.
+    function findKbdDuplicate(
+        id: BindingId,
+        chord: string,
+    ): BindingId | undefined {
+        const resolved = resolveKeybindings();
+        return (Object.keys(resolved) as BindingId[]).find(
+            (k) => k !== id && resolved[k] !== "" && resolved[k] === chord,
+        );
+    }
+
     // Commit a freshly recorded chord, or defer to a conflict prompt when it clashes with another
     // rebindable command or a reserved/built-in shortcut.
     function applyRecordedChord(id: BindingId, chord: string): void {
+        // Scan for a duplicate owner BEFORE the own-default fast path below: the Reassign flow can hand
+        // this command's default chord to another command, so even the default can clash.
+        const otherId = findKbdDuplicate(id, chord);
+        if (otherId) {
+            showKbdConflict(id, chord, kbdLabel(otherId), otherId); // clashes with another rebindable command
+            return; // wait for the user to confirm the reassignment
+        }
         // Recording a command's own default drops any override instead of persisting a redundant one — so
         // the store stays clean and the per-row Reset's enabled state stays honest.
         if (chord === DEFAULT_BINDINGS[id]) {
@@ -1100,14 +1119,6 @@ export function mountPreferencesPane(
             repaintKbdRow(id);
             cb.onKeybindingsChanged?.();
             return;
-        }
-        const resolved = resolveKeybindings();
-        const otherId = (Object.keys(resolved) as BindingId[]).find(
-            (k) => k !== id && resolved[k] !== "" && resolved[k] === chord,
-        );
-        if (otherId) {
-            showKbdConflict(id, chord, kbdLabel(otherId), otherId); // clashes with another rebindable command
-            return; // wait for the user to confirm the reassignment
         }
         const reserved = RESERVED_CHORDS[chord];
         if (reserved) {
@@ -1234,6 +1245,18 @@ export function mountPreferencesPane(
         });
         resetBtn.addEventListener("click", () => {
             hideKbdConflict(id);
+            // Reset restores the default chord, which the Reassign flow may meanwhile have handed to
+            // ANOTHER command — route through the same conflict prompt instead of silently double-binding.
+            const otherId = findKbdDuplicate(id, DEFAULT_BINDINGS[id]);
+            if (otherId) {
+                showKbdConflict(
+                    id,
+                    DEFAULT_BINDINGS[id],
+                    kbdLabel(otherId),
+                    otherId,
+                );
+                return; // wait for the user to confirm the reassignment
+            }
             saveKeybindingOverride(id, null); // drop the remap so the default wins again
             repaintKbdRow(id);
             cb.onKeybindingsChanged?.();
@@ -1243,7 +1266,12 @@ export function mountPreferencesPane(
             const p = row?.pending;
             if (!p) return;
             if (p.otherId) saveKeybindingOverride(p.otherId, ""); // a rebindable prior owner becomes unbound
-            saveKeybindingOverride(id, p.chord); // this command takes the chord (shadowing a built-in if reserved)
+            // This command takes the chord (shadowing a built-in if reserved); taking back its OWN default
+            // drops the override instead of persisting a redundant one, keeping the store clean.
+            saveKeybindingOverride(
+                id,
+                p.chord === DEFAULT_BINDINGS[id] ? null : p.chord,
+            );
             hideKbdConflict(id);
             repaintKbdRow(id);
             if (p.otherId) repaintKbdRow(p.otherId);

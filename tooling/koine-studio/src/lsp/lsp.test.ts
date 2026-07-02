@@ -111,6 +111,32 @@ describe('KoineLsp document sync', () => {
     expect(opens.every((o) => o.params.textDocument.version === 2)).toBe(true);
   });
 
+  test('changeDoc for a second uri flushes the first uri\'s pending didChange instead of dropping it', () => {
+    const { lsp, sent } = harness();
+    lsp.openDoc('file:///a.koi', 'a1');
+    lsp.openDoc('file:///b.koi', 'b1');
+    lsp.changeDoc('file:///a.koi', 'a2');
+    lsp.changeDoc('file:///b.koi', 'b2'); // within a's debounce window (the assistant's multi-file apply)
+    lsp.flush();
+    const changes = byMethod(sent, 'textDocument/didChange');
+    expect(changes).toHaveLength(2);
+    expect(changes[0].params.textDocument.uri).toBe('file:///a.koi');
+    expect(changes[0].params.contentChanges).toEqual([{ text: 'a2' }]);
+    expect(changes[1].params.textDocument.uri).toBe('file:///b.koi');
+    expect(changes[1].params.contentChanges).toEqual([{ text: 'b2' }]);
+  });
+
+  test('rapid changeDoc calls to the SAME uri still coalesce into one didChange', () => {
+    const { lsp, sent } = harness();
+    lsp.openDoc(URI, 'v1');
+    lsp.changeDoc(URI, 'v2');
+    lsp.changeDoc(URI, 'v3');
+    lsp.flush();
+    const changes = byMethod(sent, 'textDocument/didChange');
+    expect(changes).toHaveLength(1);
+    expect(changes[0].params.contentChanges).toEqual([{ text: 'v3' }]);
+  });
+
   test('closeDoc sends didClose and stops tracking (a later changeDoc is dropped)', () => {
     const { lsp, sent } = harness();
     lsp.openDoc(URI, 'v1');

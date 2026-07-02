@@ -3,6 +3,7 @@ import {
   buildShareUrl,
   buildWorkspaceShareUrl,
   MAX_SHARE_HASH_LEN,
+  PUBLIC_STUDIO_URL,
   readModelFromHash,
   workspaceShareUrlOrNull
 } from '@/export/share';
@@ -116,6 +117,55 @@ describe('workspaceShareUrlOrNull — URL-length guard', () => {
     expect(fragmentOf(buildWorkspaceShareUrl(files, 'big.koi')).length).toBeGreaterThan(
       MAX_SHARE_HASH_LEN
     );
+  });
+});
+
+describe('share URLs on the Tauri desktop host — public-origin substitution', () => {
+  // The desktop webview's own origin (`tauri://localhost` on macOS/Linux, `http://tauri.localhost`
+  // on Windows) resolves to nothing in a recipient's browser, so the builders must base the link on
+  // the canonical public Studio deployment instead of window.location.
+  const setUrl = (url: string): void =>
+    (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(url);
+  const originalHref = window.location.href;
+
+  afterEach(() => {
+    setUrl(originalHref);
+  });
+
+  it('bases workspace links on the public Studio URL under tauri://localhost (macOS/Linux)', () => {
+    setUrl('tauri://localhost/');
+    const files = [{ relPath: 'a.koi', text: 'context A {}' }];
+
+    const url = buildWorkspaceShareUrl(files, 'a.koi');
+
+    expect(url.startsWith(`${PUBLIC_STUDIO_URL}#model=`)).toBe(true);
+    // The substituted link still round-trips to the same workspace.
+    setHash(hashOf(url));
+    expect(readModelFromHash()).toEqual({ kind: 'workspace', files, active: 'a.koi' });
+  });
+
+  it('bases legacy single-model links on the public Studio URL under tauri://localhost', () => {
+    setUrl('tauri://localhost/');
+
+    const url = buildShareUrl('context A {}');
+
+    expect(url.startsWith(`${PUBLIC_STUDIO_URL}#model=`)).toBe(true);
+  });
+
+  it('bases workspace links on the public Studio URL under http://tauri.localhost (Windows)', () => {
+    setUrl('http://tauri.localhost/');
+
+    const url = buildWorkspaceShareUrl([{ relPath: 'a.koi', text: 'context A {}' }]);
+
+    expect(url.startsWith(`${PUBLIC_STUDIO_URL}#model=`)).toBe(true);
+  });
+
+  it('keeps a real web origin (path and query included) as the link base', () => {
+    setUrl('https://example.test/Koine/studio/?flag=1');
+
+    const url = buildWorkspaceShareUrl([{ relPath: 'a.koi', text: 'context A {}' }]);
+
+    expect(url.startsWith('https://example.test/Koine/studio/?flag=1#model=')).toBe(true);
   });
 });
 

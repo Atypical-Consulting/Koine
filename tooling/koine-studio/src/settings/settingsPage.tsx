@@ -354,6 +354,11 @@ export function createSettingsPage(
     if (debounceTimer !== null) {
       clearTimeout(debounceTimer);
       debounceTimer = null;
+      // Flush — don't drop — the edit the debounce was still holding: a VALID document persists exactly
+      // as the timer would have (the editor showed no diagnostics, so the user believes it saved), while
+      // an invalid one only renders diagnostics into the strip about to be torn down, preserving the
+      // intentional abandon-invalid-draft behaviour of the JSON→Visual swap.
+      if (editor) applyJsonText(editor.getText());
     }
     // The scope toggle lives in the HEADER (not the body), so replaceChildren() below won't reach it —
     // remove its node explicitly. The empty-state note (when present) is in the body and goes with the

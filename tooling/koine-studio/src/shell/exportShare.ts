@@ -36,7 +36,8 @@ export interface ExportShare {
   exportActiveDiagram(format: 'svg' | 'png' | 'plantuml'): Promise<void>;
   copyActiveDiagramMermaid(): Promise<void>;
   saveProjectToDisk(): Promise<void>;
-  importSharedWorkspace(files: { relPath: string; text: string }[], active?: string): Promise<void>;
+  /** Returns whether a workspace was actually opened, so the boot ladder can fall back to the default. */
+  importSharedWorkspace(files: { relPath: string; text: string }[], active?: string): Promise<boolean>;
   /** The Generate Project wizard handle (the toolbar button + palette command open it). */
   readonly generateProject: { open(): void };
 }
@@ -180,13 +181,13 @@ export function createExportShare(deps: ExportShareDeps): ExportShare {
   // Import a multi-file workspace carried in a share link. Materializes a real workspace and opens
   // it in folder mode (mirrors openExample). Runs from the lsp.start callback so the server is up
   // and the resulting didOpens resolve cross-file refs.
-  async function importSharedWorkspace(files: { relPath: string; text: string }[], active?: string): Promise<void> {
+  async function importSharedWorkspace(files: { relPath: string; text: string }[], active?: string): Promise<boolean> {
     // A share link is untrusted input. Drop any file whose relPath could escape the workspace root
     // before it reaches platform.materializeWorkspace (which writes to disk) — defense in depth
     // against a malicious `..`/absolute path in the payload.
     const safeFiles = files.filter((f) => isSafeShareRelPath(f.relPath));
-    // Nothing (safe) to import — fall through to the default workspace that already booted.
-    if (safeFiles.length === 0) return;
+    // Nothing (safe) to import — report it so the boot ladder falls through to the default workspace.
+    if (safeFiles.length === 0) return false;
 
     // Materialize a real workspace and open it in folder mode (mirrors openExample).
     const token = await platform.materializeWorkspace(
@@ -195,14 +196,16 @@ export function createExportShare(deps: ExportShareDeps): ExportShare {
     );
     if (!token) {
       setStatus('could not open shared workspace', 'error');
-      return;
+      return false;
     }
-    await workspace.openFolderPath(token, { recent: false });
+    const opened = await workspace.openFolderPath(token, { recent: false });
+    if (!opened.ok) return false;
     // openFolderPath activates the first file by relPath; honour the share's `active` when present.
     if (active) {
       const target = Array.from(workspace.buffers.values()).find((b) => b.relPath === active);
       if (target) workspace.activateFile(target.uri);
     }
+    return true;
   }
 
   return {

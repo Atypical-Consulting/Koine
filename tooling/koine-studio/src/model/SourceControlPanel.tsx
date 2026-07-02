@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { GitFile, GitLogEntry, GitStatus, Platform } from '@/host/types';
 import { koiConfirm } from '@/shared/overlay';
 
@@ -203,17 +203,27 @@ export function SourceControlPanel(props: {
     });
   }
 
+  // The latest diff toggle's identity. `diffText` is one shared slot, so a slow gitDiff resolve from a
+  // previously-clicked row must be discarded — only the fetch that is STILL the open row may commit.
+  const diffReq = useRef<OpenDiff | null>(null);
+
   async function onToggleDiff(f: GitFile): Promise<void> {
     if (openDiff && openDiff.relPath === f.relPath && openDiff.staged === f.staged) {
+      diffReq.current = null;
       setOpenDiff(null);
       return;
     }
-    setOpenDiff({ relPath: f.relPath, staged: f.staged });
+    const req: OpenDiff = { relPath: f.relPath, staged: f.staged };
+    diffReq.current = req;
+    setOpenDiff(req);
+    setDiffText(''); // never show the previous row's diff while this row's fetch is in flight
+    let text = '';
     try {
-      setDiffText(await git.gitDiff(folderToken, f.relPath, f.staged));
+      text = await git.gitDiff(folderToken, f.relPath, f.staged);
     } catch {
-      setDiffText('');
+      text = '';
     }
+    if (diffReq.current === req) setDiffText(text);
   }
 
   // --- empty states (after the hooks, so the hook order is stable) ----------

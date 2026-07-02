@@ -33,13 +33,20 @@ function cryptoAvailable(): boolean {
 let dbPromise: Promise<IDBDatabase> | null = null;
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
+  const pending: Promise<IDBDatabase> = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 1);
     req.onupgradeneeded = () => req.result.createObjectStore(STORE);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
-  return dbPromise;
+  dbPromise = pending;
+  // A failed open must not poison the cache for the session — getOrCreateKey's documented retry of a
+  // transient failure would otherwise always re-hit this same rejected promise. Reset so the next call
+  // reopens (mirrors ai.ts's SDK-loader pattern).
+  pending.catch(() => {
+    if (dbPromise === pending) dbPromise = null;
+  });
+  return pending;
 }
 
 function idbGet<T>(key: string): Promise<T | null> {

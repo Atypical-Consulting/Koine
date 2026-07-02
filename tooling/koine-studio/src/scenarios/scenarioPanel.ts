@@ -91,7 +91,10 @@ export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
     return currentTarget()?.operations.find((o) => o.name === opSelect.value);
   }
 
-  function populateTargets(): void {
+  // Rebuild both dropdowns from the catalog, keeping the prior selections when they survive.
+  // Returns whether the effective target/operation selection changed, so refresh() can leave the
+  // user's hand-edited JSON and the last run's results alone when it didn't.
+  function populateTargets(): boolean {
     const previous = targetSelect.value;
     targetSelect.replaceChildren();
     for (const t of catalog.targets) {
@@ -102,13 +105,15 @@ export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
     targetSelect.value = catalog.targets.some((t) => t.name === previous)
       ? previous
       : (catalog.targets[0]?.name ?? '');
-    populateOperations(true);
+    const targetChanged = targetSelect.value !== previous;
+    return populateOperations(targetChanged) || targetChanged;
   }
 
   // Rebuild the operation dropdown for the current target. `rescaffoldGiven` is true only when the
   // target itself changed (new fields ⇒ new given-state shape); switching the operation alone keeps the
-  // given-state the user entered and only re-scaffolds the args.
-  function populateOperations(rescaffoldGiven: boolean): void {
+  // given-state the user entered and only re-scaffolds the args — and a refresh that keeps both
+  // selections re-scaffolds nothing. Returns whether the operation selection changed.
+  function populateOperations(rescaffoldGiven: boolean): boolean {
     const previous = opSelect.value;
     opSelect.replaceChildren();
     const target = currentTarget();
@@ -117,8 +122,10 @@ export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
       opSelect.append(option(o.name, `${o.name} (${o.kind})`));
     }
     opSelect.value = ops.some((o) => o.name === previous) ? previous : (ops[0]?.name ?? '');
+    const opChanged = opSelect.value !== previous;
     if (rescaffoldGiven) scaffoldGiven();
-    scaffoldArgs();
+    if (rescaffoldGiven || opChanged) scaffoldArgs();
+    return opChanged;
   }
 
   // Prefill the given-state editor with the selected target's fields, so the user edits a shape rather
@@ -155,13 +162,15 @@ export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
       catalog = { targets: [] };
       loadError = errorText(e);
     }
-    populateTargets();
+    const selectionChanged = populateTargets();
     syncEnabled();
     if (loadError) {
       renderMessage(`Could not load the scenario catalog: ${loadError}`, 'error');
     } else if (disabled()) {
       renderMessage('No runnable commands found. Add a command or factory to an aggregate, then refresh.', 'muted');
-    } else {
+    } else if (selectionChanged) {
+      // The last run's timeline belongs to a selection that no longer exists — clear it. A refresh
+      // that keeps the same target + operation (e.g. re-showing the tab) leaves the results in place.
       results.replaceChildren();
     }
   }

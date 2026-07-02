@@ -89,11 +89,12 @@ export interface WorkerClient {
 const BOOT_TIMEOUT_MS = 30_000;
 
 /**
- * Default per-call timeout (ms). A call may be posted while a worker is still booting (the worker
- * buffers the message until its handler is installed), and booting is itself bounded by
- * {@link BOOT_TIMEOUT_MS}; so the call ceiling is two boot windows — comfortably beyond any real
- * LSP/compile op while still guaranteeing that a failed respawn or otherwise-lost reply can never hang
- * the caller forever (issue #635). Callers needing longer pass an explicit `timeoutMs` (or `0` to opt out).
+ * Default per-call timeout (ms). A call made while a worker is still booting is held client-side and
+ * posted on `ready` (the worker installs its message listener only after the .NET boot — see
+ * koine.worker.ts), and booting is itself bounded by {@link BOOT_TIMEOUT_MS}; so the call ceiling is
+ * two boot windows — comfortably beyond any real LSP/compile op while still guaranteeing that a failed
+ * respawn or otherwise-lost reply can never hang the caller forever (issue #635). Callers needing
+ * longer pass an explicit `timeoutMs` (or `0` to opt out).
  */
 export const DEFAULT_CALL_TIMEOUT_MS = 2 * BOOT_TIMEOUT_MS;
 
@@ -126,6 +127,11 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
   let readyPromise!: Promise<void>;
   let bootTimer!: ReturnType<typeof setTimeout>;
   let currentWorker!: WorkerLike;
+  // True once the CURRENT generation has posted `ready`. Gates `call()`'s postMessage: the worker
+  // installs its message listener only AFTER the .NET boot resolves (koine.worker.ts, issue #357),
+  // so a request posted to a still-booting worker dispatches into a listener-less port and is
+  // silently dropped — e.g. a call made right after terminateAndRespawn().
+  let currentReady = false;
   // Track which worker generation owns the current onmessage handler so late messages from a
   // terminated generation are ignored (the old worker's onmessage is nulled on respawn).
   let generation = 0;
@@ -134,6 +140,7 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
     const myGeneration = ++generation;
     const worker = workerFactory();
     currentWorker = worker;
+    currentReady = false;
 
     let resolve!: () => void;
     let reject!: (err: Error) => void;
@@ -170,6 +177,7 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
         const signal = data as WorkerSignal;
         clearTimeout(bootTimer);
         if (signal.type === 'ready') {
+          currentReady = true;
           readyResolve();
         } else if (signal.type === 'boot-failure') {
           readyReject(new Error(signal.error));
@@ -240,7 +248,24 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
         const entry: PendingCall = { resolve, reject };
         pending.set(id, entry);
         const req: WorkerRequest = { id, method, args };
-        currentWorker.postMessage(req);
+        if (currentReady) {
+          // Fast path: after boot the post stays synchronous.
+          currentWorker.postMessage(req);
+        } else {
+          // The worker has no message listener until it signals `ready` (see `currentReady` above), so
+          // posting now would drop the request on the floor. Defer the post to this generation's boot;
+          // skip it if the call already settled (cancel/abort/timeout/respawn) in the meantime. A boot
+          // failure or respawn rejects `readyPromise` — the call is then settled by rejectAll or its
+          // per-call timeout, never posted.
+          const myGeneration = generation;
+          readyPromise.then(
+            () => {
+              if (myGeneration !== generation || !pending.has(id)) return;
+              currentWorker.postMessage(req);
+            },
+            () => {},
+          );
+        }
 
         // Per-call timeout — defaults on (issue #635) so a failed respawn or any lost reply rejects the
         // caller instead of leaking a pending entry forever. `0` opts out for legitimately long calls.

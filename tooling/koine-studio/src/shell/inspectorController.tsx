@@ -607,8 +607,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     inv('glossary');
     // The left-rail Explorer + Overview are always visible, so re-scope them immediately.
     void loadModel();
-    // The diagram only re-scopes when the visual center is showing it.
-    if (activeCenter() === 'visual') void loadDiagrams();
+    // The diagram only re-scopes when the visual center is showing it — including as the SECONDARY
+    // pane of a 2-up / in overview, so visibleCenters, not just the deck primary.
+    if (visibleCenters().includes('visual')) void loadDiagrams();
     invalidateBottomPanels(); // the Events/Relationships/Context Map tables are graph-derived too
   }
 
@@ -1223,9 +1224,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // immediately when the visual center is showing.
   function onThemeChanged(): void {
     // A theme flip re-themes ONLY the diagram (not a model edit), so mark just the 'diagrams' key stale —
-    // a single-key invalidate that leaves every other surface fresh.
+    // a single-key invalidate that leaves every other surface fresh. A visible SECONDARY canvas (2-up /
+    // overview) must re-theme too, so visibleCenters, not just the deck primary.
     appStore.getState().invalidate('diagrams');
-    if (activeCenter() === 'visual') void loadDiagrams();
+    if (visibleCenters().includes('visual')) void loadDiagrams();
   }
 
   // --- center (Visual / Code / Documentation) + right rail + region focus ----
@@ -1781,9 +1783,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (target === currentTarget) return;
     setTarget(target);
     // A destination-language switch re-emits ONLY the preview (not a model edit), so mark just the
-    // 'preview' key stale — a single-key invalidate that leaves every other surface fresh.
+    // 'preview' key stale — a single-key invalidate that leaves every other surface fresh. A visible
+    // SECONDARY Output pane (2-up / overview) must re-emit too, so visibleCenters, not just the primary.
     appStore.getState().invalidate('preview');
-    if (activeCenter() === 'output' && activeOutput() === 'generated') void loadPreview();
+    if (visibleCenters().includes('output') && activeOutput() === 'generated') void loadPreview();
   }
 
   // --- bottom panel (Problems / Events / Relationships / Context Map, #144) --
@@ -1838,7 +1841,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     const center = activeCenter();
     applyDiagCollapsed(isNarrowViewport() && center === 'docs');
   }
-  applyDiagCollapsed((localStorage.getItem(DIAG_COLLAPSED_KEY) ?? '0') === '1');
+  // Same throw-guard as hasExplicitDiagCollapsePref above: touching localStorage throws in locked-down
+  // hosts (Chromium with site data blocked), and this runs during controller construction — an unguarded
+  // throw here would abort the whole IDE boot. Default to not-collapsed.
+  let storedDiagCollapsed = '0';
+  try {
+    storedDiagCollapsed = localStorage.getItem(DIAG_COLLAPSED_KEY) ?? '0';
+  } catch {
+    // no persistence available — keep the expanded default
+  }
+  applyDiagCollapsed(storedDiagCollapsed === '1');
   applyDefaultDiagCollapsed(); // override the expanded default with the narrow Docs default (#475)
   diagCollapse.addEventListener('click', () => {
     const collapsed = !diagEl.classList.contains('collapsed');

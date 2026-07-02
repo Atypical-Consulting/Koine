@@ -1,6 +1,13 @@
-import { describe, expect, test } from 'vitest';
-import { Text } from '@codemirror/state';
-import { decodeSemanticTokens, SEMANTIC_TOKEN_TYPES } from '@/editor/editor';
+import { afterEach, describe, expect, test } from 'vitest';
+import { EditorState, Text } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
+import {
+  decodeSemanticTokens,
+  SEMANTIC_TOKEN_TYPES,
+  semanticTokensExtension,
+  type SemanticTokensFn,
+} from '@/editor/editor';
+import type { SemanticTokens } from '@/lsp/lsp';
 
 // The pure decode for LSP semantic tokens (issue #329, Task 4): the 5-int delta stream
 // `[deltaLine, deltaStartChar, length, tokenType, tokenModifiers]` → absolute, offset-resolved tokens
@@ -118,5 +125,48 @@ describe('decodeSemanticTokens', () => {
     // One full token + 3 leftover ints — the partial tail is ignored, not decoded.
     const tokens = decodeSemanticTokens([0, 0, 5, 4, 0, 0, 6, 5], doc);
     expect(tokens).toEqual([{ from: 0, to: 5, cls: 'cm-st-keyword' }]);
+  });
+});
+
+// CodeMirror glue for the semanticTokensExtension ViewPlugin, driven against a REAL EditorView (the
+// @codemirror/* packages construct fine under happy-dom — see inlayHints.test.ts). The raw delta stream
+// is only valid for the doc it was requested against, so a response resolving AFTER a doc change must be
+// dropped rather than decoded against the newer doc (that would paint shifted/foreign highlights).
+function makeView(provider: SemanticTokensFn, debounceMs: number): EditorView {
+  const parent = document.createElement('div');
+  document.body.appendChild(parent);
+  return new EditorView({
+    parent,
+    state: EditorState.create({
+      doc: 'value Money',
+      extensions: [semanticTokensExtension(provider, debounceMs)],
+    }),
+  });
+}
+
+describe('semanticTokensExtension', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  test('drops a response resolving after a doc change instead of decoding pre-edit offsets', async () => {
+    // The first-paint fetch resolves AFTER an edit, inside the debounce window (no newer fetch has
+    // started yet): its delta stream describes the pre-edit doc, so it must be dropped — the debounced
+    // refetch repaints from a fresh stream.
+    let call = 0;
+    const provider: SemanticTokensFn = () => {
+      call++;
+      return call === 1
+        ? new Promise<SemanticTokens>((r) => setTimeout(() => r({ data: [0, 0, 5, 4, 0] }), 10)) // 'value' 0..5 in the PRE-edit doc
+        : Promise.resolve({ data: [0, 0, 6, 0, 0] }); // 'Xvalue' 0..6 in the post-edit doc
+    };
+    const view = makeView(provider, 40); // debounce window wide enough for the stale answer to land inside it
+    view.dispatch({ changes: { from: 0, insert: 'X' } }); // invalidates the in-flight first-paint fetch
+    await new Promise((r) => setTimeout(r, 25)); // stale answer resolved; the debounced refetch hasn't fired yet
+    expect(view.dom.querySelectorAll('.cm-st-keyword')).toHaveLength(0); // must NOT paint 'Xvalu' from the stale stream
+    await new Promise((r) => setTimeout(r, 40)); // let the debounced refetch land
+    const marks = Array.from(view.dom.querySelectorAll('.cm-st-type'));
+    expect(marks.map((m) => m.textContent)).toEqual(['Xvalue']);
+    view.destroy();
   });
 });

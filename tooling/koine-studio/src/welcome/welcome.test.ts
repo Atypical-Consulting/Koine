@@ -355,6 +355,35 @@ describe('welcome recent management', () => {
     expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(1);
   });
 
+  test('the filter input survives its own re-render and keeps keyboard focus while typing', () => {
+    const many = Array.from({ length: 10 }, (_, i) => `/proj/folder-${i}`);
+    localStorage.setItem(KEY, JSON.stringify(many));
+    mountHome(container, makeCallbacks());
+    const filter = document.querySelector('.koi-welcome-recent-filter') as HTMLInputElement;
+    filter.focus();
+
+    // First keystroke: the list re-renders, but the element the user is typing into must persist —
+    // rebuilding it would drop focus to <body> and swallow every subsequent keystroke.
+    filter.value = 'folder-3';
+    filter.dispatchEvent(new Event('input'));
+    expect(document.querySelector('.koi-welcome-recent-filter')).toBe(filter);
+    expect(document.activeElement).toBe(filter);
+
+    // A follow-up keystroke therefore still lands in the same input and keeps filtering.
+    filter.value = 'folder';
+    filter.dispatchEvent(new Event('input'));
+    expect(document.activeElement).toBe(filter);
+    expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(10);
+  });
+
+  test('the filter is not perceivable while the list is short', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/a', '/b']));
+    mountHome(container, makeCallbacks());
+    const filter = document.querySelector('.koi-welcome-recent-filter') as HTMLInputElement | null;
+    // Absent or present-but-hidden — either way it must not show below the threshold.
+    expect(filter?.hidden ?? true).toBe(true);
+  });
+
   test('clear-all empties the list', async () => {
     localStorage.setItem(KEY, JSON.stringify(['/a', '/b']));
     mountHome(container, makeCallbacks());

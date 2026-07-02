@@ -144,7 +144,10 @@ function wireTreeNav(tree: HTMLElement): void {
     // overflow, so keyboard users reach its cross-axis actions ("Reveal in Files") the mouse gets from the
     // `⋯` button (which roving tabindex keeps out of the tab order).
     if (ev.key === 'ContextMenu' || (ev.shiftKey && ev.key === 'F10')) {
-      const more = current?.querySelector<HTMLElement>('.koi-tactical-more');
+      // Only the row's OWN ⋯ qualifies (a leaf row appends it as a direct child). A bare descendant
+      // lookup on an aggregate treeitem would descend into its nested group and open the first owned
+      // leaf's menu — a wrongly-targeted action; an aggregate has no overflow, so the key no-ops there.
+      const more = current?.querySelector<HTMLElement>(':scope > .koi-tactical-more');
       if (more) {
         ev.preventDefault();
         more.click();
@@ -337,9 +340,21 @@ export function mountDomainNavigator(
   // animation is CSS, gated behind `prefers-reduced-motion: no-preference` in `_leftrail.scss`.
   function paint(level: HTMLElement, altitude: typeof paintedAltitude): void {
     closeLeafMenu(false); // a body swap orphans any open ⋯ menu; drop it (its trigger is about to be torn down)
-    if (altitude !== paintedAltitude) level.classList.add('koi-domain-enter');
+    const drilled = altitude !== paintedAltitude;
+    if (drilled) level.classList.add('koi-domain-enter');
     paintedAltitude = altitude;
+    // A drill/climb tears down the level holding the focused row, so the browser drops keyboard focus
+    // to <body> — either right here, or already (the drill's paired scope write repaints strategic
+    // first). Detect both BEFORE the swap and land focus on the fresh level's first row (the tactical
+    // breadcrumb, or the first strategic treeitem) so the Tab order continues inside the navigator
+    // instead of restarting at the app chrome (WCAG 2.4.3). Focus parked elsewhere (editor, top bar,
+    // the filter input) is left alone.
+    const active = document.activeElement;
+    const focusTornDown = active === null || active === document.body || body.contains(active);
     body.replaceChildren(level);
+    if (drilled && focusTornDown) {
+      level.querySelector<HTMLElement>('[role="treeitem"], .koi-breadcrumb-back')?.focus();
+    }
   }
 
   function render(): void {
