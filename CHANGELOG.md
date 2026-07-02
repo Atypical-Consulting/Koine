@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Koine is pre-1.0, so minor versions
 may include breaking changes.
 
+## [0.246.0](https://github.com/Atypical-Consulting/Koine/compare/v0.245.0...v0.246.0) (2026-07-02)
+
+
+### Features
+
+* **studio:** add an ESLint gate enforcing frontend safety conventions ([#978](https://github.com/Atypical-Consulting/Koine/issues/978)) ([#993](https://github.com/Atypical-Consulting/Koine/issues/993)) ([f676bc8](https://github.com/Atypical-Consulting/Koine/commit/f676bc835049c75095000faf0c19c541e5a13497))
+* **studio:** recreate the full-bleed Home with resume card, dense recents & Clone ([#1005](https://github.com/Atypical-Consulting/Koine/issues/1005)) ([#1006](https://github.com/Atypical-Consulting/Koine/issues/1006)) ([aca2b5d](https://github.com/Atypical-Consulting/Koine/commit/aca2b5dc573287b994db11a906cc19ed7b5bcd30))
+* **studio:** type-check the koine-ui⇄koine-studio DOM-id contract via shared constants ([#979](https://github.com/Atypical-Consulting/Koine/issues/979)) ([#999](https://github.com/Atypical-Consulting/Koine/issues/999)) ([83bd203](https://github.com/Atypical-Consulting/Koine/commit/83bd2036b363393ec3a590ff15ae6b997edc0f5a))
+
+
+### Bug Fixes
+
+* **studio:** release leaked store subscriptions and timers on shell teardown ([#980](https://github.com/Atypical-Consulting/Koine/issues/980)) ([#1000](https://github.com/Atypical-Consulting/Koine/issues/1000)) ([ecce6d2](https://github.com/Atypical-Consulting/Koine/commit/ecce6d2a97e867551a85de98f0c4bdd335d869dc))
+
 ## [0.245.0](https://github.com/Atypical-Consulting/Koine/compare/v0.244.0...v0.245.0) (2026-07-02)
 
 
