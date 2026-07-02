@@ -1607,6 +1607,19 @@ fn kill_mcp_child(state: &McpState) {
     }
 }
 
+/// Fully tear down the running MCP sidecar: reap the child, forget its scraped URL, AND drop the
+/// cached endpoint `info`. Unlike [`kill_mcp_child`] (which leaves `info` intact for the busy-port
+/// fallback's re-resolve), this clears the cache so the next `mcp_endpoint` resolves from a clean
+/// slate. Shared by `mcp_stop` and by `mcp_endpoint`'s port-change branch (#947). Does NOT take
+/// `state.resolving` — a caller that already holds it (`mcp_endpoint`, held for its whole body) must
+/// not re-enter that non-reentrant lock; `mcp_stop` takes the lock itself before calling in.
+fn teardown_sidecar(state: &McpState) {
+    kill_mcp_child(state);
+    if let Ok(mut g) = state.info.lock() {
+        *g = None;
+    }
+}
+
 /// Spawn the `koine mcp --http` sidecar on `port` (only if one isn't already running) and wait up to ~10s
 /// for it to announce its loopback endpoint on stderr. Returns the announced URL, `Ok(None)` if the child
 /// exited early or the wait elapsed with no announce line, or `Err` on a spawn failure. Holds the child
@@ -1746,13 +1759,13 @@ fn mcp_endpoint(port: u16, state: State<'_, McpState>) -> Result<Option<McpEndpo
 }
 
 /// Stop the MCP sidecar, forget its scraped URL, and drop the cached endpoint info so the next
-/// `mcp_endpoint` re-spawns a fresh server. Idempotent and safe when nothing is running.
+/// `mcp_endpoint` re-spawns a fresh server. Idempotent and safe when nothing is running. Takes
+/// `state.resolving` so a stop can't interleave with an in-flight `mcp_endpoint` resolve, then routes
+/// the teardown through the shared [`teardown_sidecar`] helper.
 #[tauri::command]
 fn mcp_stop(state: State<'_, McpState>) -> Result<(), String> {
-    kill_mcp_child(&state);
-    if let Ok(mut g) = state.info.lock() {
-        *g = None;
-    }
+    let _resolving = state.resolving.lock().map_err(|e| e.to_string())?;
+    teardown_sidecar(&state);
     Ok(())
 }
 
@@ -2190,6 +2203,43 @@ mod tests {
         assert_eq!(
             mcp_launch_args(0),
             ["mcp", "--http", "--port", "0"].map(String::from)
+        );
+    }
+
+    // --- MCP sidecar teardown + cache reuse (#947) --------------------------
+    //
+    // `mcp_endpoint` caches the resolved endpoint so a repeat call reuses the running server without
+    // re-spawning. `teardown_sidecar` is the shared teardown both `mcp_stop` and `mcp_endpoint`'s
+    // port-change branch route through: it reaps the child, forgets the scraped URL, AND drops the
+    // cached `info` — WITHOUT taking `state.resolving` (its callers already hold that lock). The tests
+    // drive the helper against a bare `McpState::default()` (no real `Child` is needed to prove the
+    // cache clears), matching the codebase convention of testing the `&McpState`/pure seams rather than
+    // the Tauri-`State` command wrappers.
+
+    #[test]
+    fn teardown_sidecar_clears_cached_info_and_endpoint() {
+        let state = McpState::default();
+        // Simulate a resolved + cached sidecar (the fields `mcp_endpoint` populates on a live server).
+        *state.info.lock().unwrap() = Some(McpEndpointInfo {
+            url: "http://127.0.0.1:7900/mcp".into(),
+            requested_port: 7900,
+            fallback: false,
+        });
+        *state.endpoint.lock().unwrap() = Some("http://127.0.0.1:7900/mcp".into());
+
+        teardown_sidecar(&state);
+
+        assert!(
+            state.info.lock().unwrap().is_none(),
+            "teardown must drop the cached endpoint info so the next resolve starts clean"
+        );
+        assert!(
+            state.endpoint.lock().unwrap().is_none(),
+            "teardown must forget the scraped URL"
+        );
+        assert!(
+            state.child.lock().unwrap().is_none(),
+            "teardown must leave no child running"
         );
     }
 
