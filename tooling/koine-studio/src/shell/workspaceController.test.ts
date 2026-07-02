@@ -523,19 +523,19 @@ describe('createWorkspaceController — reset', () => {
 });
 
 describe('createWorkspaceController — activateFile', () => {
-  test('flushes the leaving file BEFORE swapping the doc, then fires onActiveChanged', async () => {
+  test('flushes the leaving file BEFORE swapping the doc, then bumps activationSeq (the activation seam)', async () => {
+    const store = createAppStore();
     const platform = new FakePlatform();
     platform.files.set('a.koi', 'context A {}\n');
     platform.files.set('b.koi', 'context B {}\n');
     const trace: string[] = [];
     const lsp = makeLsp(trace);
     const editor = makeEditor(trace);
-    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
-    const active: string[] = [];
-    ws.onActiveChanged((uri) => active.push(uri));
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { store }));
 
     await ws.openFolderPath(ROOT, { recent: false });
     const bUri = uriOf('b.koi');
+    const seq0 = store.getState().activationSeq; // folder open is silent — no bump
     // Clear the boot-time setDoc so the trace below captures only the switch.
     trace.length = 0;
     ws.activateFile(bUri);
@@ -544,24 +544,27 @@ describe('createWorkspaceController — activateFile', () => {
     // flush() must run before the editor doc swap (the leaving file's debounced edits are sent first).
     expect(trace).toEqual(['flush', 'setDoc']);
     expect(editor.setDoc).toHaveBeenLastCalledWith('context B {}\n');
-    // The active-changed seam fired with the new uri (ide.ts wires showDiagnostics + doc-view refresh).
-    expect(active).toEqual([bUri]);
+    // The active-changed seam is now a slice bump: activationSeq advanced by exactly one and the slice
+    // holds the new active uri (ide.ts subscribes to activationSeq → showDiagnostics + doc-view refresh).
+    expect(store.getState().activationSeq).toBe(seq0 + 1);
+    expect(store.getState().activeUri).toBe(bUri);
   });
 
   test('activating the already-active file is a no-op', async () => {
+    const store = createAppStore();
     const platform = new FakePlatform();
     platform.files.set('a.koi', 'context A {}\n');
     const trace: string[] = [];
     const lsp = makeLsp(trace);
     const editor = makeEditor(trace);
-    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { store }));
     await ws.openFolderPath(ROOT, { recent: false });
-    const active: string[] = [];
-    ws.onActiveChanged((uri) => active.push(uri));
+    const seq0 = store.getState().activationSeq;
 
     ws.activateFile(ws.activeUri());
 
-    expect(active).toEqual([]);
+    // No switch: activationSeq is untouched and flush never ran.
+    expect(store.getState().activationSeq).toBe(seq0);
     expect(lsp.flush).not.toHaveBeenCalled();
   });
 });
@@ -802,7 +805,8 @@ describe('createWorkspaceController — applyWorkspaceEdit', () => {
 });
 
 describe('createWorkspaceController — handleDelete', () => {
-  test('closing the active file falls back to another open buffer (showDiagnostics + invalidateDocViews, no onActiveChanged)', async () => {
+  test('closing the active file falls back to another open buffer (showDiagnostics + invalidateDocViews, no activationSeq bump)', async () => {
+    const store = createAppStore();
     const platform = new FakePlatform();
     platform.files.set('a.koi', 'context A {}\n');
     platform.files.set('b.koi', 'context B {}\n');
@@ -813,12 +817,11 @@ describe('createWorkspaceController — handleDelete', () => {
     const invalidateDocViews = vi.fn();
     const dropDiagnostics = vi.fn();
     const ws = createWorkspaceController(
-      makeDeps(platform, lsp, editor, { showDiagnostics, invalidateDocViews, dropDiagnostics }),
+      makeDeps(platform, lsp, editor, { store, showDiagnostics, invalidateDocViews, dropDiagnostics }),
     );
     await ws.openFolderPath(ROOT, { recent: false });
-    // a.koi is active; track onActiveChanged so we can prove the fallback does NOT fire it.
-    const active: string[] = [];
-    ws.onActiveChanged((uri) => active.push(uri));
+    // a.koi is active; capture activationSeq so we can prove the fallback does NOT bump it.
+    const seq0 = store.getState().activationSeq;
     showDiagnostics.mockClear();
     invalidateDocViews.mockClear();
 
@@ -830,11 +833,12 @@ describe('createWorkspaceController — handleDelete', () => {
     expect(ws.buffers.has(aUri)).toBe(false);
     expect(dropDiagnostics).toHaveBeenCalledWith(aUri);
     expect(ws.activeUri()).toBe(bUri);
-    // The fallback repaints via showDiagnostics + invalidateDocViews, and deliberately does NOT fire
-    // the heavier onActiveChanged seam (no followActiveFileContext) — matching the old activateFallback.
+    // The fallback repaints via showDiagnostics + invalidateDocViews, and re-points SILENTLY — no
+    // activationSeq bump (so ide.ts's activation subscriber, incl. followActiveFileContext, does not run),
+    // matching the old activateFallback narrow-effect contract.
     expect(showDiagnostics).toHaveBeenCalledWith(bUri);
     expect(invalidateDocViews).toHaveBeenCalled();
-    expect(active).toEqual([]);
+    expect(store.getState().activationSeq).toBe(seq0);
   });
 
   test('deleting the last file empties the workspace and asks ide.ts for a new model', async () => {
@@ -1597,5 +1601,90 @@ describe('createWorkspaceController — store ownership parity (#982)', () => {
     expect(store.getState().dirtyCount()).toBe(0);
     // Never diverged: the facade getter and the slice are the same Map throughout.
     expect(store.getState().buffers).toBe(ws.buffers);
+  });
+});
+
+// Seq seams (#982 Task 4): the four callback seams became monotonic slice fields — activationSeq /
+// workspaceEditSeq / entriesSeq / saveSeq — bumped at EXACTLY the points the old callbacks fired
+// (workspaceController.ts:484/:918/:370/:941,:949,:1023,:1078). ide.ts subscribes to them. These tests
+// pin each bump point (and the critical NON-bump: folder open must stay silent on activationSeq).
+describe('createWorkspaceController — seq seams (#982)', () => {
+  test('openFolderPath does NOT bump activationSeq (the folder-open :489 contract) but bumps entriesSeq', async () => {
+    const store = createAppStore();
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { store }));
+    const seqA0 = store.getState().activationSeq;
+    const seqE0 = store.getState().entriesSeq;
+
+    await ws.openFolderPath(ROOT, { recent: false });
+
+    // Folder open activates the first file SILENTLY — activationSeq must not advance…
+    expect(store.getState().activationSeq).toBe(seqA0);
+    // …but the explorer tree was re-read, so entriesSeq advances (ide.ts resets history off it).
+    expect(store.getState().entriesSeq).toBeGreaterThan(seqE0);
+    expect(store.getState().activeUri).toBe(uriOf('a.koi')); // the active file still moved
+  });
+
+  test('applyWorkspaceEdit bumps workspaceEditSeq', async () => {
+    const store = createAppStore();
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'AAAA\n');
+    platform.files.set('b.koi', 'BBBB\n');
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { store }));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const seq0 = store.getState().workspaceEditSeq;
+
+    ws.applyWorkspaceEdit({
+      changes: {
+        [uriOf('b.koi')]: [
+          { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, newText: 'Y' },
+        ],
+      },
+    });
+
+    expect(store.getState().workspaceEditSeq).toBe(seq0 + 1);
+  });
+
+  test('a structural op (rename) bumps entriesSeq via refreshEntries', async () => {
+    const store = createAppStore();
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { store }));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const seq0 = store.getState().entriesSeq;
+
+    await ws.handleRename({ token: `${ROOT}/a.koi`, name: 'a.koi', relPath: 'a.koi', kind: 'file' }, 'renamed.koi');
+
+    expect(store.getState().entriesSeq).toBeGreaterThan(seq0);
+  });
+
+  test('each disk-writing save path bumps saveSeq (saveActive, saveAllDirty, applyFileEdit)', async () => {
+    const store = createAppStore();
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const editor = makeEditor([]);
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), editor, { store }));
+    await ws.openFolderPath(ROOT, { recent: false });
+
+    // saveActive: dirty the active buffer through the real sync path, then save.
+    editor.setDoc('context A { v1 }\n');
+    ws.syncActiveBuffer('context A { v1 }\n');
+    let seq = store.getState().saveSeq;
+    await ws.saveActive();
+    expect(store.getState().saveSeq).toBe(seq + 1);
+
+    // saveAllDirty: dirty the non-active b.koi, then Save all.
+    ws.syncBuffer(uriOf('b.koi'), 'context B { v }\n');
+    seq = store.getState().saveSeq;
+    await ws.saveAllDirty();
+    expect(store.getState().saveSeq).toBe(seq + 1);
+
+    // applyFileEdit: writing a full body to an open file hits disk.
+    seq = store.getState().saveSeq;
+    await ws.applyFileEdit('a.koi', 'context A { v3 }\n');
+    expect(store.getState().saveSeq).toBe(seq + 1);
   });
 });

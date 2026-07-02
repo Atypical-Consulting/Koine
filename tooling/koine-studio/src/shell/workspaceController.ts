@@ -17,11 +17,12 @@
 // `activeUri`/`folderRootToken` via injected thunks, while this calls back into them) is resolved
 // WITHOUT a circular import: this module's only store dependency is the type-only `AppState` (erased) and
 // the `store` handle passed through deps at runtime. Inbound effects come through deps (the editor
-// handle, the LSP slice, the diagnostics accessors, the explorer, setStatus); outbound effects fire
-// through the `onActiveChanged(uri)` / `onBuffersChanged()` seams, which ide.ts wires to
-// editorSession.showDiagnostics + controller.invalidateDocViews/followActiveFileContext and the tree
-// render respectively. The accessors are only invoked at runtime, so ide.ts can pass
-// `() => workspace.activeUri()` thunks that resolve after this is constructed.
+// handle, the LSP slice, the diagnostics accessors, the explorer, setStatus); outbound signals are the
+// workspace slice's monotonic seq fields (activationSeq / workspaceEditSeq / entriesSeq / saveSeq), which
+// ide.ts subscribes to (#982) — showDiagnostics + invalidateDocViews/followActiveFileContext + tree
+// render on activation, history.reset on entries, onDocEdited on a workspace edit, the SC refresh on
+// save. The accessors are only invoked at runtime, so ide.ts can pass `() => workspace.activeUri()`
+// thunks that resolve after this is constructed.
 import { matchesInclude } from '@/shell/workspaceSearch';
 import { pathToFileUri } from '@/shell/ideUtils';
 import { basename } from '@/shared/path';
@@ -253,20 +254,11 @@ export interface WorkspaceController {
    */
   applyFileEdit(relPath: string, body: string): Promise<string | null>;
 
-  // --- seams (ide.ts wires editorSession/controller through these to avoid a circular import) ---
-  /** Register the active-file-changed callback (ide.ts: showDiagnostics + invalidateDocViews + follow). */
-  onActiveChanged(cb: (uri: string) => void): void;
-  /** Register the buffer-set-changed callback (ide.ts re-renders the tree etc.). */
-  onBuffersChanged(cb: () => void): void;
-  /** Fired after the explorer entry tree is re-read (a folder open or any structural file op). */
-  onEntriesRefreshed(cb: () => void): void;
-  /**
-   * Fired after a save writes buffer(s) to disk (single-file save, Save-all, or the assistant's
-   * multi-file apply) — i.e. whenever a buffer's dirty flag was cleared by a successful `writeTextFile`.
-   * ide.ts wires this to the Source Control panel's live refresh-on-save (#470): the on-disk git status
-   * just changed, so re-fetch it when the SC tab is open.
-   */
-  onSaved(cb: () => void): void;
+  // NOTE (#982): the former onActiveChanged / onBuffersChanged / onEntriesRefreshed / onSaved callback
+  // seams are gone — their signals are the workspace slice's activationSeq / workspaceEditSeq /
+  // entriesSeq / saveSeq fields, which ide.ts subscribes to via the injected store (captured + disposed
+  // in its teardown). The bump points are unchanged: activation on activateFile, workspaceEdit on
+  // applyWorkspaceEdit, entries on refreshEntries, saved on each disk-writing save path.
 }
 
 export function createWorkspaceController(deps: WorkspaceControllerDeps): WorkspaceController {
@@ -281,13 +273,6 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   // The explorer entry tree per root STAYS controller-owned (moving it into the store is deferred to
   // #989); this task still renders one group per root from this map through the explorer.
   const entriesByRoot = new Map<string, FsEntry[]>();
-
-  // --- outward seams --------------------------------------------------------
-  let activeChanged: ((uri: string) => void) | null = null;
-  let buffersChanged: (() => void) | null = null;
-  let entriesRefreshed: (() => void) | null = null;
-  // Fired after a successful disk write clears a buffer's dirty flag (#470 — SC live refresh-on-save).
-  let onSavedCb: (() => void) | null = null;
 
   // --- token <-> path helpers (unchanged from ide.ts) -----------------------
 
@@ -373,7 +358,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       }
     }
     renderTree();
-    entriesRefreshed?.();
+    st().bumpEntries(); // the onEntriesRefreshed seam: ide.ts subscribes to entriesSeq (history.reset)
   }
 
   // --- open paths -----------------------------------------------------------
@@ -475,8 +460,9 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   }
 
   // Switch the editor + lsp to a different open buffer. Saves the current editor text back to
-  // the leaving buffer first (preserving unsaved edits), swaps the doc, points lsp at the new
-  // uri, then fires onActiveChanged (ide.ts re-renders diagnostics + invalidates the doc views).
+  // the leaving buffer first (preserving unsaved edits), swaps the doc, points lsp at the new uri, then
+  // bumps activationSeq — the activation seam ide.ts subscribes to (it re-renders diagnostics +
+  // invalidates the doc views).
   function activateFile(uri: string): void {
     if (uri === st().activeUri) return;
     // Flush the leaving file's debounced edits to the server before switching: the shared change
@@ -486,12 +472,14 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     if (leaving) st().upsertBuffer({ ...leaving, text: editor.getDoc() });
     const next = st().buffers.get(uri);
     if (!next) return;
-    // A real file switch bumps activationSeq (the onActiveChanged seam); folder-open / delete-fallback
-    // use setActive({ silent: true }) instead.
-    st().setActive(uri);
+    // Move activeUri BEFORE the doc swap (so the setDoc-triggered onChange sees the new active — the old
+    // `activeUriValue = uri` at :481), but fire the activation seam AFTER the swap (the old
+    // `onActiveChanged` at :484): the silent set moves activeUri with no bump; the loud set re-affirms
+    // the same uri and bumps activationSeq, running ide.ts's activation subscriber once the doc is live.
+    st().setActive(uri, { silent: true });
     lsp.setActive(uri);
     editor.setDoc(next.text);
-    activeChanged?.(uri);
+    st().setActive(uri);
   }
 
   // After the active buffer is deleted, fall back to another open file, or open a new blank model
@@ -928,7 +916,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       }
     }
     if (treeChanged) renderTree();
-    buffersChanged?.();
+    st().bumpWorkspaceEdit(); // the onBuffersChanged seam: ide.ts subscribes to workspaceEditSeq
   }
 
   // Write one full-file body to `relPath` for the assistant's multi-file apply. An EXISTING open buffer
@@ -954,7 +942,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       st().markSaved([uri]); // clear dirty AFTER the write so the buffer ends clean
       if (uri === st().activeUri) lsp.didSave(); // didSave() targets the ACTIVE doc — only valid then
       renderTree(); // setDoc's onChange repainted the explorer dirty dot; repaint it clean now
-      onSavedCb?.(); // #470: this buffer hit disk — refresh the SC panel if its tab is open
+      st().bumpSaved(); // #470: this buffer hit disk — the saveSeq subscriber refreshes the SC panel
       return uri;
     }
     const owningRoot = st().roots[0];
@@ -962,7 +950,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     try {
       const token = await platform.createFile(owningRoot, relPath, body); // new file under the folder root
       await refreshEntries();
-      onSavedCb?.(); // #470: a new (untracked) file hit disk — refresh the SC panel if its tab is open
+      st().bumpSaved(); // #470: a new (untracked) file hit disk — the saveSeq subscriber refreshes the SC panel
       return await ensureBuffer(token);
     } catch (e) {
       console.error('applyFileEdit create failed:', e);
@@ -1032,7 +1020,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
         if (after && after.text === written) st().markSaved([uri]);
         lsp.didSave();
         renderTree();
-        onSavedCb?.(); // #470: the on-disk git status changed — refresh the SC panel if its tab is open
+        st().bumpSaved(); // #470: the on-disk git status changed — the saveSeq subscriber refreshes the SC panel
       } catch (e) {
         deps.setStatus('save failed', 'error');
         console.error('writeTextFile failed:', e);
@@ -1100,7 +1088,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       if (saved > 0) {
         lsp.didSave();
         renderTree();
-        onSavedCb?.(); // #470: at least one buffer hit disk — refresh the SC panel if its tab is open
+        st().bumpSaved(); // #470: at least one buffer hit disk — the saveSeq subscriber refreshes the SC panel
       }
       if (failures > 0) {
         deps.setStatus(`Save failed for ${failures} file${failures === 1 ? '' : 's'}`, 'error');
@@ -1187,17 +1175,5 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     renderTree,
     applyWorkspaceEdit,
     applyFileEdit,
-    onActiveChanged(cb) {
-      activeChanged = cb;
-    },
-    onBuffersChanged(cb) {
-      buffersChanged = cb;
-    },
-    onEntriesRefreshed(cb) {
-      entriesRefreshed = cb;
-    },
-    onSaved(cb) {
-      onSavedCb = cb;
-    },
   };
 }

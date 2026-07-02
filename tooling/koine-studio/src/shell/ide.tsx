@@ -817,9 +817,6 @@ export function init(hooks: IdeHooks = {}): () => void {
     },
     publish: (s) => appStore.getState().setHistoryState(s),
   });
-  // Reset history whenever the explorer tree is re-read: a folder open (fresh baseline) or any
-  // structural file op (rename/move/delete/create) whose snapshots would reference stale uris.
-  workspace.onEntriesRefreshed(() => history.reset());
   // The top-bar Undo/Redo buttons (reactive enable/disable via the store).
   render(
     <HistoryControls
@@ -851,25 +848,27 @@ export function init(hooks: IdeHooks = {}): () => void {
     onOpenProblems: () => controller.selectBottomTab('problems'),
   });
 
-  // Switching files: repaint the active file's diagnostics, invalidate the doc views so they re-fetch,
-  // and follow the new file's bounded context. Preserves the exact effect order of the old activateFile.
-  workspace.onActiveChanged((uri) => {
-    editorSession.showDiagnostics(uri);
-    controller.invalidateDocViews();
-    workspace.renderTree();
-    void controller.followActiveFileContext();
+  // The workspace-slice seams (#982): the controller signals transitions by bumping the slice's seq
+  // fields (activationSeq/workspaceEditSeq/entriesSeq/saveSeq) at exactly the points the old on* callbacks
+  // fired; subscribe ONCE and run the matching body when one advances (one sub, not four, keeps the
+  // per-keystroke hot path to a single comparison). The activation body reads activeUri from the SAME
+  // snapshot; folder open / delete-fallback are silent (no bump), so it doesn't run for them (the old
+  // activateFallback contract). The unsubscribe is captured + disposed in the teardown below (#980).
+  const unsubWorkspaceSeams = appStore.subscribe((s, prev) => {
+    if (s.entriesSeq !== prev.entriesSeq) history.reset(); // folder open / structural op re-read the tree
+    if (s.activationSeq !== prev.activationSeq) {
+      const uri = s.activeUri; // a file switch: repaint diagnostics, refresh doc views, follow context
+      editorSession.showDiagnostics(uri);
+      controller.invalidateDocViews();
+      workspace.renderTree();
+      void controller.followActiveFileContext();
+    }
+    if (s.workspaceEditSeq !== prev.workspaceEditSeq) {
+      controller.onDocEdited(); // a cross-file WorkspaceEdit: reload the model-derived surfaces
+      history.noteEdit({ immediate: true });
+    }
+    if (s.saveSeq !== prev.saveSeq) controller.refreshSourceControl(); // a save hit disk (#470)
   });
-  // Fired after a WorkspaceEdit was applied across the open buffers (the old applyWorkspaceEdit tail).
-  // The tree re-render for any patched non-active buffer already ran inside the workspace; ide.ts only
-  // reloads the model-derived doc surfaces here, exactly as before (which is unconditional — the active
-  // file's own edit path also reaches onDocEdited via the editor onChange).
-  workspace.onBuffersChanged(() => {
-    controller.onDocEdited();
-    history.noteEdit({ immediate: true });
-  });
-  // A save wrote buffer(s) to disk: the on-disk git status just changed, so live-refresh the Source
-  // Control panel when its tab is open (#470). A no-op otherwise — the next SC open re-fetches anyway.
-  workspace.onSaved(() => controller.refreshSourceControl());
 
   // Dismiss the diagram Export ▾ disclosure on an outside-click or when any overlay opens, so the
   // native <details> menu can't linger above a modal scrim (#534). Teardown runs on IDE unmount.
@@ -1350,6 +1349,7 @@ export function init(hooks: IdeHooks = {}): () => void {
       canvasWrite: () => canvasWrite.dispose(),
       panels: () => panelHost.dispose(),
       reviewStoreSub: () => unsubReviewStore(),
+      workspaceSeams: () => unsubWorkspaceSeams(),
       autoSave: () => workspace.setAutoSave(false),
       exportMenuDismiss: () => teardownExportMenuDismiss(),
       editorKeys: () => disposeEditorKeys(),
