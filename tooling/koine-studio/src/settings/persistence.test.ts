@@ -21,6 +21,9 @@ import {
   getLastWorkspace,
   setLastWorkspace,
   clearLastWorkspace,
+  getLastSession,
+  setLastSession,
+  type LastSession,
   loadDiagramZoom,
   saveDiagramZoom,
   loadDiagramPositions,
@@ -591,6 +594,70 @@ describe('last-opened workspace pointer (#535)', () => {
   test('ignores an empty token (never persists "")', () => {
     setLastWorkspace('');
     expect(getLastWorkspace()).toBeNull();
+  });
+});
+
+describe('last-session snapshot for the resume card (#1005)', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('round-trips a full record through set/get', () => {
+    const session: LastSession = { project: 'billing', file: 'sales/order.koi', editedAt: 1_700_000_000_000, unsavedCount: 3 };
+    setLastSession(session);
+    expect(getLastSession()).toEqual(session);
+  });
+
+  test('round-trips a record with only the required fields (no file / unsavedCount)', () => {
+    const session: LastSession = { project: 'ordering', editedAt: 42 };
+    setLastSession(session);
+    expect(getLastSession()).toEqual(session);
+  });
+
+  test('returns null when nothing has been stored', () => {
+    expect(getLastSession()).toBeNull();
+  });
+
+  test('returns null for a garbage/legacy value (a bare string)', () => {
+    localStorage.setItem('koine.studio.lastSession', JSON.stringify('example-billing'));
+    expect(getLastSession()).toBeNull();
+  });
+
+  test('returns null for an object with no valid string project', () => {
+    localStorage.setItem('koine.studio.lastSession', JSON.stringify({ file: 'a.koi', editedAt: 5 }));
+    expect(getLastSession()).toBeNull();
+    localStorage.setItem('koine.studio.lastSession', JSON.stringify({ project: 42, editedAt: 5 }));
+    expect(getLastSession()).toBeNull();
+    localStorage.setItem('koine.studio.lastSession', JSON.stringify({ project: '' }));
+    expect(getLastSession()).toBeNull();
+  });
+
+  test('returns null for malformed JSON / an array', () => {
+    localStorage.setItem('koine.studio.lastSession', '{not json');
+    expect(getLastSession()).toBeNull();
+    localStorage.setItem('koine.studio.lastSession', '[1,2,3]');
+    expect(getLastSession()).toBeNull();
+  });
+
+  test('coerces a missing/non-numeric editedAt to 0', () => {
+    localStorage.setItem('koine.studio.lastSession', JSON.stringify({ project: 'p' }));
+    expect(getLastSession()).toEqual({ project: 'p', editedAt: 0 });
+    localStorage.setItem('koine.studio.lastSession', JSON.stringify({ project: 'p', editedAt: 'soon' }));
+    expect(getLastSession()).toEqual({ project: 'p', editedAt: 0 });
+  });
+
+  test('drops a wrong-typed file / unsavedCount rather than echoing garbage', () => {
+    localStorage.setItem(
+      'koine.studio.lastSession',
+      JSON.stringify({ project: 'p', editedAt: 1, file: 99, unsavedCount: 'many' }),
+    );
+    expect(getLastSession()).toEqual({ project: 'p', editedAt: 1 });
+  });
+
+  test('setLastSession(null) clears a stored snapshot', () => {
+    setLastSession({ project: 'billing', editedAt: 1 });
+    expect(getLastSession()).not.toBeNull();
+    setLastSession(null);
+    expect(getLastSession()).toBeNull();
+    expect(localStorage.getItem('koine.studio.lastSession')).toBeNull();
   });
 });
 

@@ -20,6 +20,7 @@
 import { dirtyCount, saveAllDirtyBuffers } from '@/shell/dirty';
 import { matchesInclude } from '@/shell/workspaceSearch';
 import { pathToFileUri } from '@/shell/ideUtils';
+import { setLastSession } from '@/settings/persistence';
 import { basename } from '@/shared/path';
 import type { FsEntry, KoiFile, Platform } from '@/host';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
@@ -605,6 +606,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       // `recent` flag as pushRecentFolder, so transient opens (shared-link import via
       // openWorkspaceWith1File, the default-workspace flow) don't overwrite the pointer.
       deps.rememberLastWorkspace?.(folder);
+      rememberLastSession(); // #1005: seed the Home resume snapshot (same `recent` gate as above)
     }
     // ide.ts restores this workspace's bounded-context scope BEFORE the first scoped render and
     // refreshes the doc surfaces. The bus value drives the render paths, so the initial ensureLoaded
@@ -968,6 +970,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       buf.text = doc;
       if (becameDirty) buf.dirty = true;
     }
+    if (becameDirty) rememberLastSession(); // #1005: clean→dirty changed the unsaved count
     return becameDirty;
   }
 
@@ -981,6 +984,24 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
 
   function anyDirty(): boolean {
     return dirtyCount(buffers) > 0;
+  }
+
+  // Persist a lightweight snapshot (project / active file / dirty count / now) for the Home resume card
+  // (#1005) on open / dirty-change / save. Best-effort/guarded, and a no-op with no folder open.
+  function rememberLastSession(): void {
+    const token = roots[0];
+    if (!token) return;
+    try {
+      const active = buffers.get(activeUriValue);
+      setLastSession({
+        project: platform.folderName(token) || token,
+        file: active?.relPath || undefined,
+        editedAt: Date.now(),
+        unsavedCount: dirtyCount(buffers),
+      });
+    } catch {
+      // best-effort — never let a resume-snapshot write break save / edit / close
+    }
   }
 
   let saveQueued = false;
@@ -1021,6 +1042,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
         lsp.didSave();
         renderTree();
         onSavedCb?.(); // #470: the on-disk git status changed — refresh the SC panel if its tab is open
+        rememberLastSession(); // #1005: a save changed the dirty count — refresh the resume snapshot
       } catch (e) {
         deps.setStatus('save failed', 'error');
         console.error('writeTextFile failed:', e);
@@ -1076,6 +1098,7 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
         lsp.didSave();
         renderTree();
         onSavedCb?.(); // #470: at least one buffer hit disk — refresh the SC panel if its tab is open
+        rememberLastSession(); // #1005: the dirty count dropped — refresh the resume snapshot
       }
       if (failures > 0) {
         deps.setStatus(`Save failed for ${failures} file${failures === 1 ? '' : 's'}`, 'error');

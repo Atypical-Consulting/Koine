@@ -76,7 +76,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   { file: 'src/shell/workspaceController.ts', maxLines: 1197 },
   // Frozen 2026-07-02 at 1017 LOC, ceil(1017 × 1.02) = 1038. #988 ratchets this down as it decomposes
   // persistence.ts. Freezing prevents further regrowth; it does not mandate the split — #988 owns that.
-  { file: 'src/settings/persistence.ts', maxLines: 1038 },
+  // Raised 1038 → 1099: #1005's Home resume card needs a persisted last-session snapshot — a new
+  // LastSession interface plus its guarded getLastSession/setLastSession accessors (~60 LOC of genuine
+  // new API, not regrowth). Ratchet to the real end-state (1077) plus the standard +2% headroom.
+  { file: 'src/settings/persistence.ts', maxLines: 1099 },
   // Frozen 2026-07-02 at 890 LOC, ceil(890 × 1.02) = 908. Frozen pending its Preact-migration tranche.
   { file: 'src/welcome/welcome.ts', maxLines: 908 },
 ];
