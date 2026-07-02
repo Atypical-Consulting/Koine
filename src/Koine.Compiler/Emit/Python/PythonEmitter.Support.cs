@@ -20,6 +20,7 @@ public sealed partial class PythonEmitter
         IReadOnlyList<string> ContextNames,
         IReadOnlySet<string> AdditiveNeeds,
         IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
+        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarDivNeeds,
         IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BinaryArithmeticNeeds);
 
     /// <summary>
