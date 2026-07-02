@@ -845,15 +845,17 @@ public sealed class SemanticValidator
 
                     // A derived (computed) member whose body infers to a WIDER numeric type than its
                     // declared type (Decimal body → Int declared) is an illegal implicit narrowing —
-                    // C#'s CS0266. No target implicitly narrows Decimal to Int, so reject the model here,
-                    // uniformly for every emitter, rather than letting one emit non-compiling code
-                    // (issue #961). Widening (Int → Decimal) and same-type bodies stay allowed.
+                    // C#'s CS0266. Reuse the canonical directional-assignability rule (Int → Decimal
+                    // widening and same-type allowed, narrowing not) rather than hand-coding a third copy,
+                    // so this stays in lockstep with the sibling assignment positions. Reject the model
+                    // here, uniformly for every emitter, rather than letting one emit non-compiling code
+                    // (issue #961).
                     if (TypeResolver.IsNumeric(initType) && TypeResolver.IsNumeric(m.Type)
-                        && initType!.Name == "Decimal" && m.Type.Name == "Int"
+                        && !MemberAnalysis.IsAssignable(initType!, m.Type)
                         && MemberAnalysis.IsDerived(m, memberNames ??= MemberNameSet(members)))
                     {
                         diagnostics.Add(Diagnostic.FromSpan(DiagnosticCodes.NarrowingConversionInDerivedMember,
-                            $"cannot implicitly convert Decimal to Int in derived member '{m.Name}'; an explicit narrowing/rounding is required",
+                            $"cannot implicitly convert Decimal to Int in derived member '{m.Name}'; declare the member 'Decimal', or keep its expression integral",
                             m.Initializer.Span));
                     }
                 }
