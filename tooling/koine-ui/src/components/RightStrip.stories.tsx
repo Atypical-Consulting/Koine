@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
-import { RightStrip } from '@/shell/RightStrip';
+import { RightStrip } from './RightStrip';
 
 // The right-edge tool-window stripe (#759). Rendered inside its real #right-strip toolbar shell so the
 // vertical icon toggles read as the Rider-style stripe and the @storybook/addon-a11y axe pass sees the

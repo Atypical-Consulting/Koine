@@ -5,7 +5,7 @@
 import { afterEach, describe, it, expect } from 'vitest';
 import { render } from 'preact';
 import { axe } from 'vitest-axe';
-import { RightStrip } from '@/shell/RightStrip';
+import { RightStrip } from './RightStrip';
 
 afterEach(() => {
   document.body.innerHTML = '';
