@@ -1,0 +1,65 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { describe, expect, test } from 'vitest';
+import { CONCEPT_COLORS, CONCEPT_SLUGS, type ConceptSlug } from '@/model/conceptColors.generated';
+
+// Concept Colors (ADR 0003): the generated TS module must never drift from the single source of truth
+// `design/concept-colors.json`, and every `light` value must stay readable on a white background.
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(here, '..', '..', '..', '..');
+const source = JSON.parse(
+  readFileSync(path.join(repoRoot, 'design', 'concept-colors.json'), 'utf8'),
+) as {
+  concepts: { slug: string; label: string; modifier: string; dark: string; light: string }[];
+};
+
+const HEX = /^#[0-9a-f]{6}$/;
+
+/** WCAG relative luminance of a #rrggbb color. */
+function luminance(hex: string): number {
+  const n = parseInt(hex.slice(1), 16);
+  const chan = (c: number): number => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * chan((n >> 16) & 255) + 0.7152 * chan((n >> 8) & 255) + 0.0722 * chan(n & 255);
+}
+
+const contrastOnWhite = (hex: string): number => 1.05 / (luminance(hex) + 0.05);
+
+describe('concept colors — generated module vs source', () => {
+  test('the generated module exists and covers all 15 concepts, in source order', () => {
+    expect(source.concepts).toHaveLength(15);
+    expect(CONCEPT_SLUGS).toHaveLength(15);
+    expect([...CONCEPT_SLUGS]).toEqual(source.concepts.map((c) => c.slug));
+  });
+
+  test('every generated color matches design/concept-colors.json exactly', () => {
+    for (const c of source.concepts) {
+      const generated = CONCEPT_COLORS[c.slug as ConceptSlug];
+      expect(generated, `missing generated entry for "${c.slug}"`).toBeDefined();
+      expect(generated).toEqual({ label: c.label, modifier: c.modifier, dark: c.dark, light: c.light });
+    }
+  });
+
+  test('every dark and light value is a #rrggbb hex', () => {
+    for (const slug of CONCEPT_SLUGS) {
+      expect(CONCEPT_COLORS[slug].dark).toMatch(HEX);
+      expect(CONCEPT_COLORS[slug].light).toMatch(HEX);
+    }
+  });
+
+  test('every light value has ≥ 3.0:1 contrast against white', () => {
+    for (const slug of CONCEPT_SLUGS) {
+      const ratio = contrastOnWhite(CONCEPT_COLORS[slug].light);
+      expect(ratio, `${slug}.light (${CONCEPT_COLORS[slug].light}) contrast on white`).toBeGreaterThanOrEqual(3.0);
+    }
+  });
+
+  test('each concept maps to a distinct LSP modifier name', () => {
+    const modifiers = source.concepts.map((c) => c.modifier);
+    expect(new Set(modifiers).size).toBe(modifiers.length);
+  });
+});

@@ -1,0 +1,20 @@
+{
+  "note": "SINGLE SOURCE OF TRUTH for every DDD concept color (ADR 0003 — Concept Colors: one concept, one color, everywhere). A concept hex may be written ONLY here; every other occurrence is generated (per-project `gen-concept-colors` scripts, drift-guarded by sync tests) or var()-derived. `dark` values are copied verbatim from the historical Studio palette (src/styles/abstracts/_ddd.scss); `light` values are contrast-tuned darkenings (each ≥ 4.5:1 against #ffffff). `concepts` is ORDERED to match the LSP semantic-token modifier bits 1–15 (SemanticTokenModifier in src/Koine.Compiler/Services/SemanticTokenProvider.cs): concepts[i] ⇔ bit i+1. `modifier` is the LSP modifier name; `slug` is the CSS/var and class slug (`--koi-ddd-<slug>`, `cm-st-k-<slug>`).",
+  "concepts": [
+    { "slug": "aggregate", "label": "Aggregate", "modifier": "aggregate", "dark": "#8b87f5", "light": "#4f46e5" },
+    { "slug": "entity", "label": "Entity", "modifier": "entity", "dark": "#34d399", "light": "#047857" },
+    { "slug": "value", "label": "Value object", "modifier": "valueObject", "dark": "#5aa9f0", "light": "#2563eb" },
+    { "slug": "enum", "label": "Enumeration", "modifier": "enumeration", "dark": "#fbbf24", "light": "#b45309" },
+    { "slug": "event", "label": "Domain event", "modifier": "domainEvent", "dark": "#f472b6", "light": "#db2777" },
+    { "slug": "integration-event", "label": "Integration event", "modifier": "integrationEvent", "dark": "#2dd4bf", "light": "#0f766e" },
+    { "slug": "command", "label": "Command", "modifier": "command", "dark": "#ef4444", "light": "#dc2626" },
+    { "slug": "query", "label": "Query", "modifier": "query", "dark": "#38bdf8", "light": "#0369a1" },
+    { "slug": "read-model", "label": "Read model", "modifier": "readModel", "dark": "#a3e635", "light": "#4d7c0f" },
+    { "slug": "service", "label": "Service", "modifier": "service", "dark": "#fb923c", "light": "#c2410c" },
+    { "slug": "repository", "label": "Repository", "modifier": "repository", "dark": "#94a3b8", "light": "#475569" },
+    { "slug": "policy", "label": "Policy", "modifier": "policy", "dark": "#d946ef", "light": "#a21caf" },
+    { "slug": "factory", "label": "Factory", "modifier": "factory", "dark": "#f59e0b", "light": "#a16207" },
+    { "slug": "state-machine", "label": "State machine", "modifier": "stateMachine", "dark": "#06b6d4", "light": "#0e7490" },
+    { "slug": "spec", "label": "Specification", "modifier": "specification", "dark": "#c084fc", "light": "#7c3aed" }
+  ]
+}
