@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent, render, waitFor } from '@testing-library/preact';
 import { SourceControlPanel, type GitSurface } from '@/model/SourceControlPanel';
 import type { GitFile, GitLogEntry, GitStatus } from '@/host/types';
-import { koiConfirm } from '@/shared/overlay';
+import { koiConfirm } from '@atypical/koine-ui';
 import { axe } from 'vitest-axe';
 
 // The save-all-before-commit prompt (#470) uses the shared Koine confirm dialog. Mock it so the
 // commit path resolves deterministically (true/false) without opening a real modal overlay.
-vi.mock('@/shared/overlay', () => ({ koiConfirm: vi.fn() }));
+vi.mock('@atypical/koine-ui', () => ({ koiConfirm: vi.fn() }));
 
 const TOKEN = 'file:///work';
 

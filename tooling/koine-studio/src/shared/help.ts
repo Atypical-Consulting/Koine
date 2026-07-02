@@ -2,7 +2,7 @@
 // renders a list of ShortcutRow into a .koi-help-table, splitting each chord on '+' into
 // individual .koi-kbd keycaps (with 'mod' rendered as ⌘ / Ctrl per platform). The app supplies
 // the rows and wires the F1 shortcut.
-import { createModal } from '@/shared/overlay';
+import { createModal } from '@atypical/koine-ui';
 import { modKey } from '@/shared/platform';
 
 export interface ShortcutRow {

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Mock the dialog + help constructors so the confirm flow is controllable and no real modal DOM/timers
 // are spun up. helpRows + formatChord stay real (pure).
 const { confirmAsk, promptAsk } = vi.hoisted(() => ({ confirmAsk: vi.fn(), promptAsk: vi.fn() }));
-vi.mock('@/shared/overlay', () => ({
+vi.mock('@atypical/koine-ui', () => ({
   createConfirmDialog: vi.fn(() => ({ ask: confirmAsk })),
   createPromptDialog: vi.fn(() => ({ ask: promptAsk })),
 }));

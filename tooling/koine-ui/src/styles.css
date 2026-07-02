@@ -1,0 +1,9 @@
+/* @atypical/koine-ui — styles barrel.
+ *
+ * Exposed as the package's "./styles.css" export. The design tokens (issue #905, Task 2) plus the
+ * presentational components' own CSS (Task 4 — DeckCard/DeckBar/ExportMenu/LeftRail; see
+ * components.css's header for what's copied vs. left in the app and why) live here. The framework-free
+ * primitives moved in Task 3 are pure DOM/JS with no CSS of their own.
+ */
+@import './tokens.css';
+@import './components.css';

@@ -13,7 +13,7 @@ import { isSafeShareRelPath } from '@/shell/ideUtils';
 import type { Platform } from '@/host';
 import type { KoineLsp } from '@/lsp/lsp';
 import type { WorkspaceController } from '@/shell/workspaceController';
-import type { PromptDialog } from '@/shared/overlay';
+import type { PromptDialog } from '@atypical/koine-ui';
 
 export interface ExportShareDeps {
   platform: Platform;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { GitFile, GitLogEntry, GitStatus, Platform } from '@/host/types';
-import { koiConfirm } from '@/shared/overlay';
+import { koiConfirm } from '@atypical/koine-ui';
 
 // The Source Control panel (issue #272): the right-rail git surface — a branch header + switcher, the
 // changed files grouped into Staged / Changes / Untracked with per-row Stage/Unstage + inline diff, a

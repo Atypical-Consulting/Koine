@@ -8,7 +8,7 @@
 // forgets everything, and the list scrolls within its own container so a long history never grows the card.
 import { getRecentFolders, removeRecentFolder, pinRecentFolder, clearRecentFolders } from '@/settings/persistence';
 import { getPlatform } from '@/host';
-import { registerOverlay, koiConfirm } from '@/shared/overlay';
+import { registerOverlay, koiConfirm } from '@atypical/koine-ui';
 import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, fillVersionChip, wireExternalLink } from '@/shared/colophon';
 import { TEMPLATES, type Template } from '@/welcome/templates';
 import { wrapIndex } from '@/shared/wrapIndex';

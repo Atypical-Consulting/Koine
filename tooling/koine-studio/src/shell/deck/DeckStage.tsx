@@ -9,7 +9,7 @@ import { useStore } from 'zustand';
 import type { AppState } from '@/store/index';
 import type { CenterView, DeckState, DocsView, OutputTab, TechView } from '@/store/slices/uiChrome';
 import { DECK_SURFACE_LIST, DECK_SURFACE_ORDER, IconSwap } from '@/shell/deck/surfaces';
-import { DeckCard } from '@/shell/deck/DeckCard';
+import { DeckCard } from '@atypical/koine-ui';
 import { applyDeckLayout } from '@/shell/deck/deckLayout';
 
 export interface DeckStageProps {

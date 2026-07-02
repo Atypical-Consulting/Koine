@@ -35,8 +35,11 @@ jobs:
   website-tests:
     name: website-tests
     runs-on: ubuntu-latest
-    # Backstop so a hung install can't run to the 6-hour default; the suite finishes in
-    # well under a minute warm (npm ci + a ~300ms vitest run).
+    # Backstop so a hung install can't run to the 6-hour default. `npm ci` now installs the whole
+    # npm workspace (issue #905: `website` depends on `@atypical/koine-ui`, and vanilla npm has no
+    # sparse/per-workspace install — every `npm ci` resolves the union of all workspace members'
+    # deps against the single root lockfile), so this is heavier than the website-only install it
+    # replaced, but the vitest run itself is still ~300ms; 10 minutes stays a generous ceiling.
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -48,10 +51,16 @@ jobs:
           # Astro 7 / Starlight require Node >= 22.12 (matches deploy-docs.yml).
           node-version: 24
           cache: npm
-          cache-dependency-path: website/package-lock.json
+          # The repo root is the npm workspace root (tooling/*, website); the workspace's
+          # single lockfile lives there, not per-member.
+          cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
-        working-directory: ./website
+      # npm workspaces keep a single lockfile at the repo root, so `npm ci` must run
+      # there (it resolves `@atypical/koine-ui` via the workspace symlink, not the
+      # registry, and its postinstall script builds koine-ui's dist/). The test step
+      # below still runs from website/; npm's ancestor node_modules walk finds the
+      # root-installed deps normally.
+      - name: Install dependencies (workspace root)
         run: npm ci
 
       - name: Run website unit tests (vitest, Node env)

@@ -7,8 +7,7 @@
 // engine (#547) — a `<ul role="menu">` mounted on document.body, positioned at the trigger, dismissed on
 // outside-pointerdown / Escape / Tab / action, with focus returned to the kebab.
 
-import { createFloatingMenu } from '@/shared/floatingMenu';
-import type { Command } from '@/shared/palette';
+import { createFloatingMenu, type Command } from '@atypical/koine-ui';
 
 export interface OverflowMenuItem {
   /** Stable id — the source command id, or a synthetic id ('install' / 'palette'). */

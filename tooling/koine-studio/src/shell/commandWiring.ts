@@ -8,8 +8,7 @@
 // reaches the rest of the shell through `deps`. The command-registry sibling (#758) is not yet landed,
 // so getCommands() is moved verbatim (the inline Command[] it already built); when #758 ships, this is
 // where the declarative registry composes in, with no change to init().
-import { createCommandPalette, type Command } from '@/shared/palette';
-import { createCommandRegistry } from '@/shared/commandRegistry';
+import { createCommandPalette, createCommandRegistry, type Command } from '@atypical/koine-ui';
 import { domById } from '@/shared/domById';
 import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
 import { devCommands } from '@/shell/devCommands';

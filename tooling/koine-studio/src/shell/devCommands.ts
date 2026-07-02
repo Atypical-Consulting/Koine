@@ -1,4 +1,4 @@
-import type { Command } from '@/shared/palette';
+import type { Command } from '@atypical/koine-ui';
 import { isDevMode } from '@/shell/devMode';
 
 // Dev-only command-palette entries. Registered ALWAYS, but gated through `when: () => isDevMode()`

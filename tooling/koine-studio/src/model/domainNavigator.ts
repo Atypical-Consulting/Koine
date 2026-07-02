@@ -11,7 +11,7 @@
 import type { ContextMapResult, GlossaryModel, ModelNode } from '@/lsp/lsp';
 import { constructForKind, constructIcon, countsByContext, type ModelOutlineHandlers } from '@/model/modelOutline';
 import { filterGlossaryModel, isAllContexts } from '@/model/activeContext';
-import { createFloatingMenu } from '@/shared/floatingMenu';
+import { createFloatingMenu } from '@atypical/koine-ui';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 

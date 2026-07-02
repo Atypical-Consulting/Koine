@@ -41,7 +41,7 @@ import {
   type DiagramPosition,
 } from '@/diagrams/diagramContract';
 import { createBrowserLayoutStore } from '@/diagrams/layoutStore';
-import { koiConfirm, koiPrompt } from '@/shared/overlay';
+import { koiConfirm, koiPrompt } from '@atypical/koine-ui';
 import { prefixedId } from '@/shared/ids';
 
 // The DDD palette as literal hex (theme-independent — abstracts/_ddd.scss never redefines it per theme),

@@ -7,7 +7,7 @@
 import { createElement, render } from 'preact';
 import { createSettingsPage, type SettingsPageHandle } from '@/settings/settingsPage';
 import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
-import { AssistantView, ASSISTANT_MOUNT_CLASS } from '@/shell/AssistantView';
+import { AssistantView, ASSISTANT_MOUNT_CLASS } from '@atypical/koine-ui';
 import { createScenarioPanel, type ScenarioPanel } from '@/scenarios/scenarioPanel';
 import { createTerminalPanel, type TerminalPanel } from '@/shell/terminal/terminalPanel';
 import { createReviewPanel, type ReviewPanel } from '@/review/ReviewPanel';

@@ -8,7 +8,7 @@ import { fireEvent } from '@testing-library/preact';
 import { axe } from 'vitest-axe';
 import { render } from 'preact';
 import { createInspectorSheet, openInspectorSheet, type InspectorSheet } from '@/shell/inspectorSheet';
-import { LeftRail } from '@/shell/LeftRail';
+import { LeftRail } from '@atypical/koine-ui';
 import {
   createInspectorController,
   type InspectorAssistant,
