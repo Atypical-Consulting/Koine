@@ -4,7 +4,7 @@
 // so applying a stale response silently garbles the document. The response is applied only when both
 // the active uri and the doc text are unchanged from request time (same guard as workspaceController's
 // save paths). Lives here, not in ide.tsx's init(), per the composition-root line budget
-// (ide.budget.test.ts).
+// (lineBudgets.test.ts).
 import { type TextEdit } from '@/lsp/lsp';
 
 export interface FormatActiveDeps {
