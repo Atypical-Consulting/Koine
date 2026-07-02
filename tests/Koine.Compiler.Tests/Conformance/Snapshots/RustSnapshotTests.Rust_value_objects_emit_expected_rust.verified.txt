@@ -180,6 +180,14 @@ pub fn dec(text: &str) -> Decimal {
     Decimal::from_str_exact(text).expect("invalid decimal literal")
 }
 
+/// Narrows a Decimal to an i64 by truncating toward zero — the Koine `Int` result of a
+/// scalar `*`/`/` that crossed through the Decimal representation. Panics if the truncated
+/// value is out of i64 range (mirroring C#'s checked `(int)` decimal cast, which throws).
+pub fn dec_to_i64(value: Decimal) -> i64 {
+    use rust_decimal::prelude::ToPrimitive;
+    value.trunc().to_i64().expect("decimal out of i64 range")
+}
+
 /// A closed interval `[start, end]` over an ordered type — the Koine `Range<T>`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Range<T: PartialOrd> {
