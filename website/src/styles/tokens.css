@@ -4,6 +4,11 @@
   Shared by the custom landing page and the Playground. Fonts are self-hosted via
   Fontsource (imported in the consuming page/layout).
 */
+
+/* Concept Colors (ADR 0003): the --koi-ddd-<slug> palette, generated from design/concept-colors.json.
+   @import must precede other rules, so it stays at the very top. */
+@import './concept-colors.generated.css';
+
 :root {
   /* Brand ink — the existing badge indigo, deepened for structure/text. */
   --koi-indigo: #3245b8;

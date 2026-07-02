@@ -39,11 +39,48 @@ export const SEMANTIC_TOKEN_TYPES = [
 /** The `tokenModifiers` bitset (`SemanticTokenModifier.TokenModifierNames` in C#); bit 0 = declaration. */
 const SEMANTIC_MODIFIER_DECLARATION = 1 << 0;
 
+/**
+ * Concept Colors (ADR 0003): the DDD concept-kind slugs in LSP modifier-bit order — bit `i+1` ⇒
+ * `CONCEPT_KIND_SLUGS[i]` (bit 0 is `declaration`). A contract-pinned local mirror of the same order
+ * emitted from `design/concept-colors.json`, kept here for the same reason `SEMANTIC_TOKEN_TYPES` is a
+ * local copy (website/ and tooling/koine-studio/ are separate build roots). The sync test asserts this
+ * equals `src/generated/concept-colors.json` so it can't drift from the palette.
+ */
+export const CONCEPT_KIND_SLUGS = [
+  'aggregate', // bit 1
+  'entity', // bit 2
+  'value', // bit 3 (valueObject)
+  'enum', // bit 4 (enumeration)
+  'event', // bit 5 (domainEvent)
+  'integration-event', // bit 6
+  'command', // bit 7
+  'query', // bit 8
+  'read-model', // bit 9
+  'service', // bit 10
+  'repository', // bit 11
+  'policy', // bit 12
+  'factory', // bit 13
+  'state-machine', // bit 14
+  'spec', // bit 15 (specification)
+] as const;
+
+/** The concept-kind slug a token's modifier bits carry, or `null` (an unknown/out-of-range bit → no class). */
+function conceptKindSlug(modifiers: number): (typeof CONCEPT_KIND_SLUGS)[number] | null {
+  for (let i = 0; i < CONCEPT_KIND_SLUGS.length; i++) {
+    if ((modifiers & (1 << (i + 1))) !== 0) return CONCEPT_KIND_SLUGS[i];
+  }
+  return null;
+}
+
 /** One decoded semantic token, resolved to absolute CodeMirror document offsets and a CSS class. */
 export interface DecodedSemanticToken {
   from: number;
   to: number;
-  /** Space-separated CSS class(es): `cm-st-<type>` plus `cm-st-declaration` when the declaration bit is set. */
+  /**
+   * Space-separated CSS class(es): `cm-st-<type>`, plus `cm-st-declaration` when the declaration bit is
+   * set, plus `cm-st-k-<slug>` when the token carries a concept-kind bit (Concept Colors). The kind
+   * class is themed last so its concept color wins over the base type color.
+   */
   cls: string;
 }
 
@@ -85,10 +122,10 @@ export function decodeSemanticTokens(data: number[], doc: Text): DecodedSemantic
     const clampedTo = Math.min(to, lineInfo.to); // never run a mark past the line end
     if (clampedTo <= from) continue;
 
-    const cls =
-      (modifiers & SEMANTIC_MODIFIER_DECLARATION) !== 0
-        ? `cm-st-${typeName} cm-st-declaration`
-        : `cm-st-${typeName}`;
+    let cls = `cm-st-${typeName}`;
+    if ((modifiers & SEMANTIC_MODIFIER_DECLARATION) !== 0) cls += ' cm-st-declaration';
+    const kind = conceptKindSlug(modifiers);
+    if (kind !== null) cls += ` cm-st-k-${kind}`;
     out.push({ from, to: clampedTo, cls });
   }
   return out;
@@ -120,6 +157,11 @@ const semanticTokensRedrawEffect = StateEffect.define<null>();
 // highlighting reads consistently with the static grammar; value/type reuses `--koi-hl-type`, keyword
 // reuses `--koi-hl-keyword`, and enum / enumMember / property / parameter get their own `--koi-hl-sem-*`
 // hues (distinct in both themes). `cm-st-declaration` (the only modifier) bolds the declaring occurrence.
+//
+// Concept Colors (ADR 0003): a kind-tagged identifier also gets `cm-st-k-<slug>`, painting it in its DDD
+// concept color (`--koi-ddd-<slug>` from concept-colors.generated.css) so a name is the same color here,
+// in Studio, and in the explorer. These rules are declared AFTER the base `cm-st-*` rules so — at equal
+// specificity — the concept color wins over the base type/enum color. Structure stays neutral.
 const semanticTokenTheme = EditorView.baseTheme({
   '.cm-st-type': { color: 'var(--koi-hl-type)' },
   '.cm-st-enum': { color: 'var(--koi-hl-sem-enum)' },
@@ -128,6 +170,10 @@ const semanticTokenTheme = EditorView.baseTheme({
   '.cm-st-keyword': { color: 'var(--koi-hl-keyword)', fontWeight: '600' },
   '.cm-st-parameter': { color: 'var(--koi-hl-sem-parameter)', fontStyle: 'italic' },
   '.cm-st-declaration': { fontWeight: '600' },
+  // Concept-kind color rules, mirroring CONCEPT_KIND_SLUGS — kept last so kind wins the color.
+  ...Object.fromEntries(
+    CONCEPT_KIND_SLUGS.map((slug) => [`.cm-st-k-${slug}`, { color: `var(--koi-ddd-${slug})` }]),
+  ),
 });
 
 /**
