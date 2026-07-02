@@ -1,24 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Drive TauriPlatform's app-data workspace logic against a mocked Tauri path + IPC, so the desktop
-// token rules run without a real Tauri runtime. `join` mirrors the real POSIX behavior (slash-joined);
-// `appDataDir` is a fixed root. Only these two surfaces are exercised here — tauri.ts's other imports
-// load normally under happy-dom (they only fail when CALLED outside Tauri, which we don't do).
-const { appDataDirMock, joinMock, invokeMock } = vi.hoisted(() => ({
+// Drive TauriPlatform's workspace logic against a mocked Tauri path + IPC, so the desktop token rules
+// run without a real Tauri runtime. `join` mirrors the real POSIX behavior (slash-joined);
+// `documentDir` is the new user-owned workspace root (`<documentDir>/Koine`) and `appDataDir` is the
+// legacy root still honored for back-compat. Only these surfaces are exercised here — tauri.ts's other
+// imports load normally under happy-dom (they only fail when CALLED outside Tauri, which we don't do).
+const { appDataDirMock, documentDirMock, joinMock, invokeMock } = vi.hoisted(() => ({
   appDataDirMock: vi.fn(async () => '/appdata'),
+  documentDirMock: vi.fn(async () => '/documents'),
   joinMock: vi.fn(async (...parts: string[]) => parts.join('/')),
   // Typed loosely (variadic in, `unknown` out) so a test can swap in a stateful `mockImplementation`
   // that returns the real IPC shapes (a KoiFile[] from list_koi_files, a path string from create_file)
   // without fighting a `Promise<undefined>` inference.
   invokeMock: vi.fn(async (_cmd?: string, _payload?: Record<string, unknown>): Promise<unknown> => undefined),
 }));
-vi.mock('@tauri-apps/api/path', () => ({ appDataDir: appDataDirMock, join: joinMock }));
+vi.mock('@tauri-apps/api/path', () => ({
+  appDataDir: appDataDirMock,
+  documentDir: documentDirMock,
+  join: joinMock,
+}));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 
 import { TauriPlatform } from '@/host/tauri';
 
 beforeEach(() => {
   appDataDirMock.mockClear();
+  documentDirMock.mockClear();
   joinMock.mockClear();
   invokeMock.mockReset();
   invokeMock.mockResolvedValue(undefined);
@@ -27,26 +34,55 @@ beforeEach(() => {
 describe('TauriPlatform.isAutoRestorableToken', () => {
   const p = new TauriPlatform();
 
-  // The bug: a desktop template token is an absolute `<appData>/workspaces/<id>` path, not a browser
-  // `example-*` slug, so the old hardcoded test matched nothing and reloads reverted to the blank model.
-  it('vouches for a materialized template dir under <appData>/workspaces/', async () => {
+  // #915: cold boot must silently re-open a materialized workspace under the NEW `<documentDir>/Koine/`
+  // root — an absolute path, not a browser `example-*` slug.
+  it('vouches for a materialized workspace under the new <documentDir>/Koine/ root', async () => {
+    expect(await p.isAutoRestorableToken('/documents/Koine/pizzeria')).toBe(true);
+  });
+
+  // Back-compat: pre-#915 desktop tokens live under `<appData>/workspaces/` and must STILL cold-boot
+  // restore (union with the new root) so an upgrading user doesn't lose their auto-reopen.
+  it('vouches for a legacy materialized dir under <appData>/workspaces/ (back-compat)', async () => {
     expect(await p.isAutoRestorableToken('/appdata/workspaces/pizzeria')).toBe(true);
   });
 
-  it('declines the default workspace (<appData>/Untitled has its own re-open flow)', async () => {
+  it('declines the new default workspace (<documentDir>/Koine/Untitled has its own re-open flow)', async () => {
+    expect(await p.isAutoRestorableToken('/documents/Koine/Untitled')).toBe(false);
+  });
+
+  it('declines the legacy default workspace (<appData>/Untitled has its own re-open flow)', async () => {
     expect(await p.isAutoRestorableToken('/appdata/Untitled')).toBe(false);
   });
 
   it('declines an externally picked folder (stays a manual Recents click)', async () => {
     expect(await p.isAutoRestorableToken('/Users/me/projects/billing')).toBe(false);
   });
+});
+
+// #915: the desktop workspace root moved from the hidden `<appData>/workspaces/<name>` to the
+// discoverable, user-owned `<documentDir>/Koine/<name>` (e.g. ~/Documents/Koine/billing). Both the
+// template mint side (materializeWorkspace) and the default scratch model (defaultWorkspace) resolve
+// through the shared `workspacesRoot()` = `<documentDir>/Koine`.
+describe('TauriPlatform workspace root (<documentDir>/Koine, #915)', () => {
+  const p = new TauriPlatform();
+
+  it('materializeWorkspace mints under <documentDir>/Koine/', async () => {
+    const token = await p.materializeWorkspace('pizzeria', [{ relPath: 'menu.koi', contents: '' }]);
+    expect(token).toBe('/documents/Koine/pizzeria');
+  });
 
   // The mint side and the recognize side must agree: materializeWorkspace returns exactly the token
-  // isAutoRestorableToken later accepts (both built from the shared WORKSPACES_SUBDIR).
+  // isAutoRestorableToken later accepts (both derive from the shared workspacesRoot()).
   it('materializeWorkspace mints exactly the token it later vouches for', async () => {
     const token = await p.materializeWorkspace('pizzeria', [{ relPath: 'menu.koi', contents: '' }]);
-    expect(token).toBe('/appdata/workspaces/pizzeria');
+    expect(token).toBe('/documents/Koine/pizzeria');
     expect(await p.isAutoRestorableToken(token as string)).toBe(true);
+  });
+
+  it('defaultWorkspace resolves the scratch model under <documentDir>/Koine/Untitled', async () => {
+    // defaultWorkspace reads back listKoiFiles before seeding — return an empty workspace so it seeds once.
+    invokeMock.mockImplementation(async (cmd?: string) => (cmd === 'list_koi_files' ? [] : undefined));
+    expect(await p.defaultWorkspace('model {}')).toBe('/documents/Koine/Untitled');
   });
 });
 
@@ -93,7 +129,7 @@ describe('TauriPlatform.materializeWorkspace persist (seed-once vs wipe-and-rewr
 
     // First open seeds the pristine template into the (empty) materialized dir.
     const dir = (await p.materializeWorkspace('pizzeria', bundled, true)) as string;
-    expect(dir).toBe('/appdata/workspaces/pizzeria');
+    expect(dir).toBe('/documents/Koine/pizzeria');
     expect(stored.get(dir)!.get('order.koi')).toBe('context Ordering {}');
 
     // The user edits order.koi inside the materialized workspace.
@@ -120,5 +156,78 @@ describe('TauriPlatform.materializeWorkspace persist (seed-once vs wipe-and-rewr
 
     expect(stored.get(dir)!.get('a.koi')).toBe('context A {}');
     expect(invokeMock.mock.calls.filter((c) => c[0] === 'delete_entry')).toContainEqual(['delete_entry', { token: dir }]);
+  });
+});
+
+// #915: an upgrading desktop user's pre-existing workspaces (under the legacy `<appData>` roots) are
+// best-effort migrated into the new `<documentDir>/Koine` root on first boot (the defaultWorkspace
+// path), so they surface in the discoverable location too. The move runs at most once, only into a
+// still-empty new root, and never throws into the boot path.
+describe('TauriPlatform legacy workspace migration (#915)', () => {
+  it('moves legacy <appData>/workspaces/* into <documentDir>/Koine on first boot', async () => {
+    const p = new TauriPlatform(); // the once-only guard is per-instance
+    const moves: Array<Record<string, unknown>> = [];
+    invokeMock.mockImplementation(async (cmd?: string, payload: Record<string, unknown> = {}) => {
+      if (cmd === 'list_entries') {
+        const dir = payload.dir as string;
+        if (dir === '/documents/Koine') return []; // new root still empty → migrate
+        if (dir === '/appdata/workspaces')
+          return [{ token: '/appdata/workspaces/billing', name: 'billing', relPath: 'billing', kind: 'dir' }];
+        return []; // /appdata/Untitled empty
+      }
+      if (cmd === 'move_entry') {
+        moves.push(payload);
+        return `${payload.destFolder}/${payload.newRelPath}`;
+      }
+      if (cmd === 'list_koi_files') return []; // defaultWorkspace then seeds a fresh Untitled
+      return undefined; // create_file etc.
+    });
+
+    await p.defaultWorkspace('model {}');
+    expect(moves).toContainEqual({
+      token: '/appdata/workspaces/billing',
+      destFolder: '/documents/Koine',
+      newRelPath: 'billing',
+      copy: false,
+    });
+
+    // A second boot must NOT migrate again (the once-only guard).
+    moves.length = 0;
+    await p.defaultWorkspace('model {}');
+    expect(moves).toHaveLength(0);
+  });
+
+  it('is a no-op when the new <documentDir>/Koine root already holds workspaces', async () => {
+    const p = new TauriPlatform();
+    const moves: Array<Record<string, unknown>> = [];
+    invokeMock.mockImplementation(async (cmd?: string, payload: Record<string, unknown> = {}) => {
+      if (cmd === 'list_entries') {
+        const dir = payload.dir as string;
+        if (dir === '/documents/Koine')
+          return [{ token: '/documents/Koine/billing', name: 'billing', relPath: 'billing', kind: 'dir' }];
+        return [{ token: '/appdata/workspaces/legacy', name: 'legacy', relPath: 'legacy', kind: 'dir' }];
+      }
+      if (cmd === 'move_entry') {
+        moves.push(payload);
+        return 'moved';
+      }
+      if (cmd === 'list_koi_files')
+        return [{ path: '/documents/Koine/Untitled/model.koi', name: 'model.koi', relPath: 'model.koi' }];
+      return undefined;
+    });
+
+    await p.defaultWorkspace('model {}');
+    expect(moves).toHaveLength(0);
+  });
+
+  it('swallows an invoke rejection so boot never breaks', async () => {
+    const p = new TauriPlatform();
+    invokeMock.mockImplementation(async (cmd?: string) => {
+      if (cmd === 'list_entries') throw new Error('fs blew up');
+      if (cmd === 'list_koi_files') return [];
+      return undefined;
+    });
+    // defaultWorkspace must still resolve to the new-root Untitled despite the migration probe throwing.
+    await expect(p.defaultWorkspace('model {}')).resolves.toBe('/documents/Koine/Untitled');
   });
 });

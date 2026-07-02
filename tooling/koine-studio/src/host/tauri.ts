@@ -6,7 +6,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { appDataDir, join } from '@tauri-apps/api/path';
+import { appDataDir, documentDir, join } from '@tauri-apps/api/path';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type {
@@ -148,9 +148,10 @@ class TauriTerminalTransport implements TerminalTransport {
   }
 }
 
-// The app-data subdirectory under which materialized template/example workspaces live
-// (`<appData>/workspaces/<id>`). Shared by materializeWorkspace (which mints these tokens) and
-// isAutoRestorableToken (which recognizes them at boot) so the two never drift.
+// The LEGACY app-data subdirectory under which desktop workspaces materialized before #915
+// (`<appData>/workspaces/<id>`). New workspaces now live under `<documentDir>/Koine` (see
+// workspacesRoot); this constant survives so isAutoRestorableToken still recognizes pre-existing tokens
+// and the best-effort migration can find leftover content to move over.
 const WORKSPACES_SUBDIR = 'workspaces';
 
 /**
@@ -283,9 +284,17 @@ export class TauriPlatform implements Platform {
     return Promise.resolve(null);
   }
 
-  // Materialize a synthetic workspace under the app-data dir (`<appData>/workspaces/<name>`), mirroring
-  // the browser's OPFS example semantics. `persist` (default false) controls the lifecycle, exactly as
-  // the Platform contract and the browser host declare it (#816):
+  // The desktop workspace root: `<documentDir>/Koine` (#915) — a discoverable, user-owned location
+  // (e.g. ~/Documents/Koine) rather than the hidden `<appData>/Roaming/...` dir workspaces lived in
+  // before. The mint side (materializeWorkspace / defaultWorkspace) and the recognize side
+  // (isAutoRestorableToken) both derive from THIS one helper so the two can never drift.
+  private async workspacesRoot(): Promise<string> {
+    return join(await documentDir(), 'Koine');
+  }
+
+  // Materialize a synthetic workspace under the user's Documents dir (`<documentDir>/Koine/<name>`,
+  // #915), mirroring the browser's OPFS example semantics. `persist` (default false) controls the
+  // lifecycle, exactly as the Platform contract and the browser host declare it (#816):
   //   • persist === true  → seed-once-and-preserve: seed the bundled files only when the folder holds no
   //     `.koi` yet, otherwise leave it untouched, so a user's edits to an opened example survive a
   //     re-open (and a cold boot, now that #807 restores the token). Reuses defaultWorkspace's seed-once
@@ -297,7 +306,7 @@ export class TauriPlatform implements Platform {
     files: { relPath: string; contents: string }[],
     persist = false,
   ): Promise<string | null> {
-    const dir = await join(await appDataDir(), WORKSPACES_SUBDIR, name);
+    const dir = await join(await this.workspacesRoot(), name);
     if (persist) {
       const existing = await this.listKoiFiles(dir).catch(() => [] as KoiFile[]);
       if (existing.length === 0) for (const f of files) await this.createFile(dir, f.relPath, f.contents);
@@ -312,23 +321,78 @@ export class TauriPlatform implements Platform {
     return dir;
   }
 
-  // The persistent default workspace: <appData>/Untitled. Seed model.koi only when the folder holds
-  // no .koi yet, so a reload restores the user's model instead of overwriting it.
+  // The persistent default workspace: <documentDir>/Koine/Untitled (#915). Seed model.koi only when the
+  // folder holds no .koi yet, so a reload restores the user's model instead of overwriting it.
   async defaultWorkspace(seed: string): Promise<string | null> {
-    const dir = await join(await appDataDir(), 'Untitled');
+    // First boot after the #915 move: best-effort migrate any pre-existing legacy workspaces into the
+    // new root BEFORE seeding Untitled here — seeding would make the root non-empty and skip migration.
+    await this.migrateLegacyWorkspaces();
+    const dir = await join(await this.workspacesRoot(), 'Untitled');
     const existing = await this.listKoiFiles(dir).catch(() => [] as KoiFile[]);
     if (existing.length === 0) await this.createFile(dir, 'model.koi', seed);
     return dir;
   }
 
-  // Cold-boot may silently re-open a materialized template/example dir (`<appData>/workspaces/<id>`)
-  // because, unlike the browser's File System Access handles, a desktop path needs no permission
-  // gesture to read. The default workspace (`<appData>/Untitled`) is excluded — it has its own
-  // defaultWorkspace re-open flow — as is any externally *picked* folder, which stays a manual Recents
-  // click. Without this, a desktop template token (an absolute path, not a browser `example-*` slug)
+  // Guard so the one-time legacy move runs at most once per process; set BEFORE any work so a failure
+  // neither retries nor loops.
+  private legacyMigrationAttempted = false;
+
+  // Best-effort, one-time migration (#915) of a user's pre-existing desktop workspaces from the legacy
+  // `<appData>` roots into the new `<documentDir>/Koine` root, so an upgrading user finds their projects
+  // in the discoverable location too. It ONLY migrates into a still-EMPTY new root (never merges over
+  // workspaces already there), and every filesystem call is wrapped so a failure is swallowed and boot
+  // continues — the safety net if it does nothing is that legacy tokens stay auto-restorable
+  // (isAutoRestorableToken), so old workspaces still open from Recents.
+  private async migrateLegacyWorkspaces(): Promise<void> {
+    if (this.legacyMigrationAttempted) return;
+    this.legacyMigrationAttempted = true;
+    try {
+      const root = await this.workspacesRoot();
+      // Only migrate into a pristine new root. list_entries rejects when the dir doesn't exist yet,
+      // which the catch treats as "empty" so a first-ever boot still migrates.
+      const existing = await this.listEntries(root).catch(() => [] as FsEntry[]);
+      if (existing.length > 0) return;
+
+      const appData = await appDataDir();
+      // Move each legacy materialized workspace to <documentDir>/Koine/<name>.
+      const legacyWorkspaces = await join(appData, WORKSPACES_SUBDIR);
+      const legacy = await this.listEntries(legacyWorkspaces).catch(() => [] as FsEntry[]);
+      for (const entry of legacy) {
+        if (entry.kind !== 'dir') continue;
+        await this.moveEntry(entry.token, root, entry.name, false).catch(() => undefined);
+      }
+
+      // Move the legacy default scratch workspace to <documentDir>/Koine/Untitled if it holds anything.
+      const legacyUntitled = await join(appData, 'Untitled');
+      const untitled = await this.listEntries(legacyUntitled).catch(() => [] as FsEntry[]);
+      if (untitled.length > 0) await this.moveEntry(legacyUntitled, root, 'Untitled', false).catch(() => undefined);
+    } catch {
+      // best effort — never block boot on a migration failure; legacy tokens remain restorable
+    }
+  }
+
+  // Cold-boot may silently re-open a materialized template/example dir because, unlike the browser's
+  // File System Access handles, a desktop path needs no permission gesture to read. A token is
+  // auto-restorable when it lives under the current `<documentDir>/Koine` root (#915) OR — for
+  // back-compat — the legacy `<appData>/workspaces` root, so an upgrading user's already-open desktop
+  // token still cold-boot restores. Two exclusions stay a manual Recents click: the default workspace
+  // (`<documentDir>/Koine/Untitled` — it has its own defaultWorkspace re-open flow; note it now shares
+  // the root with materialized workspaces, so it must be excluded explicitly, where the legacy
+  // `<appData>/Untitled` fell outside `<appData>/workspaces` naturally) and any externally *picked*
+  // folder. Without this, a desktop template token (an absolute path, not a browser `example-*` slug)
   // matched nothing and every reload reverted to the blank default.
   async isAutoRestorableToken(token: string): Promise<boolean> {
-    const root = await join(await appDataDir(), WORKSPACES_SUBDIR);
+    const root = await this.workspacesRoot();
+    // The default scratch workspace now sits under the same root as materialized workspaces (#915), so
+    // exclude it explicitly — it re-opens via defaultWorkspace, not auto-restore.
+    if (token === (await join(root, 'Untitled'))) return false;
+    const legacyRoot = await join(await appDataDir(), WORKSPACES_SUBDIR);
+    return this.isUnderRoot(token, root) || this.isUnderRoot(token, legacyRoot);
+  }
+
+  // A token is "under" a root when it is the root itself or a descendant of it, tolerating either path
+  // separator so a Windows (`\`) or POSIX (`/`) absolute path both match.
+  private isUnderRoot(token: string, root: string): boolean {
     return token === root || token.startsWith(`${root}/`) || token.startsWith(`${root}\\`);
   }
 
