@@ -1,16 +1,46 @@
 /* --- welcome / start console (routed Home view) ---
-   A full-bleed start page: a two-column hero (the live `.koi` artifact + the get-to-work rail), then
-   the searchable example gallery. Mounted inside #home-root (a fixed full-window container) via
-   mountHome(); fills it with position:absolute so it stays in normal stacking. Everything derives from
-   the --koi-* tokens so light/dark adapt for free; the editor's own syntax hues colour the hero snippet. */
+   A truly full-bleed start page: an app top bar spanning the window, then a body that fills the rest —
+   a two-column split (the live `.koi` artifact on the left, the get-to-work rail on the right), plus the
+   searchable example gallery that swaps in over it. Mounted inside #home-root (a fixed full-window
+   container) via mountHome(); fills it with position:absolute so it stays in normal stacking. Everything
+   derives from the --koi-* tokens so light/dark adapt for free; the editor's own syntax hues colour the
+   hero snippet. */
 .koi-welcome {
   position: absolute; /* fill #home-root (the fixed full-window container) */
   inset: 0;
   z-index: auto; /* not an overlay — drop the overlay stacking context */
   display: flex;
-  overflow-y: auto;
+  flex-direction: column; /* the top bar sits above a flex-filling card; inner regions own the scroll */
+  overflow: hidden;
   background: var(--koi-paper);
-  padding: clamp(12px, 3vw, 32px);
+}
+
+/* --- app top bar: a full-width strip above the card ----------------------- */
+/* Spans the whole window and persists across the console↔gallery swap (it lives outside the card).
+   Empty for now — Task 2 fills the left/right slots with the brand, theme toggle and settings. A hairline
+   at its bottom separates it from the body. */
+.koi-home-topbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--koi-space-3);
+  height: 52px;
+  padding: 0 clamp(16px, 3vw, 28px);
+  border-bottom: 1px solid var(--koi-line);
+  background: var(--koi-paper);
+}
+
+/* The left/right control slots Task 2 fills. Empty today — they just reserve the two ends of the bar. */
+.koi-home-topbar-slot {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+  min-width: 0;
+}
+
+.koi-home-topbar-end {
+  justify-content: flex-end;
 }
 
 /* #home-root is the fixed full-window container the router switches between #app and Home. */
@@ -23,46 +53,32 @@
   }
 }
 
-/* margin:auto centers the card; a FIXED height keeps the modal the same size across both views (console
-   ↔ gallery) and across tab switches — the inner regions scroll instead of the box resizing. The card is
-   one persistent frame: the console and gallery views swap *inside* it, so it animates in once (koi-rise)
-   and never re-enters on a view switch. */
+/* Full-bleed body frame: fills the width and the space below the top bar (flex:1), with no max-width
+   centering, border, radius, shadow or rise-animation — it is just the frame the two views live in. The
+   console and gallery swap *inside* it; the inner regions own the scroll so the frame itself never
+   resizes. */
 .koi-welcome-card {
   position: relative;
-  margin: auto;
   display: flex;
   flex-direction: column;
+  flex: 1; /* fill the remaining height below the top bar */
+  min-height: 0; /* let the inner views own the scroll rather than growing the frame */
   width: 100%;
-  max-width: 1040px;
-  height: min(620px, calc(100dvh - 48px));
   background: var(--koi-paper-2);
-  border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius-lg);
-  box-shadow: var(--koi-shadow);
-  padding: clamp(20px, 3vw, 34px) clamp(20px, 3.4vw, 40px) clamp(22px, 3vw, 34px);
-  overflow: hidden; /* clips the gradient cap to the rounded corners; inner regions own the scroll */
-  animation: koi-rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
-
-  /* A 3px brand-gradient cap ties the console to the monogram — the one piece of chrome decoration,
-     replacing the old blueprint-grid + glow. */
-  &::before {
-    content: '';
-    position: absolute;
-    inset: 0 0 auto 0;
-    height: 3px;
-    background: var(--koi-accent-grad);
-  }
+  overflow: hidden; /* inner regions own the scroll */
 }
 
-/* The two swappable views inside the card (console ↔ gallery). Each fills the fixed card and owns its
-   inner scroll; only one is in flow at a time (the other is [hidden]). Switching from one to the other
-   replays a quiet fade so the content changes in place — the card frame itself never moves. This mirrors
-   the editor's own view-switch fade (see base/_animations.scss). */
+/* The two swappable views inside the card (console ↔ gallery). Each fills the frame and owns its inner
+   scroll; only one is in flow at a time (the other is [hidden]). The view carries the page inset that the
+   card used to own (now that the card is edge-to-edge). Switching from one to the other replays a quiet
+   fade so the content changes in place — the frame itself never moves. This mirrors the editor's own
+   view-switch fade (see base/_animations.scss). */
 .koi-welcome-view {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  padding: clamp(20px, 3vw, 34px) clamp(20px, 3.4vw, 40px) clamp(22px, 3vw, 34px);
   animation: koi-fade 0.28s ease both;
 
   &[hidden] {
@@ -111,21 +127,23 @@
   }
 }
 
-/* --- hero: thesis (left) + launch rail (right) ---------------------------- */
-.koi-welcome-hero {
+/* --- body: thesis (left) + launch rail (right), as a two-column split ------ */
+/* A grid with a flexible hero column on the left and a fixed 424px launch column on the right, divided
+   by a 1px hairline. The body fills the console view (flex:1); each column owns its own scroll so the
+   right rail (a long recent list) scrolls independently of the left. No column gap — the hairline is the
+   divider and each column insets its own content from it. */
+.koi-home-body {
   display: grid;
-  grid-template-columns: minmax(0, 1.18fr) minmax(0, 0.82fr);
-  gap: clamp(24px, 4vw, 56px);
-  align-items: start;
-  /* Fill the fixed card and scroll internally if the content (e.g. a long recent list, or a narrow
-     viewport) outgrows it, so the card itself never resizes. */
+  grid-template-columns: minmax(0, 1fr) 424px;
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
 }
 
 .koi-welcome-lede {
   min-width: 0;
+  /* Left column scrolls independently of the launch rail; inset from the dividing hairline on its right. */
+  overflow-y: auto;
+  padding-right: clamp(24px, 4vw, 56px);
 }
 
 .koi-welcome-eyebrow {
@@ -245,11 +263,17 @@
 }
 
 /* --- launch rail: actions + recent --------------------------------------- */
+/* The fixed right column of the body split. A 1px hairline on its left edge divides it from the hero;
+   it scrolls independently (a long recent list never grows the frame) and insets its content from the
+   dividing line. */
 .koi-welcome-launch {
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: clamp(18px, 2.4vw, 26px);
+  border-left: 1px solid var(--koi-line);
+  overflow-y: auto;
+  padding-left: clamp(24px, 4vw, 56px);
 }
 
 .koi-welcome-rail-title {
@@ -936,11 +960,27 @@
   }
 }
 
-/* --- responsive: collapse the hero to one column, then tighten chrome ----- */
+/* --- responsive: collapse the body split to one column, then tighten chrome ----- */
 @media (max-width: 760px) {
-  .koi-welcome-hero {
+  /* Stack the two columns: the launch rail drops below the hero. The vertical dividing hairline and its
+     side inset give way to a top border + a scrolling column so the whole body flows naturally. */
+  .koi-home-body {
     grid-template-columns: 1fr;
     gap: clamp(20px, 5vw, 28px);
+    overflow-y: auto;
+  }
+
+  .koi-welcome-lede {
+    overflow-y: visible;
+    padding-right: 0;
+  }
+
+  .koi-welcome-launch {
+    border-left: none;
+    border-top: 1px solid var(--koi-line);
+    overflow-y: visible;
+    padding-left: 0;
+    padding-top: clamp(20px, 5vw, 28px);
   }
 
   /* Stack the colophon so it doesn't crowd the hero: chip → links → byline, top-aligned. */

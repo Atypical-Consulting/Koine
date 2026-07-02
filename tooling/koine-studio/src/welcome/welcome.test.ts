@@ -564,6 +564,72 @@ describe('mountHome — embedded chrome suppression', () => {
   });
 });
 
+describe('Home full-bleed shell', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = '';
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  test('renders a top-bar region above the card (empty, no brand)', () => {
+    mountHome(container, makeCallbacks(), SAMPLE);
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+
+    const topbar = root.querySelector<HTMLElement>('.koi-home-topbar');
+    expect(topbar).not.toBeNull();
+    // The top bar sits outside the card so it spans both views.
+    expect(topbar!.closest('.koi-welcome-card')).toBeNull();
+    // Task 2 fills the brand slot; for now the brand class stays absent everywhere on Home.
+    expect(root.querySelector('.koi-welcome-brand')).toBeNull();
+    expect(topbar!.querySelector('.koi-welcome-brand')).toBeNull();
+  });
+
+  test('lays the console body out as a two-column grid (hero left, launch right)', () => {
+    mountHome(container, makeCallbacks(), SAMPLE);
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+
+    const body = root.querySelector<HTMLElement>('.koi-home-body');
+    expect(body).not.toBeNull();
+    // The old hero wrapper is gone — the body grid replaces it.
+    expect(root.querySelector('.koi-welcome-hero')).toBeNull();
+
+    // Left column: the hero lede lives inside the body grid.
+    const lede = root.querySelector<HTMLElement>('.koi-welcome-lede');
+    expect(lede).not.toBeNull();
+    expect(lede!.closest('.koi-home-body')).toBe(body);
+
+    // Right column: the launch rail lives inside the body grid.
+    const launch = root.querySelector<HTMLElement>('.koi-welcome-launch');
+    expect(launch).not.toBeNull();
+    expect(launch!.closest('.koi-home-body')).toBe(body);
+  });
+
+  test('keeps the existing actions and recents inside the launch rail', () => {
+    localStorage.setItem(KEY, JSON.stringify(['/a/one', '/b/two']));
+    mountHome(container, makeCallbacks(), SAMPLE);
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+
+    // The three start actions still render (New model / Start from an example / Open folder).
+    expect(root.querySelectorAll('.koi-welcome-action').length).toBeGreaterThanOrEqual(3);
+    // Recents container is still present and populated.
+    expect(root.querySelector('.koi-welcome-recent')).not.toBeNull();
+    expect(root.querySelectorAll('.koi-welcome-recent-item').length).toBe(2);
+  });
+
+  test('keeps the single card holding both views, now full-bleed', () => {
+    mountHome(container, makeCallbacks(), SAMPLE);
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+    // Exactly one card, still holding the console + gallery views.
+    expect(root.querySelectorAll('.koi-welcome-card').length).toBe(1);
+    // The colophon stays inside the console view (Task 3 moves it into the hero).
+    const consoleView = root.querySelector<HTMLElement>('.koi-welcome-view:not(.koi-gallery-view)')!;
+    expect(consoleView.querySelector('.koi-home-colophon')).not.toBeNull();
+  });
+});
+
 describe('Home hero snippet', () => {
   test('collapses the spacing before the invariant message to a single space', () => {
     const el = document.createElement('div');

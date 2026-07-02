@@ -187,6 +187,19 @@ function buildHome(
     if (galleryOpen) closeGallery();
   });
 
+  // The app top bar region — a full-width strip above the card that persists across console↔gallery
+  // swaps (it lives outside the card so both views share it). It is intentionally EMPTY for now:
+  // Task 2 fills the left/right slots with the brand, theme toggle and settings. It carries no
+  // `.koi-welcome-brand` yet — a test asserts that class stays absent on Home until then.
+  const topbar = document.createElement('header');
+  topbar.className = 'koi-home-topbar';
+  const topbarStart = document.createElement('div');
+  topbarStart.className = 'koi-home-topbar-slot koi-home-topbar-start';
+  const topbarEnd = document.createElement('div');
+  topbarEnd.className = 'koi-home-topbar-slot koi-home-topbar-end';
+  topbar.append(topbarStart, topbarEnd);
+  root.appendChild(topbar);
+
   const card = document.createElement('div');
   card.className = 'koi-welcome-card';
   root.appendChild(card);
@@ -198,10 +211,13 @@ function buildHome(
   consoleView.className = 'koi-welcome-view';
   card.appendChild(consoleView);
 
-  // --- hero: the thesis (left) + get-to-work rail (right) -------------------
-  const hero = document.createElement('section');
-  hero.className = 'koi-welcome-hero';
-  consoleView.appendChild(hero);
+  // --- body: the thesis (left) + get-to-work rail (right), as a two-column grid ---
+  // Full-bleed shell: a grid with the hero lede on the left and the launch rail (a fixed 424px
+  // column) on the right, split by a 1px hairline. The right column scrolls independently. This
+  // replaces the old .koi-welcome-hero wrapper; the lede/launch classes and their children are intact.
+  const body = document.createElement('section');
+  body.className = 'koi-home-body';
+  consoleView.appendChild(body);
 
   // Left: eyebrow + editorial statement + the live snippet (the signature).
   const lede = document.createElement('div');
@@ -247,7 +263,7 @@ function buildHome(
 
   figure.append(snipBar, pre, emit);
   lede.append(eyebrow, statement, figure);
-  hero.appendChild(lede);
+  body.appendChild(lede);
 
   // Right: the launch rail — primary actions, then recent folders.
   const launch = document.createElement('div');
@@ -354,12 +370,13 @@ function buildHome(
 
   recent.append(recentHeading, recentBody);
   launch.appendChild(recent);
-  hero.appendChild(launch);
+  body.appendChild(launch);
 
   // --- colophon footer: version + project links + byline (issue #403) --------
   // The onboarding essentials a newcomer needs at first contact — what version am I on, where are the
   // docs, who made this — surfaced from the shared colophon (settings/about.ts shows the same content).
-  // It sits in the persistent console card (a sibling of the hero).
+  // It sits in the persistent console view, a sibling below the body grid (Task 3 later moves it into
+  // the hero's left footer).
   const colophonChip = document.createElement('span');
   colophonChip.className = 'koi-home-colophon-chip';
   colophonChip.hidden = true; // filled lazily by fillVersionChip; stays hidden until a version resolves
