@@ -54,13 +54,17 @@ Koine.Compiler.Emit.EmitTargetInfo.Id.get -> string!
 Koine.Compiler.Emit.EmitTargetInfo.Id.init -> void
 Koine.Compiler.Emit.EmittedFile.SourceMap.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.SourceMapSegment!>?
 Koine.Compiler.Emit.EmittedFile.SourceMap.init -> void
+Koine.Compiler.Emit.EmitterOptions.ApplicationHandlerResult.get -> string?
+Koine.Compiler.Emit.EmitterOptions.ApplicationHandlerResult.init -> void
 Koine.Compiler.Emit.EmitterOptions.ApplicationMapping.get -> string?
 Koine.Compiler.Emit.EmitterOptions.ApplicationMapping.init -> void
 Koine.Compiler.Emit.EmitterOptions.ApplicationMediatr.get -> bool
 Koine.Compiler.Emit.EmitterOptions.ApplicationMediatr.init -> void
+Koine.Compiler.Emit.EmitterOptions.ApplicationNotFound.get -> string?
+Koine.Compiler.Emit.EmitterOptions.ApplicationNotFound.init -> void
 Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.get -> bool
 Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.init -> void
-Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null, int? RegexMatchTimeoutMs = null, string? RegexMode = null) -> void
+Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null, int? RegexMatchTimeoutMs = null, string? RegexMode = null, string? ApplicationHandlerResult = null, string? ApplicationNotFound = null) -> void
 Koine.Compiler.Emit.EmitterOptions.Layers.get -> string?
 Koine.Compiler.Emit.EmitterOptions.Layers.init -> void
 Koine.Compiler.Emit.EmitterOptions.ReferenceOnly.get -> bool

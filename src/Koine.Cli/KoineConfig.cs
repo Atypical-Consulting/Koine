@@ -22,7 +22,9 @@ internal sealed record TargetOptions(
     bool ApplicationMediatr = false,
     string? ApplicationMapping = null,
     string? RegexMatchTimeoutMsText = null,
-    string? RegexModeText = null)
+    string? RegexModeText = null,
+    string? ApplicationHandlerResult = null,
+    string? ApplicationNotFound = null)
 {
     public static readonly TargetOptions Empty =
         new(null, new Dictionary<string, string>(StringComparer.Ordinal), null, null);
@@ -252,6 +254,16 @@ internal sealed record KoineConfig(
             case "application" when parts.Length == 4 && parts[3] == "mapping":
                 builder.ApplicationMapping = value;
                 break;
+            case "application" when parts.Length == 4 && parts[3] == "handlerResult":
+                // W1 (make the Application layer adoptable): what a command handler returns —
+                // void (default) or aggregate. Validated in BuildSettings.TryResolve.
+                builder.ApplicationHandlerResult = value;
+                break;
+            case "application" when parts.Length == 4 && parts[3] == "notFound":
+                // W1: how a handler treats a missing aggregate — throw (default) or nullable.
+                // Validated in BuildSettings.TryResolve.
+                builder.ApplicationNotFound = value;
+                break;
             case "regexMatchTimeoutMs" when parts.Length == 3:
                 // The C# matches-invariant ReDoS-guard match timeout (issue #794/#641): stored raw and
                 // parsed lazily by TargetOptions.RegexMatchTimeoutMs. Unlike other malformed keys this is
@@ -317,6 +329,8 @@ internal sealed record KoineConfig(
         public string? Layers;
         public string? ApplicationMediatr;
         public string? ApplicationMapping;
+        public string? ApplicationHandlerResult;
+        public string? ApplicationNotFound;
         public string? RegexMatchTimeoutMs;
         public string? RegexMode;
         public readonly Dictionary<string, string> NamespaceMap = new(StringComparer.Ordinal);
@@ -327,7 +341,9 @@ internal sealed record KoineConfig(
             string.Equals(ApplicationMediatr, "true", StringComparison.OrdinalIgnoreCase),
             ApplicationMapping,
             RegexMatchTimeoutMs,
-            RegexMode);
+            RegexMode,
+            ApplicationHandlerResult,
+            ApplicationNotFound);
     }
 
     /// <summary>

@@ -209,11 +209,11 @@ public sealed partial class PhpEmitter
     // Folding always re-boxes as a Decimal literal (never Int) so the folded value matches the
     // declared Decimal property/parameter type. A bare DECIMAL-kind literal default is already valid
     // PHP (a `new` expression, legal via PHP 8.1's "new in initializers") and is returned unchanged;
-    // a bare Int-kind literal on a Decimal member (e.g. `amount: Decimal = 5`) is a separate,
-    // pre-existing type-mismatch gap this fold does not address — see the PR's Follow-ups section.
+    // a bare Int-kind literal on a Decimal member (e.g. `amount: Decimal = 5`) falls through to
+    // TryFoldNumericLiteral below, which re-boxes it as a Decimal literal too (issue #1030).
     private static Expr FoldDecimalConstantDefault(Expr expr)
     {
-        if (expr is LiteralExpr)
+        if (expr is LiteralExpr { Kind: LiteralKind.Decimal })
         {
             return expr;
         }

@@ -126,6 +126,22 @@ public sealed partial class CSharpEmitter
         // command becomes a Unit-returning request so it always uses the two-arg IRequestHandler<,>.
         var plainResult = cmd.ReturnType is { } rt ? typeMapper.Map(rt) : null;
 
+        // W1 (make the Application layer adoptable). Two options shape the handler:
+        //   --app-handler-result aggregate  → a void command's handler returns the loaded, mutated
+        //                                      aggregate root (a caller uses it without re-loading).
+        //   --app-not-found nullable        → a missing aggregate yields null (mapped to a 404) instead
+        //                                      of throwing; the result type becomes nullable.
+        // A command that declares its own return type keeps it. `baseResult` is the non-nullable value
+        // the handler produces (null ⇒ void): a void command is promoted to return the aggregate when
+        // aggregate-return is requested OR the nullable policy needs a value to return. `effectiveResult`
+        // is the declared result type (nullable under the nullable policy). Defaults keep it null for a
+        // void command, so the emitted handler stays byte-identical to today.
+        var wantsAggregate = _options.HandlerResult == CSharpHandlerResult.Aggregate;
+        var nullableNotFound = _options.NotFound == CSharpNotFound.Nullable;
+        var baseResult = plainResult ?? ((wantsAggregate || nullableNotFound) ? root.Name : null);
+        var returnsAggregate = plainResult is null && baseResult is not null;
+        var effectiveResult = baseResult is null ? null : nullableNotFound ? baseResult + "?" : baseResult;
+
         // Request: the aggregate identity to load, then the command's parameters. The identity
         // property is normally "Id", but a command parameter named `id` (allowed for commands, only
         // factories reserve it) would PascalCase to a colliding "Id" — so pick a non-colliding name.
@@ -140,30 +156,49 @@ public sealed partial class CSharpEmitter
         fields.AddRange(cmd.Parameters.Select(p => (typeMapper.Map(p.Type), CSharpNaming.ToPascalCase(p.Name))));
         var args = string.Join(", ", cmd.Parameters.Select(p => "request." + CSharpNaming.ToPascalCase(p.Name)));
 
-        files.Add(EmitRequestRecord(emit, ns, requestType, fields, plainResult));
+        files.Add(EmitRequestRecord(emit, ns, requestType, fields, effectiveResult));
 
         var sb = new StringBuilder();
-        WriteHandlerHeader(sb, handlerType, requestType, plainResult,
+        WriteHandlerHeader(sb, handlerType, requestType, effectiveResult,
             cmd.Doc ?? $"Handles {requestType} by invoking {root.Name}.{method} and committing the unit of work.");
 
-        sb.Append(Indent).Append(HandlerSignature(requestType, plainResult)).Append('\n');
+        sb.Append(Indent).Append(HandlerSignature(requestType, effectiveResult)).Append('\n');
         sb.Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append("var aggregate = await _unitOfWork.").Append(plural)
-          .Append(".GetByIdAsync(request.").Append(idProp).Append(", ").Append(CtArg()).Append(")\n");
-        sb.Append(Indent).Append(Indent).Append(Indent)
-          .Append("?? throw new InvalidOperationException($\"").Append(root.Name).Append(" '{request.").Append(idProp).Append("}' was not found.\");\n");
-
-        if (plainResult is null)
+          .Append(".GetByIdAsync(request.").Append(idProp).Append(", ").Append(CtArg()).Append(")");
+        if (nullableNotFound)
         {
-            sb.Append(Indent).Append(Indent).Append("aggregate.").Append(method).Append('(').Append(args).Append(");\n");
-            WriteCommit(sb);
-            WriteVoidReturn(sb);
+            // Missing aggregate ⇒ return null (the caller maps it to a 404) instead of throwing.
+            sb.Append(";\n");
+            sb.Append(Indent).Append(Indent).Append("if (aggregate is null)\n");
+            sb.Append(Indent).Append(Indent).Append("{\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("return null;\n");
+            sb.Append(Indent).Append(Indent).Append("}\n\n");
         }
         else
+        {
+            sb.Append("\n");
+            sb.Append(Indent).Append(Indent).Append(Indent)
+              .Append("?? throw new InvalidOperationException($\"").Append(root.Name).Append(" '{request.").Append(idProp).Append("}' was not found.\");\n");
+        }
+
+        if (plainResult is not null)
         {
             sb.Append(Indent).Append(Indent).Append("var result = aggregate.").Append(method).Append('(').Append(args).Append(");\n");
             WriteCommit(sb);
             sb.Append(Indent).Append(Indent).Append("return result;\n");
+        }
+        else if (returnsAggregate)
+        {
+            sb.Append(Indent).Append(Indent).Append("aggregate.").Append(method).Append('(').Append(args).Append(");\n");
+            WriteCommit(sb);
+            sb.Append(Indent).Append(Indent).Append("return aggregate;\n");
+        }
+        else
+        {
+            sb.Append(Indent).Append(Indent).Append("aggregate.").Append(method).Append('(').Append(args).Append(");\n");
+            WriteCommit(sb);
+            WriteVoidReturn(sb);
         }
 
         sb.Append(Indent).Append("}\n");
@@ -172,7 +207,7 @@ public sealed partial class CSharpEmitter
         files.Add(new EmittedFile(PathFor(emit, ns, KindFolder.Application, $"{handlerType}.cs"),
             Assemble(emit, ns, sb.ToString(), usesLinq: false)));
 
-        registrations.Add(new AppRegistration("handler", MediatrHandlerService(requestType, plainResult), handlerType));
+        registrations.Add(new AppRegistration("handler", MediatrHandlerService(requestType, effectiveResult), handlerType));
         EmitValidator(emit, files, registrations, ns, requestType, cmd.Parameters, cmd.Body, index, enumMemberToType);
     }
 
@@ -439,7 +474,6 @@ public sealed partial class CSharpEmitter
         var resultName = isList ? query.ResultType.Element!.Name : query.ResultType.Name;
         var resultType = isList ? $"IReadOnlyList<{resultName}>" : resultName;
         var handlerType = query.Name + "Handler";
-        var service = $"Koine.Runtime.IQueryHandler<{query.Name}, {resultType}>";
 
         // Resolve the by-identity load: a single result over a read model whose source is an aggregate
         // root, with exactly one criterion typed as that root's identity.
@@ -459,6 +493,13 @@ public sealed partial class CSharpEmitter
             }
         }
 
+        // The by-identity load honors the not-found policy (W1): nullable ⇒ this handler returns its
+        // read model nullably and yields null on a miss, instead of throwing. Only the by-identity
+        // path has a not-found concept; a list/non-identity query is unaffected.
+        var nullableQuery = byId is not null && _options.NotFound == CSharpNotFound.Nullable;
+        var queryResultType = nullableQuery ? resultType + "?" : resultType;
+        var service = $"Koine.Runtime.IQueryHandler<{query.Name}, {queryResultType}>";
+
         var sb = new StringBuilder();
         WriteXmlDoc(sb, query.Doc ?? $"Handles the {query.Name} query.", "");
         sb.Append("public sealed class ").Append(handlerType).Append(" : ").Append(service).Append("\n{\n");
@@ -468,13 +509,25 @@ public sealed partial class CSharpEmitter
             sb.Append(Indent).Append("private readonly IUnitOfWork _unitOfWork;\n\n");
             sb.Append(Indent).Append("public ").Append(handlerType).Append("(IUnitOfWork unitOfWork)\n");
             sb.Append(Indent).Append(Indent).Append("=> _unitOfWork = unitOfWork;\n\n");
-            sb.Append(Indent).Append("public async Task<").Append(resultType).Append("> HandleAsync(")
+            sb.Append(Indent).Append("public async Task<").Append(queryResultType).Append("> HandleAsync(")
               .Append(query.Name).Append(" query, CancellationToken ct = default)\n");
             sb.Append(Indent).Append("{\n");
             sb.Append(Indent).Append(Indent).Append("var aggregate = await _unitOfWork.").Append(b.Plural)
-              .Append(".GetByIdAsync(query.").Append(b.Criterion).Append(", ct)\n");
-            sb.Append(Indent).Append(Indent).Append(Indent)
-              .Append("?? throw new InvalidOperationException($\"").Append(b.Root).Append(" '{query.").Append(b.Criterion).Append("}' was not found.\");\n");
+              .Append(".GetByIdAsync(query.").Append(b.Criterion).Append(", ct)");
+            if (nullableQuery)
+            {
+                sb.Append(";\n");
+                sb.Append(Indent).Append(Indent).Append("if (aggregate is null)\n");
+                sb.Append(Indent).Append(Indent).Append("{\n");
+                sb.Append(Indent).Append(Indent).Append(Indent).Append("return null;\n");
+                sb.Append(Indent).Append(Indent).Append("}\n\n");
+            }
+            else
+            {
+                sb.Append("\n");
+                sb.Append(Indent).Append(Indent).Append(Indent)
+                  .Append("?? throw new InvalidOperationException($\"").Append(b.Root).Append(" '{query.").Append(b.Criterion).Append("}' was not found.\");\n");
+            }
             sb.Append(Indent).Append(Indent).Append("return aggregate.To").Append(resultName).Append("();\n");
             sb.Append(Indent).Append("}\n");
         }

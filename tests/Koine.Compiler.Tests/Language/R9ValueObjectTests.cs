@@ -747,4 +747,42 @@ public class R9ValueObjectTests
             """;
         Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NarrowingConversionInDerivedMember);
     }
+
+    [Fact]
+    public void Derived_member_conditional_with_a_narrowing_decimal_else_branch_is_rejected()
+    {
+        // `total: Int = if base > 0 then 0 else base` — the `then` branch is Int (`0`), the `else` branch
+        // is Decimal (`base`). The conditional's inferred type is the common (wider) Decimal, so assigning
+        // it into the Int member is the same illegal narrowing as `base * 1.5`. Before #975 the conditional
+        // took only its `then` branch (Int), hiding the Decimal else from KOI0217 and emitting non-compiling
+        // code (C# CS0266); it must be rejected here instead.
+        const string src = """
+            context Shop {
+              value V {
+                base:  Decimal
+                total: Int = if base > 0 then 0 else base
+              }
+            }
+            """;
+        var narrowing = Diagnose(src).ShouldHaveSingleItem();
+        narrowing.Code.ShouldBe(DiagnosticCodes.NarrowingConversionInDerivedMember);
+        narrowing.Severity.ShouldBe(DiagnosticSeverity.Error);
+        narrowing.Message.ShouldContain("total");
+    }
+
+    [Fact]
+    public void Derived_member_conditional_widening_into_a_decimal_declared_type_is_allowed()
+    {
+        // The SAME conditional assigned into a Decimal member is a legal widening (both branches fit
+        // Decimal for free) — it must NOT be flagged.
+        const string src = """
+            context Shop {
+              value V {
+                base:  Decimal
+                total: Decimal = if base > 0 then 0 else base
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NarrowingConversionInDerivedMember);
+    }
 }

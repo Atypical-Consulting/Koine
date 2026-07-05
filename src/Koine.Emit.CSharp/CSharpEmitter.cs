@@ -80,6 +80,8 @@ public sealed partial class CSharpEmitter : IEmitter
                 "mapping=" + _options.Mapping,
                 "regexTimeout=" + _options.RegexMatchTimeoutMs,
                 "regexMode=" + _options.RegexMode,
+                "handlerResult=" + _options.HandlerResult,
+                "notFound=" + _options.NotFound,
                 "ns=" + map);
         }
     }
@@ -361,6 +363,17 @@ public sealed partial class CSharpEmitter : IEmitter
         if (_options.EmitsInfrastructure)
         {
             EmitInfrastructure(emit, model, files, typeMapper);
+        }
+
+        // 9. The opt-in ASP.NET Minimal-API endpoint layer (W2): binds each command/query to its
+        //    Application-layer handler. Gated on the `api` layer (which implies `application`); off by
+        //    default, so the steps above stay byte-identical when the layer is not requested.
+        if (_options.EmitsApi)
+        {
+            foreach (ContextNode ctx in model.Contexts)
+            {
+                EmitApiLayer(emit, files, ctx);
+            }
         }
 
         return files;
@@ -2277,6 +2290,9 @@ public sealed partial class CSharpEmitter : IEmitter
 
         /// <summary>The opt-in EF Core infrastructure layer (issue #128).</summary>
         public const string Infrastructure = "Infrastructure";
+
+        /// <summary>The opt-in ASP.NET Minimal-API endpoint layer (W2).</summary>
+        public const string Endpoints = "Endpoints";
     }
 
     /// <summary>The bounded context owning a namespace (its first segment); the resolution scope for R13.2.</summary>
