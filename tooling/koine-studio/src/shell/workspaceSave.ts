@@ -48,7 +48,9 @@ export function createWorkspaceSave(ctx: WorkspaceModuleCtx) {
         // mark clean when it still holds exactly what hit disk.
         const after = st().buffers.get(uri);
         if (after && after.text === written) st().markSaved([uri]);
-        lsp.didSave();
+        // didSave() targets the ACTIVE doc — only valid when it's still the one just written (mirrors
+        // applyFileEdit's guard); a switch during the write must not tell the server the wrong doc saved.
+        if (st().activeUri === uri) lsp.didSave();
         renderTree();
         st().bumpSaved(); // #470: the on-disk git status changed — the saveSeq subscriber refreshes the SC panel
       } catch (e) {
@@ -105,7 +107,7 @@ export function createWorkspaceSave(ctx: WorkspaceModuleCtx) {
       // text (the old in-place saveAllDirtyBuffers read the latest text at write time).
       const dirtyUris = [...st().buffers.values()].filter((b) => b.dirty).map((b) => b.uri);
       let failures = 0;
-      let saved = 0;
+      const savedUris = new Set<string>();
       for (const uri of dirtyUris) {
         const buf = st().buffers.get(uri);
         if (!buf || !buf.dirty) continue; // saved or removed since the snapshot
@@ -114,14 +116,19 @@ export function createWorkspaceSave(ctx: WorkspaceModuleCtx) {
           await platform.writeTextFile(buf.path, written);
           const after = st().buffers.get(uri);
           if (after && after.text === written) st().markSaved([uri]);
-          saved++;
+          savedUris.add(uri);
         } catch (e) {
           failures++;
           console.error('writeTextFile failed for', buf.path, e);
         }
       }
-      if (saved > 0) {
-        lsp.didSave();
+      if (savedUris.size > 0) {
+        // didSave() targets the ACTIVE doc. Fire it when either nothing switched during the write loop
+        // (the pre-existing behavior — the active doc may not itself have been dirty, e.g. auto-save
+        // persisting a background buffer) or the buffer switched TO is one that was actually saved this
+        // pass; a switch to an unrelated, unsaved buffer must not tell the server it saved.
+        const current = st().activeUri;
+        if (current === activeUri || savedUris.has(current)) lsp.didSave();
         renderTree();
         st().bumpSaved(); // #470: at least one buffer hit disk — the saveSeq subscriber refreshes the SC panel
       }
