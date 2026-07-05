@@ -377,6 +377,28 @@ describe('lifecycleBoot', () => {
       expect(confirmReplaceWork).toHaveBeenCalled();
       expect(deps.openExample).toHaveBeenCalledWith(billing);
     });
+
+    // Regression: bootIntentPending only tracks "a boot intent was stranded"; it does NOT track
+    // whether bootIntent.ts's own pending intent is STILL there. If a return visit to Home (the
+    // pre-existing route-intent subscription) drains it first — e.g. the user picked a different
+    // action from Home before the sidecar actually recovers — bootIntentPending is still true when
+    // the real restart fires, but takeStartIntent() now returns null. The refresh must still run.
+    it('still refreshes views on the real restart when the retained intent was already drained elsewhere', async () => {
+      peekStartIntentMock.mockReturnValue({ kind: 'open-example', template: { id: 'billing', name: 'Billing' } as never });
+      const deps = makeRejectingDeps();
+      createLifecycleBoot(deps);
+      await flush(); // boot fails; bootIntentPending is now true
+
+      // The intent was already consumed by another path (e.g. a return-visit Home pick) — takeStartIntent
+      // returns null by the time the real onServerRestart fires.
+      takeStartIntentMock.mockReturnValue(null);
+      restartCallback(deps)();
+      await flush();
+
+      expect(deps.openExample).not.toHaveBeenCalled();
+      expect(deps.invalidateDocViews).toHaveBeenCalled();
+      expect(deps.refreshActiveSurfaces).toHaveBeenCalled();
+    });
   });
 
   it('teardown disposes every controller in the preserved order, then the route-intent sub', () => {

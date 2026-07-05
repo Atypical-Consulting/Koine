@@ -162,13 +162,17 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
   // Boot: attach listeners (inside start) before messages flow, then open the doc.
   deps.lsp.onServerRestart(() => {
     // A boot intent was stranded by a failed lsp.start(): perform it now, guarded (dirty buffers can
-    // exist by the time the server recovers), and fire only once — a later normal restart falls through
-    // to the plain view-refresh below (#973).
+    // exist by the time the server recovers), and fire only once (#973). bootIntentPending only tracks
+    // "a boot intent was stranded", not whether it's STILL pending — a return visit to Home can drain
+    // it via the route-intent subscription below before this restart fires. takeStartIntent() then
+    // returns null; fall through to the plain refresh rather than skipping it.
     if (bootIntentPending) {
       bootIntentPending = false;
       const intent = takeStartIntent();
-      if (intent) void runStartIntent(intent, { guarded: true });
-      return;
+      if (intent) {
+        void runStartIntent(intent, { guarded: true });
+        return;
+      }
     }
     // Fresh sidecar is back in sync; refresh whatever doc view is showing.
     deps.invalidateDocViews();
@@ -238,9 +242,9 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
       const intent = peekStartIntent();
       if (intent) {
         bootIntentPending = true;
-        const label = intentLabel(intent);
-        deps.setStatus(`Couldn't open "${label}" — the language server didn't start`, 'error');
-        deps.setOutput(`// Couldn't open "${label}" — the language server didn't start\n` + String(e), 'plain');
+        const message = `Couldn't open "${intentLabel(intent)}" — the language server didn't start`;
+        deps.setStatus(message, 'error');
+        deps.setOutput(`// ${message}\n` + String(e), 'plain');
       } else {
         deps.setStatus('connection failed', 'error');
         deps.setOutput('// failed to start language server\n' + String(e), 'plain');
