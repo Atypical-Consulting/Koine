@@ -9,6 +9,22 @@ export function createWorkspaceSave(ctx: WorkspaceModuleCtx) {
   const { st, deps, renderTree } = ctx;
   const { platform, lsp, editor } = deps;
 
+  // Shared eligibility guard for the post-write lsp.didSave() call (targets the LSP's *current* active
+  // doc, no uri argument) — used by both saveActive's single-uri call site and saveAllDirty's multi-uri
+  // one. Fire when either the request-time active uri was never attempted this pass AND nothing
+  // switched (the auto-save precedent — the active doc may not itself have been dirty), or the CURRENT
+  // active uri is one confirmed clean (write succeeded and is still fresh) this pass — a switch to (or
+  // staying on) an unrelated, unattempted, failed, or re-dirtied buffer must not tell the server it saved.
+  function shouldNotifyDidSave(
+    requestActiveUri: string,
+    confirmedUris: ReadonlySet<string>,
+    attemptedUris: ReadonlySet<string>,
+  ): boolean {
+    const current = st().activeUri;
+    const wasAttempted = attemptedUris.has(requestActiveUri);
+    return (current === requestActiveUri && !wasAttempted) || confirmedUris.has(current);
+  }
+
   // --- save (format + write to disk) ----------------------------------------
 
   let saveQueued = false;
@@ -49,10 +65,12 @@ export function createWorkspaceSave(ctx: WorkspaceModuleCtx) {
         const after = st().buffers.get(uri);
         const stillFresh = !!after && after.text === written;
         if (stillFresh) st().markSaved([uri]);
-        // didSave() targets the ACTIVE doc — only valid when it's still the one just written AND that
-        // write is still reflected (mirrors applyFileEdit's guard); neither a switch nor a keystroke
-        // landing mid-write may tell the server the wrong (or stale) doc saved.
-        if (stillFresh && st().activeUri === uri) lsp.didSave();
+        // uri is always "attempted" here (saveActive only ever targets the one buffer) — mirrors
+        // applyFileEdit's guard; neither a switch nor a keystroke landing mid-write may tell the server
+        // the wrong (or stale) doc saved.
+        const attempted = new Set([uri]);
+        const confirmed = stillFresh ? attempted : new Set<string>();
+        if (shouldNotifyDidSave(uri, confirmed, attempted)) lsp.didSave();
         renderTree();
         st().bumpSaved(); // #470: the on-disk git status changed — the saveSeq subscriber refreshes the SC panel
       } catch (e) {
@@ -133,15 +151,7 @@ export function createWorkspaceSave(ctx: WorkspaceModuleCtx) {
         }
       }
       if (writes > 0) {
-        // didSave() targets the ACTIVE doc. Fire it when either the active buffer was never part of
-        // this pass at all AND nothing switched (the pre-existing auto-save precedent — e.g. persisting
-        // a clean-active/dirty-background pass), or the buffer switched TO (or left untouched) is one
-        // CONFIRMED saved this pass; a switch to an unrelated, unsaved, or re-dirtied buffer — or the
-        // active buffer itself failing (or going stale on) its own write with no switch — must not tell
-        // the server it saved (#1055).
-        const activeWasAttempted = dirtyUris.includes(activeUri);
-        const current = st().activeUri;
-        if ((current === activeUri && !activeWasAttempted) || savedUris.has(current)) lsp.didSave();
+        if (shouldNotifyDidSave(activeUri, savedUris, new Set(dirtyUris))) lsp.didSave();
         renderTree();
         st().bumpSaved(); // #470: at least one buffer hit disk — the saveSeq subscriber refreshes the SC panel
       }
