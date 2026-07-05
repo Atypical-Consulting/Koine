@@ -1561,3 +1561,40 @@ describe('createInspectorController — teardown / disposal (#980)', () => {
   });
 });
 
+describe('createInspectorController — teardown / disposal, in-flight loader (#1002)', () => {
+  // #980 fixed subscriptions that were LIVE at dispose time; this targets the async sibling — a surface
+  // loader that is still AWAITING its fetch when dispose() runs. The resolved continuation must not mount
+  // a fresh store-subscribing panel (or write to the host at all) on behalf of a torn-down controller.
+  test('an in-flight loadModel() that resolves after dispose() does not re-subscribe or repaint', async () => {
+    const { store, active } = createCountingStore();
+    const lsp = makeLsp();
+    // Hold ensureModelIndex()'s Promise.all pending: glossaryModel is one of its three legs, and the other
+    // two (livingDocs/model) resolve immediately from the default stub, so this alone keeps loadModel
+    // in flight until the test resolves it.
+    let resolveGlossary!: (model: GlossaryModel) => void;
+    lsp.glossaryModel.mockImplementation(
+      () =>
+        new Promise<GlossaryModel>((resolve) => {
+          resolveGlossary = resolve;
+        }),
+    );
+
+    const ctl = createInspectorController(makeDeps(lsp, { store }));
+    ctl.init();
+    // Isolate loadModel: on the technical center only the left rail (loadModel) is live, so no sibling
+    // loader (loadDiagrams / loadGlossary) races the same dispose.
+    ctl.selectCenter('technical');
+    const baseline = active();
+
+    ctl.refreshActiveSurfaces(); // kicks off loadModel(); it suspends on the deferred glossaryModel fetch
+    ctl.dispose(); // tear down WHILE that fetch is still in flight
+
+    resolveGlossary(glossaryFixture());
+    await flush(); // let the microtask-chained continuation run
+    await new Promise((resolve) => setTimeout(resolve, 0)); // + a macrotask — Preact effects subscribe deferred
+
+    expect(active()).toBe(baseline); // the resolved loader must not have mounted a fresh subscribing panel
+    expect(domById('inspector-host').innerHTML).toBe(''); // ...nor written into the torn-down host
+  });
+});
+
