@@ -461,6 +461,48 @@ public class RustSnapshotTests
     }
 
     /// <summary>
+    /// Regression (#970): a <c>sum</c>-folded value object with optional numeric fields (<c>Int?</c> +
+    /// <c>Decimal?</c>) must lift <c>impl Add</c> over each <c>Option</c>, mirroring the #964 fix for
+    /// the scalar <c>Mul</c>/<c>Div</c> operators. Before the fix the emitter switched on the field's
+    /// type name only, ignoring <c>IsOptional</c>, and emitted <c>self.steps + other.steps</c> where
+    /// both sides are <c>Option&lt;i64&gt;</c> — non-compiling Rust (E0369).
+    /// </summary>
+    [Fact]
+    public void Rust_sum_folded_value_object_with_optional_numeric_fields_lifts_add_over_the_option()
+    {
+        const string model = """
+            context Shop {
+              value Tally {
+                total: Decimal
+                steps: Int?
+                ratio: Decimal?
+                invariant total >= 0 "total cannot be negative"
+              }
+              entity Batch identified by BatchId {
+                tallies: List<Tally>
+              }
+              readmodel Summed from Batch {
+                combined: Tally = tallies.sum(t => t)
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
+        shop.ShouldContain("impl std::ops::Add for Tally");
+        shop.ShouldContain("total: self.total + other.total");
+        shop.ShouldContain("steps: self.steps.zip(other.steps).map(|(a, b)| a + b)");
+        shop.ShouldContain("ratio: self.ratio.zip(other.ratio).map(|(a, b)| a + b)");
+        shop.ShouldNotContain("steps: self.steps + other.steps");
+        shop.ShouldNotContain("ratio: self.ratio + other.ratio");
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
     /// Regression: a derived (computed) member is emitted as an accessor method, so a reference to it
     /// from another expression must render as a call <c>self.x()</c>, not a field read <c>self.x</c>.
     /// </summary>

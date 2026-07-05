@@ -12,7 +12,7 @@ Values: Scheduled, PickedUp, EnRoute, Delivered, Failed
 
 ### Address — value
 
-A street address a pizza can be delivered to. A first-class value object so a delivery destination is never a bare string, validated by shape and normalized via string ops (R1.2). Owned here and supplied to partners (see context-map).
+A street address a pizza can be delivered to. A first-class value object so a delivery destination is never a bare string, validated by shape and normalized via string ops. Owned here and supplied to partners (see context-map).
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -41,11 +41,11 @@ A driver assigned to a delivery. A small value object so an assignee is typed.
 
 ### Dispatch — aggregate (root: Delivery)
 
-The delivery aggregate: one record per delivery order. Being an aggregate root it gains an `IDeliveryRepository` and joins the context UoW; the repository block adds intention-revealing finders (R11.3).
+The delivery aggregate: one record per delivery order. Being an aggregate root it gains an `IDeliveryRepository` and joins the context UoW; the repository block adds intention-revealing finders.
 
 #### DeliveryScheduled — event
 
-Raised inside the aggregate when a delivery is scheduled by the factory (R6/R8).
+Raised inside the aggregate when a delivery is scheduled by the factory.
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -54,7 +54,7 @@ Raised inside the aggregate when a delivery is scheduled by the factory (R6/R8).
 
 #### DeliveryCompleted — event
 
-Raised when a delivery is completed (R6).
+Raised when a delivery is completed.
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -79,7 +79,7 @@ Identified by `DeliveryId`.
 
 ### Services
 
-- **DeliveryService** — R12.2 — the application service interface (IDeliveryService).
+- **DeliveryService** — the application service interface (IDeliveryService).
 
 ## Kitchen — version 1
 
@@ -99,7 +99,7 @@ Values: Queued, Prepping, Baking, Ready, Served, Scrapped
 
 ### TicketReady — integration event
 
-Raised when a ticket is finished and put up on the pass (R6). A delivery / dine-in handler reacts to it; kept primitive as a published fact.
+Raised when a ticket is finished and put up on the pass. A delivery / dine-in handler reacts to it; kept primitive as a published fact.
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -107,13 +107,13 @@ Raised when a ticket is finished and put up on the pass (R6). A delivery / dine-
 | order | `OrderId` |  |
 | readyAt | `Instant` |  |
 
-### KitchenTicket — aggregate (root: KitchenTicket)
+### Cooking — aggregate (root: KitchenTicket)
 
-The kitchen-ticket aggregate: one ticket per order on the line. Being an aggregate root it gains an `IKitchenTicketRepository` and joins the context UoW; the repository block adds intention-revealing finders (R11.3).
+The kitchen-ticket aggregate: one ticket per order on the line. Being an aggregate root it gains an `IKitchenTicketRepository` and joins the context UoW; the repository block adds intention-revealing finders.
 
 #### TicketOpened — event
 
-Raised inside the aggregate when a ticket is opened by the factory (R6/R8).
+Raised inside the aggregate when a ticket is opened by the factory.
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -122,7 +122,7 @@ Raised inside the aggregate when a ticket is opened by the factory (R6/R8).
 
 #### TicketStartedBaking — event
 
-Raised when a ticket goes into the oven (R6).
+Raised when a ticket goes into the oven.
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -150,7 +150,7 @@ Identified by `TicketId`.
 
 ## Menu — version 2
 
-Menu bounded context — the catalogue of pizzas, sizes and toppings the pizzeria sells. It is the upstream that publishes the *ubiquitous language* of money and toppings; Ordering shares its `Currency` as a shared kernel and conforms to its `Topping` weight (see context-map.koi).  Version 2 of the published model (R15): a `kcal` nutrition field was added in v2, demonstrating contract evolution with `@since`.
+Menu bounded context — the catalogue of pizzas, sizes and toppings the pizzeria sells. It is the upstream that publishes the *ubiquitous language* of money and toppings; Ordering shares its `Currency` as a shared kernel and conforms to its `Topping` weight (see context-map.koi).  Version 2 of the published model: a `kcal` nutrition field was added in v2, demonstrating contract evolution with `@since`.
 
 ### Currency — enum
 
@@ -218,7 +218,7 @@ A topping that can be added to a pizza — pepperoni, mushrooms, extra cheese. A
 
 ### Catalog — aggregate (root: Pizza)
 
-A pizza on the menu — the product the pizzeria sells. Its identity is a *natural* string key (`PizzaCode as natural(String)`, no client-side New()), and being an aggregate root it gains an `IPizzaRepository` and joins the context's generated `IUnitOfWork` (R11/R12). The `repository` block tunes the mutating set and adds intention-revealing finders (R11.3).
+A pizza on the menu — the product the pizzeria sells. Its identity is a *natural* string key (`PizzaCode as natural(String)`, no client-side New()), and being an aggregate root it gains an `IPizzaRepository` and joins the context's generated `IUnitOfWork`. The `repository` block tunes the mutating set and adds intention-revealing finders.
 
 #### Pizza — entity
 
@@ -243,7 +243,7 @@ Identified by `PizzaCode`.
 
 ## Ordering — version 1
 
-Ordering bounded context — taking and pricing a customer's pizza order. This is the heart of the template: the `Order` aggregate is the headline aggregate, its lifecycle is an explicit state machine (R7), it is priced from its line items (R1), and it publishes `OrderPlaced` so Kitchen, Delivery and Payment can react.
+Ordering bounded context — taking and pricing a customer's pizza order. This is the heart of the template: the `Sales` aggregate (root `Order`) is the headline aggregate, its lifecycle is an explicit state machine, it is priced from its line items , and it publishes `OrderPlaced` so Kitchen, Delivery and Payment can react.
 
 ### Fulfillment — enum
 
@@ -271,7 +271,7 @@ A monetary amount in a specific currency. Never negative. `Currency` is a shared
 
 ### OrderPlaced — integration event
 
-Announced to the rest of the system when an order is placed (R14.3). An integration event is a *published language* — its fields stay primitive (ids/scalars/enums), never leaking internal value objects. Kitchen, Delivery and Payment all subscribe to it (authorized by the open-host relations).
+Announced to the rest of the system when an order is placed. An integration event is a *published language* — its fields stay primitive (ids/scalars/enums), never leaking internal value objects. Kitchen, Delivery and Payment all subscribe to it (authorized by the open-host relations).
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -281,13 +281,13 @@ Announced to the rest of the system when an order is placed (R14.3). An integrat
 | total | `Decimal` |  |
 | placedAt | `Instant` |  |
 
-### Order — aggregate (root: Order)
+### Sales — aggregate (root: Order)
 
-The order aggregate. `versioned` adds an optimistic-concurrency token (R11.4); the `repository` block tunes the mutating set and adds intention-revealing finders (R11.3); being an aggregate it also joins the context `IUnitOfWork`.
+The order aggregate. `versioned` adds an optimistic-concurrency token; the `repository` block tunes the mutating set and adds intention-revealing finders; being an aggregate it also joins the context `IUnitOfWork`.
 
 #### OrderOpened — event
 
-Raised when an order is opened by the factory (R6/R8).
+Raised when an order is opened by the factory.
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -297,7 +297,7 @@ Raised when an order is opened by the factory (R6/R8).
 
 #### OrderPlacedInternally — event
 
-Raised when an order is placed for processing (R6).
+Raised when an order is placed for processing.
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -306,7 +306,7 @@ Raised when an order is placed for processing (R6).
 
 #### OrderCancelled — event
 
-Raised when an order is cancelled (R6).
+Raised when an order is cancelled.
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -353,11 +353,11 @@ Identified by `OrderId`.
 
 ### Services
 
-- **OrderingService** — R12.2 — the application/use-case service interface (IOrderingService). Each use case maps to one async method; a context with aggregates also gets a UoW.
+- **OrderingService** — the application/use-case service interface (IOrderingService). Each use case maps to one async method; a context with aggregates also gets a UoW.
 
 ## Payment — version 1
 
-Payment bounded context — charging the customer for an order and keeping the books. It is downstream of a third-party card gateway whose model we do NOT control, so it shields itself with an anti-corruption layer (R14.2): the raw gateway result is translated into our own `PaymentReceipt` (the acl block lives in context-map.koi). Two aggregates — Billing and Ledger — exercise a multi- aggregate context with a cross-aggregate policy.  Naming note: the root entity is `Charge`, deliberately NOT `Payment`. A C# type must not share its enclosing namespace's name, and this context emits into a `Payment` namespace; an entity called `Payment` would collide with it, exactly as the demo avoided by pairing a `Payments` context with a `Payment` entity.
+Payment bounded context — charging the customer for an order and keeping the books. It is downstream of a third-party card gateway whose model we do NOT control, so it shields itself with an anti-corruption layer: the raw gateway result is translated into our own `PaymentReceipt` (the acl block lives in context-map.koi). Two aggregates — Billing and Ledger — exercise a multi- aggregate context with a cross-aggregate policy.  Naming note: the root entity is `Charge`, deliberately NOT `Payment`. A C# type must not share its enclosing namespace's name, and this context emits into a `Payment` namespace; an entity called `Payment` would collide with it, exactly as the demo avoided by pairing a `Payments` context with a `Payment` entity.
 
 ### PaymentMethod — enum
 
@@ -404,7 +404,7 @@ The charge aggregate — one charge against an order.
 
 #### ChargeAuthorized — event
 
-Raised when a charge is authorized by the factory (R6/R8).
+Raised when a charge is authorized by the factory.
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -425,7 +425,7 @@ Identified by `ChargeId`.
 
 ### Books — aggregate (root: LedgerEntry)
 
-A second aggregate — the revenue ledger. Two aggregates in one context means the generated IUnitOfWork exposes both repositories (R12.1).
+A second aggregate — the revenue ledger. Two aggregates in one context means the generated IUnitOfWork exposes both repositories.
 
 #### LedgerEntry — entity
 
@@ -438,7 +438,7 @@ Identified by `LedgerEntryId`.
 
 ### Services
 
-- **PaymentService** — R12.2 — the application service interface (IPaymentService).
+- **PaymentService** — the application service interface (IPaymentService).
 
 ### Policies
 
@@ -469,7 +469,7 @@ Values: Percentage, FixedAmount, FreeDelivery
 
 ### Coupon — value
 
-A coupon code a customer can apply. A first-class value object so a coupon is never a bare string, validated by shape (R1.2).
+A coupon code a customer can apply. A first-class value object so a coupon is never a bare string, validated by shape.
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -502,6 +502,6 @@ A discount applied to an order total. THE rule of this context: the discounted t
 
 ### Services
 
-- **DiscountService** — R10.2 — a domain service with pure operations (expression bodies). `cap` clamps a requested discount so it can never exceed the order total (the safe way to build a `Discount`); `rate` gives the percentage rate for a deal kind.
+- **DiscountService** — a domain service with pure operations (expression bodies). `cap` clamps a requested discount so it can never exceed the order total (the safe way to build a `Discount`); `rate` gives the percentage rate for a deal kind.
   - `cap(orderTotal: Decimal, requested: Decimal): Decimal`
   - `rate(kind: DealKind): Decimal`

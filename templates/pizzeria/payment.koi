@@ -1,6 +1,6 @@
 /// Payment bounded context — charging the customer for an order and keeping the
 /// books. It is downstream of a third-party card gateway whose model we do NOT
-/// control, so it shields itself with an anti-corruption layer (R14.2): the raw
+/// control, so it shields itself with an anti-corruption layer: the raw
 /// gateway result is translated into our own `PaymentReceipt` (the acl block lives
 /// in context-map.koi). Two aggregates — Billing and Ledger — exercise a multi-
 /// aggregate context with a cross-aggregate policy.
@@ -11,7 +11,7 @@
 /// as the demo avoided by pairing a `Payments` context with a `Payment` entity.
 context Payment version 1 {
 
-  // R14.3 — react to placed orders (authorized by `Ordering -> Payment : open-host`
+  // react to placed orders (authorized by `Ordering -> Payment : open-host`
   // in context-map.koi). Emits an IHandleOrderPlaced seam the biller implements to
   // authorize a charge for the new order.
   subscribes Ordering.OrderPlaced
@@ -29,7 +29,7 @@ context Payment version 1 {
     invariant amount >= 0   "an amount cannot be negative"
   }
 
-  // R14.2 — the destination type the anti-corruption layer translates the gateway's
+  // the destination type the anti-corruption layer translates the gateway's
   // raw result into (see the `acl { … }` block in context-map.koi). Payment code
   // only ever sees this clean type, never the gateway's shape.
   value PaymentReceipt {
@@ -52,7 +52,7 @@ context Payment version 1 {
       find byOrder(order: OrderId): List<Charge>
     }
 
-    /// Raised when a charge is authorized by the factory (R6/R8).
+    /// Raised when a charge is authorized by the factory.
     event ChargeAuthorized {
       charge: ChargeId
       order:  OrderId
@@ -64,7 +64,7 @@ context Payment version 1 {
       method:  PaymentMethod
       status:  ChargeStatus = Authorized
 
-      // Derived read helper (R1.1).
+      // Derived read helper.
       isSettled: Bool = status == Captured
 
       states status {
@@ -74,20 +74,20 @@ context Payment version 1 {
         Failed
       }
 
-      /// Capture an authorized charge (R5/R6). The ledger-posting policy reacts.
+      /// Capture an authorized charge. The ledger-posting policy reacts.
       command capture {
         requires status == Authorized   "only an authorized charge can be captured"
         status -> Captured
         emit ChargeCaptured(charge: id, capturedAmount: amount.amount)
       }
 
-      /// Refund a captured charge (R5).
+      /// Refund a captured charge.
       command refund {
         requires status == Captured   "only a captured charge can be refunded"
         status -> Refunded
       }
 
-      /// R8 — authorize a charge for an order.
+      /// authorize a charge for an order.
       create authorize(order: OrderId, amount: Money, method: PaymentMethod) {
         emit ChargeAuthorized(charge: id, order: order)
       }
@@ -95,25 +95,25 @@ context Payment version 1 {
   }
 
   /// A second aggregate — the revenue ledger. Two aggregates in one context means
-  /// the generated IUnitOfWork exposes both repositories (R12.1).
+  /// the generated IUnitOfWork exposes both repositories.
   aggregate Books root LedgerEntry {
     entity LedgerEntry identified by LedgerEntryId {
       charge:  ChargeId
       balance: Decimal
 
-      /// Post an amount to the ledger entry (R5).
+      /// Post an amount to the ledger entry.
       command record(amount: Decimal) {
         balance -> amount
       }
     }
   }
 
-  /// R10.3 — a policy reacting to a domain event across aggregates: when a charge is
+  /// a policy reacting to a domain event across aggregates: when a charge is
   /// captured, post it to the ledger. Koine emits the handler seam (the imperative
   /// call is documented, not generated).
   policy PostToLedger when ChargeCaptured then Books.record(amount: capturedAmount)
 
-  /// R12.2 — the application service interface (IPaymentService).
+  /// the application service interface (IPaymentService).
   service PaymentService {
     usecase AuthorizeCharge(order: OrderId, amount: Money, method: PaymentMethod): ChargeId
     usecase CaptureCharge(charge: ChargeId)

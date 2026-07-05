@@ -4,7 +4,7 @@
 /// delivery order must carry a delivery address.
 context Delivery version 1 {
 
-  // R14.3 — react to placed orders (authorized by `Ordering -> Delivery : open-host`
+  // react to placed orders (authorized by `Ordering -> Delivery : open-host`
   // in context-map.koi). Emits an IHandleOrderPlaced seam the dispatcher implements
   // to create a delivery for a delivery-fulfilment order.
   subscribes Ordering.OrderPlaced
@@ -14,7 +14,7 @@ context Delivery version 1 {
 
   /// A street address a pizza can be delivered to. A first-class value object so a
   /// delivery destination is never a bare string, validated by shape and normalized
-  /// via string ops (R1.2). Owned here and supplied to partners (see context-map).
+  /// via string ops. Owned here and supplied to partners (see context-map).
   value Address {
     street:     String
     city:       String
@@ -36,7 +36,7 @@ context Delivery version 1 {
 
   /// The delivery aggregate: one record per delivery order. Being an aggregate root
   /// it gains an `IDeliveryRepository` and joins the context UoW; the repository
-  /// block adds intention-revealing finders (R11.3).
+  /// block adds intention-revealing finders.
   aggregate Dispatch root Delivery {
 
     repository {
@@ -45,13 +45,13 @@ context Delivery version 1 {
       find byCourier(courier: Courier): List<Delivery>
     }
 
-    /// Raised inside the aggregate when a delivery is scheduled by the factory (R6/R8).
+    /// Raised inside the aggregate when a delivery is scheduled by the factory.
     event DeliveryScheduled {
       delivery: DeliveryId
       order:    OrderId
     }
 
-    /// Raised when a delivery is completed (R6).
+    /// Raised when a delivery is completed.
     event DeliveryCompleted {
       delivery: DeliveryId
     }
@@ -65,7 +65,7 @@ context Delivery version 1 {
       courier:     Courier?
       status:      DeliveryStatus = Scheduled
 
-      // Derived (computed, get-only) read helpers (R1.1 / R2.1).
+      // Derived (computed, get-only) read helpers.
       assigned:    Bool = courier.isPresent
       isDelivered: Bool = status == Delivered
 
@@ -79,7 +79,7 @@ context Delivery version 1 {
       invariant courier.isPresent when status == EnRoute
         "a delivery en route must have a courier"
 
-      // The delivery lifecycle (R7): scheduled, picked up, en route, delivered —
+      // The delivery lifecycle: scheduled, picked up, en route, delivered —
       // or failed if it could not be completed.
       states status {
         Scheduled -> PickedUp, Failed
@@ -89,28 +89,28 @@ context Delivery version 1 {
         Failed
       }
 
-      /// Assign a courier and have them collect the order (R5).
+      /// Assign a courier and have them collect the order.
       command pickUp(by: Courier) {
         requires status == Scheduled   "only a scheduled delivery can be picked up"
         courier -> by
         status  -> PickedUp
       }
 
-      /// Send a picked-up delivery on its way (R5).
+      /// Send a picked-up delivery on its way.
       command depart {
         requires status == PickedUp   "only a picked-up delivery can depart"
         requires courier.isPresent    "a delivery cannot depart without a courier"
         status -> EnRoute
       }
 
-      /// Mark a delivery as completed at the door (R5/R6).
+      /// Mark a delivery as completed at the door.
       command complete {
         requires status == EnRoute   "only an en-route delivery can be completed"
         status -> Delivered
         emit DeliveryCompleted(delivery: id)
       }
 
-      /// R8 — schedule a delivery for a placed delivery order. The same-named
+      /// schedule a delivery for a placed delivery order. The same-named
       /// parameters auto-bind the required fields; `status` defaults to Scheduled.
       create schedule(order: OrderId, destination: Address) {
         requires destination.street.trim.length > 0   "a delivery order requires a delivery address"
@@ -119,13 +119,13 @@ context Delivery version 1 {
     }
   }
 
-  /// R12.2 — the application service interface (IDeliveryService).
+  /// the application service interface (IDeliveryService).
   service DeliveryService {
     usecase ScheduleDelivery(order: OrderId, destination: Address): DeliveryId
     usecase CompleteDelivery(delivery: DeliveryId)
   }
 
-  /// R12.3 — a flat read model for the dispatch board.
+  /// a flat read model for the dispatch board.
   readmodel DeliveryTicket from Delivery {
     id
     order
@@ -133,6 +133,6 @@ context Delivery version 1 {
     destination
   }
 
-  /// R12.4 — a query DTO over the dispatch board.
+  /// a query DTO over the dispatch board.
   query DeliveriesByStatus(status: DeliveryStatus): List<DeliveryTicket>
 }
