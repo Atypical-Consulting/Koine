@@ -647,8 +647,15 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     // NB: opening a workspace no longer auto-switches the rail to the Files axis — the rail defaults to
     // (and stays on) Domain, the DDD navigator. The file tree is one click away (the Files axis button /
     // ⌘B), and the Domain navigator's "Reveal in Files" still switches deliberately.
+    // ide.ts restores this workspace's bounded-context scope BEFORE the first scoped render and
+    // refreshes the doc surfaces. The bus value drives the render paths, so the initial ensureLoaded
+    // is already scoped even before the dropdown finishes repainting. It ALSO applies THIS folder's own
+    // effective workspace-scoped settings synchronously (applyEffectiveScoped → setEmitTarget) — so the
+    // recent-tag capture below must read `emitTarget` only AFTER this call, or it still carries the
+    // PREVIOUSLY-opened folder's effective target for one render (#1015).
+    deps.onFolderOpened(folder, { recent: opts.recent ?? true });
     if (opts.recent ?? true) {
-      // #1005: tag the recent with the effective emit target now (synchronous), then — desktop only —
+      // #1005: tag the recent with the now-effective emit target (synchronous), then — desktop only —
       // enrich it with the git branch via a best-effort, non-blocking follow-up. `git status` must
       // never delay or fail the open, so it is fired-and-forgotten and re-pushes the same entry
       // (pushRecentFolder preserves the already-stored language on that bare-meta re-push).
@@ -670,10 +677,6 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
       // openWorkspaceWith1File, the default-workspace flow) don't overwrite the pointer.
       deps.rememberLastWorkspace?.(folder);
     }
-    // ide.ts restores this workspace's bounded-context scope BEFORE the first scoped render and
-    // refreshes the doc surfaces. The bus value drives the render paths, so the initial ensureLoaded
-    // is already scoped even before the dropdown finishes repainting.
-    deps.onFolderOpened(folder, { recent: opts.recent ?? true });
     // Fetch the full explorer tree (dirs + .koi) and render it; falls back silently on failure.
     await refreshEntries();
     return { ok: true };
