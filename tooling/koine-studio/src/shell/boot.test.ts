@@ -2,18 +2,43 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { saveSettings, DEFAULT_SETTINGS } from '@/settings/persistence';
 
 // Stub the IDE shell so booting doesn't pull the whole editor module graph, and so we can assert
-// whether init() runs per route. The real init() is exercised exhaustively in ide.test.ts.
+// whether init() runs per route. The real init() is exercised exhaustively in ide.test.ts. BLANK is
+// exported alongside init (#1017: main.ts imports both) — a plain string stand-in is enough here since
+// these tests only assert main.ts's own lastClonedPath wiring, never the seed content itself.
+type IdeHooks = {
+  onOpenRecentFailed?: (path: string, reason: 'unreadable' | 'empty') => void;
+  onOpenRecentSucceeded?: (path: string) => void;
+};
 const { ideInit } = vi.hoisted(() => ({
-  ideInit: vi.fn<(hooks?: { onOpenRecentFailed?: (path: string, reason: 'unreadable' | 'empty') => void }) => () => void>(
-    () => () => {},
-  ),
+  ideInit: vi.fn<(hooks?: IdeHooks) => () => void>(() => () => {}),
 }));
-vi.mock('@/shell/ide', () => ({ init: ideInit }));
+vi.mock('@/shell/ide', () => ({ init: ideInit, BLANK: 'context NewModel {}\n' }));
 
 // Mock the shared live-region announcer (#522) so the perceivability-gated announcement (#573) is
 // observable without a real DOM live region. main.ts wires the affordances to this default announce.
 const { announceMock } = vi.hoisted(() => ({ announceMock: vi.fn() }));
 vi.mock('@/shell/liveRegion', () => ({ announce: announceMock, LIVE_REGION_ID: 'koi-live-region' }));
+
+// A fake Platform (#1017) so the clone→empty→"Open anyway" flow can be driven end-to-end without a
+// real git/filesystem host: canUseGit toggles the Home Clone row, and pickFolder/gitClone/createFile
+// are per-test-configurable spies. Every other boot.test.ts test relies on the DEFAULT (canUseGit:
+// false, so no Clone row) — matches the real BrowserPlatform this replaces in a non-Tauri test env.
+const { fakePlatform } = vi.hoisted(() => ({
+  fakePlatform: {
+    canUseGit: false,
+    pickFolder: vi.fn(async (): Promise<string | null> => null),
+    gitClone: vi.fn(async (): Promise<string> => {
+      throw new Error('gitClone not configured for this test');
+    }),
+    createFile: vi.fn(async (): Promise<string> => 'token'),
+    // Touched passively by every Home mount's colophon footer (fillVersionChip / external links) —
+    // stubbed so replacing the whole @/host module doesn't break the OTHER boot.test.ts tests that
+    // never interact with Clone at all.
+    appVersion: vi.fn(async (): Promise<string> => '0.0.0-test'),
+    openExternal: vi.fn(),
+  },
+}));
+vi.mock('@/host', () => ({ getPlatform: () => fakePlatform }));
 
 import { bootStudio } from '../main';
 import { appStore } from '@/store';
@@ -26,6 +51,10 @@ let dispose: (() => void) | null = null;
 beforeEach(() => {
   ideInit.mockClear();
   announceMock.mockClear();
+  fakePlatform.canUseGit = false;
+  fakePlatform.pickFolder.mockReset().mockResolvedValue(null);
+  fakePlatform.gitClone.mockReset().mockRejectedValue(new Error('gitClone not configured for this test'));
+  fakePlatform.createFile.mockReset().mockResolvedValue('token');
   appStore.setState({ route: 'home' });
   localStorage.clear();
   location.hash = '';
@@ -194,6 +223,115 @@ describe('bootStudio — a single routed view (no IDE→Home flash)', () => {
     // The dead recent is forgotten and the recents list rebuilt to its empty state on Home.
     expect(localStorage.getItem('koine.studio.recentFolders')).not.toContain('ghost');
     expect(root.querySelector('.koi-welcome-empty')).not.toBeNull();
+  });
+
+  /** Drive Home's real Clone form: open it, fill the URL, and submit. */
+  function submitClone(root: HTMLElement, url: string): void {
+    root.querySelector<HTMLButtonElement>('.koi-welcome-clone-trigger')!.click();
+    const urlInput = root.querySelector<HTMLInputElement>('.koi-welcome-clone-url')!;
+    urlInput.value = url;
+    urlInput.dispatchEvent(new Event('input', { bubbles: true }));
+    root.querySelector<HTMLButtonElement>('.koi-welcome-clone-submit')!.click();
+  }
+
+  /**
+   * The confirm dialog's affirmative button by its exact label, but ONLY when the dialog is actually
+   * open — koiConfirm is a shared singleton whose DOM persists (hidden, not removed) across calls, so
+   * a bare querySelector would still find a PRIOR call's now-closed button and report a false positive.
+   */
+  function confirmButton(label: string): HTMLButtonElement | undefined {
+    const backdrop = document.querySelector<HTMLElement>('.koi-modal-backdrop');
+    if (!backdrop || backdrop.hidden) return undefined;
+    return [...backdrop.querySelectorAll<HTMLButtonElement>('.koi-confirm-btn')].find((b) => b.textContent === label);
+  }
+
+  it('cloning an empty repo shows the cloned-empty notice, and Open-anyway seeds + reopens it (#1017)', async () => {
+    fakePlatform.canUseGit = true;
+    fakePlatform.pickFolder.mockResolvedValue('/parent');
+    fakePlatform.gitClone.mockResolvedValue('/repos/my-clone');
+
+    let hooks: IdeHooks | undefined;
+    ideInit.mockImplementationOnce((h) => {
+      hooks = h;
+      return () => {};
+    });
+
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    dispose = bootStudio(root); // pristine → Home, with the Clone row (canUseGit)
+
+    submitClone(root, 'https://github.com/user/repo.git');
+    await Promise.resolve(); // pickFolder
+    await Promise.resolve(); // gitClone
+    await Promise.resolve(); // pushRecentFolder + go() → navigate('editor') captures hooks
+
+    expect(hooks?.onOpenRecentFailed).toBeTypeOf('function');
+    expect(appStore.getState().route).toBe('editor');
+
+    // The IDE reports the clone's own open-recent attempt as empty (no .koi files yet).
+    hooks!.onOpenRecentFailed!('/repos/my-clone', 'empty');
+    expect(appStore.getState().route).toBe('home');
+
+    // The cloned-empty notice — not the dead-recent one — offers "Open anyway".
+    const openAnyway = confirmButton('Open anyway');
+    expect(openAnyway).toBeDefined();
+    openAnyway!.click();
+    await Promise.resolve(); // koiConfirm resolves → cb.onOpenEmptyAnyway(path)
+
+    // "Open anyway" seeds a first model in the cloned folder, then reopens it via the same flow.
+    expect(fakePlatform.createFile).toHaveBeenCalledWith('/repos/my-clone', 'model.koi', 'context NewModel {}\n');
+    await Promise.resolve(); // createFile
+    await Promise.resolve(); // go() → navigate('editor') again (ideStarted already true — init() not re-called)
+    expect(appStore.getState().route).toBe('editor');
+
+    // The retry succeeds this time: the IDE reports success, clearing the one-shot tracking.
+    hooks!.onOpenRecentSucceeded!('/repos/my-clone');
+
+    // A LATER, unrelated failure on the same (now-opened) path must not replay the stale clone notice.
+    hooks!.onOpenRecentFailed!('/repos/my-clone', 'empty');
+    expect(confirmButton('Open anyway')).toBeUndefined();
+  });
+
+  it('an unrelated open-recent outcome does not clear a different, still-pending clone (#1017 race)', async () => {
+    fakePlatform.canUseGit = true;
+    fakePlatform.pickFolder.mockResolvedValue('/parent');
+    fakePlatform.gitClone.mockResolvedValueOnce('/repos/A').mockResolvedValueOnce('/repos/B');
+
+    let hooks: IdeHooks | undefined;
+    ideInit.mockImplementationOnce((h) => {
+      hooks = h;
+      return () => {};
+    });
+
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    dispose = bootStudio(root);
+
+    // Clone A starts and navigates to the editor (still "in flight" from the boot layer's perspective —
+    // nothing has reported success or failure for it yet).
+    submitClone(root, 'https://github.com/user/repoA.git');
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(appStore.getState().route).toBe('editor');
+
+    // The user returns to Home (e.g. via the brand logo) before A's own open-recent attempt resolves,
+    // and clones a second, unrelated repo B — overwriting the tracked "most recent clone" path.
+    appStore.getState().navigate('home');
+    submitClone(root, 'https://github.com/user/repoB.git');
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(appStore.getState().route).toBe('editor');
+
+    // A's delayed failure arrives — it must NOT wipe B's still-pending tracking (the pre-fix bug: an
+    // unconditional `lastClonedPath = null` here would silently swallow B's own upcoming notice too).
+    hooks!.onOpenRecentFailed!('/repos/A', 'empty');
+    expect(confirmButton('Open anyway')).toBeUndefined(); // correctly not shown for A (not the tracked clone)
+
+    // B's own failure still gets its notice — proving B's tracking survived A's unrelated resolution.
+    hooks!.onOpenRecentFailed!('/repos/B', 'empty');
+    expect(confirmButton('Open anyway')).toBeDefined();
   });
 });
 

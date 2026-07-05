@@ -13,9 +13,10 @@ namespace Koine.Compiler;
 /// scans are easy to test and reason about independently of the emitter's mutable wiring.</para>
 ///
 /// <para><b>Shared across all five code emitters</b> (C#, TypeScript, Python, Php, Rust): it lives in
-/// the <c>Koine.Emit.Common</c> assembly (issue #861), even though the namespace is still
-/// <c>Koine.Compiler.Emit.CSharp</c> (kept unchanged so the extraction stays reference-only). It is not
-/// a C#-only helper — a new code emitter should reuse it rather than re-deriving operator needs.</para>
+/// the <c>Koine.Emit.Common</c> assembly (issue #861) under the target-neutral root
+/// <c>Koine.Compiler</c> namespace (issue #994), alongside its sibling helpers
+/// <see cref="FactoryIdBinding"/> and <see cref="MarkdownDoc"/>. It is not a C#-only helper — a new
+/// code emitter should reuse it rather than re-deriving operator needs.</para>
 /// </summary>
 internal static class OperatorNeedsAnalyzer
 {
