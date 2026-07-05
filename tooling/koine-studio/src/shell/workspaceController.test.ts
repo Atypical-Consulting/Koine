@@ -976,6 +976,33 @@ describe('createWorkspaceController — saveAllDirty', () => {
     expect(lsp.didSave).toHaveBeenCalledTimes(1);
   });
 
+  // Regression (#1055 — sibling gap left by #1009/#1052): the OLD `current === activeUri` fallback
+  // fired didSave() whenever nothing switched during the pass, with zero regard for whether the active
+  // buffer's own write (when it was itself part of this pass) actually landed. If the active buffer's
+  // write throws while a different dirty buffer succeeds, and no switch occurs, the server must not be
+  // told the active (still-dirty) document was saved.
+  test('the active buffer failing its own write (no switch) skips the trailing didSave', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const aUri = ws.activeUri(); // a.koi stays active throughout — no switch occurs
+    const bUri = uriOf('b.koi');
+    ws.buffers.get(aUri)!.dirty = true;
+    ws.buffers.get(bUri)!.dirty = true;
+    platform.failWrites.add('a.koi'); // the ACTIVE buffer's own write fails; b's write succeeds
+
+    await ws.saveAllDirty();
+
+    expect(ws.buffers.get(aUri)!.dirty).toBe(true); // still dirty — its write failed
+    expect(ws.buffers.get(bUri)!.dirty).toBe(false); // b saved fine
+    expect(lsp.didSave).not.toHaveBeenCalled();
+  });
+
   // Regression (#1009 code-review follow-up): a switch INTO a buffer that this pass wrote — but that
   // gets re-dirtied by a keystroke before its own write is confirmed — must not be treated as
   // confirmed saved just because its uri is in the written set; savedUris membership requires the

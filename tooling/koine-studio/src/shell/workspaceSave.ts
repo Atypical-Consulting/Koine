@@ -133,12 +133,15 @@ export function createWorkspaceSave(ctx: WorkspaceModuleCtx) {
         }
       }
       if (writes > 0) {
-        // didSave() targets the ACTIVE doc. Fire it when either nothing switched during the write loop
-        // (the pre-existing behavior — the active doc may not itself have been dirty, e.g. auto-save
-        // persisting a background buffer) or the buffer switched TO is one CONFIRMED saved this pass;
-        // a switch to an unrelated, unsaved, or re-dirtied buffer must not tell the server it saved.
+        // didSave() targets the ACTIVE doc. Fire it when either the active buffer was never part of
+        // this pass at all AND nothing switched (the pre-existing auto-save precedent — e.g. persisting
+        // a clean-active/dirty-background pass), or the buffer switched TO (or left untouched) is one
+        // CONFIRMED saved this pass; a switch to an unrelated, unsaved, or re-dirtied buffer — or the
+        // active buffer itself failing (or going stale on) its own write with no switch — must not tell
+        // the server it saved (#1055).
+        const activeWasAttempted = dirtyUris.includes(activeUri);
         const current = st().activeUri;
-        if (current === activeUri || savedUris.has(current)) lsp.didSave();
+        if ((current === activeUri && !activeWasAttempted) || savedUris.has(current)) lsp.didSave();
         renderTree();
         st().bumpSaved(); // #470: at least one buffer hit disk — the saveSeq subscriber refreshes the SC panel
       }
