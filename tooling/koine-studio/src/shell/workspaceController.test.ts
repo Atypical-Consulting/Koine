@@ -742,6 +742,40 @@ describe('createWorkspaceController — saveActive', () => {
 
     expect(lsp.didSave).toHaveBeenCalledTimes(1);
   });
+
+  // Regression (#1009 code-review follow-up): a keystroke landing mid-write on the SAME (never
+  // switched) buffer leaves it dirty again by the time the write resolves — the guard must check
+  // freshness (mirrors the markSaved check just above it), not just that the uri never switched.
+  test('a keystroke on the same buffer during the write skips didSave (content went stale)', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const origWrite = platform.writeTextFile.bind(platform);
+    let releaseWrite!: () => void;
+    const gate = new Promise<void>((res) => (releaseWrite = res));
+    platform.writeTextFile = async (path: string, contents: string) => {
+      await gate;
+      return origWrite(path, contents);
+    };
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const aUri = ws.activeUri();
+    editor.setDoc('context A { v1 }\n');
+    ws.syncActiveBuffer('context A { v1 }\n');
+
+    const save = ws.saveActive(); // synchronous until the awaited (gated) write
+    editor.setDoc('context A { v2 }\n');
+    ws.syncActiveBuffer('context A { v2 }\n'); // a keystroke lands mid-write — no buffer switch
+    releaseWrite();
+    await save;
+
+    // v1 hit disk, but the buffer now holds v2 (dirty again) — the server must not be told the
+    // (now-stale) active document was just saved.
+    expect(ws.buffers.get(aUri)!.dirty).toBe(true);
+    expect(lsp.didSave).not.toHaveBeenCalled();
+  });
 });
 
 describe('createWorkspaceController — saveAllDirty', () => {
@@ -912,6 +946,43 @@ describe('createWorkspaceController — saveAllDirty', () => {
     await ws.saveAllDirty();
 
     expect(lsp.didSave).toHaveBeenCalledTimes(1);
+  });
+
+  // Regression (#1009 code-review follow-up): a switch INTO a buffer that this pass wrote — but that
+  // gets re-dirtied by a keystroke before its own write is confirmed — must not be treated as
+  // confirmed saved just because its uri is in the written set; savedUris membership requires the
+  // SAME freshness check saveActive/markSaved use, not merely "the write didn't throw".
+  test('a switch to a buffer that goes stale before its write is confirmed skips didSave', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    // Gate b.koi's write so the active buffer can switch to it and be re-dirtied before it resolves.
+    const origWrite = platform.writeTextFile.bind(platform);
+    let releaseB!: () => void;
+    const bGate = new Promise<void>((res) => (releaseB = res));
+    platform.writeTextFile = async (path: string, contents: string) => {
+      if (path === `${ROOT}/b.koi`) await bGate;
+      return origWrite(path, contents);
+    };
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const bUri = uriOf('b.koi');
+    ws.buffers.get(bUri)!.dirty = true; // b is dirty in the background; a (active) stays clean
+
+    const save = ws.saveAllDirty(); // writes b.koi (gated)
+    ws.activateFile(bUri); // switch to b while its write is in flight
+    ws.syncBuffer(bUri, 'context B { edited again }\n'); // re-dirty b before its write resolves
+    releaseB();
+    await save;
+
+    // b.koi's write DID hit disk (with the pre-edit text), but b is dirty again by the time the pass
+    // finishes — the server must not be told the active (still-dirty) document was saved.
+    expect(platform.writes.some((w) => w.path === `${ROOT}/b.koi`)).toBe(true);
+    expect(ws.buffers.get(bUri)!.dirty).toBe(true);
+    expect(lsp.didSave).not.toHaveBeenCalled();
   });
 });
 
