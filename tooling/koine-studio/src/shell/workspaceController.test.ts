@@ -692,6 +692,90 @@ describe('createWorkspaceController — saveActive', () => {
     expect(lsp.format).toHaveBeenCalledTimes(1);
     expect(platform.writes.length).toBe(1);
   });
+
+  // Regression (#1009): lsp.didSave() targets the LSP's *current* active doc (no uri argument), but the
+  // trailing call was unconditional — a buffer switch landing during the awaited disk write made it
+  // notify the server about the NEWLY-active document, not the one saveActive actually wrote.
+  test('a buffer switch during the write is in flight skips didSave for the newly-active document', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    // Gate the write so the active buffer can switch while it is in flight.
+    const origWrite = platform.writeTextFile.bind(platform);
+    let releaseWrite!: () => void;
+    const gate = new Promise<void>((res) => (releaseWrite = res));
+    platform.writeTextFile = async (path: string, contents: string) => {
+      await gate;
+      return origWrite(path, contents);
+    };
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    editor.setDoc('context A { edited }\n');
+    ws.syncActiveBuffer('context A { edited }\n');
+
+    const save = ws.saveActive(); // synchronous until the awaited (gated) write
+    ws.activateFile(uriOf('b.koi')); // switch away from a.koi while the write is in flight
+    releaseWrite();
+    await save;
+
+    // a.koi was written to disk, but the active doc moved to b.koi before didSave fired — the server
+    // must not be told b.koi (which was NOT saved) is now clean.
+    expect(platform.writes[0].contents).toBe('context A { edited }\n');
+    expect(lsp.didSave).not.toHaveBeenCalled();
+  });
+
+  test('no buffer switch: saveActive still calls didSave for the saved document', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    editor.setDoc('context A { edited }\n');
+    ws.syncActiveBuffer('context A { edited }\n');
+
+    await ws.saveActive();
+
+    expect(lsp.didSave).toHaveBeenCalledTimes(1);
+  });
+
+  // Regression (#1009 code-review follow-up): a keystroke landing mid-write on the SAME (never
+  // switched) buffer leaves it dirty again by the time the write resolves — the guard must check
+  // freshness (mirrors the markSaved check just above it), not just that the uri never switched.
+  test('a keystroke on the same buffer during the write skips didSave (content went stale)', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const origWrite = platform.writeTextFile.bind(platform);
+    let releaseWrite!: () => void;
+    const gate = new Promise<void>((res) => (releaseWrite = res));
+    platform.writeTextFile = async (path: string, contents: string) => {
+      await gate;
+      return origWrite(path, contents);
+    };
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const aUri = ws.activeUri();
+    editor.setDoc('context A { v1 }\n');
+    ws.syncActiveBuffer('context A { v1 }\n');
+
+    const save = ws.saveActive(); // synchronous until the awaited (gated) write
+    editor.setDoc('context A { v2 }\n');
+    ws.syncActiveBuffer('context A { v2 }\n'); // a keystroke lands mid-write — no buffer switch
+    releaseWrite();
+    await save;
+
+    // v1 hit disk, but the buffer now holds v2 (dirty again) — the server must not be told the
+    // (now-stale) active document was just saved.
+    expect(ws.buffers.get(aUri)!.dirty).toBe(true);
+    expect(lsp.didSave).not.toHaveBeenCalled();
+  });
 });
 
 describe('createWorkspaceController — saveAllDirty', () => {
@@ -805,6 +889,100 @@ describe('createWorkspaceController — saveAllDirty', () => {
 
     // B is persisted with its LATEST text (B2), not the B1 snapshot captured when Save-all began.
     expect(platform.writes.find((w) => w.path === `${ROOT}/b.koi`)!.contents).toBe('B2\n');
+  });
+
+  // Regression (#1009): the trailing lsp.didSave() fired unconditionally once any buffer saved, even
+  // though it targets the LSP's current active doc — a switch to a buffer NOT part of this save pass
+  // (mid-loop, while another buffer's write is still in flight) must not tell the server that buffer
+  // was saved.
+  test('a buffer switch mid-loop to a non-saved buffer skips the trailing didSave', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    platform.files.set('c.koi', 'context C {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    // Gate a.koi's write (it sorts first) so the active buffer can switch to c.koi — which is never
+    // dirtied and so never saved this pass — while a's write is still in flight.
+    const origWrite = platform.writeTextFile.bind(platform);
+    let releaseA!: () => void;
+    const aGate = new Promise<void>((res) => (releaseA = res));
+    platform.writeTextFile = async (path: string, contents: string) => {
+      if (path === `${ROOT}/a.koi`) await aGate;
+      return origWrite(path, contents);
+    };
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const cUri = uriOf('c.koi');
+    ws.buffers.get(uriOf('b.koi'))!.dirty = true;
+    editor.setDoc('context A { edited }\n');
+    ws.syncActiveBuffer('context A { edited }\n'); // dirties the active buffer, a.koi
+
+    const save = ws.saveAllDirty(); // writes a.koi (gated), then b.koi
+    ws.activateFile(cUri); // switch to c.koi — not part of this save pass — while a's write is in flight
+    releaseA();
+    await save;
+
+    // Both dirty buffers hit disk…
+    expect(platform.writes.some((w) => w.path === `${ROOT}/a.koi`)).toBe(true);
+    expect(platform.writes.some((w) => w.path === `${ROOT}/b.koi`)).toBe(true);
+    // …but the buffer active when the loop finished (c.koi) was never saved this pass, so the server
+    // must not be told it is clean.
+    expect(lsp.didSave).not.toHaveBeenCalled();
+  });
+
+  test('no buffer switch: saveAllDirty still calls didSave once for the saved buffers', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    ws.buffers.get(uriOf('b.koi'))!.dirty = true;
+
+    await ws.saveAllDirty();
+
+    expect(lsp.didSave).toHaveBeenCalledTimes(1);
+  });
+
+  // Regression (#1009 code-review follow-up): a switch INTO a buffer that this pass wrote — but that
+  // gets re-dirtied by a keystroke before its own write is confirmed — must not be treated as
+  // confirmed saved just because its uri is in the written set; savedUris membership requires the
+  // SAME freshness check saveActive/markSaved use, not merely "the write didn't throw".
+  test('a switch to a buffer that goes stale before its write is confirmed skips didSave', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    // Gate b.koi's write so the active buffer can switch to it and be re-dirtied before it resolves.
+    const origWrite = platform.writeTextFile.bind(platform);
+    let releaseB!: () => void;
+    const bGate = new Promise<void>((res) => (releaseB = res));
+    platform.writeTextFile = async (path: string, contents: string) => {
+      if (path === `${ROOT}/b.koi`) await bGate;
+      return origWrite(path, contents);
+    };
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const bUri = uriOf('b.koi');
+    ws.buffers.get(bUri)!.dirty = true; // b is dirty in the background; a (active) stays clean
+
+    const save = ws.saveAllDirty(); // writes b.koi (gated)
+    ws.activateFile(bUri); // switch to b while its write is in flight
+    ws.syncBuffer(bUri, 'context B { edited again }\n'); // re-dirty b before its write resolves
+    releaseB();
+    await save;
+
+    // b.koi's write DID hit disk (with the pre-edit text), but b is dirty again by the time the pass
+    // finishes — the server must not be told the active (still-dirty) document was saved.
+    expect(platform.writes.some((w) => w.path === `${ROOT}/b.koi`)).toBe(true);
+    expect(ws.buffers.get(bUri)!.dirty).toBe(true);
+    expect(lsp.didSave).not.toHaveBeenCalled();
   });
 });
 
