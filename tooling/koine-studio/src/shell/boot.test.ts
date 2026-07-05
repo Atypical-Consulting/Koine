@@ -55,7 +55,7 @@ beforeEach(() => {
   fakePlatform.pickFolder.mockReset().mockResolvedValue(null);
   fakePlatform.gitClone.mockReset().mockRejectedValue(new Error('gitClone not configured for this test'));
   fakePlatform.createFile.mockReset().mockResolvedValue('token');
-  appStore.setState({ route: 'home' });
+  appStore.setState({ route: 'home', emitTarget: 'csharp' });
   localStorage.clear();
   location.hash = '';
   document.body.innerHTML = '';
