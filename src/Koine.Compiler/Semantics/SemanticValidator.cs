@@ -858,7 +858,7 @@ public sealed class SemanticValidator
                         var (where, fix) = isDerived
                             ? ("derived member", "keep its expression integral")
                             : ("default for", "use an integral default");
-                        diagnostics.Add(Diagnostic.FromSpan(DiagnosticCodes.NarrowingConversionInDerivedMember,
+                        diagnostics.Add(Diagnostic.FromSpan(DiagnosticCodes.NumericNarrowingConversion,
                             $"cannot implicitly convert Decimal to Int in {where} '{m.Name}'; declare the member 'Decimal', or {fix}",
                             m.Initializer.Span));
                     }
