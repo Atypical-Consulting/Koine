@@ -4,12 +4,12 @@
 /// so "how the kitchen cooks" evolves independently of "how an order is taken".
 context Kitchen version 1 {
 
-  // a named import: Kitchen conforms to Menu (the `Menu -> Kitchen :
+  // A named import: Kitchen conforms to Menu (the `Menu -> Kitchen :
   // conformist` relation in context-map.koi) and reuses its `Topping` value object
   // so a ticket can list exactly the toppings the menu defines, with no translation.
   import Menu.{ Topping }
 
-  // react to placed orders (authorized by `Ordering -> Kitchen : open-host`
+  // React to placed orders (authorized by `Ordering -> Kitchen : open-host`
   // in context-map.koi). Emits an IHandleOrderPlaced seam the kitchen implements to
   // open a ticket for the new order.
   subscribes Ordering.OrderPlaced
@@ -31,7 +31,7 @@ context Kitchen version 1 {
 
   publishes TicketReady
 
-  // a module groups the kitchen-line aggregate into a Kitchen.Line
+  // A module groups the kitchen-line aggregate into a Kitchen.Line
   // sub-namespace and sub-folder, keeping "the line" as its own slice of Kitchen.
   module Line {
 
@@ -112,7 +112,7 @@ context Kitchen version 1 {
           stage -> Served
         }
 
-        /// open a ticket for a placed order. The same-named parameters auto-bind
+        /// Open a ticket for a placed order. The same-named parameters auto-bind
         /// the required fields (`order`, `station`, `pizzas`, `toppings`); `stage`
         /// defaults to Queued.
         create open(order: OrderId, station: Station, pizzas: Int, toppings: List<Topping>) {
@@ -123,7 +123,7 @@ context Kitchen version 1 {
     }
   }
 
-  /// a flat read model for the kitchen display screen.
+  /// A flat read model for the kitchen display screen.
   readmodel TicketBoard from KitchenTicket {
     id
     order
@@ -132,6 +132,6 @@ context Kitchen version 1 {
     pizzas
   }
 
-  /// a query DTO over the board.
+  /// A query DTO over the board.
   query TicketsByStage(stage: TicketStage): List<TicketBoard>
 }

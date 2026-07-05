@@ -7,7 +7,7 @@
 /// v2, demonstrating contract evolution with `@since`.
 context Menu version 2 {
 
-  // enum members carrying associated data: each currency carries its
+  // Enum members carrying associated data: each currency carries its
   // display symbol and the number of minor-unit decimal places. `Currency` is
   // shared with Ordering as a shared-kernel type (see context-map.koi).
   enum Currency(symbol: String, decimals: Int) {
@@ -35,7 +35,7 @@ context Menu version 2 {
     invariant amount >= 0   "a price cannot be negative"
   }
 
-  // a quantity value object: a Decimal amount plus an enum unit, with
+  // A quantity value object: a Decimal amount plus an enum unit, with
   // generated unit-checked arithmetic (adding Grams to Kilograms throws).
   quantity Portion {
     amount: Decimal
@@ -43,7 +43,7 @@ context Menu version 2 {
     invariant amount >= 0   "a portion weight cannot be negative"
   }
 
-  // a Range<Instant> interval value object: Start/End, a start<=end
+  // A Range<Instant> interval value object: Start/End, a start<=end
   // invariant, and Contains/Overlaps, all emitted by the built-in Range<T>. The
   // pizzeria's happy-hour window during which discounted prices apply.
   value HappyHour {
@@ -86,7 +86,7 @@ context Menu version 2 {
       description:  String?
       toppings:     Set<String>
 
-      // a nutrition field introduced in v2 of the context.
+      // A nutrition field introduced in v2 of the context.
       @since(2) kcal: Int?
 
       // Derived fields: string trim, coalescing, comparison, presence check.
@@ -99,7 +99,7 @@ context Menu version 2 {
     }
   }
 
-  // a flat read model projected from the aggregate root, plus a static
+  // A flat read model projected from the aggregate root, plus a static
   // ToMenuItem(this Pizza) mapper.
   readmodel MenuItem from Pizza {
     name
@@ -108,7 +108,7 @@ context Menu version 2 {
     available: Bool = availability == Available
   }
 
-  // query DTOs handled through the shared IQueryHandler<TQuery,TResult>.
+  // Query DTOs handled through the shared IQueryHandler<TQuery,TResult>.
   query PizzasBySize(size: Size): List<MenuItem>
   query PizzaByCode(code: PizzaCode): MenuItem
 }

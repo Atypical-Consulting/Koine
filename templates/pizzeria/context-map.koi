@@ -9,7 +9,7 @@
 // partnership, open-host, and anti-corruption-layer.
 contextmap {
 
-  // shared kernel: Menu and Ordering jointly own the `Currency` enum (with
+  // Shared kernel: Menu and Ordering jointly own the `Currency` enum (with
   // its symbol/decimals associated data). It is emitted once into a dedicated kernel
   // namespace shared by both, so a price in Menu and a total in Ordering speak the
   // same currency without translation.

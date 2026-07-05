@@ -11,7 +11,7 @@
 /// as the demo avoided by pairing a `Payments` context with a `Payment` entity.
 context Payment version 1 {
 
-  // react to placed orders (authorized by `Ordering -> Payment : open-host`
+  // React to placed orders (authorized by `Ordering -> Payment : open-host`
   // in context-map.koi). Emits an IHandleOrderPlaced seam the biller implements to
   // authorize a charge for the new order.
   subscribes Ordering.OrderPlaced
@@ -29,7 +29,7 @@ context Payment version 1 {
     invariant amount >= 0   "an amount cannot be negative"
   }
 
-  // the destination type the anti-corruption layer translates the gateway's
+  // The destination type the anti-corruption layer translates the gateway's
   // raw result into (see the `acl { … }` block in context-map.koi). Payment code
   // only ever sees this clean type, never the gateway's shape.
   value PaymentReceipt {
@@ -87,7 +87,7 @@ context Payment version 1 {
         status -> Refunded
       }
 
-      /// authorize a charge for an order.
+      /// Authorize a charge for an order.
       create authorize(order: OrderId, amount: Money, method: PaymentMethod) {
         emit ChargeAuthorized(charge: id, order: order)
       }
@@ -108,12 +108,12 @@ context Payment version 1 {
     }
   }
 
-  /// a policy reacting to a domain event across aggregates: when a charge is
+  /// A policy reacting to a domain event across aggregates: when a charge is
   /// captured, post it to the ledger. Koine emits the handler seam (the imperative
   /// call is documented, not generated).
   policy PostToLedger when ChargeCaptured then Books.record(amount: capturedAmount)
 
-  /// the application service interface (IPaymentService).
+  /// The application service interface (IPaymentService).
   service PaymentService {
     usecase AuthorizeCharge(order: OrderId, amount: Money, method: PaymentMethod): ChargeId
     usecase CaptureCharge(charge: ChargeId)
