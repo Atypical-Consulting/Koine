@@ -45,42 +45,54 @@ internal static class LiteralZeroDivisorAnalysis
 
     /// <summary>Pure-literal arithmetic fold — mirrors <c>PhpEmitter.TryFoldNumericLiteral</c>
     /// exactly (including its "a literal-zero divisor is not foldable" stance), so the two never
-    /// silently drift apart.</summary>
+    /// silently drift apart. NEVER throws: an overflowing intermediate (e.g. two near-<see
+    /// cref="decimal.MaxValue"/> literals multiplied) is "not foldable" here too, mirroring
+    /// <see cref="ConstantFolder"/>'s and <c>PhpEmitter.FoldDecimalConstantDefault</c>'s own
+    /// never-throw discipline — a validation pass must never crash the compiler on a malformed
+    /// literal.</summary>
     private static bool TryFoldNumericLiteral(Expr expr, out decimal value)
     {
-        switch (expr)
+        try
         {
-            case LiteralExpr { Kind: LiteralKind.Int or LiteralKind.Decimal } lit
-                when decimal.TryParse(lit.Text, NumberStyles.Number | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out value):
-                return true;
+            switch (expr)
+            {
+                case LiteralExpr { Kind: LiteralKind.Int or LiteralKind.Decimal } lit
+                    when decimal.TryParse(lit.Text, NumberStyles.Number | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out value):
+                    return true;
 
-            case UnaryExpr { Op: UnaryOp.Negate } un when TryFoldNumericLiteral(un.Operand, out decimal v):
-                value = -v;
-                return true;
+                case UnaryExpr { Op: UnaryOp.Negate } un when TryFoldNumericLiteral(un.Operand, out decimal v):
+                    value = -v;
+                    return true;
 
-            case BinaryExpr { Op: BinaryOp.Add } bin
-                when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r):
-                value = l + r;
-                return true;
+                case BinaryExpr { Op: BinaryOp.Add } bin
+                    when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r):
+                    value = l + r;
+                    return true;
 
-            case BinaryExpr { Op: BinaryOp.Sub } bin
-                when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r):
-                value = l - r;
-                return true;
+                case BinaryExpr { Op: BinaryOp.Sub } bin
+                    when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r):
+                    value = l - r;
+                    return true;
 
-            case BinaryExpr { Op: BinaryOp.Mul } bin
-                when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r):
-                value = l * r;
-                return true;
+                case BinaryExpr { Op: BinaryOp.Mul } bin
+                    when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r):
+                    value = l * r;
+                    return true;
 
-            case BinaryExpr { Op: BinaryOp.Div } bin
-                when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r) && r != 0m:
-                value = l / r;
-                return true;
+                case BinaryExpr { Op: BinaryOp.Div } bin
+                    when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r) && r != 0m:
+                    value = l / r;
+                    return true;
 
-            default:
-                value = 0;
-                return false;
+                default:
+                    value = 0;
+                    return false;
+            }
+        }
+        catch (OverflowException)
+        {
+            value = 0;
+            return false;
         }
     }
 }

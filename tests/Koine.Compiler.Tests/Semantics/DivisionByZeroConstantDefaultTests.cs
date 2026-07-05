@@ -58,4 +58,81 @@ public class DivisionByZeroConstantDefaultTests
         result.Success.ShouldBeFalse();
         result.Diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.DivisionByZeroInConstantDefault);
     }
+
+    /// <summary>
+    /// A DERIVED (computed) member's expression dividing a sibling by a literal zero is flagged too:
+    /// the check only requires the divisor to be a provable literal zero, independent of whether the
+    /// numerator folds — dividing by zero is wrong regardless of what `a` evaluates to at runtime.
+    /// </summary>
+    [Fact]
+    public void Division_by_a_literal_zero_in_a_derived_member_is_rejected()
+    {
+        const string src = """
+            context Pricing {
+              value Rate {
+                a: Decimal
+                total: Decimal = a / 0
+              }
+            }
+            """;
+        var divByZero = Diagnose(src).ShouldHaveSingleItem();
+        divByZero.Code.ShouldBe(DiagnosticCodes.DivisionByZeroInConstantDefault);
+        divByZero.Message.ShouldContain("total");
+    }
+
+    /// <summary>
+    /// A zero divisor that only appears after folding a sub-expression (<c>1 - 1</c>) is still caught
+    /// — the recursive fold matches (and must not be weaker than) <c>PhpEmitter.TryFoldNumericLiteral</c>'s
+    /// own <c>Add</c>/<c>Sub</c>/<c>Mul</c> recursion.
+    /// </summary>
+    [Fact]
+    public void Division_by_a_folded_zero_sub_expression_is_rejected()
+    {
+        const string src = """
+            context Pricing {
+              value Rate {
+                amount: Decimal = 4 / (1 - 1)
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DivisionByZeroInConstantDefault);
+    }
+
+    /// <summary>
+    /// Ordinary non-zero division is never flagged — a negative control against the walker
+    /// over-triggering on any <c>Div</c> node.
+    /// </summary>
+    [Fact]
+    public void Division_by_a_nonzero_literal_is_allowed()
+    {
+        const string src = """
+            context Pricing {
+              value Rate {
+                amount: Decimal = 4 / 2
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.DivisionByZeroInConstantDefault);
+    }
+
+    /// <summary>
+    /// Regression: an intermediate fold that overflows <c>decimal</c>'s range (e.g. multiplying two
+    /// near-<see cref="decimal.MaxValue"/> literals) must never crash the compiler with an unhandled
+    /// <see cref="OverflowException"/> — it is simply "not provably a zero divisor", mirroring
+    /// <see cref="Koine.Compiler.Semantics.ConstantFolder"/>'s own never-throw discipline. Before this
+    /// was guarded, `1 / (79228162514264337593543950335 * 79228162514264337593543950335)` crashed
+    /// `SemanticValidator` with an uncaught `OverflowException`.
+    /// </summary>
+    [Fact]
+    public void An_overflowing_fold_does_not_throw()
+    {
+        const string src = """
+            context Pricing {
+              value Rate {
+                amount: Decimal = 1 / (79228162514264337593543950335 * 79228162514264337593543950335)
+              }
+            }
+            """;
+        Should.NotThrow(() => Diagnose(src));
+    }
 }
