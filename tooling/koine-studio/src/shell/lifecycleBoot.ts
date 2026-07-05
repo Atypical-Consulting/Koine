@@ -243,16 +243,21 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
         const intent = takeStartIntent();
         if (intent) {
           await runStartIntent(intent);
-        } else if (!deps.hasOpenWorkspace()) {
-          // The restore is only a fallback for an EMPTY editor: the toolbar is interactive while the
-          // server connects (a multi-second window in the browser), so a folder the user opened during
-          // that window must not be torn down and replaced by the restored/default workspace.
-          const last = getLastWorkspace();
-          const restorable = !!last && last !== DEFAULT_WS_TOKEN && (await deps.isAutoRestorableToken(last));
-          const restoredExample = restorable ? (await deps.openFolderPath(last as string, { recent: false })).ok : false;
-          // Legacy-scratch migration is deliberately NOT done on the example-restore path: the scratch
-          // content is only ever preserved by being seeded into the default workspace.
-          if (!restoredExample) await openDefaultWorkspaceFlow(legacyScratch ?? seed);
+        } else {
+          await withWorkspaceOpLock(async () => {
+            // The restore is only a fallback for an EMPTY editor: the toolbar is interactive while the
+            // server connects (a multi-second window in the browser), so a folder the user opened during
+            // that window — or another queued workspace-opening operation that just finished — must not
+            // be torn down and replaced by the restored/default workspace. Re-checked here (rather than
+            // before queueing) so a stale read can't win once this op's turn actually comes (#1046).
+            if (deps.hasOpenWorkspace()) return;
+            const last = getLastWorkspace();
+            const restorable = !!last && last !== DEFAULT_WS_TOKEN && (await deps.isAutoRestorableToken(last));
+            const restoredExample = restorable ? (await deps.openFolderPath(last as string, { recent: false })).ok : false;
+            // Legacy-scratch migration is deliberately NOT done on the example-restore path: the scratch
+            // content is only ever preserved by being seeded into the default workspace.
+            if (!restoredExample) await openDefaultWorkspaceFlow(legacyScratch ?? seed);
+          });
         }
       }
     })

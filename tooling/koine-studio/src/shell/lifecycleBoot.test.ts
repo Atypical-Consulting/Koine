@@ -429,6 +429,57 @@ describe('lifecycleBoot', () => {
       // Once the import settles, the queued Home action is free to run.
       expect(deps.newModel).toHaveBeenCalledOnce();
     });
+
+    it('defers a route-intent Home action until an in-flight fallback restore settles', async () => {
+      let resolveRestore!: (result: { ok: boolean }) => void;
+      const restorePromise = new Promise<{ ok: boolean }>((resolve) => {
+        resolveRestore = resolve;
+      });
+      getLastWorkspaceMock.mockReturnValue('example-billing');
+      const deps = makeDeps({ openFolderPath: vi.fn(() => restorePromise) });
+      createLifecycleBoot(deps);
+      await flush(); // the intent-less restore ladder is now awaiting the still-pending openFolderPath call
+
+      takeStartIntentMock.mockReturnValue({ kind: 'new' });
+      routeCallback()({ route: 'editor' }, { route: 'home' });
+      await flush();
+      // The restore is still in flight: the Home "New model" pick must not run concurrently.
+      expect(deps.newModel).not.toHaveBeenCalled();
+
+      resolveRestore({ ok: true });
+      await flush();
+      // Once the restore settles, the queued Home action is free to run.
+      expect(deps.newModel).toHaveBeenCalledOnce();
+    });
+
+    it('serializes two rapid Home picks so the second does not run until the first settles', async () => {
+      const deps = makeDeps();
+      createLifecycleBoot(deps);
+      await flush(); // let the (intent-less) boot ladder settle first
+
+      let resolveFirst!: () => void;
+      deps.newModel = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveFirst = resolve;
+          }),
+      );
+
+      takeStartIntentMock.mockReturnValue({ kind: 'new' });
+      routeCallback()({ route: 'editor' }, { route: 'home' });
+      await flush(); // the first pick is in flight, awaiting deps.newModel()
+
+      takeStartIntentMock.mockReturnValue({ kind: 'open-recent', path: '/proj' });
+      routeCallback()({ route: 'editor' }, { route: 'home' });
+      await flush();
+      // The first pick hasn't settled: the second pick must not run concurrently.
+      expect(deps.openRecentFolder).not.toHaveBeenCalled();
+
+      resolveFirst();
+      await flush();
+      // Once the first settles, the queued second pick is free to run.
+      expect(deps.openRecentFolder).toHaveBeenCalledWith('/proj');
+    });
   });
 
   it('teardown disposes every controller in the preserved order, then the route-intent sub', () => {
