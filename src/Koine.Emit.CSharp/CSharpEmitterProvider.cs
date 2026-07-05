@@ -81,6 +81,12 @@ public sealed class CSharpEmitterProvider : IEmitterProvider
             {
                 set.Add(CSharpLayer.Infrastructure);
             }
+            else if (string.Equals(name, "api", StringComparison.OrdinalIgnoreCase))
+            {
+                // The endpoint layer binds to the Application-layer handlers, so it implies application.
+                set.Add(CSharpLayer.Application);
+                set.Add(CSharpLayer.Api);
+            }
         }
 
         return set;

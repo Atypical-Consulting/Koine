@@ -445,6 +445,76 @@ public class R18CSharpApplicationTests
         rm.ShouldContain("private static bool MapIsPlaced(Order src)");
     }
 
+    // ------------------------------------------------------------------
+    // W2 — the opt-in `api` layer: ASP.NET Minimal-API endpoints binding
+    // commands/factories (POST) and queries (GET) to the Application-layer
+    // handlers. Implies `application`; off by default.
+    // ------------------------------------------------------------------
+
+    /// <summary>The Application + endpoint layers on (the api layer implies application).</summary>
+    internal static CSharpEmitterOptions ApiOn =>
+        CSharpEmitterOptions.Empty with
+        {
+            Layers = new HashSet<CSharpLayer> { CSharpLayer.Domain, CSharpLayer.Application, CSharpLayer.Api },
+        };
+
+    [Fact]
+    public void Config_parses_the_api_layer()
+    {
+        var opts = KoineConfig.Parse("targets.csharp.layers = domain, application, api\n").OptionsFor("csharp");
+        opts.Layers.ShouldBe(new[] { "domain", "application", "api" });
+    }
+
+    [Fact]
+    public void Api_layer_implies_application()
+    {
+        var settings = new BuildSettings { Path = "x.koi", Layers = "api" };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application", "api" });
+    }
+
+    [Fact]
+    public void Unknown_layer_is_a_hard_error_listing_api()
+    {
+        var settings = new BuildSettings { Path = "x.koi", Layers = "bogus" };
+        settings.TryResolve(out _, out var error).ShouldBeFalse();
+        error.ShouldNotBeNull();
+        error.ShouldContain("bogus");
+        error.ShouldContain("api");
+    }
+
+    [Fact]
+    public void Api_layer_off_adds_no_endpoint_file()
+    {
+        Emit(AppOn).ShouldNotContain(f => f.RelativePath.EndsWith("Endpoints.cs", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Api_layer_maps_a_command_to_a_post_endpoint()
+    {
+        var endpoints = File(Emit(ApiOn), "SalesEndpoints.cs").Contents;
+        endpoints.ShouldContain("using Microsoft.AspNetCore.Builder;");
+        endpoints.ShouldContain("public static class SalesEndpoints");
+        endpoints.ShouldContain("public static IEndpointRouteBuilder MapSalesEndpoints(this IEndpointRouteBuilder endpoints)");
+        endpoints.ShouldContain("endpoints.MapPost(\"/order/place\", async (OrderPlaceRequest request, OrderPlaceHandler handler, CancellationToken ct) =>");
+        endpoints.ShouldContain("await handler.HandleAsync(request, ct);");
+        endpoints.ShouldContain("return Results.Ok();");
+    }
+
+    [Fact]
+    public void Api_layer_maps_a_query_to_a_get_endpoint()
+    {
+        var endpoints = File(Emit(ApiOn), "SalesEndpoints.cs").Contents;
+        endpoints.ShouldContain("endpoints.MapGet(\"/order-by-id\", async ([AsParameters] OrderById query, OrderByIdHandler handler, CancellationToken ct) =>");
+    }
+
+    [Fact]
+    public void Api_layer_nullable_not_found_maps_a_missing_aggregate_to_404()
+    {
+        var endpoints = File(Emit(ApiOn with { NotFound = CSharpNotFound.Nullable }), "SalesEndpoints.cs").Contents;
+        endpoints.ShouldContain("return result is null ? Results.NotFound() : Results.Ok(result);");
+    }
+
     [Fact]
     public void Config_supplied_application_mediatr_upgrades_layers_without_a_layers_flag()
     {

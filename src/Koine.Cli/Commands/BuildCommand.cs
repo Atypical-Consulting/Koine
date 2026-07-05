@@ -47,7 +47,7 @@ internal class BuildSettings : CommandSettings
     public bool ReferenceOnly { get; init; }
 
     [CommandOption("--layers <LAYERS>")]
-    [Description("Comma-separated C# layers to emit (issues #128/#129): domain (default), application, infrastructure. Both opt-in layers imply domain. Omit for the default domain-only output.")]
+    [Description("Comma-separated C# layers to emit: domain (default), application, infrastructure, api (ASP.NET endpoints; implies application). Opt-in layers imply domain. Omit for the default domain-only output.")]
     public string? Layers { get; init; }
 
     [CommandOption("--app-mediatr")]
@@ -184,7 +184,7 @@ internal class BuildSettings : CommandSettings
 
     /// <summary>The C# layers a user may request (issues #128/#129).</summary>
     private static readonly IReadOnlySet<string> ValidLayers =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "domain", "application", "infrastructure" };
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "domain", "application", "infrastructure", "api" };
 
     /// <summary>The DTO/read-model mapping strategies a user may request via <c>--app-mapping</c> /
     /// <c>application.mapping</c> (issue #630). An unknown value is a hard error, not a silent
@@ -227,11 +227,12 @@ internal class BuildSettings : CommandSettings
 
         var wantsApplication = false;
         var wantsInfrastructure = false;
+        var wantsApi = false;
         foreach (var name in requested)
         {
             if (!ValidLayers.Contains(name))
             {
-                error = $"unknown layer '{name}' (valid layers: domain, application, infrastructure)";
+                error = $"unknown layer '{name}' (valid layers: domain, application, infrastructure, api)";
                 return false;
             }
 
@@ -243,11 +244,16 @@ internal class BuildSettings : CommandSettings
             {
                 wantsInfrastructure = true;
             }
+            else if (string.Equals(name, "api", StringComparison.OrdinalIgnoreCase))
+            {
+                wantsApi = true;
+            }
         }
 
-        // domain is always present (the opt-in layers imply it); list it first for stable output.
+        // domain is always present (the opt-in layers imply it); the api layer additionally implies
+        // application (it binds to those handlers). List in a stable order for byte-identical output.
         var layers = new List<string> { "domain" };
-        if (wantsApplication)
+        if (wantsApplication || wantsApi)
         {
             layers.Add("application");
         }
@@ -255,6 +261,11 @@ internal class BuildSettings : CommandSettings
         if (wantsInfrastructure)
         {
             layers.Add("infrastructure");
+        }
+
+        if (wantsApi)
+        {
+            layers.Add("api");
         }
 
         resolved = layers;
@@ -272,11 +283,18 @@ internal class BuildSettings : CommandSettings
     {
         var wantsInfrastructure = resolved is not null
             && resolved.Any(l => string.Equals(l, "infrastructure", StringComparison.OrdinalIgnoreCase));
+        var wantsApi = resolved is not null
+            && resolved.Any(l => string.Equals(l, "api", StringComparison.OrdinalIgnoreCase));
 
         var layers = new List<string> { "domain", "application" };
         if (wantsInfrastructure)
         {
             layers.Add("infrastructure");
+        }
+
+        if (wantsApi)
+        {
+            layers.Add("api");
         }
 
         return layers;

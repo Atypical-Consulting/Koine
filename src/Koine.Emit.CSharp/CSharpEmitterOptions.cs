@@ -82,6 +82,10 @@ internal enum CSharpLayer
 
     /// <summary>The opt-in EF Core infrastructure realization of the Domain contracts (issue #128).</summary>
     Infrastructure,
+
+    /// <summary>The opt-in ASP.NET Minimal-API endpoint layer (W2): binds commands/queries to the
+    /// Application-layer handlers. Implies <see cref="Application"/> (its handlers are the binding target).</summary>
+    Api,
 }
 
 /// <summary>
@@ -167,6 +171,12 @@ internal sealed record CSharpEmitterOptions(
     /// byte-identical to the historical emitter.
     /// </summary>
     public bool EmitsInfrastructure => Layers is not null && Layers.Contains(CSharpLayer.Infrastructure);
+
+    /// <summary>
+    /// True when the opt-in ASP.NET Minimal-API endpoint layer (W2) is requested. Off by default
+    /// (null/empty <see cref="Layers"/> ⇒ Domain-only), so unconfigured output stays byte-identical.
+    /// </summary>
+    public bool EmitsApi => Layers is not null && Layers.Contains(CSharpLayer.Api);
 
     /// <summary>
     /// Remaps a logical namespace (whose first segment is a bounded-context name) to its
