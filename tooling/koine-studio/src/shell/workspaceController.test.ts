@@ -499,6 +499,34 @@ describe('createWorkspaceController — rememberLastWorkspace (#535)', () => {
   });
 });
 
+describe('createWorkspaceController — recent-folder language tag (#1015)', () => {
+  test('tags the recent with the JUST-opened folder\'s effective emit target, not the previous one', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    platform.seed(ROOT_B, 'b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const store = createAppStore();
+    const pushRecentFolder = vi.fn();
+    // Mimics ide.tsx's real onFolderOpened: it synchronously applies the JUST-opened folder's own
+    // effective previewTarget into the store (applyEffectiveScoped → setEmitTarget) BEFORE returning.
+    // Folder A's workspace overrides to 'typescript'; folder B has no override (falls back to the
+    // 'csharp' default) — so opening B right after A must tag B's recent 'csharp', not A's 'typescript'.
+    const targetByFolder: Record<string, string> = { [ROOT_A]: 'typescript', [ROOT_B]: 'csharp' };
+    const onFolderOpened = vi.fn((folder: string) => {
+      store.getState().setEmitTarget(targetByFolder[folder]);
+    });
+    const ws = createWorkspaceController(
+      makeDeps(platform, makeLsp(trace), makeEditor(trace), { store, onFolderOpened, pushRecentFolder }),
+    );
+
+    await ws.openFolderPath(ROOT_A, { recent: true });
+    await ws.openFolderPath(ROOT_B, { recent: true });
+
+    const callForB = pushRecentFolder.mock.calls.find(([folder]) => folder === ROOT_B);
+    expect(callForB?.[1]).toEqual(expect.objectContaining({ language: 'csharp' }));
+  });
+});
+
 describe('createWorkspaceController — reset', () => {
   test('closes every open doc, clears buffers + the diagnostics cache, and does NOT re-open', async () => {
     const platform = new FakePlatform();
