@@ -110,7 +110,7 @@ public sealed partial class PythonEmitter
             if (emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? scalars)
                 && ordered.Any(m => m.Type.Name is "Int" or "Decimal"))
             {
-                WriteScalarOp(sb, name, ordered, scalars);
+                WriteScalarOp(sb, name, ordered, scalars, "*");
             }
             // `__truediv__` is the division dual of `__mul__` (#879, follow-up to the C# emitter's
             // #832): demand-generated only where the model actually divides this value object by a
@@ -118,7 +118,7 @@ public sealed partial class PythonEmitter
             if (emit.ScalarDivNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? divScalars)
                 && ordered.Any(m => m.Type.Name is "Int" or "Decimal"))
             {
-                WriteScalarDivOp(sb, name, ordered, divScalars);
+                WriteScalarOp(sb, name, ordered, divScalars, "/");
             }
             // `__add__` is demand-generated when the VO is folded with `sum` (AdditiveNeeds) OR appears
             // in a plain binary `base + base` (#834); `__sub__` is demand-generated for a plain
@@ -369,50 +369,20 @@ public sealed partial class PythonEmitter
     }
 
     /// <summary>
-    /// A value object's scalar <c>__mul__(factor)</c> (e.g. <c>Money * quantity</c>): scales each
-    /// numeric field by the factor and carries the rest unchanged. The factor type is the union of
-    /// the scalar Python types the model actually multiplies this value object by (<c>int</c> and/or
-    /// <c>Decimal</c>). <c>Decimal * int</c> and <c>Decimal * Decimal</c> stay <c>Decimal</c>, so the
-    /// constructed value object's fields keep their declared types.
+    /// A value object's scalar <c>__mul__(factor)</c> / <c>__truediv__(divisor)</c> dunder (e.g.
+    /// <c>Money * quantity</c> or <c>fee / 2</c>): applies <paramref name="op"/> to each numeric field and
+    /// carries the rest. The factor type is the union of the scalar Python types used (<c>int</c>/<c>Decimal</c>).
+    /// Multiply also emits the reflected <c>__rmul__</c> (so <c>0.9 * value</c> works, #788); division emits no
+    /// <c>__rtruediv__</c> (non-commutative; the validator rejects <c>scalar / value</c>, #878). Python's <c>/</c>
+    /// is always true division, so an <c>Int</c> field's quotient is cast with <c>int(...)</c> (truncating, like
+    /// the C# <c>(int)</c> cast) to keep field types exact under mypy --strict. <paramref name="op"/> is
+    /// <c>"*"</c> or <c>"/"</c>.
     /// </summary>
-    private void WriteScalarOp(StringBuilder sb, string name, IReadOnlyList<Member> fields, IReadOnlySet<string> scalars)
+    private void WriteScalarOp(StringBuilder sb, string name, IReadOnlyList<Member> fields, IReadOnlySet<string> scalars, string op)
     {
-        var numeric = new HashSet<string>(fields.Where(m => m.Type.Name is "Int" or "Decimal").Select(m => m.Name), StringComparer.Ordinal);
-        var factorType = ScalarUnion(scalars);
-
-        string Arg(Member m)
-        {
-            var field = "self." + PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(m.Name));
-            return numeric.Contains(m.Name) ? $"{field} * factor" : field;
-        }
-
-        sb.Append('\n');
-        sb.Append(Indent).Append("def __mul__(self, factor: ").Append(factorType).Append(") -> ").Append(name).Append(":\n");
-        sb.Append(Indent).Append(Indent).Append("return ").Append(name).Append('(')
-          .Append(string.Join(", ", fields.Select(Arg))).Append(")\n");
-
-        // Reversed operand order: `scalar * value-object` (#788). Python evaluates
-        // `Decimal.__mul__(<vo>)` → NotImplemented → falls back to the reflected `<vo>.__rmul__(scalar)`;
-        // without this method that raises `TypeError`. Delegate to `__mul__` so both operand orders
-        // scale identically — the Pythonic mirror of the merged PHP Bug-2 fix (#778). An explicit typed
-        // method (not an `__rmul__ = __mul__` alias) keeps `mypy --strict` clean.
-        sb.Append('\n');
-        sb.Append(Indent).Append("def __rmul__(self, factor: ").Append(factorType).Append(") -> ").Append(name).Append(":\n");
-        sb.Append(Indent).Append(Indent).Append("return self.__mul__(factor)\n");
-    }
-
-    /// <summary>
-    /// A value object's scalar <c>__truediv__(divisor)</c> (e.g. <c>fee / 2</c>): the division dual of
-    /// <see cref="WriteScalarOp"/>, dividing each numeric field by the divisor and carrying the rest.
-    /// Python's <c>/</c> is always true division (never <c>int</c>-valued, even <c>int / int</c>), so an
-    /// <c>Int</c> field's quotient is cast back with <c>int(...)</c> (truncating, like the C# emitter's
-    /// <c>(int)(...)</c> cast) to keep the constructed value object's field types exact — a bare
-    /// <c>field / divisor</c> would type as <c>float | Decimal</c> under <c>mypy --strict</c>, never
-    /// <c>int</c>. No reflected <c>__rtruediv__</c>: division is non-commutative and the validator
-    /// rejects <c>scalar / value-object</c> (#878), so the reversed order never reaches codegen.
-    /// </summary>
-    private void WriteScalarDivOp(StringBuilder sb, string name, IReadOnlyList<Member> fields, IReadOnlySet<string> scalars)
-    {
+        bool isDiv = op == "/";
+        var dunder = isDiv ? "__truediv__" : "__mul__";
+        var param = isDiv ? "divisor" : "factor";
         var numeric = new HashSet<string>(fields.Where(m => m.Type.Name is "Int" or "Decimal").Select(m => m.Name), StringComparer.Ordinal);
         var factorType = ScalarUnion(scalars);
 
@@ -423,13 +393,24 @@ public sealed partial class PythonEmitter
             {
                 return field;
             }
-            return m.Type.Name == "Int" ? $"int({field} / divisor)" : $"{field} / divisor";
+            // Python `/` never yields int -> truncate an Int field's quotient back to int; multiply keeps it bare.
+            return isDiv && m.Type.Name == "Int"
+                ? $"int({field} {op} {param})"
+                : $"{field} {op} {param}";
         }
 
         sb.Append('\n');
-        sb.Append(Indent).Append("def __truediv__(self, divisor: ").Append(factorType).Append(") -> ").Append(name).Append(":\n");
+        sb.Append(Indent).Append("def ").Append(dunder).Append("(self, ").Append(param).Append(": ").Append(factorType).Append(") -> ").Append(name).Append(":\n");
         sb.Append(Indent).Append(Indent).Append("return ").Append(name).Append('(')
           .Append(string.Join(", ", fields.Select(Arg))).Append(")\n");
+
+        if (!isDiv)
+        {
+            // Reflected `scalar * value` (#788): delegate to __mul__ so both operand orders scale identically.
+            sb.Append('\n');
+            sb.Append(Indent).Append("def __rmul__(self, factor: ").Append(factorType).Append(") -> ").Append(name).Append(":\n");
+            sb.Append(Indent).Append(Indent).Append("return self.__mul__(factor)\n");
+        }
     }
 
     /// <summary>
