@@ -1599,5 +1599,41 @@ describe('createInspectorController — teardown / disposal, in-flight loader (#
     expect(active()).toBe(base); // back to zero — the resolved loader must not have mounted a subscribing panel
     expect(domById('panel-events').innerHTML).toBe(loadingHtml); // ...nor repainted the torn-down host
   });
+
+  // A single-await loader could pass the test above by accident (e.g. a bail only at the very top of the
+  // continuation). runCheck genuinely suspends TWICE (pickFolder, then lsp.check) with real work between —
+  // proving the SECOND suspension is guarded too, not just the first.
+  test('an in-flight runCheck() that resolves its second await after dispose() does not repaint the torn-down host', async () => {
+    const platform = fakePlatform({ pickFolder: vi.fn(async () => '/baseline') });
+    const lsp = makeLsp();
+    let resolveCheck!: (result: CheckResult) => void;
+    lsp.check.mockImplementation(
+      () =>
+        new Promise<CheckResult>((resolve) => {
+          resolveCheck = resolve;
+        }),
+    );
+
+    const ctl = createInspectorController(makeDeps(lsp, { platform }));
+    ctl.init();
+    // Captured ONCE, before dispose(): dispose()'s render(null, centerBodyEl) detaches #view-check (it
+    // lives inside the center pane) from the document, so a FRESH domById() lookup after dispose would
+    // throw "missing #view-check" — the controller's own internal reference stays valid on a detached
+    // node (Preact/DOM writes to it don't throw), so this test must hold the same kind of reference.
+    const viewCheckEl = domById('view-check');
+
+    void ctl.runCheck(); // suspends on pickFolder first
+    await flush(); // let pickFolder resolve and the continuation reach the SECOND await (lsp.check)
+    const checkingHtml = viewCheckEl.innerHTML;
+    expect(checkingHtml).toContain('Checking against baseline'); // painted synchronously before the 2nd await
+
+    ctl.dispose(); // tear down WHILE lsp.check is still in flight
+
+    resolveCheck({ hasBreakingChanges: false, changes: [] });
+    await flush();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(viewCheckEl.innerHTML).toBe(checkingHtml); // the resolved 2nd await must not repaint it
+  });
 });
 
