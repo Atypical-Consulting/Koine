@@ -207,8 +207,10 @@ public sealed partial class PhpEmitter
     // member — that is what makes it non-derived — so the only way it can be non-literal is pure
     // arithmetic over Int/Decimal literals, which is always foldable to a single value at emit time.
     // Folding always re-boxes as a Decimal literal (never Int) so the folded value matches the
-    // declared Decimal property/parameter type; a bare literal default is already valid PHP (a `new`
-    // expression, legal via PHP 8.1's "new in initializers") and is returned unchanged.
+    // declared Decimal property/parameter type. A bare DECIMAL-kind literal default is already valid
+    // PHP (a `new` expression, legal via PHP 8.1's "new in initializers") and is returned unchanged;
+    // a bare Int-kind literal on a Decimal member (e.g. `amount: Decimal = 5`) is a separate,
+    // pre-existing type-mismatch gap this fold does not address — see the PR's Follow-ups section.
     private static Expr FoldDecimalConstantDefault(Expr expr)
     {
         if (expr is LiteralExpr)
@@ -257,6 +259,11 @@ public sealed partial class PhpEmitter
                 value = l * r;
                 return true;
 
+            // A literal-zero divisor (e.g. `amount: Decimal = 4 / 0`) has no representable quotient,
+            // so it is "not constant" here too — matching Semantics.ConstantFolder's own div-by-zero
+            // stance. This is a pre-existing, exceedingly narrow degenerate case (no legal PHP
+            // constant expression can encode it either way) tracked as a follow-up rather than
+            // fixed here: see the PR's Follow-ups section.
             case BinaryExpr { Op: BinaryOp.Div } bin
                 when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r) && r != 0m:
                 value = l / r;

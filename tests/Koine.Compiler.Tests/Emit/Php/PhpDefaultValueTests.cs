@@ -103,6 +103,32 @@ public class PhpDefaultValueTests
     }
 
     /// <summary>
+    /// The same reachability probe on a domain <b>event</b> constructor parameter default
+    /// (<c>PhpEmitter.EmitEvent</c> — a third sibling of the value-object/entity constructor code
+    /// paths above, shared by domain and integration events alike), confirming the fix covers every
+    /// PHP call site that embeds a constant-initializer default into a constructor-promoted property.
+    /// </summary>
+    [Fact]
+    public void Computed_decimal_default_on_an_event_emits_valid_php()
+    {
+        const string src =
+            "context Pricing {\n" +
+            "  event RateApplied {\n" +
+            "    amount: Decimal = 0.1 + 0.05\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var php = result.Files.Single(f => f.RelativePath.EndsWith("RateApplied.php")).Contents;
+        php.ShouldNotContain("->add(");
+
+        var r = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoInterpreterNotice);
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// A computed default that DOES reference a sibling member is already routed through the
     /// derived-member getter path (never a constructor default at all) — this stays green
     /// unconditionally and pins that the fix for the non-sibling-referencing case above does not
