@@ -196,7 +196,8 @@ public sealed partial class PhpEmitter
             if (m.Initializer is not null
                 && !MemberAnalysis.IsDerived(m, fields.Select(f => f.Name).ToHashSet()))
             {
-                var defaultVal = translator.Translate(m.Initializer, PhpExpressionTranslator.NameMode.Parameter);
+                var initializer = m.Type.Name == "Decimal" ? FoldDecimalConstantDefault(m.Initializer) : m.Initializer;
+                var defaultVal = translator.Translate(initializer, PhpExpressionTranslator.NameMode.Parameter);
                 sb.Append(" = ").Append(defaultVal);
             }
             else if (m.Type.IsOptional)
