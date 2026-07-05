@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Emit;
+using Koine.Compiler.Semantics;
 
 namespace Koine.Compiler;
 
@@ -210,7 +211,12 @@ public sealed partial class PhpEmitter
     // declared Decimal property/parameter type. A bare DECIMAL-kind literal default is already valid
     // PHP (a `new` expression, legal via PHP 8.1's "new in initializers") and is returned unchanged;
     // a bare Int-kind literal on a Decimal member (e.g. `amount: Decimal = 5`) falls through to
-    // TryFoldNumericLiteral below, which re-boxes it as a Decimal literal too (issue #1030).
+    // LiteralZeroDivisorAnalysis.TryFoldNumericLiteral below, which re-boxes it as a Decimal literal
+    // too (issue #1030). That fold is the SAME implementation SemanticValidator's
+    // DivisionByZeroInConstantDefault (KOI1606, issue #1031) uses to reject a literal-zero divisor
+    // before this emitter ever runs — shared via the InternalsVisibleTo already granted to
+    // Koine.Emit.Php, rather than a second hand-maintained copy, and already never-throws on an
+    // overflowing intermediate (so no try/catch is needed here either).
     private static Expr FoldDecimalConstantDefault(Expr expr)
     {
         if (expr is LiteralExpr { Kind: LiteralKind.Decimal })
@@ -218,61 +224,9 @@ public sealed partial class PhpEmitter
             return expr;
         }
 
-        try
-        {
-            return TryFoldNumericLiteral(expr, out decimal value)
-                ? new LiteralExpr(LiteralKind.Decimal, value.ToString(CultureInfo.InvariantCulture))
-                : expr;
-        }
-        catch (OverflowException)
-        {
-            // An overflowing fold is "not constant" — fall back to the original expression rather
-            // than throw, mirroring Semantics.ConstantFolder's never-throw discipline.
-            return expr;
-        }
-    }
-
-    private static bool TryFoldNumericLiteral(Expr expr, out decimal value)
-    {
-        switch (expr)
-        {
-            case LiteralExpr { Kind: LiteralKind.Int or LiteralKind.Decimal } lit
-                when decimal.TryParse(lit.Text, NumberStyles.Number | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out value):
-                return true;
-
-            case UnaryExpr { Op: UnaryOp.Negate } un when TryFoldNumericLiteral(un.Operand, out decimal v):
-                value = -v;
-                return true;
-
-            case BinaryExpr { Op: BinaryOp.Add } bin
-                when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r):
-                value = l + r;
-                return true;
-
-            case BinaryExpr { Op: BinaryOp.Sub } bin
-                when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r):
-                value = l - r;
-                return true;
-
-            case BinaryExpr { Op: BinaryOp.Mul } bin
-                when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r):
-                value = l * r;
-                return true;
-
-            // A literal-zero divisor (e.g. `amount: Decimal = 4 / 0`) has no representable quotient,
-            // so it is "not constant" here too — matching Semantics.ConstantFolder's own div-by-zero
-            // stance. This guard is now unreachable in practice: SemanticValidator's
-            // DivisionByZeroInConstantDefault (KOI1606, issue #1031) rejects the model before any
-            // emitter runs — kept here as defense in depth and to stay in lockstep with ConstantFolder.
-            case BinaryExpr { Op: BinaryOp.Div } bin
-                when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r) && r != 0m:
-                value = l / r;
-                return true;
-
-            default:
-                value = 0;
-                return false;
-        }
+        return LiteralZeroDivisorAnalysis.TryFoldNumericLiteral(expr, out decimal value)
+            ? new LiteralExpr(LiteralKind.Decimal, value.ToString(CultureInfo.InvariantCulture))
+            : expr;
     }
 
     // -------------------------------------------------------------------------

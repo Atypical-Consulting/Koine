@@ -9,10 +9,16 @@ namespace Koine.Compiler.Semantics;
 /// ever run. <see cref="ConstantFolder"/> operates on the already-bound IR and collapses "unfoldable
 /// because an operand isn't constant" and "unfoldable because of a literal-zero divisor" into the
 /// same <c>null</c> ("not constant") result, so it cannot report the more specific div-by-zero
-/// diagnostic on its own. This walker mirrors <c>PhpEmitter.TryFoldNumericLiteral</c>'s pure-literal
-/// arithmetic recursion (<c>Add</c>/<c>Sub</c>/<c>Mul</c>/<c>Negate</c>/<c>Div</c>) so it catches at
-/// least everything that emitter-side fold already attempts, never less — including a zero divisor
-/// that only appears after folding a sub-expression (e.g. <c>4 / (1 - 1)</c>).
+/// diagnostic on its own.
+///
+/// <para><see cref="TryFoldNumericLiteral"/> is the ONE pure-literal arithmetic fold shared with
+/// <c>PhpEmitter.FoldDecimalConstantDefault</c> (via the <c>InternalsVisibleTo</c> already granted to
+/// <c>Koine.Emit.Php</c> in <c>Koine.Compiler.csproj</c>) — a single implementation instead of two
+/// hand-maintained copies, so a future fix (a new operator, an overflow edge case) can't silently
+/// apply to only one and reopen this diagnostic's own bug class. It catches everything the PHP
+/// emitter's fold shape (<c>Add</c>/<c>Sub</c>/<c>Mul</c>/<c>Negate</c>/<c>Div</c>) already attempts,
+/// including a zero divisor that only appears after folding a sub-expression (e.g. <c>4 / (1 -
+/// 1)</c>).</para>
 ///
 /// <para>A <see cref="BinaryOp.Div"/> whose right operand folds to a literal zero is flagged
 /// regardless of whether the LEFT operand is itself foldable — dividing by zero is wrong no matter
@@ -43,14 +49,16 @@ internal static class LiteralZeroDivisorAnalysis
         }
     }
 
-    /// <summary>Pure-literal arithmetic fold — mirrors <c>PhpEmitter.TryFoldNumericLiteral</c>
-    /// exactly (including its "a literal-zero divisor is not foldable" stance), so the two never
-    /// silently drift apart. NEVER throws: an overflowing intermediate (e.g. two near-<see
-    /// cref="decimal.MaxValue"/> literals multiplied) is "not foldable" here too, mirroring
-    /// <see cref="ConstantFolder"/>'s and <c>PhpEmitter.FoldDecimalConstantDefault</c>'s own
-    /// never-throw discipline — a validation pass must never crash the compiler on a malformed
-    /// literal.</summary>
-    private static bool TryFoldNumericLiteral(Expr expr, out decimal value)
+    /// <summary>
+    /// Pure-literal arithmetic fold over <see cref="Expr"/> — shared verbatim by
+    /// <c>PhpEmitter.FoldDecimalConstantDefault</c> (issue #971) so a Decimal default's computed
+    /// literal arithmetic folds identically whether the caller is this validator or the PHP emitter.
+    /// NEVER throws: an overflowing intermediate (e.g. two near-<see cref="decimal.MaxValue"/>
+    /// literals multiplied) is "not foldable" here too, mirroring <see cref="ConstantFolder"/>'s own
+    /// never-throw discipline — a validation pass (or an emitter fold) must never crash the compiler
+    /// on a malformed literal.
+    /// </summary>
+    internal static bool TryFoldNumericLiteral(Expr expr, out decimal value)
     {
         try
         {
