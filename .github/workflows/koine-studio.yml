@@ -264,12 +264,30 @@ jobs:
       # Built at the DEPLOY's sub-path base (/Koine/studio/) so the boot smoke-test below exercises the
       # exact base/worker-URL resolution users hit — without forcing AOT (the PR validation stays on the
       # fast interpreter; the #357 worker-boot bug is in the worker JS, independent of the wasm runtime).
+      #
+      # `build:wasm` shells out to `dotnet publish src/Koine.Wasm`, which triggers Koine.Compiler's
+      # ANTLR grammar codegen (Antlr4BuildTasks launching a JVM). That launch intermittently fails with
+      # `ANT02: Could not find or load main class org.antlr.v4.Tool` (issue #1044) — a transient
+      # JVM-launch hiccup on the runner: a 100+-run audit found it exactly once, always cleared by a
+      # bare re-run, with no shared-cache-corruption pattern. Retry only this invocation (not the whole
+      # step/job), mirroring the Setup Rust retry-with-backoff in ci.yml (issue #524).
       - name: Build studio (web)
         working-directory: tooling/koine-studio
         env:
           KOINE_STUDIO_BASE: /Koine/studio/
+        shell: bash
         run: |
-          npm run build:wasm
+          for attempt in 1 2 3; do
+            if npm run build:wasm; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::npm run build:wasm failed after ${attempt} attempts (ANT02 JVM-launch flake — issue #1044)."
+              exit 1
+            fi
+            echo "npm run build:wasm failed (attempt ${attempt}); retrying in $((attempt * 5))s…" >&2
+            sleep "$((attempt * 5))"
+          done
           npm run build:web
 
       # The compiler worker must actually boot in a real browser. The vitest/storybook suites MOCK the
