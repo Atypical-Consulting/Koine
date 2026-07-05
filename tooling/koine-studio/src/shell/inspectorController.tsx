@@ -1220,7 +1220,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       // open, else browser storage (web/scratch mode).
       setDiagramPersistScope(contextWorkspaceKey());
       setDiagramLayoutStore(createLayoutStore(platform, deps.folderRootToken()));
-      await renderDiagrams(diagramsView, files, currentTheme(), () => seq === diagramsSeq);
+      // renderDiagrams itself suspends again internally (a dynamic import, a layout-store load) before it
+      // mounts into diagramsView — its own `isCurrent` gate must also see `disposed`, not just the local
+      // seq, or a resolving mount still lands in the torn-down host (#1002).
+      await renderDiagrams(diagramsView, files, currentTheme(), () => !disposed && seq === diagramsSeq);
       if (disposed) return; // the render above can itself suspend — re-check before markLoaded
       if (seq === diagramsSeq) appStore.getState().markLoaded('diagrams', token);
     } catch (e) {
@@ -2092,7 +2095,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
 
     try {
       const graph = buildContextMapGraph(res);
-      contextMapGraphHandle = await renderContextMapGraph(stage, graph, () => seq === contextMapRenderSeq, {
+      // renderContextMapGraph itself suspends again internally (a dynamic maxGraph import) before it mounts
+      // into stage and wires its click listener — its own `isCurrent` gate must also see `disposed`, not
+      // just the local seq, or a resolving mount still lands (and wires live handlers) in a torn-down host
+      // (#1002). paintContextMap is reached both from loadContextMapPanel's guardedLoad render callback and
+      // from a live setContextMapMode toggle, so this fix covers both call paths uniformly.
+      contextMapGraphHandle = await renderContextMapGraph(stage, graph, () => !disposed && seq === contextMapRenderSeq, {
         // A context-node click both FILTERS the workspace to that bounded context (only when it's a
         // real, known context — a synthetic dangling endpoint isn't a valid scope) AND JUMPS to its
         // `.koi` declaration (#290). The graph node carries the declaration span, so we reuse the same
