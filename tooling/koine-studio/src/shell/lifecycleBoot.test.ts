@@ -2,14 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock the module-level collaborators the boot ladder reaches (store subscription, emit targets, the
 // one-shot start-intent, the hash/persistence helpers) so each branch is driven deterministically.
-const { storeSubUnsub, takeStartIntentMock, getLastWorkspaceMock } = vi.hoisted(() => ({
+const { storeSubUnsub, takeStartIntentMock, peekStartIntentMock, getLastWorkspaceMock } = vi.hoisted(() => ({
   storeSubUnsub: vi.fn(),
   takeStartIntentMock: vi.fn(),
+  peekStartIntentMock: vi.fn(),
   getLastWorkspaceMock: vi.fn(),
 }));
 vi.mock('@/store/index', () => ({ appStore: { subscribe: vi.fn(() => storeSubUnsub) } }));
 vi.mock('@/shared/emitTargets', () => ({ setEmitTargets: vi.fn() }));
-vi.mock('@/shell/bootIntent', () => ({ takeStartIntent: takeStartIntentMock }));
+vi.mock('@/shell/bootIntent', () => ({ takeStartIntent: takeStartIntentMock, peekStartIntent: peekStartIntentMock }));
 vi.mock('@/export/share', () => ({ clearModelHash: vi.fn(), readModelFromHash: vi.fn() }));
 vi.mock('@/settings/persistence', () => ({ getLastWorkspace: getLastWorkspaceMock, setLastWorkspace: vi.fn(), clearLegacyScratch: vi.fn() }));
 
@@ -74,6 +75,7 @@ function makeDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
 beforeEach(() => {
   vi.clearAllMocks();
   takeStartIntentMock.mockReturnValue(null);
+  peekStartIntentMock.mockReturnValue(null);
   getLastWorkspaceMock.mockReturnValue(null);
 });
 
@@ -252,6 +254,150 @@ describe('lifecycleBoot', () => {
       await flush();
       expect(deps.openExample).toHaveBeenCalledOnce();
       expect(deps.openExample).toHaveBeenCalledWith({ id: 'billing' });
+    });
+  });
+
+  // Regression (#973): a boot-time lsp.start() rejection used to show only a generic "connection
+  // failed" — never naming the template/folder the user picked on Home, and never letting them recover.
+  describe('boot rejection with a queued Home intent (#973)', () => {
+    function makeRejectingDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
+      return makeDeps({
+        lsp: {
+          onServerRestart: vi.fn(),
+          start: vi.fn(() => Promise.reject(new Error('spawn ENOENT'))),
+          emitTargets: vi.fn(() => Promise.resolve([])) as never,
+        },
+        ...over,
+      });
+    }
+
+    it('names the queued start action in the failure status/output instead of a generic message', async () => {
+      peekStartIntentMock.mockReturnValue({ kind: 'open-example', template: { id: 'billing', name: 'Billing' } as never });
+      const deps = makeRejectingDeps();
+      createLifecycleBoot(deps);
+      await flush();
+
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.stringContaining('Billing'), 'error');
+      expect(deps.setOutput).toHaveBeenCalledWith(expect.stringContaining('Billing'), 'plain');
+      // Peek must not consume it — Task 3's recovery re-dispatch still needs it.
+      expect(takeStartIntentMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps the generic "connection failed" message when there is no pending intent', async () => {
+      peekStartIntentMock.mockReturnValue(null);
+      const deps = makeRejectingDeps();
+      createLifecycleBoot(deps);
+      await flush();
+
+      expect(deps.setStatus).toHaveBeenCalledWith('connection failed', 'error');
+      expect(deps.setOutput).toHaveBeenCalledWith(expect.stringContaining('failed to start language server'), 'plain');
+    });
+  });
+
+  // Regression (#973): onServerRestart used to only refresh views — a stranded Home intent (template,
+  // folder, "New") never re-ran once the sidecar recovered, leaving the user on an empty workspace.
+  describe('recovery re-dispatch after a failed boot (#973)', () => {
+    function restartCallback(deps: LifecycleBootDeps): () => void {
+      const fn = deps.lsp.onServerRestart as unknown as ReturnType<typeof vi.fn>;
+      return fn.mock.calls[0][0];
+    }
+
+    function makeRejectingDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
+      return makeDeps({
+        lsp: {
+          onServerRestart: vi.fn(),
+          start: vi.fn(() => Promise.reject(new Error('spawn ENOENT'))),
+          emitTargets: vi.fn(() => Promise.resolve([])) as never,
+        },
+        ...over,
+      });
+    }
+
+    it('re-dispatches the retained intent exactly once when the server recovers', async () => {
+      const billing = { id: 'billing', name: 'Billing' } as never;
+      peekStartIntentMock.mockReturnValue({ kind: 'open-example', template: billing });
+      const deps = makeRejectingDeps();
+      createLifecycleBoot(deps);
+      await flush(); // boot fails; bootIntentPending is now true
+
+      takeStartIntentMock.mockReturnValue({ kind: 'open-example', template: billing });
+      restartCallback(deps)();
+      await flush();
+
+      expect(deps.openExample).toHaveBeenCalledOnce();
+      expect(deps.openExample).toHaveBeenCalledWith(billing);
+    });
+
+    it('does not replay on a second restart, and a normal restart only refreshes views', async () => {
+      const billing = { id: 'billing', name: 'Billing' } as never;
+      peekStartIntentMock.mockReturnValue({ kind: 'open-example', template: billing });
+      const deps = makeRejectingDeps();
+      createLifecycleBoot(deps);
+      await flush();
+
+      takeStartIntentMock.mockReturnValue({ kind: 'open-example', template: billing });
+      const restart = restartCallback(deps);
+      restart();
+      await flush();
+      expect(deps.openExample).toHaveBeenCalledOnce();
+
+      restart(); // second restart: bootIntentPending is now false — no replay
+      await flush();
+      expect(deps.openExample).toHaveBeenCalledOnce();
+      expect(deps.invalidateDocViews).toHaveBeenCalled();
+      expect(deps.refreshActiveSurfaces).toHaveBeenCalled();
+    });
+
+    it('a normal mid-session restart (no failed boot) only refreshes views, never opens anything', async () => {
+      const deps = makeDeps(); // lsp.start() resolves — bootIntentPending never set
+      createLifecycleBoot(deps);
+      await flush();
+
+      restartCallback(deps)();
+      await flush();
+
+      expect(deps.openExample).not.toHaveBeenCalled();
+      expect(deps.newModel).not.toHaveBeenCalled();
+      expect(deps.invalidateDocViews).toHaveBeenCalled();
+      expect(deps.refreshActiveSurfaces).toHaveBeenCalled();
+    });
+
+    it('the re-dispatch is guarded: confirmReplaceWork is consulted (matching the return-visit path)', async () => {
+      const billing = { id: 'billing', name: 'Billing' } as never;
+      peekStartIntentMock.mockReturnValue({ kind: 'open-example', template: billing });
+      const confirmReplaceWork = vi.fn(async () => true);
+      const deps = makeRejectingDeps({ confirmReplaceWork });
+      createLifecycleBoot(deps);
+      await flush();
+
+      takeStartIntentMock.mockReturnValue({ kind: 'open-example', template: billing });
+      restartCallback(deps)();
+      await flush();
+
+      expect(confirmReplaceWork).toHaveBeenCalled();
+      expect(deps.openExample).toHaveBeenCalledWith(billing);
+    });
+
+    // Regression: bootIntentPending only tracks "a boot intent was stranded"; it does NOT track
+    // whether bootIntent.ts's own pending intent is STILL there. If a return visit to Home (the
+    // pre-existing route-intent subscription) drains it first — e.g. the user picked a different
+    // action from Home before the sidecar actually recovers — bootIntentPending is still true when
+    // the real restart fires, but takeStartIntent() now returns null. The refresh must still run.
+    it('still refreshes views on the real restart when the retained intent was already drained elsewhere', async () => {
+      peekStartIntentMock.mockReturnValue({ kind: 'open-example', template: { id: 'billing', name: 'Billing' } as never });
+      const deps = makeRejectingDeps();
+      createLifecycleBoot(deps);
+      await flush(); // boot fails; bootIntentPending is now true
+
+      // The intent was already consumed by another path (e.g. a return-visit Home pick) — takeStartIntent
+      // returns null by the time the real onServerRestart fires.
+      takeStartIntentMock.mockReturnValue(null);
+      restartCallback(deps)();
+      await flush();
+
+      expect(deps.openExample).not.toHaveBeenCalled();
+      expect(deps.invalidateDocViews).toHaveBeenCalled();
+      expect(deps.refreshActiveSurfaces).toHaveBeenCalled();
     });
   });
 

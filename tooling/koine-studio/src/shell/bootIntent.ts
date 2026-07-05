@@ -25,3 +25,8 @@ export function takeStartIntent(): StartIntent | null {
   pending = null;
   return intent;
 }
+
+/** Read the queued intent WITHOUT clearing it (null if none) — for naming a target on a boot failure. */
+export function peekStartIntent(): StartIntent | null {
+  return pending;
+}
