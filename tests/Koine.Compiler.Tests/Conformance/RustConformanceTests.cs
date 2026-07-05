@@ -144,4 +144,42 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #887: a plain (non-quantity) value object used directly in binary arithmetic —
+    /// <c>combined: Money = base + base</c> / <c>diff: Money = base - base</c> — must emit real
+    /// <c>impl std::ops::Add</c> / <c>impl std::ops::Sub</c> so the native <c>+</c>/<c>-</c> the
+    /// translator lowers to resolve. Before the fix the value-object writer only generated <c>Add</c>
+    /// (and only when the VO was <c>sum</c>-folded), so <c>base - base</c> had no <c>Sub</c> impl — a
+    /// real <c>cargo check</c> failure (E0369). Brings Rust to parity with C#/TypeScript/Python (#834)
+    /// and PHP.
+    /// </summary>
+    [Fact]
+    public void Value_object_plain_arithmetic_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  value Line {\n" +
+            "    base: Money\n" +
+            "    combined: Money = base + base\n" +
+            "    diff: Money = base - base\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): both operator impls must be rendered.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("impl std::ops::Add for Money");
+        rust.ShouldContain("impl std::ops::Sub for Money");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
