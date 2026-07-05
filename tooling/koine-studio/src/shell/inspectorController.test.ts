@@ -22,6 +22,7 @@ import { createCountingStore } from '@/store/testing';
 import { domById } from '@/shared/domById';
 import * as maxgraphRenderer from '@/diagrams/diagrams-maxgraph';
 import type { ContextMapGraphHooks } from '@/diagrams/diagrams-maxgraph';
+import * as diagramsModule from '@/diagrams/diagrams';
 import type {
   CheckResult,
   ContextMapResult,
@@ -1558,6 +1559,153 @@ describe('createInspectorController — teardown / disposal (#980)', () => {
       deps.store.getState().setSelection({ qualifiedName: 'Billing.Money', context: 'Billing' }),
     ).not.toThrow();
     expect(deps.store.getState().right).toBe('assistant');
+  });
+});
+
+describe('createInspectorController — teardown / disposal, in-flight loader (#1002)', () => {
+  // #980 fixed subscriptions that were LIVE at dispose time; this targets the async sibling — a surface
+  // loader that is still AWAITING its fetch when dispose() runs. The resolved continuation must not mount
+  // a fresh store-subscribing panel (or write to the host at all) on behalf of a torn-down controller.
+  // loadEventsPanel (via guardedLoad) is the target: its host (#panel-events) lives in the diagnostics
+  // footer, a sibling of #center — unlike a center-pane loader (e.g. loadModel), it survives dispose()'s
+  // render(null, centerBodyEl) unmount, so a post-dispose write is cleanly observable rather than masked
+  // by an unrelated "host no longer exists" throw.
+  test('an in-flight loadEventsPanel() that resolves after dispose() does not re-subscribe or repaint', async () => {
+    const { store, active } = createCountingStore();
+    const base = active(); // nothing subscribed yet
+
+    const lsp = makeLsp();
+    let resolveDocs!: (docs: DocsResult) => void;
+    lsp.livingDocs.mockImplementation(
+      () =>
+        new Promise<DocsResult>((resolve) => {
+          resolveDocs = resolve;
+        }),
+    );
+
+    const ctl = createInspectorController(makeDeps(lsp, { store }));
+    ctl.init();
+    expect(active()).toBeGreaterThan(base); // sanity: init did subscribe
+
+    ctl.selectBottomTab('events'); // kicks off loadEventsPanel(); it suspends on the deferred livingDocs fetch
+    const loadingHtml = domById('panel-events').innerHTML;
+    expect(loadingHtml).not.toBe(''); // the loading placeholder painted synchronously, before dispose
+
+    ctl.dispose(); // tear down WHILE that fetch is still in flight — drops every subscription live at dispose
+
+    resolveDocs({ files: [] });
+    await flush(); // let the microtask-chained continuation run
+    await new Promise((resolve) => setTimeout(resolve, 0)); // + a macrotask — Preact effects subscribe deferred
+
+    expect(active()).toBe(base); // back to zero — the resolved loader must not have mounted a subscribing panel
+    expect(domById('panel-events').innerHTML).toBe(loadingHtml); // ...nor repainted the torn-down host
+  });
+
+  // A single-await loader could pass the test above by accident (e.g. a bail only at the very top of the
+  // continuation). runCheck genuinely suspends TWICE (pickFolder, then lsp.check) with real work between —
+  // proving the SECOND suspension is guarded too, not just the first.
+  test('an in-flight runCheck() that resolves its second await after dispose() does not repaint the torn-down host', async () => {
+    // compatNeedsInProcessSources: true exercises the readFolderSources leg too (the real BrowserPlatform
+    // sets it), so this test's own disposed-guard after THAT suspension gets covered as well — not just
+    // the pickFolder/lsp.check pair.
+    const platform = fakePlatform({
+      pickFolder: vi.fn(async () => '/baseline'),
+      compatNeedsInProcessSources: true,
+      readFolderSources: vi.fn(async () => []),
+    });
+    const lsp = makeLsp();
+    let resolveCheck!: (result: CheckResult) => void;
+    lsp.check.mockImplementation(
+      () =>
+        new Promise<CheckResult>((resolve) => {
+          resolveCheck = resolve;
+        }),
+    );
+
+    const ctl = createInspectorController(makeDeps(lsp, { platform }));
+    ctl.init();
+    // Captured ONCE, before dispose(): dispose()'s render(null, centerBodyEl) detaches #view-check (it
+    // lives inside the center pane) from the document, so a FRESH domById() lookup after dispose would
+    // throw "missing #view-check" — the controller's own internal reference stays valid on a detached
+    // node (Preact/DOM writes to it don't throw), so this test must hold the same kind of reference.
+    const viewCheckEl = domById('view-check');
+
+    void ctl.runCheck(); // suspends on pickFolder first
+    await flush(); // let pickFolder resolve and the continuation reach the SECOND await (lsp.check)
+    const checkingHtml = viewCheckEl.innerHTML;
+    expect(checkingHtml).toContain('Checking against baseline'); // painted synchronously before the 2nd await
+
+    ctl.dispose(); // tear down WHILE lsp.check is still in flight
+
+    resolveCheck({ hasBreakingChanges: false, changes: [] });
+    await flush();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(viewCheckEl.innerHTML).toBe(checkingHtml); // the resolved 2nd await must not repaint it
+  });
+
+  // loadDiagrams' own `if (disposed) return;` only guards ITS continuation — the actual DOM mount happens
+  // inside renderDiagrams (a maxGraph canvas), which suspends AGAIN internally (a dynamic import, a
+  // layout-store load) behind its own `isCurrent` callback. Verify that callback itself observes `disposed`
+  // once torn down, not just the local seq — otherwise a resolving nested render still mounts post-dispose.
+  test('loadDiagrams threads disposed into renderDiagrams\' own isCurrent gate, not just the local seq', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    let capturedIsCurrent: (() => boolean) | undefined;
+    let resolveRender!: () => void;
+    vi.spyOn(diagramsModule, 'renderDiagrams').mockImplementation(async (_container, _files, _theme, isCurrent) => {
+      capturedIsCurrent = isCurrent;
+      return new Promise<void>((resolve) => {
+        resolveRender = resolve;
+      });
+    });
+
+    void ctl.loadDiagrams(); // suspends on lsp.livingDocs() (resolves immediately), then on renderDiagrams
+    await flush();
+    expect(capturedIsCurrent).toBeDefined();
+    expect(capturedIsCurrent!()).toBe(true); // sanity: still current before dispose
+
+    ctl.dispose(); // tear down WHILE renderDiagrams' own internal await is in flight
+
+    expect(capturedIsCurrent!()).toBe(false); // the fix: isCurrent must observe disposed too
+
+    resolveRender();
+    await flush();
+  });
+
+  // Same hazard, one level deeper: loadContextMapPanel's guardedLoad `render` callback fires a fire-and-
+  // forget `paintContextMap()`, which suspends again inside renderContextMapGraph (again, a maxGraph mount).
+  // guardedLoad's isDisposed() never reaches that nested suspension — only threading `disposed` into
+  // paintContextMap's own isCurrent callback closes it.
+  test('loadContextMapPanel threads disposed into renderContextMapGraph\'s own isCurrent gate, not just the local seq', async () => {
+    localStorage.removeItem('koine.studio.contextMapView'); // Graph is the default view
+    const lsp = makeLsp();
+    lsp.contextMap.mockResolvedValue({ contexts: ['Billing'], relations: [] });
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    let capturedIsCurrent: (() => boolean) | undefined;
+    let resolveGraph!: (handle: maxgraphRenderer.ContextMapGraphHandle | null) => void;
+    vi.spyOn(maxgraphRenderer, 'renderContextMapGraph').mockImplementation(async (_stage, _graph, isCurrent) => {
+      capturedIsCurrent = isCurrent;
+      return new Promise((resolve) => {
+        resolveGraph = resolve;
+      });
+    });
+
+    ctl.selectOutput('contextmap'); // loadContextMapPanel -> lsp.contextMap() -> render() -> paintContextMap()
+    await flush();
+    expect(capturedIsCurrent).toBeDefined();
+    expect(capturedIsCurrent!()).toBe(true); // sanity: still current before dispose
+
+    ctl.dispose(); // tear down WHILE renderContextMapGraph's own internal await is in flight
+
+    expect(capturedIsCurrent!()).toBe(false); // the fix: isCurrent must observe disposed too
+
+    resolveGraph({ dispose: vi.fn() });
+    await flush();
   });
 });
 
