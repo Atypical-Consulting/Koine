@@ -32,7 +32,8 @@ public sealed class CSharpEmitterProvider : IEmitterProvider
         if (options.NamespaceMap.Count == 0 && options.InstantMode is null && !options.EmitSourceMaps
             && !options.ReferenceOnly && options.Layers is null
             && !options.ApplicationMediatr && options.ApplicationMapping is null
-            && options.RegexMatchTimeoutMs is null && !isSourceGeneratedRegex)
+            && options.RegexMatchTimeoutMs is null && !isSourceGeneratedRegex
+            && options.ApplicationHandlerResult is null && options.ApplicationNotFound is null)
         {
             return CSharpEmitterOptions.Empty;
         }
@@ -44,10 +45,16 @@ public sealed class CSharpEmitterProvider : IEmitterProvider
             ? CSharpMappingMode.Mapperly
             : CSharpMappingMode.Plain;
         var regexMode = isSourceGeneratedRegex ? RegexMode.SourceGenerated : RegexMode.Inline;
+        var handlerResult = string.Equals(options.ApplicationHandlerResult, "aggregate", StringComparison.OrdinalIgnoreCase)
+            ? CSharpHandlerResult.Aggregate
+            : CSharpHandlerResult.Void;
+        var notFound = string.Equals(options.ApplicationNotFound, "nullable", StringComparison.OrdinalIgnoreCase)
+            ? CSharpNotFound.Nullable
+            : CSharpNotFound.Throw;
         return new CSharpEmitterOptions(
             options.NamespaceMap, instant, options.EmitSourceMaps, options.ReferenceOnly,
             ParseLayers(options.Layers), options.ApplicationMediatr, mapping,
-            options.RegexMatchTimeoutMs ?? 1000, regexMode);
+            options.RegexMatchTimeoutMs ?? 1000, regexMode, handlerResult, notFound);
     }
 
     /// <summary>

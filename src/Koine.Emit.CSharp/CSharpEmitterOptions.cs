@@ -30,6 +30,40 @@ internal enum CSharpMappingMode
 }
 
 /// <summary>
+/// What a generated command handler returns (W1: make the Application layer adoptable). Applies only
+/// to a command with no declared return type. <see cref="Void"/> (the default, byte-identical to
+/// today) returns nothing; <see cref="Aggregate"/> returns the loaded, mutated aggregate root so a
+/// caller can use the updated state without re-loading — the shape a CRUD/realtime app needs to
+/// delegate its write path to the generated handler. A command that declares its own return type is
+/// unaffected (it always returns that type).
+/// </summary>
+internal enum CSharpHandlerResult
+{
+    /// <summary>Return nothing (a <c>Task</c>-returning handler) — the historical default.</summary>
+    Void,
+
+    /// <summary>Return the loaded, mutated aggregate root.</summary>
+    Aggregate,
+}
+
+/// <summary>
+/// How a generated handler treats a missing aggregate on load (W1: make the Application layer
+/// adoptable). <see cref="Throw"/> (the default, byte-identical to today) throws an
+/// <c>InvalidOperationException</c>; <see cref="Nullable"/> returns a nullable result and yields
+/// <c>null</c> when the aggregate is absent, so a caller maps a miss to a 404 without catching an
+/// exception. A <c>nullable</c> command handler returns the aggregate (or its declared result) as a
+/// nullable type; a by-identity query handler returns its read model nullably.
+/// </summary>
+internal enum CSharpNotFound
+{
+    /// <summary>Throw <c>InvalidOperationException</c> on a missing aggregate — the historical default.</summary>
+    Throw,
+
+    /// <summary>Return a nullable result and yield <c>null</c> when the aggregate is absent.</summary>
+    Nullable,
+}
+
+/// <summary>
 /// A composable layer of the C# target, selected via <c>--layers</c> / <c>targets.csharp.layers</c>.
 /// <see cref="Domain"/> (the Domain model + application contracts) is always emitted and is the
 /// default; <see cref="Application"/> additionally emits the opt-in Application layer (issue #129) —
@@ -114,7 +148,9 @@ internal sealed record CSharpEmitterOptions(
     bool ApplicationMediatr = false,
     CSharpMappingMode Mapping = CSharpMappingMode.Plain,
     int RegexMatchTimeoutMs = 1000,
-    RegexMode RegexMode = RegexMode.Inline)
+    RegexMode RegexMode = RegexMode.Inline,
+    CSharpHandlerResult HandlerResult = CSharpHandlerResult.Void,
+    CSharpNotFound NotFound = CSharpNotFound.Throw)
 {
     public static readonly CSharpEmitterOptions Empty =
         new(new Dictionary<string, string>(StringComparer.Ordinal));

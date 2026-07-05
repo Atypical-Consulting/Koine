@@ -80,6 +80,8 @@ public sealed partial class CSharpEmitter : IEmitter
                 "mapping=" + _options.Mapping,
                 "regexTimeout=" + _options.RegexMatchTimeoutMs,
                 "regexMode=" + _options.RegexMode,
+                "handlerResult=" + _options.HandlerResult,
+                "notFound=" + _options.NotFound,
                 "ns=" + map);
         }
     }

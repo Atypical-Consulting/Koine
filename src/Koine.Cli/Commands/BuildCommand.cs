@@ -58,6 +58,14 @@ internal class BuildSettings : CommandSettings
     [Description("Application layer: DTO/read-model mapping strategy, plain (default) or mapperly.")]
     public string? AppMapping { get; init; }
 
+    [CommandOption("--app-handler-result <MODE>")]
+    [Description("Application layer: what a command handler returns, void (default) or aggregate (the loaded, mutated aggregate root).")]
+    public string? AppHandlerResult { get; init; }
+
+    [CommandOption("--app-not-found <MODE>")]
+    [Description("Application layer: how a handler treats a missing aggregate, throw (default) or nullable (return null, e.g. for a 404).")]
+    public string? AppNotFound { get; init; }
+
     [CommandOption("--regex-match-timeout-ms <MS>")]
     [Description("Override the C# regex match timeout (ms) for this invocation; wins over targets.csharp.regexMatchTimeoutMs. Must be a positive integer.")]
     public string? RegexMatchTimeoutMs { get; init; }
@@ -119,6 +127,8 @@ internal class BuildSettings : CommandSettings
 
         var applicationMediatr = AppMediatr || targetOptions.ApplicationMediatr;
         var applicationMapping = AppMapping ?? targetOptions.ApplicationMapping;
+        var applicationHandlerResult = AppHandlerResult ?? targetOptions.ApplicationHandlerResult;
+        var applicationNotFound = AppNotFound ?? targetOptions.ApplicationNotFound;
 
         // The DTO/read-model mapping strategy (issue #630): validate the resolved value — the explicit
         // --app-mapping flag or the application.mapping config key — against the modes the emitter
@@ -130,12 +140,29 @@ internal class BuildSettings : CommandSettings
             return false;
         }
 
+        // The command-handler result shape (W1: make the Application layer adoptable): void (default)
+        // or aggregate. Same hard-error-on-typo rule as --app-mapping so a misspelled value can't
+        // silently fall back to void.
+        if (applicationHandlerResult is { } handlerResult && !ValidHandlerResults.Contains(handlerResult))
+        {
+            error = $"unknown app-handler-result '{handlerResult}' (valid modes: void, aggregate)";
+            return false;
+        }
+
+        // The missing-aggregate policy (W1): throw (default) or nullable. Same hard-error-on-typo rule.
+        if (applicationNotFound is { } notFound && !ValidNotFoundPolicies.Contains(notFound))
+        {
+            error = $"unknown app-not-found '{notFound}' (valid modes: throw, nullable)";
+            return false;
+        }
+
         // The Application sub-options imply the Application layer (issue #618). A user who reaches for
         // --app-mediatr/--app-mapping clearly wants the Application layer, so honor that the same way
         // application/infrastructure already imply domain — otherwise the flag is a silent no-op when
         // the resolved layers default to Domain-only. Run this after layer resolution so an explicit
         // --layers domain (or a config block) is still upgraded to include application.
-        if (applicationMediatr || applicationMapping is not null)
+        if (applicationMediatr || applicationMapping is not null || applicationHandlerResult is not null
+            || applicationNotFound is not null)
         {
             resolvedLayers = WithApplicationLayer(resolvedLayers);
         }
@@ -145,6 +172,8 @@ internal class BuildSettings : CommandSettings
             Layers = resolvedLayers,
             ApplicationMediatr = applicationMediatr,
             ApplicationMapping = applicationMapping,
+            ApplicationHandlerResult = applicationHandlerResult,
+            ApplicationNotFound = applicationNotFound,
         };
 
         plan = new BuildPlan(
@@ -162,6 +191,18 @@ internal class BuildSettings : CommandSettings
     /// fall-back to <c>plain</c>.</summary>
     private static readonly IReadOnlySet<string> ValidAppMappings =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "plain", "mapperly" };
+
+    /// <summary>The command-handler result shapes a user may request via <c>--app-handler-result</c> /
+    /// <c>application.handlerResult</c> (W1). An unknown value is a hard error, not a silent fall-back
+    /// to <c>void</c>.</summary>
+    private static readonly IReadOnlySet<string> ValidHandlerResults =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "void", "aggregate" };
+
+    /// <summary>The missing-aggregate policies a user may request via <c>--app-not-found</c> /
+    /// <c>application.notFound</c> (W1). An unknown value is a hard error, not a silent fall-back
+    /// to <c>throw</c>.</summary>
+    private static readonly IReadOnlySet<string> ValidNotFoundPolicies =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "throw", "nullable" };
 
     /// <summary>
     /// Resolves the layer selector: the explicit <c>--layers</c> flag wins over the config's
