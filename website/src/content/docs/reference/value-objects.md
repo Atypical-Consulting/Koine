@@ -222,6 +222,15 @@ public static Money operator /(Money left, int right) => new Money(left.Amount /
 It divides the numeric field, carries the rest, and routes through the validating constructor — `money / 2`
 scales a value *down*, exactly as `money * 2` scales it up.
 
+When a scaled field is `Int` and the arithmetic doesn't land on a whole number — a fractional factor
+(`weight * 1.5`) or a non-integer quotient (`weight / 2`) — the result **truncates toward zero**: the
+fractional part is dropped and the sign is kept, e.g. `7 / 2 = 3` and `-7 / 2 = -3` (not `-4`). This is
+**consistent across every emitter target** (C#, TypeScript, Python, Rust) — the same `.koi` model
+produces the same number regardless of target. `Int × Int` is always exact, and a `Decimal` field keeps
+full precision throughout. PHP is the one outlier: an `Int` field's scalar arithmetic routes through its
+BCMath-backed `Decimal` runtime rather than a native integer, so it neither rounds nor truncates the way
+the other four targets do.
+
 Same-type values combine **directly**, too — not only through a `sum` fold. A derived field such as
 `total: Money = fee + fee` or `diff: Money = fee - fee` demand-generates the matching same-type
 `operator +` / `operator -`:
