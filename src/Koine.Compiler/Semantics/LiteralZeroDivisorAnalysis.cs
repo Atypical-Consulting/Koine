@@ -44,6 +44,16 @@ internal static class LiteralZeroDivisorAnalysis
             case UnaryExpr { Op: UnaryOp.Negate } un:
                 return HasDivisionByLiteralZero(un.Operand);
 
+            case ConditionalExpr cond:
+                return HasDivisionByLiteralZero(cond.Then) || HasDivisionByLiteralZero(cond.Else);
+
+            case CoalesceExpr coalesce:
+                return HasDivisionByLiteralZero(coalesce.Left) || HasDivisionByLiteralZero(coalesce.Right);
+
+            case LetExpr let:
+                return let.Bindings.Any(b => HasDivisionByLiteralZero(b.Value))
+                    || HasDivisionByLiteralZero(let.Body);
+
             default:
                 return false;
         }
