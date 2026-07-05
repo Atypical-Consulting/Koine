@@ -267,6 +267,7 @@ Koine.Compiler.Services.VersionInfo
 const Koine.Compiler.Diagnostics.DiagnosticCodes.AggregateNameMatchesRoot = "KOI0109" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.AmbiguousFactoryIdentity = "KOI0809" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.CommandParameterReferencesEntity = "KOI1603" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DivisionByZeroInConstantDefault = "KOI1606" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DomainEventReferencesEntity = "KOI1604" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateSpecPredicate = "KOI1007" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityFieldReferencesMessageType = "KOI1605" -> string!
