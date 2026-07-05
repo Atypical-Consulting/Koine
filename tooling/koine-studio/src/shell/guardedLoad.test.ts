@@ -11,7 +11,15 @@ describe('guardedLoad', () => {
     const store = createAppStore();
     const loading = vi.fn();
     const render = vi.fn();
-    await guardedLoad({ store, key: 'glossary', loading, fetch: async () => 'DATA', render, onError: vi.fn() });
+    await guardedLoad({
+      store,
+      key: 'glossary',
+      isDisposed: () => false,
+      loading,
+      fetch: async () => 'DATA',
+      render,
+      onError: vi.fn(),
+    });
 
     expect(loading).toHaveBeenCalledOnce();
     expect(render).toHaveBeenCalledWith('DATA');
@@ -24,6 +32,7 @@ describe('guardedLoad', () => {
     await guardedLoad({
       store,
       key: 'glossary',
+      isDisposed: () => false,
       fetch: async () => {
         store.getState().invalidate('glossary'); // an edit bumps the token while the fetch is in flight
         return 'STALE';
@@ -42,6 +51,7 @@ describe('guardedLoad', () => {
     await guardedLoad({
       store,
       key: 'events',
+      isDisposed: () => false,
       fetch: async () => {
         throw new Error('boom');
       },
@@ -59,8 +69,44 @@ describe('guardedLoad', () => {
     await guardedLoad({
       store,
       key: 'events',
+      isDisposed: () => false,
       fetch: async () => {
         store.getState().invalidate('events');
+        throw new Error('boom');
+      },
+      render: vi.fn(),
+      onError,
+    });
+
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  // #1002: a controller torn down while this fetch was in flight must not mount/mark-loaded on its behalf.
+  test('bails without rendering or marking loaded when disposed mid-fetch', async () => {
+    const store = createAppStore();
+    const render = vi.fn();
+    await guardedLoad({
+      store,
+      key: 'glossary',
+      isDisposed: () => true,
+      fetch: async () => 'DATA',
+      render,
+      onError: vi.fn(),
+    });
+
+    expect(render).not.toHaveBeenCalled();
+    expect(store.getState().isStale('glossary')).toBe(true); // never marked loaded
+  });
+
+  // #1002: same for the rejection path — a dead controller doesn't need the error surfaced either.
+  test('drops the error too when disposed mid-fetch: onError is not called', async () => {
+    const store = createAppStore();
+    const onError = vi.fn();
+    await guardedLoad({
+      store,
+      key: 'events',
+      isDisposed: () => true,
+      fetch: async () => {
         throw new Error('boom');
       },
       render: vi.fn(),
@@ -73,7 +119,7 @@ describe('guardedLoad', () => {
   test('the loading callback is optional', async () => {
     const store = createAppStore();
     await expect(
-      guardedLoad({ store, key: 'contextmap', fetch: async () => 1, render: vi.fn(), onError: vi.fn() }),
+      guardedLoad({ store, key: 'contextmap', isDisposed: () => false, fetch: async () => 1, render: vi.fn(), onError: vi.fn() }),
     ).resolves.toBeUndefined();
   });
 });
