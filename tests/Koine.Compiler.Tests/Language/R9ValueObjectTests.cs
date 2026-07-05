@@ -674,4 +674,52 @@ public class R9ValueObjectTests
             """;
         Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NarrowingConversionInDerivedMember);
     }
+
+    [Fact]
+    public void Stored_default_narrowing_decimal_literal_into_an_int_declared_type_is_rejected()
+    {
+        // `total: Int = 2.5` — a STORED (non-derived) constant default, not a computed member. The
+        // literal infers to Decimal, the field is declared Int; same illegal narrowing as issue #967's
+        // derived-member case, and must be rejected the same way (issue #974).
+        const string src = """
+            context Shop {
+              value V {
+                total: Int = 2.5
+              }
+            }
+            """;
+        var narrowing = Diagnose(src).ShouldHaveSingleItem();
+        narrowing.Code.ShouldBe(DiagnosticCodes.NarrowingConversionInDerivedMember);
+        narrowing.Severity.ShouldBe(DiagnosticSeverity.Error);
+        narrowing.Message.ShouldContain("total");
+    }
+
+    [Fact]
+    public void Stored_default_widening_int_literal_into_a_decimal_declared_type_is_allowed()
+    {
+        // `total: Decimal = 2` is the legal widening case (C# widens int -> decimal for free); must
+        // NOT be flagged.
+        const string src = """
+            context Shop {
+              value V {
+                total: Decimal = 2
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NarrowingConversionInDerivedMember);
+    }
+
+    [Fact]
+    public void Stored_default_with_a_same_type_numeric_literal_is_allowed()
+    {
+        // `total: Int = 2` is same-type: no narrowing, no diagnostic.
+        const string src = """
+            context Shop {
+              value V {
+                total: Int = 2
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NarrowingConversionInDerivedMember);
+    }
 }
