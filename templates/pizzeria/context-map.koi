@@ -1,4 +1,4 @@
-// The strategic view (R14.1) — how the pizzeria's bounded contexts relate. A context
+// The strategic view — how the pizzeria's bounded contexts relate. A context
 // map is a top-level declaration (a sibling of `context`, not nested in one). In
 // directory mode every .koi file compiles as one model, so this map can name the
 // contexts declared in the other files and authorize their event flow.
@@ -9,7 +9,7 @@
 // partnership, open-host, and anti-corruption-layer.
 contextmap {
 
-  // R14.2 — shared kernel: Menu and Ordering jointly own the `Currency` enum (with
+  // shared kernel: Menu and Ordering jointly own the `Currency` enum (with
   // its symbol/decimals associated data). It is emitted once into a dedicated kernel
   // namespace shared by both, so a price in Menu and a total in Ordering speak the
   // same currency without translation.
