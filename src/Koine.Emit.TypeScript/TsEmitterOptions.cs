@@ -2,7 +2,7 @@ namespace Koine.Compiler;
 
 /// <summary>
 /// A composable layer of the TypeScript target, selected via <c>--layers</c> /
-/// <c>targets.typescript.layers</c> — the TS analogue of <see cref="Koine.Compiler.Emit.CSharp.CSharpLayer"/>.
+/// <c>targets.typescript.layers</c> — the TS analogue of <see cref="Koine.Compiler.CSharpLayer"/>.
 /// <see cref="Domain"/> (the domain model + application contracts) is always emitted and is the default;
 /// <see cref="Infrastructure"/> additionally emits a runnable, dependency-light realization of those
 /// contracts (issue #241: concrete repositories over an in-memory store, a unit of work, a transactional
@@ -20,7 +20,7 @@ internal enum TsLayer
 
 /// <summary>
 /// Per-emit configuration for the TypeScript backend (production-grade emit). Mirrors the C#
-/// <see cref="Koine.Compiler.Emit.CSharp.CSharpEmitterOptions"/> surface for cross-emitter parity.
+/// <see cref="Koine.Compiler.CSharpEmitterOptions"/> surface for cross-emitter parity.
 /// Every member defaults so the unconfigured emitter (and every existing call site) produces
 /// byte-for-byte identical TypeScript:
 /// <list type="bullet">
@@ -40,7 +40,7 @@ internal sealed record TsEmitterOptions
 
     /// <summary>
     /// Remaps a bounded context's emitted module path (the TypeScript analogue of the C#
-    /// <see cref="Koine.Compiler.Emit.CSharp.CSharpEmitterOptions.NamespaceMap"/>). A key is a
+    /// <see cref="Koine.Compiler.CSharpEmitterOptions.NamespaceMap"/>). A key is a
     /// context name (the head segment of a module path, e.g. <c>Billing</c>); the value replaces that
     /// head, so a cross-file import of <c>Billing/value-objects/Money</c> with <c>Billing →
     /// @acme/billing</c> imports from <c>@acme/billing/value-objects/Money</c> instead of the
@@ -58,7 +58,7 @@ internal sealed record TsEmitterOptions
 
     /// <summary>
     /// The selected composable layers, parsed from the neutral <c>--layers</c> selector (the TS analogue
-    /// of <see cref="Koine.Compiler.Emit.CSharp.CSharpEmitterOptions.Layers"/>). <c>null</c> (the default)
+    /// of <see cref="Koine.Compiler.CSharpEmitterOptions.Layers"/>). <c>null</c> (the default)
     /// means Domain-only — output byte-identical to the historical emitter. The opt-in
     /// <see cref="TsLayer.Infrastructure"/> always implies <see cref="TsLayer.Domain"/>.
     /// </summary>

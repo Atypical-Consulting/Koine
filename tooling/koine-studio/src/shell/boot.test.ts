@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { saveSettings, DEFAULT_SETTINGS } from '@/settings/persistence';
+import { saveSettings, DEFAULT_SETTINGS, getRecentFolders } from '@/settings/persistence';
 
 // Stub the IDE shell so booting doesn't pull the whole editor module graph, and so we can assert
 // whether init() runs per route. The real init() is exercised exhaustively in ide.test.ts. BLANK is
@@ -55,7 +55,7 @@ beforeEach(() => {
   fakePlatform.pickFolder.mockReset().mockResolvedValue(null);
   fakePlatform.gitClone.mockReset().mockRejectedValue(new Error('gitClone not configured for this test'));
   fakePlatform.createFile.mockReset().mockResolvedValue('token');
-  appStore.setState({ route: 'home' });
+  appStore.setState({ route: 'home', emitTarget: 'csharp' });
   localStorage.clear();
   location.hash = '';
   document.body.innerHTML = '';
@@ -244,6 +244,32 @@ describe('bootStudio — a single routed view (no IDE→Home flash)', () => {
     if (!backdrop || backdrop.hidden) return undefined;
     return [...backdrop.querySelectorAll<HTMLButtonElement>('.koi-confirm-btn')].find((b) => b.textContent === label);
   }
+
+  it("cloning while a differently-targeted workspace is open does not tag the clone's recent entry with the stale target (#1072)", async () => {
+    fakePlatform.canUseGit = true;
+    fakePlatform.pickFolder.mockResolvedValue('/parent');
+    fakePlatform.gitClone.mockResolvedValue('/repos/my-clone');
+
+    // A previously-open workspace left the store's emitTarget on a non-default value — Home reads
+    // this SAME store slice, so onClone must not read it as if it were the clone's own effective target.
+    appStore.getState().setEmitTarget('rust');
+
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    dispose = bootStudio(root); // pristine → Home
+
+    submitClone(root, 'https://github.com/user/repo.git');
+    await Promise.resolve(); // pickFolder
+    await Promise.resolve(); // gitClone
+    await Promise.resolve(); // pushRecentFolder + go()
+
+    // The clone's own effective target isn't known yet (openFolderPath — which does the correct,
+    // post-#1015 tagging — hasn't resolved in this test), so the eager push must leave it untagged
+    // rather than stamping the PREVIOUSLY-open workspace's stale target on it.
+    const entry = getRecentFolders().find((r) => r.path === '/repos/my-clone');
+    expect(entry).toBeDefined();
+    expect(entry?.language).toBeUndefined();
+  });
 
   it('cloning an empty repo shows the cloned-empty notice, and Open-anyway seeds + reopens it (#1017)', async () => {
     fakePlatform.canUseGit = true;
