@@ -261,9 +261,9 @@ public sealed partial class PhpEmitter
 
             // A literal-zero divisor (e.g. `amount: Decimal = 4 / 0`) has no representable quotient,
             // so it is "not constant" here too — matching Semantics.ConstantFolder's own div-by-zero
-            // stance. This is a pre-existing, exceedingly narrow degenerate case (no legal PHP
-            // constant expression can encode it either way) tracked as a follow-up rather than
-            // fixed here: see the PR's Follow-ups section.
+            // stance. This guard is now unreachable in practice: SemanticValidator's
+            // DivisionByZeroInConstantDefault (KOI1606, issue #1031) rejects the model before any
+            // emitter runs — kept here as defense in depth and to stay in lockstep with ConstantFolder.
             case BinaryExpr { Op: BinaryOp.Div } bin
                 when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r) && r != 0m:
                 value = l / r;
