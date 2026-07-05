@@ -82,6 +82,30 @@ public class R18CSharpApplicationTests
         }
         """;
 
+    /// <summary>A minimal fixture with a DERIVED read-model field, to exercise the Mapperly per-field
+    /// mapping helper (the main <see cref="Fixture"/> read model is all-direct).</summary>
+    internal const string DerivedReadModelFixture = """
+        context Sales {
+          enum OrderStatus { Draft, Placed, Shipped }
+
+          aggregate Order root Order {
+            repository { operations: getById, add, update }
+
+            entity Order identified by OrderId {
+              customer: CustomerId
+              status:   OrderStatus = Draft
+
+              create open(customer: CustomerId) {}
+            }
+          }
+
+          readmodel OrderCard from Order {
+            id
+            isPlaced: Bool = status == Placed
+          }
+        }
+        """;
+
     /// <summary>Emits the fixture with the given C# options and asserts a clean compile of the model.</summary>
     internal static IReadOnlyList<EmittedFile> Emit(CSharpEmitterOptions options, string source = Fixture)
     {
@@ -381,6 +405,44 @@ public class R18CSharpApplicationTests
         handler.ShouldContain("if (aggregate is null)");
         handler.ShouldContain("return null;");
         handler.ShouldNotContain("throw new InvalidOperationException");
+    }
+
+    // ------------------------------------------------------------------
+    // W4 — --app-mapping mapperly: emit a Riok.Mapperly source-generated
+    // projection instead of the hand-rolled To<RM>() mapper. plain (the
+    // default) is unchanged / byte-identical.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Mapping_plain_read_model_uses_the_hand_rolled_projection()
+    {
+        var rm = File(Emit(AppOn), "OrderSummary.cs").Contents;
+        rm.ShouldContain("public static class OrderSummaryProjection");
+        rm.ShouldContain("=> new OrderSummary(");
+        rm.ShouldNotContain("[Mapper]");
+    }
+
+    [Fact]
+    public void Mapping_mapperly_emits_a_mapper_static_partial_extension()
+    {
+        var rm = File(Emit(AppOn with { Mapping = CSharpMappingMode.Mapperly }), "OrderSummary.cs").Contents;
+        rm.ShouldContain("using Riok.Mapperly.Abstractions;");
+        rm.ShouldContain("[Mapper]");
+        rm.ShouldContain("public static partial class OrderSummaryProjection");
+        rm.ShouldContain("public static partial OrderSummary ToOrderSummary(this Order src);");
+        // A pure-direct read model needs no per-field mapping helper, and no hand-rolled body.
+        rm.ShouldNotContain("MapPropertyFromSource");
+        rm.ShouldNotContain("=> new OrderSummary(");
+    }
+
+    [Fact]
+    public void Mapping_mapperly_maps_a_derived_field_via_a_helper()
+    {
+        var files = Emit(AppOn with { Mapping = CSharpMappingMode.Mapperly }, DerivedReadModelFixture);
+        var rm = File(files, "OrderCard.cs").Contents;
+        rm.ShouldContain("[MapPropertyFromSource(nameof(OrderCard.IsPlaced), Use = nameof(MapIsPlaced))]");
+        rm.ShouldContain("public static partial OrderCard ToOrderCard(this Order src);");
+        rm.ShouldContain("private static bool MapIsPlaced(Order src)");
     }
 
     [Fact]
