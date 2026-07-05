@@ -229,6 +229,15 @@ internal sealed class JavaExpressionTranslator
 
     private void WriteUnary(UnaryExpr un, StringBuilder sb)
     {
+        // A Decimal literal lowers to `new java.math.BigDecimal("…")`, a reference type Java has no unary
+        // `-` for. Fold the sign into the literal string so `-273.15` emits
+        // `new java.math.BigDecimal("-273.15")` rather than the ill-typed `-new java.math.BigDecimal(...)`.
+        if (un.Op == UnaryOp.Negate && un.Operand is LiteralExpr { Kind: LiteralKind.Decimal } dlit)
+        {
+            sb.Append("new java.math.BigDecimal(\"-").Append(EscapeJavaString(dlit.Text)).Append("\")");
+            return;
+        }
+
         sb.Append(un.Op == UnaryOp.Not ? '!' : '-');
         WriteAtom(un.Operand, sb);
     }
@@ -311,12 +320,19 @@ internal sealed class JavaExpressionTranslator
             return;
         }
 
-        // (4) Decimal arithmetic -> add/subtract/multiply/divide.
+        // (4) Decimal arithmetic -> add/subtract/multiply/divide. A bare `BigDecimal.divide(x)` throws
+        // ArithmeticException on a non-terminating quotient (e.g. 10/3), so a Decimal `/` passes
+        // MathContext.DECIMAL128 — matching the value-object slice's `dividedBy` lowering.
         if (isDecimal && IsArithmetic(bin.Op))
         {
             WriteBigDecimalOperand(bin.Left, leftType, sb);
             sb.Append('.').Append(DecimalMethod(bin.Op)).Append('(');
             WriteBigDecimalOperand(bin.Right, rightType, sb);
+            if (bin.Op == BinaryOp.Div)
+            {
+                sb.Append(", java.math.MathContext.DECIMAL128");
+            }
+
             sb.Append(')');
             return;
         }
@@ -405,9 +421,11 @@ internal sealed class JavaExpressionTranslator
     {
         if (expr is LiteralExpr { Kind: LiteralKind.Int } lit)
         {
+            // The `L` suffix makes it a Java `long` literal (as WriteLiteral does): without it a literal
+            // above Integer.MAX_VALUE (e.g. 5000000000) is parsed as an int -> "integer number too large".
             sb.Append(lit.Text == "0"
                 ? "java.math.BigDecimal.ZERO"
-                : "java.math.BigDecimal.valueOf(" + lit.Text + ")");
+                : "java.math.BigDecimal.valueOf(" + lit.Text + "L)");
             return;
         }
 
@@ -517,6 +535,17 @@ internal sealed class JavaExpressionTranslator
         var target = new StringBuilder();
         WriteAtom(ma.Target, target);
         var t = target.ToString();
+
+        // A user type that declares a member named after a built-in member-op (count/length/trim/…) shadows
+        // the op shortcut — read it through its accessor instead of dispatching by name only. Without this a
+        // domain field named e.g. `count` would emit `.size()`, a method the emitted record/class lacks
+        // (mirrors the C# #605/#672 guard).
+        if (targetType is not null
+            && _index.TryGetMemberType(targetType.Qualifier ?? _resolver.Context, targetType.Name, ma.MemberName, out _))
+        {
+            sb.Append(t).Append('.').Append(JavaNaming.Member(ma.MemberName)).Append("()");
+            return;
+        }
 
         switch (ma.MemberName)
         {
@@ -797,8 +826,14 @@ internal sealed class JavaExpressionTranslator
 
     private static bool IsNullLiteral(Expr expr) => expr is IdentifierExpr { Name: "null" };
 
-    /// <summary>True when a type is a Java reference type for equality purposes — anything but the <c>long</c>/<c>boolean</c> primitives.</summary>
-    private static bool IsReferenceType(TypeRef? type) => type is not null && type.Name is not ("Int" or "Bool");
+    /// <summary>
+    /// True when a type is a Java reference type for equality purposes — anything but the unboxed
+    /// <c>long</c>/<c>boolean</c> primitives. An optional (<c>Int?</c>/<c>Bool?</c>) maps to
+    /// <c>Optional&lt;Long&gt;</c>/<c>Optional&lt;Boolean&gt;</c>, a reference type, so it must route
+    /// <c>==</c>/<c>!=</c> through <c>Objects.equals</c> rather than a raw primitive <c>==</c>.
+    /// </summary>
+    private static bool IsReferenceType(TypeRef? type) =>
+        type is not null && (type.IsOptional || type.Name is not ("Int" or "Bool"));
 
     /// <summary>The Java infix symbol closing a <c>compareTo</c> comparison (<c>… &lt;sym&gt; 0</c>) or a plain primitive comparison.</summary>
     private static string ComparisonSymbol(BinaryOp op) => op switch

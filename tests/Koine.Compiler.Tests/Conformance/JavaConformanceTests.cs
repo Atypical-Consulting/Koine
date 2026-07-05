@@ -161,6 +161,126 @@ public class JavaConformanceTests
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
+    /// <summary>
+    /// A regression fixture for the ordinary-model javac-17 bugs the billing/pizzeria templates don't hit,
+    /// each of which produced INVALID or semantically-WRONG Java before the fix:
+    /// <list type="bullet">
+    ///   <item>plain Decimal <c>/</c> lowered to a bare <c>BigDecimal.divide(x)</c> — a runtime
+    ///   <c>ArithmeticException</c> on a non-terminating quotient; now carries
+    ///   <c>MathContext.DECIMAL128</c>;</item>
+    ///   <item>a negated Decimal literal emitted the ill-typed <c>-new BigDecimal("…")</c> (no unary
+    ///   <c>-</c> on <c>BigDecimal</c>) — as an invariant bound, an enum associated value, and an entity
+    ///   member default; now folds the sign into the literal string;</item>
+    ///   <item>a domain member named <c>count</c> read via member access emitted <c>.size()</c>, a method
+    ///   the record lacks; now reads its accessor;</item>
+    ///   <item>a Decimal comparison against an int literal above <c>Integer.MAX_VALUE</c> emitted
+    ///   <c>valueOf(5000000000)</c> — "integer number too large"; now suffixes <c>L</c>;</item>
+    ///   <item>record components named after the record-illegal <c>Object</c> methods (<c>notify</c>,
+    ///   <c>wait</c>, <c>hashCode</c>, <c>toString</c>, …) were emitted verbatim — "illegal record
+    ///   component name"; now escaped;</item>
+    ///   <item>equality on two optional primitives used a raw reference <c>==</c> on two <c>Optional</c>s
+    ///   (wrong); now routes through <c>Objects.equals</c>.</item>
+    /// </list>
+    /// </summary>
+    private const string RegressionFixture = """
+        context Regression {
+          /// Decimal division (MathContext) and a Decimal comparison against a large int literal.
+          value Ratio {
+            numerator:   Decimal
+            denominator: Decimal
+            quotient:    Decimal = numerator / denominator
+            invariant numerator <= 5000000000 "numerator cap exceeded"
+          }
+
+          /// A negated Decimal literal as an invariant bound.
+          value Temperature {
+            celsius: Decimal
+            invariant celsius >= -273.15 "below absolute zero"
+          }
+
+          /// A negated Decimal literal as an enum associated value.
+          enum Adjustment(delta: Decimal) {
+            REFUND(-5.00)
+            FEE(5.00)
+          }
+
+          /// A domain member named `count` read via member access must resolve to its accessor, not `.size()`.
+          value Segment {
+            count: Int
+            invariant count >= 0 "a segment count cannot be negative"
+          }
+
+          value SegmentPair {
+            first:  Segment
+            second: Segment
+            total:  Int = first.count + second.count
+          }
+
+          /// Record components named after the record-illegal Object methods must be escaped.
+          value Reserved {
+            notify:   Bool
+            wait:     Int
+            hashCode: Int
+            toString: String
+          }
+
+          /// Equality on two optional primitives must route through Objects.equals, not a raw ==.
+          value OptionalMatch {
+            left:    Int?
+            right:   Int?
+            matched: Bool = left == right
+          }
+
+          /// A negated Decimal literal as an entity member default.
+          entity Account identified by AccountId {
+            balance:     Decimal
+            creditLimit: Decimal = -100.00
+          }
+        }
+        """;
+
+    /// <summary>
+    /// The regression coverage for the ordinary-model javac-17 bugs (Decimal division, negated Decimal
+    /// literals, a domain member named <c>count</c>, a large int literal in a Decimal comparison, a
+    /// <c>notify</c>/<c>wait</c> record component, and an optional-primitive equality): all must emit Java
+    /// that <c>javac --release 17</c> accepts (skipped if no JDK 17+). Before the fixes each was a hard
+    /// <c>javac</c> error (or, for Decimal division, a latent runtime throw).
+    /// </summary>
+    [Fact]
+    public void Harness_accepts_ordinary_model_javac_17_regressions()
+    {
+        var result = new KoineCompiler().Compile(RegressionFixture, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // The fixed shapes, asserted directly (independent of whether a JDK is present).
+        var ratio = result.Files.Single(f => f.RelativePath.EndsWith("Ratio.java", StringComparison.Ordinal)).Contents;
+        ratio.ShouldContain(".divide(this.denominator(), java.math.MathContext.DECIMAL128)"); // Decimal `/`
+        ratio.ShouldContain("java.math.BigDecimal.valueOf(5000000000L)");                     // large int literal
+
+        var temperature = result.Files.Single(f => f.RelativePath.EndsWith("Temperature.java", StringComparison.Ordinal)).Contents;
+        temperature.ShouldContain("new java.math.BigDecimal(\"-273.15\")");                    // negated literal (invariant)
+
+        var adjustment = result.Files.Single(f => f.RelativePath.EndsWith("Adjustment.java", StringComparison.Ordinal)).Contents;
+        adjustment.ShouldContain("REFUND(new java.math.BigDecimal(\"-5.00\"))");               // negated literal (enum)
+
+        var account = result.Files.Single(f => f.RelativePath.EndsWith("Account.java", StringComparison.Ordinal)).Contents;
+        account.ShouldContain("this.creditLimit = new java.math.BigDecimal(\"-100.00\")");     // negated literal (entity default)
+
+        var pair = result.Files.Single(f => f.RelativePath.EndsWith("SegmentPair.java", StringComparison.Ordinal)).Contents;
+        pair.ShouldContain("this.first().count() + this.second().count()");                    // member-op shadowed by a real field
+
+        var reserved = result.Files.Single(f => f.RelativePath.EndsWith("Reserved.java", StringComparison.Ordinal)).Contents;
+        reserved.ShouldContain("boolean notify_, long wait_, long hashCode_, String toString_"); // record-illegal names escaped
+
+        var optionalMatch = result.Files.Single(f => f.RelativePath.EndsWith("OptionalMatch.java", StringComparison.Ordinal)).Contents;
+        optionalMatch.ShouldContain("java.util.Objects.equals(this.left(), this.right())");    // optional == optional
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
     /// <summary>A representative model must emit Java that <c>javac --release 17</c> accepts (skipped if no JDK 17+).</summary>
     [Fact]
     public void Harness_accepts_well_formed_java()

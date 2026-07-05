@@ -31,6 +31,12 @@ internal static class JavaNaming
         "true", "false", "null",
         // Contextual keywords (Java 10/14/16+). Renamed too so emitted names never surprise `javac`.
         "var", "record", "yield", "sealed", "permits",
+        // Not keywords, but illegal as `record` component names (JLS 8.10.3): they collide with the
+        // implicit `Object` methods a record may not override. Value objects, events and generated ids
+        // emit as records whose components are named via Member, so a member named like one of these is
+        // renamed with a trailing underscore too — and, on an entity class, this also keeps a member from
+        // clashing with the generated `hashCode()`/`toString()`.
+        "clone", "finalize", "getClass", "hashCode", "notify", "notifyAll", "toString", "wait",
     };
 
     /// <summary>
