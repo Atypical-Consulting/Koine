@@ -92,7 +92,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // buffer switch during the write/format await AND a mid-write keystroke re-dirtying the saved
   // buffer (savedUris tracking gated on the same freshness check as markSaved, plus an active-uri
   // check) — 191 LOC, ceil(191 × 1.02) = 195.
-  { file: 'src/shell/workspaceSave.ts', maxLines: 195 },
+  // Raised 195 → 209: #1055 closes the sibling gap (the active buffer's own write failing, with no
+  // switch, must also skip didSave) and extracts the shared shouldNotifyDidSave eligibility guard used
+  // by both saveActive and saveAllDirty — 204 LOC, ceil(204 × 1.02) = 209.
+  { file: 'src/shell/workspaceSave.ts', maxLines: 209 },
   // Frozen 2026-07-02 at 1017 LOC, ceil(1017 × 1.02) = 1038. #988 ratchets this down as it decomposes
   // persistence.ts. Freezing prevents further regrowth; it does not mandate the split — #988 owns that.
   // Raised 1038 → 1099: #1005's Home resume card needs a persisted last-session snapshot — a new
