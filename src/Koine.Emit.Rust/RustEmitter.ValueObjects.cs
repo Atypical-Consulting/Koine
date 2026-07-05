@@ -300,7 +300,11 @@ public sealed partial class RustEmitter
         foreach (Member m in fields)
         {
             var f = RustNaming.Field(m.Name);
-            var value = m.Type.Name is "Int" or "Decimal" ? $"self.{f} + other.{f}" : "self." + f;
+            var value = m.Type.Name is "Int" or "Decimal"
+                ? m.Type.IsOptional
+                    ? $"self.{f}.zip(other.{f}).map(|(a, b)| a + b)"
+                    : $"self.{f} + other.{f}"
+                : "self." + f;
             sb.Append(Indent).Append(Indent).Append(Indent).Append(f).Append(": ").Append(value).Append(",\n");
         }
         sb.Append(Indent).Append(Indent).Append("}\n");
