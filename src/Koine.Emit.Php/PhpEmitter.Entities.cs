@@ -192,7 +192,10 @@ public sealed partial class PhpEmitter
             var typeName = typeMapper.Map(m.Type);
             sb.Append(Indent).Append(Indent).Append(typeName).Append(" $").Append(paramName);
 
-            // Default value for constant-initializer fields.
+            // Default value for constant-initializer fields. A Decimal default is folded first
+            // (FoldDecimalConstantDefault, issue #971) so a computed value never reaches this PHP
+            // constant-required position as a method-call chain; every other type's arithmetic
+            // already renders as native PHP operators, which are valid constant expressions as-is.
             if (m.Initializer is not null
                 && !MemberAnalysis.IsDerived(m, fields.Select(f => f.Name).ToHashSet()))
             {
