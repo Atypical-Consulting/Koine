@@ -512,57 +512,24 @@ public class CrossEmitterConformanceTests
 
     private readonly record struct TsRun(bool ToolchainAvailable, bool[] Outcomes);
 
-    private TsRun RunTypeScript(string koi, IReadOnlyList<Scenario> scenarios)
+    private static TsRun RunTypeScript(string koi, IReadOnlyList<Scenario> scenarios)
     {
-        if (ResolveNodeTool("tsc") is not { } tsc || ResolveNodeTool("node") is not { } node)
+        CompileResult emit = new KoineCompiler().Compile(koi, new TypeScriptEmitter());
+        emit.Success.ShouldBeTrue("TS emit failed:\n" + string.Join("\n", emit.Diagnostics.Select(d => d.ToString())));
+
+        // The driver prints one ACCEPT/REJECT line per scenario, in order. A scenario that throws (any
+        // error — invariant violation or an explicit assertion failure) is a REJECT. Delegates the
+        // transpile-with-tsc + run-with-node pipeline to the shared TestSupport helper (issue #938).
+        TestSupport.NodeRun run = TestSupport.RunTypeScript(emit.Files, BuildTsDriver(scenarios));
+        if (!run.ToolchainAvailable)
         {
             return new TsRun(ToolchainAvailable: false, Outcomes: Array.Empty<bool>());
         }
 
-        CompileResult emit = new KoineCompiler().Compile(koi, new TypeScriptEmitter());
-        emit.Success.ShouldBeTrue("TS emit failed:\n" + string.Join("\n", emit.Diagnostics.Select(d => d.ToString())));
+        run.Ok.ShouldBeTrue("TS transpile/run failed:\n" + string.Join("\n", run.Errors));
 
-        string root = Path.Combine(Path.GetTempPath(), "koine-xemit-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
-        {
-            foreach (EmittedFile f in emit.Files)
-            {
-                // Skip the emitter's tsconfig.json: we transpile by passing the .ts files explicitly
-                // on the command line (with flags mirroring that tsconfig), and a present-but-unused
-                // tsconfig.json makes tsc error (TS5112). The shipped tsconfig is exercised separately
-                // by TypeScriptConformanceTests.
-                if (string.Equals(f.RelativePath, "tsconfig.json", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                string path = Path.Combine(root, f.RelativePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                File.WriteAllText(path, f.Contents);
-            }
-
-            // The emitted code uses ESM with extensionless relative imports; mark the dir as ESM and
-            // supply a resolve hook that appends `.js` so Node can load the transpiled output as-is.
-            File.WriteAllText(Path.Combine(root, "package.json"), "{ \"type\": \"module\" }\n");
-            File.WriteAllText(Path.Combine(root, "__loader.mjs"), EsmExtensionLoader);
-            File.WriteAllText(Path.Combine(root, "__register.mjs"),
-                "import { register } from 'node:module';\nregister('./__loader.mjs', import.meta.url);\n");
-
-            // The driver prints one ACCEPT/REJECT line per scenario, in order. A scenario that throws
-            // (any error — invariant violation or an explicit assertion failure) is a REJECT.
-            File.WriteAllText(Path.Combine(root, "__driver.ts"), BuildTsDriver(scenarios));
-
-            RunTsc(tsc, root);
-
-            string stdout = RunNode(node, root);
-            bool[] outcomes = ParseDriverOutput(stdout, scenarios.Count);
-            return new TsRun(ToolchainAvailable: true, Outcomes: outcomes);
-        }
-        finally
-        {
-            try { Directory.Delete(root, recursive: true); } catch { /* best-effort */ }
-        }
+        bool[] outcomes = ParseDriverOutput(run.Stdout, scenarios.Count);
+        return new TsRun(ToolchainAvailable: true, Outcomes: outcomes);
     }
 
     private static string BuildTsDriver(IReadOnlyList<Scenario> scenarios)
@@ -600,140 +567,6 @@ public class CrossEmitterConformanceTests
         (lines.Count == expected).ShouldBeTrue($"TS driver printed {lines.Count} ACCEPT/REJECT lines, expected {expected}. Raw output:\n{stdout}");
 
         return lines.Select(l => l == "ACCEPT").ToArray();
-    }
-
-    private static void RunTsc(string tsc, string root)
-    {
-        // Transpile in place to .js with the same target/module/strict settings the emitter's shipped
-        // tsconfig uses (we pass them explicitly rather than via `-p .` so we can emit, not --noEmit).
-        // The emitted runtime/types must therefore also type-check cleanly under --strict.
-        var psi = NewPsi(tsc, root);
-        psi.ArgumentList.Add("--target");
-        psi.ArgumentList.Add("ES2022");
-        psi.ArgumentList.Add("--module");
-        psi.ArgumentList.Add("ESNext");
-        psi.ArgumentList.Add("--moduleResolution");
-        psi.ArgumentList.Add("bundler");
-        psi.ArgumentList.Add("--strict");
-        psi.ArgumentList.Add("--skipLibCheck");
-        foreach (string ts in Directory.GetFiles(root, "*.ts", SearchOption.AllDirectories))
-        {
-            psi.ArgumentList.Add(Path.GetRelativePath(root, ts));
-        }
-
-        using var proc = Process.Start(psi)!;
-        string stdout = proc.StandardOutput.ReadToEnd();
-        string stderr = proc.StandardError.ReadToEnd();
-        proc.WaitForExit();
-        (proc.ExitCode == 0).ShouldBeTrue("tsc failed to transpile the emitted TypeScript:\n" + stdout + stderr);
-    }
-
-    private static string RunNode(string node, string root)
-    {
-        var psi = NewPsi(node, root);
-        psi.ArgumentList.Add("--import");
-        psi.ArgumentList.Add("./__register.mjs");
-        psi.ArgumentList.Add("__driver.js");
-
-        using var proc = Process.Start(psi)!;
-        string stdout = proc.StandardOutput.ReadToEnd();
-        string stderr = proc.StandardError.ReadToEnd();
-        proc.WaitForExit();
-        (proc.ExitCode == 0).ShouldBeTrue("node failed to run the conformance driver:\n" + stdout + stderr);
-        return stdout;
-    }
-
-    private static ProcessStartInfo NewPsi(string fileName, string workingDir) => new()
-    {
-        FileName = fileName,
-        WorkingDirectory = workingDir,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        UseShellExecute = false,
-        CreateNoWindow = true,
-    };
-
-    /// <summary>
-    /// An ESM resolve hook that appends <c>.js</c> to extensionless relative specifiers, so Node can
-    /// load the transpiled emitter output (whose imports are extensionless, e.g.
-    /// <c>'./value-objects/Money'</c>) without rewriting the generated code.
-    /// </summary>
-    private const string EsmExtensionLoader = """
-        export async function resolve(specifier, context, nextResolve) {
-          if ((specifier.startsWith('./') || specifier.startsWith('../')) && !/\.[mc]?js$/.test(specifier)) {
-            try { return await nextResolve(specifier + '.js', context); } catch { /* fall through */ }
-          }
-          return nextResolve(specifier, context);
-        }
-        """;
-
-    /// <summary>
-    /// Locates a Node toolchain binary (<c>tsc</c> or <c>node</c>): an explicit <c>KOINE_TSC</c> /
-    /// <c>KOINE_NODE</c> override first, then PATH, then the repo-local install under
-    /// <c>tooling/koine-textmate/node_modules/.bin</c>. Returns <c>null</c> when absent so the TS half
-    /// is skipped rather than failing.
-    /// </summary>
-    private static string? ResolveNodeTool(string tool)
-    {
-        string? overrideVar = tool == "tsc"
-            ? Environment.GetEnvironmentVariable("KOINE_TSC")
-            : Environment.GetEnvironmentVariable("KOINE_NODE");
-        if (overrideVar is { Length: > 0 })
-        {
-            return overrideVar;
-        }
-
-        string[] names = OperatingSystem.IsWindows() ? [tool + ".cmd", tool + ".exe", tool] : [tool];
-        string[] dirs = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
-        foreach (string dir in dirs)
-        {
-            foreach (string n in names)
-            {
-                string candidate = Path.Combine(dir, n);
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
-            }
-        }
-
-        // Fall back to the repo-local install, mirroring TestSupport.ResolveTsc(): a dev who ran
-        // `npm install` under tooling/koine-textmate gets a `.bin/tsc` even with nothing on PATH, so
-        // the cross-emitter check runs for real instead of staying dormant. (`node` is not vendored
-        // there, so it must still be on PATH — which it is whenever npm is available.)
-        return RepoLocalBin(names);
-    }
-
-    /// <summary>
-    /// Probes <c>tooling/koine-textmate/node_modules/.bin/&lt;tool&gt;</c> by walking up from the test
-    /// assembly directory to the repo root (the directory containing <c>.git</c>). Returns the first
-    /// existing candidate, or <c>null</c> when the repo root or the install is absent.
-    /// </summary>
-    private static string? RepoLocalBin(string[] names)
-    {
-        for (DirectoryInfo? dir = new(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        {
-            if (!Directory.Exists(Path.Combine(dir.FullName, ".git")) &&
-                !File.Exists(Path.Combine(dir.FullName, ".git")))
-            {
-                continue;
-            }
-
-            foreach (string n in names)
-            {
-                string candidate = Path.Combine(
-                    dir.FullName, "tooling", "koine-textmate", "node_modules", ".bin", n);
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
-            }
-
-            return null;
-        }
-
-        return null;
     }
 
     /// <summary>

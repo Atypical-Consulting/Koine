@@ -353,8 +353,7 @@ public class TypeScriptConformanceTests
     [Fact]
     public void Int_field_scalar_multiply_and_divide_truncate_toward_zero()
     {
-        const string src = IntFieldScalarModel;
-        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        var result = new KoineCompiler().Compile(TypeScriptSnapshotTests.IntFieldScalarFixture, new TypeScriptEmitter());
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var rendered = TestSupport.Render(result.Files);
@@ -372,8 +371,7 @@ public class TypeScriptConformanceTests
     [Fact]
     public void Int_field_divide_truncates_toward_zero_at_runtime()
     {
-        const string src = IntFieldScalarModel;
-        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        var result = new KoineCompiler().Compile(TypeScriptSnapshotTests.IntFieldScalarFixture, new TypeScriptEmitter());
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         const string driver = """
@@ -393,23 +391,4 @@ public class TypeScriptConformanceTests
         run.Stdout.ShouldContain("\"negative\":-3");
         run.Stdout.ShouldContain("\"fractional\":7");
     }
-
-    /// <summary>
-    /// A plain <c>Int</c> value object (no invariant, so both positive and negative construction are
-    /// valid) whose scalar <c>÷</c>/<c>×</c> paths are demand-generated — shared by the static-rendering
-    /// and runtime-truncation tests above.
-    /// </summary>
-    private const string IntFieldScalarModel =
-        "context Shop {\n" +
-        "  value Weight {\n" +
-        "    grams: Int\n" +
-        "  }\n" +
-        "  entity Parcel identified by ParcelId {\n" +
-        "    total: Weight\n" +
-        "  }\n" +
-        "  readmodel Split from Parcel {\n" +
-        "    half: Weight = total / 2\n" +
-        "    tenth: Weight = total * 1.5\n" +
-        "  }\n" +
-        "}\n";
 }
