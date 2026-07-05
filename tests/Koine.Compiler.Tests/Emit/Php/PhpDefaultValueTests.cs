@@ -48,6 +48,59 @@ public class PhpDefaultValueTests
     }
 
     /// <summary>
+    /// Issue #1030: a bare <c>Int</c>-literal default on a Decimal-typed member (no arithmetic at
+    /// all, e.g. <c>amount: Decimal = 5</c>) must be re-boxed as a Decimal literal exactly like a
+    /// bare Decimal-literal default already is — not emitted as an unconverted <c>int</c>, which
+    /// trips PHP's typed-parameter default-value rule ("Cannot use int as default value for
+    /// parameter of type Decimal").
+    /// </summary>
+    [Fact]
+    public void Bare_int_literal_default_on_a_decimal_member_emits_a_valid_new_expression()
+    {
+        const string src =
+            "context Pricing {\n" +
+            "  value Rate {\n" +
+            "    amount: Decimal = 5\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var php = string.Join("\n", result.Files.Select(f => f.Contents));
+        php.ShouldContain("$amount = new \\Koine\\Runtime\\Decimal('5')");
+
+        var r = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoInterpreterNotice);
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1030 edge case: a negative bare Int-literal default (<c>amount: Decimal = -5</c>) is
+    /// represented as a <c>UnaryExpr</c> over an Int literal, not itself a <c>LiteralExpr</c> — so it
+    /// never hit the old broad guard either and already falls through to
+    /// <c>TryFoldNumericLiteral</c>'s existing negate case. Pinned as a regression test.
+    /// </summary>
+    [Fact]
+    public void Negative_bare_int_literal_default_on_a_decimal_member_emits_a_valid_new_expression()
+    {
+        const string src =
+            "context Pricing {\n" +
+            "  value Rate {\n" +
+            "    amount: Decimal = -5\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var php = string.Join("\n", result.Files.Select(f => f.Contents));
+        php.ShouldContain("$amount = new \\Koine\\Runtime\\Decimal('-5')");
+
+        var r = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoInterpreterNotice);
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// The reachability probe (issue #971, Task 1): a value-object member whose default is
     /// <b>computed</b> Decimal arithmetic (<c>0.1 + 0.05</c>) — but does not reference any sibling
     /// member, so it is NOT classified as derived — must still emit valid PHP. Before the fix this
