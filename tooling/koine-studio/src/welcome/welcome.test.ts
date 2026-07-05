@@ -866,11 +866,16 @@ describe('mountHome — cloned-empty recovery (notifyClonedEmpty hook, #1017)', 
 
     const notified = home.notifyClonedEmpty('/repos/my-clone');
 
+    // The dialog must be genuinely OPEN, not merely present in the DOM — koiConfirm is a shared
+    // singleton whose backdrop persists (hidden) even before any confirm has ever been asked.
+    const backdrop = document.querySelector<HTMLElement>('.koi-modal-backdrop');
+    expect(backdrop).not.toBeNull();
+    expect(backdrop!.hidden).toBe(false);
     // A message distinguishing "cloned" from a dead/failed recent — not the terse status this
     // replaces — plus an explicit "Open anyway" affirmative action (not a bare Home bounce).
-    const dialog = document.querySelector('.koi-modal, [role="dialog"]') ?? document.body;
-    expect(dialog.textContent).toContain('my-clone');
-    const openAnyway = [...document.querySelectorAll<HTMLButtonElement>('.koi-confirm-btn')].find(
+    expect(backdrop!.querySelector('.koi-modal-title')?.textContent).toContain('my-clone');
+    expect(backdrop!.querySelector('.koi-confirm-msg')?.textContent).toMatch(/no .koi files/);
+    const openAnyway = [...backdrop!.querySelectorAll<HTMLButtonElement>('.koi-confirm-btn')].find(
       (b) => b.textContent === 'Open anyway',
     );
     expect(openAnyway).toBeDefined();

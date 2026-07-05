@@ -144,6 +144,14 @@ export interface IdeHooks {
    * the entry there. Absent in tests that drive init() directly.
    */
   onOpenRecentFailed?(path: string, reason: 'unreadable' | 'empty'): void;
+  /**
+   * An open-recent start-intent's folder opened successfully (#1017). Lets the boot layer clear any
+   * one-shot "this path was just cloned" tracking now that the specific attempt it was scoped to has
+   * resolved — without this, a clone that opens cleanly (or an "Open anyway" retry that succeeds after
+   * seeding a first file) would leave that tracking permanently pinned to the path, misattributing an
+   * unrelated LATER failure on the same path (e.g. its files deleted outside Studio) to this clone.
+   */
+  onOpenRecentSucceeded?(path: string): void;
 }
 
 // --- the composition-root contract (#757) --------------------------------------------------------
@@ -1002,7 +1010,10 @@ export function init(hooks: IdeHooks = {}): () => void {
   // forget the entry there.
   async function openRecentFolder(path: string): Promise<void> {
     const result = await workspace.openFolderPath(path, { userInitiated: true });
-    if (result.ok) return;
+    if (result.ok) {
+      hooks.onOpenRecentSucceeded?.(path);
+      return;
+    }
     hooks.onOpenRecentFailed?.(path, result.reason);
   }
 
