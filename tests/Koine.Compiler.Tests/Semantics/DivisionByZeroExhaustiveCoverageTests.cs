@@ -111,4 +111,32 @@ public class DivisionByZeroExhaustiveCoverageTests
             """;
         Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.DivisionByZeroInConstantDefault);
     }
+
+    /// <summary>
+    /// A <c>LambdaExpr</c> body containing a literal-zero divisor is deliberately NOT flagged: a
+    /// lambda's body isn't evaluated at the point the enclosing member default is evaluated — it only
+    /// runs later, once (and if) the lambda is invoked by the collection operation (here, <c>sum</c>
+    /// aggregating over <c>lines</c>). Recursing into it the way every other wrapper shape in this
+    /// walker is recursed into would be a false positive: an empty (or non-empty but never-summed)
+    /// <c>lines</c> never actually divides by zero at construction time. This is the one deliberate
+    /// EXCLUSION from the walker's otherwise-exhaustive default recursion (<see
+    /// cref="Koine.Compiler.Semantics.LiteralZeroDivisorAnalysis"/>'s <c>ZeroDivisorWalker.VisitLambda</c>
+    /// override).
+    /// </summary>
+    [Fact]
+    public void Division_by_a_literal_zero_in_a_lambda_body_is_not_flagged()
+    {
+        const string src = """
+            context Pricing {
+              value Line {
+                qty: Int
+              }
+              value Rate {
+                lines: List<Line>
+                amount: Int = lines.sum(l => l.qty / 0)
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.DivisionByZeroInConstantDefault);
+    }
 }
