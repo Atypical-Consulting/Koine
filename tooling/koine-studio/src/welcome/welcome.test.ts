@@ -855,6 +855,60 @@ describe('mountHome — dead-recent recovery (recover hook, #391)', () => {
   });
 });
 
+describe('mountHome — cloned-empty recovery (notifyClonedEmpty hook, #1017)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  test('notifyClonedEmpty(path) shows a "cloned, empty" message + Open-anyway control, not a bare bounce', async () => {
+    const el = document.createElement('div');
+    const home = mountHome(el, makeCallbacks(), SAMPLE);
+
+    const notified = home.notifyClonedEmpty('/repos/my-clone');
+
+    // A message distinguishing "cloned" from a dead/failed recent — not the terse status this
+    // replaces — plus an explicit "Open anyway" affirmative action (not a bare Home bounce).
+    const dialog = document.querySelector('.koi-modal, [role="dialog"]') ?? document.body;
+    expect(dialog.textContent).toContain('my-clone');
+    const openAnyway = [...document.querySelectorAll<HTMLButtonElement>('.koi-confirm-btn')].find(
+      (b) => b.textContent === 'Open anyway',
+    );
+    expect(openAnyway).toBeDefined();
+
+    openAnyway!.click();
+    await notified;
+  });
+
+  test('accepting Open-anyway calls onOpenEmptyAnyway with the cloned path', async () => {
+    const el = document.createElement('div');
+    const onOpenEmptyAnyway = vi.fn();
+    const home = mountHome(el, { ...makeCallbacks(), onOpenEmptyAnyway }, SAMPLE);
+
+    const notified = home.notifyClonedEmpty('/repos/my-clone');
+    document.querySelectorAll<HTMLButtonElement>('.koi-confirm-btn').forEach((b) => {
+      if (b.textContent === 'Open anyway') b.click();
+    });
+    await notified;
+
+    expect(onOpenEmptyAnyway).toHaveBeenCalledWith('/repos/my-clone');
+  });
+
+  test('cancelling does not call onOpenEmptyAnyway', async () => {
+    const el = document.createElement('div');
+    const onOpenEmptyAnyway = vi.fn();
+    const home = mountHome(el, { ...makeCallbacks(), onOpenEmptyAnyway }, SAMPLE);
+
+    const notified = home.notifyClonedEmpty('/repos/my-clone');
+    const cancelBtn = [...document.querySelectorAll<HTMLButtonElement>('.koi-confirm-btn')].find(
+      (b) => b.textContent !== 'Open anyway',
+    );
+    cancelBtn!.click();
+    await notified;
+
+    expect(onOpenEmptyAnyway).not.toHaveBeenCalled();
+  });
+});
+
 describe('Home colophon footer', () => {
   beforeEach(() => {
     document.body.innerHTML = '';

@@ -10,7 +10,7 @@ import '@xterm/xterm/css/xterm.css';
 // var(--koi-*) reference in the component styles below resolves at load time.
 import '@atypical/koine-ui/styles.css';
 import '@/styles/main.scss';
-import { init } from '@/shell/ide';
+import { init, BLANK } from '@/shell/ide';
 import { mountHome, type WelcomeCallbacks, type HomeHandle } from '@/welcome/welcome';
 import { appStore } from '@/store';
 import { getPlatform } from '@/host';
@@ -31,7 +31,11 @@ import {
 // workspace was opened (so a later cold-open Home offers a one-click Resume back to it — #766), then
 // navigates to the editor — where the IDE consumes the intent and performs the real work. Home can't
 // call the IDE directly because, by design (#368), the editor isn't mounted while Home is showing.
-function homeCallbacks(): WelcomeCallbacks {
+// `onCloned` reports a just-finished clone's path so bootStudio's onOpenRecentFailed hook can tell
+// "this open-recent failure came from a clone" apart from an ordinary Recent-folder click — only the
+// former gets the cloned-empty notice (#1017); it's threaded in rather than a module-level variable so
+// each bootStudio() call (and each test) gets its own isolated tracking state.
+function homeCallbacks(onCloned: (path: string) => void): WelcomeCallbacks {
   const go = (intent: StartIntent): void => {
     setStartIntent(intent);
     markWorkspaceOpened();
@@ -68,7 +72,18 @@ function homeCallbacks(): WelcomeCallbacks {
       if (parent === null) return; // user dismissed the folder picker — nothing to do
       const clonedPath = await getPlatform().gitClone(url, parent);
       pushRecentFolder(clonedPath, { language: appStore.getState().emitTarget });
+      onCloned(clonedPath);
       go({ kind: 'open-recent', path: clonedPath });
+    },
+    // "Open anyway" on the cloned-empty notice (#1017): seed a first model in the (still-empty) cloned
+    // folder, then reopen it via the same open-recent flow — which now succeeds since the folder is no
+    // longer empty. A seeding failure (e.g. permissions) is left silent: the user is still on Home with
+    // the folder safely in Recent, free to retry.
+    onOpenEmptyAnyway: (path) => {
+      void getPlatform()
+        .createFile(path, 'model.koi', BLANK)
+        .then(() => go({ kind: 'open-recent', path }))
+        .catch(() => {});
     },
   };
 }
@@ -173,6 +188,11 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
   let ideStarted = false;
   let ideDispose: (() => void) | null = null;
   let home: HomeHandle | null = null;
+  // The path of the most recent clone (#1017), so a subsequent open-recent failure can tell "this
+  // came from Clone" apart from an ordinary Recent-folder click — only the former gets the
+  // cloned-empty notice below. One-shot: cleared the moment onOpenRecentFailed consumes it, so
+  // re-opening the same still-empty folder later from Recents doesn't replay stale clone messaging.
+  let lastClonedPath: string | null = null;
 
   function showEditor(): void {
     home?.destroy();
@@ -185,10 +205,16 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
         // The editor→Home leg of the route hand-off (#391): an open-recent start-intent that fails to
         // open its folder recovers on Home, not via an overlay over the editor. Returning to Home
         // re-mounts it (showHome runs synchronously inside navigate), so `home` is set before recover();
-        // for a vanished folder we then offer to forget the dead entry there.
+        // for a vanished folder we then offer to forget the dead entry there. An empty (no .koi files)
+        // folder gets the same Home-based treatment, but ONLY the cloned-empty notice (#1017) — never
+        // the dead-recent one — and only when this open-recent intent was the clone's own, not an
+        // unrelated later click on the same (still-empty) recent entry.
         onOpenRecentFailed: (path, reason) => {
           appStore.getState().navigate('home');
+          const clonedEmpty = reason === 'empty' && path === lastClonedPath;
+          lastClonedPath = null;
           if (reason === 'unreadable') void home?.recover(path);
+          else if (clonedEmpty) void home?.notifyClonedEmpty(path);
         },
       });
       // Warm the offline WASM compiler cache now that the editor (the only surface that needs the
@@ -210,13 +236,21 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
       // the IDE and restores the last workspace (#766). The two `undefined`s keep mountHome's `templates`
       // and `canOpenFolders` defaults (a default param applies when the arg is undefined).
       if (!home) {
-        home = mountHome(homeRoot, homeCallbacks(), undefined, undefined, {
-          warm: ideStarted,
-          canResume: ideStarted || hasPersistedWorkspace(),
-          // Surface the Clone-repository row only where the host can actually clone (#1005): desktop
-          // git yes, browser no — the same capability the Source Control panel gates on.
-          canClone: getPlatform().canUseGit,
-        });
+        home = mountHome(
+          homeRoot,
+          homeCallbacks((path) => {
+            lastClonedPath = path;
+          }),
+          undefined,
+          undefined,
+          {
+            warm: ideStarted,
+            canResume: ideStarted || hasPersistedWorkspace(),
+            // Surface the Clone-repository row only where the host can actually clone (#1005): desktop
+            // git yes, browser no — the same capability the Source Control panel gates on.
+            canClone: getPlatform().canUseGit,
+          },
+        );
       }
     }
   }

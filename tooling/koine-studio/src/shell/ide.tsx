@@ -124,8 +124,10 @@ const SEED = `context Billing {
 
 // What "New" opens: a clean, valid, empty bounded context — NOT the Billing SEED. "New" means a
 // fresh canvas; loading a full sample is the welcome screen's example gallery's job, not this one's.
-// An empty-bodied context is valid Koine (the same shape `koine init` and the LSP tests use).
-const BLANK = `context NewModel {
+// An empty-bodied context is valid Koine (the same shape `koine init` and the LSP tests use). Exported
+// so main.ts can seed the same first model when a user opts to open a cloned-but-empty folder anyway
+// (#1017), rather than main.ts (boot-layer code) keeping its own copy to drift out of sync.
+export const BLANK = `context NewModel {
 
   // Describe your bounded context here — add value objects, entities, and aggregates.
 

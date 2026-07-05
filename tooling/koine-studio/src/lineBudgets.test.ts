@@ -56,7 +56,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // projection glue + the two setFolderRootToken pushes (Tasks 2/3) and the four on* seam registrations
   // (Task 4), but the single consolidated seq subscription that replaced them roughly offset the savings
   // (net −1 LOC). Ratchet to the measured end-state.
-  { file: 'src/shell/ide.tsx', maxLines: 1364 },
+  // Raised 1364 → 1366: #1017 exported the "New model" seed constant (BLANK) so main.ts can reuse it
+  // to seed a first file when a user opts to open a cloned-but-empty folder anyway, adding one doc-line
+  // + one `export` keyword — no new logic in ide.tsx itself.
+  { file: 'src/shell/ide.tsx', maxLines: 1366 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.
@@ -111,7 +114,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1442 → 1513: #1005 hi-fi visual-fidelity pass — single-line recent rows (side group) + shortLang
   // codes, header-mounted filter (magnifier wrap), resume chevron, boxed per-key keycaps (keys/key), sun/moon
   // theme icon and text-only colophon; net imperative-DOM growth to 1483 LOC, ceil(1483 × 1.02) = 1513.
-  { file: 'src/welcome/welcome.ts', maxLines: 1513 },
+  // Raised 1513 → 1522: #1017 cloned-empty recovery — the notifyClonedEmpty seam (mirrors dead-recent
+  // recover()) plus its HomeHandle/WelcomeCallbacks doc comments; measured end-state, no headroom needed
+  // (the next feature here should ratchet again rather than inherit slack).
+  { file: 'src/welcome/welcome.ts', maxLines: 1522 },
 ];
 
 describe('line-budget guard', () => {
