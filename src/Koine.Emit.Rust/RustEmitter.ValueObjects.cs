@@ -9,8 +9,8 @@ namespace Koine.Compiler;
 /// runs the invariants before constructing; stored fields are exposed through accessors (by value for
 /// <c>Copy</c> types, by <c>&amp;str</c>/<c>&amp;T</c> otherwise), constant-default members are set
 /// inside <c>new</c>, and derived (computed) members become get-only methods. Demand-driven operators
-/// (scalar <c>Mul</c>, additive <c>Add</c>) are emitted only where the model actually uses them
-/// (mirroring the C#/Python emitters). A <c>quantity</c> additionally gets unit-checked
+/// (scalar <c>Mul</c>/<c>Div</c>, additive <c>Add</c>/subtractive <c>Sub</c>) are emitted only where the
+/// model actually uses them (mirroring the C#/Python emitters). A <c>quantity</c> additionally gets unit-checked
 /// <c>add</c>/<c>sub</c> (returning <c>Result</c>) and a scalar <c>scale</c>.
 /// </summary>
 public sealed partial class RustEmitter
@@ -76,9 +76,20 @@ public sealed partial class RustEmitter
             {
                 WriteScalarOp(sb, name, stored, divScalars, "/");
             }
-            if (emit.AdditiveNeeds.Contains(vo.Name))
+            // `Add` is demand-generated when the VO is folded with `sum` (emit.AdditiveNeeds) OR appears
+            // in a plain `base + base` (#887); `Sub` is demand-generated for a plain `base - base` (#887
+            // — never generated for plain VOs before). The call-site lowering in RustExpressionTranslator
+            // already emits the native `+`/`-`, i.e. `std::ops::Add`/`std::ops::Sub`; this writes the impls.
+            emit.BinaryArithmeticNeeds.TryGetValue(vo.Name, out IReadOnlySet<BinaryOp>? arithmeticOps);
+            bool needsAdd = emit.AdditiveNeeds.Contains(vo.Name) || (arithmeticOps?.Contains(BinaryOp.Add) ?? false);
+            bool needsSub = arithmeticOps?.Contains(BinaryOp.Sub) ?? false;
+            if (needsAdd)
             {
-                WriteAdditiveAdd(sb, name, stored);
+                WriteAdditiveOp(sb, name, stored, "+");
+            }
+            if (needsSub)
+            {
+                WriteAdditiveOp(sb, name, stored, "-");
             }
         }
     }
@@ -273,21 +284,27 @@ public sealed partial class RustEmitter
         }
     }
 
-    /// <summary>An additive <c>Add</c> (for <c>sum</c> folds): adds numeric fields pairwise, carries the rest from self.</summary>
-    private void WriteAdditiveAdd(StringBuilder sb, string name, IReadOnlyList<Member> fields)
+    /// <summary>An additive <c>Add</c>/<c>Sub</c> (for <c>sum</c> folds and plain value-object arithmetic,
+    /// #887): applies <paramref name="op"/> to each numeric field pairwise, carries the rest from self.
+    /// <paramref name="op"/> is <c>"+"</c> or <c>"-"</c>.</summary>
+    private void WriteAdditiveOp(StringBuilder sb, string name, IReadOnlyList<Member> fields, string op)
     {
+        bool isSub = op == "-";
+        var trait = isSub ? "Sub" : "Add";
+        var fn = isSub ? "sub" : "add";
+
         sb.Append('\n');
-        sb.Append("impl std::ops::Add for ").Append(name).Append(" {\n");
+        sb.Append("impl std::ops::").Append(trait).Append(" for ").Append(name).Append(" {\n");
         sb.Append(Indent).Append("type Output = ").Append(name).Append(";\n");
-        sb.Append(Indent).Append("fn add(self, other: ").Append(name).Append(") -> ").Append(name).Append(" {\n");
+        sb.Append(Indent).Append("fn ").Append(fn).Append("(self, other: ").Append(name).Append(") -> ").Append(name).Append(" {\n");
         sb.Append(Indent).Append(Indent).Append(name).Append(" {\n");
         foreach (Member m in fields)
         {
             var f = RustNaming.Field(m.Name);
             var value = m.Type.Name is "Int" or "Decimal"
                 ? m.Type.IsOptional
-                    ? $"self.{f}.zip(other.{f}).map(|(a, b)| a + b)"
-                    : $"self.{f} + other.{f}"
+                    ? $"self.{f}.zip(other.{f}).map(|(a, b)| a {op} b)"
+                    : $"self.{f} {op} other.{f}"
                 : "self." + f;
             sb.Append(Indent).Append(Indent).Append(Indent).Append(f).Append(": ").Append(value).Append(",\n");
         }

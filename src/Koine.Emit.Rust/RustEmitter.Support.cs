@@ -20,7 +20,8 @@ public sealed partial class RustEmitter
         IReadOnlyDictionary<(string Context, string Enum), IReadOnlyDictionary<string, string>> EnumVariants,
         IReadOnlySet<string> AdditiveNeeds,
         IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarDivNeeds);
+        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarDivNeeds,
+        IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BinaryArithmeticNeeds);
 
     internal const string Indent = "    ";
 
