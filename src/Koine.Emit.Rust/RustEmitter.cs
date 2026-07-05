@@ -66,7 +66,8 @@ public sealed partial class RustEmitter : IEmitter
             // `sum`s it, or a scalar `Mul` where the model multiplies it by a scalar.
             OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
             OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
-            OperatorNeedsAnalyzer.BuildScalarDivisionNeeds(model, index));
+            OperatorNeedsAnalyzer.BuildScalarDivisionNeeds(model, index),
+            OperatorNeedsAnalyzer.BuildValueObjectArithmeticNeeds(model, index));
 
         var files = new List<EmittedFile>
         {
