@@ -24,6 +24,15 @@ namespace Koine.Compiler.Semantics;
 /// regardless of whether the LEFT operand is itself foldable — dividing by zero is wrong no matter
 /// what the numerator evaluates to, so this also catches a <b>derived</b> member's expression like
 /// <c>total: Decimal = a / 0</c> where <c>a</c> is a sibling member.</para>
+///
+/// <para>The traversal itself is <see cref="ZeroDivisorWalker"/>, an <see cref="ExprWalker"/> subclass
+/// (issue #1056) rather than a hand-enumerated switch: #1031 and #1048 each patched a switch whose
+/// silent <c>default</c> arm let a not-yet-listed <see cref="Expr"/> shape (a comparison-wrapped
+/// <see cref="BinaryExpr"/>, a <see cref="Ast.GuardExpr"/>) slip past undetected. <see cref="ExprWalker"/>'s
+/// own dispatch already recurses into every current (and future) <see cref="Expr"/> shape by default, so
+/// only <see cref="ZeroDivisorWalker.VisitBinary"/> needs an override to test for the zero divisor —
+/// every other shape is covered for free, closing this bug class by construction instead of by the next
+/// follow-up issue.</para>
 /// </summary>
 internal static class LiteralZeroDivisorAnalysis
 {
@@ -31,34 +40,32 @@ internal static class LiteralZeroDivisorAnalysis
     /// provably-literal zero.</summary>
     public static bool HasDivisionByLiteralZero(Expr expr)
     {
-        switch (expr)
+        var walker = new ZeroDivisorWalker();
+        walker.Visit(expr);
+        return walker.Found;
+    }
+
+    private sealed class ZeroDivisorWalker : ExprWalker
+    {
+        public bool Found { get; private set; }
+
+        protected override void VisitBinary(BinaryExpr n)
         {
-            case BinaryExpr { Op: BinaryOp.Div } bin:
-                return (TryFoldNumericLiteral(bin.Right, out decimal r) && r == 0m)
-                    || HasDivisionByLiteralZero(bin.Left)
-                    || HasDivisionByLiteralZero(bin.Right);
+            if (n.Op == BinaryOp.Div && TryFoldNumericLiteral(n.Right, out decimal r) && r == 0m)
+            {
+                Found = true;
+            }
 
-            case BinaryExpr { Op: BinaryOp.Add or BinaryOp.Sub or BinaryOp.Mul } bin:
-                return HasDivisionByLiteralZero(bin.Left) || HasDivisionByLiteralZero(bin.Right);
-
-            case UnaryExpr { Op: UnaryOp.Negate } un:
-                return HasDivisionByLiteralZero(un.Operand);
-
-            case ConditionalExpr cond:
-                return HasDivisionByLiteralZero(cond.Condition)
-                    || HasDivisionByLiteralZero(cond.Then)
-                    || HasDivisionByLiteralZero(cond.Else);
-
-            case CoalesceExpr coalesce:
-                return HasDivisionByLiteralZero(coalesce.Left) || HasDivisionByLiteralZero(coalesce.Right);
-
-            case LetExpr let:
-                return let.Bindings.Any(b => HasDivisionByLiteralZero(b.Value))
-                    || HasDivisionByLiteralZero(let.Body);
-
-            default:
-                return false;
+            base.VisitBinary(n);
         }
+
+        /// <summary>
+        /// A no-op: unlike every other shape this walker covers, a lambda body's division isn't
+        /// unconditionally evaluated when the member default is evaluated — it only runs if/when the
+        /// lambda is later invoked. Recursing into it would flag a division that's actually safe at
+        /// construction time.
+        /// </summary>
+        protected override void VisitLambda(LambdaExpr n) { }
     }
 
     /// <summary>
