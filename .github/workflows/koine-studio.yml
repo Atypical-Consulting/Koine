@@ -133,6 +133,7 @@ jobs:
       #     the web frontend (TypeScript typecheck + Vite bundle).
       - name: Build Rust host (cargo)
         working-directory: tooling/koine-studio/src-tauri
+        shell: bash
         run: |
           # The crate version tracks the Koine release version (bumped by release-please in
           # Cargo.toml + tauri.conf.json). release-please can't cleanly rewrite Cargo.lock — a
