@@ -3,7 +3,7 @@ namespace Koine.Compiler;
 /// <summary>
 /// A composable layer of the Python target, selected via <c>--layers</c> /
 /// <c>targets.python.layers</c> — the Python analogue of
-/// <see cref="Koine.Compiler.Emit.CSharp.CSharpLayer"/>. <see cref="Domain"/> (the domain model +
+/// <see cref="Koine.Compiler.CSharpLayer"/>. <see cref="Domain"/> (the domain model +
 /// application contracts) is always emitted and is the default; <see cref="Infrastructure"/>
 /// additionally emits a runnable, dependency-free realization of those contracts (issue #241: concrete
 /// repositories over an in-memory store, a unit of work, a transactional outbox + dispatcher,
