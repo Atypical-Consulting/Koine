@@ -82,6 +82,30 @@ public class R18CSharpApplicationTests
         }
         """;
 
+    /// <summary>A minimal fixture with a DERIVED read-model field, to exercise the Mapperly per-field
+    /// mapping helper (the main <see cref="Fixture"/> read model is all-direct).</summary>
+    internal const string DerivedReadModelFixture = """
+        context Sales {
+          enum OrderStatus { Draft, Placed, Shipped }
+
+          aggregate Order root Order {
+            repository { operations: getById, add, update }
+
+            entity Order identified by OrderId {
+              customer: CustomerId
+              status:   OrderStatus = Draft
+
+              create open(customer: CustomerId) {}
+            }
+          }
+
+          readmodel OrderCard from Order {
+            id
+            isPlaced: Bool = status == Placed
+          }
+        }
+        """;
+
     /// <summary>Emits the fixture with the given C# options and asserts a clean compile of the model.</summary>
     internal static IReadOnlyList<EmittedFile> Emit(CSharpEmitterOptions options, string source = Fixture)
     {
@@ -240,6 +264,255 @@ public class R18CSharpApplicationTests
         var settings = new BuildSettings { Path = "x.koi" };
         settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
         plan.Options.Layers.ShouldBeNull();
+    }
+
+    // ------------------------------------------------------------------
+    // W1 (make the Application layer adoptable) — --app-handler-result
+    // void|aggregate: what a command handler returns. void (default) is
+    // byte-identical to today; aggregate makes a void command's handler
+    // return the loaded, mutated aggregate root (no re-load at the caller).
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Config_parses_application_handler_result()
+    {
+        var opts = KoineConfig
+            .Parse("targets.csharp.application.handlerResult = aggregate\n")
+            .OptionsFor("csharp");
+        opts.ApplicationHandlerResult.ShouldBe("aggregate");
+    }
+
+    [Fact]
+    public void App_handler_result_flag_implies_the_application_layer()
+    {
+        var settings = new BuildSettings { Path = "x.koi", AppHandlerResult = "aggregate" };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+        plan.Options.ApplicationHandlerResult.ShouldBe("aggregate");
+    }
+
+    [Fact]
+    public void Unknown_app_handler_result_is_a_hard_error()
+    {
+        var settings = new BuildSettings { Path = "x.koi", Layers = "application", AppHandlerResult = "entity" };
+        settings.TryResolve(out _, out var error).ShouldBeFalse();
+        error.ShouldNotBeNull();
+        error.ShouldContain("entity");
+    }
+
+    [Fact]
+    public void Known_app_handler_result_values_resolve_true_case_insensitively()
+    {
+        new BuildSettings { Path = "x.koi", AppHandlerResult = "void" }
+            .TryResolve(out _, out var e1).ShouldBeTrue(e1);
+        new BuildSettings { Path = "x.koi", AppHandlerResult = "Aggregate" }
+            .TryResolve(out _, out var e2).ShouldBeTrue(e2);
+    }
+
+    [Fact]
+    public void Handler_result_default_void_is_byte_identical_to_app_on()
+    {
+        // The new option's default value must not perturb the Application-layer output.
+        var explicitVoid = Emit(AppOn with { HandlerResult = CSharpHandlerResult.Void });
+        TestSupport.Render(explicitVoid).ShouldBe(TestSupport.Render(Emit(AppOn)));
+    }
+
+    [Fact]
+    public void Handler_result_aggregate_returns_the_mutated_aggregate_from_a_void_command()
+    {
+        var files = Emit(AppOn with { HandlerResult = CSharpHandlerResult.Aggregate });
+
+        // The void `place` command now returns the loaded, mutated Order — and still compiles, since
+        // Emit asserts a clean Roslyn compile of the whole emitted model.
+        var handler = File(files, "OrderPlaceHandler.cs").Contents;
+        handler.ShouldContain("Task<Order>");
+        handler.ShouldContain("return aggregate;");
+        handler.ShouldNotContain("return result;");
+    }
+
+    // ------------------------------------------------------------------
+    // W1 — --app-not-found throw|nullable: how a handler treats a missing
+    // aggregate. throw (default) is byte-identical to today; nullable
+    // returns null on a miss (the caller maps it to a 404).
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Config_parses_application_not_found()
+    {
+        var opts = KoineConfig
+            .Parse("targets.csharp.application.notFound = nullable\n")
+            .OptionsFor("csharp");
+        opts.ApplicationNotFound.ShouldBe("nullable");
+    }
+
+    [Fact]
+    public void App_not_found_flag_implies_the_application_layer()
+    {
+        var settings = new BuildSettings { Path = "x.koi", AppNotFound = "nullable" };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+        plan.Options.ApplicationNotFound.ShouldBe("nullable");
+    }
+
+    [Fact]
+    public void Unknown_app_not_found_is_a_hard_error()
+    {
+        var settings = new BuildSettings { Path = "x.koi", Layers = "application", AppNotFound = "maybe" };
+        settings.TryResolve(out _, out var error).ShouldBeFalse();
+        error.ShouldNotBeNull();
+        error.ShouldContain("maybe");
+    }
+
+    [Fact]
+    public void Known_app_not_found_values_resolve_true_case_insensitively()
+    {
+        new BuildSettings { Path = "x.koi", AppNotFound = "throw" }
+            .TryResolve(out _, out var e1).ShouldBeTrue(e1);
+        new BuildSettings { Path = "x.koi", AppNotFound = "Nullable" }
+            .TryResolve(out _, out var e2).ShouldBeTrue(e2);
+    }
+
+    [Fact]
+    public void Not_found_default_throw_is_byte_identical_to_app_on()
+    {
+        var explicitThrow = Emit(AppOn with { NotFound = CSharpNotFound.Throw });
+        TestSupport.Render(explicitThrow).ShouldBe(TestSupport.Render(Emit(AppOn)));
+    }
+
+    [Fact]
+    public void Not_found_nullable_returns_null_from_a_command_handler_on_a_miss()
+    {
+        var files = Emit(AppOn with { NotFound = CSharpNotFound.Nullable });
+
+        // The void `place` command's handler now returns the (nullable) aggregate and yields null on a
+        // miss instead of throwing. The whole model still compiles (Emit asserts a Roslyn compile).
+        var handler = File(files, "OrderPlaceHandler.cs").Contents;
+        handler.ShouldContain("Task<Order?>");
+        handler.ShouldContain("if (aggregate is null)");
+        handler.ShouldContain("return null;");
+        handler.ShouldContain("return aggregate;");
+        handler.ShouldNotContain("throw new InvalidOperationException");
+    }
+
+    [Fact]
+    public void Not_found_nullable_makes_a_by_id_query_handler_return_null_on_a_miss()
+    {
+        var files = Emit(AppOn with { NotFound = CSharpNotFound.Nullable });
+
+        // OrderById is a by-identity query — it now returns OrderSummary? and yields null on a miss.
+        var handler = File(files, "OrderByIdHandler.cs").Contents;
+        handler.ShouldContain("Task<OrderSummary?>");
+        handler.ShouldContain("if (aggregate is null)");
+        handler.ShouldContain("return null;");
+        handler.ShouldNotContain("throw new InvalidOperationException");
+    }
+
+    // ------------------------------------------------------------------
+    // W4 — --app-mapping mapperly: emit a Riok.Mapperly source-generated
+    // projection instead of the hand-rolled To<RM>() mapper. plain (the
+    // default) is unchanged / byte-identical.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Mapping_plain_read_model_uses_the_hand_rolled_projection()
+    {
+        var rm = File(Emit(AppOn), "OrderSummary.cs").Contents;
+        rm.ShouldContain("public static class OrderSummaryProjection");
+        rm.ShouldContain("=> new OrderSummary(");
+        rm.ShouldNotContain("[Mapper]");
+    }
+
+    [Fact]
+    public void Mapping_mapperly_emits_a_mapper_static_partial_extension()
+    {
+        var rm = File(Emit(AppOn with { Mapping = CSharpMappingMode.Mapperly }), "OrderSummary.cs").Contents;
+        rm.ShouldContain("using Riok.Mapperly.Abstractions;");
+        rm.ShouldContain("[Mapper]");
+        rm.ShouldContain("public static partial class OrderSummaryProjection");
+        rm.ShouldContain("public static partial OrderSummary ToOrderSummary(this Order src);");
+        // A pure-direct read model needs no per-field mapping helper, and no hand-rolled body.
+        rm.ShouldNotContain("MapPropertyFromSource");
+        rm.ShouldNotContain("=> new OrderSummary(");
+    }
+
+    [Fact]
+    public void Mapping_mapperly_maps_a_derived_field_via_a_helper()
+    {
+        var files = Emit(AppOn with { Mapping = CSharpMappingMode.Mapperly }, DerivedReadModelFixture);
+        var rm = File(files, "OrderCard.cs").Contents;
+        rm.ShouldContain("[MapPropertyFromSource(nameof(OrderCard.IsPlaced), Use = nameof(MapIsPlaced))]");
+        rm.ShouldContain("public static partial OrderCard ToOrderCard(this Order src);");
+        rm.ShouldContain("private static bool MapIsPlaced(Order src)");
+    }
+
+    // ------------------------------------------------------------------
+    // W2 — the opt-in `api` layer: ASP.NET Minimal-API endpoints binding
+    // commands/factories (POST) and queries (GET) to the Application-layer
+    // handlers. Implies `application`; off by default.
+    // ------------------------------------------------------------------
+
+    /// <summary>The Application + endpoint layers on (the api layer implies application).</summary>
+    internal static CSharpEmitterOptions ApiOn =>
+        CSharpEmitterOptions.Empty with
+        {
+            Layers = new HashSet<CSharpLayer> { CSharpLayer.Domain, CSharpLayer.Application, CSharpLayer.Api },
+        };
+
+    [Fact]
+    public void Config_parses_the_api_layer()
+    {
+        var opts = KoineConfig.Parse("targets.csharp.layers = domain, application, api\n").OptionsFor("csharp");
+        opts.Layers.ShouldBe(new[] { "domain", "application", "api" });
+    }
+
+    [Fact]
+    public void Api_layer_implies_application()
+    {
+        var settings = new BuildSettings { Path = "x.koi", Layers = "api" };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application", "api" });
+    }
+
+    [Fact]
+    public void Unknown_layer_is_a_hard_error_listing_api()
+    {
+        var settings = new BuildSettings { Path = "x.koi", Layers = "bogus" };
+        settings.TryResolve(out _, out var error).ShouldBeFalse();
+        error.ShouldNotBeNull();
+        error.ShouldContain("bogus");
+        error.ShouldContain("api");
+    }
+
+    [Fact]
+    public void Api_layer_off_adds_no_endpoint_file()
+    {
+        Emit(AppOn).ShouldNotContain(f => f.RelativePath.EndsWith("Endpoints.cs", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Api_layer_maps_a_command_to_a_post_endpoint()
+    {
+        var endpoints = File(Emit(ApiOn), "SalesEndpoints.cs").Contents;
+        endpoints.ShouldContain("using Microsoft.AspNetCore.Builder;");
+        endpoints.ShouldContain("public static class SalesEndpoints");
+        endpoints.ShouldContain("public static IEndpointRouteBuilder MapSalesEndpoints(this IEndpointRouteBuilder endpoints)");
+        endpoints.ShouldContain("endpoints.MapPost(\"/order/place\", async (OrderPlaceRequest request, OrderPlaceHandler handler, CancellationToken ct) =>");
+        endpoints.ShouldContain("await handler.HandleAsync(request, ct);");
+        endpoints.ShouldContain("return Results.Ok();");
+    }
+
+    [Fact]
+    public void Api_layer_maps_a_query_to_a_get_endpoint()
+    {
+        var endpoints = File(Emit(ApiOn), "SalesEndpoints.cs").Contents;
+        endpoints.ShouldContain("endpoints.MapGet(\"/order-by-id\", async ([AsParameters] OrderById query, OrderByIdHandler handler, CancellationToken ct) =>");
+    }
+
+    [Fact]
+    public void Api_layer_nullable_not_found_maps_a_missing_aggregate_to_404()
+    {
+        var endpoints = File(Emit(ApiOn with { NotFound = CSharpNotFound.Nullable }), "SalesEndpoints.cs").Contents;
+        endpoints.ShouldContain("return result is null ? Results.NotFound() : Results.Ok(result);");
     }
 
     [Fact]

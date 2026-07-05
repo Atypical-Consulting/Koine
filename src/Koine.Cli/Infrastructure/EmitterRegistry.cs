@@ -116,7 +116,8 @@ internal static class EmitterRegistry
         if (options.NamespaceMap.Count == 0 && options.InstantMode is null && options.Layout is null
             && !emitSourceMaps && !referenceOnly
             && !hasLayers && !options.ApplicationMediatr && options.ApplicationMapping is null
-            && options.RegexMatchTimeoutMs is null && isDefaultRegexMode)
+            && options.RegexMatchTimeoutMs is null && isDefaultRegexMode
+            && options.ApplicationHandlerResult is null && options.ApplicationNotFound is null)
         {
             return EmitterOptions.Empty;
         }
@@ -129,6 +130,6 @@ internal static class EmitterRegistry
         return new EmitterOptions(
             options.NamespaceMap, options.InstantMode, options.Layout, emitSourceMaps, referenceOnly,
             layers, options.ApplicationMediatr, options.ApplicationMapping, options.RegexMatchTimeoutMs,
-            options.RegexModeText);
+            options.RegexModeText, options.ApplicationHandlerResult, options.ApplicationNotFound);
     }
 }

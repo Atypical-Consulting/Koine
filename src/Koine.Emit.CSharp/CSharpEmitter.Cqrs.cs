@@ -12,6 +12,9 @@ namespace Koine.Compiler;
 /// </summary>
 public sealed partial class CSharpEmitter
 {
+    /// <summary>The using a Mapperly-mode read-model projection needs (issue #630 / W4).</summary>
+    private static readonly string[] MapperlyUsing = { "Riok.Mapperly.Abstractions" };
+
     // ----------------------------------------------------------------------
     // Application services, read models, CQRS (R12)
     // ----------------------------------------------------------------------
@@ -130,6 +133,17 @@ public sealed partial class CSharpEmitter
 
         sb.Append(");\n\n");
 
+        // W4 (issue #630): --app-mapping mapperly emits a Riok.Mapperly source-generated mapper
+        // instead of the hand-rolled projection. RefOnly keeps the stubbed hand-rolled form (a
+        // reference surface has no generated bodies). Plain (the default) is unchanged/byte-identical.
+        if (_options.Mapping == CSharpMappingMode.Mapperly && !RefOnly)
+        {
+            EmitMapperlyProjection(sb, rm, fields);
+            var usesLinqMapperly = rm.Fields.Any(f => f.Projection is not null && ExprUsesLinq(f.Projection));
+            return new EmittedFile(PathFor(emit, ns, KindFolder.ReadModels, $"{rm.Name}.cs"),
+                Assemble(emit, ns, sb.ToString(), usesLinqMapperly, MapperlyUsing));
+        }
+
         WriteXmlDoc(sb, $"Projects {rm.SourceType} to {rm.Name}.", "");
         sb.Append("public static class ").Append(rm.Name).Append("Projection\n{\n");
         sb.Append(Indent).Append("public static ").Append(rm.Name).Append(" To").Append(rm.Name)
@@ -158,6 +172,53 @@ public sealed partial class CSharpEmitter
 
         var usesLinq = rm.Fields.Any(f => f.Projection is not null && ExprUsesLinq(f.Projection));
         return new EmittedFile(PathFor(emit, ns, KindFolder.ReadModels, $"{rm.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq));
+    }
+
+    /// <summary>
+    /// Emits a Riok.Mapperly source-generated projection (W4): a <c>[Mapper]</c> static partial class
+    /// with a static partial <c>To&lt;Name&gt;(this Source)</c> extension method (so every call site is
+    /// unchanged). Direct fields auto-map by name; each derived field has no like-named source member,
+    /// so it is mapped from a private helper — wired via <c>[MapPropertyFromSource]</c> — whose body is
+    /// the translated projection expression.
+    /// </summary>
+    private void EmitMapperlyProjection(
+        StringBuilder sb,
+        ReadModelDecl rm,
+        IReadOnlyList<(string CsType, string Prop, string Rhs)> fields)
+    {
+        // `fields` is built in `rm.Fields` order, so a field is derived exactly when the like-indexed
+        // ReadModelField carries a projection; collect those for the per-property mapping helpers.
+        var derived = new List<(string CsType, string Prop, string Rhs)>();
+        for (var i = 0; i < rm.Fields.Count; i++)
+        {
+            if (rm.Fields[i].Projection is not null)
+            {
+                derived.Add(fields[i]);
+            }
+        }
+
+        WriteXmlDoc(sb, $"Projects {rm.SourceType} to {rm.Name} (Riok.Mapperly source-generated).", "");
+        sb.Append("[Mapper]\n");
+        sb.Append("public static partial class ").Append(rm.Name).Append("Projection\n{\n");
+
+        foreach (var d in derived)
+        {
+            sb.Append(Indent).Append("[MapPropertyFromSource(nameof(").Append(rm.Name).Append('.').Append(d.Prop)
+              .Append("), Use = nameof(Map").Append(d.Prop).Append("))]\n");
+        }
+
+        sb.Append(Indent).Append("public static partial ").Append(rm.Name).Append(" To").Append(rm.Name)
+          .Append("(this ").Append(rm.SourceType).Append(" src);\n");
+
+        foreach (var d in derived)
+        {
+            sb.Append('\n');
+            sb.Append(Indent).Append("private static ").Append(d.CsType).Append(" Map").Append(d.Prop)
+              .Append('(').Append(rm.SourceType).Append(" src)\n");
+            sb.Append(Indent).Append(Indent).Append("=> ").Append(d.Rhs).Append(";\n");
+        }
+
+        sb.Append("}\n");
     }
 
     /// <summary>
