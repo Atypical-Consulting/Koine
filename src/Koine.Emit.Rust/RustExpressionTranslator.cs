@@ -215,6 +215,23 @@ internal sealed class RustExpressionTranslator
         TypeRef? leftType = _resolver.Infer(bin.Left, scope);
         TypeRef? rightType = _resolver.Infer(bin.Right, scope);
 
+        // A `quantity`'s plain +/- has no native operator to lower to — WriteQuantityOps only ever
+        // emits the inherent, unit-checked `add`/`sub` methods (never `impl std::ops::Add`/`Sub`), so
+        // the call site must route through them instead (#1068).
+        if (bin.Op is BinaryOp.Add or BinaryOp.Sub && IsQuantityType(leftType))
+        {
+            WriteOperand(bin.Left, sb, null, null, clone: false);
+            sb.Append('.').Append(bin.Op == BinaryOp.Add ? "add" : "sub").Append("(&");
+            WriteOperand(bin.Right, sb, null, null, clone: false);
+            sb.Append(").expect(\"").Append(leftType!.Name).Append(": unit mismatch\")");
+            if (parenthesize)
+            {
+                sb.Append(')');
+            }
+
+            return;
+        }
+
         // String concatenation lowers to `String + &str` — Rust's `+` on strings consumes an owned
         // left and borrows the right. Cloning both sides (the default for non-Copy arithmetic operands)
         // would emit the invalid `String + String`, so route string `+` through a dedicated writer.
@@ -736,6 +753,10 @@ internal sealed class RustExpressionTranslator
 
         return expr is IdentifierExpr || expr is MemberAccessExpr;
     }
+
+    /// <summary>True when a type resolves to a <c>quantity</c> value object (mirrors the emitter-side <c>vo.IsQuantity</c> branch).</summary>
+    private bool IsQuantityType(TypeRef? type) =>
+        type is not null && _index.TryGetDecl(type.Name, out TypeDecl decl) && decl is ValueObjectDecl { IsQuantity: true };
 
     private static string RawRegexLiteral(string pattern)
     {
