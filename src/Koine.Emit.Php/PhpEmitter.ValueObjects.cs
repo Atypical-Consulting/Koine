@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Emit;
@@ -165,9 +166,14 @@ public sealed partial class PhpEmitter
             var typeName = typeMapper.Map(m.Type);
             sb.Append(Indent).Append(Indent).Append("public readonly ").Append(typeName).Append(" $").Append(propName);
             // Default value for constant-initializer fields (not derived, but has an initializer).
+            // A Decimal default is folded first (FoldDecimalConstantDefault, issue #971) so a
+            // computed value never reaches this PHP constant-required position as a method-call
+            // chain; every other type's arithmetic already renders as native PHP operators, which
+            // are valid constant expressions as-is.
             if (m.Initializer is not null && !MemberAnalysis.IsDerived(m, fields.Select(f => f.Name).ToHashSet()))
             {
-                var defaultVal = translator.Translate(m.Initializer, PhpExpressionTranslator.NameMode.Parameter);
+                var initializer = m.Type.Name == "Decimal" ? FoldDecimalConstantDefault(m.Initializer) : m.Initializer;
+                var defaultVal = translator.Translate(initializer, PhpExpressionTranslator.NameMode.Parameter);
                 sb.Append(" = ").Append(defaultVal);
             }
             else if (m.Type.IsOptional)
@@ -187,6 +193,86 @@ public sealed partial class PhpEmitter
         }
 
         sb.Append(Indent).Append("}\n");
+    }
+
+    // -------------------------------------------------------------------------
+    // Computed Decimal constant defaults (issue #971)
+    // -------------------------------------------------------------------------
+
+    // PHP only permits constant expressions in a constructor-promoted property/parameter default.
+    // PhpExpressionTranslator.WriteDecimalBinary always lowers Decimal arithmetic to a runtime
+    // method-call chain (`->add(...)`/`->sub(...)`/…) — never a constant expression — so a Decimal
+    // member whose default is COMPUTED (e.g. `amount: Decimal = 0.1 + 0.05`) would otherwise land
+    // invalid PHP in the default position. A non-derived initializer can never reference another
+    // member — that is what makes it non-derived — so the only way it can be non-literal is pure
+    // arithmetic over Int/Decimal literals, which is always foldable to a single value at emit time.
+    // Folding always re-boxes as a Decimal literal (never Int) so the folded value matches the
+    // declared Decimal property/parameter type. A bare DECIMAL-kind literal default is already valid
+    // PHP (a `new` expression, legal via PHP 8.1's "new in initializers") and is returned unchanged;
+    // a bare Int-kind literal on a Decimal member (e.g. `amount: Decimal = 5`) is a separate,
+    // pre-existing type-mismatch gap this fold does not address — see the PR's Follow-ups section.
+    private static Expr FoldDecimalConstantDefault(Expr expr)
+    {
+        if (expr is LiteralExpr)
+        {
+            return expr;
+        }
+
+        try
+        {
+            return TryFoldNumericLiteral(expr, out decimal value)
+                ? new LiteralExpr(LiteralKind.Decimal, value.ToString(CultureInfo.InvariantCulture))
+                : expr;
+        }
+        catch (OverflowException)
+        {
+            // An overflowing fold is "not constant" — fall back to the original expression rather
+            // than throw, mirroring Semantics.ConstantFolder's never-throw discipline.
+            return expr;
+        }
+    }
+
+    private static bool TryFoldNumericLiteral(Expr expr, out decimal value)
+    {
+        switch (expr)
+        {
+            case LiteralExpr { Kind: LiteralKind.Int or LiteralKind.Decimal } lit
+                when decimal.TryParse(lit.Text, NumberStyles.Number | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out value):
+                return true;
+
+            case UnaryExpr { Op: UnaryOp.Negate } un when TryFoldNumericLiteral(un.Operand, out decimal v):
+                value = -v;
+                return true;
+
+            case BinaryExpr { Op: BinaryOp.Add } bin
+                when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r):
+                value = l + r;
+                return true;
+
+            case BinaryExpr { Op: BinaryOp.Sub } bin
+                when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r):
+                value = l - r;
+                return true;
+
+            case BinaryExpr { Op: BinaryOp.Mul } bin
+                when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r):
+                value = l * r;
+                return true;
+
+            // A literal-zero divisor (e.g. `amount: Decimal = 4 / 0`) has no representable quotient,
+            // so it is "not constant" here too — matching Semantics.ConstantFolder's own div-by-zero
+            // stance. This is a pre-existing, exceedingly narrow degenerate case (no legal PHP
+            // constant expression can encode it either way) tracked as a follow-up rather than
+            // fixed here: see the PR's Follow-ups section.
+            case BinaryExpr { Op: BinaryOp.Div } bin
+                when TryFoldNumericLiteral(bin.Left, out decimal l) && TryFoldNumericLiteral(bin.Right, out decimal r) && r != 0m:
+                value = l / r;
+                return true;
+
+            default:
+                value = 0;
+                return false;
+        }
     }
 
     // -------------------------------------------------------------------------
