@@ -1707,5 +1707,40 @@ describe('createInspectorController — teardown / disposal, in-flight loader (#
     resolveGraph({ dispose: vi.fn() });
     await flush();
   });
+
+  // #1037: refreshContextList is a public method invoked from ide.tsx on every onFolderOpened /
+  // onRootSetChanged — the one loader-shaped sibling #1002's own review pass flagged but left
+  // unaudited. Same hazard as loadEventsPanel above: a fetch still in flight when dispose() runs must
+  // resolve into a no-op, not a write into the store or the status-bar DOM on behalf of a dead controller.
+  test('an in-flight refreshContextList() that resolves after dispose() does not write the store or status bar', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    const baselineContexts = deps.store.getState().contexts;
+    const baselineCoverage = deps.store.getState().docsCoverage;
+    const baselineStatusBar = domById('sb-context').textContent;
+
+    let resolveGlossary!: (model: GlossaryModel) => void;
+    lsp.glossaryModel.mockImplementation(
+      () =>
+        new Promise<GlossaryModel>((resolve) => {
+          resolveGlossary = resolve;
+        }),
+    );
+
+    void ctl.refreshContextList(); // suspends on the deferred glossaryModel fetch
+
+    ctl.dispose(); // tear down WHILE that fetch is still in flight
+
+    resolveGlossary(glossaryFixture());
+    await flush(); // let the microtask-chained continuation run
+    await new Promise((resolve) => setTimeout(resolve, 0)); // + a macrotask, matching the sibling tests above
+
+    expect(deps.store.getState().contexts).toEqual(baselineContexts);
+    expect(deps.store.getState().docsCoverage).toEqual(baselineCoverage);
+    expect(domById('sb-context').textContent).toBe(baselineStatusBar);
+  });
 });
 
