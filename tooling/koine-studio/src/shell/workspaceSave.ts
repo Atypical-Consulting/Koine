@@ -47,8 +47,12 @@ export function createWorkspaceSave(ctx: WorkspaceModuleCtx) {
         // Keystrokes landing while the write is in flight replace the buffer (via syncBufferText) — only
         // mark clean when it still holds exactly what hit disk.
         const after = st().buffers.get(uri);
-        if (after && after.text === written) st().markSaved([uri]);
-        lsp.didSave();
+        const stillFresh = !!after && after.text === written;
+        if (stillFresh) st().markSaved([uri]);
+        // didSave() targets the ACTIVE doc — only valid when it's still the one just written AND that
+        // write is still reflected (mirrors applyFileEdit's guard); neither a switch nor a keystroke
+        // landing mid-write may tell the server the wrong (or stale) doc saved.
+        if (stillFresh && st().activeUri === uri) lsp.didSave();
         renderTree();
         st().bumpSaved(); // #470: the on-disk git status changed — the saveSeq subscriber refreshes the SC panel
       } catch (e) {
@@ -105,23 +109,36 @@ export function createWorkspaceSave(ctx: WorkspaceModuleCtx) {
       // text (the old in-place saveAllDirtyBuffers read the latest text at write time).
       const dirtyUris = [...st().buffers.values()].filter((b) => b.dirty).map((b) => b.uri);
       let failures = 0;
-      let saved = 0;
+      let writes = 0;
+      // Uris CONFIRMED clean after their write (still hold exactly what hit disk) — a keystroke landing
+      // mid-write (or mid-loop, on a not-yet-written buffer) leaves a uri dirty again despite its write
+      // having succeeded, and the didSave() guard below must not treat it as confirmed saved even though
+      // the disk write itself (tracked by `writes`, below) genuinely happened.
+      const savedUris = new Set<string>();
       for (const uri of dirtyUris) {
         const buf = st().buffers.get(uri);
         if (!buf || !buf.dirty) continue; // saved or removed since the snapshot
         const written = buf.text;
         try {
           await platform.writeTextFile(buf.path, written);
+          writes++;
           const after = st().buffers.get(uri);
-          if (after && after.text === written) st().markSaved([uri]);
-          saved++;
+          if (after && after.text === written) {
+            st().markSaved([uri]);
+            savedUris.add(uri);
+          }
         } catch (e) {
           failures++;
           console.error('writeTextFile failed for', buf.path, e);
         }
       }
-      if (saved > 0) {
-        lsp.didSave();
+      if (writes > 0) {
+        // didSave() targets the ACTIVE doc. Fire it when either nothing switched during the write loop
+        // (the pre-existing behavior — the active doc may not itself have been dirty, e.g. auto-save
+        // persisting a background buffer) or the buffer switched TO is one CONFIRMED saved this pass;
+        // a switch to an unrelated, unsaved, or re-dirtied buffer must not tell the server it saved.
+        const current = st().activeUri;
+        if (current === activeUri || savedUris.has(current)) lsp.didSave();
         renderTree();
         st().bumpSaved(); // #470: at least one buffer hit disk — the saveSeq subscriber refreshes the SC panel
       }
