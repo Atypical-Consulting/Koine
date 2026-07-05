@@ -227,6 +227,9 @@ public static class DiagnosticCodes
     public const string DomainEventReferencesEntity = "KOI1604";
     public const string EntityFieldReferencesMessageType = "KOI1605";
 
+    // ---- Constant-foldable default/derived expressions (KOI1606–1609) -----
+    public const string DivisionByZeroInConstantDefault = "KOI1606";
+
     // Helper: build a descriptor that carries the existing one-line description into both Title and
     // MessageFormat, so no information is lost while the richer shape is adopted incrementally.
     private static DiagnosticDescriptor D(
@@ -418,5 +421,8 @@ public static class DiagnosticCodes
             [CommandParameterReferencesEntity] = D(CommandParameterReferencesEntity, "A command or factory parameter is an entity or aggregate; commands carry data and identities, not entity references.", DiagnosticCategory.References, DiagnosticSeverity.Error),
             [DomainEventReferencesEntity] = D(DomainEventReferencesEntity, "A domain-event field references an entity or aggregate; events carry data and identities, not entity references.", DiagnosticCategory.References, DiagnosticSeverity.Error),
             [EntityFieldReferencesMessageType] = D(EntityFieldReferencesMessageType, "An entity or aggregate-root field is typed as a domain/integration event, read model, or query; an entity holds domain state (value objects, enums, ids, child entities), not events, read models, or queries.", DiagnosticCategory.References, DiagnosticSeverity.Error),
+
+            // ---- Constant-foldable default/derived expressions ---------------
+            [DivisionByZeroInConstantDefault] = D(DivisionByZeroInConstantDefault, "A member's initializer — a stored constant default or a derived (computed) expression — divides by a provably-literal zero; no target can represent the result.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
         };
 }

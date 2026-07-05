@@ -862,6 +862,22 @@ public sealed class SemanticValidator
                             $"cannot implicitly convert Decimal to Int in {where} '{m.Name}'; declare the member 'Decimal', or {fix}",
                             m.Initializer.Span));
                     }
+
+                    // A member initializer — derived (computed) or a stored constant default — that
+                    // provably divides by a literal zero has no representable quotient in ANY target:
+                    // C# rejects it at Roslyn-compile time (CS0020), TypeScript silently narrows it to
+                    // `Infinity`, Python raises ZeroDivisionError the moment the module is imported, and
+                    // PHP silently throws DivisionByZeroError at construction (issue #1031). Reject the
+                    // model here, uniformly for every emitter, rather than letting each one independently
+                    // (and differently) mishandle an expression that was never representable to begin with.
+                    if (LiteralZeroDivisorAnalysis.HasDivisionByLiteralZero(m.Initializer))
+                    {
+                        var isDerived = MemberAnalysis.IsDerived(m, memberNames ??= MemberNameSet(members));
+                        var where = isDerived ? "derived member" : "constant default for";
+                        diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DivisionByZeroInConstantDefault,
+                            $"division by zero in the {where} '{m.Name}'",
+                            m.Initializer.Span));
+                    }
                 }
             }
         }
