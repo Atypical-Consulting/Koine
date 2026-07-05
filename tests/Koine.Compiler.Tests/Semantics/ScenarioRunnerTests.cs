@@ -68,6 +68,40 @@ public class ScenarioRunnerTests
         }
         """;
 
+    // A `requires` clause (not just an `invariant`) driven by a lambda-taking collection op
+    // (#1071): the interpreter must evaluate `.all(l => l.qty > 0)` to a real Passed/Failed
+    // outcome, not silently degrade to Indeterminate.
+    private const string RepricingModel = """
+        context Pricing {
+          value Line {
+            qty: Int
+          }
+
+          entity Order identified by OrderId {
+            lines: List<Line>
+
+            command reprice {
+              requires lines.all(l => l.qty > 0) "every line needs a positive quantity"
+            }
+          }
+        }
+        """;
+
+    // A `requires` clause over a field with no given value: the interpreter cannot evaluate
+    // it (an `Unknown` operand), so the precondition reports Indeterminate — and, per #1071,
+    // that must gate the scenario closed the same way a Failed precondition does.
+    private const string GateModel = """
+        context Gate {
+          entity Widget identified by WidgetId {
+            qty: Int
+
+            command check {
+              requires qty > 0 "qty must be positive"
+            }
+          }
+        }
+        """;
+
     private static SemanticModel Build(string src)
     {
         var (model, diagnostics) = new KoineCompiler().Parse(src);
@@ -78,6 +112,9 @@ public class ScenarioRunnerTests
 
     private static ScenarioValue Line(int quantity) =>
         ScenarioValue.RecordOf(("product", ScenarioValue.FromString("P1")), ("quantity", ScenarioValue.FromInt(quantity)));
+
+    private static ScenarioValue QtyLine(int qty) =>
+        ScenarioValue.RecordOf(("qty", ScenarioValue.FromInt(qty)));
 
     // ----------------------------------------------------------------------
     // The headline: place a valid draft order → events + invariants.
@@ -237,5 +274,66 @@ public class ScenarioRunnerTests
         ScenarioResult result = await run;
         var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
         precondition.Outcome.ShouldBe(CheckOutcome.Indeterminate);
+    }
+
+    // ----------------------------------------------------------------------
+    // #1071: a `requires` clause built from a lambda-taking collection op must evaluate
+    // to a real Passed/Failed outcome, and an Indeterminate outcome must gate the scenario
+    // closed (like Failed) rather than silently letting it proceed.
+    // ----------------------------------------------------------------------
+
+    [Fact]
+    public void Requires_lambda_all_predicate_passes_when_every_line_has_a_positive_quantity()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "reprice",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(2), QtyLine(3)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Passed);
+        result.Ok.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Requires_lambda_all_predicate_fails_when_a_line_has_a_non_positive_quantity()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "reprice",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(2), QtyLine(0)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Failed);
+        result.Ok.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void An_indeterminate_requires_outcome_blocks_the_scenario_like_a_failed_one()
+    {
+        var sema = Build(GateModel);
+        var scenario = new Scenario(
+            "Widget", "check",
+            new Dictionary<string, ScenarioValue>(), // no 'qty' given -> Unknown -> Indeterminate
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Indeterminate);
+        result.Ok.ShouldBeFalse(
+            "an indeterminate requires outcome must fail the scenario closed, not silently pass it open");
     }
 }
