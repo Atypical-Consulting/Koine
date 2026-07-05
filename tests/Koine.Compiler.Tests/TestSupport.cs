@@ -457,19 +457,7 @@ public static class TestSupport
                 File.WriteAllText(path, f.Contents);
             }
 
-            var psi = new ProcessStartInfo
-            {
-                FileName = tsc.FileName,
-                WorkingDirectory = root,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            foreach (string arg in tsc.Arguments)
-            {
-                psi.ArgumentList.Add(arg);
-            }
+            var arguments = new List<string>(tsc.Arguments);
 
             // When the emitter shipped a tsconfig.json, type-check via `tsc -p .` so the test
             // validates EXACTLY the configuration users get (target/lib/strict all live there).
@@ -477,36 +465,35 @@ public static class TestSupport
             var hasTsconfig = fileList.Any(f => string.Equals(f.RelativePath, "tsconfig.json", StringComparison.OrdinalIgnoreCase));
             if (hasTsconfig)
             {
-                psi.ArgumentList.Add("-p");
-                psi.ArgumentList.Add(".");
+                arguments.Add("-p");
+                arguments.Add(".");
             }
             else
             {
-                psi.ArgumentList.Add("--noEmit");
-                psi.ArgumentList.Add("--strict");
-                psi.ArgumentList.Add("--target");
-                psi.ArgumentList.Add("ES2022");
-                psi.ArgumentList.Add("--module");
-                psi.ArgumentList.Add("ESNext");
-                psi.ArgumentList.Add("--moduleResolution");
-                psi.ArgumentList.Add("bundler");
-                foreach (EmittedFile f in fileList.Where(f => f.RelativePath.EndsWith(".ts", StringComparison.OrdinalIgnoreCase)))
-                {
-                    psi.ArgumentList.Add(f.RelativePath);
-                }
+                arguments.Add("--noEmit");
+                arguments.Add("--strict");
+                arguments.Add("--target");
+                arguments.Add("ES2022");
+                arguments.Add("--module");
+                arguments.Add("ESNext");
+                arguments.Add("--moduleResolution");
+                arguments.Add("bundler");
+                arguments.AddRange(fileList
+                    .Where(f => f.RelativePath.EndsWith(".ts", StringComparison.OrdinalIgnoreCase))
+                    .Select(f => f.RelativePath));
             }
 
-            using var proc = Process.Start(psi)!;
-            string stdout = proc.StandardOutput.ReadToEnd();
-            string stderr = proc.StandardError.ReadToEnd();
-            proc.WaitForExit();
+            if (RunProcess(tsc.FileName, arguments, workingDirectory: root) is not { } run)
+            {
+                return new TypeScriptCheck(ToolchainAvailable: true, Ok: false, new[] { $"failed to start '{tsc.FileName}'" });
+            }
 
-            if (proc.ExitCode == 0)
+            if (run.ExitCode == 0)
             {
                 return new TypeScriptCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>());
             }
 
-            var errors = (stdout + stderr)
+            var errors = (run.StdOut + run.StdErr)
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .ToList();
             return new TypeScriptCheck(ToolchainAvailable: true, Ok: false, errors);
