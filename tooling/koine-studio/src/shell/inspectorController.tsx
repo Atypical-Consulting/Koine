@@ -557,6 +557,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   async function refreshContextList(): Promise<void> {
     try {
       const model = await lsp.glossaryModel();
+      if (disposed) return; // torn down mid-fetch (#1002/#1037) — no write into the dead host
       setContextOptions(listContexts(model));
       // Publish glossary documentation coverage for the status-bar docs ring (#923) — the model is
       // already in hand here, and this runs on folder open + every (debounced) edit, so the ring tracks
@@ -564,6 +565,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       const cov = coverage(model.entries);
       appStore.getState().setDocsCoverage({ documented: cov.documented, total: cov.total });
     } catch (e) {
+      if (disposed) return;
       // Best-effort: empty the picker, but log so a failing glossary model isn't a silent dead end.
       console.warn('Context list refresh failed; clearing the context picker.', e);
       setContextOptions([]);
