@@ -440,9 +440,15 @@ async function boot(opts: {
   platform?: FakePlatform;
   // The boot-layer seam main.ts injects (#391): a failed open-recent is reported here rather than
   // overlaid on the editor. Forwarded into init() so a test can observe the report.
-  hooks?: { onOpenRecentFailed?: (path: string, reason: 'unreadable' | 'empty') => void };
+  hooks?: {
+    onOpenRecentFailed?: (path: string, reason: 'unreadable' | 'empty') => void;
+    onOpenRecentSucceeded?: (path: string) => void;
+  };
 } = {}): Promise<{
-  init: (hooks?: { onOpenRecentFailed?: (path: string, reason: 'unreadable' | 'empty') => void }) => void;
+  init: (hooks?: {
+    onOpenRecentFailed?: (path: string, reason: 'unreadable' | 'empty') => void;
+    onOpenRecentSucceeded?: (path: string) => void;
+  }) => void;
   platform: FakePlatform;
   beforeUnload: (e: Event) => void;
 }> {
@@ -842,6 +848,27 @@ describe('ide init() — Recent open recovery routes to the Home route (#391)', 
     expect(onOpenRecentFailed).toHaveBeenCalledWith('ghost', 'unreadable');
     // …and never mounted an in-editor start-screen overlay (the two-surfaces case #368/#391 remove).
     expect(document.querySelector('.koi-welcome')).toBeNull();
+  });
+
+  test('a successful open-recent reports back via onOpenRecentSucceeded (#1017)', async () => {
+    // The boot layer's cloned-empty tracking (main.ts) needs a success signal, not just a failure one,
+    // so a clone that opens cleanly doesn't leave a stale "just cloned" association pinned to its path
+    // forever. FakePlatform's listKoiFiles ignores its folder argument and reads from `this.files`, so
+    // seed one .koi file there — mirroring a clone whose repo already has a model — before the open.
+    const p = installPlatform();
+    p.files.set('model.koi', 'context Billing {}');
+
+    window.location.hash = '';
+    const { setStartIntent } = await import('@/shell/bootIntent');
+    setStartIntent({ kind: 'open-recent', path: '/repos/my-clone' });
+
+    const onOpenRecentSucceeded = vi.fn();
+    const onOpenRecentFailed = vi.fn();
+    await boot({ platform: p, hooks: { onOpenRecentSucceeded, onOpenRecentFailed } });
+    await settleBoot();
+
+    expect(onOpenRecentSucceeded).toHaveBeenCalledWith('/repos/my-clone');
+    expect(onOpenRecentFailed).not.toHaveBeenCalled();
   });
 });
 

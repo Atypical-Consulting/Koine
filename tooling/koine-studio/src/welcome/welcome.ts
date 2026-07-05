@@ -53,6 +53,13 @@ export interface WelcomeCallbacks {
    * means the caller has taken over navigation. Optional: hosts that can't clone omit it and no row shows.
    */
   onClone?(url: string): Promise<void>;
+  /**
+   * "Open anyway" for a folder that opened with `reason: 'empty'` (no `.koi` files) — offered by the
+   * cloned-empty notice (#1017) so a successful clone with nothing to open yet doesn't dead-end. The
+   * caller (main.ts) seeds a first model in `path` and opens it via the same open-recent flow used
+   * elsewhere. Optional: hosts that never surface the cloned-empty notice omit it.
+   */
+  onOpenEmptyAnyway?(path: string): void;
 }
 
 /**
@@ -281,13 +288,16 @@ interface BuiltHome {
   refreshRecent(): void;
   /** Surface the dead-recent recovery confirm and, on accept, forget the entry + refresh the list (#391). */
   recover(path: string): Promise<void>;
+  /** Surface the "cloned, empty" notice and, on "Open anyway", hand off to onOpenEmptyAnyway (#1017). */
+  notifyClonedEmpty(path: string): Promise<void>;
 }
 
 /**
  * The routed Home view's imperative handle (returned by {@link mountHome}). Beyond teardown it exposes
- * the two seams the boot layer drives when an open-recent start-intent fails: {@link refreshRecent} to
- * rebuild the recents list in place, and {@link recover} to run the dead-recent recovery on Home (#391)
- * instead of painting the legacy overlay over the editor.
+ * the seams the boot layer drives when an open-recent start-intent fails: {@link refreshRecent} to
+ * rebuild the recents list in place, {@link recover} to run the dead-recent recovery on Home (#391), and
+ * {@link notifyClonedEmpty} to surface the "cloned, but empty" outcome (#1017) — instead of painting the
+ * legacy overlay over the editor, or bouncing back to Home with no explanation.
  */
 export interface HomeHandle {
   destroy(): void;
@@ -295,6 +305,11 @@ export interface HomeHandle {
   refreshRecent(): void;
   /** Confirm "Remove from Recent?" on this view and, on accept, forget the dead entry + refresh the list. */
   recover(path: string): Promise<void>;
+  /**
+   * Tell the user a clone succeeded but has no `.koi` files yet (it's safely in Recent), offering
+   * "Open anyway" to seed a first model there and open it (#1017).
+   */
+  notifyClonedEmpty(path: string): Promise<void>;
 }
 
 /**
@@ -1451,11 +1466,27 @@ function buildHome(
     }
   }
 
+  // Cloned-empty recovery (#1017): a clone succeeded and is safely in Recent, but the folder has no
+  // .koi files yet, so the boot layer's open-recent attempt failed with reason:'empty' and bounced back
+  // to Home. Left as-is that reads as a silent failure ("did the clone even work?"); this tells the user
+  // it worked and offers a next step. Unlike recover() this isn't destructive, so it carries no `danger`
+  // styling, and declining just leaves the folder in Recent for later — nothing is forgotten.
+  async function notifyClonedEmpty(path: string): Promise<void> {
+    const openAnyway = await koiConfirm({
+      title: `Cloned "${basename(path)}"`,
+      message: "It's saved in Recent, but has no .koi files yet. Open it anyway to start a new model there?",
+      confirmLabel: 'Open anyway',
+      cancelLabel: 'Not now',
+    });
+    if (openAnyway) cb.onOpenEmptyAnyway?.(path);
+  }
+
   return {
     // Rebuild the recent list in place — so a caller that mutated the recents (e.g. after forgetting a
     // dead entry) can refresh the list without a full remount.
     refreshRecent: renderRecent,
     recover,
+    notifyClonedEmpty,
     root,
     destroy,
   };
@@ -1482,5 +1513,10 @@ export function mountHome(
   });
   home.refreshRecent();
   container.appendChild(home.root);
-  return { destroy: home.destroy, refreshRecent: home.refreshRecent, recover: home.recover };
+  return {
+    destroy: home.destroy,
+    refreshRecent: home.refreshRecent,
+    recover: home.recover,
+    notifyClonedEmpty: home.notifyClonedEmpty,
+  };
 }
