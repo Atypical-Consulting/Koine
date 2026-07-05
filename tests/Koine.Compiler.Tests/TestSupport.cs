@@ -907,14 +907,24 @@ public static class TestSupport
     }
 
     /// <summary>Captured result of a child process: exit code plus full stdout/stderr.</summary>
-    private readonly record struct ProcessRun(int ExitCode, string StdOut, string StdErr);
+    /// <remarks><c>internal</c> (not <c>private</c>) purely so the same-assembly deadlock regression
+    /// test can read the captured streams; it is not part of any public contract.</remarks>
+    internal readonly record struct ProcessRun(int ExitCode, string StdOut, string StdErr);
 
     /// <summary>
     /// Runs a process to completion in <paramref name="workingDirectory"/>, capturing its exit code,
     /// stdout, and stderr. Returns <c>null</c> when the process fails to even start (e.g. a broken
     /// shebang) so callers can fall through to the next candidate instead of crashing.
     /// </summary>
-    private static ProcessRun? RunProcess(
+    /// <remarks>
+    /// stdout and stderr are drained <em>concurrently</em> — both <see cref="StreamReader.ReadToEndAsync()"/>
+    /// tasks are started before either is awaited — rather than one-stream-to-EOF-then-the-other. Reading
+    /// them sequentially is the classic <see cref="Process"/> redirection deadlock: if the child fills the
+    /// OS pipe buffer of the stream being read <em>second</em> while the parent is still blocked draining
+    /// the first, neither side can make progress and <see cref="Process.WaitForExit()"/> is never reached.
+    /// <c>internal</c> (not <c>private</c>) only so the same-assembly regression test can exercise it.
+    /// </remarks>
+    internal static ProcessRun? RunProcess(
         string fileName,
         IReadOnlyList<string> args,
         string? workingDirectory = null,
@@ -954,10 +964,13 @@ public static class TestSupport
                 return null;
             }
 
-            string stdout = proc.StandardOutput.ReadToEnd();
-            string stderr = proc.StandardError.ReadToEnd();
+            // Drain both pipes concurrently — see the remarks above: reading one stream to EOF before
+            // touching the other deadlocks the moment the child fills the second stream's pipe buffer.
+            Task<string> stdoutTask = proc.StandardOutput.ReadToEndAsync();
+            Task<string> stderrTask = proc.StandardError.ReadToEndAsync();
+            Task.WaitAll(stdoutTask, stderrTask);
             proc.WaitForExit();
-            return new ProcessRun(proc.ExitCode, stdout, stderr);
+            return new ProcessRun(proc.ExitCode, stdoutTask.Result, stderrTask.Result);
         }
         catch
         {
