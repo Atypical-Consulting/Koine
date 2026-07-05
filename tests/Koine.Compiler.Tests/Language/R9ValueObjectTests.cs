@@ -636,7 +636,7 @@ public class R9ValueObjectTests
             }
             """;
         var narrowing = Diagnose(src).ShouldHaveSingleItem();
-        narrowing.Code.ShouldBe(DiagnosticCodes.NarrowingConversionInDerivedMember);
+        narrowing.Code.ShouldBe(DiagnosticCodes.NumericNarrowingConversion);
         narrowing.Severity.ShouldBe(DiagnosticSeverity.Error);
         narrowing.Message.ShouldContain("total");
         narrowing.Line.ShouldBe(4);   // the `total: Int = base * 1.5` line, not the whole value block
@@ -656,7 +656,7 @@ public class R9ValueObjectTests
               }
             }
             """;
-        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NarrowingConversionInDerivedMember);
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NumericNarrowingConversion);
     }
 
     [Fact]
@@ -672,7 +672,7 @@ public class R9ValueObjectTests
               }
             }
             """;
-        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NarrowingConversionInDerivedMember);
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NumericNarrowingConversion);
     }
 
     [Fact]
@@ -689,7 +689,7 @@ public class R9ValueObjectTests
             }
             """;
         var narrowing = Diagnose(src).ShouldHaveSingleItem();
-        narrowing.Code.ShouldBe(DiagnosticCodes.NarrowingConversionInDerivedMember);
+        narrowing.Code.ShouldBe(DiagnosticCodes.NumericNarrowingConversion);
         narrowing.Severity.ShouldBe(DiagnosticSeverity.Error);
         narrowing.Message.ShouldContain("total");
         narrowing.Line.ShouldBe(3);   // the `total: Int = 2.5` line, not the whole value block
@@ -707,7 +707,7 @@ public class R9ValueObjectTests
               }
             }
             """;
-        Diagnose(entitySrc).ShouldContain(d => d.Code == DiagnosticCodes.NarrowingConversionInDerivedMember);
+        Diagnose(entitySrc).ShouldContain(d => d.Code == DiagnosticCodes.NumericNarrowingConversion);
 
         const string eventSrc = """
             context Shop {
@@ -716,7 +716,7 @@ public class R9ValueObjectTests
               }
             }
             """;
-        Diagnose(eventSrc).ShouldContain(d => d.Code == DiagnosticCodes.NarrowingConversionInDerivedMember);
+        Diagnose(eventSrc).ShouldContain(d => d.Code == DiagnosticCodes.NumericNarrowingConversion);
     }
 
     [Fact]
@@ -731,7 +731,7 @@ public class R9ValueObjectTests
               }
             }
             """;
-        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NarrowingConversionInDerivedMember);
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NumericNarrowingConversion);
     }
 
     [Fact]
@@ -745,7 +745,7 @@ public class R9ValueObjectTests
               }
             }
             """;
-        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NarrowingConversionInDerivedMember);
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NumericNarrowingConversion);
     }
 
     [Fact]
@@ -765,7 +765,7 @@ public class R9ValueObjectTests
             }
             """;
         var narrowing = Diagnose(src).ShouldHaveSingleItem();
-        narrowing.Code.ShouldBe(DiagnosticCodes.NarrowingConversionInDerivedMember);
+        narrowing.Code.ShouldBe(DiagnosticCodes.NumericNarrowingConversion);
         narrowing.Severity.ShouldBe(DiagnosticSeverity.Error);
         narrowing.Message.ShouldContain("total");
     }
@@ -783,6 +783,6 @@ public class R9ValueObjectTests
               }
             }
             """;
-        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NarrowingConversionInDerivedMember);
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.NumericNarrowingConversion);
     }
 }
