@@ -131,7 +131,10 @@ export function createWorkspaceBuffers(ctx: WorkspaceModuleCtx) {
         console.error('applyFileEdit write failed:', e);
         return null;
       }
-      st().markSaved([uri]); // clear dirty AFTER the write so the buffer ends clean
+      // Keystrokes landing while the write is in flight replace the buffer (via syncBufferText) — only
+      // mark clean when it still holds exactly what hit disk (mirrors saveActive / saveAllDirty).
+      const after = st().buffers.get(uri);
+      if (after && after.text === body) st().markSaved([uri]);
       if (uri === st().activeUri) lsp.didSave(); // didSave() targets the ACTIVE doc — only valid then
       renderTree(); // setDoc's onChange repainted the explorer dirty dot; repaint it clean now
       st().bumpSaved(); // #470: this buffer hit disk — the saveSeq subscriber refreshes the SC panel
