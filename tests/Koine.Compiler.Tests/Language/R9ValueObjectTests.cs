@@ -679,7 +679,7 @@ public class R9ValueObjectTests
     public void Stored_default_narrowing_decimal_literal_into_an_int_declared_type_is_rejected()
     {
         // `total: Int = 2.5` — a STORED (non-derived) constant default, not a computed member. The
-        // literal infers to Decimal, the field is declared Int; same illegal narrowing as issue #967's
+        // literal infers to Decimal, the field is declared Int; same illegal narrowing as issue #961's
         // derived-member case, and must be rejected the same way (issue #974).
         const string src = """
             context Shop {
@@ -692,6 +692,31 @@ public class R9ValueObjectTests
         narrowing.Code.ShouldBe(DiagnosticCodes.NarrowingConversionInDerivedMember);
         narrowing.Severity.ShouldBe(DiagnosticSeverity.Error);
         narrowing.Message.ShouldContain("total");
+        narrowing.Line.ShouldBe(3);   // the `total: Int = 2.5` line, not the whole value block
+    }
+
+    [Fact]
+    public void Stored_default_narrowing_is_rejected_on_entity_and_event_members_too()
+    {
+        // KOI0217 lives in the member validation shared across value objects, entities, and events, so
+        // the stored-default extension (issue #974) applies uniformly, not just to value objects.
+        const string entitySrc = """
+            context Shop {
+              entity Item identified by ItemId as natural(Int) {
+                total: Int = 2.5
+              }
+            }
+            """;
+        Diagnose(entitySrc).ShouldContain(d => d.Code == DiagnosticCodes.NarrowingConversionInDerivedMember);
+
+        const string eventSrc = """
+            context Shop {
+              event Priced {
+                total: Int = 2.5
+              }
+            }
+            """;
+        Diagnose(eventSrc).ShouldContain(d => d.Code == DiagnosticCodes.NarrowingConversionInDerivedMember);
     }
 
     [Fact]
