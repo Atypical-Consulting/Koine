@@ -1539,39 +1539,7 @@ public static class TestSupport
         return null;
     }
 
-    private static bool CanRun(string fileName, string[] args)
-    {
-        try
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = fileName,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            foreach (string a in args)
-            {
-                psi.ArgumentList.Add(a);
-            }
-
-            using var proc = Process.Start(psi);
-            if (proc is null)
-            {
-                return false;
-            }
-
-            proc.StandardOutput.ReadToEnd();
-            proc.StandardError.ReadToEnd();
-            proc.WaitForExit();
-            return proc.ExitCode == 0;
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    private static bool CanRun(string fileName, string[] args) => RunProcess(fileName, args) is { ExitCode: 0 };
 
     /// <summary>Result of validating an AsyncAPI document with the external CLI.</summary>
     public readonly record struct AsyncApiCheck(bool ToolchainAvailable, bool Ok, IReadOnlyList<string> Errors);
