@@ -182,4 +182,38 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #887 — the demand-gating must be genuinely two-way: a value object used ONLY in a plain
+    /// <c>base - base</c> (never summed, never used in a plain <c>+</c>) must get <c>Sub</c> but NOT a
+    /// spurious <c>Add</c>. Without this negative fixture, a swapped <c>BinaryOp.Add</c>/<c>BinaryOp.Sub</c>
+    /// check in the emitter's demand-gating would slip through undetected, since the sibling positive test
+    /// exercises a value object that needs both operators together.
+    /// </summary>
+    [Fact]
+    public void Value_object_used_only_in_subtraction_does_not_emit_add()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  value Line {\n" +
+            "    base: Money\n" +
+            "    diff: Money = base - base\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("impl std::ops::Sub for Money");
+        rust.ShouldNotContain("impl std::ops::Add for Money");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
