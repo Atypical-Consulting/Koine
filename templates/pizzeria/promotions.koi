@@ -9,7 +9,7 @@ context Promotions version 1 {
   enum DealKind { Percentage, FixedAmount, FreeDelivery }
 
   /// A coupon code a customer can apply. A first-class value object so a coupon is
-  /// never a bare string, validated by shape (R1.2).
+  /// never a bare string, validated by shape.
   value Coupon {
     code:       String
     normalized: String = code.trim.upper
@@ -37,11 +37,11 @@ context Promotions version 1 {
       "a discount cannot drive the order total negative"
   }
 
-  // R10.1 — a named, reusable specification over Discount, emitted as a static
+  // a named, reusable specification over Discount, emitted as a static
   // predicate (PromotionsSpecifications.IsFreeOrder): the deal made the order free.
   spec IsFreeOrder on Discount = discountedTotal == 0
 
-  /// R10.2 — a domain service with pure operations (expression bodies). `cap` clamps
+  /// a domain service with pure operations (expression bodies). `cap` clamps
   /// a requested discount so it can never exceed the order total (the safe way to
   /// build a `Discount`); `rate` gives the percentage rate for a deal kind.
   service DiscountService {

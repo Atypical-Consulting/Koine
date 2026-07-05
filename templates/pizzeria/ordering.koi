@@ -1,7 +1,7 @@
 /// Ordering bounded context — taking and pricing a customer's pizza order. This is
 /// the heart of the template: the `Sales` aggregate (root `Order`) is the headline
-/// aggregate, its lifecycle is an explicit state machine (R7), it is priced from its line items
-/// (R1), and it publishes `OrderPlaced` so Kitchen, Delivery and Payment can react.
+/// aggregate, its lifecycle is an explicit state machine, it is priced from its line items
+///, and it publishes `OrderPlaced` so Kitchen, Delivery and Payment can react.
 context Ordering version 1 {
 
   /// How the customer wants the order fulfilled. Drives routing into Delivery.
@@ -20,7 +20,7 @@ context Ordering version 1 {
     invariant amount >= 0   "an amount cannot be negative"
   }
 
-  /// Announced to the rest of the system when an order is placed (R14.3). An
+  /// Announced to the rest of the system when an order is placed. An
   /// integration event is a *published language* — its fields stay primitive
   /// (ids/scalars/enums), never leaking internal value objects. Kitchen, Delivery
   /// and Payment all subscribe to it (authorized by the open-host relations).
@@ -34,9 +34,9 @@ context Ordering version 1 {
 
   publishes OrderPlaced
 
-  /// The order aggregate. `versioned` adds an optimistic-concurrency token (R11.4);
+  /// The order aggregate. `versioned` adds an optimistic-concurrency token;
   /// the `repository` block tunes the mutating set and adds intention-revealing
-  /// finders (R11.3); being an aggregate it also joins the context `IUnitOfWork`.
+  /// finders; being an aggregate it also joins the context `IUnitOfWork`.
   aggregate Sales root Order versioned {
 
     repository {
@@ -45,20 +45,20 @@ context Ordering version 1 {
       find mostRecent(customer: CustomerId): Order
     }
 
-    /// Raised when an order is opened by the factory (R6/R8).
+    /// Raised when an order is opened by the factory.
     event OrderOpened {
       orderId:   OrderId
       customer:  CustomerId
       lineCount: Int
     }
 
-    /// Raised when an order is placed for processing (R6).
+    /// Raised when an order is placed for processing.
     event OrderPlacedInternally {
       orderId:   OrderId
       lineCount: Int
     }
 
-    /// Raised when an order is cancelled (R6).
+    /// Raised when an order is cancelled.
     event OrderCancelled {
       orderId: OrderId
     }
@@ -71,7 +71,7 @@ context Ordering version 1 {
       quantity:  Int
       unitPrice: Money
       // Derived (computed, get-only). lineTotal scales Money by a scalar;
-      // payable applies a conditional "buy 5+ get 10% off" deal (R1.1).
+      // payable applies a conditional "buy 5+ get 10% off" deal.
       lineTotal: Money = unitPrice * quantity
       /// What the customer actually pays for this line (10% off at 5+ pizzas).
       payable:   Money = if quantity >= 5 then lineTotal * 0.9 else lineTotal
@@ -86,11 +86,11 @@ context Ordering version 1 {
       status:      OrderStatus = Draft
       placedAt:    Instant?
 
-      // Collection operations over the child lines (R1.3).
+      // Collection operations over the child lines.
       total:       Money = lines.sum(l => l.payable)
       lineCount:   Int   = lines.count
 
-      // Presence check on an optional (R2.1) and a scoped enum member (R3.5):
+      // Presence check on an optional and a scoped enum member:
       // bare `Cancelled` resolves to OrderStatus.
       isPlaced:    Bool = placedAt.isPresent
       isCancelled: Bool = status == Cancelled
@@ -101,7 +101,7 @@ context Ordering version 1 {
       invariant lines.distinctBy(l => l.pizza)    "no duplicate pizzas in an order"
       invariant status == Draft when lines.isEmpty
 
-      // The order's legal lifecycle (R7): only these transitions are permitted.
+      // The order's legal lifecycle: only these transitions are permitted.
       states status {
         Draft          -> Placed, Cancelled
         Placed         -> InKitchen, Cancelled
@@ -111,8 +111,8 @@ context Ordering version 1 {
         Cancelled
       }
 
-      /// Place a drafted order for processing, stamping the time (R5) and recording
-      /// a domain event (R6). The cross-context announcement is `OrderPlaced`.
+      /// Place a drafted order for processing, stamping the time and recording
+      /// a domain event. The cross-context announcement is `OrderPlaced`.
       command place {
         requires status == Draft   "only a draft order can be placed"
         requires !lines.isEmpty    "cannot place an empty order"
@@ -129,7 +129,7 @@ context Ordering version 1 {
         emit OrderCancelled(orderId: id)
       }
 
-      /// R8 — factory-only creation: open a draft order for a customer. The presence
+      /// factory-only creation: open a draft order for a customer. The presence
       /// of any `create` makes the all-args constructor private, so callers must go
       /// through `Order.Open(...)`.
       create open(customer: CustomerId, fulfillment: Fulfillment, lines: List<OrderLine>) {
@@ -139,14 +139,14 @@ context Ordering version 1 {
     }
   }
 
-  /// R12.2 — the application/use-case service interface (IOrderingService). Each
+  /// the application/use-case service interface (IOrderingService). Each
   /// use case maps to one async method; a context with aggregates also gets a UoW.
   service OrderingService {
     usecase PlaceOrder(customer: CustomerId, fulfillment: Fulfillment, lines: List<OrderLine>): OrderId
     usecase CancelOrder(order: OrderId)
   }
 
-  /// R12.3 — a flat read model + projection mapper for an order board.
+  /// a flat read model + projection mapper for an order board.
   readmodel OrderSummary from Order {
     id
     customer
@@ -155,6 +155,6 @@ context Ordering version 1 {
     lineCount: Int = lines.count
   }
 
-  /// R12.4 — a query DTO over the read model.
+  /// a query DTO over the read model.
   query OrdersByStatus(status: OrderStatus): List<OrderSummary>
 }
