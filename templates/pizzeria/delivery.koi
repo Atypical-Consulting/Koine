@@ -4,7 +4,7 @@
 /// delivery order must carry a delivery address.
 context Delivery version 1 {
 
-  // react to placed orders (authorized by `Ordering -> Delivery : open-host`
+  // React to placed orders (authorized by `Ordering -> Delivery : open-host`
   // in context-map.koi). Emits an IHandleOrderPlaced seam the dispatcher implements
   // to create a delivery for a delivery-fulfilment order.
   subscribes Ordering.OrderPlaced
@@ -110,7 +110,7 @@ context Delivery version 1 {
         emit DeliveryCompleted(delivery: id)
       }
 
-      /// schedule a delivery for a placed delivery order. The same-named
+      /// Schedule a delivery for a placed delivery order. The same-named
       /// parameters auto-bind the required fields; `status` defaults to Scheduled.
       create schedule(order: OrderId, destination: Address) {
         requires destination.street.trim.length > 0   "a delivery order requires a delivery address"
@@ -119,13 +119,13 @@ context Delivery version 1 {
     }
   }
 
-  /// the application service interface (IDeliveryService).
+  /// The application service interface (IDeliveryService).
   service DeliveryService {
     usecase ScheduleDelivery(order: OrderId, destination: Address): DeliveryId
     usecase CompleteDelivery(delivery: DeliveryId)
   }
 
-  /// a flat read model for the dispatch board.
+  /// A flat read model for the dispatch board.
   readmodel DeliveryTicket from Delivery {
     id
     order
@@ -133,6 +133,6 @@ context Delivery version 1 {
     destination
   }
 
-  /// a query DTO over the dispatch board.
+  /// A query DTO over the dispatch board.
   query DeliveriesByStatus(status: DeliveryStatus): List<DeliveryTicket>
 }
