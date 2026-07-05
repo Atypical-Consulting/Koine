@@ -15,6 +15,9 @@ export function createWorkspaceSave(ctx: WorkspaceModuleCtx) {
   // switched (the auto-save precedent — the active doc may not itself have been dirty), or the CURRENT
   // active uri is one confirmed clean (write succeeded and is still fresh) this pass — a switch to (or
   // staying on) an unrelated, unattempted, failed, or re-dirtied buffer must not tell the server it saved.
+  // saveActive only ever attempts its own uri, so its call always has wasAttempted === true — the
+  // first disjunct is saveAllDirty's alone (the "active doc wasn't part of this pass" auto-save case);
+  // saveActive's outcome is carried entirely by confirmedUris.has(current).
   function shouldNotifyDidSave(
     requestActiveUri: string,
     confirmedUris: ReadonlySet<string>,
@@ -69,7 +72,7 @@ export function createWorkspaceSave(ctx: WorkspaceModuleCtx) {
         // applyFileEdit's guard; neither a switch nor a keystroke landing mid-write may tell the server
         // the wrong (or stale) doc saved.
         const attempted = new Set([uri]);
-        const confirmed = stillFresh ? attempted : new Set<string>();
+        const confirmed = stillFresh ? new Set([uri]) : new Set<string>();
         if (shouldNotifyDidSave(uri, confirmed, attempted)) lsp.didSave();
         renderTree();
         st().bumpSaved(); // #470: the on-disk git status changed — the saveSeq subscriber refreshes the SC panel
