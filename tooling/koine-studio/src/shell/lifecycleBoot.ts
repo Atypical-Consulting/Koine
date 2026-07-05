@@ -119,6 +119,20 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
   // (this stays false) keeps the plain view-refresh behavior.
   let bootIntentPending = false;
 
+  // Only one workspace-opening operation may run at a time. The shared-import branches below and
+  // runStartIntent (the cold-boot intent, the route-intent subscription's return-visit intent, and the
+  // onServerRestart recovery re-dispatch all funnel through it) queue through this so a Home action
+  // taken during the lsp.start() connect window can't race an in-flight shared-link import — or
+  // another Home action — and silently clobber it (#1046). Each call waits for whatever is already
+  // running rather than firing blindly; a queued call re-checks its own preconditions (e.g.
+  // hasOpenWorkspace()) once it's actually its turn.
+  let workspaceOpQueue: Promise<unknown> = Promise.resolve();
+  function withWorkspaceOpLock<T>(op: () => Promise<T>): Promise<T> {
+    const run = workspaceOpQueue.catch(() => {}).then(op);
+    workspaceOpQueue = run.catch(() => {});
+    return run;
+  }
+
   // Boot/empty-state: open the host's persistent default workspace. The clearLegacyScratch + the
   // OPFS-error output line are ide-specific, so they wrap workspace.openDefaultWorkspaceFlow here.
   async function openDefaultWorkspaceFlow(seedDoc: string): Promise<void> {
@@ -142,21 +156,23 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
   // — dirty buffers can exist — so the route-intent subscription passes `guarded` and every destructive
   // action asks first, matching the in-editor New/open paths.
   async function runStartIntent(intent: StartIntent, opts: { guarded?: boolean } = {}): Promise<void> {
-    if (opts.guarded && !(await deps.confirmReplaceWork('Replace your work?', 'Discard & continue'))) return;
-    switch (intent.kind) {
-      case 'new':
-        await deps.newModel();
-        break;
-      case 'open-folder':
-        await deps.openFolder();
-        break;
-      case 'open-recent':
-        await deps.openRecentFolder(intent.path);
-        break;
-      case 'open-example':
-        await deps.openExample(intent.template);
-        break;
-    }
+    return withWorkspaceOpLock(async () => {
+      if (opts.guarded && !(await deps.confirmReplaceWork('Replace your work?', 'Discard & continue'))) return;
+      switch (intent.kind) {
+        case 'new':
+          await deps.newModel();
+          break;
+        case 'open-folder':
+          await deps.openFolder();
+          break;
+        case 'open-recent':
+          await deps.openRecentFolder(intent.path);
+          break;
+        case 'open-example':
+          await deps.openExample(intent.template);
+          break;
+      }
+    });
   }
 
   // Boot: attach listeners (inside start) before messages flow, then open the doc.
@@ -191,28 +207,32 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
       // The workspace opens once the server is up so each file's didOpen resolves cross-file refs.
       // Isolated try/finally per branch: an open failure must not masquerade as a connection failure.
       if (shared?.kind === 'workspace') {
-        let opened = false;
-        try {
-          opened = await deps.importSharedWorkspace(shared.files, shared.active);
-        } catch (e) {
-          console.error('importing shared workspace failed:', e);
-          deps.setStatus('could not open shared workspace', 'error');
-        } finally {
-          clearModelHash();
-        }
-        // An import that opened nothing (every relPath filtered as unsafe, a failed materialize, or a
-        // thrown import) must not strand the editor with zero buffers behind it — every save would be a
-        // silent no-op. Fall through to the default workspace, like a plain boot.
-        if (!opened) await openDefaultWorkspaceFlow(legacyScratch ?? seed);
+        await withWorkspaceOpLock(async () => {
+          let opened = false;
+          try {
+            opened = await deps.importSharedWorkspace(shared.files, shared.active);
+          } catch (e) {
+            console.error('importing shared workspace failed:', e);
+            deps.setStatus('could not open shared workspace', 'error');
+          } finally {
+            clearModelHash();
+          }
+          // An import that opened nothing (every relPath filtered as unsafe, a failed materialize, or
+          // a thrown import) must not strand the editor with zero buffers behind it — every save would
+          // be a silent no-op. Fall through to the default workspace, like a plain boot.
+          if (!opened) await openDefaultWorkspaceFlow(legacyScratch ?? seed);
+        });
       } else if (shared?.kind === 'single') {
-        try {
-          await deps.openWorkspaceWith1File(shared.text);
-        } catch (e) {
-          console.error('opening shared model failed:', e);
-          deps.setStatus('could not open shared model', 'error');
-        } finally {
-          clearModelHash();
-        }
+        await withWorkspaceOpLock(async () => {
+          try {
+            await deps.openWorkspaceWith1File(shared.text);
+          } catch (e) {
+            console.error('opening shared model failed:', e);
+            deps.setStatus('could not open shared model', 'error');
+          } finally {
+            clearModelHash();
+          }
+        });
       } else {
         // A start action chosen on the Home route (#368) is queued as a one-shot intent and performed
         // here, once. A plain editor boot has no intent: restore the workspace it was last on (#535).
@@ -223,16 +243,21 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
         const intent = takeStartIntent();
         if (intent) {
           await runStartIntent(intent);
-        } else if (!deps.hasOpenWorkspace()) {
-          // The restore is only a fallback for an EMPTY editor: the toolbar is interactive while the
-          // server connects (a multi-second window in the browser), so a folder the user opened during
-          // that window must not be torn down and replaced by the restored/default workspace.
-          const last = getLastWorkspace();
-          const restorable = !!last && last !== DEFAULT_WS_TOKEN && (await deps.isAutoRestorableToken(last));
-          const restoredExample = restorable ? (await deps.openFolderPath(last as string, { recent: false })).ok : false;
-          // Legacy-scratch migration is deliberately NOT done on the example-restore path: the scratch
-          // content is only ever preserved by being seeded into the default workspace.
-          if (!restoredExample) await openDefaultWorkspaceFlow(legacyScratch ?? seed);
+        } else {
+          await withWorkspaceOpLock(async () => {
+            // The restore is only a fallback for an EMPTY editor: the toolbar is interactive while the
+            // server connects (a multi-second window in the browser), so a folder the user opened during
+            // that window — or another queued workspace-opening operation that just finished — must not
+            // be torn down and replaced by the restored/default workspace. Re-checked here (rather than
+            // before queueing) so a stale read can't win once this op's turn actually comes (#1046).
+            if (deps.hasOpenWorkspace()) return;
+            const last = getLastWorkspace();
+            const restorable = !!last && last !== DEFAULT_WS_TOKEN && (await deps.isAutoRestorableToken(last));
+            const restoredExample = restorable ? (await deps.openFolderPath(last as string, { recent: false })).ok : false;
+            // Legacy-scratch migration is deliberately NOT done on the example-restore path: the scratch
+            // content is only ever preserved by being seeded into the default workspace.
+            if (!restoredExample) await openDefaultWorkspaceFlow(legacyScratch ?? seed);
+          });
         }
       }
     })

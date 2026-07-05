@@ -170,15 +170,21 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
         appStore.getState().showSettings();
       },
       // Clone repository (#1005): only wired on hosts that can clone (Home renders the row on canUseGit).
-      // Pick a parent folder, run the desktop git clone, remember the clone as a recent (tagging it with
-      // the current emit target so its dense row shows a language), then open it via the same go() flow
-      // onOpenRecent uses. A cancelled folder pick is a quiet no-op; a gitClone rejection propagates so the
-      // Home form can show its inline error and stay open for a retry (it is never swallowed here).
+      // Pick a parent folder, run the desktop git clone, remember the clone as a recent so it's visible
+      // in the list right away (the #1017 cloned-empty notice depends on it already being "saved in
+      // Recent"), then open it via the same go() flow onOpenRecent uses. The eager push carries NO
+      // language: appStore.getState().emitTarget here is whatever workspace was PREVIOUSLY open (or the
+      // default) — the clone's own effective target isn't known until openFolderPath resolves it, and
+      // that path already re-tags the recent with the correct value once it does (#1015). Leaving it
+      // untagged (rather than stamping the stale value) means a clone that stays empty — and so never
+      // reaches that re-tagging — shows no language badge instead of a wrong one (#1072). A cancelled
+      // folder pick is a quiet no-op; a gitClone rejection propagates so the Home form can show its
+      // inline error and stay open for a retry (it is never swallowed here).
       onClone: async (url) => {
         const parent = await getPlatform().pickFolder('Choose a folder to clone the repository into');
         if (parent === null) return; // user dismissed the folder picker — nothing to do
         const clonedPath = await getPlatform().gitClone(url, parent);
-        pushRecentFolder(clonedPath, { language: appStore.getState().emitTarget });
+        pushRecentFolder(clonedPath);
         lastClonedPath = clonedPath;
         go({ kind: 'open-recent', path: clonedPath });
       },

@@ -499,6 +499,34 @@ describe('createWorkspaceController — rememberLastWorkspace (#535)', () => {
   });
 });
 
+describe('createWorkspaceController — recent-folder language tag (#1015)', () => {
+  test('tags the recent with the JUST-opened folder\'s effective emit target, not the previous one', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    platform.seed(ROOT_B, 'b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const store = createAppStore();
+    const pushRecentFolder = vi.fn();
+    // Mimics ide.tsx's real onFolderOpened: it synchronously applies the JUST-opened folder's own
+    // effective previewTarget into the store (applyEffectiveScoped → setEmitTarget) BEFORE returning.
+    // Folder A's workspace overrides to 'typescript'; folder B has no override (falls back to the
+    // 'csharp' default) — so opening B right after A must tag B's recent 'csharp', not A's 'typescript'.
+    const targetByFolder: Record<string, string> = { [ROOT_A]: 'typescript', [ROOT_B]: 'csharp' };
+    const onFolderOpened = vi.fn((folder: string) => {
+      store.getState().setEmitTarget(targetByFolder[folder]);
+    });
+    const ws = createWorkspaceController(
+      makeDeps(platform, makeLsp(trace), makeEditor(trace), { store, onFolderOpened, pushRecentFolder }),
+    );
+
+    await ws.openFolderPath(ROOT_A, { recent: true });
+    await ws.openFolderPath(ROOT_B, { recent: true });
+
+    const callForB = pushRecentFolder.mock.calls.find(([folder]) => folder === ROOT_B);
+    expect(callForB?.[1]).toEqual(expect.objectContaining({ language: 'csharp' }));
+  });
+});
+
 describe('createWorkspaceController — reset', () => {
   test('closes every open doc, clears buffers + the diagnostics cache, and does NOT re-open', async () => {
     const platform = new FakePlatform();
@@ -948,6 +976,33 @@ describe('createWorkspaceController — saveAllDirty', () => {
     expect(lsp.didSave).toHaveBeenCalledTimes(1);
   });
 
+  // Regression (#1055 — sibling gap left by #1009/#1052): the OLD `current === activeUri` fallback
+  // fired didSave() whenever nothing switched during the pass, with zero regard for whether the active
+  // buffer's own write (when it was itself part of this pass) actually landed. If the active buffer's
+  // write throws while a different dirty buffer succeeds, and no switch occurs, the server must not be
+  // told the active (still-dirty) document was saved.
+  test('the active buffer failing its own write (no switch) skips the trailing didSave', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const aUri = ws.activeUri(); // a.koi stays active throughout — no switch occurs
+    const bUri = uriOf('b.koi');
+    ws.buffers.get(aUri)!.dirty = true;
+    ws.buffers.get(bUri)!.dirty = true;
+    platform.failWrites.add('a.koi'); // the ACTIVE buffer's own write fails; b's write succeeds
+
+    await ws.saveAllDirty();
+
+    expect(ws.buffers.get(aUri)!.dirty).toBe(true); // still dirty — its write failed
+    expect(ws.buffers.get(bUri)!.dirty).toBe(false); // b saved fine
+    expect(lsp.didSave).not.toHaveBeenCalled();
+  });
+
   // Regression (#1009 code-review follow-up): a switch INTO a buffer that this pass wrote — but that
   // gets re-dirtied by a keystroke before its own write is confirmed — must not be treated as
   // confirmed saved just because its uri is in the written set; savedUris membership requires the
@@ -983,6 +1038,60 @@ describe('createWorkspaceController — saveAllDirty', () => {
     expect(platform.writes.some((w) => w.path === `${ROOT}/b.koi`)).toBe(true);
     expect(ws.buffers.get(bUri)!.dirty).toBe(true);
     expect(lsp.didSave).not.toHaveBeenCalled();
+  });
+
+  // The two remaining cells of the didSave-eligibility table (#1055 Task 2) not otherwise pinned above:
+  // the active buffer itself being part of this pass and confirmed clean (no switch) fires, and a
+  // switch TO a buffer already confirmed saved earlier in the same pass still fires.
+  test('the active buffer itself confirmed saved (no switch) fires the trailing didSave', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const aUri = ws.activeUri(); // a.koi — active, and itself part of this pass
+    ws.buffers.get(aUri)!.dirty = true;
+    ws.buffers.get(uriOf('b.koi'))!.dirty = true;
+
+    await ws.saveAllDirty();
+
+    expect(ws.buffers.get(aUri)!.dirty).toBe(false); // confirmed clean
+    expect(lsp.didSave).toHaveBeenCalledTimes(1);
+  });
+
+  test('a switch to a buffer confirmed saved earlier in this pass fires the trailing didSave', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    // Gate b.koi's write (it sorts after a.koi) so a.koi's write can complete and be CONFIRMED saved
+    // while b's write — the buffer active at request time — is still in flight.
+    const origWrite = platform.writeTextFile.bind(platform);
+    let releaseB!: () => void;
+    const bGate = new Promise<void>((res) => (releaseB = res));
+    platform.writeTextFile = async (path: string, contents: string) => {
+      if (path === `${ROOT}/b.koi`) await bGate;
+      return origWrite(path, contents);
+    };
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const aUri = uriOf('a.koi');
+    const bUri = uriOf('b.koi');
+    ws.activateFile(bUri); // b.koi is active at request time
+    ws.buffers.get(aUri)!.dirty = true; // background — writes and confirms fast (not gated)
+    ws.buffers.get(bUri)!.dirty = true; // active — its write is gated
+
+    const save = ws.saveAllDirty(); // writes a.koi (confirmed), then b.koi (gated)
+    ws.activateFile(aUri); // switch to a.koi — already CONFIRMED saved this pass — while b's write is in flight
+    releaseB();
+    await save;
+
+    expect(lsp.didSave).toHaveBeenCalledTimes(1);
   });
 });
 
