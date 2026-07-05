@@ -37,11 +37,11 @@ context Promotions version 1 {
       "a discount cannot drive the order total negative"
   }
 
-  // a named, reusable specification over Discount, emitted as a static
+  // A named, reusable specification over Discount, emitted as a static
   // predicate (PromotionsSpecifications.IsFreeOrder): the deal made the order free.
   spec IsFreeOrder on Discount = discountedTotal == 0
 
-  /// a domain service with pure operations (expression bodies). `cap` clamps
+  /// A domain service with pure operations (expression bodies). `cap` clamps
   /// a requested discount so it can never exceed the order total (the safe way to
   /// build a `Discount`); `rate` gives the percentage rate for a deal kind.
   service DiscountService {

@@ -1,7 +1,7 @@
 /// Ordering bounded context — taking and pricing a customer's pizza order. This is
 /// the heart of the template: the `Sales` aggregate (root `Order`) is the headline
-/// aggregate, its lifecycle is an explicit state machine, it is priced from its line items
-///, and it publishes `OrderPlaced` so Kitchen, Delivery and Payment can react.
+/// aggregate, its lifecycle is an explicit state machine, it is priced from its line items,
+/// and it publishes `OrderPlaced` so Kitchen, Delivery and Payment can react.
 context Ordering version 1 {
 
   /// How the customer wants the order fulfilled. Drives routing into Delivery.
@@ -129,7 +129,7 @@ context Ordering version 1 {
         emit OrderCancelled(orderId: id)
       }
 
-      /// factory-only creation: open a draft order for a customer. The presence
+      /// Factory-only creation: open a draft order for a customer. The presence
       /// of any `create` makes the all-args constructor private, so callers must go
       /// through `Order.Open(...)`.
       create open(customer: CustomerId, fulfillment: Fulfillment, lines: List<OrderLine>) {
@@ -139,14 +139,14 @@ context Ordering version 1 {
     }
   }
 
-  /// the application/use-case service interface (IOrderingService). Each
+  /// The application/use-case service interface (IOrderingService). Each
   /// use case maps to one async method; a context with aggregates also gets a UoW.
   service OrderingService {
     usecase PlaceOrder(customer: CustomerId, fulfillment: Fulfillment, lines: List<OrderLine>): OrderId
     usecase CancelOrder(order: OrderId)
   }
 
-  /// a flat read model + projection mapper for an order board.
+  /// A flat read model + projection mapper for an order board.
   readmodel OrderSummary from Order {
     id
     customer
@@ -155,6 +155,6 @@ context Ordering version 1 {
     lineCount: Int = lines.count
   }
 
-  /// a query DTO over the read model.
+  /// A query DTO over the read model.
   query OrdersByStatus(status: OrderStatus): List<OrderSummary>
 }
