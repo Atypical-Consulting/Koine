@@ -183,6 +183,17 @@ public sealed class TypeResolver
 
         protected override KoineType VisitGuard(GuardExpr n) => Visit(n.Body);
 
+        /// <summary>True when <paramref name="t"/> resolves to a numeric primitive (<c>Int</c>/<c>Decimal</c>).</summary>
+        private static bool IsNumericType(KoineType t) => t.Name is "Int" or "Decimal";
+
+        /// <summary>
+        /// The common (wider) numeric type of two numeric operands — <c>Decimal</c> dominates <c>Int</c>.
+        /// The single numeric-promotion rule, shared by arithmetic (<see cref="VisitBinary"/>) and
+        /// conditional-branch joining (<see cref="VisitConditional"/>). Callers gate on <see cref="IsNumericType"/>.
+        /// </summary>
+        private static KoineType WiderNumeric(KoineType a, KoineType b) =>
+            a.Name == "Decimal" || b.Name == "Decimal" ? Decimal : Int;
+
         protected override KoineType VisitBinary(BinaryExpr n)
         {
             switch (n.Op)
@@ -213,8 +224,8 @@ public sealed class TypeResolver
                     KoineType arithmetic =
                         l.IsValueLike ? l :                               // value-object scalar arithmetic (Money * qty)
                         r.IsValueLike ? r :
-                        l.Name == "Decimal" || r.Name == "Decimal" ? Decimal :
-                        l.Name == "Int" && r.Name == "Int" ? Int :
+                        IsNumericType(l) && IsNumericType(r) ? WiderNumeric(l, r) :  // Int/Decimal promotion (shared with VisitConditional, #975)
+                        l.Name == "Decimal" || r.Name == "Decimal" ? Decimal :      // a Decimal operand still dominates a non-numeric sibling
                         !l.IsError ? l : r;                               // was `l ?? r`
                     return arithmetic.IsError ? ErrorType.Instance : arithmetic.WithOptional(optional);
             }
@@ -222,11 +233,28 @@ public sealed class TypeResolver
 
         protected override KoineType VisitConditional(ConditionalExpr n)
         {
-            // The result is optional if EITHER branch is optional.
             KoineType then = Visit(n.Then);
             KoineType @else = Visit(n.Else);
-            KoineType result = !then.IsError ? then : @else;
-            return result.IsError ? ErrorType.Instance : result.WithOptional(then.IsOptional || @else.IsOptional);
+
+            // The result is optional if EITHER branch is optional.
+            bool optional = then.IsOptional || @else.IsOptional;
+
+            // An error branch propagates as before: prefer the non-error branch, else the error itself.
+            if (then.IsError || @else.IsError)
+            {
+                KoineType fallback = !then.IsError ? then : @else;
+                return fallback.IsError ? ErrorType.Instance : fallback.WithOptional(optional);
+            }
+
+            // Both branches valid: join two numeric branches to their common (wider) type — the same
+            // Int/Decimal promotion arithmetic applies (VisitBinary) — so a narrowing `else` (e.g.
+            // `if p then 0 else base` with `base: Decimal`) is visible to the KOI0217 narrowing guard
+            // instead of hiding behind an Int-looking `then` (#975). Non-numeric branches keep the
+            // existing then-preferring behavior unchanged.
+            KoineType result = IsNumericType(then) && IsNumericType(@else)
+                ? WiderNumeric(then, @else)
+                : then;
+            return result.WithOptional(optional);
         }
 
         protected override KoineType VisitCoalesce(CoalesceExpr n)
