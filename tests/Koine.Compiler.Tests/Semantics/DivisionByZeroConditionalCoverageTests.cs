@@ -76,6 +76,24 @@ public class DivisionByZeroConditionalCoverageTests
         Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DivisionByZeroInConstantDefault);
     }
 
+    /// <summary>
+    /// Regression against narrowing the walk to only the first/last binding (or only bindings the
+    /// body actually reads): every binding in a multi-binding <c>let</c> must be checked, regardless
+    /// of position or whether the body references it.
+    /// </summary>
+    [Fact]
+    public void Division_by_a_literal_zero_in_a_non_last_unused_let_binding_is_rejected()
+    {
+        const string src = """
+            context Pricing {
+              value Rate {
+                amount: Decimal = let x = 4 / 0, y = 1 in y
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DivisionByZeroInConstantDefault);
+    }
+
     [Fact]
     public void Division_by_a_literal_zero_in_a_let_body_is_rejected()
     {
