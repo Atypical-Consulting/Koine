@@ -684,6 +684,53 @@ public class PythonConformanceTests
             "plain value-object +/- should evaluate (10+10==20, 10-10==0):\n" + string.Join("\n", run.Errors));
     }
 
+    /// <summary>
+    /// Issue #938 cross-target parity: Python already truncates an <c>Int</c> field's scalar divide
+    /// toward zero (<c>int(self.grams / divisor)</c> — Python's <c>/</c> is always true division, so the
+    /// quotient is cast with <c>int(...)</c>, matching C#'s <c>(int)</c> cast). This pins that behavior
+    /// so it can't silently regress while the TypeScript emitter is being brought into line (the same
+    /// issue's actual fix). A runtime driver proves the negative-operand case truncates toward zero
+    /// (<c>-7 / 2 == -3</c>), not toward negative infinity (<c>floor(-7 / 2) == -4</c>, which Python's own
+    /// <c>//</c> operator would give — this emitter deliberately uses true division + <c>int(...)</c>,
+    /// not <c>//</c>, to get truncation rather than floor).
+    /// </summary>
+    [Fact]
+    public void Int_field_scalar_divide_truncates_toward_zero()
+    {
+        const string src = """
+            context Shop {
+              value Weight {
+                grams: Int
+              }
+              value Box {
+                total: Weight
+                half: Weight = total / 2
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("int(self.grams / divisor)");
+
+        AssertStrictlyTypeChecks(result.Files);
+
+        const string driver = """
+            from shop.value_objects.weight import Weight
+
+            positive = Weight(7) / 2
+            negative = Weight(-7) / 2
+            assert positive.grams == 3, positive.grams
+            assert negative.grams == -3, negative.grams
+            """;
+
+        TestSupport.PythonCheck run = TestSupport.RunPython(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+        run.Ok.ShouldBeTrue(
+            "Int-field divide should truncate toward zero (7/2==3, -7/2==-3):\n" + string.Join("\n", run.Errors));
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {
