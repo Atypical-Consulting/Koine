@@ -518,6 +518,130 @@ public static class TestSupport
     }
 
     /// <summary>
+    /// Result of transpiling emitted TypeScript with <c>tsc</c> and executing it with <c>node</c>
+    /// against a caller-supplied driver script. <see cref="ToolchainAvailable"/> is false when no
+    /// Node/<c>tsc</c> toolchain could be located; <see cref="Ok"/> reflects whether the transpile and
+    /// the node run both exited zero. <see cref="Stdout"/> carries the driver's captured output for the
+    /// caller to assert against.
+    /// </summary>
+    public readonly record struct NodeRun(bool ToolchainAvailable, bool Ok, string Stdout, IReadOnlyList<string> Errors)
+    {
+        /// <summary>A skipped result: no toolchain present, so nothing was executed.</summary>
+        public static NodeRun Skipped { get; } =
+            new(ToolchainAvailable: false, Ok: false, Stdout: string.Empty, Errors: Array.Empty<string>());
+    }
+
+    /// <summary>
+    /// Writes the emitted TypeScript to a fresh temp directory alongside a caller-supplied
+    /// <paramref name="driver"/> script (saved as <c>__driver.ts</c>), transpiles everything with
+    /// <c>tsc</c>, and executes the result with <c>node</c> — the TypeScript analogue of
+    /// <see cref="RunPython"/>, for runtime hazards a type-check alone can't see (e.g. whether a
+    /// rounding rule actually evaluates to the expected number, not just that it type-checks). The
+    /// emitted code uses ESM with extensionless relative imports, so the temp directory is marked as an
+    /// ESM package with a resolve hook that appends <c>.js</c> for Node to load the transpiled output
+    /// as-is. When no Node/<c>tsc</c> toolchain is found the result is <see cref="NodeRun.Skipped"/> so
+    /// the suite stays green without one; CI installs the toolchain and runs this for real.
+    /// </summary>
+    public static NodeRun RunTypeScript(IEnumerable<EmittedFile> files, string driver)
+    {
+        if (ResolveTsc() is not { } tsc || ResolveNode() is not { } node)
+        {
+            return NodeRun.Skipped;
+        }
+
+        var fileList = files.ToList();
+        string root = Path.Combine(Path.GetTempPath(), "koine-tsrun-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            foreach (EmittedFile f in fileList)
+            {
+                // Transpile by passing .ts files explicitly rather than via the emitter's shipped
+                // tsconfig.json (a present-but-unused tsconfig makes tsc error with TS5112).
+                if (string.Equals(f.RelativePath, "tsconfig.json", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string path = Path.Combine(root, f.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, f.Contents);
+            }
+
+            File.WriteAllText(Path.Combine(root, "package.json"), "{ \"type\": \"module\" }\n");
+            File.WriteAllText(Path.Combine(root, "__loader.mjs"), EsmExtensionLoader);
+            File.WriteAllText(Path.Combine(root, "__register.mjs"),
+                "import { register } from 'node:module';\nregister('./__loader.mjs', import.meta.url);\n");
+            File.WriteAllText(Path.Combine(root, "__driver.ts"), driver);
+
+            var tscArgs = new List<string>(tsc.Arguments)
+            {
+                "--target", "ES2022", "--module", "ESNext", "--moduleResolution", "bundler",
+                "--strict", "--skipLibCheck",
+            };
+            tscArgs.AddRange(Directory.GetFiles(root, "*.ts", SearchOption.AllDirectories)
+                .Select(ts => Path.GetRelativePath(root, ts)));
+
+            if (RunProcess(tsc.FileName, tscArgs, root) is not { } tscRun)
+            {
+                return NodeRun.Skipped;
+            }
+            if (tscRun.ExitCode != 0)
+            {
+                var tscErrors = (tscRun.StdOut + tscRun.StdErr)
+                    .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+                return new NodeRun(ToolchainAvailable: true, Ok: false, Stdout: string.Empty, Errors: tscErrors);
+            }
+
+            var nodeArgs = new List<string>(node.Arguments) { "--import", "./__register.mjs", "__driver.js" };
+            if (RunProcess(node.FileName, nodeArgs, root) is not { } nodeRun)
+            {
+                return NodeRun.Skipped;
+            }
+            if (nodeRun.ExitCode != 0)
+            {
+                var nodeErrors = (nodeRun.StdOut + nodeRun.StdErr)
+                    .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+                return new NodeRun(ToolchainAvailable: true, Ok: false, Stdout: nodeRun.StdOut, Errors: nodeErrors);
+            }
+
+            return new NodeRun(ToolchainAvailable: true, Ok: true, Stdout: nodeRun.StdOut, Errors: Array.Empty<string>());
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// An ESM resolve hook that appends <c>.js</c> to extensionless relative specifiers, so Node can
+    /// load the transpiled emitter output (whose imports are extensionless, e.g.
+    /// <c>'./value-objects/Money'</c>) without rewriting the generated code.
+    /// </summary>
+    private const string EsmExtensionLoader = """
+        export async function resolve(specifier, context, nextResolve) {
+          if ((specifier.startsWith('./') || specifier.startsWith('../')) && !/\.[mc]?js$/.test(specifier)) {
+            try { return await nextResolve(specifier + '.js', context); } catch { /* fall through */ }
+          }
+          return nextResolve(specifier, context);
+        }
+        """;
+
+    /// <summary>
+    /// Locates a usable <c>node</c>: an explicit <c>KOINE_NODE</c> override (always wins), otherwise a
+    /// direct <c>node</c> on PATH. Returns <c>null</c> when neither works so the caller can skip.
+    /// </summary>
+    private static ToolInvocation? ResolveNode()
+    {
+        if (Environment.GetEnvironmentVariable("KOINE_NODE") is { Length: > 0 } overrideNode)
+        {
+            return new ToolInvocation(overrideNode, Array.Empty<string>());
+        }
+
+        return OnPath("node") is { } node ? new ToolInvocation(node, Array.Empty<string>()) : null;
+    }
+
+    /// <summary>
     /// Result of a Python type-check run. <see cref="ToolchainAvailable"/> is false when no
     /// <c>mypy</c> could be located locally — callers should SKIP (not fail) in that case so
     /// <c>dotnet test</c> stays green without a mypy toolchain. When the toolchain IS available,
