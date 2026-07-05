@@ -121,4 +121,22 @@ public class DivisionByZeroConditionalCoverageTests
             """;
         Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.DivisionByZeroInConstantDefault);
     }
+
+    /// <summary>
+    /// The zero divisor can also hide inside the CONDITION itself (not just the branches) via a nested
+    /// <c>let</c> binding whose bound value is never read by the condition's own boolean result — Roslyn
+    /// still constant-folds it once emitted as a C# ternary's condition, so it must be caught too.
+    /// </summary>
+    [Fact]
+    public void Division_by_a_literal_zero_in_the_condition_itself_is_rejected()
+    {
+        const string src = """
+            context Pricing {
+              value Rate {
+                amount: Decimal = if (let x = 4 / 0 in true) then 1 else 2
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.DivisionByZeroInConstantDefault);
+    }
 }

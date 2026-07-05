@@ -45,7 +45,9 @@ internal static class LiteralZeroDivisorAnalysis
                 return HasDivisionByLiteralZero(un.Operand);
 
             case ConditionalExpr cond:
-                return HasDivisionByLiteralZero(cond.Then) || HasDivisionByLiteralZero(cond.Else);
+                return HasDivisionByLiteralZero(cond.Condition)
+                    || HasDivisionByLiteralZero(cond.Then)
+                    || HasDivisionByLiteralZero(cond.Else);
 
             case CoalesceExpr coalesce:
                 return HasDivisionByLiteralZero(coalesce.Left) || HasDivisionByLiteralZero(coalesce.Right);
