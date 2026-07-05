@@ -23,7 +23,10 @@ public sealed partial class JavaEmitter
             EmitType(emit, files, context, nested);
         }
 
-        // The aggregate root's repository interface (the Rust backend's EmitAggregateExtras analogue) lands
-        // with the events/repositories task, alongside the per-context DomainEvent sealed interface.
+        // The aggregate root's persistence-ignorant repository interface (the Rust backend's
+        // EmitAggregateExtras analogue). The per-context DomainEvent sealed interface is emitted once per
+        // context by EmitContextExtras, not here, so a same-named event nested in the aggregate still lands
+        // in the single context-wide sum.
+        EmitAggregateExtras(emit, files, context, agg);
     }
 }

@@ -64,15 +64,19 @@ public sealed partial class JavaEmitter : IEmitter
         };
 
         // Phase 1 tactical core — value objects, generated IDs, smart enums, entities, aggregates,
-        // events, commands, and repositories — is emitted one public type per file by the split
-        // partials (JavaEmitter.ValueObjects.cs, .Enums.cs, .Entities.cs, .Aggregates.cs, .Events.cs),
-        // dispatched from EmitType as each task lands.
+        // events, and repositories — is emitted one public type per file by the split partials
+        // (JavaEmitter.ValueObjects.cs, .Enums.cs, .Entities.cs, .Aggregates.cs, .Events.cs),
+        // dispatched from EmitType. After a context's declarations, EmitContextExtras adds the pieces
+        // that are context-wide rather than a single declaration: the DomainEvent sealed interface over
+        // its events, and a branded record for every identity it references but does not locally own.
         foreach (ContextNode ctx in model.Contexts)
         {
             foreach (TypeDecl type in ctx.Types)
             {
                 EmitType(emit, files, ctx.Name, type);
             }
+
+            EmitContextExtras(emit, files, ctx);
         }
 
         return files;
@@ -82,9 +86,10 @@ public sealed partial class JavaEmitter : IEmitter
     /// Dispatches one top-level declaration to its construct emitter, appending one <see cref="EmittedFile"/>
     /// per public Java type (the one-public-type-per-file rule). Mirrors the Rust backend's
     /// <c>EmitType</c> switch, but each case adds a whole file rather than appending to a shared module
-    /// buffer. Task 4 wires the value-object case; later tasks add their own <c>case</c> (enums, entities +
-    /// aggregate recursion + generated IDs, events, repositories). Unimplemented kinds fall through the
-    /// <c>default</c> so the walk stays green as tasks land.
+    /// buffer. Value objects, enums, entities (with aggregate recursion + generated IDs), aggregates,
+    /// and events/integration events are wired; the Phase-2 application/CQRS kinds (read models, queries)
+    /// fall through the <c>default</c>. A repository lives on its aggregate, so it is emitted by
+    /// <c>EmitAggregate</c>, not dispatched here.
     /// </summary>
     private void EmitType(JavaEmitContext emit, List<EmittedFile> files, string context, TypeDecl type)
     {
@@ -102,7 +107,13 @@ public sealed partial class JavaEmitter : IEmitter
             case AggregateDecl agg:
                 EmitAggregate(emit, files, context, agg);
                 break;
-            // Task 7: case EventDecl / case IntegrationEventDecl / case ReadModelDecl / case QueryDecl
+            case EventDecl ev:
+                files.Add(EmitEvent(emit, context, ev.Name, ev.Doc, ev.Members));
+                break;
+            case IntegrationEventDecl iev:
+                files.Add(EmitEvent(emit, context, iev.Name, iev.Doc, iev.Members));
+                break;
+            // ReadModelDecl / QueryDecl are the Phase-2 application/CQRS layer — deliberately skipped here.
             default:
                 break;
         }
