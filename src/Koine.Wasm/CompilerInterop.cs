@@ -150,7 +150,7 @@ public static partial class CompilerInterop
         nameof(PrepareCallHierarchy), nameof(IncomingCalls), nameof(OutgoingCalls),
         nameof(PrepareTypeHierarchy), nameof(Supertypes), nameof(Subtypes),
         nameof(PrepareRename), nameof(Rename), nameof(CodeActions), nameof(Docs),
-        nameof(RunScenario), nameof(ScenarioCatalog),
+        nameof(RunScenario), nameof(ScenarioCatalog), nameof(SyntaxTree),
     ];
 
     private static DiagnosticDto ToDto(Diagnostic d) => new(

@@ -217,6 +217,7 @@ internal sealed class LspServer
                                         ["koineCheck"] = true,
                                         ["koineRunScenario"] = true,
                                         ["koineScenarioCatalog"] = true,
+                                        ["koineSyntaxTree"] = true,
                                     },
                                 },
                                 ["serverInfo"] = new Dictionary<string, object?>
@@ -605,6 +606,14 @@ internal sealed class LspServer
                             if (root.TryGetProperty("id", out _))
                             {
                                 Respond(root, ScenarioCatalogResultJson());
+                            }
+
+                            break;
+
+                        case "koine/syntaxTree":
+                            if (root.TryGetProperty("id", out _))
+                            {
+                                Respond(root, SyntaxTreeResultJson(root));
                             }
 
                             break;
@@ -1957,6 +1966,51 @@ internal sealed class LspServer
     /// when supplied — that Studio's visual editors drive forms/canvases from. A null model yields the
     /// empty <c>model</c> root.
     /// </summary>
+    /// <summary>
+    /// The <c>koine/syntaxTree</c> parse-tree projection of the active buffer
+    /// (<c>params.textDocument.uri</c>): the warm compilation's per-file syntax root as a recursive
+    /// <c>{ kind, name, span, isMissing, isError, leaf, children }</c> tree, or the JSON literal
+    /// <c>null</c> when the document is not open. Shares its shape byte-for-byte with the browser
+    /// <c>[JSExport] SyntaxTree</c> export (issue #890), so Koine Studio consumes both hosts unchanged.
+    /// </summary>
+    private object? SyntaxTreeResultJson(JsonElement root)
+    {
+        if (!TryGetUri(root, out var uri))
+        {
+            return null;
+        }
+
+        var node = _ls.SyntaxTree(_compilation, uri);
+        return node is null ? null : SyntaxNodeJson(node);
+    }
+
+    private static Dictionary<string, object?> SyntaxNodeJson(SyntaxTreeNode node) => new()
+    {
+        ["kind"] = node.Kind,
+        ["name"] = node.Name,
+        ["span"] = SyntaxSpanJson(node.Span),
+        ["isMissing"] = node.IsMissing,
+        ["isError"] = node.IsError,
+        ["leaf"] = node.Leaf,
+        ["children"] = node.Children.Select(c => (object)SyntaxNodeJson(c)).ToArray(),
+    };
+
+    /// <summary>
+    /// The raw (1-based, end-EXCLUSIVE) <see cref="SourceSpan"/> as a flat JSON object — NOT the 0-based
+    /// LSP range: the syntax-tree panel keeps source coordinates so it can slice/select the .koi. Mirrors
+    /// the wasm <c>WSyntaxSpan</c> field order/casing exactly.
+    /// </summary>
+    private static Dictionary<string, object?> SyntaxSpanJson(SourceSpan span) => new()
+    {
+        ["line"] = span.Line,
+        ["column"] = span.Column,
+        ["endLine"] = span.EndLine,
+        ["endColumn"] = span.EndColumn,
+        ["offset"] = span.Offset,
+        ["length"] = span.Length,
+        ["file"] = span.File,
+    };
+
     private object ModelResultJson(JsonElement root)
     {
         var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();

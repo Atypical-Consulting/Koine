@@ -1255,6 +1255,27 @@ public sealed class KoineLanguageService
     }
 
     /// <summary>
+    /// The parse/syntax tree of the ACTIVE buffer <paramref name="activeUri"/> — its per-file
+    /// <see cref="SemanticModel.Model"/> root projected into a serializable
+    /// <see cref="SyntaxTreeNode"/> tree by <see cref="SyntaxTreeProvider.Build"/> (the target-agnostic
+    /// child walk, so a new node kind is projected for free). Uses the warm snapshot's memoized per-file
+    /// model — no re-parse. Returns <c>null</c> when <paramref name="activeUri"/> is not a document in
+    /// <paramref name="compilation"/> (an absent tree, never an exception), mirroring the LSP nullable
+    /// contract of hover/definition. The single core seam both Studio hosts serialize: the browser
+    /// <c>[JSExport] SyntaxTree</c> and the desktop <c>koine/syntaxTree</c> LSP request.
+    /// </summary>
+    public SyntaxTreeNode? SyntaxTree(KoineCompilation compilation, string activeUri)
+    {
+        if (!compilation.Documents.TryGetValue(activeUri, out var source)
+            || compilation.SemanticModelFor(activeUri) is not { } semantic)
+        {
+            return null;
+        }
+
+        return SyntaxTreeProvider.Build(semantic.Model, source);
+    }
+
+    /// <summary>
     /// The inlay hints for the active document within the 0-based LSP range
     /// <c>[startLine:startChar, endLine:endChar]</c>. Two grammar-grounded sites:
     /// <list type="bullet">

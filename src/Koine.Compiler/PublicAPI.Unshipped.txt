@@ -164,6 +164,7 @@ Koine.Compiler.Services.KoineLanguageService.RenamePreviewAt(Koine.Compiler.Serv
 Koine.Compiler.Services.KoineLanguageService.RenamePreviewAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character, string! newName) -> Koine.Compiler.Services.RenamePreview?
 Koine.Compiler.Services.KoineLanguageService.Subtypes(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.TypeHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
 Koine.Compiler.Services.KoineLanguageService.Supertypes(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.TypeHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
+Koine.Compiler.Services.KoineLanguageService.SyntaxTree(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri) -> Koine.Compiler.Services.SyntaxTreeNode?
 Koine.Compiler.Services.KoineLanguageService.WorkspaceSymbols(Koine.Compiler.Services.KoineCompilation! compilation, string! query) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.WorkspaceSymbol!>!
 Koine.Compiler.Services.ModelEditResult
 Koine.Compiler.Services.ModelEditResult.Diagnostics.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!

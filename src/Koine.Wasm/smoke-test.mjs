@@ -394,6 +394,18 @@ check('CodeLenses', () => {
   expectArray(parse(api.CodeLenses(ORDERING_FILES, ORDERING_URI)));
 });
 
+check('SyntaxTree', () => {
+  // The active buffer's parse tree: a recursive { kind, name, span, isMissing, isError, leaf, children }
+  // rooted at the KoineModel — `null` is the catch / unknown-uri fallback this must NOT pass on.
+  const r = expectObject(parse(api.SyntaxTree(ORDERING_FILES, ORDERING_URI)), 'kind', 'span', 'children');
+  expectTrue(r.kind === 'KoineModel', `syntax-tree root kind should be 'KoineModel', got '${r.kind}'`);
+  expectArray(r.children);
+  expectTrue(r.children.length > 0, 'the syntax tree should project the active buffer, not the empty fallback');
+  expectObject(r.span, 'line', 'column', 'endLine', 'endColumn', 'offset', 'length', 'file');
+  // An unknown active uri yields the JSON literal null, not a throw.
+  expectTrue(parse(api.SyntaxTree(ORDERING_FILES, 'file:///nope.koi')) === null, 'an unknown uri should yield null');
+});
+
 check('Format', () => {
   // Formatting a deliberately un-canonical source yields a single full-document edit.
   const r = expectArray(parse(api.Format('context  X{value M{amount:Decimal}}')));
