@@ -20,6 +20,12 @@ import { appStore } from '@/store/index';
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
+// The store is mocked, so drive the subscription callback lifecycleBoot registered directly.
+function routeCallback(): (s: { route: string }, prev: { route: string }) => void {
+  const sub = vi.mocked((appStore as unknown as { subscribe: ReturnType<typeof vi.fn> }).subscribe);
+  return sub.mock.calls[sub.mock.calls.length - 1][0];
+}
+
 function makeDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
   const order: string[] = [];
   const d = (name: string) => vi.fn(() => void order.push(name));
@@ -199,12 +205,6 @@ describe('lifecycleBoot', () => {
   // (dirty buffers can exist), but the intent used to run the RAW unguarded actions — "New model" from
   // Home silently wiped unsaved work (and the default workspace on disk) with no confirmation.
   describe('route-intent subscription (return visits)', () => {
-    // The store is mocked, so drive the subscription callback lifecycleBoot registered directly.
-    function routeCallback(): (s: { route: string }, prev: { route: string }) => void {
-      const sub = vi.mocked((appStore as unknown as { subscribe: ReturnType<typeof vi.fn> }).subscribe);
-      return sub.mock.calls[sub.mock.calls.length - 1][0];
-    }
-
     it('asks confirmReplaceWork before running a destructive return-visit intent', async () => {
       const deps = makeDeps({ confirmReplaceWork: vi.fn(async () => false) });
       createLifecycleBoot(deps);
@@ -398,6 +398,36 @@ describe('lifecycleBoot', () => {
       expect(deps.openExample).not.toHaveBeenCalled();
       expect(deps.invalidateDocViews).toHaveBeenCalled();
       expect(deps.refreshActiveSurfaces).toHaveBeenCalled();
+    });
+  });
+
+  // Regression (#1046): the shared-import branches had no guard against a Home action (routed
+  // through the same-file route-intent subscription) firing while an import was still in flight —
+  // whichever settled last silently won, discarding the other's workspace with no indication a race
+  // occurred.
+  describe('workspace-open guard (#1046)', () => {
+    it('defers a route-intent Home action until an in-flight shared-workspace import settles', async () => {
+      let resolveImport!: (opened: boolean) => void;
+      const importPromise = new Promise<boolean>((resolve) => {
+        resolveImport = resolve;
+      });
+      const deps = makeDeps({
+        shared: { kind: 'workspace', files: [{ relPath: 'a.koi', text: 'x' }] } as never,
+        importSharedWorkspace: vi.fn(() => importPromise),
+      });
+      createLifecycleBoot(deps);
+      await flush(); // the boot ladder is now awaiting the still-pending importSharedWorkspace call
+
+      takeStartIntentMock.mockReturnValue({ kind: 'new' });
+      routeCallback()({ route: 'editor' }, { route: 'home' });
+      await flush();
+      // The import is still in flight: the Home "New model" pick must not run concurrently.
+      expect(deps.newModel).not.toHaveBeenCalled();
+
+      resolveImport(true);
+      await flush();
+      // Once the import settles, the queued Home action is free to run.
+      expect(deps.newModel).toHaveBeenCalledOnce();
     });
   });
 
