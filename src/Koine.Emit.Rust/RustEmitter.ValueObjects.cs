@@ -66,7 +66,7 @@ public sealed partial class RustEmitter
             if (emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? scalars)
                 && stored.Any(m => m.Type.Name is "Int" or "Decimal"))
             {
-                WriteScalarMul(sb, name, stored, scalars);
+                WriteScalarOp(sb, name, stored, scalars, "*");
             }
             // `Div` is the division dual of `Mul` (#879, follow-up to the C# emitter's #832):
             // demand-generated only where the model actually divides this value object by a scalar
@@ -74,7 +74,7 @@ public sealed partial class RustEmitter
             if (emit.ScalarDivNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? divScalars)
                 && stored.Any(m => m.Type.Name is "Int" or "Decimal"))
             {
-                WriteScalarDiv(sb, name, stored, divScalars);
+                WriteScalarOp(sb, name, stored, divScalars, "/");
             }
             if (emit.AdditiveNeeds.Contains(vo.Name))
             {
@@ -245,43 +245,27 @@ public sealed partial class RustEmitter
     // Demand-driven operators
     // ----------------------------------------------------------------------
 
-    /// <summary>A scalar <c>Mul</c> (e.g. <c>Money * quantity</c>): scales each numeric field, carries the rest.</summary>
-    private void WriteScalarMul(StringBuilder sb, string name, IReadOnlyList<Member> fields, IReadOnlySet<string> scalars)
+    /// <summary>A scalar <c>Mul</c>/<c>Div</c> (e.g. <c>Money * quantity</c> or <c>fee / 2</c>): applies
+    /// <paramref name="op"/> to each numeric field, carries the rest. <paramref name="op"/> is <c>"*"</c> or <c>"/"</c>.</summary>
+    private void WriteScalarOp(StringBuilder sb, string name, IReadOnlyList<Member> fields, IReadOnlySet<string> scalars, string op)
     {
-        foreach (var (rustFactor, isDecimal) in ScalarFactors(scalars))
-        {
-            sb.Append('\n');
-            sb.Append("impl std::ops::Mul<").Append(rustFactor).Append("> for ").Append(name).Append(" {\n");
-            sb.Append(Indent).Append("type Output = ").Append(name).Append(";\n");
-            sb.Append(Indent).Append("fn mul(self, factor: ").Append(rustFactor).Append(") -> ").Append(name).Append(" {\n");
-            sb.Append(Indent).Append(Indent).Append(name).Append(" {\n");
-            foreach (Member m in fields)
-            {
-                var f = RustNaming.Field(m.Name);
-                sb.Append(Indent).Append(Indent).Append(Indent).Append(f).Append(": ")
-                  .Append(ScaleField(m, "self." + f, "factor", isDecimal)).Append(",\n");
-            }
-            sb.Append(Indent).Append(Indent).Append("}\n");
-            sb.Append(Indent).Append("}\n");
-            sb.Append("}\n");
-        }
-    }
+        bool isDiv = op == "/";
+        var trait = isDiv ? "Div" : "Mul";
+        var fn = isDiv ? "div" : "mul";
+        var param = isDiv ? "divisor" : "factor";
 
-    /// <summary>A scalar <c>Div</c> (e.g. <c>fee / 2</c>): the division dual of <see cref="WriteScalarMul"/>, dividing each numeric field, carrying the rest.</summary>
-    private void WriteScalarDiv(StringBuilder sb, string name, IReadOnlyList<Member> fields, IReadOnlySet<string> scalars)
-    {
         foreach (var (rustFactor, isDecimal) in ScalarFactors(scalars))
         {
             sb.Append('\n');
-            sb.Append("impl std::ops::Div<").Append(rustFactor).Append("> for ").Append(name).Append(" {\n");
+            sb.Append("impl std::ops::").Append(trait).Append('<').Append(rustFactor).Append("> for ").Append(name).Append(" {\n");
             sb.Append(Indent).Append("type Output = ").Append(name).Append(";\n");
-            sb.Append(Indent).Append("fn div(self, divisor: ").Append(rustFactor).Append(") -> ").Append(name).Append(" {\n");
+            sb.Append(Indent).Append("fn ").Append(fn).Append("(self, ").Append(param).Append(": ").Append(rustFactor).Append(") -> ").Append(name).Append(" {\n");
             sb.Append(Indent).Append(Indent).Append(name).Append(" {\n");
             foreach (Member m in fields)
             {
                 var f = RustNaming.Field(m.Name);
                 sb.Append(Indent).Append(Indent).Append(Indent).Append(f).Append(": ")
-                  .Append(DivideField(m, "self." + f, "divisor", isDecimal)).Append(",\n");
+                  .Append(ScaleField(m, "self." + f, param, isDecimal, op)).Append(",\n");
             }
             sb.Append(Indent).Append(Indent).Append("}\n");
             sb.Append(Indent).Append("}\n");
@@ -372,33 +356,19 @@ public sealed partial class RustEmitter
         }
     }
 
-    /// <summary>Scales one field expression by a factor, coercing across Int/Decimal as needed.</summary>
-    private static string ScaleField(Member m, string fieldExpr, string factor, bool factorIsDecimal)
+    /// <summary>Applies <paramref name="op"/> (<c>"*"</c>/<c>"/"</c>) to one field expression against an
+    /// operand (factor or divisor), coercing across Int/Decimal as needed.</summary>
+    private static string ScaleField(Member m, string fieldExpr, string operand, bool operandIsDecimal, string op)
     {
         // An optional numeric field is Option<T>; the operator (and Decimal::from) can't apply to it
         // directly, so map over it and run the exact non-optional coercion on the unwrapped value `v`.
-        var operand = m.Type.IsOptional ? "v" : fieldExpr;
+        var lhs = m.Type.IsOptional ? "v" : fieldExpr;
         var coercion = m.Type.Name switch
         {
-            "Decimal" => factorIsDecimal ? $"{operand} * {factor}" : $"{operand} * Decimal::from({factor})",
-            "Int" => factorIsDecimal
-                ? $"crate::koine_runtime::dec_to_i64(Decimal::from({operand}) * {factor})"
-                : $"{operand} * {factor}",
-            _ => null,
-        };
-        return WrapOptional(m, fieldExpr, coercion);
-    }
-
-    /// <summary>Divides one field expression by a divisor, coercing across Int/Decimal as needed — the division dual of <see cref="ScaleField"/>.</summary>
-    private static string DivideField(Member m, string fieldExpr, string divisor, bool divisorIsDecimal)
-    {
-        var operand = m.Type.IsOptional ? "v" : fieldExpr;
-        var coercion = m.Type.Name switch
-        {
-            "Decimal" => divisorIsDecimal ? $"{operand} / {divisor}" : $"{operand} / Decimal::from({divisor})",
-            "Int" => divisorIsDecimal
-                ? $"crate::koine_runtime::dec_to_i64(Decimal::from({operand}) / {divisor})"
-                : $"{operand} / {divisor}",
+            "Decimal" => operandIsDecimal ? $"{lhs} {op} {operand}" : $"{lhs} {op} Decimal::from({operand})",
+            "Int" => operandIsDecimal
+                ? $"crate::koine_runtime::dec_to_i64(Decimal::from({lhs}) {op} {operand})"
+                : $"{lhs} {op} {operand}",
             _ => null,
         };
         return WrapOptional(m, fieldExpr, coercion);
