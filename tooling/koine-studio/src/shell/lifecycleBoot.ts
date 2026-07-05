@@ -7,9 +7,10 @@
 // teardown, so init() is now a thin composition root.
 import { appStore } from '@/store/index';
 import { setEmitTargets } from '@/shared/emitTargets';
-import { takeStartIntent, type StartIntent } from '@/shell/bootIntent';
+import { peekStartIntent, takeStartIntent, type StartIntent } from '@/shell/bootIntent';
 import { clearModelHash, readModelFromHash } from '@/export/share';
 import { getLastWorkspace, setLastWorkspace, clearLegacyScratch } from '@/settings/persistence';
+import { basename } from '@/shared/path';
 import { type Template } from '@/welcome/templates';
 
 // The host's reserved default-workspace token (mirrors host/browser/fs.ts DEFAULT_WS_TOKEN). Parentheses
@@ -94,8 +95,29 @@ export interface LifecycleBoot {
   teardown(): void;
 }
 
+// A human-readable name for a queued Home intent, used to name a boot failure (#973) instead of only
+// a generic "connection failed" — e.g. "Billing" for an example template, the folder's trailing path
+// segment for a recent folder. `open-folder` has no path yet (it opens a picker), so it names the action.
+function intentLabel(intent: StartIntent): string {
+  switch (intent.kind) {
+    case 'new':
+      return 'a new model';
+    case 'open-folder':
+      return 'the selected folder';
+    case 'open-recent':
+      return basename(intent.path);
+    case 'open-example':
+      return intent.template.name;
+  }
+}
+
 export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
   const { shared, legacyScratch, seed } = deps;
+
+  // Set (only) in the boot ladder's .catch when a Home intent was stranded by a failed lsp.start().
+  // The first onServerRestart after that consumes and re-runs it (#973); a normal mid-session restart
+  // (this stays false) keeps the plain view-refresh behavior.
+  let bootIntentPending = false;
 
   // Boot/empty-state: open the host's persistent default workspace. The clearLegacyScratch + the
   // OPFS-error output line are ide-specific, so they wrap workspace.openDefaultWorkspaceFlow here.
@@ -202,8 +224,18 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
       }
     })
     .catch((e) => {
-      deps.setStatus('connection failed', 'error');
-      deps.setOutput('// failed to start language server\n' + String(e), 'plain');
+      // Peek (don't consume) so a still-pending intent both names this failure AND survives for the
+      // onServerRestart re-dispatch above (#973). No pending intent: keep the plain generic message.
+      const intent = peekStartIntent();
+      if (intent) {
+        bootIntentPending = true;
+        const label = intentLabel(intent);
+        deps.setStatus(`Couldn't open "${label}" — the language server didn't start`, 'error');
+        deps.setOutput(`// Couldn't open "${label}" — the language server didn't start\n` + String(e), 'plain');
+      } else {
+        deps.setStatus('connection failed', 'error');
+        deps.setOutput('// failed to start language server\n' + String(e), 'plain');
+      }
     });
 
   // The IDE shell boots once and stays alive across Home↔Editor route swaps (main.ts toggles visibility,

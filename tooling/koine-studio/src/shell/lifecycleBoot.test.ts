@@ -2,14 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock the module-level collaborators the boot ladder reaches (store subscription, emit targets, the
 // one-shot start-intent, the hash/persistence helpers) so each branch is driven deterministically.
-const { storeSubUnsub, takeStartIntentMock, getLastWorkspaceMock } = vi.hoisted(() => ({
+const { storeSubUnsub, takeStartIntentMock, peekStartIntentMock, getLastWorkspaceMock } = vi.hoisted(() => ({
   storeSubUnsub: vi.fn(),
   takeStartIntentMock: vi.fn(),
+  peekStartIntentMock: vi.fn(),
   getLastWorkspaceMock: vi.fn(),
 }));
 vi.mock('@/store/index', () => ({ appStore: { subscribe: vi.fn(() => storeSubUnsub) } }));
 vi.mock('@/shared/emitTargets', () => ({ setEmitTargets: vi.fn() }));
-vi.mock('@/shell/bootIntent', () => ({ takeStartIntent: takeStartIntentMock }));
+vi.mock('@/shell/bootIntent', () => ({ takeStartIntent: takeStartIntentMock, peekStartIntent: peekStartIntentMock }));
 vi.mock('@/export/share', () => ({ clearModelHash: vi.fn(), readModelFromHash: vi.fn() }));
 vi.mock('@/settings/persistence', () => ({ getLastWorkspace: getLastWorkspaceMock, setLastWorkspace: vi.fn(), clearLegacyScratch: vi.fn() }));
 
@@ -74,6 +75,7 @@ function makeDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
 beforeEach(() => {
   vi.clearAllMocks();
   takeStartIntentMock.mockReturnValue(null);
+  peekStartIntentMock.mockReturnValue(null);
   getLastWorkspaceMock.mockReturnValue(null);
 });
 
@@ -252,6 +254,43 @@ describe('lifecycleBoot', () => {
       await flush();
       expect(deps.openExample).toHaveBeenCalledOnce();
       expect(deps.openExample).toHaveBeenCalledWith({ id: 'billing' });
+    });
+  });
+
+  // Regression (#973): a boot-time lsp.start() rejection used to show only a generic "connection
+  // failed" — never naming the template/folder the user picked on Home, and never letting them recover.
+  describe('boot rejection with a queued Home intent (#973)', () => {
+    function makeRejectingDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
+      return makeDeps({
+        lsp: {
+          onServerRestart: vi.fn(),
+          start: vi.fn(() => Promise.reject(new Error('spawn ENOENT'))),
+          emitTargets: vi.fn(() => Promise.resolve([])) as never,
+        },
+        ...over,
+      });
+    }
+
+    it('names the queued start action in the failure status/output instead of a generic message', async () => {
+      peekStartIntentMock.mockReturnValue({ kind: 'open-example', template: { id: 'billing', name: 'Billing' } as never });
+      const deps = makeRejectingDeps();
+      createLifecycleBoot(deps);
+      await flush();
+
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.stringContaining('Billing'), 'error');
+      expect(deps.setOutput).toHaveBeenCalledWith(expect.stringContaining('Billing'), 'plain');
+      // Peek must not consume it — Task 3's recovery re-dispatch still needs it.
+      expect(takeStartIntentMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps the generic "connection failed" message when there is no pending intent', async () => {
+      peekStartIntentMock.mockReturnValue(null);
+      const deps = makeRejectingDeps();
+      createLifecycleBoot(deps);
+      await flush();
+
+      expect(deps.setStatus).toHaveBeenCalledWith('connection failed', 'error');
+      expect(deps.setOutput).toHaveBeenCalledWith(expect.stringContaining('failed to start language server'), 'plain');
     });
   });
 
