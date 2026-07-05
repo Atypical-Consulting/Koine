@@ -161,6 +161,15 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
 
   // Boot: attach listeners (inside start) before messages flow, then open the doc.
   deps.lsp.onServerRestart(() => {
+    // A boot intent was stranded by a failed lsp.start(): perform it now, guarded (dirty buffers can
+    // exist by the time the server recovers), and fire only once — a later normal restart falls through
+    // to the plain view-refresh below (#973).
+    if (bootIntentPending) {
+      bootIntentPending = false;
+      const intent = takeStartIntent();
+      if (intent) void runStartIntent(intent, { guarded: true });
+      return;
+    }
     // Fresh sidecar is back in sync; refresh whatever doc view is showing.
     deps.invalidateDocViews();
     deps.refreshActiveSurfaces();

@@ -294,6 +294,91 @@ describe('lifecycleBoot', () => {
     });
   });
 
+  // Regression (#973): onServerRestart used to only refresh views — a stranded Home intent (template,
+  // folder, "New") never re-ran once the sidecar recovered, leaving the user on an empty workspace.
+  describe('recovery re-dispatch after a failed boot (#973)', () => {
+    function restartCallback(deps: LifecycleBootDeps): () => void {
+      const fn = deps.lsp.onServerRestart as unknown as ReturnType<typeof vi.fn>;
+      return fn.mock.calls[0][0];
+    }
+
+    function makeRejectingDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
+      return makeDeps({
+        lsp: {
+          onServerRestart: vi.fn(),
+          start: vi.fn(() => Promise.reject(new Error('spawn ENOENT'))),
+          emitTargets: vi.fn(() => Promise.resolve([])) as never,
+        },
+        ...over,
+      });
+    }
+
+    it('re-dispatches the retained intent exactly once when the server recovers', async () => {
+      const billing = { id: 'billing', name: 'Billing' } as never;
+      peekStartIntentMock.mockReturnValue({ kind: 'open-example', template: billing });
+      const deps = makeRejectingDeps();
+      createLifecycleBoot(deps);
+      await flush(); // boot fails; bootIntentPending is now true
+
+      takeStartIntentMock.mockReturnValue({ kind: 'open-example', template: billing });
+      restartCallback(deps)();
+      await flush();
+
+      expect(deps.openExample).toHaveBeenCalledOnce();
+      expect(deps.openExample).toHaveBeenCalledWith(billing);
+    });
+
+    it('does not replay on a second restart, and a normal restart only refreshes views', async () => {
+      const billing = { id: 'billing', name: 'Billing' } as never;
+      peekStartIntentMock.mockReturnValue({ kind: 'open-example', template: billing });
+      const deps = makeRejectingDeps();
+      createLifecycleBoot(deps);
+      await flush();
+
+      takeStartIntentMock.mockReturnValue({ kind: 'open-example', template: billing });
+      const restart = restartCallback(deps);
+      restart();
+      await flush();
+      expect(deps.openExample).toHaveBeenCalledOnce();
+
+      restart(); // second restart: bootIntentPending is now false — no replay
+      await flush();
+      expect(deps.openExample).toHaveBeenCalledOnce();
+      expect(deps.invalidateDocViews).toHaveBeenCalled();
+      expect(deps.refreshActiveSurfaces).toHaveBeenCalled();
+    });
+
+    it('a normal mid-session restart (no failed boot) only refreshes views, never opens anything', async () => {
+      const deps = makeDeps(); // lsp.start() resolves — bootIntentPending never set
+      createLifecycleBoot(deps);
+      await flush();
+
+      restartCallback(deps)();
+      await flush();
+
+      expect(deps.openExample).not.toHaveBeenCalled();
+      expect(deps.newModel).not.toHaveBeenCalled();
+      expect(deps.invalidateDocViews).toHaveBeenCalled();
+      expect(deps.refreshActiveSurfaces).toHaveBeenCalled();
+    });
+
+    it('the re-dispatch is guarded: confirmReplaceWork is consulted (matching the return-visit path)', async () => {
+      const billing = { id: 'billing', name: 'Billing' } as never;
+      peekStartIntentMock.mockReturnValue({ kind: 'open-example', template: billing });
+      const confirmReplaceWork = vi.fn(async () => true);
+      const deps = makeRejectingDeps({ confirmReplaceWork });
+      createLifecycleBoot(deps);
+      await flush();
+
+      takeStartIntentMock.mockReturnValue({ kind: 'open-example', template: billing });
+      restartCallback(deps)();
+      await flush();
+
+      expect(confirmReplaceWork).toHaveBeenCalled();
+      expect(deps.openExample).toHaveBeenCalledWith(billing);
+    });
+  });
+
   it('teardown disposes every controller in the preserved order, then the route-intent sub', () => {
     const deps = makeDeps();
     const order = (deps as unknown as { _order: string[] })._order;
