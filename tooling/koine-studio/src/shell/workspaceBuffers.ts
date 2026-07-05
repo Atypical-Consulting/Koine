@@ -113,8 +113,9 @@ export function createWorkspaceBuffers(ctx: WorkspaceModuleCtx) {
 
   // Write one full-file body to `relPath` for the assistant's multi-file apply. An EXISTING open buffer
   // (matched by relPath) is updated in place — reflected in the editor when it's the active one (so the
-  // change shows + fires onChange), synced to the LSP, persisted, and left CLEAN. A relPath with no open
-  // buffer is CREATED under the primary root and opened. Returns the file uri, or null on failure.
+  // change shows + fires onChange), synced to the LSP, persisted, and left clean UNLESS a keystroke
+  // landed mid-write (mirrors saveActive/saveAllDirty). A relPath with no open buffer is CREATED under
+  // the primary root and opened. Returns the file uri, or null on failure.
   async function applyFileEdit(relPath: string, body: string): Promise<string | null> {
     const existing = [...st().buffers.values()].find((b) => b.relPath === relPath);
     if (existing) {
@@ -136,7 +137,7 @@ export function createWorkspaceBuffers(ctx: WorkspaceModuleCtx) {
       const after = st().buffers.get(uri);
       if (after && after.text === body) st().markSaved([uri]);
       if (uri === st().activeUri) lsp.didSave(); // didSave() targets the ACTIVE doc — only valid then
-      renderTree(); // setDoc's onChange repainted the explorer dirty dot; repaint it clean now
+      renderTree(); // repaint the explorer dirty dot to match the dirty flag as it now stands
       st().bumpSaved(); // #470: this buffer hit disk — the saveSeq subscriber refreshes the SC panel
       return uri;
     }
