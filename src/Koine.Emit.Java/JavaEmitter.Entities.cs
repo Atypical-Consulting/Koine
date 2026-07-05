@@ -52,7 +52,7 @@ public sealed partial class JavaEmitter
     {
         var name = JavaNaming.Type(entity.Name);
         var idType = JavaNaming.Type(entity.IdentityName);
-        var typeMapper = new JavaTypeMapper(emit.Index);
+        var typeMapper = new JavaTypeMapper(emit.Index, context, PackageFor);
 
         var memberNames = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.Ordinal);
         var stored = entity.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();

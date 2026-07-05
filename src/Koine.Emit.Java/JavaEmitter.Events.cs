@@ -42,7 +42,7 @@ public sealed partial class JavaEmitter
     private EmittedFile EmitEvent(JavaEmitContext emit, string context, string name, string? doc, IReadOnlyList<Member> members)
     {
         var typeName = JavaNaming.Type(name);
-        var typeMapper = new JavaTypeMapper(emit.Index);
+        var typeMapper = new JavaTypeMapper(emit.Index, context, PackageFor);
 
         var sb = new StringBuilder();
         WriteJavadoc(sb, doc, string.Empty);
@@ -216,7 +216,7 @@ public sealed partial class JavaEmitter
             return null;
         }
 
-        var typeMapper = new JavaTypeMapper(emit.Index);
+        var typeMapper = new JavaTypeMapper(emit.Index, context, PackageFor);
         var rootName = JavaNaming.Type(root.Name);
         var idType = JavaNaming.Type(root.IdentityName);
         var iface = rootName + "Repository";

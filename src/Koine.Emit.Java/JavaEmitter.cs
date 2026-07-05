@@ -56,11 +56,23 @@ public sealed partial class JavaEmitter : IEmitter
     public IReadOnlyList<EmittedFile> Emit(KoineModel model, SemanticModel? semantic)
     {
         ModelIndex index = (semantic ?? new SemanticModel(model)).Index;
-        var emit = new JavaEmitContext(index);
+        var emit = new JavaEmitContext(
+            index,
+            // Demand-driven operator emission (R9), shared with the C#/Rust/Python/TS emitters so the
+            // targets stay semantically aligned: a value object only gets a `plus`/`minus` where the model
+            // sums or adds/subtracts it, or a `times`/`dividedBy` where it is scaled by a scalar. Java
+            // reference types carry no operators, so these lower to method calls (JavaExpressionTranslator).
+            OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
+            OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
+            OperatorNeedsAnalyzer.BuildScalarDivisionNeeds(model, index),
+            OperatorNeedsAnalyzer.BuildValueObjectArithmeticNeeds(model, index));
 
         var files = new List<EmittedFile>
         {
             new(JavaRuntime.DomainExceptionFileName, JavaRuntime.DomainExceptionSource + "\n"),
+            // The shared Range<T> interval type — always emitted (like DomainException), so a
+            // `Range<T>`-typed component always resolves.
+            new(JavaRuntime.RangeFileName, JavaRuntime.RangeSource + "\n"),
         };
 
         // Phase 1 tactical core — value objects, generated IDs, smart enums, entities, aggregates,

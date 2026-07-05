@@ -77,6 +77,90 @@ public class JavaConformanceTests
         }
         """;
 
+    /// <summary>
+    /// A two-context model exercising the three javac-17 gaps closed after the initial Java backend
+    /// landed (verification against a real JDK 17): (1) a <b>cross-context type reference</b> — <c>Sales</c>
+    /// references <c>Catalog</c>'s <c>Currency</c> enum and <c>Topping</c> value object, which must emit
+    /// package-qualified (<c>koine.generated.catalog.…</c>) since they live in another package; (2) a
+    /// <c>Range&lt;Instant&gt;</c> field, which must resolve to the emitted <c>koine.runtime.Range</c>; and
+    /// (3) <b>value-object arithmetic</b> — <c>unitPrice * quantity</c> (a <c>value-object * scalar</c>) and
+    /// <c>lines.sum(l =&gt; l.subtotal)</c> (a <c>sum</c> fold over a value object), which must lower to the
+    /// demand-generated <c>times</c>/<c>plus</c> methods (Java reference types carry no operators).
+    /// </summary>
+    private const string CrossContextArithmeticFixture = """
+        contextmap {
+          Catalog -> Sales : conformist
+        }
+
+        context Catalog {
+          /// A pizza topping — owned by Catalog, referenced cross-context by Sales.
+          value Topping {
+            name: String
+          }
+
+          /// A currency — owned by Catalog, referenced cross-context by Sales.
+          enum Currency { EUR, USD }
+        }
+
+        context Sales {
+          import Catalog.{ Topping, Currency }
+
+          /// A monetary amount. `Currency` is owned by Catalog (a cross-context reference).
+          value Money {
+            amount:   Decimal
+            currency: Currency
+          }
+
+          /// One order line: value-object arithmetic (`unitPrice * quantity`) and a
+          /// cross-context `Topping` collection.
+          value OrderLine {
+            quantity:  Int
+            unitPrice: Money
+            toppings:  List<Topping>
+            subtotal:  Money = unitPrice * quantity
+          }
+
+          /// A basket: a `sum` fold over a value object and a `Range<Instant>` field.
+          value Basket {
+            lines:  List<OrderLine>
+            window: Range<Instant>
+            total:  Money = lines.sum(l => l.subtotal)
+          }
+        }
+        """;
+
+    /// <summary>
+    /// The regression coverage for the three javac-17 gaps: a cross-context (package-qualified) type
+    /// reference, a <c>Range&lt;T&gt;</c> field, and value-object arithmetic (<c>vo * scalar</c> plus a
+    /// <c>sum</c> of a value object) must all emit Java that <c>javac --release 17</c> accepts (skipped if
+    /// no JDK 17+). Before the fix each of these was a hard <c>javac</c> error.
+    /// </summary>
+    [Fact]
+    public void Harness_accepts_cross_context_arithmetic_and_range()
+    {
+        var result = new KoineCompiler().Compile(CrossContextArithmeticFixture, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // The three fixed shapes, asserted directly (independent of whether a JDK is present).
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("sales/Money.java", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("koine.generated.catalog.Currency currency"); // (1) cross-context qualification
+        money.ShouldContain("public Money times(long factor)");           // (3) demand-driven scalar op
+        money.ShouldContain("public Money plus(Money other)");            // (3) demand-driven additive op
+
+        var basket = result.Files.Single(f => f.RelativePath.EndsWith("Basket.java", StringComparison.Ordinal)).Contents;
+        basket.ShouldContain("koine.runtime.Range<java.time.Instant> window"); // (2) Range<T> field
+        basket.ShouldContain(".reduce(Money::plus)");                          // (3) sum folds with plus
+
+        var orderLine = result.Files.Single(f => f.RelativePath.EndsWith("OrderLine.java", StringComparison.Ordinal)).Contents;
+        orderLine.ShouldContain("this.unitPrice().times(this.quantity())");     // (3) vo * scalar lowering
+        orderLine.ShouldContain("java.util.List<koine.generated.catalog.Topping>"); // (1) cross-context element
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
     /// <summary>A representative model must emit Java that <c>javac --release 17</c> accepts (skipped if no JDK 17+).</summary>
     [Fact]
     public void Harness_accepts_well_formed_java()

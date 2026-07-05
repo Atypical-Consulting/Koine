@@ -31,7 +31,7 @@ public sealed partial class JavaEmitter
         var stored = vo.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var derived = vo.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
 
-        var typeMapper = new JavaTypeMapper(emit.Index);
+        var typeMapper = new JavaTypeMapper(emit.Index, context, PackageFor);
         // membersAsAccessors: a record's components are private, so a member read in an instance body
         // (a derived accessor) goes through `this.x()`. Parameter-mode reads (the invariants) are bare
         // component names regardless, so the same translator serves both.
@@ -55,8 +55,169 @@ public sealed partial class JavaEmitter
             WriteDerivedAccessor(sb, m, typeMapper, translator);
         }
 
+        // Demand-driven arithmetic methods — Java reference types carry no operators, so a value object
+        // combined/scaled by the model gets `plus`/`minus`/`times`/`dividedBy` the translator lowers to.
+        WriteValueObjectOperators(sb, emit, name, vo, stored);
+
         sb.Append("}\n");
         return TypeFile(context, name, sb.ToString());
+    }
+
+    private static readonly IReadOnlySet<BinaryOp> EmptyBinaryOps = new HashSet<BinaryOp>();
+
+    /// <summary>
+    /// Emits the demand-driven arithmetic methods a value object's uses require (R9), the Java analogue of
+    /// the Rust backend's <c>impl Add/Mul/Div</c>: <c>plus</c>/<c>minus</c> for additive combination (a
+    /// <c>sum</c> fold or a plain binary <c>+</c>/<c>-</c>), and <c>times</c>/<c>dividedBy</c> overloads for
+    /// scalar scaling by a <c>long</c> (Koine <c>Int</c>) and/or a <c>java.math.BigDecimal</c> (Koine
+    /// <c>Decimal</c>). Only the operators the model actually uses are emitted (via
+    /// <see cref="OperatorNeedsAnalyzer"/>), so a value object never carries a method no one invokes.
+    /// </summary>
+    private static void WriteValueObjectOperators(
+        StringBuilder sb, JavaEmitContext emit, string name, ValueObjectDecl vo, IReadOnlyList<Member> stored)
+    {
+        IReadOnlySet<BinaryOp> binaryOps =
+            emit.BinaryNeeds.TryGetValue(vo.Name, out IReadOnlySet<BinaryOp>? ops) ? ops : EmptyBinaryOps;
+        var hasNumeric = stored.Any(m => m.Type.Name is "Int" or "Decimal");
+
+        // `plus`: a `sum` fold over this value object, or a plain binary `+`.
+        if (emit.AdditiveNeeds.Contains(vo.Name) || binaryOps.Contains(BinaryOp.Add))
+        {
+            WriteAdditiveMethod(sb, name, stored, "plus", "+");
+        }
+
+        // `minus`: a plain binary `-`.
+        if (binaryOps.Contains(BinaryOp.Sub))
+        {
+            WriteAdditiveMethod(sb, name, stored, "minus", "-");
+        }
+
+        // `times`/`dividedBy`: scalar scaling — one overload per scalar type the model uses.
+        if (hasNumeric && emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? mulScalars))
+        {
+            WriteScalarMethods(sb, name, stored, mulScalars, "times", "*");
+        }
+
+        if (hasNumeric && emit.ScalarDivNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? divScalars))
+        {
+            WriteScalarMethods(sb, name, stored, divScalars, "dividedBy", "/");
+        }
+    }
+
+    /// <summary>
+    /// Writes an additive method (<c>plus</c>/<c>minus</c>): a new value object whose numeric components are
+    /// combined pairwise (<c>BigDecimal.add</c>/<c>subtract</c> for a <c>Decimal</c>, <c>+</c>/<c>-</c> for a
+    /// <c>long</c>) and whose non-numeric components are carried from <c>this</c>.
+    /// </summary>
+    private static void WriteAdditiveMethod(
+        StringBuilder sb, string name, IReadOnlyList<Member> stored, string method, string op)
+    {
+        sb.Append('\n');
+        WriteJavadoc(sb, "Combines this " + name + " with another, component-wise.", Indent);
+        sb.Append(Indent).Append("public ").Append(name).Append(' ').Append(method)
+          .Append('(').Append(name).Append(" other) {\n");
+        sb.Append(Indent).Append(Indent).Append("return new ").Append(name).Append('(')
+          .Append(string.Join(", ", stored.Select(m => AdditiveComponent(m, op)))).Append(");\n");
+        sb.Append(Indent).Append("}\n");
+    }
+
+    /// <summary>The component expression for an additive method: a pairwise numeric combine, or a carried non-numeric component.</summary>
+    private static string AdditiveComponent(Member m, string op)
+    {
+        var field = JavaNaming.Member(m.Name);
+        var self = "this." + field + "()";
+        var other = "other." + field + "()";
+        if (m.Type.Name is not ("Int" or "Decimal"))
+        {
+            return self; // carry a non-numeric component (e.g. a currency enum) from `this`.
+        }
+
+        if (m.Type.Name == "Decimal")
+        {
+            var dm = op == "+" ? "add" : "subtract";
+            return m.Type.IsOptional
+                ? self + ".flatMap(a -> " + other + ".map(a::" + dm + "))"
+                : self + "." + dm + "(" + other + ")";
+        }
+
+        // Int -> long.
+        return m.Type.IsOptional
+            ? self + ".flatMap(a -> " + other + ".map(b -> a " + op + " b))"
+            : self + " " + op + " " + other;
+    }
+
+    /// <summary>Writes the <c>times</c>/<c>dividedBy</c> overloads for the scalar types (<c>int</c>/<c>decimal</c>) the model scales this value object by.</summary>
+    private static void WriteScalarMethods(
+        StringBuilder sb, string name, IReadOnlyList<Member> stored, IReadOnlySet<string> scalars, string method, string op)
+    {
+        // "int" -> a `long` overload; "decimal" -> a `java.math.BigDecimal` overload. Defaulting to the
+        // long overload when the analyzer recorded neither keeps the method callable (never reached today).
+        if (scalars.Contains("int") || (!scalars.Contains("int") && !scalars.Contains("decimal")))
+        {
+            WriteScalarMethod(sb, name, stored, method, op, "long", factorIsDecimal: false);
+        }
+
+        if (scalars.Contains("decimal"))
+        {
+            WriteScalarMethod(sb, name, stored, method, op, "java.math.BigDecimal", factorIsDecimal: true);
+        }
+    }
+
+    /// <summary>Writes one scalar-scaling overload (<c>times</c>/<c>dividedBy</c>) taking a <paramref name="javaType"/> factor.</summary>
+    private static void WriteScalarMethod(
+        StringBuilder sb, string name, IReadOnlyList<Member> stored, string method, string op, string javaType, bool factorIsDecimal)
+    {
+        var param = method == "times" ? "factor" : "divisor";
+        sb.Append('\n');
+        WriteJavadoc(sb, "Scales this " + name + " by a " + param + ".", Indent);
+        sb.Append(Indent).Append("public ").Append(name).Append(' ').Append(method)
+          .Append('(').Append(javaType).Append(' ').Append(param).Append(") {\n");
+        sb.Append(Indent).Append(Indent).Append("return new ").Append(name).Append('(')
+          .Append(string.Join(", ", stored.Select(m => ScaleComponent(m, op, param, factorIsDecimal)))).Append(");\n");
+        sb.Append(Indent).Append("}\n");
+    }
+
+    /// <summary>The component expression for a scalar-scaling method: the numeric component scaled by the operand, or a carried non-numeric component.</summary>
+    private static string ScaleComponent(Member m, string op, string param, bool factorIsDecimal)
+    {
+        var field = "this." + JavaNaming.Member(m.Name) + "()";
+        if (m.Type.Name is not ("Int" or "Decimal"))
+        {
+            return field; // carry a non-numeric component (e.g. a currency enum) unchanged.
+        }
+
+        var lhs = m.Type.IsOptional ? "v" : field;
+        var coercion = ScaleExpr(m.Type.Name, lhs, op, param, factorIsDecimal);
+        return m.Type.IsOptional ? field + ".map(v -> " + coercion + ")" : coercion;
+    }
+
+    /// <summary>
+    /// Scales one numeric operand (<paramref name="lhs"/>) by <paramref name="param"/> under <paramref name="op"/>
+    /// (<c>*</c>/<c>/</c>), crossing through <c>BigDecimal</c> and narrowing back to <c>long</c> as needed. A
+    /// <c>Decimal</c> divide uses <c>MathContext.DECIMAL128</c> so a non-terminating quotient never throws.
+    /// </summary>
+    private static string ScaleExpr(string typeName, string lhs, string op, string param, bool factorIsDecimal)
+    {
+        if (typeName == "Decimal")
+        {
+            var operand = factorIsDecimal ? param : "java.math.BigDecimal.valueOf(" + param + ")";
+            return op == "*"
+                ? lhs + ".multiply(" + operand + ")"
+                : lhs + ".divide(" + operand + ", java.math.MathContext.DECIMAL128)";
+        }
+
+        // Int -> long. A decimal factor crosses into BigDecimal then narrows back (truncating toward zero,
+        // like a Java `(long)` cast); a long factor scales directly.
+        if (factorIsDecimal)
+        {
+            var crossed = "java.math.BigDecimal.valueOf(" + lhs + ")"
+                + (op == "*"
+                    ? ".multiply(" + param + ")"
+                    : ".divide(" + param + ", java.math.MathContext.DECIMAL128)");
+            return crossed + ".longValue()";
+        }
+
+        return lhs + " " + op + " " + param;
     }
 
     /// <summary>

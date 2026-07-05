@@ -19,8 +19,19 @@ public sealed partial class JavaEmitter
     /// <summary>The four-space unit of Java indentation used throughout the construct emitters.</summary>
     internal const string Indent = "    ";
 
-    /// <summary>The immutable per-emit state threaded through every construct emitter (extended by later tasks).</summary>
-    internal sealed record JavaEmitContext(ModelIndex Index);
+    /// <summary>
+    /// The immutable per-emit state threaded through every construct emitter. Carries the model index and
+    /// the demand-driven value-object operator needs (which VOs need a <c>plus</c> from a <c>sum</c> fold,
+    /// which scalar types each is multiplied / divided by, and which plain binary <c>+</c>/<c>-</c> each
+    /// participates in) so the value-object slice emits only the arithmetic methods the model actually uses
+    /// and the translator lowers <c>+</c>/<c>-</c>/<c>*</c>/<c>/</c> on value objects to those method calls.
+    /// </summary>
+    internal sealed record JavaEmitContext(
+        ModelIndex Index,
+        IReadOnlySet<string> AdditiveNeeds,
+        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
+        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarDivNeeds,
+        IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BinaryNeeds);
 
     // ----------------------------------------------------------------------
     // Package / path / file assembly

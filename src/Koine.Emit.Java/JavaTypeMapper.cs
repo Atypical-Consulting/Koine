@@ -29,11 +29,24 @@ namespace Koine.Compiler;
 internal sealed class JavaTypeMapper
 {
     private readonly ModelIndex _index;
+    private readonly string? _context;
+    private readonly Func<string, string>? _packageFor;
 
-    /// <summary>Creates a type mapper over <paramref name="index"/> (used to classify named references).</summary>
-    public JavaTypeMapper(ModelIndex index)
+    /// <summary>
+    /// Creates a type mapper over <paramref name="index"/> (used to classify named references). When
+    /// <paramref name="context"/> and <paramref name="packageFor"/> are supplied the mapper is
+    /// <em>context-aware</em>: a declared type owned by a <em>different</em> bounded context is emitted
+    /// <b>package-qualified</b> (<c>&lt;ownerPackage&gt;.&lt;Type&gt;</c>) so a flat multi-context source
+    /// tree's cross-context references resolve — exactly like the Rust backend qualifies a foreign type as
+    /// <c>crate::&lt;module&gt;::Type</c>. A null <paramref name="context"/> keeps the legacy
+    /// single-context behaviour (bare names). <paramref name="packageFor"/> is the emitter's own
+    /// <c>PackageFor</c> so the qualification matches the owner's emitted package byte-for-byte.
+    /// </summary>
+    public JavaTypeMapper(ModelIndex index, string? context = null, Func<string, string>? packageFor = null)
     {
         _index = index;
+        _context = context;
+        _packageFor = packageFor;
     }
 
     /// <summary>
@@ -60,9 +73,56 @@ internal sealed class JavaTypeMapper
         ModelIndex.SetTypeName => $"java.util.Set<{MapArg(type.Element)}>",
         ModelIndex.MapTypeName => $"java.util.Map<{MapArg(type.Element)}, {MapArg(type.Value)}>",
         ModelIndex.RangeTypeName => $"koine.runtime.Range<{MapArg(type.Element)}>",
-        // value / entity / aggregate / enum / generated-ID / unknown types map to their Java type name.
-        _ => JavaNaming.Type(type.Name),
+        // value / entity / aggregate / enum / generated-ID / unknown types map to their Java type name,
+        // package-qualified when owned by a different context than the one being emitted.
+        _ => QualifyTypeName(type.Name),
     };
+
+    /// <summary>
+    /// The Java type name for a declared Koine type, package-qualified as
+    /// <c>&lt;ownerPackage&gt;.&lt;Type&gt;</c> when the type is owned by a <em>different</em> bounded
+    /// context than the one being emitted (so cross-context references resolve in the flat per-context
+    /// package layout). Bare PascalCase otherwise — in the legacy context-agnostic mode, for a same-context
+    /// (local) type, and for branded ID types, which are re-materialized locally by the emitter's unowned-id
+    /// pass rather than qualified.
+    /// </summary>
+    public string QualifyTypeName(string koineName)
+    {
+        var pascal = JavaNaming.Type(koineName);
+        if (_context is null || _packageFor is null || !IsQualifiable(koineName)
+            || OwnerContextOf(koineName) is not { } owner)
+        {
+            return pascal;
+        }
+
+        var ownerPackage = _packageFor(owner);
+        return string.Equals(ownerPackage, _packageFor(_context), StringComparison.Ordinal)
+            ? pascal
+            : ownerPackage + "." + pascal;
+    }
+
+    /// <summary>The single bounded context whose package emits a type, or null when unknown/ambiguous.</summary>
+    private string? OwnerContextOf(string koineName)
+    {
+        // A shared-kernel type is physically emitted into one canonical owner's package (e.g. the
+        // pizzeria's `Currency`, jointly owned by Menu and Ordering, lands in Menu's package).
+        if (_index.IsSharedKernelType(koineName) && _index.KernelOwnerOfType(koineName) is { } kernelOwner)
+        {
+            return kernelOwner;
+        }
+
+        IReadOnlyList<string> declaring = _index.DeclaringContextsOf(koineName);
+        return declaring.Count == 1 ? declaring[0] : null;
+    }
+
+    /// <summary>
+    /// True for the named declared kinds that emit a Java type into a context package (so a foreign one is
+    /// worth qualifying). Branded ID types are excluded: a foreign id is re-materialized locally by the
+    /// emitter's unowned-id pass, never package-qualified.
+    /// </summary>
+    private bool IsQualifiable(string koineName) => _index.Classify(koineName) is
+        TypeKind.Value or TypeKind.Entity or TypeKind.Aggregate or TypeKind.Enum
+        or TypeKind.Event or TypeKind.IntegrationEvent or TypeKind.ReadModel or TypeKind.Query;
 
     /// <summary>
     /// Maps a type argument (a generic element / value, or an <c>Optional</c> payload): primitives are

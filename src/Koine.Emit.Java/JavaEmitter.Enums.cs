@@ -33,7 +33,7 @@ public sealed partial class JavaEmitter
 
         if (@enum.HasAssociatedData)
         {
-            var typeMapper = new JavaTypeMapper(emit.Index);
+            var typeMapper = new JavaTypeMapper(emit.Index, context, PackageFor);
             // Enum constant args are literal expressions; the shared translator renders them exactly like
             // any other literal (Int -> `2L`, String -> escaped quotes, Decimal -> `new BigDecimal("…")`),
             // so the constant invocations stay consistent with the rest of the backend. There is no member

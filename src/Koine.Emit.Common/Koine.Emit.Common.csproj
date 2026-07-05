@@ -39,6 +39,7 @@
     <InternalsVisibleTo Include="Koine.Emit.Python" />
     <InternalsVisibleTo Include="Koine.Emit.Php" />
     <InternalsVisibleTo Include="Koine.Emit.Rust" />
+    <InternalsVisibleTo Include="Koine.Emit.Java" />
     <InternalsVisibleTo Include="Koine.Compiler.Tests" />
   </ItemGroup>
 

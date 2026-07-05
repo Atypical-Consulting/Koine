@@ -262,6 +262,16 @@ internal sealed class JavaExpressionTranslator
         var isDecimal = leftType?.Name == "Decimal" || rightType?.Name == "Decimal";
         var isInstant = leftType?.Name == "Instant" || rightType?.Name == "Instant";
 
+        // (0) Value-object arithmetic — Java reference types carry no operators, so a `+`/`-`/`*`/`/`
+        // involving a value object lowers to its demand-driven method (plus/minus/times/dividedBy), emitted
+        // on the value-object record by the value-object slice. Checked first: a `value-object * decimal`
+        // (e.g. `lineTotal * 0.9`) must NOT be mistaken for Decimal arithmetic below. Comparisons on a value
+        // object still fall through to Objects.equals (case 3).
+        if (IsArithmetic(bin.Op) && TryWriteValueObjectArithmetic(bin, leftType, rightType, sb))
+        {
+            return;
+        }
+
         // (1) Decimal comparison (incl. equality) -> compareTo. Value equality via `compareTo == 0`, not the
         // scale-sensitive BigDecimal.equals.
         if (isDecimal && IsComparison(bin.Op))
@@ -318,6 +328,60 @@ internal sealed class JavaExpressionTranslator
         sb.Append(' ').Append(PlainSymbol(bin.Op)).Append(' ');
         WriteBinaryChild(bin.Right, bin.Op, rightOperand: true, sb);
     }
+
+    /// <summary>
+    /// Lowers value-object arithmetic to the demand-driven method the value-object slice emits, returning
+    /// <c>true</c> when it handled the operator: <c>value-object + value-object</c> → <c>a.plus(b)</c>,
+    /// <c>value-object - value-object</c> → <c>a.minus(b)</c>, <c>value-object * scalar</c> /
+    /// <c>scalar * value-object</c> → <c>vo.times(scalar)</c>, and <c>value-object / scalar</c> →
+    /// <c>vo.dividedBy(scalar)</c>. Returns <c>false</c> (leaving the caller to its primitive/Decimal
+    /// lowering) when no operand is a value object, so plain numeric arithmetic is untouched.
+    /// </summary>
+    private bool TryWriteValueObjectArithmetic(BinaryExpr bin, TypeRef? leftType, TypeRef? rightType, StringBuilder sb)
+    {
+        var leftVo = IsValueObject(leftType);
+        var rightVo = IsValueObject(rightType);
+        if (!leftVo && !rightVo)
+        {
+            return false;
+        }
+
+        // Additive `+`/`-`: both operands are the same value object; the method is called on the left.
+        if (bin.Op is BinaryOp.Add or BinaryOp.Sub && leftVo)
+        {
+            WriteAtom(bin.Left, sb);
+            sb.Append('.').Append(bin.Op == BinaryOp.Add ? "plus" : "minus").Append('(');
+            WriteTopLevel(bin.Right, sb);
+            sb.Append(')');
+            return true;
+        }
+
+        // Scalar `*` (commutative): the value object is the receiver, the scalar the argument.
+        if (bin.Op == BinaryOp.Mul && leftVo != rightVo)
+        {
+            var (voExpr, scalarExpr) = leftVo ? (bin.Left, bin.Right) : (bin.Right, bin.Left);
+            WriteAtom(voExpr, sb);
+            sb.Append(".times(");
+            WriteTopLevel(scalarExpr, sb);
+            sb.Append(')');
+            return true;
+        }
+
+        // Scalar `/`: only `value-object / scalar` (the value object on the left) is a meaningful scale-down.
+        if (bin.Op == BinaryOp.Div && leftVo && !rightVo)
+        {
+            WriteAtom(bin.Left, sb);
+            sb.Append(".dividedBy(");
+            WriteTopLevel(bin.Right, sb);
+            sb.Append(')');
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>True when a type classifies as a Koine value object (so its arithmetic lowers to a method call).</summary>
+    private bool IsValueObject(TypeRef? type) => type is not null && _index.Classify(type.Name) == TypeKind.Value;
 
     /// <summary>Renders one operand of a plain-infix binary, dropping the redundant parentheses precedence/associativity does not require.</summary>
     private void WriteBinaryChild(Expr expr, BinaryOp parentOp, bool rightOperand, StringBuilder sb)
@@ -555,10 +619,27 @@ internal sealed class JavaExpressionTranslator
         }
     }
 
-    /// <summary>Renders a <c>sum</c> fold as a stream reduction — a Decimal selector reduces with <c>BigDecimal::add</c>, a numeric selector maps to <c>long</c> and sums.</summary>
+    /// <summary>
+    /// Renders a <c>sum</c> fold as a stream reduction — a value-object selector reduces with the value
+    /// object's <c>plus</c> method (throwing on an empty collection, the seedless-fold contract), a Decimal
+    /// selector reduces with <c>BigDecimal::add</c>, and a numeric selector maps to <c>long</c> and sums.
+    /// </summary>
     private void WriteSum(CallExpr call, string target, StringBuilder sb)
     {
         TypeRef? selector = InferSelectorType(call);
+        if (selector is not null && _index.Classify(selector.Name) == TypeKind.Value)
+        {
+            // Value objects have no additive operator in Java; fold with the demand-generated `plus` method
+            // (emitted on the record by the value-object slice). A seedless reduce yields Optional, so an
+            // empty collection throws — matching the C#/Rust/TS `sum` semantics.
+            var voType = _typeMapper.Map(new TypeRef(selector.Name));
+            sb.Append(target).Append(".stream().map(").Append(LambdaParam(call)).Append(" -> ");
+            WriteLambdaBody(call, sb);
+            sb.Append(").reduce(").Append(voType).Append("::plus).orElseThrow(() -> ")
+              .Append("new koine.runtime.DomainException(\"cannot sum an empty collection\"))");
+            return;
+        }
+
         if (selector?.Name == "Decimal")
         {
             sb.Append(target).Append(".stream().map(").Append(LambdaParam(call)).Append(" -> ");
