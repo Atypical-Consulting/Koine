@@ -485,7 +485,8 @@ public static class TestSupport
 
             if (RunProcess(tsc.FileName, arguments, workingDirectory: root) is not { } run)
             {
-                return new TypeScriptCheck(ToolchainAvailable: true, Ok: false, new[] { $"failed to start '{tsc.FileName}'" });
+                // The resolved tsc refused to launch (e.g. a broken shebang). Treat as no toolchain.
+                return TypeScriptCheck.Skipped;
             }
 
             if (run.ExitCode == 0)
