@@ -96,7 +96,12 @@ public sealed partial class JavaEmitter : IEmitter
             case EnumDecl e:
                 files.Add(EmitEnum(emit, context, e));
                 break;
-            // Task 6: case EntityDecl / case AggregateDecl (recurse into nested types) + generated IDs
+            case EntityDecl entity:
+                EmitEntity(emit, files, context, entity);
+                break;
+            case AggregateDecl agg:
+                EmitAggregate(emit, files, context, agg);
+                break;
             // Task 7: case EventDecl / case IntegrationEventDecl / case ReadModelDecl / case QueryDecl
             default:
                 break;
