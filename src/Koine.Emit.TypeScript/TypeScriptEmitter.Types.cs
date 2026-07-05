@@ -209,8 +209,9 @@ public sealed partial class TypeScriptEmitter
     /// <summary>
     /// A value object's scalar <c>multiply(factor)</c> / <c>divide(divisor)</c> method (e.g.
     /// <c>Money * quantity</c> or <c>fee / 2</c>): applies <paramref name="op"/> to every numeric field
-    /// (a <c>Decimal</c> via the runtime op, a plain <c>Int</c> via JS <c>*</c>/<c>/</c> rounded to stay an
-    /// integer) and carries the rest unchanged. Both <c>Int</c> and <c>Decimal</c> scalars are a TS
+    /// (a <c>Decimal</c> via the runtime op, a plain <c>Int</c> via JS <c>*</c>/<c>/</c> truncated toward
+    /// zero to stay an integer — matching C#'s <c>(int)</c> cast and Python's/Rust's native truncation,
+    /// see issue #938) and carries the rest unchanged. Both <c>Int</c> and <c>Decimal</c> scalars are a TS
     /// <c>number</c>. <paramref name="op"/> is the operator token (<c>"*"</c> or <c>"/"</c>); division adds a
     /// zero-divisor guard because JS <c>/</c> silently yields Infinity/NaN rather than throwing.
     /// </summary>
@@ -236,10 +237,11 @@ public sealed partial class TypeScriptEmitter
             {
                 return field;
             }
-            // A Decimal scales/divides exactly via the runtime op; an Int field uses JS `*`/`/`, rounded to stay integer.
+            // A Decimal scales/divides exactly via the runtime op; an Int field uses JS `*`/`/`,
+            // truncated toward zero (matches C#/Python/Rust — issue #938).
             return m.Type.Name == "Decimal"
                 ? $"{field}.{method}(new Decimal({param}.toString()))"
-                : $"Math.round({field} {op} {param})";
+                : $"Math.trunc({field} {op} {param})";
         }
 
         sb.Append('\n');
