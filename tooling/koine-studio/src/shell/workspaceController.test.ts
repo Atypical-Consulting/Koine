@@ -842,6 +842,40 @@ describe('createWorkspaceController — applyWorkspaceEdit', () => {
   });
 });
 
+describe('createWorkspaceController — applyFileEdit', () => {
+  // Regression (#1008): the dirty flag was cleared unconditionally AFTER the awaited disk write, so a
+  // keystroke landing while the assistant's apply write was in flight was marked saved even though it
+  // never hit disk — mirrors the saveActive/saveAllDirty mid-write guard.
+  test('a keystroke landing during the disk write keeps the buffer dirty', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    // Gate the write so a keystroke can land while it is in flight.
+    const origWrite = platform.writeTextFile.bind(platform);
+    let releaseWrite!: () => void;
+    const gate = new Promise<void>((res) => (releaseWrite = res));
+    platform.writeTextFile = async (path: string, contents: string) => {
+      await gate;
+      return origWrite(path, contents);
+    };
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const aUri = ws.activeUri(); // a.koi (first by relPath)
+
+    const apply = ws.applyFileEdit('a.koi', 'context A { v1 }\n'); // synchronous until the awaited (gated) write
+    editor.setDoc('context A { v2 }\n');
+    ws.syncActiveBuffer('context A { v2 }\n'); // a keystroke lands mid-write
+    releaseWrite();
+    await apply;
+
+    // v1 hit disk, but the buffer now holds v2 — it must still count as unsaved.
+    expect(platform.writes[0].contents).toBe('context A { v1 }\n');
+    expect(ws.buffers.get(aUri)!.dirty).toBe(true);
+  });
+});
+
 describe('createWorkspaceController — handleDelete', () => {
   test('closing the active file falls back to another open buffer (showDiagnostics + invalidateDocViews, no activationSeq bump)', async () => {
     const store = createAppStore();
