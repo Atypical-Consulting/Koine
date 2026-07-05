@@ -343,4 +343,52 @@ public class TypeScriptConformanceTests
         skipped.Ok.ShouldBeFalse();
         skipped.Errors.ShouldBeEmpty();
     }
+
+    /// <summary>
+    /// Issue #938: an <c>Int</c> field's value-object scalar <c>multiply</c>/<c>divide</c> must
+    /// truncate toward zero (<c>Math.trunc</c>), matching the C#/Python/Rust emitters, instead of
+    /// rounding half-up (<c>Math.round</c>). Before the fix this was the one target that diverged —
+    /// the same <c>.koi</c> model produced a different number in TypeScript than everywhere else.
+    /// </summary>
+    [Fact]
+    public void Int_field_scalar_multiply_and_divide_truncate_toward_zero()
+    {
+        var result = new KoineCompiler().Compile(TypeScriptSnapshotTests.IntFieldScalarFixture, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("Math.trunc(");
+        rendered.ShouldNotContain("Math.round(");
+    }
+
+    /// <summary>
+    /// Issue #938 runtime proof: the emitted <c>divide</c>/<c>multiply</c> must actually evaluate to the
+    /// truncated-toward-zero result under Node — including a negative operand, where truncation
+    /// (<c>-7 / 2 === -3</c>) differs from both half-up rounding (<c>Math.round(-3.5) === -3</c>,
+    /// coincidentally the same here) and floor (<c>Math.floor(-3.5) === -4</c>, which truncation must
+    /// NOT match). Skipped (not failed) when no Node/tsc toolchain is present locally; CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Int_field_divide_truncates_toward_zero_at_runtime()
+    {
+        var result = new KoineCompiler().Compile(TypeScriptSnapshotTests.IntFieldScalarFixture, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string driver = """
+            import { Weight } from './Shop/value-objects/Weight.js';
+
+            const positive = new Weight(7).divide(2);
+            const negative = new Weight(-7).divide(2);
+            const fractional = new Weight(5).multiply(1.5);
+            console.log(JSON.stringify({ positive: positive.grams, negative: negative.grams, fractional: fractional.grams }));
+            """;
+
+        TestSupport.NodeRun run = TestSupport.RunTypeScript(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoToolchainNotice);
+
+        run.Ok.ShouldBeTrue("Int-field divide/multiply should evaluate under node:\n" + string.Join("\n", run.Errors));
+        run.Stdout.ShouldContain("\"positive\":3");
+        run.Stdout.ShouldContain("\"negative\":-3");
+        run.Stdout.ShouldContain("\"fractional\":7");
+    }
 }

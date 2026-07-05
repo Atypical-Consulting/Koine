@@ -99,4 +99,37 @@ public class TypeScriptSnapshotTests
         return Verify(TestSupport.Render(result.Files))
             .UseDirectory("Snapshots");
     }
+
+    /// <summary>
+    /// An <c>Int</c>-field value object with a demand-generated scalar <c>multiply</c>/<c>divide</c>
+    /// (issue #938). No existing snapshot exercises this path — every prior TS fixture scales a
+    /// <c>Decimal</c> field, so the <c>Math.round</c>-vs-<c>Math.trunc</c> choice was invisible to the
+    /// snapshot suite. This pins the emitted <c>Math.trunc(...)</c> so a future regression back to
+    /// <c>Math.round</c> (or drift to <c>Math.floor</c>) fails the snapshot.
+    /// </summary>
+    internal const string IntFieldScalarFixture = """
+        context Shop {
+          value Weight {
+            grams: Int
+          }
+          entity Parcel identified by ParcelId {
+            total: Weight
+          }
+          readmodel Split from Parcel {
+            half: Weight = total / 2
+            tenth: Weight = total * 1.5
+          }
+        }
+        """;
+
+    /// <summary>The emitted <c>Int</c>-field <c>multiply</c>/<c>divide</c> must match its reviewed snapshot.</summary>
+    [Fact]
+    public Task Int_field_scalar_multiply_and_divide_emits_expected_typescript()
+    {
+        var result = new KoineCompiler().Compile(IntFieldScalarFixture, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files))
+            .UseDirectory("Snapshots");
+    }
 }

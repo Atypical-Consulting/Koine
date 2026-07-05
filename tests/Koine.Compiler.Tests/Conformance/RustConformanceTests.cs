@@ -108,4 +108,40 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #938 cross-target parity: Rust already truncates an <c>Int</c> field's scalar divide toward
+    /// zero for free — <c>ScaleField</c> emits the bare native <c>self.grams / divisor</c> (both
+    /// <c>i64</c>), and Rust's integer division truncates toward zero by definition, with no
+    /// <c>dec_to_i64</c> coercion involved (that path is only for a Decimal-typed operand). No emitter
+    /// change was needed; this pins the rendering so it can't silently regress while the TypeScript
+    /// emitter is being brought into line (the same issue's actual fix).
+    /// </summary>
+    [Fact]
+    public void Int_field_scalar_divide_uses_native_truncating_division()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Weight {\n" +
+            "    grams: Int\n" +
+            "  }\n" +
+            "  value Box {\n" +
+            "    total: Weight\n" +
+            "    half: Weight = total / 2\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.grams / divisor");
+        // Only the Decimal-operand coercion path routes through dec_to_i64 (crate::koine_runtime's own
+        // definition of the helper aside) — an Int field scaled by an Int scalar never should.
+        rust.ShouldNotContain("dec_to_i64(self.grams");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
