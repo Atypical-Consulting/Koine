@@ -1565,36 +1565,39 @@ describe('createInspectorController — teardown / disposal, in-flight loader (#
   // #980 fixed subscriptions that were LIVE at dispose time; this targets the async sibling — a surface
   // loader that is still AWAITING its fetch when dispose() runs. The resolved continuation must not mount
   // a fresh store-subscribing panel (or write to the host at all) on behalf of a torn-down controller.
-  test('an in-flight loadModel() that resolves after dispose() does not re-subscribe or repaint', async () => {
+  // loadEventsPanel (via guardedLoad) is the target: its host (#panel-events) lives in the diagnostics
+  // footer, a sibling of #center — unlike a center-pane loader (e.g. loadModel), it survives dispose()'s
+  // render(null, centerBodyEl) unmount, so a post-dispose write is cleanly observable rather than masked
+  // by an unrelated "host no longer exists" throw.
+  test('an in-flight loadEventsPanel() that resolves after dispose() does not re-subscribe or repaint', async () => {
     const { store, active } = createCountingStore();
+    const base = active(); // nothing subscribed yet
+
     const lsp = makeLsp();
-    // Hold ensureModelIndex()'s Promise.all pending: glossaryModel is one of its three legs, and the other
-    // two (livingDocs/model) resolve immediately from the default stub, so this alone keeps loadModel
-    // in flight until the test resolves it.
-    let resolveGlossary!: (model: GlossaryModel) => void;
-    lsp.glossaryModel.mockImplementation(
+    let resolveDocs!: (docs: DocsResult) => void;
+    lsp.livingDocs.mockImplementation(
       () =>
-        new Promise<GlossaryModel>((resolve) => {
-          resolveGlossary = resolve;
+        new Promise<DocsResult>((resolve) => {
+          resolveDocs = resolve;
         }),
     );
 
     const ctl = createInspectorController(makeDeps(lsp, { store }));
     ctl.init();
-    // Isolate loadModel: on the technical center only the left rail (loadModel) is live, so no sibling
-    // loader (loadDiagrams / loadGlossary) races the same dispose.
-    ctl.selectCenter('technical');
-    const baseline = active();
+    expect(active()).toBeGreaterThan(base); // sanity: init did subscribe
 
-    ctl.refreshActiveSurfaces(); // kicks off loadModel(); it suspends on the deferred glossaryModel fetch
-    ctl.dispose(); // tear down WHILE that fetch is still in flight
+    ctl.selectBottomTab('events'); // kicks off loadEventsPanel(); it suspends on the deferred livingDocs fetch
+    const loadingHtml = domById('panel-events').innerHTML;
+    expect(loadingHtml).not.toBe(''); // the loading placeholder painted synchronously, before dispose
 
-    resolveGlossary(glossaryFixture());
+    ctl.dispose(); // tear down WHILE that fetch is still in flight — drops every subscription live at dispose
+
+    resolveDocs({ files: [] });
     await flush(); // let the microtask-chained continuation run
     await new Promise((resolve) => setTimeout(resolve, 0)); // + a macrotask — Preact effects subscribe deferred
 
-    expect(active()).toBe(baseline); // the resolved loader must not have mounted a fresh subscribing panel
-    expect(domById('inspector-host').innerHTML).toBe(''); // ...nor written into the torn-down host
+    expect(active()).toBe(base); // back to zero — the resolved loader must not have mounted a subscribing panel
+    expect(domById('panel-events').innerHTML).toBe(loadingHtml); // ...nor repainted the torn-down host
   });
 });
 

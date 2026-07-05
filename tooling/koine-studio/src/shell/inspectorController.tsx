@@ -317,6 +317,12 @@ export interface InspectorController {
 export function createInspectorController(deps: InspectorControllerDeps): InspectorController {
   const { lsp, editor, output, platform, store: appStore } = deps;
 
+  // Set as dispose()'s first statement, so a loader continuation racing teardown observes it. Unlike the
+  // stale-token guard (which only suppresses STALE content on a LIVE controller), this suppresses ALL
+  // post-await mount/subscribe/status-write work once the controller is dead — closing the in-flight-
+  // loader-after-dispose leak (#1002, the async sibling of #980's live-subscription leaks).
+  let disposed = false;
+
   // --- DOM hosts (looked up once; the same id surface init() builds, so a drift throws via domById()) ---
   // A copy affordance overlaid on the emitted-preview pane (auto-hidden with the pane). Tracks the
   // most recent generated output; disabled until there is some.
@@ -749,6 +755,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     await guardedLoad({
       store: appStore,
       key: 'glossary',
+      isDisposed: () => disposed,
       loading: () => docMessage(glossaryView, 'Loading glossary…'),
       fetch: () => lsp.glossaryModel(),
       render: (model) => {
@@ -857,9 +864,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     docMessage(target, 'Loading decisions…');
     try {
       const adrs = await store.listAdrs();
+      if (disposed) return; // torn down mid-fetch (#1002) — no write into the dead host
       target.replaceChildren(renderAdrPanel({ canWrite: store.canWrite, adrs, notes: [], renderMarkdown }, docsHandlers(store)));
       adrLoaded = true;
     } catch (e) {
+      if (disposed) return;
       docMessage(target, 'Decisions request failed: ' + String(e), 'error');
     }
   }
@@ -871,9 +880,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     docMessage(target, 'Loading notes…');
     try {
       const notes = await store.listNotes();
+      if (disposed) return; // torn down mid-fetch (#1002) — no write into the dead host
       target.replaceChildren(renderNotesPanel({ canWrite: store.canWrite, adrs: [], notes, renderMarkdown }, docsHandlers(store)));
       notesLoaded = true;
     } catch (e) {
+      if (disposed) return;
       docMessage(target, 'Notes request failed: ' + String(e), 'error');
     }
   }
@@ -1122,6 +1133,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     }
     try {
       await ensureModelIndex();
+      if (disposed) return; // torn down mid-fetch (#1002) — no repaint on behalf of a dead controller
       // The model index just (re)built — the canvas palette reads it to gate its aggregate-scoped buttons
       // (#254), so re-render it.
       renderCanvasPalette();
@@ -1129,6 +1141,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       applySelectionHighlight();
       appStore.getState().markLoaded('model', token);
     } catch (e) {
+      if (disposed) return;
       // The navigator owns #rail-domain-pane and surfaces its own fetch failure there; a failing model
       // index (the inspector/breadcrumb source) is reported on the status pill instead.
       deps.setStatus('Model request failed: ' + String(e), 'error');
@@ -1197,6 +1210,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     docMessage(diagramsView, 'Rendering diagrams…');
     try {
       const res = await lsp.livingDocs();
+      if (disposed) return; // torn down mid-fetch (#1002) — no repaint on behalf of a dead controller
       if (seq !== diagramsSeq) return;
       // Scope the diagrams to the active bounded context (#146): each diagram's graph is narrowed and
       // emptied diagrams/files drop out, so a context shows only its own diagrams. "All" is the identity.
@@ -1207,8 +1221,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       setDiagramPersistScope(contextWorkspaceKey());
       setDiagramLayoutStore(createLayoutStore(platform, deps.folderRootToken()));
       await renderDiagrams(diagramsView, files, currentTheme(), () => seq === diagramsSeq);
+      if (disposed) return; // the render above can itself suspend — re-check before markLoaded
       if (seq === diagramsSeq) appStore.getState().markLoaded('diagrams', token);
     } catch (e) {
+      if (disposed) return;
       if (seq === diagramsSeq) docMessage(diagramsView, 'Diagrams request failed: ' + String(e), 'error');
     }
   }
@@ -1714,10 +1730,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     try {
       folder = await platform.pickFolder('Select baseline model folder');
     } catch (e) {
+      if (disposed) return; // torn down mid-fetch (#1002) — no write into the dead host
       docMessage(checkView, 'Could not open the folder picker: ' + String(e), 'error');
       selectOutput('compatibility');
       return;
     }
+    if (disposed) return;
     if (!folder) return; // cancelled — abort silently
     selectOutput('compatibility');
     docMessage(checkView, 'Checking against baseline…');
@@ -1726,13 +1744,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       const baselineSources = platform.compatNeedsInProcessSources
         ? await platform.readFolderSources(folder)
         : undefined;
+      if (disposed) return;
       const res = await lsp.check(folder, baselineSources);
+      if (disposed) return;
       if (res.error) {
         docMessage(checkView, 'Compatibility check failed: ' + res.error, 'error');
         return;
       }
       checkView.innerHTML = `<div class="koi-md">${renderMarkdown(renderCheckMarkdown(res))}</div>`;
     } catch (e) {
+      if (disposed) return;
       docMessage(checkView, 'Check request failed: ' + String(e), 'error');
     }
   }
@@ -1760,6 +1781,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (!lastPreview) output.setContent('// generating preview…', 'plain');
     try {
       const res = await lsp.emitPreview(currentTarget);
+      if (disposed) return; // torn down mid-fetch (#1002) — no repaint on behalf of a dead controller
       if (seq !== previewSeq) return;
       let content: string;
       let lang: OutputLang;
@@ -1780,6 +1802,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       copyBtn.disabled = !copyable;
       appStore.getState().markLoaded('preview', token);
     } catch (e) {
+      if (disposed) return;
       if (seq !== previewSeq) return;
       output.setContent('// preview request failed\n' + String(e), 'plain');
       lastPreview = '';
@@ -2096,6 +2119,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     await guardedLoad({
       store: appStore,
       key: 'contextmap',
+      isDisposed: () => disposed,
       loading: () => {
         disposeContextMapGraph();
         docMessage(contextMapView, 'Loading context map…');
@@ -2123,6 +2147,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     await guardedLoad({
       store: appStore,
       key: 'events',
+      isDisposed: () => disposed,
       loading: () => docMessage(eventsPanel, 'Loading events…'),
       fetch: () => bottomGraph(),
       render: (graph) =>
@@ -2135,6 +2160,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     await guardedLoad({
       store: appStore,
       key: 'relationships',
+      isDisposed: () => disposed,
       loading: () => docMessage(relationshipsPanel, 'Loading relationships…'),
       fetch: () =>
         Promise.all([
@@ -2211,6 +2237,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // between boots stops a deferred refresh (onDocEdited's 350ms debounce) from firing into a torn-down
   // environment, where `render` would throw "document is not defined".
   function dispose(): void {
+    disposed = true;
     clearTimeout(copyResetTimer);
     clearTimeout(editDebounce);
     clearTimeout(bottomPanelDebounce);
