@@ -106,6 +106,7 @@ jobs:
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
 
       - name: Cache Cargo build
+        id: cargo-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
@@ -132,6 +133,7 @@ jobs:
       #     the web frontend (TypeScript typecheck + Vite bundle).
       - name: Build Rust host (cargo)
         working-directory: tooling/koine-studio/src-tauri
+        shell: bash
         run: |
           # The crate version tracks the Koine release version (bumped by release-please in
           # Cargo.toml + tauri.conf.json). release-please can't cleanly rewrite Cargo.lock — a
@@ -139,8 +141,15 @@ jobs:
           # comments — so on a release PR the lock's own-package version lags Cargo.toml. Refresh
           # just that one entry offline (surgical: touches only koine-studio's version line, no
           # network, no dependency churn) so `--locked` stays a real dependency-reproducibility
-          # gate without going red on a version-only drift.
-          cargo update -p koine-studio --offline
+          # gate without going red on a version-only drift. That reasoning only holds when the
+          # Cargo registry cache above is warm; on a cold/partial cache (cache-hit != 'true') there
+          # is no local index for --offline to consult, so fall back to a network-allowed update
+          # (issue #1023).
+          if [ "${{ steps.cargo-cache.outputs.cache-hit }}" = "true" ]; then
+            cargo update -p koine-studio --offline
+          else
+            cargo update -p koine-studio
+          fi
           cargo build --locked
           cargo test --locked
 
