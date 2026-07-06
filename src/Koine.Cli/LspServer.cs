@@ -1988,27 +1988,14 @@ internal sealed class LspServer
     {
         ["kind"] = node.Kind,
         ["name"] = node.Name,
-        ["span"] = SyntaxSpanJson(node.Span),
+        // Every syntax-tree node keeps its raw source span, INCLUDING the all-zero root sentinel, so
+        // it builds SpanFields directly rather than through MapSourceSpan (which collapses an absent
+        // span to null for the diagram graph). Same shared 7-key camelCase shape as the diagram.
+        ["span"] = SpanFields(node.Span),
         ["isMissing"] = node.IsMissing,
         ["isError"] = node.IsError,
         ["leaf"] = node.Leaf,
         ["children"] = node.Children.Select(c => (object)SyntaxNodeJson(c)).ToArray(),
-    };
-
-    /// <summary>
-    /// The raw (1-based, end-EXCLUSIVE) <see cref="SourceSpan"/> as a flat JSON object — NOT the 0-based
-    /// LSP range: the syntax-tree panel keeps source coordinates so it can slice/select the .koi. Mirrors
-    /// the wasm <c>WSyntaxSpan</c> field order/casing exactly.
-    /// </summary>
-    private static Dictionary<string, object?> SyntaxSpanJson(SourceSpan span) => new()
-    {
-        ["line"] = span.Line,
-        ["column"] = span.Column,
-        ["endLine"] = span.EndLine,
-        ["endColumn"] = span.EndColumn,
-        ["offset"] = span.Offset,
-        ["length"] = span.Length,
-        ["file"] = span.File,
     };
 
     private object ModelResultJson(JsonElement root)
@@ -2365,28 +2352,30 @@ internal sealed class LspServer
     };
 
     /// <summary>
-    /// Maps the raw, 1-based <see cref="SourceSpan"/> straight through (NOT the 0-based LSP range:
-    /// the diagram graph keeps source coordinates so Task 4 can convert when navigating). Null when
-    /// the node carries no span.
+    /// The raw, 1-based (end-EXCLUSIVE) <see cref="SourceSpan"/> as its flat 7-key JSON object — NOT
+    /// the 0-based LSP range: both the diagram graph (#290) and the syntax tree (#890) keep source
+    /// coordinates so consumers can slice/navigate the .koi. The single shared span-field builder both
+    /// wire shapes project through (#1099); the camelCase key NAMES are the wire contract on both hosts.
     /// </summary>
-    private static Dictionary<string, object?>? MapSourceSpan(SourceSpan? span)
+    private static Dictionary<string, object?> SpanFields(SourceSpan s) => new()
     {
-        if (span is not { } s)
-        {
-            return null;
-        }
+        ["file"] = s.File,
+        ["line"] = s.Line,
+        ["column"] = s.Column,
+        ["endLine"] = s.EndLine,
+        ["endColumn"] = s.EndColumn,
+        ["offset"] = s.Offset,
+        ["length"] = s.Length,
+    };
 
-        return new Dictionary<string, object?>
-        {
-            ["file"] = s.File,
-            ["line"] = s.Line,
-            ["column"] = s.Column,
-            ["endLine"] = s.EndLine,
-            ["endColumn"] = s.EndColumn,
-            ["offset"] = s.Offset,
-            ["length"] = s.Length,
-        };
-    }
+    /// <summary>
+    /// Maps the diagram graph's optional <see cref="SourceSpan"/> straight through
+    /// <see cref="SpanFields"/>, collapsing an absent (null) span to JSON <c>null</c> — the diagram's
+    /// jump-to-source treats "no span" as "not navigable". The syntax tree, by contrast, emits
+    /// <see cref="SpanFields"/> unconditionally so its all-zero root stays a non-null object.
+    /// </summary>
+    private static Dictionary<string, object?>? MapSourceSpan(SourceSpan? span) =>
+        span is { } s ? SpanFields(s) : null;
 
     /// <summary>
     /// Runs the model-versioning compatibility check of the merged workspace (the current model)
