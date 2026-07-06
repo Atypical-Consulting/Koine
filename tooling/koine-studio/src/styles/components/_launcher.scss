@@ -1,7 +1,8 @@
 /* --- ⌘K Spotlight command launcher (issue #1143) --- */
-/* Shell + input row + prefix-mode chrome only (this task). Results (.lx-item, .lx-kind, .lx-glyph,
-   grouped .lx-results content), the .lx-preview pane body, the ⌘K .lx-actmenu, and .lx-toast are
-   authored by later tasks — the selectors below are the hooks those tasks slot into. */
+/* Shell + input row + prefix-mode chrome (task 3) + grouped result rows (task 4, this task): group
+   labels, `.lx-item` rows, the `.lx-kind` DDD chip / `.lx-glyph` line icon, fuzzy-match `<mark>`
+   highlights, and the empty-results state. The .lx-preview pane body, the ⌘K .lx-actmenu, and
+   .lx-toast are authored by later tasks — the selectors below are the hooks those tasks slot into. */
 .lx-scrim {
   position: fixed;
   inset: 0;
@@ -157,6 +158,169 @@
 .lx.has-preview .lx-results {
   flex: 0 0 540px;
   border-right: 1px solid color-mix(in srgb, var(--koi-line) 70%, transparent);
+}
+
+/* result groups + rows (task 4) */
+.lx-group-label {
+  font-family: var(--koi-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--koi-muted);
+  padding: 12px 10px 5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lx-group:first-child .lx-group-label {
+  padding-top: 4px;
+}
+
+.lx-group-label .gl-n {
+  color: color-mix(in srgb, var(--koi-muted) 70%, transparent);
+}
+
+.lx-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 10px;
+  height: 46px;
+  border-radius: var(--koi-radius-sm);
+  cursor: pointer;
+  position: relative;
+}
+
+.lx-item:hover {
+  background: color-mix(in srgb, var(--koi-fg) 5%, transparent);
+}
+
+.lx-item.sel {
+  background: color-mix(in srgb, var(--koi-accent) 15%, transparent);
+}
+
+.lx-item.sel::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2.5px;
+  border-radius: 2px;
+  background: var(--koi-accent-grad);
+}
+
+.lx-kind {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--koi-radius-sm);
+  font-family: var(--koi-font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--kc);
+  background: color-mix(in srgb, var(--kc) 18%, transparent);
+}
+
+.lx-glyph {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--koi-radius-sm);
+  background: color-mix(in srgb, var(--koi-fg) 7%, transparent);
+  color: var(--koi-muted);
+}
+
+.lx-item.sel .lx-glyph {
+  color: var(--koi-fg);
+}
+
+.lx-glyph .lx-ic {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.lx-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.lx-title {
+  font-size: 14px;
+  color: var(--koi-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lx-title mark {
+  background: none;
+  color: var(--koi-accent);
+  font-weight: 700;
+}
+
+.lx-sub {
+  font-size: 11.5px;
+  color: var(--koi-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lx-sub .lx-ctx {
+  color: color-mix(in srgb, var(--koi-ink-soft) 80%, var(--koi-muted));
+}
+
+.lx-tail {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lx-tail .lx-kbd {
+  font-family: var(--koi-font-mono);
+  font-size: 10.5px;
+  color: var(--koi-muted);
+  border: 1px solid var(--koi-line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 2px 6px;
+}
+
+.lx-tail .lx-meta {
+  font-family: var(--koi-font-mono);
+  font-size: 11px;
+  color: var(--koi-muted);
+}
+
+.lx-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--koi-muted);
+  font-size: 12.5px;
+}
+
+.lx-empty .le-big {
+  color: var(--koi-fg);
+  font-size: 14px;
+  margin-bottom: 6px;
 }
 
 .lx-preview {

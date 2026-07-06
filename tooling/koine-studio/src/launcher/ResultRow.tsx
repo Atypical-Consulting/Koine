@@ -1,0 +1,141 @@
+// One `.lx-item` row in the Spotlight launcher's results list (issue #1143, task 4): a DDD kind chip
+// or line-icon glyph, the fuzzy-highlighted title + sub line, and a best-effort tail (a command's
+// keycap hint, a commit's short hash). Pure presentation — there is no live preview pane (Task 5), no
+// real per-result action wiring (Task 6), and no keyboard-driven selection state (Task 7) yet; this
+// task only renders what a given `RankedResult` looks like and whether it is (already) selected.
+import { highlight, type RankedResult } from '@/launcher/fuzzy';
+import { KIND, type CatalogEntry } from '@/launcher/catalog';
+
+export interface ResultRowProps {
+  result: RankedResult;
+  selected: boolean;
+  /** Stubbed for a later task's mouse/keyboard selection wiring (Task 7) — no-op until then. */
+  onHover?: () => void;
+  /** Stubbed for a later task's default quick-action (Task 6) — no-op until then. */
+  onRun?: () => void;
+}
+
+/** The line-icon glyphs a non-chip category renders, ported verbatim (path data unchanged) from the
+ * prototype's `I` map in design/design_handoff_git_spotlight_logos/koine-launcher.js. */
+type GlyphKind = 'action' | 'file' | 'gloss' | 'rule' | 'state' | 'commit';
+
+function GlyphPaths({ kind }: { kind: GlyphKind }) {
+  switch (kind) {
+    case 'action':
+      return <path d="M4.5 4 8 7.5 4.5 11M8.5 11.5h4" />;
+    case 'file':
+      return (
+        <>
+          <path d="M4 2.4h4.5l3 3v8H4z" />
+          <path d="M8.5 2.4v3h3" />
+        </>
+      );
+    case 'gloss':
+      return (
+        <>
+          <path d="M4 3.2h6a1.4 1.4 0 0 1 1.4 1.4v8.2M4 3.2A1.2 1.2 0 0 0 2.8 4.4v8.4A1.2 1.2 0 0 0 4 14h7.4" />
+          <path d="M5.4 6h4M5.4 8.2h4" />
+        </>
+      );
+    case 'rule':
+      return <path d="M8 2.2 3.2 4v3.4c0 3 2 5 4.8 6.4 2.8-1.4 4.8-3.4 4.8-6.4V4z" />;
+    case 'state':
+      return (
+        <>
+          <circle cx="4" cy="8" r="1.7" />
+          <circle cx="12" cy="8" r="1.7" />
+          <path d="M5.7 8h4.6M8.6 6.3 10.3 8 8.6 9.7" />
+        </>
+      );
+    case 'commit':
+      return (
+        <>
+          <circle cx="8" cy="8" r="2.4" />
+          <path d="M8 2v3.6M8 10.4V14" />
+        </>
+      );
+  }
+}
+
+/** The prototype's `catGlyph` category → glyph mapping, minus the symbol/event branch (those render a
+ * `.lx-kind` chip instead, handled by the caller). `rule` picks `state` vs `rule` off `rkind`. */
+function glyphKindFor(entry: CatalogEntry): GlyphKind {
+  if (entry.cat === 'rule') return entry.rkind === 'state' ? 'state' : 'rule';
+  if (entry.cat === 'glossary') return 'gloss';
+  if (entry.cat === 'commit') return 'commit';
+  if (entry.cat === 'action') return 'action';
+  return 'file';
+}
+
+/** The tail: a command's keyboard-chord hint, or a commit's short hash — best-effort from whatever
+ * identity field the entry actually carries (files don't yet carry a diff-stat field to show here). */
+function Tail({ entry }: { entry: CatalogEntry }) {
+  if (entry.cat === 'action' && entry.hint) return <span class="lx-kbd">{entry.hint}</span>;
+  if (entry.cat === 'commit' && entry.hash) return <span class="lx-meta">{entry.hash.slice(0, 7)}</span>;
+  return null;
+}
+
+/** The sub line: a file shows just its directory; a commit shows its own pre-built "sha · author"
+ * sub; everything else shows its sub plus a `·`-separated context when it has one — ported verbatim
+ * from the prototype's `itemRow()` sub-building branch. */
+function Sub({ entry }: { entry: CatalogEntry }) {
+  if (entry.cat === 'file') return <span class="lx-ctx">{entry.ctx ?? ''}</span>;
+  if (entry.cat === 'commit') return <>{entry.sub}</>;
+  return (
+    <>
+      {entry.sub ?? ''}
+      {entry.ctx ? (
+        <>
+          {' · '}
+          <span class="lx-ctx">{entry.ctx}</span>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * One grouped result row. `result.entry` is the `CatalogEntry` to render; `result.ranges` are the
+ * title's matched character indices from `rank()` (empty when the entry matched on its secondary
+ * keyword/context pass, in which case the title renders with no highlight).
+ */
+export function ResultRow(props: ResultRowProps) {
+  const { result, selected, onHover, onRun } = props;
+  const { entry } = result;
+  const chip = entry.cat === 'symbol' || entry.cat === 'event' ? KIND[entry.kind as keyof typeof KIND] : undefined;
+  const segments = highlight(entry.title, result.ranges);
+
+  return (
+    <div
+      class={selected ? 'lx-item sel' : 'lx-item'}
+      role="option"
+      aria-selected={selected}
+      data-id={entry.id}
+      onMouseMove={onHover}
+      onClick={onRun}
+    >
+      {chip ? (
+        <span class="lx-kind" style={{ '--kc': `var(${chip.token})` }} title={chip.word}>
+          {chip.code}
+        </span>
+      ) : (
+        <span class="lx-glyph">
+          <svg class="lx-ic" viewBox="0 0 16 16" aria-hidden="true">
+            <GlyphPaths kind={glyphKindFor(entry)} />
+          </svg>
+        </span>
+      )}
+      <div class="lx-main">
+        <div class="lx-title">
+          {segments.map((seg, i) => (seg.match ? <mark key={i}>{seg.text}</mark> : seg.text))}
+        </div>
+        <div class="lx-sub">
+          <Sub entry={entry} />
+        </div>
+      </div>
+      <div class="lx-tail">
+        <Tail entry={entry} />
+      </div>
+    </div>
+  );
+}

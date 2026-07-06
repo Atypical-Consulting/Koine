@@ -1,12 +1,12 @@
 // The Spotlight launcher's overlay shell: scrim + card + input row + prefix-mode pill + footer legend
-// (issue #1143, task 3). This task builds the visible chrome only — no results list (Task 4), no
-// preview pane (Task 5), no per-result actions (Task 6), no full keyboard nav beyond Esc (Task 7). The
-// `.lx-results` container is included (empty) so Task 4 can slot grouped rows straight into it, and
-// carries `data-mode`/`data-query` so later tasks (and this task's tests) can read the derived
-// mode/query without threading extra state through props.
+// (issue #1143, task 3), extended (task 4) to fill `.lx-results` with grouped, ranked result rows. No
+// preview pane (Task 5), no per-result actions (Task 6), no full keyboard nav beyond Esc (Task 7) —
+// `selected` is always false this task; a later task supplies the selection index.
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { buildCatalog, type LauncherSources } from '@/launcher/buildCatalog';
 import { MODES, PREFIX_CHARS, parseMode, type CatalogEntry } from '@/launcher/catalog';
+import { deriveResults } from '@/launcher/deriveResults';
+import { ResultRow } from '@/launcher/ResultRow';
 
 export interface LauncherPanelProps {
   sources: LauncherSources;
@@ -24,6 +24,11 @@ export function LauncherPanel(props: LauncherPanelProps) {
   const { mode, query } = parseMode(input);
   // Flips once a selected result exposes a preview() to show (Task 5); always false this task.
   const hasPreview = false;
+  // Grouped/ranked results (Task 4) — see deriveResults.ts for the empty-query default vs. ranked-and-
+  // grouped derivation. `visible` (unused here) is the same flat top-to-bottom row order Task 7's
+  // selection reducer and Task 5's preview need; re-derive it from (catalog, mode, query) rather than
+  // threading it through props, since deriveResults is a pure function those tasks can call directly.
+  const { sections } = deriveResults(catalog, mode, query);
 
   // Load the live catalog once per open so the count reflects real data; guarded against the panel
   // closing/unmounting before the join resolves (buildCatalog awaits the model index + git log).
@@ -110,8 +115,25 @@ export function LauncherPanel(props: LauncherPanelProps) {
           <kbd class="lx-esc">esc</kbd>
         </div>
         <div class="lx-body">
-          {/* Empty this task — Task 4 groups+renders `.lx-item` rows from `data-mode`/`data-query`. */}
-          <div class="lx-results" role="listbox" aria-label="Results" data-mode={mode.key} data-query={query} />
+          <div class="lx-results" role="listbox" aria-label="Results" data-mode={mode.key} data-query={query}>
+            {sections.length === 0 && (
+              <div class="lx-empty">
+                <div class="le-big">No matches for "{query}"</div>
+                Try a different term, or a mode: <b>&gt;</b> commands · <b>@</b> symbols · <b>#</b> events
+              </div>
+            )}
+            {sections.map((section) => (
+              <div class="lx-group" key={section.label}>
+                <div class="lx-group-label">
+                  {section.label}
+                  <span class="gl-n">{section.rows.length}</span>
+                </div>
+                {section.rows.map((row) => (
+                  <ResultRow key={row.entry.id} result={row} selected={false} />
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
         <div class="lx-footer">
           <span class="lx-hint">

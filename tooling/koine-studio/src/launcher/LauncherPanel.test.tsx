@@ -7,6 +7,8 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact';
 import { LauncherPanel } from '@/launcher/LauncherPanel';
 import type { LauncherSources } from '@/launcher/buildCatalog';
 import type { Command } from '@atypical/koine-ui';
+import type { ModelIndex } from '@/model/modelIndex';
+import type { GlossaryEntry } from '@/lsp/lsp';
 
 afterEach(() => cleanup());
 
@@ -24,6 +26,56 @@ function makeSources(over: Partial<LauncherSources> = {}): LauncherSources {
 
 function mount(sources: LauncherSources, onClose = vi.fn()) {
   return render(<LauncherPanel sources={sources} visible={true} onClose={onClose} />);
+}
+
+const RANGE = { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } };
+
+/**
+ * A known, small live catalog for the grouped-results tests below: an aggregate + a value-object
+ * symbol, a domain event, a workspace file, a registry command, and a git commit — one entry per
+ * `GROUPS` category the fixture bothers to populate. Commit/keyword text is chosen so a query of
+ * "Order" matches only the symbol/event/file rows (not the command or the commit), keeping the
+ * group-order assertions unambiguous.
+ */
+function makeKnownCatalogSources(): LauncherSources {
+  const orderAgg: GlossaryEntry = {
+    id: 'Ordering.Order', name: 'Order', kind: 'aggregate', context: 'Ordering',
+    qualifiedName: 'Ordering.Order', doc: null, nameRange: RANGE,
+  };
+  const moneyVo: GlossaryEntry = {
+    id: 'Ordering.Money', name: 'Money', kind: 'quantity', context: 'Ordering',
+    qualifiedName: 'Ordering.Money', doc: null, nameRange: RANGE,
+  };
+  const placedEvent: GlossaryEntry = {
+    id: 'Ordering.OrderPlaced', name: 'OrderPlaced', kind: 'event', context: 'Ordering',
+    qualifiedName: 'Ordering.OrderPlaced', doc: null, nameRange: RANGE,
+  };
+  const modelIndex: ModelIndex = {
+    glossary: { entries: [orderAgg, moneyVo, placedEvent] },
+    byQn: new Map([
+      [orderAgg.qualifiedName, { entry: orderAgg }],
+      [moneyVo.qualifiedName, { entry: moneyVo }],
+      [placedEvent.qualifiedName, { entry: placedEvent }],
+    ]),
+    qnByCtxName: new Map(),
+  };
+
+  return makeSources({
+    modelIndex: vi.fn(async () => modelIndex),
+    commands: vi.fn((): Command[] => [{ id: 'cmd:new-file', title: 'New file', run: () => {} }]),
+    files: vi.fn(() => [{ uri: 'file:///ws/src/Ordering/ordering.koi', relPath: 'src/Ordering/ordering.koi' }]),
+    gitLog: vi.fn(() =>
+      Promise.resolve([{ sha: 'abc1234567890', author: 'Ada Lovelace', date: '2026-07-01T10:00:00Z', message: 'chore: initial commit' }]),
+    ),
+    canUseGit: true,
+  });
+}
+
+function groupLabels(container: ParentNode): (string | null)[] {
+  return Array.from(container.querySelectorAll('.lx-group-label')).map((el) => {
+    const text = el.textContent ?? '';
+    return text.replace(/\d+$/, '').trim();
+  });
 }
 
 describe('LauncherPanel', () => {
@@ -107,5 +159,68 @@ describe('LauncherPanel', () => {
 
     await waitFor(() => expect(view.container.querySelector('.lx-count')!.textContent).toBe('1'));
     expect(sources.modelIndex).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('LauncherPanel — grouped results (issue #1143, task 4)', () => {
+  test('empty query shows the curated Top hits / Recent default set, not the full catalog', async () => {
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources);
+
+    // The full live catalog has 6 entries (1 command, 2 symbols, 1 event, 1 file, 1 commit) but the
+    // curated empty-query view only ever shows the Top-hits symbols + Recent commits/files slices.
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+
+    const labels = groupLabels(view.container);
+    expect(labels).toEqual(['Top hits', 'Recent']);
+    expect(view.container.querySelectorAll('.lx-item')).toHaveLength(3); // 2 symbols + 1 commit
+  });
+
+  test('typing a symbol name filters + groups results under the GROUPS headers in order', async () => {
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources);
+    await waitFor(() => expect(sources.modelIndex).toHaveBeenCalled());
+    const input = view.getByLabelText('Search commands, symbols, files…') as HTMLInputElement;
+
+    fireEvent.input(input, { target: { value: 'Order' } });
+
+    await waitFor(() => expect(groupLabels(view.container).length).toBeGreaterThan(0));
+    // "Order" fuzzy-matches the Order aggregate, the OrderPlaced event, and ordering.koi's filename —
+    // but neither "New file" (the command) nor "chore: initial commit" (the commit) contain the
+    // subsequence o-r-d-e-r, so those two groups are absent — GROUPS order: symbol, event, file.
+    expect(groupLabels(view.container)).toEqual(['Domain symbols', 'Events', 'Files']);
+  });
+
+  test('a symbol row shows a .lx-kind chip colored by its DDD token, with <mark> highlights in the title', async () => {
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources);
+    const input = view.getByLabelText('Search commands, symbols, files…') as HTMLInputElement;
+    await waitFor(() => expect(sources.modelIndex).toHaveBeenCalled());
+
+    fireEvent.input(input, { target: { value: 'Order' } });
+
+    await waitFor(() => expect(view.container.querySelector('.lx-kind')).toBeTruthy());
+    const chip = view.container.querySelector('.lx-kind') as HTMLElement;
+    expect(chip.textContent).toBe('AR');
+    expect(chip.getAttribute('style')).toContain('--kc');
+    expect(chip.getAttribute('style')).toContain('var(--koi-ddd-aggregate)');
+
+    const row = chip.closest('.lx-item') as HTMLElement;
+    const marks = row.querySelectorAll('.lx-title mark');
+    expect(marks.length).toBeGreaterThan(0);
+    expect(Array.from(marks).map((m) => m.textContent).join('')).toBe('Order');
+  });
+
+  test('#-mode input shows only the Events group', async () => {
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources);
+    const input = view.getByLabelText('Search commands, symbols, files…') as HTMLInputElement;
+    await waitFor(() => expect(sources.modelIndex).toHaveBeenCalled());
+
+    fireEvent.input(input, { target: { value: '#Order' } });
+
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+    expect(groupLabels(view.container)).toEqual(['Events']);
+    expect(view.container.querySelector('.lx-item')!.textContent).toContain('OrderPlaced');
   });
 });
