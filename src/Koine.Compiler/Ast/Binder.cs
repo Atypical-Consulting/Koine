@@ -1,3 +1,5 @@
+using Koine.Compiler.Services;
+
 namespace Koine.Compiler.Ast;
 
 /// <summary>
@@ -209,7 +211,7 @@ internal sealed class Binder : KoineSyntaxVisitor
     {
         IReadOnlyList<Member> members =
             _enclosingTypeName is not null && _index.TryGetDecl(_enclosingTypeName, out TypeDecl decl)
-                ? FieldedMembers(decl)
+                ? decl.MembersOf()
                 : Array.Empty<Member>();
 
         // Reuse the shared scope builders rather than open-coding KoineType.From over each name, so
@@ -225,15 +227,6 @@ internal sealed class Binder : KoineSyntaxVisitor
 
         return scope;
     }
-
-    private static IReadOnlyList<Member> FieldedMembers(TypeDecl decl) => decl switch
-    {
-        ValueObjectDecl v => v.Members,
-        EntityDecl e => e.Members,
-        EventDecl ev => ev.Members,
-        IntegrationEventDecl ie => ie.Members,
-        _ => Array.Empty<Member>()
-    };
 
     // ---- Resolution (reproduces the existing string paths) ---------------------
 

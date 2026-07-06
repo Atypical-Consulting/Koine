@@ -96,12 +96,10 @@ public sealed partial class PythonEmitter : IEmitter
             BuildTypeLocations(model),
             model.Contexts.Select(c => c.Name).ToList(),
             // Demand-driven operator emission (R9): a value object only gets an additive `__add__`
-            // (where the model `sum`s it) or a scalar `__mul__` (where the model multiplies it by a
-            // scalar) — shared with the C#/TS emitters so the three stay semantically aligned.
-            OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
-            OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
-            OperatorNeedsAnalyzer.BuildScalarDivisionNeeds(model, index),
-            OperatorNeedsAnalyzer.BuildValueObjectArithmeticNeeds(model, index));
+            // (where the model `sum`s it or adds it directly) or a scalar `__mul__`/`__truediv__`
+            // (where the model multiplies/divides it by a scalar) — the analyzer's single-pass per-VO
+            // model, shared with the C#/TS emitters so the three stay semantically aligned (#836).
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index));
 
         var files = new List<EmittedFile>();
 

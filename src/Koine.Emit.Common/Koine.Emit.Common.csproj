@@ -1,11 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <RootNamespace>Koine.Compiler</RootNamespace>
-  </PropertyGroup>
+  <Import Project="..\Koine.Emit.props" />
 
   <!-- Shared emitter helpers, factored out of Koine.Compiler so each Koine.Emit.<Target> can reuse
        them without pulling in a sibling emitter (issue #861). Packable so a plugin emitter author can
@@ -17,13 +12,6 @@
     <Description>Shared helpers for Koine emitters — factory-id binding and Markdown documentation rendering — reused across the built-in Koine.Emit.&lt;Target&gt; backends and available to third-party IEmitterProvider authors.</Description>
     <PackageTags>ddd;domain-driven-design;dsl;compiler;code-generation;koine;emitter</PackageTags>
   </PropertyGroup>
-
-  <!-- Per-project public-API contract gate (RS0016), mirroring Koine.Compiler. -->
-  <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
-    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
-    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Koine.Compiler\Koine.Compiler.csproj" />

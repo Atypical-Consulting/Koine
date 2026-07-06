@@ -327,3 +327,5 @@ static Koine.Compiler.Services.ScenarioService.Run(Koine.Compiler.Ast.SemanticMo
 static Koine.Compiler.Services.ScenarioService.WriteJson(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! tree) -> string!
 static Koine.Compiler.Services.SyntaxTreeProvider.Build(Koine.Compiler.Ast.KoineNode! root, string! source) -> Koine.Compiler.Services.SyntaxTreeNode!
 static Koine.Compiler.Services.VersionInfo.Display(System.Reflection.Assembly! assembly) -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.AmbiguousMultiOwnerReference = "KOI1419" -> string!
+Koine.Compiler.Ast.ModelIndex.ResolveCanonicalOwner(string! koineName, string! referencingContext) -> string?
