@@ -53,6 +53,17 @@ function wideFixture(n: number): SyntaxTreeNode {
   return node('KoineModel', null, [node('ContextNode', 'Big', members)]);
 }
 
+/** Like {@link wideFixture} but the member at `target` carries a real span (on line `target + 10`) so a
+ *  caret there resolves to it — a deep, off-window caret target for the virtualized caret-scroll (#1098). */
+function wideSpannedFixture(n: number, target: number): SyntaxTreeNode {
+  const members = Array.from({ length: n }, (_, i) =>
+    node('Member', `m${i}`, [], i === target ? { span: span(i + 10, 1, i + 10, 30) } : {}),
+  );
+  return node('KoineModel', null, [node('ContextNode', 'Big', members, { span: span(1, 1, n + 100, 1) })], {
+    span: zeroSpan,
+  });
+}
+
 /** A narrow fake source the panel fetches from — a single vi.fn matching {@link SyntaxTreeSource}. */
 function makeSource(tree: SyntaxTreeNode | null): SyntaxTreeSource {
   return { syntaxTree: vi.fn(async () => tree) };
@@ -234,6 +245,59 @@ describe('SyntaxTreePanel', () => {
     // Positions are honest and contiguous within the window (posinset increases by 1 per rendered row).
     const positions = members.map((m) => Number(m.getAttribute('aria-posinset')));
     for (let i = 1; i < positions.length; i++) expect(positions[i]).toBe(positions[i - 1] + 1);
+  });
+
+  // --- keyboard nav, caret highlight-scroll & WCAG across virtualized rows (#1098) --------------------
+
+  test('keyboard nav reaches rows outside the render window (End/Home scroll them in, then focus)', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(5000))} />);
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+
+    // Only a window is mounted, so the last member (m4999) is NOT initially in the DOM.
+    expect(view.queryByRole('treeitem', { name: /Member m4999/ })).toBeNull();
+
+    // End must still reach it: the panel scrolls it into the window, then moves roving focus onto it.
+    root.focus();
+    fireEvent.keyDown(root, { key: 'End' });
+    await waitFor(() =>
+      expect((document.activeElement as HTMLElement | null)?.getAttribute('aria-label')).toMatch(/Member m4999/),
+    );
+    // The roving tabindex stays a single tab stop across the windowed jump.
+    expect(view.container.querySelectorAll('[role="treeitem"][tabindex="0"]').length).toBe(1);
+
+    // Home jumps back to the (now off-window) root, scrolling it back into the window first.
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Home' });
+    await waitFor(() =>
+      expect((document.activeElement as HTMLElement | null)?.getAttribute('aria-label')).toMatch(/KoineModel/),
+    );
+  });
+
+  test('a caret on a row outside the window scrolls it in and marks it current', async () => {
+    // 300 members (> threshold) so the tree virtualizes; member #250 carries a real span far down.
+    const view = render(
+      <SyntaxTreePanel source={makeSource(wideSpannedFixture(300, 250))} caret={{ line: 260, column: 5 }} />,
+    );
+    await view.findByRole('treeitem', { name: /KoineModel/ });
+
+    // The caret's deepest containing node (m250, well outside the initial window) is scrolled into the
+    // window, mounted, and highlighted.
+    await waitFor(() => {
+      const current = view.container.querySelector('.koi-stree-item--current');
+      expect(current).not.toBeNull();
+      expect(current!.getAttribute('aria-label')).toMatch(/Member m250/);
+      expect(current!.getAttribute('aria-current')).toBe('true');
+    });
+    expect(view.container.querySelectorAll('.koi-stree-item--current').length).toBe(1);
+  });
+
+  test('a virtualized large tree is accessibility-clean with a single roving tab stop', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(3000))} />);
+    await view.findByRole('tree', { name: /Syntax tree/i });
+
+    // Exactly one tabbable row — a single tab stop across the whole (windowed) tree.
+    expect(view.container.querySelectorAll('[role="treeitem"][tabindex="0"]').length).toBe(1);
+    // No WCAG violations with only a window of the 3002 rows mounted (aria-level/setsize/posinset honest).
+    expect(await axe(view.container)).toHaveNoViolations();
   });
 });
 

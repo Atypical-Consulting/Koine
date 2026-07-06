@@ -39,17 +39,6 @@ function defaultExpanded(root: SyntaxTreeNode): Set<string> {
   return keys;
 }
 
-/** Walk the tree to the node at an index-path key (`0/1/2`), or null if the path no longer resolves. */
-function nodeAtKey(root: SyntaxTreeNode, key: string): SyntaxTreeNode | null {
-  const parts = key.split('/');
-  let node: SyntaxTreeNode | undefined = root; // parts[0] is the root itself
-  for (let i = 1; i < parts.length; i++) {
-    node = node?.children[Number(parts[i])];
-    if (!node) return null;
-  }
-  return node ?? null;
-}
-
 /** True when a node's OWN raw span contains the 1-based caret `(line, col)`:
  *  `(span.line, span.column) <= (line, col) < (span.endLine, span.endColumn)` — lexicographic on
  *  line-then-column, end-EXCLUSIVE. All-zero / span-less nodes (the root has a `line:0` span) contain
@@ -157,6 +146,16 @@ function flattenVisible(root: SyntaxTreeNode, expanded: Set<string>): Row[] {
   return rows;
 }
 
+/** The half-open range `[first, last)` of row indices to mount for a scroll offset + viewport height
+ *  (padded by overscan). Shared by the render and the keyboard/caret nav so "is this row mounted?" agrees
+ *  everywhere. Because each row sits at content-y `index * ROW_HEIGHT`, the offset maps directly. */
+function windowRange(total: number, scrollTop: number, viewportH: number): { first: number; last: number } {
+  const viewport = viewportH || ROW_HEIGHT * FALLBACK_VIEWPORT_ROWS;
+  const first = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+  const last = Math.min(total, first + Math.ceil(viewport / ROW_HEIGHT) + OVERSCAN * 2);
+  return { first, last };
+}
+
 export function SyntaxTreePanel(props: {
   source: SyntaxTreeSource;
   /**
@@ -193,6 +192,11 @@ export function SyntaxTreePanel(props: {
   // layout), where the render falls back to a fixed-size window.
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
+  // Deferred roving focus (#1098): moving focus onto a row currently OUTSIDE the render window can't focus
+  // it synchronously — it isn't mounted yet. We record the target key and bump a nonce; an effect focuses
+  // it on the next render, once the scroll has pulled it into the window.
+  const [pendingFocus, setPendingFocus] = useState(0);
+  const pendingKeyRef = useRef<string | null>(null);
   const treeRef = useRef<HTMLDivElement>(null);
 
   // The single fetch path: pull the active document's tree on mount and whenever the source or the
@@ -237,14 +241,47 @@ export function SyntaxTreePanel(props: {
     if (hit) setExpanded((prev) => withAncestorsExpanded(prev, hit.key));
   }, [caret, tree]);
 
-  // Scroll the highlighted row into view once it (and its just-expanded ancestors) are in the DOM. Keyed
-  // on `activeKey` so a caret move that lands on the same node doesn't re-scroll; `scrollIntoView` is
-  // guarded (happy-dom / older engines may not implement it).
+  // Bring the row at `index` into the mounted window by adjusting the scroll offset — both the `scrollTop`
+  // state (drives which rows render) and the real container (so the browser scrollbar tracks it). Because
+  // each row sits at content-y `index * ROW_HEIGHT`, the offset maps directly. A no-op when it's in view.
+  const scrollIndexIntoView = (index: number): void => {
+    const viewport = viewportH || ROW_HEIGHT * FALLBACK_VIEWPORT_ROWS;
+    const rowTop = index * ROW_HEIGHT;
+    const rowBottom = rowTop + ROW_HEIGHT;
+    let next = scrollTop;
+    if (rowTop < scrollTop) next = rowTop;
+    else if (rowBottom > scrollTop + viewport) next = rowBottom - viewport;
+    if (next !== scrollTop) {
+      setScrollTop(next);
+      if (treeRef.current) treeRef.current.scrollTop = next;
+    }
+  };
+
+  // Editor → tree scroll (#890/#1098): once the highlighted row (and its just-expanded ancestors) settle,
+  // bring it into view. In a windowed tree the target may not be mounted, so scroll by INDEX to pull it
+  // into the window; otherwise fall back to the element's own `scrollIntoView` (guarded — happy-dom / older
+  // engines may not implement it). Keyed on `activeKey` so only a NEW caret target scrolls — re-running on
+  // the user's own scroll (`scrollTop`) or an unrelated expand (`expanded`) would fight them, so those are
+  // read as their latest value here, not as triggers.
   useEffect(() => {
-    if (activeKey == null) return;
-    const el = treeRef.current?.querySelector<HTMLElement>(`[data-key="${activeKey}"]`);
-    el?.scrollIntoView?.({ block: 'nearest' });
+    if (activeKey == null || tree == null) return;
+    const navRows = flattenVisible(tree, expanded);
+    const index = navRows.findIndex((r) => r.key === activeKey);
+    if (index === -1) return;
+    if (navRows.length > VIRTUALIZE_THRESHOLD) scrollIndexIntoView(index);
+    else treeRef.current?.querySelector<HTMLElement>(`[data-key="${activeKey}"]`)?.scrollIntoView?.({ block: 'nearest' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire only on a new caret target (see comment)
   }, [activeKey]);
+
+  // Focus a row that a windowed jump just scrolled into view — its DOM node didn't exist when the key was
+  // pressed. Runs after the scroll-driven re-render mounts it; a no-op for the common in-window case, which
+  // `focusRow` focuses synchronously.
+  useEffect(() => {
+    const key = pendingKeyRef.current;
+    if (key == null) return;
+    treeRef.current?.querySelector<HTMLElement>(`[data-key="${key}"]`)?.focus();
+    pendingKeyRef.current = null;
+  }, [pendingFocus]);
 
   // Measure the scroll viewport (#1098) so a windowed tree mounts exactly the rows it needs. happy-dom
   // and a pre-layout first paint report 0 height — the render then falls back to a fixed-size window.
@@ -256,18 +293,22 @@ export function SyntaxTreePanel(props: {
     return () => window.removeEventListener('resize', measure);
   }, [tree]);
 
-  /** The visible treeitems in DOM (== visual) order — collapsed subtrees aren't in the DOM, so this is
-   *  exactly the set Arrow keys traverse. Mirrors the domain navigator's `treeItems()`. */
-  function visibleItems(): HTMLElement[] {
-    const el = treeRef.current;
-    return el ? Array.from(el.querySelectorAll<HTMLElement>('[role="treeitem"]')) : [];
-  }
-
-  /** Move roving focus to a visible row (already in the DOM): focus it, then make it the lone tab stop. */
-  function moveFocus(el: HTMLElement | undefined): void {
-    if (!el) return;
-    el.focus();
-    setFocusedKey(el.dataset.key ?? null);
+  /** Move roving focus to the row at `index` in the flattened `navRows`, making it the lone tab stop. An
+   *  in-window row focuses immediately; an off-window row is scrolled into the window and focused once it
+   *  mounts (the pending-focus effect) — so keyboard nav reaches every row, not just the mounted slice. */
+  function focusRow(navRows: Row[], index: number): void {
+    if (index < 0 || index >= navRows.length) return;
+    const key = navRows[index].key;
+    setFocusedKey(key);
+    const { first, last } = windowRange(navRows.length, scrollTop, viewportH);
+    const mounted = navRows.length <= VIRTUALIZE_THRESHOLD || (index >= first && index < last);
+    if (mounted) {
+      treeRef.current?.querySelector<HTMLElement>(`[data-key="${key}"]`)?.focus();
+    } else {
+      scrollIndexIntoView(index);
+      pendingKeyRef.current = key;
+      setPendingFocus((n) => n + 1);
+    }
   }
 
   const toggle = (key: string): void =>
@@ -278,63 +319,68 @@ export function SyntaxTreePanel(props: {
       return next;
     });
 
-  // The WAI-ARIA tree keyboard model, delegated on the root: ArrowUp/Down across visible rows, Home/End
-  // to the ends, ArrowRight to expand / descend, ArrowLeft to collapse / ascend. Enter/Space SELECT the
-  // row and jump the editor to its span (mirroring a row click) — expand/collapse is Arrow-only, so
-  // keyboard users reach the tree → source navigation that a mouse click gives (WCAG 2.1.1).
+  // The WAI-ARIA tree keyboard model, delegated on the root: ArrowUp/Down across the flattened visible
+  // rows, Home/End to the ends, ArrowRight to expand / descend, ArrowLeft to collapse / ascend. Enter/Space
+  // SELECT the row and jump the editor to its span (mirroring a row click) — expand/collapse is Arrow-only,
+  // so keyboard users reach the tree → source navigation a mouse click gives (WCAG 2.1.1). Nav indexes into
+  // `flattenVisible` (not the DOM), so it reaches rows the virtualization has scrolled out of the window.
   function onKeyDown(ev: JSX.TargetedKeyboardEvent<HTMLDivElement>): void {
-    const items = visibleItems();
-    if (!items.length || tree == null) return;
+    if (tree == null) return;
+    const navRows = flattenVisible(tree, expanded);
+    if (!navRows.length) return;
     const current = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[role="treeitem"]') ?? null;
-    const idx = current ? items.indexOf(current) : -1;
-    const key = current?.dataset.key ?? null;
-    const node = key ? nodeAtKey(tree, key) : null;
-    const hasChildren = !!node && node.children.length > 0;
-    const isExpanded = !!key && expanded.has(key);
+    const key = current?.dataset.key ?? focusedKey ?? ROOT_KEY;
+    const idx = navRows.findIndex((r) => r.key === key);
+    if (idx === -1) return;
+    const node = navRows[idx].node;
+    const hasChildren = node.children.length > 0;
+    const isExpanded = expanded.has(key);
 
     switch (ev.key) {
       case 'ArrowDown':
         ev.preventDefault();
-        moveFocus(items[Math.min(items.length - 1, idx + 1)] ?? items[0]);
+        focusRow(navRows, Math.min(navRows.length - 1, idx + 1));
         break;
       case 'ArrowUp':
         ev.preventDefault();
-        moveFocus(items[Math.max(0, idx - 1)] ?? items[0]);
+        focusRow(navRows, Math.max(0, idx - 1));
         break;
       case 'Home':
         ev.preventDefault();
-        moveFocus(items[0]);
+        focusRow(navRows, 0);
         break;
       case 'End':
         ev.preventDefault();
-        moveFocus(items[items.length - 1]);
+        focusRow(navRows, navRows.length - 1);
         break;
       case 'ArrowRight':
-        if (hasChildren && key) {
+        if (hasChildren) {
           ev.preventDefault();
-          if (!isExpanded) toggle(key); // expand in place; focus stays on this row (its DOM node persists)
-          else moveFocus(items[idx + 1]); // already open → step into the first child (next visible row)
+          if (!isExpanded) {
+            toggle(key); // expand in place; focus stays on this row (its DOM node persists)
+            setFocusedKey(key);
+          } else {
+            focusRow(navRows, idx + 1); // already open → step into the first child (next visible row)
+          }
         }
         break;
       case 'ArrowLeft':
-        if (key) {
-          ev.preventDefault();
-          if (hasChildren && isExpanded) {
-            toggle(key); // collapse in place; focus stays on this (still-visible) row
-            setFocusedKey(key);
-          } else if (key.includes('/')) {
-            moveFocus(items.find((el) => el.dataset.key === key.slice(0, key.lastIndexOf('/'))));
-          }
+        ev.preventDefault();
+        if (hasChildren && isExpanded) {
+          toggle(key); // collapse in place; focus stays on this (still-visible) row
+          setFocusedKey(key);
+        } else if (key.includes('/')) {
+          const parentKey = key.slice(0, key.lastIndexOf('/'));
+          const parentIdx = navRows.findIndex((r) => r.key === parentKey);
+          if (parentIdx !== -1) focusRow(navRows, parentIdx);
         }
         break;
       case 'Enter':
       case ' ':
-        if (key && node) {
-          ev.preventDefault();
-          setFocusedKey(key);
-          setActiveKey(key);
-          onNodeClick?.(node); // select + jump to source, exactly as a row click does
-        }
+        ev.preventDefault();
+        setFocusedKey(key);
+        setActiveKey(key);
+        onNodeClick?.(node); // select + jump to source, exactly as a row click does
         break;
     }
   }
@@ -440,14 +486,7 @@ export function SyntaxTreePanel(props: {
   const rows = flattenVisible(tree, expanded);
   const total = rows.length;
   const virtualize = total > VIRTUALIZE_THRESHOLD;
-
-  let first = 0;
-  let last = total;
-  if (virtualize) {
-    const viewport = viewportH || ROW_HEIGHT * FALLBACK_VIEWPORT_ROWS;
-    first = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
-    last = Math.min(total, first + Math.ceil(viewport / ROW_HEIGHT) + OVERSCAN * 2);
-  }
+  const { first, last } = virtualize ? windowRange(total, scrollTop, viewportH) : { first: 0, last: total };
   const windowRows = rows.slice(first, last);
 
   return (

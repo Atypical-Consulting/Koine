@@ -39,6 +39,17 @@ const normalTree: SyntaxTreeNode = node('KoineModel', null, [
   ]),
 ]);
 
+// A large model: one context with 3000 sibling members — well past the panel's windowing threshold, so
+// only a viewport slice mounts. Exercises the virtualized render + a11y (aria-level/setsize/posinset,
+// single roving tab stop) under breadth (#1098).
+const largeTree: SyntaxTreeNode = node('KoineModel', null, [
+  node(
+    'ContextNode',
+    'Big',
+    Array.from({ length: 3000 }, (_, i) => node('Member', `field${i}`, [], { leaf: 'Int' })),
+  ),
+]);
+
 // A half-typed file's recovered tree: a dangling ErrorNode and a phantom (missing) node ANTLR inserts
 // during error recovery, alongside otherwise-valid structure.
 const recoveredTree: SyntaxTreeNode = node('KoineModel', null, [
@@ -71,6 +82,13 @@ export const NormalTree: Story = {};
  *  rendered with its distinct recovery marker so the recovered subtree stays legible. */
 export const RecoveredErrorTree: Story = {
   args: { source: makeSource(recoveredTree) },
+};
+
+/** A large model (one context, 3000 members): the panel virtualizes, mounting only a viewport window of
+ *  rows while keeping the flat WAI-ARIA semantics and a single roving tab stop. Guards the windowed render
+ *  against the @storybook/addon-a11y axe pass (Chromium/CI). */
+export const LargeTree: Story = {
+  args: { source: makeSource(largeTree) },
 };
 
 /** An unknown/absent active document (`syntaxTree` resolves null): the panel paints its empty state
