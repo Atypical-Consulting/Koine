@@ -147,6 +147,45 @@ describe('uiChrome railAxis / diagCollapsed / contextMapView (#983)', () => {
   });
 });
 
+describe('uiChrome panelSide / sideRail (#983)', () => {
+  test('panelSide defaults to bottom (matching DEFAULT_LAYOUT) and setPanelSide round-trips', () => {
+    const s = make();
+    expect(s.getState().panelSide).toBe('bottom');
+    s.getState().setPanelSide('right');
+    expect(s.getState().panelSide).toBe('right');
+    s.getState().setPanelSide('bottom');
+    expect(s.getState().panelSide).toBe('bottom');
+  });
+
+  test('togglePanelSide flips bottom↔right', () => {
+    const s = make();
+    expect(s.getState().panelSide).toBe('bottom');
+    s.getState().togglePanelSide();
+    expect(s.getState().panelSide).toBe('right');
+    s.getState().togglePanelSide();
+    expect(s.getState().panelSide).toBe('bottom');
+  });
+
+  test('sideRail defaults to right (matching DEFAULT_LAYOUT) and setSideRail round-trips', () => {
+    const s = make();
+    expect(s.getState().sideRail).toBe('right');
+    s.getState().setSideRail('left');
+    expect(s.getState().sideRail).toBe('left');
+    s.getState().setSideRail('right');
+    expect(s.getState().sideRail).toBe('right');
+  });
+
+  test('toggleSideRail flips right↔left independently of panelSide', () => {
+    const s = make();
+    expect(s.getState().sideRail).toBe('right');
+    s.getState().toggleSideRail();
+    expect(s.getState().sideRail).toBe('left');
+    expect(s.getState().panelSide).toBe('bottom'); // untouched
+    s.getState().toggleSideRail();
+    expect(s.getState().sideRail).toBe('right');
+  });
+});
+
 describe('uiChrome settingsEditorMode / settingsJsonScope (#983)', () => {
   test('settingsEditorMode defaults to visual and setSettingsEditorMode round-trips', () => {
     const s = make();

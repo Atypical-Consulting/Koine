@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock the edge resizer so we can assert exactly how the layout controller wires (and re-wires) the
 // inspector + left-rail handles, and that dispose() releases them — without driving real pointer drags.
@@ -13,7 +13,18 @@ const { resizerDisposers, initEdgeResizerMock } = vi.hoisted(() => {
 });
 vi.mock('@/shell/resize', () => ({ initEdgeResizer: initEdgeResizerMock }));
 
-import { createLayoutController, type LayoutControllerDeps } from '@/shell/layout';
+import { createLayoutController, type LayoutController, type LayoutControllerDeps } from '@/shell/layout';
+
+// layout.ts subscribes to the appStore SINGLETON now (panelSide/sideRail live in the uiChrome slice),
+// so an undisposed controller leaves a live subscription that a later test's toggle would re-fire —
+// stacking extra wireRailResizers → initEdgeResizer calls and breaking the call-count assertions. Track
+// every controller and dispose them after each test so the singleton subscription never leaks across `it`s.
+const created: LayoutController[] = [];
+function create(deps: LayoutControllerDeps): LayoutController {
+  const ctrl = createLayoutController(deps);
+  created.push(ctrl);
+  return ctrl;
+}
 
 function mountLayoutDom(): void {
   document.body.innerHTML = `
@@ -44,9 +55,16 @@ describe('layout controller', () => {
     mountLayoutDom();
   });
 
+  // Dispose every controller a test built so its captured appStore subscription is released — otherwise
+  // subscriptions stack across `it`s and a later toggle re-fires them all (see `create` above).
+  afterEach(() => {
+    for (const c of created) c.dispose();
+    created.length = 0;
+  });
+
   it('mirrors the persisted layout onto #split and wires both edge resizers at construction', () => {
     const deps = makeDeps();
-    createLayoutController(deps);
+    create(deps);
 
     const split = deps.splitEl;
     expect(split.dataset.panelSide).toBeTruthy();
@@ -57,30 +75,45 @@ describe('layout controller', () => {
     expect(cssVars).toEqual(['--koi-inspector-w', '--koi-leftrail-w']);
   });
 
-  it('togglePanelSide flips #split[data-panel-side] (persisted via layoutStore)', () => {
-    const ctrl = createLayoutController(makeDeps());
+  it('togglePanelSide flips #split[data-panel-side] AND persists the merged blob', () => {
+    const ctrl = create(makeDeps());
     const split = document.getElementById('split') as HTMLElement;
-    const before = split.dataset.panelSide;
+    expect(split.dataset.panelSide).toBe('bottom'); // default
     ctrl.actions.togglePanelSide();
-    expect(split.dataset.panelSide).not.toBe(before);
-    expect(['bottom', 'right']).toContain(split.dataset.panelSide);
+    expect(split.dataset.panelSide).toBe('right'); // flipped
+    // The transition merges into the koine.studio.layout blob, so the reload-source reflects it.
+    const blob = JSON.parse(localStorage.getItem('koine.studio.layout') as string);
+    expect(blob.panelSide).toBe('right');
   });
 
-  it('toggleSideRail flips the side and re-wires the resizers with swapped anchors', () => {
-    const ctrl = createLayoutController(makeDeps());
+  it('toggleSideRail flips data-siderail-side, persists, and re-wires the resizers', () => {
+    const ctrl = create(makeDeps());
     const split = document.getElementById('split') as HTMLElement;
-    const before = split.dataset.siderailSide;
+    expect(split.dataset.siderailSide).toBe('right'); // default
     initEdgeResizerMock.mockClear();
 
     ctrl.actions.toggleSideRail();
 
-    expect(split.dataset.siderailSide).not.toBe(before);
+    expect(split.dataset.siderailSide).toBe('left'); // flipped
     expect(initEdgeResizerMock).toHaveBeenCalledTimes(2); // both handles re-wired live
+    const blob = JSON.parse(localStorage.getItem('koine.studio.layout') as string);
+    expect(blob.sideRail).toBe('left');
+  });
+
+  it('restores BOTH panelSide and sideRail from a stored blob onto #split at construction', () => {
+    localStorage.setItem(
+      'koine.studio.layout',
+      JSON.stringify({ panelSide: 'right', sideRail: 'left', rightCollapsed: true, leftCollapsed: false }),
+    );
+    const deps = makeDeps();
+    create(deps);
+    expect(deps.splitEl.dataset.panelSide).toBe('right');
+    expect(deps.splitEl.dataset.siderailSide).toBe('left');
   });
 
   it('toggleProperties / toggleNavigator flip the chrome-collapse store slices', () => {
     const deps = makeDeps();
-    const ctrl = createLayoutController(deps);
+    const ctrl = create(deps);
     ctrl.actions.toggleProperties();
     ctrl.actions.toggleNavigator();
     expect(deps.toggleRightCollapsed).toHaveBeenCalledOnce();
@@ -88,7 +121,7 @@ describe('layout controller', () => {
   });
 
   it('a section header click toggles its data-open + aria-expanded', () => {
-    createLayoutController(makeDeps());
+    create(makeDeps());
     const sect = document.getElementById('rail-files') as HTMLElement;
     const head = sect.querySelector('.rail-sect-head') as HTMLButtonElement;
 
@@ -103,7 +136,7 @@ describe('layout controller', () => {
 
   it('toggleFileTree maps the Files pane visibility onto the rail axis', () => {
     const deps = makeDeps();
-    const ctrl = createLayoutController(deps);
+    const ctrl = create(deps);
     const files = document.getElementById('rail-files') as HTMLElement;
 
     files.hidden = true;
@@ -116,7 +149,7 @@ describe('layout controller', () => {
   });
 
   it('dispose() releases the live resizers and stops the section-header listeners', () => {
-    const ctrl = createLayoutController(makeDeps());
+    const ctrl = create(makeDeps());
     const head = document.querySelector('.rail-sect-head') as HTMLButtonElement;
     const sect = document.getElementById('rail-files') as HTMLElement;
 

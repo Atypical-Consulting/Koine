@@ -119,6 +119,14 @@ export type SettingsJsonScope = 'user' | 'workspace';
 /** The Context Map's rendered view (#983): the interactive graph or the dense per-relation table. */
 export type ContextMapView = 'graph' | 'table';
 
+/** Which edge the bottom/auxiliary panel docks to (#983). Inlined here (not imported from layoutStore)
+ *  so the slice stays self-contained; structurally identical to `LayoutState['panelSide']`. */
+export type PanelSide = 'bottom' | 'right';
+
+/** Which side the collapsible file-explorer/inspector side rail lives on (#983). Inlined for the same
+ *  no-cycle reason as {@link PanelSide}; structurally identical to `LayoutState['sideRail']`. */
+export type SideRail = 'left' | 'right';
+
 /** The left rail opens on the Domain navigator — the strategic/tactical DDD view is the primary lens. */
 export const DEFAULT_RAIL_AXIS: RailAxis = 'domain';
 
@@ -130,6 +138,12 @@ export const DEFAULT_SETTINGS_EDITOR_MODE: SettingsEditorMode = 'visual';
 
 /** The Settings JSON editor targets the user document by default (workspace needs a folder open). */
 export const DEFAULT_SETTINGS_JSON_SCOPE: SettingsJsonScope = 'user';
+
+/** The bottom panel docks to the bottom edge by default. MUST match `DEFAULT_LAYOUT.panelSide`. */
+export const DEFAULT_PANEL_SIDE: PanelSide = 'bottom';
+
+/** The side rail (inspector) lives on the right by default. MUST match `DEFAULT_LAYOUT.sideRail`. */
+export const DEFAULT_SIDE_RAIL: SideRail = 'right';
 
 export interface UiChromeSlice {
   center: CenterView;
@@ -164,6 +178,14 @@ export interface UiChromeSlice {
   /** The Context Map's rendered view (#983). Runtime source of truth; inspectorController mirrors it to
    *  `koine.studio.contextMapView` for persistence and repaints the panel on a change. */
   contextMapView: ContextMapView;
+  /** Which edge the bottom panel docks to (#983). Runtime source of truth, mirrored to `layoutStore`
+   *  for persistence like the collapse flags; the layout controller subscribes and repaints
+   *  #split[data-panel-side]. */
+  panelSide: PanelSide;
+  /** Which side the inspector side rail lives on (#983). Runtime source of truth, mirrored to
+   *  `layoutStore` for persistence; the layout controller subscribes, repaints #split[data-siderail-side]
+   *  and re-anchors the edge resizers on a change. */
+  sideRail: SideRail;
   /** The active UI theme (#983). Runtime source of truth for what was `theme.ts`'s module-local `active`;
    *  `applyTheme`/`setTheme` publish here and `currentTheme()` reads it, so the theme fan-out (diagrams +
    *  terminal re-theme) is a plain store subscription instead of a bespoke listener Set. Persistence stays
@@ -211,6 +233,12 @@ export interface UiChromeSlice {
    *  an explicit preference (`diagCollapsedPref !== null`), so a saved choice is never overridden. */
   applyDiagCollapsedDefault(v: boolean): void;
   setContextMapView(v: ContextMapView): void;
+  setPanelSide(v: PanelSide): void;
+  /** Flip the bottom panel's dock edge (bottom↔right), like `toggleRightCollapsed` flips its flag. */
+  togglePanelSide(): void;
+  setSideRail(v: SideRail): void;
+  /** Flip the side rail's side (right↔left), like `toggleLeftCollapsed` flips its flag. */
+  toggleSideRail(): void;
   /** Publish the active theme (#983). Called by `theme.ts`'s `applyTheme`; the DOM apply + persistence
    *  stay in `theme.ts`, this only mirrors the value so subscribers can react. */
   setTheme(v: ThemeName): void;
@@ -264,6 +292,8 @@ export function createUiChromeSlice(
     diagCollapsed: false,
     diagCollapsedPref: null,
     contextMapView: DEFAULT_CONTEXT_MAP_VIEW,
+    panelSide: DEFAULT_PANEL_SIDE,
+    sideRail: DEFAULT_SIDE_RAIL,
     theme: 'dark',
     deck: DEFAULT_DECK_STATE,
     settingsOpen: false,
@@ -321,6 +351,10 @@ export function createUiChromeSlice(
       set({ diagCollapsed: v });
     },
     setContextMapView: (v) => set({ contextMapView: v }),
+    setPanelSide: (v) => set({ panelSide: v }),
+    togglePanelSide: () => set({ panelSide: get().panelSide === 'bottom' ? 'right' : 'bottom' }),
+    setSideRail: (v) => set({ sideRail: v }),
+    toggleSideRail: () => set({ sideRail: get().sideRail === 'right' ? 'left' : 'right' }),
     setTheme: (v) => set({ theme: v }),
     setSettingsEditorMode: (v) => set({ settingsEditorMode: v }),
     setSettingsJsonScope: (v) => set({ settingsJsonScope: v }),
