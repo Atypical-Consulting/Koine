@@ -2,12 +2,17 @@ name: release-please
 
 # Derives the next semantic version from Conventional Commits on every push to main and keeps a
 # release PR up to date (bumping Directory.Build.props + CHANGELOG.md). Merging that PR tags
-# vX.Y.Z, which triggers release.yml's pack-and-publish job. See
-# adr/0002-conventional-commits-and-automated-semver.md.
+# vX.Y.Z; the release-please-action's `release_created` output then gates the cli-binaries and
+# nupkg jobs below, which build and attach release assets in this same workflow run. (A
+# tag-triggered workflow can't do this: GITHUB_TOKEN-created tags/releases don't fire
+# `on: push: tags` / `on: release`.) See adr/0002-conventional-commits-and-automated-semver.md.
 
 on:
   push:
     branches: [main]
+  # Manual dry-run: builds the CLI/Studio matrices without uploading (release_created is false
+  # off a dispatch, so every upload step is skipped). Use to validate the build path pre-release.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -58,7 +63,115 @@ jobs:
     needs: bootstrap-baseline
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+        id: release
         with:
           target-branch: main
+
+  # Self-contained, single-file CLI per OS, attached to the release. Reuses the existing
+  # Properties/PublishProfiles/<rid>.pubxml (SelfContained, PublishSingleFile, trimming OFF).
+  cli-binaries:
+    name: cli (${{ matrix.rid }})
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: windows-latest
+            rid: win-x64
+          - os: macos-latest
+            rid: osx-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Setup .NET
+        uses: ./.github/actions/setup-dotnet-wasm
+        with:
+          install-wasm-workloads: false
+
+      - name: Publish self-contained CLI
+        run: dotnet publish src/Koine.Cli -p:PublishProfile=${{ matrix.rid }}
+
+      - name: Archive (tar.gz, Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ needs.release-please.outputs.tag_name }}"
+          tag="${tag:-dev}"
+          out="koine-${tag}-${{ matrix.rid }}.tar.gz"
+          tar -C "src/Koine.Cli/bin/publish/${{ matrix.rid }}" -czf "$out" koine
+          echo "ASSET=$out" >> "$GITHUB_ENV"
+
+      - name: Archive (zip, Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tag = "${{ needs.release-please.outputs.tag_name }}"
+          if (-not $tag) { $tag = "dev" }
+          $out = "koine-$tag-${{ matrix.rid }}.zip"
+          Compress-Archive -Path "src/Koine.Cli/bin/publish/${{ matrix.rid }}/koine.exe" -DestinationPath $out -Force
+          "ASSET=$out" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Upload to release
+        if: ${{ needs.release-please.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release upload "${{ needs.release-please.outputs.tag_name }}" "$ASSET" --clobber
+
+  # CLI packed as a .NET global tool, attached to the release. Folds in the (never-triggered)
+  # release.yml pack. NuGet.org publish stays a TODO until a NUGET_API_KEY secret exists.
+  nupkg:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Setup .NET
+        uses: ./.github/actions/setup-dotnet-wasm
+        with:
+          install-wasm-workloads: false
+
+      - name: Pack CLI
+        run: dotnet pack src/Koine.Cli/Koine.Cli.csproj -c Release -o ./artifacts
+
+      - name: Upload nupkg to release
+        if: ${{ needs.release-please.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ needs.release-please.outputs.tag_name }}" ./artifacts/*.nupkg --clobber
+
+      # TODO: publish to NuGet once a NUGET_API_KEY secret is configured:
+      # dotnet nuget push ./artifacts/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} \
+      #   --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+  # Studio desktop installers (.dmg/.msi or NSIS .exe/.AppImage/.deb), UNSIGNED, attached to the
+  # release. Reuses the same build as CI via the reusable workflow; publish only on a real release.
+  studio-desktop:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/studio-build.yml
+    with:
+      bundle: ${{ needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
+      publish: ${{ needs.release-please.outputs.release_created == 'true' }}
+      tag: ${{ needs.release-please.outputs.tag_name }}

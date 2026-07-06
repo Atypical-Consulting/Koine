@@ -15,9 +15,12 @@ value-object arithmetic …`.
 
 Separately, `Directory.Build.props`'s `<Version>`/`<InformationalVersion>` is bumped by hand, and
 `.github/workflows/release.yml` already packs and (eventually) publishes the CLI whenever a `v*` tag
-is pushed — but nothing creates those tags. `CHANGELOG.md` already declares adherence to [Keep a
-Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/), and
-notes the project is pre-1.0 ("minor versions may include breaking changes").
+is pushed — but nothing creates those tags. (This workflow was later removed; that a
+`GITHUB_TOKEN`-pushed tag would never have triggered it is the subject of
+[ADR 0008](0008-release-assets-in-release-please-run.md).) `CHANGELOG.md` already declares adherence
+to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
+[Semantic Versioning](https://semver.org/), and notes the project is pre-1.0 ("minor versions may
+include breaking changes").
 
 A first pass at this ADR proposed rewording only the most recent violators and leaving the rest of
 history alone, on the grounds that a full rewrite would touch every commit SHA. On review, the
@@ -50,8 +53,11 @@ project maintainer wanted full compliance: every commit on `main`, not just the 
    semantic version from Conventional Commits since the last release: `fix:` → patch, `feat:` →
    minor, `!`/`BREAKING CHANGE:` → major. `.github/workflows/release-please.yml` runs it on every
    push to `main`; it opens/updates a release PR that bumps `Directory.Build.props` (via the
-   `x-release-please-version` marker) and `CHANGELOG.md`, and tags `vX.Y.Z` on merge — which is what
-   triggers the existing `release.yml`.
+   `x-release-please-version` marker) and `CHANGELOG.md`, and tags `vX.Y.Z` on merge. (That tag does
+   *not* trigger a separate workflow: release-please creates it with `GITHUB_TOKEN`, which by design
+   cannot fire `on: push` / `on: release` runs, so release assets are built inside this same run
+   instead — see [ADR 0008](0008-release-assets-in-release-please-run.md), which supersedes this
+   point.)
 4. **`bump-minor-pre-major: true`** while the major version is `0`: a breaking change bumps `0.X.0`
    instead of jumping to `1.0.0`, matching the pre-1.0 policy `CHANGELOG.md` already documents.
    Flip this off in `release-please-config.json` deliberately when the project is ready for `1.0.0`.

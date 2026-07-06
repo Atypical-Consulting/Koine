@@ -3,7 +3,7 @@ name: Koine Studio
 # Cross-platform CI for the Koine IDE stack: publishes the `koine lsp` sidecar,
 # runs the headless LSP JSON-RPC tests, and builds Koine Studio (the Tauri v2
 # desktop app) on Linux, Windows, and macOS. Mirrors the action versions and
-# .NET setup used by ci.yml / release.yml.
+# .NET setup used by ci.yml.
 
 on:
   push:
@@ -20,191 +20,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  studio:
-    name: studio (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    # Backstop so a stuck network/build step (e.g. a stalled apt mirror) fails fast
-    # instead of running to the 6-hour default. Cold cargo + dotnet + npm builds land
-    # well under this; a run that exceeds it is hung, not slow.
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            rid: linux-x64
-            triple: x86_64-unknown-linux-gnu
-          - os: windows-latest
-            rid: win-x64
-            triple: x86_64-pc-windows-msvc
-          - os: macos-latest
-            rid: osx-arm64
-            triple: aarch64-apple-darwin
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
-        with:
-          # All projects target net10.0; pin the 10.0.x channel and allow preview
-          # builds in case the GA SDK is not yet on the runner image (matches ci.yml).
-          dotnet-version: '10.0.x'
-          dotnet-quality: preview
-
-      # No central package management / lock files, so cache the global NuGet
-      # package folder keyed on the project files that pin versions.
-      - name: Cache NuGet
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
-          restore-keys: ${{ runner.os }}-nuget-
-
-      # Tauri v2 on Linux needs WebKitGTK + libsoup and the standard GTK/app-indicator
-      # system libraries (linked at `cargo build` time); Windows and macOS runners ship
-      # their web views already.
-      #
-      # We cache the .deb packages so warm runs restore them from the Actions cache and
-      # never touch Ubuntu's apt mirror — the Azure mirror intermittently stalls mid-fetch
-      # and apt's transfer timeout doesn't catch a slowly-trickling connection (one such
-      # stall burned ~50 min before being cancelled). Only a cold cache hits apt; the
-      # timeout config below makes that one fetch fail fast instead of hanging.
-      - name: Cap apt acquire timeouts (cold-cache safety net)
-        if: runner.os == 'Linux'
-        run: |
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
-            | sudo tee /etc/apt/apt.conf.d/99-koine-timeouts >/dev/null
-
-      - name: Install Linux system dependencies (Tauri v2)
-        if: runner.os == 'Linux'
-        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1
-        with:
-          packages: libwebkit2gtk-4.1-dev libsoup-3.0-dev libgtk-3-dev libappindicator3-dev librsvg2-dev patchelf
-          version: koine-tauri-1
-
-      # (a) Publish the self-contained `koine lsp` sidecar for this OS's RID using
-      #     Stream A's publish profile (Properties/PublishProfiles/<rid>.pubxml).
-      - name: Publish LSP sidecar
-        run: dotnet publish src/Koine.Cli -p:PublishProfile=${{ matrix.rid }}
-
-      # (b) Headless LSP coverage: the JSON-RPC server tests run over stdio with no
-      #     editor attached. Filtered to the LSP suite rather than the full ~500 tests.
-      - name: Run headless LSP tests
-        run: dotnet test tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj -c Release --filter "FullyQualifiedName~LspServerTests"
-
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version: '24'
-          cache: npm
-          # The repo root is the npm workspace root (tooling/*, website); the workspace's
-          # single lockfile lives there, not per-member.
-          cache-dependency-path: package-lock.json
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
-
-      - name: Cache Cargo build
-        id: cargo-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            tooling/koine-studio/src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('tooling/koine-studio/src-tauri/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      # Stage the published sidecar where Tauri's `externalBin` resolves it: the
-      # build script (tauri_build) validates `binaries/koine-<target-triple>` exists
-      # at COMPILE time, so this must run before any cargo build/test of the host.
-      - name: Stage sidecar for Tauri (externalBin)
-        shell: bash
-        run: |
-          ext=""
-          [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
-          mkdir -p tooling/koine-studio/src-tauri/binaries
-          cp "src/Koine.Cli/bin/publish/${{ matrix.rid }}/koine${ext}" \
-             "tooling/koine-studio/src-tauri/binaries/koine-${{ matrix.triple }}${ext}"
-
-      # (c) Build Koine Studio: the Rust host (framing + broker, with unit tests) and
-      #     the web frontend (TypeScript typecheck + Vite bundle).
-      - name: Build Rust host (cargo)
-        working-directory: tooling/koine-studio/src-tauri
-        shell: bash
-        run: |
-          # The crate version tracks the Koine release version (bumped by release-please in
-          # Cargo.toml + tauri.conf.json). release-please can't cleanly rewrite Cargo.lock — a
-          # typed TOML updater reformats it (breaking --locked) and cargo strips generic-updater
-          # comments — so on a release PR the lock's own-package version lags Cargo.toml. Refresh
-          # just that one entry offline (surgical: touches only koine-studio's version line, no
-          # network, no dependency churn) so `--locked` stays a real dependency-reproducibility
-          # gate without going red on a version-only drift. That reasoning only holds when the
-          # Cargo registry cache above is warm; on a cold/partial cache (cache-hit != 'true') there
-          # is no local index for --offline to consult, so fall back to a network-allowed update
-          # (issue #1023).
-          if [ "${{ steps.cargo-cache.outputs.cache-hit }}" = "true" ]; then
-            cargo update -p koine-studio --offline
-          else
-            cargo update -p koine-studio
-          fi
-          cargo build --locked
-          cargo test --locked
-
-      # npm workspaces keep a single lockfile at the repo root, so `npm ci` must run
-      # there (it resolves `@atypical/koine-ui` via the workspace symlink, not the
-      # registry). The build script below still runs from the package subdirectory;
-      # npm's ancestor node_modules walk finds the root-installed deps normally.
-      - name: Install npm dependencies (workspace root)
-        run: npm ci
-
-      - name: Build frontend (npm)
-        working-directory: tooling/koine-studio
-        run: npm run build
-
-      # `npm test` (vitest) now runs two projects: the happy-dom unit/DOM suite AND the
-      # `storybook` project, which executes every story as a real-browser test via
-      # @storybook/addon-vitest (Playwright/Chromium). The browser binary must exist before
-      # `npm test`. Only Chromium is needed; --with-deps installs the system libs Chromium
-      # needs on Linux and is a no-op for those deps on macOS/Windows.
-      - name: Install Playwright Chromium (Storybook story tests)
-        uses: ./.github/actions/setup-playwright
-        with:
-          working-directory: tooling/koine-studio
-          cache-key-files: package-lock.json
-
-      # Issue #400: the Windows runner intermittently exhausts disk during the Vite module-transform
-      # phase, crashing vitest workers with "Error: disk full". The cause is drive placement, not
-      # total space: %TEMP% lives on C: (~30 GB free) where Vite/rolldown spill their transform temp,
-      # while the workspace drive D: has ~140 GB free. Point TEMP/TMP at D: (RUNNER_TEMP already lives
-      # there) so the transform has ample headroom. This replaces the previous approach of pruning
-      # toolchains off C:, which burned ~3.5 min per run on slow Remove-Item calls to reclaim space on
-      # the wrong drive. GITHUB_ENV makes the redirect apply to the vitest step below.
-      - name: "Redirect temp to the D: drive for headroom (Windows)"
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          "TEMP=$env:RUNNER_TEMP" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "TMP=$env:RUNNER_TEMP"  | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "TEMP/TMP redirected to $env:RUNNER_TEMP"
-          Get-PSDrive -PSProvider FileSystem |
-            Select-Object Name,
-              @{N='Used(GB)';E={[Math]::Round($_.Used/1GB,2)}},
-              @{N='Free(GB)';E={[Math]::Round($_.Free/1GB,2)}} |
-            Format-Table -AutoSize
-
-      # Frontend tests: happy-dom unit/DOM logic (project-name/zip helpers, the wizard flow)
-      # plus the Storybook story + a11y checks running headless in Chromium.
-      #
-      # `npm test` is `vitest run` (one-shot). vitest.config.ts disables the Vite dev-server file
-      # watcher for that non-interactive run so no native libuv `fs.watch` (src/win/fs-event.c) is
-      # carried into teardown — previously that watcher aborted this step on windows-latest *after*
-      # a fully green suite (`_wcsnicmp` assertion, fs-event.c:72). See #414.
-      - name: Test frontend (npm)
-        working-directory: tooling/koine-studio
-        run: npm test
+  # Desktop build/test on all 3 OSes via the reusable workflow. bundle/publish stay false in CI:
+  # this reproduces the prior inline `studio` job exactly (no installers produced or uploaded).
+  studio-desktop:
+    uses: ./.github/workflows/studio-build.yml
+    with:
+      bundle: false
+      publish: false
 
   # Validate the BROWSER edition of the studio: the Koine.Wasm compiler bundle plus the web
   # frontend (TypeScript typecheck + Vite bundle). Linux-only — the output is platform-neutral

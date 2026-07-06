@@ -216,6 +216,24 @@ gh pr view "$PR" --json state,mergedAt,mergeCommit --jq '{state, mergedAt, merge
 If the merge is rejected for a reason the loop didn't catch, do **not** reach for `--admin` — surface
 the rejection and stop.
 
+### Multi-issue PRs: keep the changelog honest
+
+release-please derives the version bump and one CHANGELOG entry **per Conventional Commit on
+`main`**. A squash-merge collapses the whole PR into a single commit, so a PR that closes several
+issues yields exactly one release-notes line and one bump — under-reporting the work (this is what
+happened with #1120 → the thin 0.246.1 notes).
+
+When squash-merging a PR that closes **more than one issue**, write the squash-commit **body** with
+one Conventional Commit line per distinct change, e.g.:
+
+    fix(emit): qualify multi-owner cross-context type references (#1091)
+
+    feat(emit): consolidate shared emitter infra onto #356 helpers (#581, #977)
+    feat(emit): migrate C#/TS/Python emitters to the unified NeedsAdd model (#902)
+
+Verify the resulting release PR lists an entry per line. If release-please does not split the body,
+prefer not bundling unrelated issues into one squash in the first place.
+
 ## Step 6 — File follow-ups via `create-issue`
 
 Landing a PR often leaves a tail of "not now, but worth doing" work. Capture it as tracked issues.
