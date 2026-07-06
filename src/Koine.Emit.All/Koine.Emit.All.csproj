@@ -1,11 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <RootNamespace>Koine.Compiler</RootNamespace>
-  </PropertyGroup>
+  <Import Project="..\Koine.Emit.props" />
 
   <!-- The built-in emitter aggregator (issue #861): owns BuiltInEmitterProviders, the single source of
        truth for which targets ship with Koine, and references every Koine.Emit.<Target> so a host gets
@@ -18,12 +13,6 @@
     <Description>The Koine emitter meta-package — references every built-in Koine.Emit.&lt;Target&gt; backend (C#, TypeScript, Python, PHP, Rust, Java, glossary, docs, AsyncAPI, OpenAPI) and exposes BuiltInEmitterProviders, the single source of truth for the targets that ship with Koine.</Description>
     <PackageTags>ddd;domain-driven-design;dsl;compiler;code-generation;koine;emitter</PackageTags>
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
-    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
-    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Koine.Emit.Common\Koine.Emit.Common.csproj" />
