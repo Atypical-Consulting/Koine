@@ -40,7 +40,9 @@ objects as structs with smart constructors returning `Result<_, DomainError>`, s
 `enum`s matched exhaustively (with `Match`/`Switch`/`from_name`/`from_value` lookups), entities and
 aggregates with invariant-checked behaviors, factories that mint identities, domain events raised into
 a `Vec`-friendly `DomainEvent` collection, query DTOs and read-model projections, and repositories as
-`trait`s; **multi-context** models compile end-to-end via `crate::<module>` qualification; depends only
+`trait`s; **multi-context** models compile end-to-end via `crate::<module>` qualification — a type
+owned by *two* contexts and referenced from a *third* resolves to a deterministic canonical owner
+(shared with the Java target) and raises a `KOI1419` warning naming the chosen owner; depends only
 on `rust_decimal` for money and `regex` for `matches`, plus `uuid` when a model uses a factory), a
 **Java 17** emitter ships (`--target java` → dependency-free, stdlib-only Java 17: value objects and
 domain events as validating `record`s with compact constructors, smart enums as Java `enum`s (with
