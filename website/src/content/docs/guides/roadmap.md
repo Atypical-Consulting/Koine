@@ -1,9 +1,9 @@
 ---
 title: "Roadmap"
-description: "An honest status report on Koine — the capabilities you can rely on today (the full DDD toolkit; C#, TypeScript, Python, PHP, and Rust emitters; and editor tooling), with per-target maturity and what comes next."
+description: "An honest status report on Koine — the capabilities you can rely on today (the full DDD toolkit; C#, TypeScript, Python, PHP, Rust, and Java emitters; and editor tooling), with per-target maturity and what comes next."
 ---
 
-Koine ships the **full tactical and strategic Domain-Driven Design toolkit**, emitters for five
+Koine ships the **full tactical and strategic Domain-Driven Design toolkit**, emitters for six
 languages, and first-class editor tooling. This page is the honest status report — organized by
 **what you can do**, with a per-target maturity matrix so you know exactly what to rely on now and
 what is still ahead. Every construct below is implemented, tested, and demonstrated in the
@@ -69,8 +69,8 @@ reference page that documents it in depth.
 ## Generate to your stack
 
 The parser and semantic model are strictly **target-agnostic**, so the same `.koi` model compiles to
-five languages. C# is the primary, most complete target; the others cover progressively more of the
-construct set. Point `koine build` at `--target csharp | typescript | python | php | rust` (see the
+six languages. C# is the primary, most complete target; the others cover progressively more of the
+construct set. Point `koine build` at `--target csharp | typescript | python | php | rust | java` (see the
 [CLI reference](/Koine/guides/cli/#koine-build)).
 
 ### Maturity by target
@@ -84,6 +84,7 @@ the proof, not a promise.
 | **Python** | Full tactical **and** strategic/CQRS layer — value objects, smart enums, entities, events, read models, queries, policies, and context-map/ACL translators | `mypy --strict` + `ast.parse` |
 | **PHP** | Full tactical **and** strategic/CQRS layer | `phpstan` + `php -l` |
 | **Rust** | Tactical core plus multi-context references and the CQRS read side — value objects, smart enums, entities/aggregates, factories, events, query DTOs, read-model projections, and repository traits | `cargo check` |
+| **Java** | Tactical core plus events/commands/repositories — value objects & events as validating `record`s, smart enums, entities/aggregates with invariant-guarded behaviors, generated IDs, a sealed `DomainEvent`, and repository interfaces; multi-context references package-qualify; dependency-free Java 17 | `javac --release 17` |
 | **TypeScript** | Tactical core — value objects, identity-equal entities, smart enums as typed `const` objects, `*Id` branded primitives | `tsc --noEmit --strict` |
 
 ## A taste of the shipped surface

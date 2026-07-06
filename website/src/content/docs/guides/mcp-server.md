@@ -18,7 +18,7 @@ matches what the CLI produces. The server lives in `src/Koine.Mcp` and speaks tw
 | Tool | What it does |
 |------|--------------|
 | `koine_validate` | Parse + full semantic checks over one or many `.koi` files; returns diagnostics with stable codes and 1-based line/column spans. The loop-closer: fix and re-validate until `ok`. |
-| `koine_compile` | Run the full pipeline through a target emitter — `csharp` (default), `typescript`, `python`, `php`, `rust`, `glossary`, `docs`, `asyncapi`, or `openapi` — and return the generated files. |
+| `koine_compile` | Run the full pipeline through a target emitter — `csharp` (default), `typescript`, `python`, `php`, `rust`, `java`, `glossary`, `docs`, `asyncapi`, or `openapi` — and return the generated files. |
 | `koine_coverage` | Report which of a model's declared types a chosen `target` actually emits — every value / entity / aggregate / enum / event / read model / query, each `Covered` or `Missing`, plus `Total` / `Covered` / `IsComplete` rollups — so an agent can confirm a target fully realizes the model. Accepts the same targets as `koine_compile`. |
 | `koine_format` | Canonically format a single `.koi` source string. |
 | `koine_reference` | A compact cheatsheet of every construct, the type system, and the expression/invariant sublanguage. Call with no topic for the whole thing, or a topic slug (e.g. `value`, `aggregate`, `expressions`, `context-map`) for one section. |

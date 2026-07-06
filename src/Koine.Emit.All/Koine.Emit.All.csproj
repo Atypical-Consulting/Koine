@@ -9,13 +9,13 @@
 
   <!-- The built-in emitter aggregator (issue #861): owns BuiltInEmitterProviders, the single source of
        truth for which targets ship with Koine, and references every Koine.Emit.<Target> so a host gets
-       "one reference, all nine targets" (the meta-package preserving the #69 platform experience).
+       "one reference, all targets" (the meta-package preserving the #69 platform experience).
        Assembly name (Koine.Emit.All) != namespace (Koine.Compiler.Emit) so consumer churn is
        reference-only. -->
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Koine.Emit.All</PackageId>
-    <Description>The Koine emitter meta-package — references every built-in Koine.Emit.&lt;Target&gt; backend (C#, TypeScript, Python, PHP, Rust, glossary, docs, AsyncAPI, OpenAPI) and exposes BuiltInEmitterProviders, the single source of truth for the targets that ship with Koine.</Description>
+    <Description>The Koine emitter meta-package — references every built-in Koine.Emit.&lt;Target&gt; backend (C#, TypeScript, Python, PHP, Rust, Java, glossary, docs, AsyncAPI, OpenAPI) and exposes BuiltInEmitterProviders, the single source of truth for the targets that ship with Koine.</Description>
     <PackageTags>ddd;domain-driven-design;dsl;compiler;code-generation;koine;emitter</PackageTags>
   </PropertyGroup>
 
@@ -32,6 +32,7 @@
     <ProjectReference Include="..\Koine.Emit.Python\Koine.Emit.Python.csproj" />
     <ProjectReference Include="..\Koine.Emit.Php\Koine.Emit.Php.csproj" />
     <ProjectReference Include="..\Koine.Emit.Rust\Koine.Emit.Rust.csproj" />
+    <ProjectReference Include="..\Koine.Emit.Java\Koine.Emit.Java.csproj" />
     <ProjectReference Include="..\Koine.Emit.Glossary\Koine.Emit.Glossary.csproj" />
     <ProjectReference Include="..\Koine.Emit.Docs\Koine.Emit.Docs.csproj" />
     <ProjectReference Include="..\Koine.Emit.AsyncApi\Koine.Emit.AsyncApi.csproj" />
