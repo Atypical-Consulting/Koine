@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Koine — Studio Chrome v3 (center + source control)</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: radial-gradient(ellipse 70% 60% at 50% 0%, color-mix(in srgb, var(--koi-accent) 8%, transparent), transparent 60%), #070a0e;
+    font-family: var(--koi-font-body); color: var(--koi-fg); -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column; align-items: center; padding: 30px 24px 38px; gap: 20px;
+  }
+  .caption { text-align: center; max-width: 780px; }
+  .caption .eyebrow { font-family: var(--koi-font-mono); font-size: var(--koi-text-xs); letter-spacing: 0.22em; text-transform: uppercase; color: var(--koi-accent); margin: 0 0 8px; }
+  .caption h1 { font-family: var(--koi-font-display); font-weight: 640; font-size: 21px; letter-spacing: -0.02em; margin: 0 0 6px; }
+  .caption p { margin: 0; font-size: 13px; color: var(--koi-muted); }
+
+  .studio { width: min(1360px, 98vw); height: min(852px, 86vh); min-height: 600px; background: var(--koi-paper); border: 1px solid var(--koi-line); border-radius: 12px; box-shadow: var(--koi-shadow); display: flex; flex-direction: column; overflow: hidden; }
+  .ico { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ===================== TOP BAR ===================== */
+  .top { flex: none; background: linear-gradient(180deg, var(--koi-paper-2), color-mix(in srgb, var(--koi-paper-2) 80%, var(--koi-paper))); border-bottom: 1px solid var(--koi-line); position: relative; }
+  .top::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--koi-accent-grad); opacity: 0.5; }
+  .row1 { display: flex; align-items: center; gap: 14px; padding: 9px 14px; }
+  .brand { display: flex; align-items: center; gap: 10px; flex: none; border: 0; background: transparent; padding: 4px 6px; margin-left: -2px; border-radius: var(--koi-radius-sm); cursor: pointer; }
+  .brand:hover { background: var(--koi-surface); }
+  .brand-logo { width: 28px; height: 28px; border-radius: 8px; flex: none; background: var(--koi-accent); display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px color-mix(in srgb, var(--koi-accent) 30%, transparent); }
+  .brand-text { display: flex; flex-direction: column; line-height: 1; gap: 2px; }
+  .brand-name { font-family: var(--koi-font-display); font-weight: 700; font-size: 15px; letter-spacing: -0.01em; color: var(--koi-fg); }
+  .brand-eyebrow { font-family: var(--koi-font-mono); font-size: 9px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.26em; color: var(--koi-muted); }
+  .iconset { display: flex; gap: 2px; }
+  .t-ico { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--koi-radius-sm); background: transparent; border: 1px solid transparent; color: var(--koi-muted); cursor: pointer; }
+  .t-ico:hover { background: var(--koi-surface); color: var(--koi-fg); }
+  .cmd { flex: 1; max-width: 560px; margin: 0 auto; display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 12px; border-radius: var(--koi-radius-sm); background: color-mix(in srgb, var(--koi-paper) 60%, transparent); border: 1px solid var(--koi-line); color: var(--koi-muted); font-size: 13px; cursor: text; }
+  .cmd:hover { border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line)); }
+  .cmd .kbd { margin-left: auto; font-family: var(--koi-font-mono); font-size: 11px; color: var(--koi-muted); border: 1px solid var(--koi-line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; }
+  .right { display: flex; align-items: center; gap: 9px; flex: none; }
+  .emit { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 11px; border-radius: var(--koi-radius-sm); border: 1px solid var(--koi-line); background: color-mix(in srgb, var(--koi-paper) 60%, transparent); color: var(--koi-ink-soft); font-size: 12.5px; cursor: pointer; }
+  .emit .lbl { color: var(--koi-muted); }
+  .emit .lang-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--lang-csharp); flex: none; }
+  .generate { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 15px; border-radius: var(--koi-radius-sm); background: var(--koi-accent); color: var(--koi-on-accent); font-weight: 600; font-size: 12.5px; border: 0; cursor: pointer; box-shadow: 0 2px 12px color-mix(in srgb, var(--koi-accent) 30%, transparent); }
+
+  /* ===================== BODY ===================== */
+  .body { flex: 1; display: flex; min-height: 0; }
+  .leftrail { width: 292px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--koi-line); min-height: 0; }
+  .pane-frame { width: 100%; border: 0; display: block; background: var(--koi-paper); }
+  .rail-tabs { height: 57px; flex: none; border-bottom: 1px solid var(--koi-line); }
+  .rail-outline { flex: 1; min-height: 0; }
+  .editor { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--koi-paper); }
+
+  /* ---------- deck / surface bar ---------- */
+  .deckbar { flex: none; display: flex; align-items: center; gap: 16px; padding: 11px 16px 10px; background: var(--koi-paper); border-bottom: 1px solid var(--koi-line); }
+  .deck-tabs { display: flex; align-items: center; gap: 6px; }
+  .deck-tab { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 13px; border-radius: var(--koi-radius-sm); background: transparent; border: 1px solid transparent; color: var(--koi-muted); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .deck-tab:hover { color: var(--koi-fg); background: var(--koi-surface); }
+  .deck-tab .ico { width: 15px; height: 15px; }
+  .deck-tab.sec { background: var(--koi-surface); color: var(--koi-fg); }
+  .deck-tab.on { background: color-mix(in srgb, var(--koi-accent) 20%, transparent); color: var(--koi-accent); border-color: color-mix(in srgb, var(--koi-accent) 45%, transparent); }
+  .deck-hints { margin-left: auto; display: flex; align-items: center; gap: 9px; font-size: 11.5px; color: var(--koi-muted); white-space: nowrap; }
+  .deck-hints .grp { display: inline-flex; align-items: center; gap: 5px; }
+  .deck-hints .dot { color: color-mix(in srgb, var(--koi-muted) 55%, transparent); }
+  .kchip { font-family: var(--koi-font-mono); font-size: 10.5px; color: var(--koi-ink-soft); background: color-mix(in srgb, var(--koi-paper) 60%, transparent); border: 1px solid var(--koi-line); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; min-width: 17px; height: 18px; display: inline-flex; align-items: center; justify-content: center; }
+  .kchip.wide { padding: 0 6px; }
+  .deck-hints .rng { color: color-mix(in srgb, var(--koi-muted) 70%, transparent); margin: 0 -2px; }
+
+  /* ---------- code surface (card) ---------- */
+  .center-body { flex: 1; min-height: 0; display: flex; padding: 0; }
+  .surface { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--koi-paper); }
+  .surface-head { flex: none; display: flex; align-items: center; gap: 12px; height: 42px; padding: 0 14px; border-bottom: 1px solid var(--koi-line); background: color-mix(in srgb, var(--koi-paper-2) 50%, var(--koi-paper)); }
+  .surface-title { display: inline-flex; align-items: center; gap: 8px; font-family: var(--koi-font-display); font-weight: 640; font-size: 13.5px; color: var(--koi-fg); }
+  .surface-title .ico { width: 15px; height: 15px; color: var(--koi-muted); }
+  .facet { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: var(--koi-radius-sm); background: color-mix(in srgb, var(--koi-paper) 55%, transparent); border: 1px solid var(--koi-line); }
+  .facet button { height: 24px; padding: 0 11px; border: 0; background: transparent; color: var(--koi-muted); border-radius: var(--koi-radius-xs); font: inherit; font-size: 11.5px; cursor: pointer; }
+  .facet button.on { background: var(--koi-surface); color: var(--koi-fg); }
+  .facet button:not(.on):hover { color: var(--koi-fg); }
+  .surface-file { margin-left: auto; font-family: var(--koi-font-mono); font-size: 12px; color: var(--koi-muted); }
+
+  .code { flex: 1; min-height: 0; overflow: auto; padding: 12px 0; font-family: var(--koi-font-mono); font-size: 13px; line-height: 1.66; background: var(--koi-paper); }
+  .code table { border-collapse: collapse; width: 100%; }
+  .code tr.active td { background: color-mix(in srgb, var(--koi-accent) 9%, transparent); }
+  .code tr.active td.ln { color: var(--koi-accent); box-shadow: inset 2px 0 0 var(--koi-accent); }
+  .code td.ln { width: 52px; text-align: right; padding-right: 18px; user-select: none; color: color-mix(in srgb, var(--koi-muted) 55%, transparent); font-size: 12px; vertical-align: top; }
+  .code td.src { white-space: pre; padding-right: 18px; }
+  .code .cursor { display: inline-block; width: 1px; margin: 0 -0.5px; background: var(--koi-accent); animation: caret 1.1s steps(1) infinite; }
+  @keyframes caret { 50% { opacity: 0; } }
+  .k { color: var(--koi-hl-keyword); } .t { color: var(--koi-hl-type); } .s { color: var(--koi-hl-string); }
+  .n { color: var(--koi-hl-number); } .c { color: var(--koi-hl-comment); font-style: italic; } .op { color: var(--koi-ink-soft); }
+  .pr { color: var(--koi-hl-sem-property); } .pu { color: var(--koi-muted); }
+
+  /* ---------- diagnostics strip ---------- */
+  .diag { flex: none; height: 34px; display: flex; align-items: stretch; gap: 4px; padding: 0 8px; border-top: 1px solid var(--koi-line); background: var(--koi-paper-2); }
+  .diag-collapse { align-self: center; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 0; color: var(--koi-muted); cursor: pointer; border-radius: var(--koi-radius-xs); }
+  .diag-collapse:hover { background: var(--koi-surface); color: var(--koi-fg); }
+  .diag-tab { display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; background: transparent; border: 0; color: var(--koi-muted); font: inherit; font-family: var(--koi-font-mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; border-bottom: 2px solid transparent; }
+  .diag-tab:hover { color: var(--koi-fg); }
+  .diag-tab.on { color: var(--koi-fg); border-bottom-color: var(--koi-accent); }
+  .diag-clean { margin-left: auto; align-self: center; display: inline-flex; align-items: center; gap: 6px; font-family: var(--koi-font-mono); font-size: 11.5px; color: var(--koi-hl-string); }
+  .diag-clean::before { content: ''; width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+
+  /* ===================== RIGHT: source control + strip ===================== */
+  .rightwrap { flex: none; display: flex; min-height: 0; }
+  .right { width: 320px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--koi-line); min-height: 0; background: var(--koi-paper); }
+  .right-header { flex: none; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 14px; background: var(--koi-paper-2); border-bottom: 1px solid var(--koi-line); }
+  .right-title { margin: 0; font-family: var(--koi-font-body); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--koi-muted); white-space: nowrap; }
+  .rh-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+  .right-header .hdr-ico { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--koi-radius-sm); color: var(--koi-muted); background: transparent; border: 1px solid transparent; cursor: pointer; }
+  .right-header .hdr-ico:hover { background: var(--koi-surface); color: var(--koi-fg); }
+  .right-header .hdr-ico .ico { width: 15px; height: 15px; }
+  .right-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 14px 24px; }
+
+  /* ---- source control ---- */
+  /* branch + sync */
+  .sc-branchbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .sc-branch { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: var(--koi-radius-sm); border: 1px solid var(--koi-line); background: var(--koi-surface); color: var(--koi-fg); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; text-align: left; }
+  .sc-branch:hover { border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line)); }
+  .sc-branch .bico { width: 15px; height: 15px; color: var(--koi-muted); flex: none; }
+  .sc-branch .bname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sc-branch .caret { width: 12px; height: 12px; color: var(--koi-muted); flex: none; }
+  .sc-sync { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 10px; border-radius: var(--koi-radius-sm); border: 1px solid var(--koi-line); background: transparent; color: var(--koi-ink-soft); font: inherit; font-family: var(--koi-font-mono); font-size: 11.5px; cursor: pointer; }
+  .sc-sync:hover { background: var(--koi-surface); color: var(--koi-fg); border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line)); }
+  .sc-sync .ico { width: 13px; height: 13px; }
+  .sc-sync .ahead { color: var(--koi-accent); }
+  .sc-sync i { font-style: normal; margin-right: 2.5px; }
+  .sc-sync .sep { opacity: 0.4; }
+
+  /* commit composer */
+  .sc-composer { display: flex; flex-direction: column; margin-bottom: 20px; border: 1px solid var(--koi-line); border-radius: var(--koi-radius-md, 10px); background: var(--koi-surface); overflow: hidden; transition: border-color var(--koi-dur-fast, .12s) ease, box-shadow var(--koi-dur-fast, .12s) ease; }
+  .sc-composer:focus-within { border-color: var(--koi-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--koi-accent) 15%, transparent); }
+  .sc-composer textarea { font: inherit; font-size: 13px; color: var(--koi-fg); background: transparent; border: 0; padding: 10px 11px 8px; resize: none; min-height: 58px; line-height: 1.5; }
+  .sc-composer textarea:focus { outline: none; }
+  .sc-composer textarea::placeholder { color: var(--koi-muted); }
+  .sc-composer-foot { display: flex; align-items: center; gap: 8px; padding: 8px; border-top: 1px solid color-mix(in srgb, var(--koi-line) 70%, transparent); background: color-mix(in srgb, var(--koi-paper) 45%, transparent); }
+  .sc-hint { font-family: var(--koi-font-mono); font-size: 10.5px; color: var(--koi-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sc-hint kbd { font: inherit; color: var(--koi-ink-soft); }
+  .sc-commit-split { flex: 1; width: 100%; display: flex; align-items: stretch; border-radius: var(--koi-radius-sm); overflow: hidden; box-shadow: 0 1px 8px color-mix(in srgb, var(--koi-accent) 22%, transparent); }
+  .sc-commit-btn { flex: 1; position: relative; height: 30px; padding: 0 12px; border: 0; background: var(--koi-accent); color: var(--koi-on-accent); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; }
+  .sc-kbd { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 3px; }
+  .sc-kbd kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 4px; font-family: var(--koi-font-mono); font-size: 10px; line-height: 1; color: var(--koi-on-accent); background: color-mix(in srgb, var(--koi-on-accent) 15%, transparent); border: 1px solid color-mix(in srgb, var(--koi-on-accent) 26%, transparent); }
+  .sc-kbd .ret .ico { width: 10px; height: 10px; }
+  .sc-commit-btn:hover { background: color-mix(in srgb, var(--koi-accent) 88%, #fff); }
+  .sc-commit-caret { width: 26px; border: 0; border-left: 1px solid color-mix(in srgb, var(--koi-on-accent) 25%, transparent); background: var(--koi-accent); color: var(--koi-on-accent); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+  .sc-commit-caret:hover { background: color-mix(in srgb, var(--koi-accent) 88%, #fff); }
+  .sc-commit-caret .ico { width: 12px; height: 12px; }
+  .sc-commit-split.disabled { box-shadow: none; opacity: 0.5; pointer-events: none; }
+
+  /* groups */
+  .sc-group { margin-bottom: 18px; }
+  .sc-group.staged[hidden] { display: none; }
+  .sc-group-head { display: flex; align-items: center; gap: 4px; margin: 0 -8px 6px; padding: 2px 8px; }
+  .sc-group-toggle { flex: 1; display: inline-flex; align-items: center; gap: 7px; background: none; border: 0; padding: 3px 0; cursor: pointer; font-family: var(--koi-font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--koi-muted); }
+  .sc-group-toggle:hover { color: var(--koi-fg); }
+  .sc-group-toggle .chev { width: 11px; height: 11px; flex: none; transition: transform var(--koi-dur-fast, .12s) ease; }
+  .sc-group.collapsed .chev { transform: rotate(-90deg); }
+  .sc-group.collapsed .sc-files, .sc-group.collapsed .sc-log { display: none; }
+  .sc-group-toggle .cnt { min-width: 16px; height: 15px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: var(--koi-surface); color: var(--koi-ink-soft); font-size: 10px; }
+  .sc-group.staged .sc-group-toggle .cnt { background: color-mix(in srgb, var(--koi-accent) 20%, transparent); color: var(--koi-accent); }
+  .sc-group-actions { display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity var(--koi-dur-fast, .12s) ease; }
+  .sc-group-head:hover .sc-group-actions { opacity: 1; }
+  .sc-gact { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--koi-radius-xs); background: none; border: 0; color: var(--koi-muted); cursor: pointer; }
+  .sc-gact:hover { background: var(--koi-surface); color: var(--koi-fg); }
+  .sc-gact.danger:hover { color: var(--koi-error); }
+  .sc-gact .ico { width: 14px; height: 14px; }
+
+  .sc-files { list-style: none; margin: 0; padding: 0; }
+  .sc-file { display: flex; align-items: center; gap: 8px; margin: 0 -8px; padding: 5px 8px; border-radius: var(--koi-radius-sm); cursor: default; }
+  .sc-file:hover { background: color-mix(in srgb, var(--koi-fg) 6%, transparent); }
+  .sc-glyph { flex: none; width: 14px; text-align: center; font-family: var(--koi-font-mono); font-weight: 700; font-size: 12px; }
+  .sc-glyph.modified { color: var(--koi-accent); }
+  .sc-glyph.added { color: var(--koi-hl-string); }
+  .sc-glyph.deleted { color: var(--koi-error); }
+  .sc-file-open { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; overflow: hidden; }
+  .sc-name { color: var(--koi-fg); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; max-width: 100%; }
+  .sc-file-open:hover .sc-name { color: var(--koi-accent); }
+  .sc-dir { color: var(--koi-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sc-stat { flex: none; font-family: var(--koi-font-mono); font-size: 10.5px; display: inline-flex; gap: 5px; }
+  .sc-file:hover .sc-stat { display: none; }
+  .sc-stat .add { color: var(--koi-hl-string); }
+  .sc-stat .del { color: var(--koi-error); }
+  .sc-row-actions { flex: none; display: none; align-items: center; gap: 1px; }
+  .sc-file:hover .sc-row-actions { display: inline-flex; }
+  .sc-ract { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--koi-radius-xs); background: none; border: 0; color: var(--koi-muted); cursor: pointer; }
+  .sc-ract:hover { background: var(--koi-surface); color: var(--koi-fg); }
+  .sc-ract.danger:hover { color: var(--koi-error); }
+  .sc-ract.stage:hover { color: var(--koi-accent); }
+  .sc-ract .ico { width: 14px; height: 14px; }
+
+  /* recent commits */
+  .sc-viewall { background: none; border: 0; color: var(--koi-accent); font: inherit; font-size: 11px; cursor: pointer; padding: 3px 4px; border-radius: var(--koi-radius-xs); }
+  .sc-viewall:hover { background: color-mix(in srgb, var(--koi-accent) 12%, transparent); }
+  .sc-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .sc-log-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px; margin: 0 -8px; border-radius: var(--koi-radius-sm); position: relative; }
+  .sc-log-item:hover { background: color-mix(in srgb, var(--koi-fg) 5%, transparent); }
+  .sc-avatar { flex: none; width: 24px; height: 24px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-family: var(--koi-font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.02em; color: var(--koi-accent); background: color-mix(in srgb, var(--koi-accent) 18%, transparent); }
+  .sc-log-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .sc-log-msg { font-size: 12.5px; color: var(--koi-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sc-log-meta { font-size: 11px; color: var(--koi-muted); display: inline-flex; align-items: center; gap: 6px; }
+  .sc-log-meta code { font-family: var(--koi-font-mono); font-size: 10.5px; color: color-mix(in srgb, var(--koi-accent) 80%, var(--koi-muted)); }
+  .sc-log-meta .sep { opacity: 0.5; }
+
+  /* right strip */
+  .rstrip { width: 42px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; background: var(--koi-paper-2); border-left: 1px solid var(--koi-line); }
+  .rstrip-btn { position: relative; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; background: transparent; color: var(--koi-muted); border: 1px solid transparent; border-radius: var(--koi-radius-sm); cursor: pointer; }
+  .rstrip-btn:hover { background: var(--koi-surface); color: var(--koi-fg); border-color: var(--koi-line); }
+  .rstrip-btn.on { color: var(--koi-fg); background: color-mix(in srgb, var(--koi-accent) 16%, transparent); }
+  .rstrip-btn.on::before { content: ''; position: absolute; left: -1px; top: 50%; transform: translateY(-50%); width: 2px; height: 17px; border-radius: 2px; background: var(--koi-accent-grad); }
+  .rstrip .ico { width: 16px; height: 16px; }
+  .rstrip-sep { width: 18px; height: 1px; background: var(--koi-line); margin: 4px 0; }
+
+  /* ===================== STATUS BAR ===================== */
+  .statusbar { flex: none; height: 30px; display: flex; align-items: center; padding: 0 4px; background: var(--koi-paper-2); border-top: 1px solid var(--koi-line); color: var(--koi-muted); font-family: var(--koi-font-mono); font-size: 11px; white-space: nowrap; overflow: hidden; }
+  .sb-seg { display: inline-flex; align-items: center; gap: 6px; height: 100%; padding: 0 10px; }
+  .sb-seg.btn { cursor: pointer; }
+  .sb-seg.btn:hover { background: var(--koi-surface); color: var(--koi-fg); }
+  .sb-seg .ico { width: 12px; height: 12px; }
+  .sb-err { color: var(--koi-muted); }
+  .sb-warn { color: var(--koi-muted); }
+  .sb-push { margin-left: auto; }
+  .sb-emit .lang-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--lang-csharp); }
+  .sb-ready::before { content: ''; width: 7px; height: 7px; border-radius: 999px; background: var(--koi-hl-string); }
+  .sb-ctx .dot { width: 8px; height: 8px; border-radius: 3px; background: var(--koi-ddd-aggregate); }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="kmark" viewBox="0 0 120 120">
+    <g fill="none" stroke="currentColor" stroke-linejoin="round" stroke-linecap="round">
+      <polygon points="106,60 83,99.84 37,99.84 14,60 37,20.16 83,20.16" stroke-width="6"/>
+      <g stroke-width="7.5"><path d="M48 36 V84"/><path d="M48 60 L78 36"/><path d="M48 60 L78 84"/></g>
+    </g>
+  </symbol>
+</defs></svg>
+
+<div class="caption">
+  <p class="eyebrow">Koine · studio chrome · v3</p>
+  <h1>Refined editor deck &amp; Source Control rail</h1>
+  <p>The center column rebuilt as a surface deck — Overview / Canvas / Code / Output / Docs with focus-key hints — over a titled Code surface and a mono diagnostics strip. The right rail carries the git Source Control panel with its tool-window switcher spine.</p>
+</div>
+
+<div class="studio">
+  <!-- ============ TOP BAR ============ -->
+  <header class="top">
+    <div class="row1">
+      <button class="brand" title="Back to the start screen">
+        <span class="brand-logo"><svg width="18" height="18" viewBox="0 0 120 120" style="color:var(--koi-on-accent)"><use href="#kmark"/></svg></span>
+        <span class="brand-text"><span class="brand-name">Koine</span><span class="brand-eyebrow">Studio</span></span>
+      </button>
+      <div class="iconset">
+        <button class="t-ico" title="New"><svg class="ico" width="15" height="15" viewBox="0 0 16 16"><path d="M8 3.4v9.2M3.4 8h9.2"/></svg></button>
+        <button class="t-ico" title="Open"><svg class="ico" width="15" height="15" viewBox="0 0 16 16"><path d="M2.2 4.3c0-.7.5-1.3 1.2-1.3h2.9l1.3 1.6h4.9c.7 0 1.3.6 1.3 1.3v6c0 .7-.6 1.2-1.3 1.2H3.4c-.7 0-1.2-.5-1.2-1.2z"/></svg></button>
+        <button class="t-ico" title="Undo"><svg class="ico" width="15" height="15" viewBox="0 0 16 16"><path d="M6.5 3 3.5 6l3 3M3.6 6H10a3.5 3.5 0 0 1 0 7H7"/></svg></button>
+        <button class="t-ico" title="Redo"><svg class="ico" width="15" height="15" viewBox="0 0 16 16"><path d="M9.5 3 12.5 6l-3 3M12.4 6H6a3.5 3.5 0 0 0 0 7h3"/></svg></button>
+      </div>
+      <div class="cmd"><svg class="ico" width="14" height="14" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg>Search commands, symbols, files…<span class="kbd">⌘K</span></div>
+      <div class="right" style="align-items: center; flex-direction: row; justify-content: flex-end; background-color: #151A22; width: auto; border: 0; margin-right: -8px;">
+        <button class="emit" title="Emit target language"><span class="lang-dot"></span><span class="lbl">Emit</span> C#<svg class="ico" width="11" height="11" viewBox="0 0 16 16" style="opacity:.7"><path d="M4 6.5 8 10 12 6.5"/></svg></button>
+        <button class="generate"><svg class="ico" width="14" height="14" viewBox="0 0 16 16"><path d="M8 2.6v6.8M5.2 6.8 8 9.6l2.8-2.8M3.4 12.6h9.2"/></svg>Generate</button>
+        <button class="t-ico" title="Workspace settings"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" style="stroke-width:1.7"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ BODY ============ -->
+  <div class="body">
+    <div class="leftrail">
+      <iframe class="pane-frame rail-tabs" src="railframes/LeftRail.html" title="Left rail" scrolling="no"></iframe>
+      <iframe class="pane-frame rail-outline" src="railframes/ModelOutlinePanel.html" title="Model outline"></iframe>
+    </div>
+
+    <!-- ---- CENTER ---- -->
+    <div class="editor">
+      <div class="deckbar">
+        <div class="deck-tabs" role="tablist" aria-label="Editor surface">
+          <button class="deck-tab sec"><svg class="ico" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.4" height="4.4" rx="1"/><rect x="9.1" y="2.5" width="4.4" height="4.4" rx="1"/><rect x="2.5" y="9.1" width="4.4" height="4.4" rx="1"/><rect x="9.1" y="9.1" width="4.4" height="4.4" rx="1"/></svg>Overview</button>
+          <button class="deck-tab"><svg class="ico" viewBox="0 0 16 16"><circle cx="4" cy="4" r="1.7"/><circle cx="4" cy="12" r="1.7"/><circle cx="12" cy="8" r="1.7"/><path d="M4 5.6v4.8M5.5 4h3M5.5 12h3M5.6 11.2 10.4 8.8M5.6 4.8 10.4 7.2"/></svg>Canvas</button>
+          <button class="deck-tab on"><svg class="ico" viewBox="0 0 16 16"><path d="M5.5 5 2.5 8l3 3M10.5 5l3 3-3 3"/></svg>Code</button>
+          <button class="deck-tab"><svg class="ico" viewBox="0 0 16 16"><rect x="2.2" y="3" width="11.6" height="10" rx="1.6"/><path d="M4.6 6.4 6.8 8.4 4.6 10.4M8 10.4h3"/></svg>Output</button>
+          <button class="deck-tab"><svg class="ico" viewBox="0 0 16 16"><path d="M4 2.4h5l3 3v8H4z"/><path d="M9 2.4v3h3M6 8h4M6 10.4h4"/></svg>Docs</button>
+        </div>
+        <div class="deck-hints">
+          <span class="grp"><span class="kchip wide">Esc</span> overview</span>
+          <span class="dot">·</span>
+          <span class="grp"><span class="kchip">1</span><span class="rng">–</span><span class="kchip">4</span> focus</span>
+          <span class="dot">·</span>
+          <span class="grp"><span class="kchip">⌘</span><span class="rng">+</span><span class="kchip">1</span><span class="rng">–</span><span class="kchip">4</span> beside</span>
+        </div>
+      </div>
+
+      <div class="center-body">
+        <div class="surface">
+        <div class="surface-head">
+          <span class="surface-title"><svg class="ico" viewBox="0 0 16 16"><path d="M5.5 5 2.5 8l3 3M10.5 5l3 3-3 3"/></svg>Code</span>
+          <span class="facet"><button class="on">Editor</button><button>Scenarios</button></span>
+          <span class="surface-file">ubiquitous.koi</span>
+        </div>
+        <div class="code">
+          <table>
+            <tr><td class="ln">1</td><td class="src"><span class="k">context</span> <span class="t">Ordering</span> <span class="pu">{</span></td></tr>
+            <tr><td class="ln">2</td><td class="src">  <span class="k">aggregate</span> <span class="t">Sales</span> <span class="k">root</span> <span class="t">Order</span> <span class="pu">{</span></td></tr>
+            <tr><td class="ln">3</td><td class="src">    <span class="k">enum</span> <span class="t">OrderStatus</span> <span class="pu">{</span> <span class="t">Draft</span><span class="pu">,</span> <span class="t">Placed</span><span class="pu">,</span> <span class="t">Shipped</span><span class="pu">,</span> <span class="t">Cancelled</span> <span class="pu">}</span></td></tr>
+            <tr><td class="ln">4</td><td class="src"></td></tr>
+            <tr><td class="ln">5</td><td class="src">    <span class="k">value</span> <span class="t">OrderLine</span> <span class="pu">{</span></td></tr>
+            <tr><td class="ln">6</td><td class="src">      <span class="pr">product</span><span class="pu">:</span>   <span class="t">ProductId</span></td></tr>
+            <tr><td class="ln">7</td><td class="src">      <span class="pr">quantity</span><span class="pu">:</span>  <span class="t">Int</span></td></tr>
+            <tr><td class="ln">8</td><td class="src">      <span class="pr">unitPrice</span><span class="pu">:</span> <span class="t">Int</span></td></tr>
+            <tr class="active"><td class="ln">9</td><td class="src">      <span class="pr">subtotal</span><span class="pu">:</span>  <span class="t">Decimal</span> <span class="op">=</span> <span class="pr">unitPrice</span> <span class="op">*</span> <span class="pr">quantity</span><span class="cursor">&nbsp;</span></td></tr>
+            <tr><td class="ln">10</td><td class="src"></td></tr>
+            <tr><td class="ln">11</td><td class="src">      <span class="k">invariant</span> <span class="pr">quantity</span> <span class="op">&gt;</span> <span class="n">0</span> <span class="s">"Quantity must be at least one"</span></td></tr>
+            <tr><td class="ln">12</td><td class="src">      <span class="k">invariant</span> <span class="pr">unitPrice</span> <span class="op">&#8805;</span> <span class="n">0</span> <span class="s">"Unit price cannot be negative"</span></td></tr>
+            <tr><td class="ln">13</td><td class="src">    <span class="pu">}</span></td></tr>
+            <tr><td class="ln">14</td><td class="src"></td></tr>
+            <tr><td class="ln">15</td><td class="src">    <span class="k">entity</span> <span class="t">Order</span> <span class="k">identified by</span> <span class="t">OrderId</span> <span class="pu">{</span></td></tr>
+            <tr><td class="ln">16</td><td class="src">      <span class="pr">lines</span><span class="pu">:</span>  <span class="t">List</span><span class="pu">&lt;</span><span class="t">OrderLine</span><span class="pu">&gt;</span></td></tr>
+            <tr><td class="ln">17</td><td class="src">      <span class="pr">status</span><span class="pu">:</span> <span class="t">OrderStatus</span> <span class="op">=</span> <span class="t">Draft</span></td></tr>
+            <tr><td class="ln">18</td><td class="src"></td></tr>
+            <tr><td class="ln">19</td><td class="src">      <span class="k">states</span> <span class="pr">status</span> <span class="pu">{</span></td></tr>
+            <tr><td class="ln">20</td><td class="src">        <span class="t">Draft</span> <span class="op">→</span> <span class="t">Placed</span></td></tr>
+            <tr><td class="ln">21</td><td class="src">        <span class="t">Placed</span> <span class="op">→</span> <span class="t">Shipped</span></td></tr>
+            <tr><td class="ln">22</td><td class="src">        <span class="t">Placed</span> <span class="op">→</span> <span class="t">Cancelled</span></td></tr>
+            <tr><td class="ln">23</td><td class="src">      <span class="pu">}</span></td></tr>
+            <tr><td class="ln">24</td><td class="src">    <span class="pu">}</span></td></tr>
+            <tr><td class="ln">25</td><td class="src">  <span class="pu">}</span></td></tr>
+            <tr><td class="ln">26</td><td class="src"><span class="pu">}</span></td></tr>
+            <tr><td class="ln">27</td><td class="src"></td></tr>
+          </table>
+        </div>
+        </div>
+      </div>
+
+      <div class="diag">
+        <button class="diag-collapse" title="Collapse panel"><svg class="ico" width="14" height="14" viewBox="0 0 16 16"><path d="M6.5 4 10.5 8l-4 4"/></svg></button>
+        <button class="diag-tab on">Problems</button>
+        <button class="diag-tab">Events</button>
+        <button class="diag-tab">Relationships</button>
+        <button class="diag-tab">Terminal</button>
+        <button class="diag-tab">Review</button>
+        <span class="diag-clean">clean</span>
+      </div>
+    </div>
+
+    <!-- ---- RIGHT: source control + switcher spine ---- -->
+    <div class="rightwrap">
+      <div class="right">
+        <div class="right-header" style="width: 100%;">
+          <h2 class="right-title">Source Control</h2>
+          <div class="rh-actions">
+            <button class="hdr-ico" title="Refresh" data-act="refresh"><svg class="ico" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2.5V5h-2.5"/></svg></button>
+            <button class="hdr-ico" title="Views and more actions"><svg class="ico" viewBox="0 0 16 16"><circle cx="8" cy="3.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="8" cy="12.5" r="1.1" fill="currentColor" stroke="none"/></svg></button>
+          </div>
+        </div>
+        <div class="right-body" style="width: 100%;">
+          <div class="sc-branchbar">
+            <button class="sc-branch" title="Checkout branch…">
+              <svg class="ico bico" viewBox="0 0 16 16"><circle cx="4.5" cy="4" r="1.7"/><circle cx="4.5" cy="12" r="1.7"/><circle cx="11.5" cy="6.2" r="1.7"/><path d="M4.5 5.7v4.6M4.5 8.5h4a2.5 2.5 0 0 0 2.5-2.5v-.2"/></svg>
+              <span class="bname">main</span>
+              <svg class="ico caret" viewBox="0 0 16 16"><path d="M5 6.5 8 4l3 2.5M5 9.5 8 12l3-2.5"/></svg>
+            </button>
+            <button class="sc-sync" title="Push 2 commits to origin/main">
+              <span class="ahead"><i>↑</i>2</span><span class="sep">·</span><span class="behind"><i>↓</i>0</span>
+              <svg class="ico" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2.5V5h-2.5"/></svg>
+            </button>
+          </div>
+
+          <div class="sc-composer">
+            <textarea id="sc-msg" placeholder="Message (what changed and why)" rows="2"></textarea>
+            <div class="sc-composer-foot">
+              <div class="sc-commit-split disabled" id="sc-commit-split">
+                <button class="sc-commit-btn" id="sc-commit-btn"><span class="lbl">Commit to main</span><span class="sc-kbd"><kbd>⌘</kbd><kbd class="ret"><svg class="ico" viewBox="0 0 16 16"><path d="M12.4 4.6v2.7a1.6 1.6 0 0 1-1.6 1.6H4.6M6.9 6.9 4.4 9l2.5 2.1"/></svg></kbd></span></button>
+                <button class="sc-commit-caret" title="Commit options"><svg class="ico" viewBox="0 0 16 16"><path d="M4 6.5 8 10 12 6.5"/></svg></button>
+              </div>
+            </div>
+          </div>
+
+          <section class="sc-group staged collapsed" id="sc-staged" hidden>
+            <div class="sc-group-head">
+              <button class="sc-group-toggle" data-toggle><svg class="ico chev" viewBox="0 0 16 16"><path d="M4 6.5 8 10 12 6.5"/></svg>Staged<span class="cnt" id="sc-staged-cnt">0</span></button>
+              <div class="sc-group-actions">
+                <button class="sc-gact" title="Unstage all" data-unstage-all><svg class="ico" viewBox="0 0 16 16"><path d="M4 8h8"/></svg></button>
+              </div>
+            </div>
+            <ul class="sc-files" id="sc-staged-list"></ul>
+          </section>
+
+          <section class="sc-group" id="sc-changes">
+            <div class="sc-group-head">
+              <button class="sc-group-toggle" data-toggle><svg class="ico chev" viewBox="0 0 16 16"><path d="M4 6.5 8 10 12 6.5"/></svg>Changes<span class="cnt" id="sc-changes-cnt">1</span></button>
+              <div class="sc-group-actions">
+                <button class="sc-gact danger" title="Discard all changes"><svg class="ico" viewBox="0 0 16 16"><path d="M6.5 3h3M3.5 4.5h9M11.5 4.5l-.5 8a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1l-.5-8"/></svg></button>
+                <button class="sc-gact" title="Stage all changes" data-stage-all><svg class="ico" viewBox="0 0 16 16"><path d="M8 4v8M4 8h8"/></svg></button>
+              </div>
+            </div>
+            <ul class="sc-files" id="sc-changes-list">
+              <li class="sc-file" data-file="src/domain/ordering.koi" data-status="M">
+                <span class="sc-glyph modified">M</span>
+                <button class="sc-file-open" title="Open changes"><span class="sc-name">ordering.koi</span><span class="sc-dir">src/domain</span></button>
+                <span class="sc-stat"><span class="add">+4</span><span class="del">−1</span></span>
+                <div class="sc-row-actions">
+                  <button class="sc-ract" title="Open changes"><svg class="ico" viewBox="0 0 16 16"><path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4Z"/><circle cx="8" cy="8" r="1.8"/></svg></button>
+                  <button class="sc-ract danger" title="Discard changes"><svg class="ico" viewBox="0 0 16 16"><path d="M11.5 4.5 8 8m0 0L4.5 4.5M8 8l3.5 3.5M8 8l-3.5 3.5"/></svg></button>
+                  <button class="sc-ract stage" title="Stage changes" data-stage><svg class="ico" viewBox="0 0 16 16"><path d="M8 4v8M4 8h8"/></svg></button>
+                </div>
+              </li>
+            </ul>
+          </section>
+
+          <section class="sc-group" id="sc-recent" style="margin-bottom:0">
+            <div class="sc-group-head">
+              <button class="sc-group-toggle" data-toggle><svg class="ico chev" viewBox="0 0 16 16"><path d="M4 6.5 8 10 12 6.5"/></svg>Recent commits</button>
+              <button class="sc-viewall">View all</button>
+            </div>
+            <ul class="sc-log">
+              <li class="sc-log-item">
+                <span class="sc-avatar">PM</span>
+                <div class="sc-log-main">
+                  <span class="sc-log-msg">add OrderLine invariants</span>
+                  <span class="sc-log-meta"><code>c9344ef</code><span class="sep">·</span>Philippe Matray<span class="sep">·</span>2h ago</span>
+                </div>
+              </li>
+              <li class="sc-log-item">
+                <span class="sc-avatar">PM</span>
+                <div class="sc-log-main">
+                  <span class="sc-log-msg">initial commit</span>
+                  <span class="sc-log-meta"><code>9147d2b</code><span class="sep">·</span>Philippe Matray<span class="sep">·</span>5h ago</span>
+                </div>
+              </li>
+            </ul>
+          </section>
+        </div>
+      </div>
+
+      <div class="rstrip" role="toolbar" aria-label="Tool windows">
+        <button class="rstrip-btn" title="Properties"><svg class="ico" viewBox="0 0 16 16"><path d="M3 4.5h10M3 8h10M3 11.5h10"/><circle cx="6" cy="4.5" r="1.7" fill="currentColor" stroke="none"/><circle cx="10" cy="8" r="1.7" fill="currentColor" stroke="none"/><circle cx="6" cy="11.5" r="1.7" fill="currentColor" stroke="none"/></svg></button>
+        <button class="rstrip-btn" title="Assistant"><svg class="ico" viewBox="0 0 16 16"><path d="M8 2.2l1.5 3.8L13.3 7.5 9.5 9 8 12.8 6.5 9 2.7 7.5 6.5 6z"/></svg></button>
+        <div class="rstrip-sep"></div>
+        <button class="rstrip-btn on" title="Source Control"><svg class="ico" viewBox="0 0 16 16"><circle cx="4.5" cy="4" r="1.7"/><circle cx="4.5" cy="12" r="1.7"/><circle cx="11.5" cy="6.2" r="1.7"/><path d="M4.5 5.7v4.6M4.5 8.5h4a2.5 2.5 0 0 0 2.5-2.5v-.2"/></svg></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ STATUS BAR ============ -->
+  <footer class="statusbar" aria-label="Model status">
+    <span class="sb-seg btn" title="Open the Problems tab"><span class="sb-err">✕ 0</span><span class="sb-warn">⚠ 0</span></span>
+    <span class="sb-seg">Context: <span style="color:var(--koi-ink-soft)">All contexts</span></span>
+    <span class="sb-seg btn" title="Glossary coverage"><svg class="ico" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 0-1.5 3.6"/><path d="M13 6v2.5h-2.4"/></svg>Docs 0/5</span>
+    <span class="sb-push"></span>
+    <span class="sb-seg sb-emit"><span class="lang-dot"></span>Emit: C#</span>
+    <span class="sb-seg">Ln 9, Col 43</span>
+    <span class="sb-seg">UTF-8</span>
+    <span class="sb-seg sb-ready">Ready</span>
+    <span class="sb-seg">v0.244.0</span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  const msg = document.getElementById('sc-msg');
+  const split = document.getElementById('sc-commit-split');
+  const commitBtn = document.getElementById('sc-commit-btn');
+  const commitLbl = commitBtn.querySelector('.lbl');
+  const changes = document.getElementById('sc-changes');
+  const changesList = document.getElementById('sc-changes-list');
+  const changesCnt = document.getElementById('sc-changes-cnt');
+  const staged = document.getElementById('sc-staged');
+  const stagedList = document.getElementById('sc-staged-list');
+  const stagedCnt = document.getElementById('sc-staged-cnt');
+
+  function refresh() {
+    const nStaged = stagedList.children.length;
+    const nChanges = changesList.children.length;
+    stagedCnt.textContent = nStaged;
+    changesCnt.textContent = nChanges;
+    staged.hidden = nStaged === 0;
+    if (nStaged > 0) staged.classList.remove('collapsed');
+    const ready = nStaged > 0 && msg.value.trim().length > 0;
+    split.classList.toggle('disabled', !ready);
+    commitLbl.textContent = nStaged > 0 ? ('Commit ' + nStaged + ' file' + (nStaged > 1 ? 's' : '') + ' to main') : 'Commit to main';
+  }
+
+  // build the stage/unstage row-action button set for a file row
+  function rowActions(mode) {
+    const wrap = document.createElement('div');
+    wrap.className = 'sc-row-actions';
+    const eye = mode === 'staged'
+      ? ''
+      : '<button class="sc-ract" title="Open changes"><svg class="ico" viewBox="0 0 16 16"><path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4Z"/><circle cx="8" cy="8" r="1.8"/></svg></button>';
+    const discard = mode === 'staged'
+      ? ''
+      : '<button class="sc-ract danger" title="Discard changes"><svg class="ico" viewBox="0 0 16 16"><path d="M11.5 4.5 8 8m0 0L4.5 4.5M8 8l3.5 3.5M8 8l-3.5 3.5"/></svg></button>';
+    const act = mode === 'staged'
+      ? '<button class="sc-ract" title="Unstage" data-unstage><svg class="ico" viewBox="0 0 16 16"><path d="M4 8h8"/></svg></button>'
+      : '<button class="sc-ract stage" title="Stage changes" data-stage><svg class="ico" viewBox="0 0 16 16"><path d="M8 4v8M4 8h8"/></svg></button>';
+    wrap.innerHTML = eye + discard + act;
+    return wrap;
+  }
+
+  function move(row, toStaged) {
+    const ra = row.querySelector('.sc-row-actions');
+    if (ra) ra.replaceWith(rowActions(toStaged ? 'staged' : 'changes'));
+    (toStaged ? stagedList : changesList).appendChild(row);
+    refresh();
+  }
+
+  document.addEventListener('click', function (e) {
+    const stageBtn = e.target.closest('[data-stage]');
+    if (stageBtn) { move(stageBtn.closest('.sc-file'), true); return; }
+    const unstageBtn = e.target.closest('[data-unstage]');
+    if (unstageBtn) { move(unstageBtn.closest('.sc-file'), false); return; }
+    if (e.target.closest('[data-stage-all]')) { [...changesList.children].forEach(r => move(r, true)); return; }
+    if (e.target.closest('[data-unstage-all]')) { [...stagedList.children].forEach(r => move(r, false)); return; }
+    const toggle = e.target.closest('[data-toggle]');
+    if (toggle) { toggle.closest('.sc-group').classList.toggle('collapsed'); return; }
+    const refreshBtn = e.target.closest('[data-act="refresh"]');
+    if (refreshBtn) { const i = refreshBtn.querySelector('.ico'); i.style.transition = 'transform .5s ease'; i.style.transform = 'rotate(360deg)'; setTimeout(() => { i.style.transition = 'none'; i.style.transform = 'none'; }, 520); return; }
+    if (e.target.closest('#sc-commit-btn') && !split.classList.contains('disabled')) {
+      [...stagedList.children].forEach(r => r.remove());
+      msg.value = '';
+      refresh();
+    }
+  });
+
+  msg.addEventListener('input', refresh);
+  msg.addEventListener('keydown', function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !split.classList.contains('disabled')) {
+      commitBtn.click();
+    }
+  });
+
+  refresh();
+})();
+</script>
+
+</body>
+</html>

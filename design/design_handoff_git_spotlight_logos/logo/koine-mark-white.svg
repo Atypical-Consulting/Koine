@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" fill="none" role="img" aria-label="Koine">
+  <g stroke="#ffffff" stroke-linejoin="round" stroke-linecap="round">
+    <polygon points="106,60 83,99.84 37,99.84 14,60 37,20.16 83,20.16" stroke-width="6"></polygon>
+    <g stroke-width="7.5">
+      <path d="M48 36 V84"></path>
+      <path d="M48 60 L78 36"></path>
+      <path d="M48 60 L78 84"></path>
+    </g>
+  </g>
+</svg>
