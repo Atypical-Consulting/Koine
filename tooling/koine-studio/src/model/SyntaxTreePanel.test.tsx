@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { fireEvent, render, waitFor } from '@testing-library/preact';
+import { act, fireEvent, render, waitFor } from '@testing-library/preact';
 import { SyntaxTreePanel, deepestContaining, type SyntaxTreeSource } from '@/model/SyntaxTreePanel';
 import type { SyntaxSpan, SyntaxTreeNode } from '@/lsp/protocol';
 import { axe } from 'vitest-axe';
@@ -162,6 +162,56 @@ describe('SyntaxTreePanel', () => {
       expect(view.getByRole('treeitem', { name: /KoineModel/ }).getAttribute('tabindex')).toBe('0'),
     );
     expect(view.getByRole('treeitem', { name: /ContextNode Shipping/ }).getAttribute('tabindex')).toBe('-1');
+  });
+
+  test('keeps DOM keyboard focus on the preserved row when focus was in the tree', async () => {
+    // A fresh (but identical) tree object on every fetch — the honest shape of a server rebuild, which
+    // remounts rows and drops focus to <body> unless we actively restore it.
+    const syntaxTree = vi.fn(async () => fixture());
+    const source: SyntaxTreeSource = { syntaxTree };
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    root.focus();
+    fireEvent.keyDown(root, { key: 'ArrowDown' }); // keyboard focus + tab stop → Billing (0/0)
+    const ctx = view.getByRole('treeitem', { name: /ContextNode Billing/ });
+    expect(document.activeElement).toBe(ctx);
+
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    // Let the async refetch resolve and the post-commit re-focus effect run.
+    await waitFor(() => expect(syntaxTree).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    // After the rebuild the keyboard user is still on Billing, not yanked to <body>/root.
+    expect((document.activeElement as HTMLElement)?.getAttribute('aria-label')).toMatch(/ContextNode Billing/);
+    expect(document.activeElement).toBe(view.getByRole('treeitem', { name: /ContextNode Billing/ }));
+  });
+
+  test('does not steal focus into the tree when focus was elsewhere during a refetch', async () => {
+    const syntaxTree = vi.fn(async () => fixture());
+    const source: SyntaxTreeSource = { syntaxTree };
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+
+    // Establish Billing as the roving tab stop (so a row IS restorable), THEN move focus out of the tree.
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    root.focus();
+    fireEvent.keyDown(root, { key: 'ArrowDown' }); // tab stop → Billing (0/0)
+    (document.activeElement as HTMLElement | null)?.blur?.(); // focus leaves the tree → document.body
+    expect(view.container.contains(document.activeElement)).toBe(false);
+
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    // Let the async refetch resolve AND any post-commit re-focus effect run (Billing was already the tab
+    // stop, so there's no DOM change to await on — flush the microtask/effect queue explicitly instead).
+    await waitFor(() => expect(syntaxTree).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    // Even though the Billing tab stop is preserved, a refetch must NOT pull DOM focus back into the tree
+    // when focus was elsewhere — only the tab stop is restored, silently.
+    expect(view.container.contains(document.activeElement)).toBe(false);
   });
 
   test('an empty refetch resets to the root and paints the empty state without crashing', async () => {

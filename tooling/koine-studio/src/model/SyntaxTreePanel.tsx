@@ -161,6 +161,14 @@ export function SyntaxTreePanel(props: {
     node: focusedKey && tree ? nodeAtKey(tree, focusedKey) : null,
   };
 
+  // A one-shot request to re-focus the restored row after a refetch commit (#1097). The fetch resolve
+  // sets the key + bumps `refocusTick` ONLY when keyboard focus was inside the tree at rebuild time, so
+  // the effect below re-homes an active keyboard user onto the preserved row without ever STEALING focus
+  // when it was elsewhere. Making the a11y guarantee explicit here (rather than leaning on Preact's
+  // incidental positional DOM reuse) keeps it robust across future reconciliation changes.
+  const refocusKeyRef = useRef<string | null>(null);
+  const [refocusTick, setRefocusTick] = useState(0);
+
   // The single fetch path: pull the active document's tree on mount and whenever the source or the
   // controller's `revision` changes. The `alive` latch guards against both an unmount-stale resolve and
   // an out-of-order response — a superseded fetch (revision bumped again) has its cleanup flip `alive`
@@ -173,6 +181,9 @@ export function SyntaxTreePanel(props: {
       .then(() => source.syntaxTree())
       .then((t) => {
         if (!alive) return;
+        // Whether the keyboard user was actually parked inside the tree at rebuild time — read BEFORE the
+        // state updates re-render. Gates the DOM re-focus below so we never yank focus in from elsewhere.
+        const wasFocusedInTree = !!treeRef.current?.contains(document.activeElement);
         // Preserve the roving tab stop across the rebuild (#1097): keep it on the previously-focused
         // node when the SAME index-path still resolves to a node of the same identity in the new tree
         // (a typing edit that left it intact); otherwise fall back to the root. Re-expand its ancestors
@@ -186,6 +197,12 @@ export function SyntaxTreePanel(props: {
         );
         setFocusedKey(restore); // preserved tab stop, or null → the (new) root
         setActiveKey(null); // drop any stale highlight; the caret effect re-derives it for the new tree
+        // Only when focus was in the tree AND we actually restored a row: re-home focus onto it after the
+        // commit (the effect below), so an active keyboard user isn't dropped to <body> by the rebuild.
+        if (restore && wasFocusedInTree) {
+          refocusKeyRef.current = restore;
+          setRefocusTick((n) => n + 1);
+        }
       })
       .catch(() => {
         if (!alive) return;
@@ -220,6 +237,17 @@ export function SyntaxTreePanel(props: {
     const el = treeRef.current?.querySelector<HTMLElement>(`[data-key="${activeKey}"]`);
     el?.scrollIntoView?.({ block: 'nearest' });
   }, [activeKey]);
+
+  // Re-home keyboard focus onto the restored row after a refetch commit (#1097), but only when the fetch
+  // resolve flagged it (focus was in the tree AND a row was restored). Fires exactly once per such
+  // refetch via the `refocusTick` bump; a no-op on mount and on refetches with nothing to restore.
+  // `focus` is guarded (happy-dom / older engines may not implement it on a plain element).
+  useEffect(() => {
+    const key = refocusKeyRef.current;
+    refocusKeyRef.current = null;
+    if (key == null) return;
+    treeRef.current?.querySelector<HTMLElement>(`[data-key="${key}"]`)?.focus?.();
+  }, [refocusTick]);
 
   /** The visible treeitems in DOM (== visual) order — collapsed subtrees aren't in the DOM, so this is
    *  exactly the set Arrow keys traverse. Mirrors the domain navigator's `treeItems()`. */
