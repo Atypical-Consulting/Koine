@@ -5,6 +5,7 @@
 // "integration-event" — KIND below is keyed by the real kind, not the prototype's shorthand, so later
 // tasks can look a glossary/model-index entry's `kind` straight up without a translation step.
 import type { ConceptSlug } from '@/model/conceptColors.generated';
+import type { Range } from '@/lsp/lsp';
 
 /** The seven result categories a catalog entry can belong to. */
 export type Category = 'action' | 'symbol' | 'event' | 'rule' | 'file' | 'glossary' | 'commit';
@@ -34,6 +35,20 @@ export interface CatalogEntry {
   preview?: () => unknown;
   /** Hook for a later task's per-result quick-action binding; deliberately loose until that task lands. */
   actionKey?: string;
+
+  // --- carry-through fields added by the live catalog builder (buildCatalog.ts, #1143) ---------
+  // Additive and optional so Task 1's tests are untouched; each is the identity a later task (5/6/8)
+  // needs to act on the entry without re-deriving it from the title/sub strings.
+  /** The glossary-entry qualified name (symbol/event/glossary entries): the selection/preview key. */
+  qualifiedName?: string;
+  /** The declaration name's source range (symbol/event entries): jump-to-source (Task 6). */
+  nameRange?: Range;
+  /** The bound `Command.id` (action entries): what `registry.run(...)` dispatches (Tasks 6/8). */
+  cmdId?: string;
+  /** The command's keyboard-chord hint, e.g. `⌘N` (action entries), shown alongside the title. */
+  hint?: string;
+  /** The declaration's `///` doc text (glossary entries): the live-preview pane's body (Task 5). */
+  doc?: string | null;
 }
 
 /** A prefix-switchable search mode (`>`, `@`, `#`, `/`, `:`, or the no-prefix "all"). */
