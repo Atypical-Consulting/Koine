@@ -1,8 +1,8 @@
 /* --- ⌘K Spotlight command launcher (issue #1143) --- */
-/* Shell + input row + prefix-mode chrome (task 3) + grouped result rows (task 4, this task): group
-   labels, `.lx-item` rows, the `.lx-kind` DDD chip / `.lx-glyph` line icon, fuzzy-match `<mark>`
-   highlights, and the empty-results state. The .lx-preview pane body, the ⌘K .lx-actmenu, and
-   .lx-toast are authored by later tasks — the selectors below are the hooks those tasks slot into. */
+/* Shell + input row + prefix-mode chrome (task 3) + grouped result rows (task 4): group labels,
+   `.lx-item` rows, the `.lx-kind` DDD chip / `.lx-glyph` line icon, fuzzy-match `<mark>` highlights,
+   and the empty-results state. The .lx-preview pane body (task 5) follows further down. The ⌘K
+   `.lx-actmenu` popover + `.lx-toast` confirmation (task 6, this pass) are at the bottom of this file. */
 .lx-scrim {
   position: fixed;
   inset: 0;
@@ -20,6 +20,7 @@
 }
 
 .lx {
+  position: relative; /* anchors the .lx-actmenu popover (task 6) to the card's bottom-right */
   width: 720px;
   max-width: 94vw;
   display: flex;
@@ -308,6 +309,34 @@
   font-family: var(--koi-font-mono);
   font-size: 11px;
   color: var(--koi-muted);
+}
+
+/* the selected row's quick-action trigger (task 6): opens .lx-actmenu for this result. Only ever
+   rendered (by ResultRow.tsx) on the selected row, so no extra `.sel`-only CSS gate is needed here. */
+.lx-actbtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: var(--koi-radius-xs);
+  border: 1px solid var(--koi-line);
+  background: color-mix(in srgb, var(--koi-paper) 50%, transparent);
+  color: var(--koi-ink-soft);
+  font: inherit;
+  font-family: var(--koi-font-mono);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.lx-actbtn:hover {
+  border-color: color-mix(in srgb, var(--koi-accent) 50%, var(--koi-line));
+  color: var(--koi-fg);
+}
+
+.lx-actbtn-kbd {
+  opacity: 0.6;
 }
 
 .lx-empty {
@@ -612,6 +641,24 @@
   color: var(--koi-muted);
 }
 
+/* the footer "⌘K actions" trigger (task 6) is a real button (opens .lx-actmenu for the selected
+   result) dressed as a `.lx-hint` — reset the button chrome so it reads identically to the static hints. */
+.lx-hint-btn {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.lx-hint-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.lx-hint-btn:not(:disabled):hover {
+  color: var(--koi-fg);
+}
+
 .lx-hint kbd {
   font-family: var(--koi-font-mono);
   font-size: 10px;
@@ -658,4 +705,120 @@
 .lx-mchip b {
   font-family: var(--koi-font-mono);
   font-weight: 700;
+}
+
+/* ===================== quick actions: .lx-actmenu popover + .lx-toast (issue #1143, task 6) =====
+   Ported from the prototype's <style> (design/design_handoff_git_spotlight_logos/Koine Launcher -
+   Spotlight.html), tokens only — one deliberate deviation from the prototype's z-index:5 (a leftover
+   from its single-page stacking context): SEAMS.md calls for --koi-z-popover here. `LauncherPanel.tsx`
+   mounts/unmounts this component instead of toggling a `.open` class (Preact conditional rendering),
+   so there is no `.lx-actmenu.open` selector to carry over. */
+.lx-actmenu {
+  position: absolute;
+  z-index: var(--koi-z-popover);
+  right: 14px;
+  bottom: 52px;
+  width: 300px;
+  padding: 6px;
+  border-radius: var(--koi-radius-lg);
+  background: color-mix(in srgb, var(--koi-paper-2) 96%, transparent);
+  backdrop-filter: blur(24px);
+  border: 1px solid color-mix(in srgb, var(--koi-fg) 14%, var(--koi-line));
+  box-shadow: 0 20px 60px rgba(2, 5, 10, 0.6);
+}
+
+.lx-actmenu-head {
+  font-family: var(--koi-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--koi-muted);
+  padding: 7px 10px 6px;
+}
+
+.lx-actitem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  height: 36px;
+  border-radius: var(--koi-radius-sm);
+  cursor: pointer;
+}
+
+.lx-actitem.sel {
+  background: color-mix(in srgb, var(--koi-accent) 15%, transparent);
+}
+
+.lx-actitem .lx-ic {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--koi-muted);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.lx-actitem.sel .lx-ic {
+  color: var(--koi-accent);
+}
+
+.lx-actitem .ai-label {
+  flex: 1;
+  font-size: 13px;
+  color: var(--koi-fg);
+}
+
+.lx-actitem .ai-kbd {
+  font-family: var(--koi-font-mono);
+  font-size: 10.5px;
+  color: var(--koi-muted);
+  border: 1px solid var(--koi-line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+
+/* toast confirmation — mounted once inside `.lx-scrim` (LauncherPanel.tsx) and toggled via the
+   `.show` class, so the fade transition below plays instead of an abrupt mount/unmount. */
+.lx-toast {
+  position: fixed;
+  z-index: var(--koi-z-toast);
+  left: 50%;
+  bottom: 42px;
+  transform: translateX(-50%) translateY(12px);
+  opacity: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border-radius: var(--koi-radius-lg);
+  background: color-mix(in srgb, var(--koi-paper-2) 96%, transparent);
+  backdrop-filter: blur(18px);
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 32%, var(--koi-line));
+  box-shadow: 0 16px 44px rgba(2, 5, 10, 0.55);
+  color: var(--koi-fg);
+  font-size: 13px;
+  transition: opacity var(--koi-dur-mid) ease, transform var(--koi-dur-mid) ease;
+  pointer-events: none;
+}
+
+.lx-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.lx-toast .lx-ic {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--koi-accent);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }

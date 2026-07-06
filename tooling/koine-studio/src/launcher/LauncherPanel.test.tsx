@@ -1,10 +1,12 @@
 // Panel-level checks for the Spotlight launcher's overlay SHELL (issue #1143, task 3): the scrim +
-// card + input row + prefix-mode pill. Results (Task 4), preview (Task 5), actions (Task 6), and full
-// keyboard nav (Task 7) are exercised by later tasks' own test files — this file only covers what this
-// task builds. Mirrors src/shell/searchController.test.tsx: mount the real component with fake seams.
+// card + input row + prefix-mode pill. Results (Task 4) and preview (Task 5) get their own describe
+// blocks below; quick actions (Task 6) are covered further down (the action menu + default-run
+// wiring); full keyboard nav (Task 7) is still not exercised here. Mirrors
+// src/shell/searchController.test.tsx: mount the real component with fake seams.
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact';
 import { LauncherPanel } from '@/launcher/LauncherPanel';
+import type { LauncherActionDeps } from '@/launcher/actions';
 import type { LauncherSources } from '@/launcher/buildCatalog';
 import type { Command } from '@atypical/koine-ui';
 import type { ModelIndex } from '@/model/modelIndex';
@@ -24,8 +26,30 @@ function makeSources(over: Partial<LauncherSources> = {}): LauncherSources {
   };
 }
 
-function mount(sources: LauncherSources, onClose = vi.fn()) {
-  return render(<LauncherPanel sources={sources} visible={true} onClose={onClose} />);
+/** A no-op stub for the quick-action effect seam (issue #1143, task 6) — Task 8 binds the real thing. */
+function makeActionDeps(over: Partial<LauncherActionDeps> = {}): LauncherActionDeps {
+  return {
+    gotoDefinition: vi.fn(),
+    findUsages: vi.fn(),
+    peek: vi.fn(),
+    rename: vi.fn(),
+    copy: vi.fn(),
+    openFile: vi.fn(),
+    openFileChanges: vi.fn(),
+    revealFile: vi.fn(),
+    openGlossary: vi.fn(),
+    findInModel: vi.fn(),
+    gotoRule: vi.fn(),
+    viewCommit: vi.fn(),
+    revertCommit: vi.fn(),
+    runCommand: vi.fn(),
+    toast: vi.fn(),
+    ...over,
+  };
+}
+
+function mount(sources: LauncherSources, onClose = vi.fn(), actionDeps: LauncherActionDeps = makeActionDeps()) {
+  return render(<LauncherPanel sources={sources} visible={true} onClose={onClose} actionDeps={actionDeps} />);
 }
 
 const RANGE = { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } };
@@ -95,7 +119,7 @@ describe('LauncherPanel', () => {
   });
 
   test('hides the scrim (hidden attribute) when not visible', () => {
-    const view = render(<LauncherPanel sources={makeSources()} visible={false} onClose={vi.fn()} />);
+    const view = render(<LauncherPanel sources={makeSources()} visible={false} onClose={vi.fn()} actionDeps={makeActionDeps()} />);
     const scrim = view.container.querySelector('.lx-scrim') as HTMLElement;
     expect(scrim.hidden).toBe(true);
   });
@@ -254,5 +278,103 @@ describe('LauncherPanel — live preview pane (issue #1143, task 5)', () => {
     const selectedRow = view.container.querySelector('.lx-item.sel') as HTMLElement;
     expect(selectedRow.textContent).toContain('Order');
     expect(view.container.querySelectorAll('.lx-item.sel')).toHaveLength(1);
+  });
+});
+
+describe('LauncherPanel — quick actions + action menu + toast (issue #1143, task 6)', () => {
+  test('clicking a result row runs its default quick action against the injected deps', async () => {
+    const actionDeps = makeActionDeps();
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources, vi.fn(), actionDeps);
+
+    // Empty-query "Top hits" lists the Order aggregate first (see the preview-pane describe above) —
+    // its default action (index 0 of actionsFor) is "Go to definition".
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+    const row = view.container.querySelector('.lx-item') as HTMLElement;
+    expect(row.textContent).toContain('Order');
+
+    fireEvent.click(row);
+
+    expect(actionDeps.gotoDefinition).toHaveBeenCalledTimes(1);
+    const called = (actionDeps.gotoDefinition as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(called.qualifiedName).toBe('Ordering.Order');
+  });
+
+  test('the footer "⌘K actions" trigger opens the popover listing the selected result\'s actions', async () => {
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+
+    expect(view.container.querySelector('.lx-actmenu')).toBeNull();
+    const trigger = view.getByText('actions').closest('button') as HTMLButtonElement;
+
+    fireEvent.click(trigger);
+
+    const menu = view.container.querySelector('.lx-actmenu') as HTMLElement;
+    expect(menu).toBeTruthy();
+    expect(menu.getAttribute('role')).toBe('menu');
+    const items = menu.querySelectorAll('[role="menuitem"]');
+    expect(Array.from(items).map((i) => i.textContent)).toEqual([
+      'Go to definition↵', 'Find usages⇧↵', 'Peek⌥↵', 'Rename symbolF2', 'Copy name⌘C',
+    ]);
+    expect(items[0].className).toContain('sel');
+  });
+
+  test('the selected row\'s tail "Actions" button also opens the menu for that result', async () => {
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+
+    const tailBtn = view.container.querySelector('.lx-item.sel .lx-actbtn') as HTMLButtonElement;
+    expect(tailBtn).toBeTruthy();
+
+    fireEvent.click(tailBtn);
+
+    expect(view.container.querySelector('.lx-actmenu')).toBeTruthy();
+  });
+
+  test('clicking an action-menu row runs that action and closes the menu', async () => {
+    const actionDeps = makeActionDeps();
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources, vi.fn(), actionDeps);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+    fireEvent.click(view.getByText('actions').closest('button') as HTMLButtonElement);
+
+    const items = view.container.querySelectorAll('.lx-actmenu [role="menuitem"]');
+    fireEvent.click(items[1]); // "Find usages"
+
+    expect(actionDeps.findUsages).toHaveBeenCalledTimes(1);
+    expect(view.container.querySelector('.lx-actmenu')).toBeNull();
+  });
+
+  test('Copy name shows a confirmation toast', async () => {
+    const actionDeps = makeActionDeps();
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources, vi.fn(), actionDeps);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+    fireEvent.click(view.getByText('actions').closest('button') as HTMLButtonElement);
+
+    const items = view.container.querySelectorAll('.lx-actmenu [role="menuitem"]');
+    fireEvent.click(items[4]); // "Copy name"
+
+    await waitFor(() => expect(actionDeps.toast).toHaveBeenCalledTimes(1));
+    const toast = view.container.querySelector('.lx-toast') as HTMLElement;
+    expect(toast.className).toContain('show');
+    expect(toast.textContent).toContain('Order');
+  });
+
+  test('Escape closes the action menu without closing the whole launcher', async () => {
+    const onClose = vi.fn();
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources, onClose);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+    fireEvent.click(view.getByText('actions').closest('button') as HTMLButtonElement);
+    expect(view.container.querySelector('.lx-actmenu')).toBeTruthy();
+
+    const scrim = view.container.querySelector('.lx-scrim') as HTMLElement;
+    fireEvent.keyDown(scrim, { key: 'Escape' });
+
+    expect(view.container.querySelector('.lx-actmenu')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

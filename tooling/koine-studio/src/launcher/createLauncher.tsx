@@ -10,6 +10,7 @@
 // as LauncherPanel.tsx.
 import { render } from 'preact';
 import { el } from '@atypical/koine-ui';
+import type { LauncherActionDeps } from '@/launcher/actions';
 import type { LauncherSources } from '@/launcher/buildCatalog';
 import { LauncherPanel } from '@/launcher/LauncherPanel';
 
@@ -24,16 +25,18 @@ export interface LauncherHandle {
 /**
  * Mount the launcher into the document (once) and return the imperative handle. The panel stays
  * mounted across open/close (a `visible` prop flip) — cheaper than remounting, and matches
- * createSearchPanel's approach — so `sources` is captured once at construction time.
+ * createSearchPanel's approach — so `sources`/`actionDeps` are captured once at construction time.
+ * `actionDeps` (issue #1143, task 6) is the per-result quick-action effect seam `actionsFor` calls
+ * into; Task 8 supplies the concrete binding to `lsp`/`platform`/`openUri`/clipboard.
  */
-export function createLauncher(sources: LauncherSources): LauncherHandle {
+export function createLauncher(sources: LauncherSources, actionDeps: LauncherActionDeps): LauncherHandle {
   const host = el('div', { class: 'lx-host' });
   document.body.appendChild(host);
   let isOpen = false;
   let opener: HTMLElement | null = null; // element focused before the launcher opened, restored on close
 
   function paint(): void {
-    render(<LauncherPanel sources={sources} visible={isOpen} onClose={close} />, host);
+    render(<LauncherPanel sources={sources} visible={isOpen} onClose={close} actionDeps={actionDeps} />, host);
   }
 
   function open(): void {

@@ -1,8 +1,8 @@
 // One `.lx-item` row in the Spotlight launcher's results list (issue #1143, task 4): a DDD kind chip
 // or line-icon glyph, the fuzzy-highlighted title + sub line, and a best-effort tail (a command's
-// keycap hint, a commit's short hash). Pure presentation — there is no live preview pane (Task 5), no
-// real per-result action wiring (Task 6), and no keyboard-driven selection state (Task 7) yet; this
-// task only renders what a given `RankedResult` looks like and whether it is (already) selected.
+// keycap hint, a commit's short hash). Extended (task 6) with the selected row's `.lx-actbtn` tail
+// affordance, which opens the `.lx-actmenu` popover for this result (`LauncherPanel.tsx` owns that
+// state) — full keyboard-driven selection is still Task 7.
 import { highlight, type RankedResult } from '@/launcher/fuzzy';
 import { KIND, type CatalogEntry } from '@/launcher/catalog';
 
@@ -11,8 +11,10 @@ export interface ResultRowProps {
   selected: boolean;
   /** Stubbed for a later task's mouse/keyboard selection wiring (Task 7) — no-op until then. */
   onHover?: () => void;
-  /** Stubbed for a later task's default quick-action (Task 6) — no-op until then. */
+  /** Runs this result's default quick action (issue #1143, task 6) — wired to `actionsFor(entry, deps)[0].run()`. */
   onRun?: () => void;
+  /** Opens the `.lx-actmenu` popover for this result (issue #1143, task 6); only rendered when `selected`. */
+  onOpenMenu?: () => void;
 }
 
 /** The line-icon glyphs a non-chip category renders, ported verbatim (path data unchanged) from the
@@ -101,7 +103,7 @@ function Sub({ entry }: { entry: CatalogEntry }) {
  * keyword/context pass, in which case the title renders with no highlight).
  */
 export function ResultRow(props: ResultRowProps) {
-  const { result, selected, onHover, onRun } = props;
+  const { result, selected, onHover, onRun, onOpenMenu } = props;
   const { entry } = result;
   const chip = entry.cat === 'symbol' || entry.cat === 'event' ? KIND[entry.kind as keyof typeof KIND] : undefined;
   const segments = highlight(entry.title, result.ranges);
@@ -136,6 +138,20 @@ export function ResultRow(props: ResultRowProps) {
       </div>
       <div class="lx-tail">
         <Tail entry={entry} />
+        {selected && onOpenMenu && (
+          <button
+            type="button"
+            class="lx-actbtn avail"
+            aria-label={`Quick actions for ${entry.title}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenMenu();
+            }}
+          >
+            Actions
+            <span class="lx-actbtn-kbd">⌘K</span>
+          </button>
+        )}
       </div>
     </div>
   );
