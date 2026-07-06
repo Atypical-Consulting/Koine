@@ -1,3 +1,13 @@
+<p align="center">
+  <!-- The Koine brand mark: a lowercase kappa (κ) inscribed in the ports-and-adapters hexagon.
+       GitHub ignores @media inside a referenced SVG, so <picture> flips the variant by theme:
+       the accent mark on a dark README, the ink mark on a light one. -->
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/koine-mark.svg" />
+    <img src="assets/koine-mark-ink.svg" alt="Koine" width="96" height="96" />
+  </picture>
+</p>
+
 # Koine
 
 > Write your domain's **ubiquitous language** once, in `.koi` files. Koine compiles it to

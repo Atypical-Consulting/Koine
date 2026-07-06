@@ -360,7 +360,7 @@ function buildHome(
   // `koi-home-brand` class is a stable hook that only strips the button hover (this copy is a decorative
   // <div>, not a nav control). The lockup carries the accessible name (role=img + aria-label); the
   // monogram SVG and wordmark text are decorative (aria-hidden) so it reads once as "Koine Studio".
-  // `koineMark('home')` gets a stable gradient id distinct from the editor's so the two never collide.
+  // The mark comes from the shared builder (logo.ts) — single-ink and id-free, so copies never collide.
   const brand = document.createElement('div');
   brand.className = 'brand koi-home-brand';
   brand.setAttribute('role', 'img');
@@ -369,7 +369,7 @@ function buildHome(
   const brandLogo = document.createElement('span');
   brandLogo.className = 'brand-logo';
   brandLogo.setAttribute('aria-hidden', 'true');
-  brandLogo.innerHTML = koineMark('home');
+  brandLogo.innerHTML = koineMark();
 
   const brandText = document.createElement('span');
   brandText.className = 'brand-text';

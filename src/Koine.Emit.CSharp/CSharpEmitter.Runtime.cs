@@ -56,6 +56,44 @@ public sealed partial class CSharpEmitter
             Assemble(emit, RuntimeNamespace, sb.ToString(), usesLinq: false));
     }
 
+    /// <summary>
+    /// Emits the generated <c>Result&lt;T&gt;</c> once into Koine.Runtime, a sibling of
+    /// <see cref="EmitDomainEventInterface"/>. Emitted only under the <c>--app-not-found result</c>
+    /// policy (W1, #1041): a handler yields <c>Result&lt;T&gt;.NotFound()</c> on a missing aggregate and
+    /// <c>Result&lt;T&gt;.Ok(value)</c> on a hit, so a caller distinguishes a miss from a value without a
+    /// nullable reference or a caught exception. A lightweight <c>readonly struct</c> — no allocation, no
+    /// third-party dependency.
+    /// </summary>
+    private EmittedFile EmitResult(EmitContext emit)
+    {
+        var sb = new StringBuilder();
+        sb.Append("/// <summary>The outcome of an operation that may not find its target: a value, or a not-found miss.</summary>\n");
+        sb.Append("public readonly struct Result<T>\n");
+        sb.Append("{\n");
+        sb.Append(Indent).Append("private readonly T? _value;\n\n");
+        sb.Append(Indent).Append("private Result(bool isSuccess, T? value)\n");
+        sb.Append(Indent).Append("{\n");
+        sb.Append(Indent).Append(Indent).Append("IsSuccess = isSuccess;\n");
+        sb.Append(Indent).Append(Indent).Append("_value = value;\n");
+        sb.Append(Indent).Append("}\n\n");
+        sb.Append(Indent).Append("/// <summary>True when the operation produced a value; false when the target was not found.</summary>\n");
+        sb.Append(Indent).Append("public bool IsSuccess { get; }\n\n");
+        sb.Append(Indent).Append("/// <summary>True when the target aggregate was not found.</summary>\n");
+        sb.Append(Indent).Append("public bool IsNotFound => !IsSuccess;\n\n");
+        sb.Append(Indent).Append("/// <summary>The produced value; throws when this result is a not-found miss.</summary>\n");
+        sb.Append(Indent).Append("public T Value => IsSuccess\n");
+        sb.Append(Indent).Append(Indent).Append("? _value!\n");
+        sb.Append(Indent).Append(Indent).Append(": throw new InvalidOperationException(\"Result has no value; it is a not-found miss.\");\n\n");
+        sb.Append(Indent).Append("/// <summary>A successful result carrying <paramref name=\"value\"/>.</summary>\n");
+        sb.Append(Indent).Append("public static Result<T> Ok(T value) => new(true, value);\n\n");
+        sb.Append(Indent).Append("/// <summary>A not-found result: the target aggregate was absent.</summary>\n");
+        sb.Append(Indent).Append("public static Result<T> NotFound() => new(false, default);\n");
+        sb.Append("}\n");
+
+        return new EmittedFile($"{FolderFor(RuntimeNamespace)}/Result.cs",
+            Assemble(emit, RuntimeNamespace, sb.ToString(), usesLinq: false));
+    }
+
     /// <summary>Emits the <c>IIntegrationEvent</c> published-language marker once into Koine.Runtime (R14.3).</summary>
     private EmittedFile EmitIntegrationEventInterface(EmitContext emit)
     {

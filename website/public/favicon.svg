@@ -1,1 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><path fill-rule="evenodd" d="M81 36 64 0 47 36l-1 2-9-10a6 6 0 0 0-9 9l10 10h-2L0 64l36 17h2L28 91a6 6 0 1 0 9 9l9-10 1 2 17 36 17-36v-2l9 10a6 6 0 1 0 9-9l-9-9 2-1 36-17-36-17-2-1 9-9a6 6 0 1 0-9-9l-9 10v-2Zm-17 2-2 5c-4 8-11 15-19 19l-5 2 5 2c8 4 15 11 19 19l2 5 2-5c4-8 11-15 19-19l5-2-5-2c-8-4-15-11-19-19l-2-5Z" clip-rule="evenodd"/><path d="M118 19a6 6 0 0 0-9-9l-3 3a6 6 0 1 0 9 9l3-3Zm-96 4c-2 2-6 2-9 0l-3-3a6 6 0 1 1 9-9l3 3c3 2 3 6 0 9Zm0 82c-2-2-6-2-9 0l-3 3a6 6 0 1 0 9 9l3-3c3-2 3-6 0-9Zm96 4a6 6 0 0 1-9 9l-3-3a6 6 0 1 1 9-9l3 3Z"/><style>path{fill:#000}@media (prefers-color-scheme:dark){path{fill:#fff}}</style></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" fill="none" role="img" aria-label="Koine">
+  <!-- The Koine hexagon-κ brand mark (#1141): a lowercase kappa inscribed in the ports-and-adapters
+       hexagon. Matches the Studio favicon (tooling/koine-studio/src/assets/koine-mark.svg) so the docs
+       tab and the app tab share one mark; the stroke flips by prefers-color-scheme (light accent on a
+       light tab, lighter accent on a dark tab), the same adaptive pattern as the old compass favicon. -->
+  <g stroke-linejoin="round" stroke-linecap="round">
+    <polygon points="106,60 83,99.84 37,99.84 14,60 37,20.16 83,20.16" stroke-width="6"/>
+    <g stroke-width="7.5">
+      <path d="M48 36 V84"/>
+      <path d="M48 60 L78 36"/>
+      <path d="M48 60 L78 84"/>
+    </g>
+  </g>
+  <style>
+    g { stroke: #2f7fe0; }
+    @media (prefers-color-scheme: dark) { g { stroke: #5aa9ff; } }
+  </style>
+</svg>

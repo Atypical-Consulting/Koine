@@ -801,4 +801,284 @@ public class R18CSharpApplicationTests
         var files = Emit(AppOn, src);
         files.ShouldNotContain(f => f.RelativePath.EndsWith("OrderPlaceHandler.cs", StringComparison.Ordinal));
     }
+
+    // ------------------------------------------------------------------
+    // W1 (#1041) — --app-not-found result: return a generated Result<T>
+    // instead of throwing/nulling on a missing aggregate. Task 1 plumbs the
+    // option and emits the Result<T> runtime type; Task 2 wires the returns.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Config_parses_application_not_found_result()
+    {
+        var opts = KoineConfig
+            .Parse("targets.csharp.application.notFound = result\n")
+            .OptionsFor("csharp");
+        opts.ApplicationNotFound.ShouldBe("result");
+    }
+
+    [Fact]
+    public void App_not_found_result_flag_implies_the_application_layer()
+    {
+        var settings = new BuildSettings { Path = "x.koi", AppNotFound = "result" };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+        plan.Options.ApplicationNotFound.ShouldBe("result");
+    }
+
+    [Fact]
+    public void Known_app_not_found_result_resolves_true_case_insensitively()
+    {
+        new BuildSettings { Path = "x.koi", AppNotFound = "result" }
+            .TryResolve(out _, out var e1).ShouldBeTrue(e1);
+        new BuildSettings { Path = "x.koi", AppNotFound = "Result" }
+            .TryResolve(out _, out var e2).ShouldBeTrue(e2);
+    }
+
+    [Fact]
+    public void Result_type_is_emitted_and_compiles_under_the_result_policy()
+    {
+        // Emit asserts a clean Roslyn compile of the whole model, so this also proves Result<T> compiles.
+        var files = Emit(AppOn with { NotFound = CSharpNotFound.Result });
+        var result = files.Single(f => f.RelativePath == "Koine/Runtime/Result.cs");
+        result.Contents.ShouldContain("public readonly struct Result<T>");
+        result.Contents.ShouldContain("public static Result<T> Ok(T value)");
+        result.Contents.ShouldContain("public static Result<T> NotFound()");
+        result.Contents.ShouldContain("public bool IsSuccess");
+    }
+
+    [Fact]
+    public void Result_type_is_absent_under_throw_and_nullable_policies()
+    {
+        Emit(AppOn).ShouldNotContain(f => f.RelativePath == "Koine/Runtime/Result.cs");
+        Emit(AppOn with { NotFound = CSharpNotFound.Nullable })
+            .ShouldNotContain(f => f.RelativePath == "Koine/Runtime/Result.cs");
+    }
+
+    [Fact]
+    public void Not_found_result_wraps_a_command_handler_return()
+    {
+        var files = Emit(AppOn with { NotFound = CSharpNotFound.Result });
+
+        // The void `place` command's handler now returns Result<Order>, yielding NotFound() on a miss and
+        // Ok(aggregate) on a hit. The whole model still compiles (Emit asserts the Koine compile succeeds).
+        var handler = File(files, "OrderPlaceHandler.cs").Contents;
+        handler.ShouldContain("using Koine.Runtime;");
+        handler.ShouldContain("public async Task<Result<Order>> HandleAsync(OrderPlaceRequest request, CancellationToken ct = default)");
+        handler.ShouldContain("if (aggregate is null)");
+        handler.ShouldContain("return Result<Order>.NotFound();");
+        handler.ShouldContain("return Result<Order>.Ok(aggregate);");
+        handler.ShouldNotContain("throw new InvalidOperationException");
+        handler.ShouldNotContain("return null;");
+    }
+
+    [Fact]
+    public void Not_found_result_makes_a_by_id_query_handler_return_a_result()
+    {
+        var files = Emit(AppOn with { NotFound = CSharpNotFound.Result });
+
+        // OrderById is a by-identity query — it now returns Result<OrderSummary> and yields NotFound() on a miss.
+        var handler = File(files, "OrderByIdHandler.cs").Contents;
+        handler.ShouldContain("Koine.Runtime.IQueryHandler<OrderById, Result<OrderSummary>>");
+        handler.ShouldContain("public async Task<Result<OrderSummary>> HandleAsync(OrderById query, CancellationToken ct = default)");
+        handler.ShouldContain("return Result<OrderSummary>.NotFound();");
+        handler.ShouldContain("return Result<OrderSummary>.Ok(aggregate.ToOrderSummary());");
+        handler.ShouldNotContain("throw new InvalidOperationException");
+    }
+
+    [Fact]
+    public void Not_found_result_application_output_roslyn_compiles()
+    {
+        // Prove the emitted Result<T> + the wrapped command/query handlers are valid C# — the emitted
+        // artifact, not just a clean Koine compile.
+        var (assembly, errors) = TestSupport.Compile(Emit(AppOn with { NotFound = CSharpNotFound.Result }));
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    [Fact]
+    public void Not_found_result_output_is_stable_and_the_default_stays_byte_identical()
+    {
+        // The result branch must not perturb the throw (default) output.
+        TestSupport.Render(Emit(AppOn with { NotFound = CSharpNotFound.Throw }))
+            .ShouldBe(TestSupport.Render(Emit(AppOn)));
+    }
+
+    [Fact]
+    public void Api_layer_result_not_found_maps_a_command_endpoint_to_200_or_404()
+    {
+        var endpoints = File(Emit(ApiOn with { NotFound = CSharpNotFound.Result }), "SalesEndpoints.cs").Contents;
+        endpoints.ShouldContain("return result.IsSuccess ? Results.Ok(result.Value) : Results.NotFound();");
+    }
+
+    [Fact]
+    public void Api_layer_result_maps_only_the_result_returning_endpoints()
+    {
+        // The command (place) and the by-id query (OrderById) return Result<T> → mapped. The factory
+        // (open, plain aggregate) and the list query (OrdersByStatus, plain list) must stay plain Ok —
+        // mapping .IsSuccess on those would not compile, so the by-id detection must exclude them.
+        var endpoints = File(Emit(ApiOn with { NotFound = CSharpNotFound.Result }), "SalesEndpoints.cs").Contents;
+        System.Text.RegularExpressions.Regex.Matches(endpoints, "result.IsSuccess").Count.ShouldBe(2);
+        endpoints.ShouldContain("return Results.Ok(result);");
+    }
+
+    // ------------------------------------------------------------------
+    // W1 (#1041) — --app-handler-result readModel: a void command's handler
+    // returns a read-model projection of the mutated aggregate instead of
+    // the aggregate. void (default) / aggregate are unchanged.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Config_parses_application_handler_result_read_model()
+    {
+        var opts = KoineConfig
+            .Parse("targets.csharp.application.handlerResult = readModel\n")
+            .OptionsFor("csharp");
+        opts.ApplicationHandlerResult.ShouldBe("readModel");
+    }
+
+    [Fact]
+    public void App_handler_result_read_model_flag_implies_the_application_layer()
+    {
+        var settings = new BuildSettings { Path = "x.koi", AppHandlerResult = "readModel" };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+        plan.Options.ApplicationHandlerResult.ShouldBe("readModel");
+    }
+
+    [Fact]
+    public void Known_app_handler_result_read_model_resolves_true_case_insensitively()
+    {
+        new BuildSettings { Path = "x.koi", AppHandlerResult = "readmodel" }
+            .TryResolve(out _, out var e1).ShouldBeTrue(e1);
+        new BuildSettings { Path = "x.koi", AppHandlerResult = "readModel" }
+            .TryResolve(out _, out var e2).ShouldBeTrue(e2);
+    }
+
+    [Fact]
+    public void Handler_result_read_model_returns_a_projection_of_the_mutated_aggregate()
+    {
+        var files = Emit(AppOn with { HandlerResult = CSharpHandlerResult.ReadModel });
+
+        // The void `place` command's handler now returns the OrderSummary read model projected from the
+        // mutated Order, via the emitted To<RM>() projection, instead of returning nothing.
+        var handler = File(files, "OrderPlaceHandler.cs").Contents;
+        handler.ShouldContain("public async Task<OrderSummary> HandleAsync(OrderPlaceRequest request, CancellationToken ct = default)");
+        handler.ShouldContain("aggregate.Place();");
+        handler.ShouldContain("return aggregate.ToOrderSummary();");
+        handler.ShouldNotContain("return aggregate;");
+    }
+
+    [Fact]
+    public void Handler_result_read_model_composes_with_the_nullable_not_found_policy()
+    {
+        var files = Emit(AppOn with { HandlerResult = CSharpHandlerResult.ReadModel, NotFound = CSharpNotFound.Nullable });
+        var handler = File(files, "OrderPlaceHandler.cs").Contents;
+        handler.ShouldContain("public async Task<OrderSummary?> HandleAsync(");
+        handler.ShouldContain("return null;");
+        handler.ShouldContain("return aggregate.ToOrderSummary();");
+    }
+
+    [Fact]
+    public void Handler_result_read_model_output_roslyn_compiles()
+    {
+        var (assembly, errors) = TestSupport.Compile(Emit(AppOn with { HandlerResult = CSharpHandlerResult.ReadModel }));
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    [Fact]
+    public void Handler_result_read_model_falls_back_to_the_aggregate_without_a_read_model()
+    {
+        // An aggregate with no read model cannot project, so readModel falls back to returning the
+        // mutated aggregate.
+        const string src = """
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Order root Order {
+                repository { operations: getById, add }
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+                  states status {
+                    Draft -> Placed
+                    Placed
+                  }
+                  command place {
+                    status -> Placed
+                  }
+                }
+              }
+            }
+            """;
+        var handler = File(Emit(AppOn with { HandlerResult = CSharpHandlerResult.ReadModel }, src), "OrderPlaceHandler.cs").Contents;
+        handler.ShouldContain("public async Task<Order> HandleAsync(");
+        handler.ShouldContain("return aggregate;");
+    }
+
+    // ------------------------------------------------------------------
+    // W1 (#1041) — the two options composed, and their less-travelled
+    // branches (declared-return command, MediatR mode, the api layer).
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Not_found_result_composes_with_read_model_handler_result()
+    {
+        // readModel + result: a void command's handler returns Result<OrderSummary> wrapping the To<RM>()
+        // projection on a hit and NotFound() on a miss.
+        var handler = File(Emit(AppOn with { HandlerResult = CSharpHandlerResult.ReadModel, NotFound = CSharpNotFound.Result }),
+            "OrderPlaceHandler.cs").Contents;
+        handler.ShouldContain("public async Task<Result<OrderSummary>> HandleAsync(");
+        handler.ShouldContain("return Result<OrderSummary>.NotFound();");
+        handler.ShouldContain("return Result<OrderSummary>.Ok(aggregate.ToOrderSummary());");
+    }
+
+    [Fact]
+    public void Not_found_result_wraps_a_declared_return_command()
+    {
+        // A command that declares its own return type keeps it, wrapped in Result<declared> — a distinct
+        // path from the promoted-void command that the other result tests exercise.
+        const string src = """
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Order root Order {
+                repository { operations: getById, add }
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+                  total:  Int = 0
+                  command bump(by: Int): Int {
+                    total -> total + by
+                    result total
+                  }
+                }
+              }
+            }
+            """;
+        var handler = File(Emit(AppOn with { NotFound = CSharpNotFound.Result }, src), "OrderBumpHandler.cs").Contents;
+        handler.ShouldContain("public async Task<Result<int>> HandleAsync(");
+        handler.ShouldContain("return Result<int>.NotFound();");
+        handler.ShouldContain("var result = aggregate.Bump(request.By);");
+        handler.ShouldContain("return Result<int>.Ok(result);");
+    }
+
+    [Fact]
+    public void Not_found_result_composes_with_mediatr_mode()
+    {
+        // Under MediatR the wrapped result flows through the two-arg IRequest/IRequestHandler shape.
+        var files = Emit(AppOn with { NotFound = CSharpNotFound.Result, ApplicationMediatr = true });
+        File(files, "OrderPlaceRequest.cs").Contents
+            .ShouldContain("public sealed record OrderPlaceRequest(OrderId Id) : MediatR.IRequest<Result<Order>>;");
+        var handler = File(files, "OrderPlaceHandler.cs").Contents;
+        handler.ShouldContain("MediatR.IRequestHandler<OrderPlaceRequest, Result<Order>>");
+        handler.ShouldContain("public async Task<Result<Order>> Handle(OrderPlaceRequest request, CancellationToken cancellationToken)");
+        handler.ShouldContain("return Result<Order>.Ok(aggregate);");
+    }
+
+    [Fact]
+    public void Api_layer_read_model_returns_the_projected_body()
+    {
+        // Regression: an --app-handler-result readModel command endpoint must return the projected read
+        // model (Results.Ok(result)), not discard it with an empty Results.Ok().
+        var endpoints = File(Emit(ApiOn with { HandlerResult = CSharpHandlerResult.ReadModel }), "SalesEndpoints.cs").Contents;
+        endpoints.ShouldContain("var result = await handler.HandleAsync(request, ct);");
+        endpoints.ShouldContain("return Results.Ok(result);");
+        endpoints.ShouldNotContain("return Results.Ok();");
+    }
 }
