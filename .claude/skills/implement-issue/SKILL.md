@@ -270,36 +270,17 @@ If the review is clean, say so and skip the fix commit.
 ## Step 8 — Sync with `main` and resolve conflicts
 
 `main` moves while this PR sits in draft. Mark it ready against a stale base and it merges with
-conflicts — or won't merge. So before the final gate, pull the latest `main` into the branch, resolve
-collisions, *then* re-verify on the merged tree.
+conflicts — or won't merge. So before the final gate, merge the latest `main` into the branch, resolve
+collisions, *then* re-verify on the merged tree (Step 9 is the proof — a clean textual merge is not a
+clean semantic one).
 
-When the profile's *Integration style* is squash-merge, the branch's history is collapsed at merge time
-— which makes a **merge** of `main` into the branch the right tool, not a rebase: resolves each conflict
-once, no force-push, and the throwaway merge commit disappears when the PR squashes. (For a rebase- or
-merge-commit repo, follow the profile's *Integration style*.)
-
-```bash
-git fetch origin main
-git <commit-identity> merge origin/main
-```
-
-- **"Already up to date" / clean merge** → go to Step 9.
-- **Conflicts** → resolve favoring *both sides' intent* — a parallel PR's work is as real as yours. Most are mechanical; the profile's *Conflict hot-spots* table (and `references/github-mechanics.md` §7) lists them by file. Two rules prevent silent damage:
-  - **Regenerate derived files; don't hand-merge them.** Snapshots and lockfiles must not be merged line-by-line — take one side to clear the conflict, then regenerate (re-run affected tests and accept the fresh snapshot; reinstall deps to rebuild the lockfile).
-  - **A textual merge is not a semantic merge.** Don't trust it until it builds and passes — `main` may have renamed a symbol your branch still calls. Step 9 is the proof.
-
-Finish the merge with the project identity once it builds, then push:
-
-```bash
-git add -A
-git <commit-identity> commit --no-edit   # completes the merge
-git push
-```
-
-If a conflict is genuinely ambiguous — both sides rewrote the same logic — stop and surface it with both
-sides shown rather than guessing. Note the race: if another PR merges *after* you sync but before this
-lands, you may have to re-run this step — it's cheap, and a re-sync right before merge is the surest path
-to a clean integration.
+Follow the shared procedure in [`../_shared/sync-with-main.md`](../_shared/sync-with-main.md)
+(merge-not-rebase, the conflict rule-of-thumb keyed off the profile's *Conflict hot-spots*, and
+finish-and-verify); `references/github-mechanics.md` §7 has the implement-issue framing. If a conflict
+is genuinely ambiguous — both sides rewrote the same logic — stop and surface it with both sides shown
+rather than guessing (Autonomy contract). Note the race: if another PR merges *after* you sync but
+before this lands, re-run this step — it's cheap, and a re-sync right before merge is the surest path to
+a clean integration.
 
 ---
 
