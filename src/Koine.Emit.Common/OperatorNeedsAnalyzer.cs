@@ -21,66 +21,15 @@ namespace Koine.Compiler;
 internal static class OperatorNeedsAnalyzer
 {
     /// <summary>
-    /// Records, per value-object type, which scalar C# types ("int"/"decimal") it is multiplied by in a
-    /// <c>value-object * scalar</c> multiplication. Only those operators are generated, so we never emit
-    /// spurious (or non-compiling) operators on value objects that are never multiplied. A thin
-    /// projection over the single-pass <see cref="BuildOperatorNeeds"/>.
-    /// </summary>
-    public static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildScalarOperatorNeeds(KoineModel model, ModelIndex index) =>
-        ProjectScalarFactors(BuildOperatorNeeds(model, index), static n => n.MultiplyFactors);
-
-    /// <summary>
-    /// The division sibling of <see cref="BuildScalarOperatorNeeds"/>: records, per value-object type,
-    /// which scalar C# types ("int"/"decimal") it is divided by. Drives demand-driven <c>operator /</c>
-    /// generation (#832) — the natural dual of scalar multiplication. Division is non-commutative, so
-    /// only the value-object-on-the-left form is recorded; <c>scalar / value-object</c> would divide a
-    /// scalar <i>by</i> the value object, which is not a value-object operator, so it is deliberately not
-    /// recorded (its reversed-operand emission is a separate concern, out of scope here). A thin
-    /// projection over the single-pass <see cref="BuildOperatorNeeds"/>.
-    /// </summary>
-    public static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildScalarDivisionNeeds(KoineModel model, ModelIndex index) =>
-        ProjectScalarFactors(BuildOperatorNeeds(model, index), static n => n.DivideFactors);
-
-    /// <summary>
-    /// The value-object types folded by a <c>sum</c> selector (e.g. <c>lines.sum(l =&gt; l.subtotal)</c>
-    /// producing a <c>Money</c>) and therefore needing an additive operator. A thin projection over the
-    /// single-pass <see cref="BuildOperatorNeeds"/> (its <see cref="ValueObjectOperatorNeeds.IsSummable"/>
-    /// flag).
-    /// </summary>
-    public static IReadOnlySet<string> BuildAdditiveOperatorNeeds(KoineModel model, ModelIndex index) =>
-        BuildOperatorNeeds(model, index)
-            .Where(kv => kv.Value.IsSummable)
-            .Select(kv => kv.Key)
-            .ToHashSet(StringComparer.Ordinal);
-
-    /// <summary>
-    /// Records, per value-object type, which additive operators it participates in via plain
-    /// <c>value-object <b>+</b>/<b>-</b> value-object</c> binary arithmetic — e.g.
-    /// <c>combined: Money = base + base</c>. This is the binary-operator sibling of
-    /// <see cref="BuildAdditiveOperatorNeeds"/> (which only fires on a <c>sum(selector)</c> fold): a
-    /// value object used directly in <c>+</c>/<c>-</c> needs an <c>add</c>/<c>subtract</c> method too,
-    /// otherwise the lowered call site (<c>$vo-&gt;add(...)</c>) targets a method that was never
-    /// generated. A guard-narrowed optional operand still infers as the same value type, so it is
-    /// recorded here as well (its emission need is identical; only the call-site routing differs).
-    /// Target-agnostic like the rest of this analyzer: the PHP emitter generates its <c>add</c>/<c>subtract</c>
-    /// methods from this map, and the C# emitter consumes it (alongside <see cref="BuildAdditiveOperatorNeeds"/>)
-    /// to demand-generate direct <c>operator +</c>/<c>operator -</c> for plain value objects (#833). A thin
-    /// projection over the single-pass <see cref="BuildOperatorNeeds"/>.
-    /// </summary>
-    public static IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BuildValueObjectArithmeticNeeds(KoineModel model, ModelIndex index) =>
-        BuildOperatorNeeds(model, index)
-            .Where(kv => kv.Value.BinaryOps.Count > 0)
-            .ToDictionary(kv => kv.Key, kv => (IReadOnlySet<BinaryOp>)kv.Value.BinaryOps, StringComparer.Ordinal);
-
-    /// <summary>
-    /// The whole per-value-object need model — the single-pass output the four scalar / additive /
-    /// binary projection methods derive from — exposed directly for an emitter that needs more than one
-    /// signal at once. The PHP emitter consumes it so the "does this value object need an <c>add</c>?"
-    /// decision (the union of the <c>sum</c>-fold and binary <c>+</c> demands, see
-    /// <see cref="ValueObjectOperatorNeeds.NeedsAdd"/>) lives in the analyzer rather than being
-    /// re-combined from <see cref="BuildAdditiveOperatorNeeds"/> and
-    /// <see cref="BuildValueObjectArithmeticNeeds"/> in the emitter (#836). Internal because it surfaces
-    /// the internal <see cref="ValueObjectOperatorNeeds"/> record.
+    /// The whole per-value-object need model — the single-pass output every code emitter reads its
+    /// scalar (<see cref="ValueObjectOperatorNeeds.MultiplyFactors"/> /
+    /// <see cref="ValueObjectOperatorNeeds.DivideFactors"/>), <c>sum</c>-fold
+    /// (<see cref="ValueObjectOperatorNeeds.IsSummable"/>), and plain binary <c>+</c>/<c>-</c>
+    /// (<see cref="ValueObjectOperatorNeeds.BinaryOps"/>) signals off. Every emitter consumes it so the
+    /// "does this value object need an <c>add</c>?" decision (the union of the <c>sum</c>-fold and binary
+    /// <c>+</c> demands, see <see cref="ValueObjectOperatorNeeds.NeedsAdd"/>) lives in the analyzer rather
+    /// than being re-combined per target in the emitter (#836). Internal because it surfaces the internal
+    /// <see cref="ValueObjectOperatorNeeds"/> record.
     /// </summary>
     internal static IReadOnlyDictionary<string, ValueObjectOperatorNeeds> BuildValueObjectOperatorNeeds(KoineModel model, ModelIndex index) =>
         BuildOperatorNeeds(model, index);
@@ -174,17 +123,6 @@ internal static class OperatorNeedsAnalyzer
     }
 
     /// <summary>
-    /// Projects one scalar factor set (multiply or divide) out of the per-VO need model, keeping only
-    /// value objects that actually carry a factor under that operator — so the result is byte-identical
-    /// to the pre-unification per-operator map (which only ever held keys it recorded a factor for).
-    /// </summary>
-    private static IReadOnlyDictionary<string, IReadOnlySet<string>> ProjectScalarFactors(
-        IReadOnlyDictionary<string, ValueObjectOperatorNeeds> needs,
-        Func<ValueObjectOperatorNeeds, IReadOnlySet<string>> select) =>
-        needs.Where(kv => select(kv.Value).Count > 0)
-             .ToDictionary(kv => kv.Key, kv => select(kv.Value), StringComparer.Ordinal);
-
-    /// <summary>
     /// The per-value-object operator demand accumulated by <see cref="BuildOperatorNeeds"/> in one pass:
     /// the scalar C# types it is multiplied / divided by, the plain binary additive operators it
     /// participates in, and whether it is folded by <c>sum</c>. One record replaces the separate per-pass
@@ -239,11 +177,10 @@ internal static class OperatorNeedsAnalyzer
     /// Every expression the demand-driven value-object analyses scan, paired with the
     /// <see cref="TypeScope"/> it is resolved in: member initializers, invariant conditions, command
     /// and factory bodies, state-rule guards, service operation bodies, spec conditions, and
-    /// read-model field projections. The <b>single</b> site enumerator — the scalar
-    /// <c>*</c>/<c>/</c> analyses (<see cref="BuildScalarOperatorNeeds"/>, <see cref="BuildScalarDivisionNeeds"/>),
-    /// the <c>sum</c> fold (<see cref="BuildAdditiveOperatorNeeds"/>), and the plain binary <c>+</c>/<c>-</c>
-    /// analysis (<see cref="BuildValueObjectArithmeticNeeds"/>) all walk it, so the site list lives in one
-    /// place and cannot drift between passes (#836).
+    /// read-model field projections. The <b>single</b> site enumerator that
+    /// <see cref="BuildOperatorNeeds"/> walks to accumulate every per-VO need signal (scalar
+    /// <c>*</c>/<c>/</c> factors, the <c>sum</c> fold, and plain binary <c>+</c>/<c>-</c>) in one pass, so
+    /// the site list lives in one place and cannot drift between analyses (#836).
     /// </summary>
     private static IEnumerable<(Expr Expr, TypeScope Scope)> ExpressionScanSites(KoineModel model, ModelIndex index)
     {
