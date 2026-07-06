@@ -1,12 +1,12 @@
 import { describe, expect, test, vi } from 'vitest';
-import { fireEvent, render, waitFor } from '@testing-library/preact';
+import { act, fireEvent, render, waitFor } from '@testing-library/preact';
 import { SyntaxTreePanel, deepestContaining, type SyntaxTreeSource } from '@/model/SyntaxTreePanel';
-import type { SyntaxSpan, SyntaxTreeNode } from '@/lsp/protocol';
+import type { SourceSpan, SyntaxTreeNode } from '@/lsp/protocol';
 import { axe } from 'vitest-axe';
 
 // A throwaway raw span — the panel renders structure, not coordinates, so every fixture node can share
 // one. (1-based, end-exclusive, matching the koine/syntaxTree wire shape.)
-const SPAN: SyntaxSpan = { line: 1, column: 1, endLine: 1, endColumn: 1, offset: 0, length: 0, file: null };
+const SPAN: SourceSpan = { line: 1, column: 1, endLine: 1, endColumn: 1, offset: 0, length: 0, file: null };
 
 /** Terse fixture-node builder so a tree literal stays readable. Non-leaf/flag fields default sensibly. */
 function node(kind: string, name: string | null, children: SyntaxTreeNode[] = [], extra: Partial<SyntaxTreeNode> = {}): SyntaxTreeNode {
@@ -17,8 +17,8 @@ function node(kind: string, name: string | null, children: SyntaxTreeNode[] = []
 // The root carries the wire's all-zero span; the real nodes carry NESTING own-spans so a caret resolves
 // to exactly one deepest containing node. Billing wraps lines 1–4; Money lines 2–3; the amount Member
 // sits on line 3, cols 5–19 (end-exclusive at 20).
-const zeroSpan: SyntaxSpan = { line: 0, column: 0, endLine: 0, endColumn: 0, offset: 0, length: 0, file: null };
-const span = (line: number, column: number, endLine: number, endColumn: number): SyntaxSpan => ({
+const zeroSpan: SourceSpan = { line: 0, column: 0, endLine: 0, endColumn: 0, offset: 0, length: 0, file: null };
+const span = (line: number, column: number, endLine: number, endColumn: number): SourceSpan => ({
   line, column, endLine, endColumn, offset: 0, length: 0, file: 'file:///m.koi',
 });
 function spannedFixture(): SyntaxTreeNode {
@@ -133,6 +133,122 @@ describe('SyntaxTreePanel', () => {
 
     view.rerender(<SyntaxTreePanel source={source} revision={1} />);
     await waitFor(() => expect(source.syntaxTree).toHaveBeenCalledTimes(2));
+  });
+
+  test('preserves the roving tab stop on the same node across a revision refetch', async () => {
+    // The same tree comes back on every call — a typing edit that leaves the focused node intact.
+    const source = makeSource(fixture());
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+
+    // Arrow down from the root to the Billing context, taking the lone tab stop with it.
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    root.focus();
+    fireEvent.keyDown(root, { key: 'ArrowDown' });
+    const ctx = view.getByRole('treeitem', { name: /ContextNode Billing/ });
+    expect(ctx.getAttribute('tabindex')).toBe('0'); // it holds the roving tab stop now
+    expect(root.getAttribute('tabindex')).toBe('-1');
+
+    // A model edit bumps the revision → the panel refetches and rebuilds the tree.
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    await waitFor(() => expect(source.syntaxTree).toHaveBeenCalledTimes(2));
+
+    // The tab stop stays on Billing (same kind/name identity), NOT reset back to the root.
+    expect(view.getByRole('treeitem', { name: /ContextNode Billing/ }).getAttribute('tabindex')).toBe('0');
+    expect(view.getByRole('treeitem', { name: /KoineModel/ }).getAttribute('tabindex')).toBe('-1');
+  });
+
+  test('falls back to the root tab stop when the focused node is gone after a refetch', async () => {
+    // First the Billing tree; the refetch returns a DIFFERENT context at the same path (Shipping), so
+    // the previously-focused node's identity no longer matches at `0/0`.
+    const shipping = node('KoineModel', null, [
+      node('ContextNode', 'Shipping', [node('ValueObjectDecl', 'Address', [])]),
+    ]);
+    const syntaxTree = vi.fn().mockResolvedValueOnce(fixture()).mockResolvedValueOnce(shipping);
+    const source: SyntaxTreeSource = { syntaxTree };
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    root.focus();
+    fireEvent.keyDown(root, { key: 'ArrowDown' }); // tab stop → Billing (0/0)
+    expect(view.getByRole('treeitem', { name: /ContextNode Billing/ }).getAttribute('tabindex')).toBe('0');
+
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    await waitFor(() => expect(syntaxTree).toHaveBeenCalledTimes(2));
+
+    // The identity guard rejects Shipping-at-0/0 as a match, so the tab stop resets to the root.
+    await waitFor(() =>
+      expect(view.getByRole('treeitem', { name: /KoineModel/ }).getAttribute('tabindex')).toBe('0'),
+    );
+    expect(view.getByRole('treeitem', { name: /ContextNode Shipping/ }).getAttribute('tabindex')).toBe('-1');
+  });
+
+  test('re-homes DOM keyboard focus onto the preserved row when focus was in the tree', async () => {
+    const syntaxTree = vi.fn(async () => fixture());
+    const source: SyntaxTreeSource = { syntaxTree };
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    root.focus();
+    fireEvent.keyDown(root, { key: 'ArrowDown' }); // keyboard focus + tab stop → Billing (0/0)
+    const ctx = view.getByRole('treeitem', { name: /ContextNode Billing/ });
+    expect(document.activeElement).toBe(ctx);
+    // Spy on THIS row's focus so the test proves the re-focus EFFECT actively re-homes focus, rather than
+    // silently passing on Preact's incidental positional DOM reuse (which keeps `activeElement` on the row
+    // regardless). Removing the effect's scheduling block makes this expectation fail.
+    const focusSpy = vi.spyOn(ctx, 'focus');
+
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    // Let the async refetch resolve and the post-commit re-focus effect run.
+    await waitFor(() => expect(syntaxTree).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    // The effect called .focus() on the preserved Billing row, and focus ends up there (not <body>/root).
+    expect(focusSpy).toHaveBeenCalled();
+    expect(document.activeElement).toBe(view.getByRole('treeitem', { name: /ContextNode Billing/ }));
+    expect((document.activeElement as HTMLElement)?.getAttribute('aria-label')).toMatch(/ContextNode Billing/);
+    focusSpy.mockRestore();
+  });
+
+  test('does not steal focus into the tree when focus was elsewhere during a refetch', async () => {
+    const syntaxTree = vi.fn(async () => fixture());
+    const source: SyntaxTreeSource = { syntaxTree };
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+
+    // Establish Billing as the roving tab stop (so a row IS restorable), THEN move focus out of the tree.
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    root.focus();
+    fireEvent.keyDown(root, { key: 'ArrowDown' }); // tab stop → Billing (0/0)
+    (document.activeElement as HTMLElement | null)?.blur?.(); // focus leaves the tree → document.body
+    expect(view.container.contains(document.activeElement)).toBe(false);
+
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    // Let the async refetch resolve AND any post-commit re-focus effect run (Billing was already the tab
+    // stop, so there's no DOM change to await on — flush the microtask/effect queue explicitly instead).
+    await waitFor(() => expect(syntaxTree).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    // Even though the Billing tab stop is preserved, a refetch must NOT pull DOM focus back into the tree
+    // when focus was elsewhere — only the tab stop is restored, silently.
+    expect(view.container.contains(document.activeElement)).toBe(false);
+  });
+
+  test('an empty refetch resets to the root and paints the empty state without crashing', async () => {
+    const syntaxTree = vi.fn().mockResolvedValueOnce(fixture()).mockResolvedValueOnce(null);
+    const source: SyntaxTreeSource = { syntaxTree };
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    root.focus();
+    fireEvent.keyDown(root, { key: 'ArrowDown' }); // tab stop → Billing
+
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    // The now-empty tree paints the empty state (no tree role, no crash) with the tab stop reset.
+    expect(await view.findByText(/No syntax tree/i)).toBeTruthy();
+    expect(view.queryByRole('tree')).toBeNull();
   });
 
   test('clicking a row fires onNodeClick with that node and marks it current', async () => {
@@ -361,5 +477,20 @@ describe('deepestContaining', () => {
     const tree = spannedFixture();
     expect(deepestContaining(tree, 100, 1)).toBeNull(); // out of range
     expect(deepestContaining(tree, 5, 1)).toBeNull(); // == Billing's end (end-exclusive), so not contained
+  });
+
+  test('a SyntaxTreeNode.span typed as the shared SourceSpan keeps the line-0 root a no-jump sentinel (#1099)', () => {
+    // #1099 retyped SyntaxTreeNode.span from the deleted SyntaxSpan to the shared SourceSpan. Building
+    // the spans as SourceSpan must still type-check (same seven fields) AND preserve the sentinel: the
+    // all-zero root (line 0) resolves to no node, so the panel never jumps to 0:0.
+    const rootSpan: SourceSpan = { file: null, line: 0, column: 0, endLine: 0, endColumn: 0, offset: 0, length: 0 };
+    const childSpan: SourceSpan = { file: 'file:///m.koi', line: 1, column: 1, endLine: 3, endColumn: 1, offset: 0, length: 0 };
+    const tree: SyntaxTreeNode = node('KoineModel', null, [
+      node('ContextNode', 'Billing', [], { span: childSpan }),
+    ], { span: rootSpan });
+
+    // A caret inside the child resolves to it (jumpable); nothing resolves to the zero-span root.
+    expect(deepestContaining(tree, 2, 1)?.node.name).toBe('Billing');
+    expect(deepestContaining(tree, 0, 0)).toBeNull(); // the all-zero root is never a match → no jump
   });
 });

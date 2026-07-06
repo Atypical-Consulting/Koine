@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
 import { SyntaxTreePanel, type SyntaxTreeSource } from '@/model/SyntaxTreePanel';
-import type { SyntaxSpan, SyntaxTreeNode } from '@/lsp/protocol';
+import type { SourceSpan, SyntaxTreeNode } from '@/lsp/protocol';
 
 // The right-rail Syntax Tree panel (#890) — the active document's raw parse tree as a keyboard-navigable
 // WAI-ARIA tree. The panel owns its own async fetch rather than reading the store, so each story seeds a
@@ -9,7 +9,7 @@ import type { SyntaxSpan, SyntaxTreeNode } from '@/lsp/protocol';
 // distinctly. The @storybook/addon-a11y axe pass (Chromium/CI — not runnable locally) guards each state.
 
 // A shared throwaway span — the panel renders structure, not coordinates.
-const SPAN: SyntaxSpan = { line: 1, column: 1, endLine: 1, endColumn: 1, offset: 0, length: 0, file: null };
+const SPAN: SourceSpan = { line: 1, column: 1, endLine: 1, endColumn: 1, offset: 0, length: 0, file: null };
 
 function node(
   kind: string,

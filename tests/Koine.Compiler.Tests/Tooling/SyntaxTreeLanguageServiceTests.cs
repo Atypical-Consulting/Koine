@@ -106,6 +106,31 @@ public class SyntaxTreeLanguageServiceTests
     }
 
     [Fact]
+    public void Lsp_koine_syntaxTree_root_span_is_a_non_null_all_zero_object()
+    {
+        // The root (KoineModel) node carries the all-zero SourceSpan.None sentinel. It MUST serialize
+        // as a NON-NULL object exposing all seven span keys — with line == 0 and file == JSON null —
+        // NOT collapse to JSON null the way an absent diagram span does. Studio's panel relies on this
+        // (`span.line > 0` root guard in SyntaxTreePanel.tsx / inspectorController.tsx). Pins the wire
+        // contract across the SyntaxSpanJson → shared span-fields builder consolidation (#1099).
+        var output = RunSession(
+            Initialize(),
+            DidOpen(OrderingUri, Ordering),
+            SyntaxTreeRequest(OrderingUri));
+
+        TryResultForId(output, 88, out var result).ShouldBeTrue();
+
+        var span = result.GetProperty("span");
+        span.ValueKind.ShouldBe(JsonValueKind.Object); // a non-null object, never JSON null
+        foreach (var key in new[] { "line", "column", "endLine", "endColumn", "offset", "length", "file" })
+        {
+            span.TryGetProperty(key, out _).ShouldBeTrue($"root span is missing '{key}'");
+        }
+        span.GetProperty("line").GetInt32().ShouldBe(0);                 // all-zero root sentinel
+        span.GetProperty("file").ValueKind.ShouldBe(JsonValueKind.Null); // file: null on the root
+    }
+
+    [Fact]
     public void Lsp_koine_syntaxTree_returns_null_for_an_unopened_uri()
     {
         var output = RunSession(Initialize(), SyntaxTreeRequest("file:///never-opened.koi"));
