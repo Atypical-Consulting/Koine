@@ -26,11 +26,14 @@ public sealed record SyntaxTreeNode(
 
 /// <summary>
 /// Projects a parsed <see cref="KoineNode"/> subtree (the model root, or any node) into a
-/// serializable <see cref="SyntaxTreeNode"/> tree by recursing the grammar-agnostic child walk
-/// (<see cref="NodeWalker.ChildNodes"/>). No per-construct code: a new node kind is projected for
+/// serializable <see cref="SyntaxTreeNode"/> tree by recursing the source-generated child walk
+/// (<c>Koine.Compiler.Ast.ChildNodes.Of</c> / <c>KoineSyntaxChildEnumerator</c>) — the same
+/// enumeration <see cref="SyntaxGraph"/> navigation uses, so sibling order is deterministic and
+/// cross-runtime stable (not the implementation-defined order of the reflection oracle
+/// <see cref="NodeWalker.ChildNodes"/>). No per-construct code: a new node kind is projected for
 /// free. Runs equally over a clean parse and an error-tolerant (recovered) tree — recovered
 /// <see cref="ErrorNode"/> markers and ANTLR-inserted <see cref="KoineNode.IsMissing"/> phantoms
-/// surface flagged, rather than being dropped.
+/// surface flagged, rather than being dropped (the generated walk does not filter them).
 /// </summary>
 public static class SyntaxTreeProvider
 {
@@ -46,7 +49,10 @@ public static class SyntaxTreeProvider
     public static SyntaxTreeNode Build(KoineNode root, string source)
     {
         var children = new List<SyntaxTreeNode>();
-        foreach (KoineNode child in NodeWalker.ChildNodes(root))
+        // Order children via the source-generated child walk — the same enumeration SyntaxGraph
+        // navigation uses — so the DTO's sibling order is deterministic and cross-runtime stable.
+        // Fully qualified so 'ChildNodes' can't be misread as a member of this type.
+        foreach (KoineNode child in Koine.Compiler.Ast.ChildNodes.Of(root))
         {
             children.Add(Build(child, source));
         }

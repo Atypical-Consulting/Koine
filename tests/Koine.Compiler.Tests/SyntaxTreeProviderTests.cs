@@ -88,6 +88,42 @@ public class SyntaxTreeProviderTests
         Flatten(root).ShouldContain(n => n.Kind == "ValueObjectDecl" && n.Name == "Email");
     }
 
+    [Fact]
+    public void Build_orders_children_deterministically_via_the_generated_walk()
+    {
+        var (model, _) = new KoineCompiler().Parse(CleanSource);
+        model.ShouldNotBeNull();
+
+        // Determinism: two independent builds are structurally identical (Kind + Span + Name at
+        // every node, in the same flattened sequence) — the DTO serializes byte-stably.
+        SyntaxTreeNode first = SyntaxTreeProvider.Build(model!, CleanSource);
+        SyntaxTreeNode second = SyntaxTreeProvider.Build(model!, CleanSource);
+        Flatten(first).Select(Signature).ShouldBe(Flatten(second).Select(Signature));
+
+        // Ordering is pinned to the source-generated ChildNodes.Of walk — the same order the
+        // navigation graph (SyntaxGraph) presents — NOT the non-deterministic reflection walk
+        // NodeWalker.ChildNodes. Walk the DTO and the model in parallel and compare, at every node,
+        // the child (Kind, Span) sequence against ChildNodes.Of for the corresponding KoineNode.
+        AssertChildOrderMatchesGenerated(first, model!);
+    }
+
+    // Each DTO node's child order must equal the source-generated ChildNodes.Of order (the exact
+    // enumeration SyntaxGraph navigates) for the corresponding KoineNode, recursively.
+    private static void AssertChildOrderMatchesGenerated(SyntaxTreeNode dto, KoineNode node)
+    {
+        IReadOnlyList<KoineNode> generated = Koine.Compiler.Ast.ChildNodes.Of(node).ToList();
+        dto.Children.Select(c => (c.Kind, c.Span))
+            .ShouldBe(generated.Select(n => (n.GetType().Name, n.Span)));
+
+        for (int i = 0; i < generated.Count; i++)
+        {
+            AssertChildOrderMatchesGenerated(dto.Children[i], generated[i]);
+        }
+    }
+
+    private static (string Kind, SourceSpan Span, string? Name) Signature(SyntaxTreeNode n) =>
+        (n.Kind, n.Span, n.Name);
+
     private static IEnumerable<SyntaxTreeNode> Flatten(SyntaxTreeNode node)
     {
         yield return node;
