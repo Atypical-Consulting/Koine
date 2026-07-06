@@ -12,75 +12,285 @@
   padding: 0;
 }
 
-.koi-sc-head {
+/* Header action row. The shell's #right-title already renders the "Source Control" title, so the panel
+   renders only its local actions (Refresh + overflow) — no in-panel title, to avoid double-titling. */
+.koi-sc-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
+  gap: 0.15rem;
+  margin-bottom: 0.35rem;
+}
+
+/* Ghost icon button (mirrors the toolbar chrome): transparent until hover. */
+.koi-sc-hdr-ico {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--koi-radius-sm);
+  color: var(--koi-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
+/* Shared line-icon recipe (mirrors .tb-ico): 1.4px strokes tinted by the button's text color. */
+.koi-sc-ico {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The Refresh glyph spins 360° when its button carries .is-spinning — a class toggled on each click. */
+.koi-sc-hdr-ico .koi-sc-ico {
+  transition: transform var(--koi-dur-mid) ease;
+}
+
+.koi-sc-hdr-ico.is-spinning .koi-sc-ico {
+  transform: rotate(360deg);
+}
+
+/* Branch + sync bar: the branch switcher (a native <select> styled as a pill) beside a best-effort
+   ahead/behind readout. */
+.koi-sc-branchbar {
+  display: flex;
+  align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.7rem;
+  margin-bottom: 0.9rem;
 }
 
 .koi-sc-branch {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
+  flex: 1;
   min-width: 0;
-}
-
-.koi-sc-branch-icon {
-  color: var(--koi-muted);
-}
-
-.koi-sc-branch-select {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 30px;
+  padding: 0 0.6rem;
+  border-radius: var(--koi-radius-sm);
+  border: 1px solid var(--koi-line);
+  background: var(--koi-surface);
+  color: var(--koi-fg);
   font: inherit;
   font-size: var(--koi-text-md);
-  color: var(--koi-fg);
-  background: var(--koi-surface);
-  border: 1px solid color-mix(in srgb, var(--koi-fg) 16%, transparent);
-  border-radius: var(--koi-radius-sm);
-  padding: 0.15rem 0.35rem;
-  max-width: 100%;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
+  }
 }
 
 .koi-sc-branch-name {
-  font-weight: 600;
-  color: var(--koi-fg);
+  cursor: default;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Best-effort ahead/behind sync readout (mono). GitStatus carries no upstream counts, so it reads 0/0
+   until real sync wiring lands — the `ahead` count is tinted with the accent. */
+/* A non-interactive ahead/behind readout (a <div>, not a button) — no push action is wired, so it must
+   not read as a live control. */
+.koi-sc-sync {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 30px;
+  padding: 0 0.6rem;
+  border-radius: var(--koi-radius-sm);
+  border: 1px solid var(--koi-line);
+  background: transparent;
+  color: var(--koi-ink-soft);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-xs);
+
+  .ahead {
+    color: var(--koi-accent);
+  }
+
+  i {
+    font-style: normal;
+    margin-right: 0.15rem;
+  }
+
+  .sep {
+    opacity: 0.4;
+  }
 }
 
 .koi-sc-error {
   margin: 0 0 0.6rem;
   padding: 0.35rem 0.5rem;
   border-radius: var(--koi-radius-sm);
-  color: var(--koi-error, #b00020);
-  background: color-mix(in srgb, var(--koi-error, #b00020) 12%, transparent);
+  color: var(--koi-error);
+  background: color-mix(in srgb, var(--koi-error) 12%, transparent);
   font-size: var(--koi-text-sm);
 }
 
-/* Commit box: a labelled textarea over a primary Commit button. */
-.koi-sc-commit {
+/* Commit composer: a bordered card holding the message textarea over a split Commit button. The whole
+   card lights up (accent border + soft ring) while any child — textarea or button — holds focus. */
+.koi-sc-composer {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-lg);
+  background: var(--koi-surface);
+  overflow: hidden;
+  transition:
+    border-color var(--koi-dur-fast) ease,
+    box-shadow var(--koi-dur-fast) ease;
+
+  &:focus-within {
+    border-color: var(--koi-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--koi-accent) 15%, transparent);
+  }
 }
 
-.koi-sc-commit-input {
+/* Transparent textarea — the card owns the surface + border, so the textarea drops its own chrome. */
+.koi-sc-composer-input {
   font: inherit;
   font-size: var(--koi-text-md);
   color: var(--koi-fg);
-  background: var(--koi-surface);
-  border: 1px solid color-mix(in srgb, var(--koi-accent) 38%, transparent);
+  background: transparent;
+  border: 0;
+  padding: 0.6rem 0.7rem 0.5rem;
+  resize: none;
+  min-height: 58px;
+  line-height: 1.5;
+
+  &:focus {
+    outline: none;
+  }
+
+  &::placeholder {
+    color: var(--koi-muted);
+  }
+}
+
+/* Footer band under the message, hosting the primary action. */
+.koi-sc-composer-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-top: 1px solid color-mix(in srgb, var(--koi-line) 70%, transparent);
+  background: color-mix(in srgb, var(--koi-paper) 45%, transparent);
+}
+
+/* Split button = the primary Commit action fused with a caret for its (future) options menu. The
+   accent glow is dropped and the whole control dims once the commit is disabled. */
+.koi-sc-commit-split {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: stretch;
   border-radius: var(--koi-radius-sm);
-  padding: 0.4rem 0.5rem;
-  resize: vertical;
-  min-height: 2.4rem;
+  overflow: hidden;
+  box-shadow: 0 1px 8px color-mix(in srgb, var(--koi-accent) 22%, transparent);
+
+  &.is-disabled {
+    box-shadow: none;
+    opacity: 0.5;
+  }
 }
 
 .koi-sc-commit-btn {
-  align-self: flex-end;
+  flex: 1;
+  position: relative;
+  height: 30px;
+  padding: 0 0.75rem;
+  border: 0;
+  background: var(--koi-accent);
+  color: var(--koi-on-accent);
+  font: inherit;
+  font-size: var(--koi-text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--koi-accent) 88%, var(--koi-on-accent));
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
+/* Inline ⌘⏎ keycap, pinned to the button's right edge over its centred label. */
+.koi-sc-kbd {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+
+  kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 3px;
+    border-radius: var(--koi-radius-xs);
+    font-family: var(--koi-font-mono);
+    font-size: var(--koi-text-2xs);
+    line-height: 1;
+    color: var(--koi-on-accent);
+    background: color-mix(in srgb, var(--koi-on-accent) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--koi-on-accent) 26%, transparent);
+  }
+
+  .ret .koi-sc-ico {
+    width: 11px;
+    height: 11px;
+  }
+}
+
+/* The caret half — a hairline divider off the button's on-accent text colour. */
+.koi-sc-commit-caret {
+  flex: none;
+  width: 26px;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--koi-on-accent) 25%, transparent);
+  background: var(--koi-accent);
+  color: var(--koi-on-accent);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  &:disabled {
+    cursor: default;
+  }
 }
 
 /* File groups. */
@@ -88,19 +298,115 @@
   margin-bottom: 1rem;
 }
 
-.koi-sc-group-title {
+/* File-group header: a collapse toggle (chevron + label + count pill) beside a hover/focus-revealed
+   action cluster (Stage all / Unstage all / Discard all). Negative side margins let the head's hover
+   surface bleed to the panel edges like the rows below it. */
+.koi-sc-group-head {
   display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  margin: 0 0 0.4rem;
-  font-size: var(--koi-text-base);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--koi-muted);
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0 -0.5rem 0.4rem;
+  padding: 2px 0.5rem;
 }
 
-.koi-sc-count {
-  font-size: var(--koi-text-sm);
+/* The toggle owns the label + count and drives the collapsed state; borderless, mono, uppercase. */
+.koi-sc-group-toggle {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: none;
+  border: 0;
+  padding: 3px 0;
+  cursor: pointer;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--koi-muted);
+
+  &:hover {
+    color: var(--koi-fg);
+  }
+
+  .chev {
+    width: 11px;
+    height: 11px;
+    flex: none;
+    transition: transform var(--koi-dur-fast) ease;
+  }
+
+  .cnt {
+    min-width: 16px;
+    height: 15px;
+    padding: 0 5px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--koi-radius-pill);
+    background: var(--koi-surface);
+    color: var(--koi-ink-soft);
+    font-size: var(--koi-text-2xs);
+  }
+}
+
+/* Collapsed: rotate the chevron and hide this group's file list (the log section reuses .collapsed too). */
+.koi-sc-group.collapsed .chev {
+  transform: rotate(-90deg);
+}
+
+.koi-sc-group.collapsed .koi-sc-files,
+.koi-sc-group.collapsed .koi-sc-log {
+  display: none;
+}
+
+/* The staged group tints its count pill with the accent to read as "ready to commit". */
+.koi-sc-group.staged .koi-sc-group-toggle .cnt {
+  background: color-mix(in srgb, var(--koi-accent) 20%, transparent);
+  color: var(--koi-accent);
+}
+
+/* Action cluster: hidden until the head is hovered or an action is keyboard-focused. */
+.koi-sc-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--koi-dur-fast) ease;
+}
+
+.koi-sc-group-head:hover .koi-sc-group-actions,
+.koi-sc-group-actions:focus-within {
+  opacity: 1;
+}
+
+.koi-sc-gact {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--koi-radius-xs);
+  background: none;
+  border: 0;
+  color: var(--koi-muted);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+  }
+
+  &.danger:hover {
+    color: var(--koi-error);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
 }
 
 .koi-sc-files {
@@ -111,44 +417,31 @@
 
 .koi-sc-file {
   border-radius: var(--koi-radius-sm);
+}
+
+/* The row proper: glyph + path button + stat/actions. Negative side margins bleed the hover surface to
+   the rail edges; `position: relative` anchors the absolutely-positioned action cluster (see below),
+   which overlays the stat's trailing slot so revealing the actions never shifts the row's layout. */
+.koi-sc-file-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 -0.5rem;
+  padding: 5px 0.5rem;
+  border-radius: var(--koi-radius-sm);
 
   &:hover {
     background: color-mix(in srgb, var(--koi-fg) 6%, transparent);
   }
 }
 
-.koi-sc-file-row {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-/* The path is a button that toggles the inline diff — borderless so the row reads as a list, not a form. */
-.koi-sc-file-open {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex: 1;
-  min-width: 0;
-  background: none;
-  border: none;
-  color: var(--koi-fg);
-  font: inherit;
-  font-size: var(--koi-text-md);
-  text-align: left;
-  padding: 0.25rem 0.3rem;
-  cursor: pointer;
-  border-radius: var(--koi-radius-sm);
-
-  &:hover {
-    color: var(--koi-accent);
-  }
-}
-
+/* The status glyph — a mono gutter letter, tinted by change kind (accent / green / error). */
 .koi-sc-glyph {
   flex: none;
-  width: 1.1em;
+  width: 14px;
   text-align: center;
+  font-family: var(--koi-font-mono);
   font-weight: 700;
   font-size: var(--koi-text-sm);
   color: var(--koi-muted);
@@ -162,20 +455,137 @@
 
 .koi-sc-glyph-added,
 .koi-sc-glyph-untracked {
-  color: var(--koi-ok, #16a34a);
+  color: var(--koi-hl-string);
 }
 
 .koi-sc-glyph-deleted,
 .koi-sc-glyph-conflicted {
-  color: var(--koi-error, #b00020);
+  color: var(--koi-error);
 }
 
-.koi-sc-file-path {
+/* The path is a button that toggles the inline diff — borderless so the row reads as a list, not a form.
+   Its label is split into a foreground basename + a muted directory prefix. */
+.koi-sc-file-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+
+  &:hover .koi-sc-name {
+    color: var(--koi-accent);
+  }
+}
+
+.koi-sc-name {
+  flex: none;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--koi-fg);
+  font-size: var(--koi-text-md);
 }
 
+.koi-sc-dir {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--koi-muted);
+  font-size: var(--koi-text-sm);
+}
+
+/* Trailing +/− stat (mono) — fades out when the action cluster takes its place on hover/focus. */
+.koi-sc-stat {
+  flex: none;
+  display: inline-flex;
+  gap: 0.3rem;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  transition: opacity var(--koi-dur-fast) ease;
+
+  .add {
+    color: var(--koi-hl-string);
+  }
+
+  .del {
+    color: var(--koi-error);
+  }
+
+  .none {
+    color: var(--koi-muted);
+  }
+}
+
+/* Row action cluster: overlays the stat's trailing slot. It stays in the DOM (opacity/pointer-events,
+   NOT display:none) so its buttons remain in the tab order — a keyboard/AT user can Tab to per-row
+   Stage/Unstage/Open, which then reveals the cluster via the row's :focus-within. (display:none would
+   drop the buttons from the tab order, and :focus-within could never fire — an a11y regression.) */
+.koi-sc-row-actions {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--koi-dur-fast) ease;
+}
+
+.koi-sc-file-row:hover .koi-sc-row-actions,
+.koi-sc-file-row:focus-within .koi-sc-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Swap keyed off the SAME hover/focus-within triggers as the reveal, so the stat and the action cluster
+   never show at once. */
+.koi-sc-file-row:hover .koi-sc-stat,
+.koi-sc-file-row:focus-within .koi-sc-stat {
+  opacity: 0;
+}
+
+.koi-sc-ract {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--koi-radius-xs);
+  background: none;
+  border: 0;
+  color: var(--koi-muted);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+  }
+
+  &.danger:hover {
+    color: var(--koi-error);
+  }
+
+  &.stage:hover {
+    color: var(--koi-accent);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
+/* The Initialize-repository call-to-action in the not-a-repo empty state. */
 .koi-sc-act {
   flex: none;
   background: none;
@@ -209,43 +619,101 @@
   white-space: pre;
 }
 
-/* Recent commits. */
+/* Recent commits. The section reuses the file-group head (collapse toggle) with a "View all" text action
+   that links (in a follow-up) to the full history surface. */
+.koi-sc-viewall {
+  flex: none;
+  background: none;
+  border: 0;
+  color: var(--koi-accent);
+  font: inherit;
+  font-size: var(--koi-text-sm);
+  cursor: pointer;
+  padding: 3px 4px;
+  border-radius: var(--koi-radius-xs);
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
 .koi-sc-log {
   list-style: none;
   margin: 0;
   padding: 0;
+  display: flex;
+  flex-direction: column;
 }
 
+/* Each commit row: a round initials avatar beside a message + meta column. Negative side margins bleed
+   the hover surface to the rail edges, aligning the rows with the file rows above. */
 .koi-sc-log-item {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: baseline;
-  gap: 0.2rem 0.45rem;
-  padding: 0.3rem 0.3rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--koi-fg) 8%, transparent);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 0 -0.5rem;
+  padding: 0.5rem;
+  border-radius: var(--koi-radius-sm);
 
-  &:last-child {
-    border-bottom: none;
+  &:hover {
+    background: color-mix(in srgb, var(--koi-fg) 5%, transparent);
   }
 }
 
-.koi-sc-log-sha {
-  grid-row: 1;
-  color: var(--koi-muted);
-  font-family: var(--koi-font-mono, monospace);
-  font-size: var(--koi-text-sm);
+/* Round, accent-tinted monogram of the author's initials. Decorative (aria-hidden in the markup). */
+.koi-sc-avatar {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--koi-radius-pill);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--koi-accent);
+  background: color-mix(in srgb, var(--koi-accent) 18%, transparent);
+}
+
+/* The message + meta stack that fills the remaining width beside the avatar. */
+.koi-sc-log-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .koi-sc-log-msg {
-  grid-row: 1;
   color: var(--koi-fg);
+  font-size: var(--koi-text-md);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Muted mono-ish meta: short SHA · author · date, `·`-separated. */
 .koi-sc-log-meta {
-  grid-row: 2;
-  grid-column: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--koi-muted);
   font-size: var(--koi-text-sm);
+
+  code {
+    font-family: var(--koi-font-mono);
+    font-size: var(--koi-text-2xs);
+    color: color-mix(in srgb, var(--koi-accent) 80%, var(--koi-muted));
+  }
+
+  .sep {
+    opacity: 0.5;
+  }
 }

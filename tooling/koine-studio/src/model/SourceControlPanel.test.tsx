@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { fireEvent, render, waitFor } from '@testing-library/preact';
+import { fireEvent, render, waitFor, within } from '@testing-library/preact';
 import { SourceControlPanel, type GitSurface } from '@/model/SourceControlPanel';
 import type { GitFile, GitLogEntry, GitStatus } from '@/host/types';
 import { koiConfirm } from '@atypical/koine-ui';
@@ -47,7 +47,7 @@ function makeGit(initial: GitFile[]) {
 
 // The section element of one file group, addressed by its aria-label (the panel groups files into named
 // landmarks). Returns null when the group has no files — the panel omits an empty group entirely.
-const group = (c: Element, label: string) => c.querySelector(`[aria-label="${label}"]`);
+const group = (c: Element, label: string) => c.querySelector<HTMLElement>(`[aria-label="${label}"]`);
 
 describe('SourceControlPanel', () => {
   test('renders the branch and groups changed files into Staged / Changes / Untracked', async () => {
@@ -68,6 +68,54 @@ describe('SourceControlPanel', () => {
     expect(group(view.container, 'Untracked')!.textContent).toContain('c.koi');
   });
 
+  test('a file row shows its status glyph + change-stat, and hover row actions (Open changes / Stage / Unstage)', async () => {
+    const git = makeGit([
+      { relPath: 'a.koi', staged: true, status: 'modified' },
+      { relPath: 'b.koi', staged: false, status: 'modified' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    // The unstaged b.koi row carries a status glyph and a (best-effort) change-stat element.
+    const changes = await waitFor(() => {
+      const el = group(view.container, 'Changes');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(changes.querySelector('.koi-sc-glyph')).not.toBeNull();
+    expect(changes.querySelector('.koi-sc-stat')).not.toBeNull();
+
+    // The hover/focus row actions are reachable by accessible name: Open changes + Stage on the
+    // unstaged row, Unstage on the staged row.
+    expect(view.getByRole('button', { name: 'Open changes b.koi' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Stage b.koi' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Unstage a.koi' })).toBeTruthy();
+
+    // Splitting the filename into name/dir must NOT change the file-open button's accessible name.
+    expect(view.getByRole('button', { name: 'b.koi modified' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'a.koi modified' })).toBeTruthy();
+  });
+
+  test('renders the branch switcher, the ahead/behind sync readout, and the Refresh control', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    // The branch switcher still resolves by its displayed value (the current branch).
+    await view.findByDisplayValue('main');
+
+    // The branch/sync bar renders a best-effort ahead/behind readout referencing the upstream ref.
+    const sync = await waitFor(() => {
+      const el = view.container.querySelector('.koi-sc-sync');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(sync.textContent).toContain('↑0');
+    expect(sync.textContent).toContain('↓0');
+    expect(sync.getAttribute('title')).toMatch(/origin\/main/);
+
+    // The Refresh action is still present as an accessible button.
+    expect(view.getByRole('button', { name: /Refresh/i })).toBeTruthy();
+  });
+
   test('clicking Stage stages the file and re-fetches so it moves to the staged group', async () => {
     const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }]);
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
@@ -81,6 +129,65 @@ describe('SourceControlPanel', () => {
     expect(group(view.container, 'Changes')).toBeNull();
   });
 
+  test('a group header toggle collapses and expands its file list', async () => {
+    const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    await waitFor(() => expect(group(view.container, 'Changes')).not.toBeNull());
+    // The group header's toggle is the button whose accessible name is the label + count (not a row action).
+    const toggle = () => within(group(view.container, 'Changes')!).getByRole('button', { name: /Changes/ });
+
+    // Groups default to expanded.
+    expect(group(view.container, 'Changes')!.classList.contains('collapsed')).toBe(false);
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+
+    // Clicking the toggle collapses the group (the file list hides via the `collapsed` class).
+    fireEvent.click(toggle());
+    expect(group(view.container, 'Changes')!.classList.contains('collapsed')).toBe(true);
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+
+    // Clicking again expands it back.
+    fireEvent.click(toggle());
+    expect(group(view.container, 'Changes')!.classList.contains('collapsed')).toBe(false);
+  });
+
+  test('a group header "Stage all" stages every file in that group', async () => {
+    const git = makeGit([
+      { relPath: 'b.koi', staged: false, status: 'modified' },
+      { relPath: 'c.koi', staged: false, status: 'modified' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    // The group action is named exactly "Stage all" so it never collides with the per-row "Stage b.koi".
+    const stageAll = await view.findByRole('button', { name: 'Stage all' });
+    fireEvent.click(stageAll);
+
+    await waitFor(() => expect(git.gitStage).toHaveBeenCalledWith(TOKEN, ['b.koi', 'c.koi']));
+  });
+
+  test('a staged group "Unstage all" unstages every staged file', async () => {
+    const git = makeGit([
+      { relPath: 'a.koi', staged: true, status: 'modified' },
+      { relPath: 'd.koi', staged: true, status: 'modified' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    const unstageAll = await view.findByRole('button', { name: 'Unstage all' });
+    fireEvent.click(unstageAll);
+
+    await waitFor(() => expect(git.gitUnstage).toHaveBeenCalledWith(TOKEN, ['a.koi', 'd.koi']));
+  });
+
+  test('the non-staged group renders a disabled Discard-all placeholder (unwired)', async () => {
+    const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    const discardAll = (await view.findByRole('button', {
+      name: /Discard all changes/i,
+    })) as HTMLButtonElement;
+    expect(discardAll.disabled).toBe(true);
+  });
+
   test('typing a message and clicking Commit calls gitCommit with the message', async () => {
     const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
@@ -88,9 +195,43 @@ describe('SourceControlPanel', () => {
     const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
     fireEvent.input(textarea, { target: { value: 'Add order total' } });
 
-    const commitBtn = view.getByRole('button', { name: 'Commit' }) as HTMLButtonElement;
+    const commitBtn = view.getByRole('button', { name: /Commit \d+ file/ }) as HTMLButtonElement;
     expect(commitBtn.disabled).toBe(false);
     fireEvent.click(commitBtn);
+
+    await waitFor(() => expect(git.gitCommit).toHaveBeenCalledWith(TOKEN, 'Add order total'));
+  });
+
+  test('the split Commit button is disabled until staged + message, and ⌘⏎ commits from the textarea', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
+    const commitBtn = () => view.getByRole('button', { name: /Commit \d+ file/ }) as HTMLButtonElement;
+
+    // A staged file but an empty message → the split Commit button is disabled.
+    expect(commitBtn().disabled).toBe(true);
+
+    // ⌘⏎ with an empty message is a no-op (it only fires when the button would be enabled).
+    fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
+    expect(git.gitCommit).not.toHaveBeenCalled();
+
+    // Typing a non-empty message enables the button.
+    fireEvent.input(textarea, { target: { value: 'Add order total' } });
+    expect(commitBtn().disabled).toBe(false);
+
+    // ⌘⏎ inside the textarea now commits (the keyboard shortcut the keycap advertises).
+    fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
+    await waitFor(() => expect(git.gitCommit).toHaveBeenCalledWith(TOKEN, 'Add order total'));
+  });
+
+  test('Ctrl+⏎ in the message textarea also commits (non-mac shortcut)', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: 'Add order total' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
 
     await waitFor(() => expect(git.gitCommit).toHaveBeenCalledWith(TOKEN, 'Add order total'));
   });
@@ -152,6 +293,27 @@ describe('SourceControlPanel', () => {
     await waitFor(() => expect(view.queryByRole('button', { name: /Initialize Repository/i })).toBeNull());
   });
 
+  test('the recent-commits log renders each commit as an avatar + short SHA + message, plus a View all action', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    // The Recent commits landmark keeps its accessible name (region query / axe rely on it).
+    const recent = await view.findByRole('region', { name: 'Recent commits' });
+
+    // Each log row leads with a mono avatar of the author's initials — "Ada" → "AD" (single-word name
+    // → first two letters uppercased, matching the `initials` helper).
+    const avatar = recent.querySelector('.koi-sc-avatar');
+    expect(avatar).not.toBeNull();
+    expect(avatar!.textContent).toBe('AD');
+
+    // …beside the short 7-char SHA and the commit message.
+    expect(recent.textContent).toContain('abcdef1'); // sha 'abcdef1234567'.slice(0,7)
+    expect(recent.textContent).toContain('Seed the model');
+
+    // The section header exposes a "View all" placeholder action for the (future) full-history surface.
+    expect(view.getByRole('button', { name: /View all/i })).toBeTruthy();
+  });
+
   test('has no accessibility violations', async () => {
     const git = makeGit([
       { relPath: 'a.koi', staged: true, status: 'modified' },
@@ -187,7 +349,7 @@ describe('SourceControlPanel — save-all-before-commit prompt (#470)', () => {
     );
     const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
     fireEvent.input(textarea, { target: { value: 'Add order total' } });
-    const commitBtn = view.getByRole('button', { name: 'Commit' }) as HTMLButtonElement;
+    const commitBtn = view.getByRole('button', { name: /Commit \d+ file/ }) as HTMLButtonElement;
     expect(commitBtn.disabled).toBe(false);
     fireEvent.click(commitBtn);
     return { git, onSaveAll, order };
