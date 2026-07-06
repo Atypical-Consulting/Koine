@@ -111,6 +111,52 @@ function accessibleName(node: SyntaxTreeNode): string {
   return s;
 }
 
+// --- windowed virtualization (#1098) --------------------------------------------------------------
+// A large or deeply-expanded tree is FLATTENED to an ordered list of the currently-visible (expanded)
+// rows, and only the rows intersecting the viewport are mounted; the off-window rows above and below are
+// represented as scroll-container padding, so the region still scrolls as if every row were present.
+// Hierarchy that the old nested `role="group"` markup conveyed structurally is now carried on each flat
+// `role="treeitem"` by `aria-level`/`aria-setsize`/`aria-posinset` (the WAI-ARIA flat-tree pattern).
+// Below the threshold the whole list renders in normal flow, so a small tree (the common case) is
+// unchanged.
+
+/** One flattened visible row: its index-path key, the node, its 1-based depth, and its position among
+ *  siblings — enough to render an honest flat `treeitem` with `aria-level`/`aria-setsize`/`aria-posinset`. */
+interface Row {
+  key: string;
+  node: SyntaxTreeNode;
+  level: number;
+  setSize: number;
+  posInSet: number;
+  hasChildren: boolean;
+  isExpanded: boolean;
+}
+
+/** The fixed row height (px) the window math assumes — mirrors `--koi-stree-row-h` in _syntax-tree.scss. */
+const ROW_HEIGHT = 24;
+/** At/below this many visible rows, render every row (windowing is pure overhead for a small tree). */
+const VIRTUALIZE_THRESHOLD = 100;
+/** Rows rendered above/below the viewport so a fast scroll doesn't flash blank. */
+const OVERSCAN = 8;
+/** Window size (in rows) when the container height can't be measured yet (pre-layout / happy-dom tests). */
+const FALLBACK_VIEWPORT_ROWS = 40;
+
+/** Pre-order flatten of the visible (expanded) rows. A collapsed node contributes its own row but none of
+ *  its descendants — exactly the set the panel renders and the arrow keys traverse. */
+function flattenVisible(root: SyntaxTreeNode, expanded: Set<string>): Row[] {
+  const rows: Row[] = [];
+  const walk = (node: SyntaxTreeNode, key: string, level: number, setSize: number, posInSet: number): void => {
+    const hasChildren = node.children.length > 0;
+    const isExpanded = hasChildren && expanded.has(key);
+    rows.push({ key, node, level, setSize, posInSet, hasChildren, isExpanded });
+    if (isExpanded) {
+      node.children.forEach((c, i) => walk(c, `${key}/${i}`, level + 1, node.children.length, i + 1));
+    }
+  };
+  walk(root, ROOT_KEY, 1, 1, 1);
+  return rows;
+}
+
 export function SyntaxTreePanel(props: {
   source: SyntaxTreeSource;
   /**
@@ -142,6 +188,11 @@ export function SyntaxTreePanel(props: {
   // (editor → tree): exactly one row wears `--current` + `aria-current` at a time. Distinct from
   // `focusedKey` (the keyboard tab stop) — selecting/highlighting isn't the same as being the tab stop.
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  // Windowing state (#1098): the live scroll offset and measured viewport height drive which slice of the
+  // flattened rows is mounted. Both stay 0 for a small (unwindowed) tree, and 0 under happy-dom (no
+  // layout), where the render falls back to a fixed-size window.
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportH, setViewportH] = useState(0);
   const treeRef = useRef<HTMLDivElement>(null);
 
   // The single fetch path: pull the active document's tree on mount and whenever the source or the
@@ -194,6 +245,16 @@ export function SyntaxTreePanel(props: {
     const el = treeRef.current?.querySelector<HTMLElement>(`[data-key="${activeKey}"]`);
     el?.scrollIntoView?.({ block: 'nearest' });
   }, [activeKey]);
+
+  // Measure the scroll viewport (#1098) so a windowed tree mounts exactly the rows it needs. happy-dom
+  // and a pre-layout first paint report 0 height — the render then falls back to a fixed-size window.
+  // Re-measured on window resize; re-runs when the tree changes (a new document can change the rail size).
+  useEffect(() => {
+    const measure = (): void => setViewportH(treeRef.current?.clientHeight ?? 0);
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [tree]);
 
   /** The visible treeitems in DOM (== visual) order — collapsed subtrees aren't in the DOM, so this is
    *  exactly the set Arrow keys traverse. Mirrors the domain navigator's `treeItems()`. */
@@ -297,14 +358,14 @@ export function SyntaxTreePanel(props: {
     );
   }
 
-  // One row + (when expanded) its nested `role="group"` of children. The treeitem is the focusable unit;
-  // the twisty, recovery badges and leaf preview are decorative (aria-hidden) — the isolated `aria-label`
+  // One flat `role="treeitem"` row (no nested `role="group"` — hierarchy is carried by `aria-level`/
+  // `aria-setsize`/`aria-posinset` so the list can be windowed). The treeitem is the focusable unit; the
+  // twisty, recovery badges and leaf preview are decorative (aria-hidden) — the isolated `aria-label`
   // carries the spoken name. Clicking the row SELECTS it (highlights + fires `onNodeClick` → jump-to-span)
   // and takes the roving tab stop; the twisty is the separate expand/collapse affordance (keyboard still
   // toggles via Arrow/Enter/Space on the row). The caret-tracked or clicked node wears `--current`.
-  function renderNode(node: SyntaxTreeNode, level: number, key: string): JSX.Element {
-    const hasChildren = node.children.length > 0;
-    const isExpanded = hasChildren && expanded.has(key);
+  function renderRow(row: Row): JSX.Element {
+    const { key, node, level, setSize, posInSet, hasChildren, isExpanded } = row;
     const tabbable = key === (focusedKey ?? ROOT_KEY);
     const isCurrent = key === activeKey;
     const cls = ['koi-stree-item'];
@@ -319,6 +380,8 @@ export function SyntaxTreePanel(props: {
         class={cls.join(' ')}
         data-key={key}
         aria-level={level}
+        aria-setsize={setSize}
+        aria-posinset={posInSet}
         aria-expanded={hasChildren ? isExpanded : undefined}
         aria-current={isCurrent ? 'true' : undefined}
         aria-label={accessibleName(node)}
@@ -366,17 +429,39 @@ export function SyntaxTreePanel(props: {
             </span>
           )}
         </div>
-        {isExpanded && (
-          <div role="group">{node.children.map((c, i) => renderNode(c, level + 1, `${key}/${i}`))}</div>
-        )}
       </div>
     );
   }
 
+  // Flatten to the ordered visible rows, then mount only the viewport window (#1098). A small tree
+  // (≤ threshold) renders every row in normal flow — byte-for-byte the pre-virtualization behaviour;
+  // a large one mounts just the slice, offset by top/bottom padding that stands in for the rest so the
+  // region scrolls as if all rows were present.
+  const rows = flattenVisible(tree, expanded);
+  const total = rows.length;
+  const virtualize = total > VIRTUALIZE_THRESHOLD;
+
+  let first = 0;
+  let last = total;
+  if (virtualize) {
+    const viewport = viewportH || ROW_HEIGHT * FALLBACK_VIEWPORT_ROWS;
+    first = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+    last = Math.min(total, first + Math.ceil(viewport / ROW_HEIGHT) + OVERSCAN * 2);
+  }
+  const windowRows = rows.slice(first, last);
+
   return (
     <div class="koi-stree">
-      <div ref={treeRef} class="koi-stree-scroll" role="tree" aria-label="Syntax tree" onKeyDown={onKeyDown}>
-        {renderNode(tree, 1, ROOT_KEY)}
+      <div
+        ref={treeRef}
+        class={`koi-stree-scroll${virtualize ? ' koi-stree-scroll--virtual' : ''}`}
+        role="tree"
+        aria-label="Syntax tree"
+        onKeyDown={onKeyDown}
+        onScroll={virtualize ? (e) => setScrollTop(e.currentTarget.scrollTop) : undefined}
+        style={virtualize ? { paddingTop: `${first * ROW_HEIGHT}px`, paddingBottom: `${(total - last) * ROW_HEIGHT}px` } : undefined}
+      >
+        {windowRows.map((row) => renderRow(row))}
       </div>
     </div>
   );

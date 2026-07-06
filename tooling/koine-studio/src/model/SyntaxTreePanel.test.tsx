@@ -46,6 +46,13 @@ function fixture(): SyntaxTreeNode {
   ]);
 }
 
+/** A model whose single (default-expanded) context holds `n` sibling members — a huge, fully-visible
+ *  flat list of `n + 2` rows (root + context + members). Exercises windowing under breadth (#1098). */
+function wideFixture(n: number): SyntaxTreeNode {
+  const members = Array.from({ length: n }, (_, i) => node('Member', `m${i}`, [], { leaf: 'Int' }));
+  return node('KoineModel', null, [node('ContextNode', 'Big', members)]);
+}
+
 /** A narrow fake source the panel fetches from — a single vi.fn matching {@link SyntaxTreeSource}. */
 function makeSource(tree: SyntaxTreeNode | null): SyntaxTreeSource {
   return { syntaxTree: vi.fn(async () => tree) };
@@ -171,6 +178,62 @@ describe('SyntaxTreePanel', () => {
     const view = render(<SyntaxTreePanel source={makeSource(fixture())} />);
     await view.findByRole('tree', { name: /Syntax tree/i });
     expect(await axe(view.container)).toHaveNoViolations();
+  });
+
+  // --- windowed virtualization (#1098) ---------------------------------------------------------------
+  // ROW_HEIGHT mirrors `--koi-stree-row-h` (24px) in _syntax-tree.scss — the fixed row height the window
+  // math assumes. happy-dom reports no layout, so the panel falls back to a fixed-size window.
+  const ROW_HEIGHT = 24;
+
+  test('a large tree renders only a bounded window of rows while representing the full count', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(5000))} />);
+    await view.findByRole('treeitem', { name: /KoineModel/ });
+
+    const items = view.getAllByRole('treeitem');
+    // Only a viewport-sized window is in the DOM — far fewer than the 5002 visible rows (root + context
+    // + 5000 members).
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.length).toBeLessThan(120);
+
+    // The scroll region still accounts for EVERY row: the window is padded above + below by the
+    // off-window rows' collapsed height, so the container scrolls as if all 5002 rows were present.
+    const treeEl = view.getByRole('tree');
+    const pad = (parseFloat(treeEl.style.paddingTop) || 0) + (parseFloat(treeEl.style.paddingBottom) || 0);
+    expect(Math.round(pad / ROW_HEIGHT) + items.length).toBe(5002);
+  });
+
+  test('a small tree renders every row unwindowed (virtualization transparent below the threshold)', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(fixture())} />);
+    await view.findByRole('treeitem', { name: /KoineModel/ });
+
+    // The default-expanded rows in pre-order with their aria-levels: root, Billing, then Billing's three
+    // children (Money — collapsed, has a child — the error, the missing node). No row is windowed out.
+    const rows = view.getAllByRole('treeitem').map((el) => ({
+      label: el.getAttribute('aria-label'),
+      level: el.getAttribute('aria-level'),
+    }));
+    expect(rows.map((r) => r.level)).toEqual(['1', '2', '3', '3', '3']);
+    expect(rows[0].label).toMatch(/^KoineModel/);
+    expect(rows[1].label).toMatch(/^ContextNode Billing/);
+    // No windowing scaffolding for a small tree — the scroll region isn't padded.
+    expect(view.getByRole('tree').style.paddingTop).toBe('');
+  });
+
+  test('a huge single sibling list windows to a bounded slice with honest aria-setsize/posinset', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(4000))} />);
+    await view.findByRole('treeitem', { name: /KoineModel/ });
+
+    const items = view.getAllByRole('treeitem');
+    expect(items.length).toBeLessThan(120); // windowed, not 4002 in the DOM
+
+    // The members are one flat sibling set: each rendered member reports the full set size and its
+    // 1-based position, even though only a window of the set is present.
+    const members = items.filter((el) => /^Member /.test(el.getAttribute('aria-label') ?? ''));
+    expect(members.length).toBeGreaterThan(0);
+    for (const m of members) expect(m.getAttribute('aria-setsize')).toBe('4000');
+    // Positions are honest and contiguous within the window (posinset increases by 1 per rendered row).
+    const positions = members.map((m) => Number(m.getAttribute('aria-posinset')));
+    for (let i = 1; i < positions.length; i++) expect(positions[i]).toBe(positions[i - 1] + 1);
   });
 });
 

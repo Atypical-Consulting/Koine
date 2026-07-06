@@ -126,3 +126,23 @@
 .koi-stree-item.koi-stree-item--current > .koi-stree-row {
   background: color-mix(in srgb, var(--koi-accent) 20%, transparent);
 }
+
+/* Windowed (virtualized) mode (#1098): for a large or deeply-expanded tree only a viewport slice of rows
+   is mounted, offset by top/bottom padding on the scroll container that stands in for the off-window
+   rows. Each row is pinned to the fixed height the window math assumes (`ROW_HEIGHT` in SyntaxTreePanel)
+   so that padding lines up exactly — the row content is already single-line (`white-space: nowrap`). A
+   small tree renders unwindowed and is unaffected. */
+.koi-stree-scroll--virtual {
+  --koi-stree-row-h: 24px;
+
+  .koi-stree-item {
+    height: var(--koi-stree-row-h);
+    overflow: hidden;
+  }
+
+  .koi-stree-row {
+    height: 100%;
+    align-items: center;
+    padding-block: 0;
+  }
+}
