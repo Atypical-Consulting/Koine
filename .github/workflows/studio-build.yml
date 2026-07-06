@@ -21,8 +21,11 @@ on:
         type: string
         default: ''
 
-permissions:
-  contents: write
+# No workflow-level `permissions:` on purpose. A reusable workflow that DECLARES more than a caller
+# grants fails the whole run at startup (`startup_failure`) — and the CI caller (koine-studio.yml)
+# runs read-only. So permissions are inherited from each caller job instead: koine-studio.yml calls
+# this read-only (publish=false, nothing is uploaded), while release-please.yml's `studio-desktop`
+# job grants `contents: write` for the `gh release upload`. Do not add `contents: write` here.
 
 jobs:
   studio:
