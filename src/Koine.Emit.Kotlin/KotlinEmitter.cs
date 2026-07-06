@@ -58,10 +58,16 @@ public sealed partial class KotlinEmitter : IEmitter
 
     public IReadOnlyList<EmittedFile> Emit(KoineModel model, SemanticModel? semantic)
     {
-        // Skeleton (issue #1066, Task 1): the shared koine.runtime package (Task 3) and the per-construct
-        // partials — value objects, enums, entities, aggregates, events/commands, repositories (Tasks 5-8)
-        // — append to this list as they land. The provider/registry wiring is complete now, so the target
-        // resolves end-to-end from an empty file set.
-        return new List<EmittedFile>();
+        var files = new List<EmittedFile>
+        {
+            // The shared koine.runtime package (DomainException + the Range<T> interval type), always
+            // emitted like the JVM sibling's DomainException/Range so a `Range<T>`-typed member and every
+            // invariant guard always resolve.
+            new(KotlinRuntime.FileName, KotlinRuntime.Source + "\n"),
+        };
+
+        // The per-construct partials — value objects, generated IDs, smart enums, entities, aggregates,
+        // events/commands, repositories (Tasks 5-8) — append to this list as they land.
+        return files;
     }
 }
