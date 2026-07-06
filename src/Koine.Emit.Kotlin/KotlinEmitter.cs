@@ -106,6 +106,9 @@ public sealed partial class KotlinEmitter : IEmitter
             case ValueObjectDecl vo:
                 files.Add(EmitValueObject(emit, context, vo));
                 break;
+            case EnumDecl e:
+                files.Add(EmitEnum(emit, context, e));
+                break;
             case EntityDecl entity:
                 files.Add(EmitId(emit, context, entity));
                 break;

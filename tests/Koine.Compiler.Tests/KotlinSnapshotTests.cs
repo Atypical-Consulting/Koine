@@ -153,4 +153,54 @@ public class KotlinSnapshotTests
         seq.ShouldContain("value class SeqId(val value: Long)");
         seq.ShouldNotContain("generate()");
     }
+
+    // Smart enums: a data-carrying enum (constructor `val`s are the accessors) and a bare enum, each with the
+    // neutral-key companion. Enums only, so the snapshot is stable.
+    private const string EnumFixture = """
+        context Enums {
+          /// Currencies, carrying their symbol and minor-unit count.
+          enum Currency(symbol: String, decimals: Int) {
+            EUR("€", 2)
+            USD("$", 2)
+            GBP("£", 2)
+          }
+
+          enum OrderStatus { Draft, Placed, Shipped, Cancelled }
+        }
+        """;
+
+    [Fact]
+    public Task Kotlin_smart_enums_emit_expected_kotlin()
+    {
+        var result = new KoineCompiler().Compile(EnumFixture, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var currency = result.Files.Single(f => f.RelativePath.EndsWith("Currency.kt", StringComparison.Ordinal)).Contents;
+        // Associated data becomes primary-constructor `val`s (the accessors); Int -> Long, so `2` -> `2L`.
+        currency.ShouldContain("enum class Currency(val symbol: String, val decimals: Long) {");
+        currency.ShouldContain("EUR(\"€\", 2L),");
+        currency.ShouldContain("GBP(\"£\", 2L);");
+        currency.ShouldContain("fun tryFromKey(key: String): Currency? = entries.find { it.name == key }");
+        currency.ShouldContain("fun fromKey(key: String): Currency = tryFromKey(key) ?: throw koine.runtime.DomainException(\"no Currency with key '$key'\")");
+
+        var status = result.Files.Single(f => f.RelativePath.EndsWith("OrderStatus.kt", StringComparison.Ordinal)).Contents;
+        status.ShouldContain("enum class OrderStatus {");
+        status.ShouldContain("Draft,");
+        status.ShouldContain("Cancelled;");
+        status.ShouldContain("companion object {");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    [Fact]
+    public void Kotlin_enum_member_named_like_a_keyword_is_backtick_escaped()
+    {
+        var result = new KoineCompiler().Compile(
+            "context Kw { enum Access { object, normal } }", new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var access = result.Files.Single(f => f.RelativePath.EndsWith("Access.kt", StringComparison.Ordinal)).Contents;
+        access.ShouldContain("`object`,");   // a Kotlin hard keyword — backtick-escaped
+        access.ShouldContain("normal;");     // not a keyword — verbatim
+    }
 }
