@@ -43,7 +43,8 @@ import {
   type AssistantContext,
 } from '@/ai/aiPrompts';
 import { AssistantChat } from '@/ai/components/AssistantChat';
-import type { ChangeSetAttempt } from '@/ai/components/ChangeSetPanel';
+import { files, type ChangeSetAttempt } from '@/ai/components/ChangeSetPanel';
+import { makeTextCoalescer } from '@/ai/textCoalescer';
 import type { ComposerQuickAction } from '@/ai/components/Composer';
 import type { TranscriptNotice, TurnMechanism } from '@/ai/components/Transcript';
 import { buildDisplayIndex } from '@/ai/assistantTools';
@@ -389,8 +390,6 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
     return cur !== file.before;
   }
 
-  const files = (n: number): string => `file${n === 1 ? '' : 's'}`;
-
   // Apply the change set under review (#984's state machine renders it; this owns the EFFECT): a
   // LIVE workspace read partitions the accepted files into drifted (warned + skipped, #473) and clean;
   // only the clean subset is written via the host, and the settle dispatches walk the slice —
@@ -687,6 +686,12 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
       rerender();
     };
     let full = '';
+    // Coalesce streamed deltas into ONE appendStreamingText per animation frame: a store set() per
+    // token makes every subscriber (the Transcript's keyed re-render + autoscroll layout read, the
+    // StoreInspector) pay per delta. The buffer is INVISIBLE to the store, so it is drained with a
+    // synchronous flushNow() at every boundary that reads or clears the live turn's text — a tool
+    // call starting, the commit/abort settles below — before that boundary dispatches.
+    const streamText = makeTextCoalescer((text) => store.getState().appendStreamingText(text));
     try {
       // Fetch the grounding context ONCE (a quick-action caller passes the one it already resolved, so
       // getContext — which may hit the LSP to build the domain index — isn't run twice).
@@ -776,7 +781,7 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
         ...(mechanism === 'gbnf' && gbnf ? { grammar: gbnf } : {}),
         onText: (delta) => {
           full += delta;
-          store.getState().appendStreamingText(delta);
+          streamText.push(delta);
         },
         // Withhold the tools when the user hasn't opted into the agentic loop (plain streaming request —
         // no `tools` ⇒ local servers stream instead of buffering), AND whenever the grammar is effective
@@ -801,6 +806,9 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
           // Any text streamed this round was a "thinking" preamble before the tool call — the slice
           // clears the turn text (so the card and the eventual answer render in chronological order),
           // and the local accumulator must agree so the eventual commit is the post-tools answer only.
+          // Drain the coalescer FIRST so startToolCall's clear disposes of ALL of the preamble — a
+          // late frame flush would otherwise resurrect its tail after the card opened.
+          streamText.flushNow();
           full = '';
           store.getState().startToolCall({ id: start.id, name: start.name, args: start.argsJson });
         },
@@ -815,6 +823,9 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
           });
         },
       });
+      // The stream is over: drain the buffered tail (and cancel the pending frame) BEFORE the commit
+      // below clears the live turn — an uncancelled frame could otherwise fire into a LATER turn.
+      streamText.flushNow();
       // Register the live apply-gate BEFORE the commit renders the bubble: the bubble's mount effect
       // asks `getApplyCandidate` for this content, and it must resolve with THIS turn's outcome (the
       // repaired candidate, or null for a staged/explanatory/invalid turn) rather than re-validating.
@@ -860,6 +871,9 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
         await resolveConstrainedOutcome(full, offerApply, mechanism, ctx, resolveGate);
       }
     } catch (e) {
+      // The stream ended mid-flight: drain the buffered tail (and cancel the pending frame) before
+      // either settle path below commits or rolls back the live turn.
+      streamText.flushNow();
       // Keep the stored history in lock-step with the transcript on both failure paths.
       const aborted = aborter?.signal.aborted ?? false;
       if (aborted && full.trim()) {

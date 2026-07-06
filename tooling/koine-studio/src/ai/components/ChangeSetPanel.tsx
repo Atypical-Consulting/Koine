@@ -1,3 +1,4 @@
+import { useMemo } from 'preact/hooks';
 import type { StoreApi } from 'zustand/vanilla';
 import { useAppStore } from '@/store/hooks';
 import type { AppState } from '@/store/index';
@@ -91,8 +92,51 @@ function lineDiff(oldText: string, newText: string): string {
   return out.join('\n');
 }
 
-/** Pluralize the panel's file counts exactly as the imperative panel did. */
-const files = (n: number): string => `file${n === 1 ? '' : 's'}`;
+/**
+ * Pluralize the panel's file counts exactly as the imperative panel did. Exported as the ONE
+ * `files(n)` helper — the host's per-attempt wording (aiPanel.ts) feeds the same live region this
+ * panel renders, so the two surfaces must never drift apart on the word for "N files".
+ */
+export const files = (n: number): string => `file${n === 1 ? '' : 's'}`;
+
+/**
+ * One reviewed file row: the accept checkbox, the new/modified badge, the display label, the inline
+ * line-diff, and the sticky drift warning (#473). A component (keyed by `file.key` in the parent) so
+ * the O(m×n) {@link lineDiff} is memoized per row across panel re-renders — a checkbox toggle or a
+ * phase change re-renders the panel, but an unchanged before/body pair must not re-run the DP.
+ */
+function ChangeSetFileRow({
+  store,
+  file: f,
+  terminal,
+}: {
+  store: StoreApi<AppState>;
+  file: ChangeSetFileState;
+  terminal: boolean;
+}) {
+  const diff = useMemo(() => lineDiff(f.before, f.body), [f.before, f.body]);
+  return (
+    <div class="koi-changeset-file">
+      <input
+        type="checkbox"
+        class="koi-changeset-accept"
+        checked={f.accepted}
+        disabled={terminal}
+        aria-label={`Accept changes to ${f.display}`}
+        onChange={(e) => store.getState().setChangeSetFileAccepted(f.key, e.currentTarget.checked)}
+      />
+      <span class={`koi-changeset-badge ${f.isNew ? 'koi-changeset-badge-new' : 'koi-changeset-badge-modified'}`}>
+        {f.isNew ? 'new' : 'modified'}
+      </span>
+      <span class="koi-changeset-path">{f.display}</span>
+      <pre class="koi-changeset-diff">{diff}</pre>
+      {f.drifted && (
+        // Sticky per-file drift (#473): the file changed since it was proposed, so apply skips it.
+        <span class="koi-changeset-drift">Changed since this was proposed — skipped to protect your edits.</span>
+      )}
+    </div>
+  );
+}
 
 export function ChangeSetPanel({ store, onApply, onDiscard, attempt }: ChangeSetPanelProps) {
   const changeSet = useAppStore(store, (s) => s.chat.changeSet);
@@ -139,28 +183,11 @@ export function ChangeSetPanel({ store, onApply, onDiscard, attempt }: ChangeSet
     >
       {changeSet.files.map((f) => (
         // Rows key by the staged edit's opaque session key (#472): unique even when two roots of a
-        // multi-root workspace stage the SAME relPath, so a toggle can never hit the wrong root. The
-        // rendered label is the row's `display` — the tool layer's disambiguated path, carried on the
-        // slice state — so the user reviews exactly the file the model addressed.
-        <div class="koi-changeset-file" key={f.key}>
-          <input
-            type="checkbox"
-            class="koi-changeset-accept"
-            checked={f.accepted}
-            disabled={terminal}
-            aria-label={`Accept changes to ${f.display}`}
-            onChange={(e) => store.getState().setChangeSetFileAccepted(f.key, e.currentTarget.checked)}
-          />
-          <span class={`koi-changeset-badge ${f.isNew ? 'koi-changeset-badge-new' : 'koi-changeset-badge-modified'}`}>
-            {f.isNew ? 'new' : 'modified'}
-          </span>
-          <span class="koi-changeset-path">{f.display}</span>
-          <pre class="koi-changeset-diff">{lineDiff(f.before, f.body)}</pre>
-          {f.drifted && (
-            // Sticky per-file drift (#473): the file changed since it was proposed, so apply skips it.
-            <span class="koi-changeset-drift">Changed since this was proposed — skipped to protect your edits.</span>
-          )}
-        </div>
+        // multi-root workspace stage the SAME relPath, so a toggle can never hit the wrong root — and
+        // so each row's memoized diff survives the panel's re-renders. The rendered label is the
+        // row's `display` — the tool layer's disambiguated path, carried on the slice state — so the
+        // user reviews exactly the file the model addressed.
+        <ChangeSetFileRow key={f.key} store={store} file={f} terminal={terminal} />
       ))}
       {/* End-of-turn whole-staged-workspace validation (#474): anything other than a CLEAN compile
           (`ok: true …`) — errors, warnings, or a "could not validate" note — is reviewable BEFORE apply. */}

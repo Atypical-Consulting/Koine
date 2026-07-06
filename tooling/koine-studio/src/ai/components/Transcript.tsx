@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Fragment, type ComponentChildren } from 'preact';
 import type { StoreApi } from 'zustand/vanilla';
 import { useAppStore } from '@/store/hooks';
@@ -217,6 +217,9 @@ function ToolCard({ call }: { call: ChatToolCall }) {
   const pending = call.state === 'pending';
   const raw = call.result ?? '';
   const truncated = raw.length > TOOL_RESULT_CLAMP;
+  // Memoized on the raw argsJson (immutable once the call starts): the transcript re-renders per
+  // streamed batch/ephemeral prop, and every settled card would otherwise re-parse + re-stringify.
+  const args = useMemo(() => prettyToolArgs(call.args), [call.args]);
   return (
     <details class="koi-assistant-tool" data-state={call.state}>
       <summary>
@@ -234,7 +237,7 @@ function ToolCard({ call }: { call: ChatToolCall }) {
         <dl class="koi-tool-detail">
           <dt>Arguments</dt>
           <dd>
-            <pre>{prettyToolArgs(call.args)}</pre>
+            <pre>{args}</pre>
           </dd>
           <dt>Result</dt>
           <dd>

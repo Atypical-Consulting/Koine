@@ -121,7 +121,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // stageChangeSet display map), so colliding-twin review rows can never swap relative to the paths
   // the model addressed (#472); ~13 LOC of wiring plus its comments, and ChangeSetPanel.tsx DELETED
   // its row-order label re-derivation in exchange. Measured end-state, no headroom.
-  { file: 'src/ai/aiPanel.ts', maxLines: 939 },
+  // Raised 939 → 953: review perf fix on the same arc — streamed deltas now coalesce into ONE
+  // appendStreamingText per animation frame (the batcher itself lives in textCoalescer.ts; this is
+  // only its wiring: the per-send coalescer + the synchronous flushNow() at each semantic boundary —
+  // tool-call start, commit, abort — with their ordering comments), and the `files(n)` pluralizer
+  // moved to its single home in ChangeSetPanel.tsx. Measured end-state, no headroom.
+  { file: 'src/ai/aiPanel.ts', maxLines: 953 },
   // Frozen 2026-07-02 at 1301 LOC (grown from the audit's 1284 @ fc83bcf5), ceil(1301 × 1.02) = 1328.
   // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
   // not mandate the split — #989 owns that.
