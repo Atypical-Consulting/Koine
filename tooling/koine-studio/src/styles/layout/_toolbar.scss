@@ -329,11 +329,14 @@ body[data-route='home'] #toolbar {
   opacity: 0.7;
 }
 
-/* The dropdown menu of emit targets — anchored under the selector, above other chrome. */
+/* The dropdown menu of emit targets — anchored under the selector, above other chrome. The extra
+   offset drops the menu clear of the toolbar's accent-gradient under-edge (topbar-chrome ::after),
+   which otherwise renders flush against the menu's top border and reads as a stray blue hairline
+   belonging to the menu rather than to the bar. */
 .emit-menu {
   @include a.popover-surface;
   position: absolute;
-  top: calc(100% + var(--koi-space-1));
+  top: calc(100% + var(--koi-space-2));
   right: 0;
   z-index: var(--koi-z-popover);
   min-width: 100%;
@@ -342,11 +345,23 @@ body[data-route='home'] #toolbar {
 
 .emit-menu-item {
   @include a.menu-item;
+  display: flex;
+  align-items: center;
   gap: var(--koi-space-2);
 
   &[aria-checked='true'] {
     color: var(--koi-fg);
     background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+
+    /* A radio row needs a visible selected marker: the tinted background alone is weaker than the
+       hover wash, so the active target was indistinguishable from a merely-hovered one. */
+    &::after {
+      content: '✓' / ''; /* decorative — aria-checked already conveys the selected state to AT */
+      color: var(--koi-accent);
+      font-size: var(--koi-text-xs);
+      font-weight: 700;
+      line-height: 1;
+    }
   }
 }
 
