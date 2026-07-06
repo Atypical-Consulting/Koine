@@ -854,4 +854,70 @@ public class R18CSharpApplicationTests
         Emit(AppOn with { NotFound = CSharpNotFound.Nullable })
             .ShouldNotContain(f => f.RelativePath == "Koine/Runtime/Result.cs");
     }
+
+    [Fact]
+    public void Not_found_result_wraps_a_command_handler_return()
+    {
+        var files = Emit(AppOn with { NotFound = CSharpNotFound.Result });
+
+        // The void `place` command's handler now returns Result<Order>, yielding NotFound() on a miss and
+        // Ok(aggregate) on a hit. The whole model still compiles (Emit asserts the Koine compile succeeds).
+        var handler = File(files, "OrderPlaceHandler.cs").Contents;
+        handler.ShouldContain("using Koine.Runtime;");
+        handler.ShouldContain("public async Task<Result<Order>> HandleAsync(OrderPlaceRequest request, CancellationToken ct = default)");
+        handler.ShouldContain("if (aggregate is null)");
+        handler.ShouldContain("return Result<Order>.NotFound();");
+        handler.ShouldContain("return Result<Order>.Ok(aggregate);");
+        handler.ShouldNotContain("throw new InvalidOperationException");
+        handler.ShouldNotContain("return null;");
+    }
+
+    [Fact]
+    public void Not_found_result_makes_a_by_id_query_handler_return_a_result()
+    {
+        var files = Emit(AppOn with { NotFound = CSharpNotFound.Result });
+
+        // OrderById is a by-identity query — it now returns Result<OrderSummary> and yields NotFound() on a miss.
+        var handler = File(files, "OrderByIdHandler.cs").Contents;
+        handler.ShouldContain("Koine.Runtime.IQueryHandler<OrderById, Result<OrderSummary>>");
+        handler.ShouldContain("public async Task<Result<OrderSummary>> HandleAsync(OrderById query, CancellationToken ct = default)");
+        handler.ShouldContain("return Result<OrderSummary>.NotFound();");
+        handler.ShouldContain("return Result<OrderSummary>.Ok(aggregate.ToOrderSummary());");
+        handler.ShouldNotContain("throw new InvalidOperationException");
+    }
+
+    [Fact]
+    public void Not_found_result_application_output_roslyn_compiles()
+    {
+        // Prove the emitted Result<T> + the wrapped command/query handlers are valid C# — the emitted
+        // artifact, not just a clean Koine compile.
+        var (assembly, errors) = TestSupport.Compile(Emit(AppOn with { NotFound = CSharpNotFound.Result }));
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    [Fact]
+    public void Not_found_result_output_is_stable_and_the_default_stays_byte_identical()
+    {
+        // The result branch must not perturb the throw (default) output.
+        TestSupport.Render(Emit(AppOn with { NotFound = CSharpNotFound.Throw }))
+            .ShouldBe(TestSupport.Render(Emit(AppOn)));
+    }
+
+    [Fact]
+    public void Api_layer_result_not_found_maps_a_command_endpoint_to_200_or_404()
+    {
+        var endpoints = File(Emit(ApiOn with { NotFound = CSharpNotFound.Result }), "SalesEndpoints.cs").Contents;
+        endpoints.ShouldContain("return result.IsSuccess ? Results.Ok(result.Value) : Results.NotFound();");
+    }
+
+    [Fact]
+    public void Api_layer_result_maps_only_the_result_returning_endpoints()
+    {
+        // The command (place) and the by-id query (OrderById) return Result<T> → mapped. The factory
+        // (open, plain aggregate) and the list query (OrdersByStatus, plain list) must stay plain Ok —
+        // mapping .IsSuccess on those would not compile, so the by-id detection must exclude them.
+        var endpoints = File(Emit(ApiOn with { NotFound = CSharpNotFound.Result }), "SalesEndpoints.cs").Contents;
+        System.Text.RegularExpressions.Regex.Matches(endpoints, "result.IsSuccess").Count.ShouldBe(2);
+        endpoints.ShouldContain("return Results.Ok(result);");
+    }
 }

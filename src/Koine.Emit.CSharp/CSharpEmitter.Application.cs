@@ -138,9 +138,17 @@ public sealed partial class CSharpEmitter
         // void command, so the emitted handler stays byte-identical to today.
         var wantsAggregate = _options.HandlerResult == CSharpHandlerResult.Aggregate;
         var nullableNotFound = _options.NotFound == CSharpNotFound.Nullable;
-        var baseResult = plainResult ?? ((wantsAggregate || nullableNotFound) ? root.Name : null);
+        var resultNotFound = _options.NotFound == CSharpNotFound.Result;
+        var baseResult = plainResult ?? ((wantsAggregate || nullableNotFound || resultNotFound) ? root.Name : null);
         var returnsAggregate = plainResult is null && baseResult is not null;
-        var effectiveResult = baseResult is null ? null : nullableNotFound ? baseResult + "?" : baseResult;
+        var effectiveResult = baseResult is null ? null
+            : nullableNotFound ? baseResult + "?"
+            : resultNotFound ? $"Result<{baseResult}>"
+            : baseResult;
+
+        // Under the `result` policy the handler wraps its success value in Result<T>.Ok(...) and yields
+        // Result<T>.NotFound() on a miss (no nullable reference, no exception).
+        string Ok(string expr) => resultNotFound ? $"Result<{baseResult}>.Ok({expr})" : expr;
 
         // Request: the aggregate identity to load, then the command's parameters. The identity
         // property is normally "Id", but a command parameter named `id` (allowed for commands, only
@@ -166,13 +174,15 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append("var aggregate = await _unitOfWork.").Append(plural)
           .Append(".GetByIdAsync(request.").Append(idProp).Append(", ").Append(CtArg()).Append(")");
-        if (nullableNotFound)
+        if (nullableNotFound || resultNotFound)
         {
-            // Missing aggregate ⇒ return null (the caller maps it to a 404) instead of throwing.
+            // Missing aggregate ⇒ return the miss (null, or Result<T>.NotFound()) — the caller maps it to
+            // a 404 — instead of throwing.
+            var miss = resultNotFound ? $"Result<{baseResult}>.NotFound()" : "null";
             sb.Append(";\n");
             sb.Append(Indent).Append(Indent).Append("if (aggregate is null)\n");
             sb.Append(Indent).Append(Indent).Append("{\n");
-            sb.Append(Indent).Append(Indent).Append(Indent).Append("return null;\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("return ").Append(miss).Append(";\n");
             sb.Append(Indent).Append(Indent).Append("}\n\n");
         }
         else
@@ -186,13 +196,13 @@ public sealed partial class CSharpEmitter
         {
             sb.Append(Indent).Append(Indent).Append("var result = aggregate.").Append(method).Append('(').Append(args).Append(");\n");
             WriteCommit(sb);
-            sb.Append(Indent).Append(Indent).Append("return result;\n");
+            sb.Append(Indent).Append(Indent).Append("return ").Append(Ok("result")).Append(";\n");
         }
         else if (returnsAggregate)
         {
             sb.Append(Indent).Append(Indent).Append("aggregate.").Append(method).Append('(').Append(args).Append(");\n");
             WriteCommit(sb);
-            sb.Append(Indent).Append(Indent).Append("return aggregate;\n");
+            sb.Append(Indent).Append(Indent).Append("return ").Append(Ok("aggregate")).Append(";\n");
         }
         else
         {
@@ -494,10 +504,12 @@ public sealed partial class CSharpEmitter
         }
 
         // The by-identity load honors the not-found policy (W1): nullable ⇒ this handler returns its
-        // read model nullably and yields null on a miss, instead of throwing. Only the by-identity
-        // path has a not-found concept; a list/non-identity query is unaffected.
+        // read model nullably and yields null on a miss; result ⇒ it returns a Result<RM> and yields
+        // NotFound() on a miss; both instead of throwing. Only the by-identity path has a not-found
+        // concept; a list/non-identity query is unaffected.
         var nullableQuery = byId is not null && _options.NotFound == CSharpNotFound.Nullable;
-        var queryResultType = nullableQuery ? resultType + "?" : resultType;
+        var resultQuery = byId is not null && _options.NotFound == CSharpNotFound.Result;
+        var queryResultType = nullableQuery ? resultType + "?" : resultQuery ? $"Result<{resultType}>" : resultType;
         var service = $"Koine.Runtime.IQueryHandler<{query.Name}, {queryResultType}>";
 
         var sb = new StringBuilder();
@@ -514,12 +526,13 @@ public sealed partial class CSharpEmitter
             sb.Append(Indent).Append("{\n");
             sb.Append(Indent).Append(Indent).Append("var aggregate = await _unitOfWork.").Append(b.Plural)
               .Append(".GetByIdAsync(query.").Append(b.Criterion).Append(", ct)");
-            if (nullableQuery)
+            if (nullableQuery || resultQuery)
             {
+                var miss = resultQuery ? $"Result<{resultType}>.NotFound()" : "null";
                 sb.Append(";\n");
                 sb.Append(Indent).Append(Indent).Append("if (aggregate is null)\n");
                 sb.Append(Indent).Append(Indent).Append("{\n");
-                sb.Append(Indent).Append(Indent).Append(Indent).Append("return null;\n");
+                sb.Append(Indent).Append(Indent).Append(Indent).Append("return ").Append(miss).Append(";\n");
                 sb.Append(Indent).Append(Indent).Append("}\n\n");
             }
             else
@@ -528,7 +541,9 @@ public sealed partial class CSharpEmitter
                 sb.Append(Indent).Append(Indent).Append(Indent)
                   .Append("?? throw new InvalidOperationException($\"").Append(b.Root).Append(" '{query.").Append(b.Criterion).Append("}' was not found.\");\n");
             }
-            sb.Append(Indent).Append(Indent).Append("return aggregate.To").Append(resultName).Append("();\n");
+            var projected = $"aggregate.To{resultName}()";
+            sb.Append(Indent).Append(Indent).Append("return ")
+              .Append(resultQuery ? $"Result<{resultType}>.Ok({projected})" : projected).Append(";\n");
             sb.Append(Indent).Append("}\n");
         }
         else
