@@ -987,6 +987,31 @@ describe('multi-file change set (agentic edits)', () => {
     expect(diag?.textContent).toContain('could not validate');
   });
 
+  // FIX: Clear conversation must retire the pending change set with the transcript it reviewed —
+  // the retired imperative panel's rebuild destroyed the island; the slice is the one owner now.
+  test('Clear conversation retires the pending change set (the review panel is gone after Clear)', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      req.onText('Edit.');
+      return 'Edit.';
+    });
+    const container = document.createElement('div');
+    createAssistantChat(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
+        runEditTool: vi.fn(async () => 'ok'),
+        onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
+      }),
+    );
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+
+    container.querySelector<HTMLButtonElement>('.koi-assistant-clear')!.click();
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).toBeNull());
+    expect(container.querySelectorAll('.koi-msg').length).toBe(0); // the transcript emptied too
+  });
+
   test('a non-staged generative turn still shows single-file Apply (no change set)', async () => {
     // An ordinary generative reply (a fenced koine block, nothing staged) → the legacy single-file gate.
     vi.mocked(runAssistant).mockImplementation(async (req: any) => {
@@ -1943,6 +1968,45 @@ describe('workspace switching around send (per-workspace transcript integrity)',
     ]);
     // …and A's stored transcript is exactly its own turn.
     expect(loadChat('A').map((m) => m.content)).toEqual(['hello from A', 'reply']);
+  });
+
+  // After a turn settles, focus must RETURN to the composer so the user can type the next prompt.
+  // The trap: finishChatTurn() flips chat.status, but the Composer's `disabled={busy}` re-render is
+  // DEFERRED (the store hook flushes async), so a focus() fired right after it would land on a
+  // still-disabled textarea and silently no-op. The host must flush the render synchronously first.
+  test('after a completed send, focus lands on the ENABLED composer textarea (not a disabled no-op)', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.onText('reply');
+      return 'reply';
+    });
+    // Spy on focus() to record the textarea's disabled state AT CALL TIME — asserting the final DOM
+    // alone would be false-green, since the deferred re-render enables the textarea soon afterwards.
+    const disabledAtFocus: boolean[] = [];
+    const origFocus = HTMLElement.prototype.focus;
+    const focusSpy = vi
+      .spyOn(HTMLTextAreaElement.prototype, 'focus')
+      .mockImplementation(function (this: HTMLTextAreaElement) {
+        disabledAtFocus.push(this.disabled);
+        origFocus.call(this);
+      });
+    try {
+      const container = document.createElement('div');
+      document.body.append(container); // focus() only takes on connected elements
+      createAssistantChat(opts(container));
+
+      typeSend(container, 'hello');
+      await vi.waitFor(() => expect(disabledAtFocus.length).toBeGreaterThan(0));
+
+      // The settle-time focus targeted an ENABLED textarea (the re-render was flushed first)…
+      expect(disabledAtFocus[disabledAtFocus.length - 1]).toBe(false);
+      // …and actually took: the composer owns keyboard focus for the next prompt.
+      const input = container.querySelector<HTMLTextAreaElement>('.koi-assistant-input')!;
+      expect(input.disabled).toBe(false);
+      expect(document.activeElement).toBe(input);
+      container.remove();
+    } finally {
+      focusSpy.mockRestore();
+    }
   });
 
   test('syncWorkspace() mid-stream is deferred: the turn persists under its send-time workspace', async () => {

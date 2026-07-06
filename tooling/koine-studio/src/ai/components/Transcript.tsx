@@ -143,6 +143,12 @@ function AssistantBubble({
   const [applied, setApplied] = useState(false);
 
   useEffect(() => {
+    // This bubble's content changed identity (a hydrateChat replacing the transcript reuses bubbles
+    // positionally): any previously resolved candidate — and a terminal Applied lock — belongs to
+    // the OLD content. Drop both synchronously, BEFORE the early return below, so a stale Apply
+    // affordance can never carry over onto a message whose own gate hasn't (or won't ever) run.
+    setCandidate(null);
+    setApplied(false);
     // An explanatory turn (offerApply: false) never consults the gate — its reply is prose that must
     // not be applied, and the suppression is persisted on the message so replays stay apply-free.
     if (!offerApply || !getApplyCandidate) return;
@@ -255,6 +261,10 @@ export function Transcript({
   const messages = useAppStore(store, (s) => s.chat.messages);
   const status = useAppStore(store, (s) => s.chat.status);
   const turn = useAppStore(store, (s) => s.chat.turn);
+  // The workspace key scopes the positional bubble keys below: a workspace swap (hydrateChat to a
+  // different key) must REMOUNT every bubble rather than positionally reuse one conversation's
+  // per-bubble state (a resolved Apply candidate, an open tool card) for another's.
+  const workspaceKey = useAppStore(store, (s) => s.chat.workspaceKey);
   const scroller = useRef<HTMLDivElement>(null);
 
   // The live turn renders only while streaming — finish/abort clear `chat.turn`, but gating on the
@@ -281,7 +291,7 @@ export function Transcript({
         </div>
       )}
       {messages.map((m, i) => (
-        <Fragment key={`m${i}`}>
+        <Fragment key={`${workspaceKey}:m${i}`}>
           {/* The finished trailing turn's tool cards sit ABOVE its reply bubble, exactly where they
               streamed (the imperative insertBefore contract survives the turn's completion). */}
           {i === last &&

@@ -362,15 +362,21 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
   // against? A drifted file must be skipped so a stale full-file body can't clobber newer work.
   // `fresh` is ONE live workspace read taken at apply time, uri-keyed like the send-time snapshot
   // (#472 Task 4): an existing file resolves by the row's OWN key — never a same-relPath twin under
-  // another root. The slice normalizes an absent send-time text to '' (`before` is always a string).
-  function isDrifted(file: ChangeSetFileState, fresh: WorkspaceFilesSnapshot | null): boolean {
+  // another root. `freshPaths` is `fresh.displayPath`'s value set, built ONCE per apply (null iff
+  // `fresh` is) so the new-file branch stays O(1) per row instead of rescanning the display map. The
+  // slice normalizes an absent send-time text to '' (`before` is always a string).
+  function isDrifted(
+    file: ChangeSetFileState,
+    fresh: WorkspaceFilesSnapshot | null,
+    freshPaths: ReadonlySet<string> | null,
+  ): boolean {
     if (file.isNew) {
       // A brand-new file's key is synthetic (`new:<relPath>`) and never appears in the live snapshot:
       // drift iff the path it would CREATE now exists — in a root's display map, or as a raw key in a
       // legacy relPath-keyed host — so a file created since SEND is never clobbered. Absent ⇒ still
       // new ⇒ no drift.
       if (!fresh) return false;
-      return Object.values(fresh.displayPath).includes(file.relPath) || file.relPath in fresh.files;
+      return (freshPaths?.has(file.relPath) ?? false) || file.relPath in fresh.files;
     }
     const cur = fresh?.files[file.key];
     if (cur === undefined) {
@@ -390,22 +396,27 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
   // beginChangeSetApply → resolveChangeSetApply / rejectChangeSetApply (#633) — with the stale-set
   // guards keeping a late settle from un-retiring a superseded set (#684). The per-attempt wording
   // (the clean count, the skip notices) rides `attempt` into the panel's live region.
-  function applyChangeSet(accepted: readonly ChangeSetFileState[]): void {
+  function applyChangeSet(_accepted: readonly ChangeSetFileState[]): void {
     // Belt-and-braces re-entrancy guard alongside the disabled button: only the CURRENT set, still
     // under review, can be applied — 'applying' (in flight) and the terminal phases bail here.
     const cs = store.getState().chat.changeSet;
     if (!cs || cs.phase.kind !== 'reviewing') return;
     const id = cs.id;
-    const list = accepted.filter((f) => f.accepted);
+    // Derive the accepted list from the STORE the guard just read — never from the panel's render-time
+    // argument (`_accepted` stays in the onApply signature but a stale render must not pick the files).
+    const list = cs.files.filter((f) => f.accepted);
     if (!list.length) return;
 
     // Partition the accepted files against a LIVE read taken NOW (#473): a file the user edited while
     // the turn ran (drift) is warned + skipped; only the clean subset is written. The send-time `before`
     // still backs the REVIEWED diff — drift is judged against the current text at apply time. Detection
     // stays here in the host; the RESULT goes through the slice, whose state warns the rows (by key).
+    // One pass over the rows, with the display-path set built once for the new-file drift branch.
     const fresh = opts.getWorkspaceFiles?.() ?? null;
-    const drifted = list.filter((f) => isDrifted(f, fresh));
-    const clean = list.filter((f) => !drifted.includes(f));
+    const freshPaths = fresh ? new Set(Object.values(fresh.displayPath)) : null;
+    const drifted: ChangeSetFileState[] = [];
+    const clean: ChangeSetFileState[] = [];
+    for (const f of list) (isDrifted(f, fresh, freshPaths) ? drifted : clean).push(f);
     if (drifted.length) store.getState().markChangeSetDrift(drifted.map((f) => f.key));
 
     if (!clean.length) {
@@ -888,6 +899,11 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
       if (chat().status === 'streaming') store.getState().finishChatTurn();
       // Replay a workspace sync that arrived mid-stream, now that the transcript is quiescent.
       if (pendingSync) syncWorkspace();
+      // Flush the settle synchronously BEFORE focusing: the Composer's `disabled={busy}` update via
+      // its own store subscription is deferred (Preact batches the hook flush), so focus() would hit
+      // a still-disabled textarea and no-op. render() is synchronous and the children re-read the
+      // store during render, so the textarea is enabled by the time focus runs.
+      rerender();
       focusComposer();
     }
   }

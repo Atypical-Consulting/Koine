@@ -23,10 +23,11 @@ import type { ChangeSetFileState } from '@/store/slices/chat';
 
 /**
  * The host's per-apply-attempt outcome (#473/#633), which the slice's phase deliberately doesn't
- * carry: the live-region wording counts the files actually WRITTEN this attempt (the clean subset,
- * minus drift skips — `phase.appliedCount` counts the accepted files at settle time instead), and the
- * drift/partial/reject messages name the exact skips/failures. Keyed by the set id so a stale attempt
- * from a replaced set is ignored without the host having to clear it.
+ * carry: the live-region wording counts the files actually WRITTEN this attempt (the clean subset at
+ * CLICK time — `phase.appliedCount` counts the accepted, non-drift-skipped rows at settle time, so a
+ * mid-apply accept toggle can still skew it), and the drift/partial/reject messages name the exact
+ * skips/failures. Keyed by the set id so a stale attempt from a replaced set is ignored without the
+ * host having to clear it.
  */
 export interface ChangeSetAttempt {
   /** The id of the set this attempt belongs to; ignored unless it matches the rendered set. */

@@ -316,6 +316,72 @@ describe('Transcript (#990)', () => {
     });
   });
 
+  // Per-bubble useState (the resolved Apply candidate, the terminal Applied lock) must never leak
+  // across a transcript swap: bubbles are keyed positionally (`m${i}`), so a hydrateChat landing a
+  // DIFFERENT conversation with an assistant message at the same index would otherwise reuse the
+  // bubble — stale candidate and all. Assertions ride observable DOM + an explicit gate spy, per the
+  // focus/refetch test gotcha (Preact reuses rows positionally, so a naive test can be false-green).
+  describe('per-bubble state across transcript swaps', () => {
+    test('a workspace swap does not carry a resolved Apply candidate onto the new transcript', async () => {
+      const store = exchangeStore('A reply');
+      let resolveB!: (v: string | null) => void;
+      const getApplyCandidate = vi.fn((md: string) =>
+        md === 'A reply'
+          ? Promise.resolve('context A {}')
+          : new Promise<string | null>((r) => {
+              resolveB = r;
+            }),
+      );
+      const { container } = mount(store, { getApplyCandidate });
+      await waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
+
+      // Swap to workspace B, whose transcript ALSO has an assistant message at index 1. B's gate is
+      // held pending, so any Apply visible now is A's stale candidate leaking across the swap.
+      act(() =>
+        store.getState().hydrateChat('ws-B', [
+          { role: 'user', content: 'q in B' },
+          { role: 'assistant', content: 'B reply' },
+        ]),
+      );
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      expect(getApplyCandidate).toHaveBeenCalledWith('B reply'); // the NEW gate did run…
+      expect(container.querySelector('.koi-assistant-apply')).toBeNull(); // …but nothing stale shows
+
+      // And once B's gate settles null, still nothing to apply.
+      resolveB(null);
+      await act(async () => {});
+      expect(container.querySelector('.koi-assistant-apply')).toBeNull();
+    });
+
+    test('a same-key transcript replacement resets the bubble even on the offerApply:false early return', async () => {
+      const store = createAppStore();
+      store.getState().hydrateChat('ws-1', [
+        { role: 'user', content: 'q' },
+        { role: 'assistant', content: 'model reply' },
+      ]);
+      const getApplyCandidate = vi.fn(() => Promise.resolve('context X {}'));
+      const { container } = mount(store, { getApplyCandidate });
+      await waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
+
+      // The SAME workspace re-hydrates a different conversation whose message at this index is an
+      // explanatory turn (offerApply: false). The reused bubble takes the early return — no new gate
+      // run will ever overwrite the old candidate — so the reset must happen BEFORE that return.
+      act(() =>
+        store.getState().hydrateChat('ws-1', [
+          { role: 'user', content: 'q2' },
+          { role: 'assistant', content: 'explanation', offerApply: false },
+        ]),
+      );
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+      expect(container.querySelector('.koi-assistant-apply')).toBeNull();
+    });
+  });
+
   test('autoscrolls to the bottom as the transcript grows', () => {
     const store = exchangeStore();
     const { container } = mount(store);

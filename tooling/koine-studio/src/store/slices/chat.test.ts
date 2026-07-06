@@ -110,6 +110,17 @@ describe('chat slice', () => {
     s.getState().clearChatTranscript();
     expect(s.getState().chat.messages).toEqual([]);
   });
+
+  test('clearChatTranscript also retires a pending change set (Clear conversation drops the review)', () => {
+    const s = createAppStore();
+    s.getState().appendChatMessage(user('a'));
+    s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
+    s.getState().clearChatTranscript();
+    expect(s.getState().chat.messages).toEqual([]);
+    // The review belongs to the cleared conversation — a pending set must not outlive its transcript
+    // (the retired imperative panel's rebuild dropped it too; the slice is the one owner now).
+    expect(s.getState().chat.changeSet).toBeNull();
+  });
 });
 
 // The composer draft (#990 Task 5): the textarea's text as slice state, so the declarative Composer
@@ -439,6 +450,17 @@ describe('change-set state machine', () => {
     expect(s.getState().chat.changeSet?.phase).toEqual({ kind: 'applied', appliedCount: 2 });
   });
 
+  test('resolveChangeSetApply excludes drift-skipped rows from appliedCount (truthful count)', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet([edit('a.koi', 'x'), edit('b.koi', 'y'), edit('c.koi', 'z')], {}, null);
+    // The host marks drift BEFORE beginChangeSetApply (#473) and never writes a drifted row — an
+    // accepted-but-drifted file was NOT applied, so the terminal count must not include it.
+    s.getState().markChangeSetDrift(['a.koi']);
+    s.getState().beginChangeSetApply();
+    s.getState().resolveChangeSetApply({ failed: [] });
+    expect(s.getState().chat.changeSet?.phase).toEqual({ kind: 'applied', appliedCount: 2 });
+  });
+
   test('resolveChangeSetApply with failures returns to reviewing with a note naming them (no false Applied)', () => {
     const s = createAppStore();
     s.getState().stageChangeSet([edit('a.koi', 'x'), edit('b.koi', 'y')], {}, null);
@@ -553,6 +575,40 @@ describe('change-set state machine', () => {
     expect(s.getState().chat.changeSet).toBeNull();
     s.getState().discardChangeSet(); // already null: harmless
     expect(s.getState().chat.changeSet).toBeNull();
+  });
+});
+
+// A staged change set must not survive a workspace SWITCH — its staged bodies were computed against
+// the old workspace's buffers, so applying it into another folder would clobber unrelated files. A
+// same-key re-hydrate (the panel re-shown over the same folder) must keep a pending review alive.
+describe('hydrateChat × change set (workspace swap)', () => {
+  test('a different-key hydrate drops a reviewing change set (and the ephemeral turn)', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
+    s.getState().hydrateChat('other-ws', [user('other history')]);
+    expect(s.getState().chat.workspaceKey).toBe('other-ws');
+    expect(s.getState().chat.messages).toEqual([user('other history')]);
+    expect(s.getState().chat.changeSet).toBeNull();
+    expect(s.getState().chat.turn).toBeNull(); // belt-and-braces: already null when not streaming
+  });
+
+  test('a same-key hydrate preserves the pending change set (panel re-show must not kill a review)', () => {
+    const s = createAppStore();
+    s.getState().hydrateChat('ws-1', []);
+    s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
+    s.getState().hydrateChat('ws-1', [user('restored')]);
+    expect(s.getState().chat.messages).toEqual([user('restored')]);
+    expect(s.getState().chat.changeSet?.phase).toEqual({ kind: 'reviewing' });
+  });
+
+  test('a mid-stream hydrate still no-ops ENTIRELY: the change set survives untouched', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
+    s.getState().startChatTurn();
+    s.getState().hydrateChat('other-ws', [assistant('stale')]);
+    expect(s.getState().chat.workspaceKey).toBe('scratch');
+    expect(s.getState().chat.changeSet?.phase).toEqual({ kind: 'reviewing' });
+    expect(s.getState().chat.turn).not.toBeNull(); // the live turn is untouched too
   });
 });
 

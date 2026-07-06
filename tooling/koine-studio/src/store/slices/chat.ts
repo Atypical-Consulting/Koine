@@ -95,7 +95,13 @@ export interface ChatSlice {
      */
     readonly draft: string;
   };
-  /** Replace key + transcript on workspace switch. NO-OP while streaming — a mid-stream workspace reassignment must not clobber the live turn. */
+  /**
+   * Replace key + transcript on workspace switch. NO-OP while streaming — a mid-stream workspace
+   * reassignment must not clobber the live turn. A DIFFERENT-key hydrate also drops the pending
+   * change set (its staged bodies were computed against the old workspace's buffers) and the
+   * ephemeral turn (belt-and-braces — already null when not streaming); a same-key hydrate keeps
+   * them, so a panel re-show never kills a review in progress.
+   */
   hydrateChat(workspaceKey: string, messages: readonly ChatMessage[]): void;
   /** Append one turn immutably (new array identity, prior snapshot untouched). */
   appendChatMessage(msg: ChatMessage): void;
@@ -140,7 +146,10 @@ export interface ChatSlice {
     result: string;
     durationMs: number;
   }): void;
-  /** Empty the transcript (the workspace key and status are untouched). */
+  /**
+   * Empty the transcript AND retire any pending change set — the review belongs to the cleared
+   * conversation and must not outlive it. The workspace key and status are untouched.
+   */
   clearChatTranscript(): void;
   /** Replace the composer draft ('' clears it). The only writer of `chat.draft`. */
   setChatDraft(text: string): void;
@@ -162,9 +171,10 @@ export interface ChatSlice {
   /** reviewing → applying; no-op unless reviewing with at least one accepted file. */
   beginChangeSetApply(): void;
   /**
-   * Settle an apply: no failures → terminal `applied` counting the accepted files; any failures →
-   * back to `reviewing` with a note naming them so retry stays open (no false Applied). No-op
-   * unless applying — in particular after invalidation (#684).
+   * Settle an apply: no failures → terminal `applied` counting the files actually WRITTEN (accepted
+   * minus the drift-skipped rows — the host marks drift before beginChangeSetApply, #473); any
+   * failures → back to `reviewing` with a note naming them so retry stays open (no false Applied).
+   * No-op unless applying — in particular after invalidation (#684).
    */
   resolveChangeSetApply(result: { failed: readonly string[] }): void;
   /** applying → reviewing with the error note (#633: the in-flight lock must never stay stuck); no-op unless applying (#684). */
@@ -199,6 +209,13 @@ export function createChatSlice(
     hydrateChat: (workspaceKey, messages) => {
       const chat = get().chat;
       if (chat.status === 'streaming') return;
+      if (workspaceKey !== chat.workspaceKey) {
+        // A workspace SWAP takes the staged review with it: the change set's bodies were computed
+        // against the old workspace's buffers, so it must not stay applyable over another folder.
+        // The ephemeral turn is dropped too (belt-and-braces — already null when not streaming).
+        set({ chat: { ...chat, workspaceKey, messages: [...messages], changeSet: null, turn: null } });
+        return;
+      }
       set({ chat: { ...chat, workspaceKey, messages: [...messages] } });
     },
     appendChatMessage: (msg) => {
@@ -262,7 +279,9 @@ export function createChatSlice(
       });
     },
     clearChatTranscript: () => {
-      set({ chat: { ...get().chat, messages: [] } });
+      // The change set goes with the conversation it reviewed (the retired imperative panel's
+      // rebuild dropped it on Clear too — one owner, same behavior).
+      set({ chat: { ...get().chat, messages: [], changeSet: null } });
     },
     setChatDraft: (text) => {
       set({ chat: { ...get().chat, draft: text } });
@@ -310,7 +329,9 @@ export function createChatSlice(
       if (!cs || cs.phase.kind !== 'applying') return;
       const phase: ChangeSetPhase =
         failed.length === 0
-          ? { kind: 'applied', appliedCount: cs.files.filter((f) => f.accepted).length }
+          ? // Truthful count: what was actually written — a drifted row was skipped by the host's
+            // apply (never written), so it must not inflate the terminal "Applied N" (#473).
+            { kind: 'applied', appliedCount: cs.files.filter((f) => f.accepted && !f.drifted).length }
           : { kind: 'reviewing', note: `Failed to apply: ${failed.join(', ')}` };
       setChangeSet({ ...cs, phase });
     },

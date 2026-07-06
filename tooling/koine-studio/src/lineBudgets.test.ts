@@ -111,7 +111,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Lowered 919 → 910: #472 Task 4 rounds the key through the review rows — the apply payload uses
   // each row's own key, so the snapshotKeyFor/liveTextFor reverse lookups are deleted and drift
   // resolves per key against one fresh snapshot. Measured end-state, no headroom.
-  { file: 'src/ai/aiPanel.ts', maxLines: 910 },
+  // Raised 910 → 926: code-review fixes on the #984/#990/#472 arc — applyChangeSet derives the
+  // accepted list from the store (not the panel's render-time argument), the drift partition becomes
+  // a single pass with a once-per-apply display-path Set, and send()'s finally flushes a synchronous
+  // rerender() before focusComposer() so focus lands on an ENABLED textarea; correctness wiring plus
+  // its comments, not feature growth. Measured end-state, no headroom.
+  { file: 'src/ai/aiPanel.ts', maxLines: 926 },
   // Frozen 2026-07-02 at 1301 LOC (grown from the audit's 1284 @ fc83bcf5), ceil(1301 × 1.02) = 1328.
   // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
   // not mandate the split — #989 owns that.
