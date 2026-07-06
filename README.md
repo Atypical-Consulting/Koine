@@ -8,7 +8,7 @@
 [![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![Tests](https://img.shields.io/badge/tests-1900%2B%20passing-2ea44f)](tests/)
-![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20Java%20%C2%B7%20docs%20%C2%B7%20AsyncAPI%20%C2%B7%20OpenAPI-178600)
+![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20Java%20%C2%B7%20Kotlin%20%C2%B7%20docs%20%C2%B7%20AsyncAPI%20%C2%B7%20OpenAPI-178600)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 ## The problem
@@ -48,6 +48,13 @@ per-constant associated data), entities and aggregates as classes with identity 
 invariant-guarded behaviors, generated identities as branded `record`s minting `java.util.UUID`, domain
 events grouped under a per-context `sealed interface DomainEvent`, and repositories as `interface`s —
 one public type per `.java` file, `koine.runtime.DomainException` for invariant failures), a
+**Kotlin 2.x** emitter ships (`--target kotlin` → idiomatic, dependency-free Kotlin/JVM: value objects
+and domain events as `data class`es (invariants in an `init` block), generated identities as
+`@JvmInline value class`es minting `java.util.UUID`, smart enums as `enum class`es (constructor `val`
+accessors + neutral-key `fromKey`/`tryFromKey`), entities and aggregates as classes with `var … private
+set` state, identity `equals`/`hashCode`, and invariant-guarded behaviors, events under a per-context
+`sealed interface DomainEvent`, and repositories as `interface`s — optionality lives in the type system
+as `T?` (never `Optional`), `koine.runtime.DomainException` for invariant failures), a
 **docs** target emits living
 documentation (`--target docs` → Markdown + Mermaid diagrams) straight from the model, an
 **AsyncAPI 3.0** target emits a single event-API document (`--target asyncapi` → channels, messages,
@@ -82,7 +89,7 @@ surface below is a click away in the [live Studio](https://atypical-consulting.g
 | IDE view | What it shows |
 |----------|---------------|
 | **Editor & live diagnostics** | Your `.koi` model on the left, the emitted code on the right, with error squiggles and quick info as you type — the same parser and validator the CLI runs. |
-| **Emit-target switcher** | Flip the *same* model between **C#**, **TypeScript**, **Python**, **PHP**, **Rust**, and **Java** output without leaving the page. |
+| **Emit-target switcher** | Flip the *same* model between **C#**, **TypeScript**, **Python**, **PHP**, **Rust**, **Java**, and **Kotlin** output without leaving the page. |
 | **Context-map graph** | An interactive graph of the bounded contexts and the relationships between them. |
 | **Diagram views** | Aggregates and state machines rendered as diagrams straight from the model. |
 | **Ubiquitous-language glossary** | The generated glossary of every term in the domain, kept in lock-step with the model. |
@@ -214,6 +221,9 @@ dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.k
 
 # Or to Java (dependency-free Java 17 — records, sealed events, invariant-guarded classes; `javac --release 17` proves it compiles)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target java --out ./generated_java
+
+# Or to Kotlin (idiomatic Kotlin 2.x/JVM — data classes, @JvmInline value-class IDs, sealed events, T? optionality; `kotlinc` proves it compiles)
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target kotlin --out ./generated_kt
 
 # Emit the opt-in C# Application layer alongside the domain (handlers, validators, query handlers, DI)
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target csharp --layers domain,application --out ./generated
