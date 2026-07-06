@@ -109,9 +109,43 @@ describe('SourceControlPanel', () => {
     const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
     fireEvent.input(textarea, { target: { value: 'Add order total' } });
 
-    const commitBtn = view.getByRole('button', { name: 'Commit' }) as HTMLButtonElement;
+    const commitBtn = view.getByRole('button', { name: /Commit \d+ file/ }) as HTMLButtonElement;
     expect(commitBtn.disabled).toBe(false);
     fireEvent.click(commitBtn);
+
+    await waitFor(() => expect(git.gitCommit).toHaveBeenCalledWith(TOKEN, 'Add order total'));
+  });
+
+  test('the split Commit button is disabled until staged + message, and ⌘⏎ commits from the textarea', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
+    const commitBtn = () => view.getByRole('button', { name: /Commit \d+ file/ }) as HTMLButtonElement;
+
+    // A staged file but an empty message → the split Commit button is disabled.
+    expect(commitBtn().disabled).toBe(true);
+
+    // ⌘⏎ with an empty message is a no-op (it only fires when the button would be enabled).
+    fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
+    expect(git.gitCommit).not.toHaveBeenCalled();
+
+    // Typing a non-empty message enables the button.
+    fireEvent.input(textarea, { target: { value: 'Add order total' } });
+    expect(commitBtn().disabled).toBe(false);
+
+    // ⌘⏎ inside the textarea now commits (the keyboard shortcut the keycap advertises).
+    fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
+    await waitFor(() => expect(git.gitCommit).toHaveBeenCalledWith(TOKEN, 'Add order total'));
+  });
+
+  test('Ctrl+⏎ in the message textarea also commits (non-mac shortcut)', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: 'Add order total' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
 
     await waitFor(() => expect(git.gitCommit).toHaveBeenCalledWith(TOKEN, 'Add order total'));
   });
@@ -208,7 +242,7 @@ describe('SourceControlPanel — save-all-before-commit prompt (#470)', () => {
     );
     const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
     fireEvent.input(textarea, { target: { value: 'Add order total' } });
-    const commitBtn = view.getByRole('button', { name: 'Commit' }) as HTMLButtonElement;
+    const commitBtn = view.getByRole('button', { name: /Commit \d+ file/ }) as HTMLButtonElement;
     expect(commitBtn.disabled).toBe(false);
     fireEvent.click(commitBtn);
     return { git, onSaveAll, order };

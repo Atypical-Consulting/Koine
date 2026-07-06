@@ -270,6 +270,10 @@ export function SourceControlPanel(props: {
   const unstaged = files.filter((f) => !f.staged && f.status !== 'untracked');
   const untracked = files.filter((f) => !f.staged && f.status === 'untracked');
   const hasStaged = staged.length > 0;
+  const branch = status?.branch ?? 'main';
+  // The split Commit button (and the ⌘⏎ shortcut) are live only with a staged file, a non-empty
+  // message, and no commit/refresh in flight — the same latch the original single button used.
+  const commitDisabled = busy || committing || message.trim().length === 0 || !hasStaged;
   // Surface the current branch even when it isn't in the local list (detached HEAD / fresh branch).
   const branchOptions = status && !branches.includes(status.branch) ? [status.branch, ...branches] : branches;
 
@@ -406,24 +410,54 @@ export function SourceControlPanel(props: {
         <p class="koi-docs-empty">Loading changes…</p>
       ) : (
         <>
-          <div class="koi-sc-commit">
+          <div class="koi-sc-composer">
             <textarea
-              class="koi-sc-commit-input"
+              class="koi-sc-composer-input"
               aria-label="Commit message"
               rows={2}
               placeholder="Message (what changed and why)"
               value={message}
               disabled={busy}
               onInput={(e) => setMessage((e.currentTarget as HTMLTextAreaElement).value)}
+              onKeyDown={(e) => {
+                // ⌘⏎ / Ctrl+⏎ commits straight from the message box — but only when the Commit
+                // button would itself be enabled, so the shortcut can never bypass the guards.
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                  e.preventDefault();
+                  if (!commitDisabled) onCommit();
+                }
+              }}
             />
-            <button
-              type="button"
-              class="koi-sc-commit-btn koi-docs-save"
-              disabled={busy || committing || message.trim().length === 0 || !hasStaged}
-              onClick={onCommit}
-            >
-              Commit
-            </button>
+            <div class="koi-sc-composer-foot">
+              <div class={`koi-sc-commit-split${commitDisabled ? ' is-disabled' : ''}`}>
+                <button type="button" class="koi-sc-commit-btn" disabled={commitDisabled} onClick={onCommit}>
+                  <span class="koi-sc-commit-lbl">
+                    Commit {staged.length} {staged.length === 1 ? 'file' : 'files'} to {branch}
+                  </span>
+                  {/* Keyboard hint, aria-hidden so the button's accessible name stays "Commit N files…". */}
+                  <span class="koi-sc-kbd" aria-hidden="true">
+                    <kbd>⌘</kbd>
+                    <kbd class="ret">
+                      <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+                        <path d="M12.4 4.6v2.7a1.6 1.6 0 0 1-1.6 1.6H4.6M6.9 6.9 4.4 9l2.5 2.1" />
+                      </svg>
+                    </kbd>
+                  </span>
+                </button>
+                {/* Split caret — commit-options menu is a follow-up; a labelled placeholder for now. */}
+                <button
+                  type="button"
+                  class="koi-sc-commit-caret"
+                  title="Commit options"
+                  aria-label="Commit options"
+                  disabled={commitDisabled}
+                >
+                  <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M4 6.5 8 10 12 6.5" />
+                  </svg>
+                </button>
+              </div>
+            </div>
           </div>
 
           {fileGroup('Staged Changes', staged)}
