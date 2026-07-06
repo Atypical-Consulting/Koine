@@ -1,6 +1,6 @@
 ---
 title: "Roadmap"
-description: "An honest status report on Koine — the capabilities you can rely on today (the full DDD toolkit; C#, TypeScript, Python, PHP, Rust, and Java emitters; and editor tooling), with per-target maturity and what comes next."
+description: "An honest status report on Koine — the capabilities you can rely on today (the full DDD toolkit; C#, TypeScript, Python, PHP, Rust, Java, and Kotlin emitters; and editor tooling), with per-target maturity and what comes next."
 ---
 
 Koine ships the **full tactical and strategic Domain-Driven Design toolkit**, emitters for six
@@ -70,7 +70,7 @@ reference page that documents it in depth.
 
 The parser and semantic model are strictly **target-agnostic**, so the same `.koi` model compiles to
 six languages. C# is the primary, most complete target; the others cover progressively more of the
-construct set. Point `koine build` at `--target csharp | typescript | python | php | rust | java` (see the
+construct set. Point `koine build` at `--target csharp | typescript | python | php | rust | java | kotlin` (see the
 [CLI reference](/Koine/guides/cli/#koine-build)).
 
 ### Maturity by target
@@ -85,6 +85,7 @@ the proof, not a promise.
 | **PHP** | Full tactical **and** strategic/CQRS layer | `phpstan` + `php -l` |
 | **Rust** | Tactical core plus multi-context references and the CQRS read side — value objects, smart enums, entities/aggregates, factories, events, query DTOs, read-model projections, and repository traits | `cargo check` |
 | **Java** | Tactical core plus events/commands/repositories — value objects & events as validating `record`s, smart enums, entities/aggregates with invariant-guarded behaviors, generated IDs, a sealed `DomainEvent`, and repository interfaces; multi-context references package-qualify; dependency-free Java 17 | `javac --release 17` |
+| **Kotlin** | Tactical core plus events/commands/repositories — value objects & events as `data class`es (invariants in `init`), `@JvmInline value class` IDs, smart enums (`fromKey`/`tryFromKey`), entities/aggregates with `var … private set` state + invariant-guarded behaviors, a sealed `DomainEvent`, and repository interfaces; optionality is `T?` (never `Optional`); multi-context references package-qualify; dependency-free Kotlin 2.x/JVM | `kotlinc` |
 | **TypeScript** | Tactical core — value objects, identity-equal entities, smart enums as typed `const` objects, `*Id` branded primitives | `tsc --noEmit --strict` |
 
 ## A taste of the shipped surface

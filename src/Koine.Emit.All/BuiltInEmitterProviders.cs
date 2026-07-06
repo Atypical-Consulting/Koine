@@ -21,6 +21,7 @@ public static class BuiltInEmitterProviders
         new PhpEmitterProvider(),
         new RustEmitterProvider(),
         new JavaEmitterProvider(),
+        new KotlinEmitterProvider(),
         new GlossaryEmitterProvider(),
         new DocsEmitterProvider(),
         new AsyncApiEmitterProvider(),

@@ -33,6 +33,7 @@
     <ProjectReference Include="..\Koine.Emit.Php\Koine.Emit.Php.csproj" />
     <ProjectReference Include="..\Koine.Emit.Rust\Koine.Emit.Rust.csproj" />
     <ProjectReference Include="..\Koine.Emit.Java\Koine.Emit.Java.csproj" />
+    <ProjectReference Include="..\Koine.Emit.Kotlin\Koine.Emit.Kotlin.csproj" />
     <ProjectReference Include="..\Koine.Emit.Glossary\Koine.Emit.Glossary.csproj" />
     <ProjectReference Include="..\Koine.Emit.Docs\Koine.Emit.Docs.csproj" />
     <ProjectReference Include="..\Koine.Emit.AsyncApi\Koine.Emit.AsyncApi.csproj" />

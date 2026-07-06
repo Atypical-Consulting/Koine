@@ -44,7 +44,7 @@ import {
 } from '@codemirror/autocomplete';
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { showMinimap } from '@replit/codemirror-minimap';
-import { csharp, java } from '@codemirror/legacy-modes/mode/clike';
+import { csharp, java, kotlin } from '@codemirror/legacy-modes/mode/clike';
 import { typescript, json } from '@codemirror/legacy-modes/mode/javascript';
 import { python } from '@codemirror/legacy-modes/mode/python';
 import { rust } from '@codemirror/legacy-modes/mode/rust';
@@ -1501,6 +1501,9 @@ const LANG_MODES: Record<string, () => Extension> = {
   // Java reuses the bundled clike legacy mode (same package as the C# mode above), so highlighting the
   // emitted `.java` files adds no new dependency.
   java: () => StreamLanguage.define(java),
+  // Kotlin reuses the same clike legacy mode (which ships a `kotlin` tokenizer), so highlighting the
+  // emitted `.kt` files adds no new dependency.
+  kotlin: () => StreamLanguage.define(kotlin),
   // JSON powers the read-only MCP configuration recipe in Settings (createJsonView); the
   // legacy-modes JSON tokenizer is already bundled, so highlighting it adds no new dependency.
   json: () => StreamLanguage.define(json),

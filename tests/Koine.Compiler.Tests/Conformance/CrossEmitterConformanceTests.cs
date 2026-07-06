@@ -52,6 +52,11 @@ public class CrossEmitterConformanceTests
         "run. The C# (and, where available, TypeScript) outcomes were still asserted. Install mypy " +
         "(or set KOINE_MYPY) — CI runs the full comparison.";
 
+    private const string NoKotlinToolchainNotice =
+        "No kotlinc toolchain available locally; the Kotlin half of the cross-emitter comparison was not " +
+        "run. The C# (and, where available, TypeScript/Python) outcomes were still asserted. Install kotlinc " +
+        "(or set KOINE_KOTLINC) — CI runs the full comparison.";
+
     // ---- The corpus -----------------------------------------------------------------------------
 
     /// <summary>
@@ -468,12 +473,24 @@ public class CrossEmitterConformanceTests
             pyCheck.Ok.ShouldBeTrue("plain VO arithmetic should type-check under mypy --strict:\n" + string.Join("\n", pyCheck.Errors));
         }
 
-        // The C# half always asserts above; the TS and Python halves only assert when their toolchain
+        // Kotlin: emit + kotlinc, asserted when the Kotlin toolchain is present. The `base + base` /
+        // `base - base` lowers to the demand-driven `operator fun plus`/`minus` the Kotlin value-object slice
+        // emits (a plain-VO-arithmetic path the billing/values templates don't hit).
+        CompileResult kt = new KoineCompiler().Compile(koi, new KotlinEmitter());
+        kt.Success.ShouldBeTrue("Kotlin emit failed:\n" + string.Join("\n", kt.Diagnostics.Select(d => d.ToString())));
+        TestSupport.KotlinCheck ktCheck = TestSupport.CompileKotlin(kt.Files);
+        if (ktCheck.ToolchainAvailable)
+        {
+            ktCheck.Ok.ShouldBeTrue("plain VO arithmetic should type-check under kotlinc:\n" + string.Join("\n", ktCheck.Errors));
+        }
+
+        // The C# half always asserts above; the TS, Python, and Kotlin halves only assert when their toolchain
         // ran. Funnel each absence through RequireOrSkip AFTER the assertions (mirrors the Theory and
         // satisfies the NoSilentToolchainGate meta-test) so a missing toolchain reports Skipped — or, under
         // KOINE_REQUIRE_CONFORMANCE, Failed — instead of silently passing.
         TestSupport.RequireOrSkip(tsCheck.ToolchainAvailable, NoToolchainNotice);
         TestSupport.RequireOrSkip(pyCheck.ToolchainAvailable, NoPythonToolchainNotice);
+        TestSupport.RequireOrSkip(ktCheck.ToolchainAvailable, NoKotlinToolchainNotice);
     }
 
     private static string Verb(bool accepted) => accepted ? "ACCEPTED" : "REJECTED";
