@@ -107,7 +107,14 @@ public sealed partial class PythonEmitter
         }
         else
         {
-            if (emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? scalars)
+            // This value object's full operator demand, resolved once from the analyzer's single-pass
+            // model (#836): scalar multiply/divide factors, the `sum`-fold `IsSummable` flag, the plain
+            // binary `+`/`-` ops, and the precomputed `add`-need union. `null` = this VO needs no
+            // generated arithmetic, read null-safely below (matching PhpEmitter.EmitValueObject).
+            var needs = emit.OperatorNeeds.GetValueOrDefault(vo.Name);
+
+            IReadOnlySet<string>? scalars = needs?.MultiplyFactors;
+            if (scalars is { Count: > 0 }
                 && ordered.Any(m => m.Type.Name is "Int" or "Decimal"))
             {
                 WriteScalarOp(sb, name, ordered, scalars, "*");
@@ -115,18 +122,20 @@ public sealed partial class PythonEmitter
             // `__truediv__` is the division dual of `__mul__` (#879, follow-up to the C# emitter's
             // #832): demand-generated only where the model actually divides this value object by a
             // scalar (base / 2), never emitted unconditionally.
-            if (emit.ScalarDivNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? divScalars)
+            IReadOnlySet<string>? divScalars = needs?.DivideFactors;
+            if (divScalars is { Count: > 0 }
                 && ordered.Any(m => m.Type.Name is "Int" or "Decimal"))
             {
                 WriteScalarOp(sb, name, ordered, divScalars, "/");
             }
-            // `__add__` is demand-generated when the VO is folded with `sum` (AdditiveNeeds) OR appears
-            // in a plain binary `base + base` (#834); `__sub__` is demand-generated for a plain
-            // `base - base` (#834 — never generated for plain VOs before). Python lowers both call sites
-            // to the native `+`/`-`, i.e. `__add__`/`__sub__`; this emits the dunder definitions.
-            emit.BinaryArithmeticNeeds.TryGetValue(vo.Name, out IReadOnlySet<BinaryOp>? arithmeticOps);
-            bool needsAdd = emit.AdditiveNeeds.Contains(vo.Name) || (arithmeticOps?.Contains(BinaryOp.Add) ?? false);
-            bool needsSub = arithmeticOps?.Contains(BinaryOp.Sub) ?? false;
+            // `__add__` is demand-generated when the VO is folded with `sum` OR appears in a plain binary
+            // `base + base` (#834) — the analyzer pre-computes that union as `needs.NeedsAdd` so the
+            // emitter no longer recombines the additive-fold and binary-arithmetic maps itself (#836).
+            // `__sub__` is demand-generated purely from the plain binary `-` demand (`base - base`, #834
+            // — never generated for plain VOs before). Python lowers both call sites to the native
+            // `+`/`-`, i.e. `__add__`/`__sub__`; this emits the dunder definitions.
+            bool needsAdd = needs?.NeedsAdd ?? false;
+            bool needsSub = needs is not null && needs.BinaryOps.Contains(BinaryOp.Sub);
             if (needsAdd)
             {
                 WriteValueObjectAdditiveOp(sb, name, ordered, "__add__", "+");
