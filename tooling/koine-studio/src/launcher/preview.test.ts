@@ -241,7 +241,9 @@ describe('previewFor — dispatch', () => {
     expect(vm?.rule).toEqual({ kind: 'invariant', expr: 'quantity > 0' });
   });
 
-  test('rule (rkind "state"): pairs adjacent declared enum members into a transition', () => {
+  test('rule (rkind "state"): yields the enum\'s declared state list, NEVER a fabricated transition (#1145)', () => {
+    // Guarded transitions aren't indexed, so a state entry must not invent an "A → B" edge from
+    // declaration adjacency — it shows the honest flat state list instead.
     const statusEntry = glossaryEntry({ name: 'OrderStatus', kind: 'enum', context: 'Ordering', qualifiedName: 'Ordering.OrderStatus' });
     const statusElement: ModelElement = {
       entry: statusEntry,
@@ -255,10 +257,13 @@ describe('previewFor — dispatch', () => {
 
     const vm = previewFor(entry, { element: statusElement });
 
-    expect(vm?.transition).toEqual({ from: 'Placed', to: 'Shipped' });
+    expect(vm?.transition).toBeUndefined();
+    expect(vm?.states).toEqual(['Draft', 'Placed', 'Shipped']);
+    expect(vm?.header).toEqual({ chipSlug: 'enum', name: 'Placed', sub: 'state · OrderStatus' });
+    expect(vm?.note).toBeTruthy();
   });
 
-  test('rule (rkind "state"): degrades to the bare states list when there is no adjacent member to pair', () => {
+  test('rule (rkind "state"): still yields the bare state list for a single-state enum', () => {
     const statusEntry = glossaryEntry({ name: 'OrderStatus', kind: 'enum', context: 'Ordering', qualifiedName: 'Ordering.OrderStatus' });
     const statusElement: ModelElement = { entry: statusEntry, modelMembers: [{ kind: 'enumMember', name: 'OnlyState', type: null, value: null }] };
     const entry: CatalogEntry = { id: 'rule:3', cat: 'rule', rkind: 'state', title: 'OnlyState', qualifiedName: 'Ordering.OrderStatus' };

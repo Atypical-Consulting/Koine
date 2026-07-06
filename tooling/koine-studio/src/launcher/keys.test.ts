@@ -74,9 +74,11 @@ describe('handleKey — menu closed', () => {
     expect(result).toEqual({ kind: 'fill', query: `${prefix}${title}`, preventDefault: true });
   });
 
-  test('Tab with no selected title is a no-op', () => {
+  test('Tab with no selected title fills nothing but still traps focus (preventDefault, kind none)', () => {
+    // #1145 review: even with no result to fill, Tab must be prevented so the browser's default focus
+    // move can't escape the modal overlay.
     const result = handleKey(press('Tab'), makeState({ selectedTitle: null }));
-    expect(result).toEqual({ kind: 'none', preventDefault: false });
+    expect(result).toEqual({ kind: 'none', preventDefault: true });
   });
 
   test('Escape clears a non-empty query', () => {

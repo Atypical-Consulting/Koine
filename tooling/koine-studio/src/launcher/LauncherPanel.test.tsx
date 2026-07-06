@@ -165,6 +165,17 @@ describe('LauncherPanel', () => {
     expect(input.value.startsWith('@')).toBe(false);
   });
 
+  test('clearing the mode also drops a single following space so "@ Order" becomes "Order" (#1145)', () => {
+    const view = mount(makeSources());
+    const input = view.getByLabelText('Search commands, symbols, files…') as HTMLInputElement;
+    fireEvent.input(input, { target: { value: '@ Order' } });
+    expect(view.container.querySelector('.lx-modepill')).toBeTruthy();
+
+    fireEvent.click(view.getByLabelText('Clear mode'));
+
+    expect(input.value).toBe('Order');
+  });
+
   test('Escape calls onClose', () => {
     const onClose = vi.fn();
     const view = mount(makeSources(), onClose);
@@ -485,5 +496,63 @@ describe('LauncherPanel — keyboard model (issue #1143, task 7)', () => {
     const after = view.container.querySelectorAll('.lx-item');
     expect(after[1].className).toContain('sel');
     expect(after[0].className).not.toContain('sel');
+  });
+
+  test('traps keydowns while open: a bubbling ⌘K / ⌘S from inside the scrim never reaches the window (#1145)', async () => {
+    // The shell's GLOBAL chords listen on `window`; while the launcher is open it must own its keys so
+    // ⌘K/⌘S/⌘Z don't toggle the palette or act on the editor beneath. The existing tests dispatch on the
+    // scrim directly and so miss this — here we dispatch a REAL bubbling event from the focused input and
+    // assert it's stopped before it reaches a window listener.
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+
+    const windowSpy = vi.fn();
+    window.addEventListener('keydown', windowSpy);
+    try {
+      const input = view.getByLabelText('Search commands, symbols, files…') as HTMLInputElement;
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true, cancelable: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true, bubbles: true, cancelable: true }));
+      expect(windowSpy).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('keydown', windowSpy);
+    }
+  });
+
+  test('aria-activedescendant on the input tracks the selected result row (#1145 a11y)', async () => {
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item')).toHaveLength(3));
+    const input = view.getByLabelText('Search commands, symbols, files…') as HTMLInputElement;
+
+    const first = view.container.querySelector('.lx-item.sel') as HTMLElement;
+    expect(first.id).toBeTruthy();
+    expect(input.getAttribute('aria-activedescendant')).toBe(first.id);
+
+    const scrim = view.container.querySelector('.lx-scrim') as HTMLElement;
+    fireEvent.keyDown(scrim, { key: 'ArrowDown' });
+
+    const next = view.container.querySelector('.lx-item.sel') as HTMLElement;
+    expect(next.id).not.toBe(first.id);
+    expect(input.getAttribute('aria-activedescendant')).toBe(next.id);
+  });
+
+  test('the action menu drives its active item via aria-activedescendant, not aria-selected on menuitems (#1145 a11y)', async () => {
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+    const scrim = view.container.querySelector('.lx-scrim') as HTMLElement;
+
+    fireEvent.keyDown(scrim, { key: 'k', metaKey: true }); // open the actions menu
+
+    const menu = view.container.querySelector('.lx-actmenu') as HTMLElement;
+    expect(menu.getAttribute('aria-activedescendant')).toBe('lx-act-0');
+    const items = menu.querySelectorAll('[role="menuitem"]');
+    expect(items[0].id).toBe('lx-act-0');
+    expect(items[0].hasAttribute('aria-selected')).toBe(false); // wrong pairing for role="menuitem"
+
+    fireEvent.keyDown(scrim, { key: 'ArrowDown' });
+
+    expect((view.container.querySelector('.lx-actmenu') as HTMLElement).getAttribute('aria-activedescendant')).toBe('lx-act-1');
   });
 });

@@ -724,7 +724,7 @@
   background: color-mix(in srgb, var(--koi-paper-2) 96%, transparent);
   backdrop-filter: blur(24px);
   border: 1px solid color-mix(in srgb, var(--koi-fg) 14%, var(--koi-line));
-  box-shadow: 0 20px 60px rgba(2, 5, 10, 0.6);
+  box-shadow: var(--koi-shadow);
 }
 
 .lx-actmenu-head {
@@ -799,7 +799,7 @@
   background: color-mix(in srgb, var(--koi-paper-2) 96%, transparent);
   backdrop-filter: blur(18px);
   border: 1px solid color-mix(in srgb, var(--koi-accent) 32%, var(--koi-line));
-  box-shadow: 0 16px 44px rgba(2, 5, 10, 0.55);
+  box-shadow: var(--koi-shadow);
   color: var(--koi-fg);
   font-size: 13px;
   transition: opacity var(--koi-dur-mid) ease, transform var(--koi-dur-mid) ease;

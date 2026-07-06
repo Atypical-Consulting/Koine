@@ -5,9 +5,12 @@
 // `menuOpen`/`menuIndex` state and mounts/unmounts this component; full ↑/↓ + ↵ keyboard driving of
 // `selectedIndex` is Task 7 — this task wires mouse hover/click plus a self-contained Esc-to-close.
 import type { ActionIcon, LauncherAction } from '@/launcher/actions';
+import { GlyphPaths } from '@/launcher/ResultRow';
 
 /** The line-icon glyphs a quick action can render, ported verbatim (path data unchanged) from the
- * prototype's `I` map in design/design_handoff_git_spotlight_logos/koine-launcher.js. */
+ * prototype's `I` map in design/design_handoff_git_spotlight_logos/koine-launcher.js. The four glyphs
+ * shared with the result list (`file`/`gloss`/`commit`/`state`) reuse `ResultRow`'s exported `GlyphPaths`
+ * instead of re-hardcoding identical path data (issue #1145 review); the rest are unique to this menu. */
 function ActionIconPaths({ kind }: { kind: ActionIcon }) {
   switch (kind) {
     case 'goto':
@@ -38,21 +41,11 @@ function ActionIconPaths({ kind }: { kind: ActionIcon }) {
     case 'run':
       return <path d="M5 3.5 12 8l-7 4.5z" />;
     case 'file':
-      return (
-        <>
-          <path d="M4 2.4h4.5l3 3v8H4z" />
-          <path d="M8.5 2.4v3h3" />
-        </>
-      );
+      return <GlyphPaths kind="file" />;
     case 'diff':
       return <path d="M4 3.5v6M4 12.5v.01M4 9.5a1.5 1.5 0 0 0 1.5 1.5h3M12 12.5v-6M12 3.5v.01" />;
     case 'gloss':
-      return (
-        <>
-          <path d="M4 3.2h6a1.4 1.4 0 0 1 1.4 1.4v8.2M4 3.2A1.2 1.2 0 0 0 2.8 4.4v8.4A1.2 1.2 0 0 0 4 14h7.4" />
-          <path d="M5.4 6h4M5.4 8.2h4" />
-        </>
-      );
+      return <GlyphPaths kind="gloss" />;
     case 'search':
       return (
         <>
@@ -61,20 +54,9 @@ function ActionIconPaths({ kind }: { kind: ActionIcon }) {
         </>
       );
     case 'commit':
-      return (
-        <>
-          <circle cx="8" cy="8" r="2.4" />
-          <path d="M8 2v3.6M8 10.4V14" />
-        </>
-      );
+      return <GlyphPaths kind="commit" />;
     case 'state':
-      return (
-        <>
-          <circle cx="4" cy="8" r="1.7" />
-          <circle cx="12" cy="8" r="1.7" />
-          <path d="M5.7 8h4.6M8.6 6.3 10.3 8 8.6 9.7" />
-        </>
-      );
+      return <GlyphPaths kind="state" />;
     case 'open':
       return (
         <>
@@ -116,15 +98,25 @@ export function ActionMenu(props: ActionMenuProps) {
   }
 
   return (
-    <div class="lx-actmenu" role="menu" aria-label={`Actions for ${title}`} tabIndex={-1} onKeyDown={onKeyDown}>
+    <div
+      class="lx-actmenu"
+      role="menu"
+      aria-label={`Actions for ${title}`}
+      tabIndex={-1}
+      // The active row is tracked in state (focus stays in the launcher input), so it's announced via
+      // aria-activedescendant on the menu — NOT aria-selected on the menuitems, which is the wrong pairing
+      // for role="menu"/"menuitem" (aria-selected belongs to option/tab/etc.) (issue #1145 review).
+      aria-activedescendant={`lx-act-${selectedIndex}`}
+      onKeyDown={onKeyDown}
+    >
       <div class="lx-actmenu-head">{title}</div>
       {actions.map((action, i) => (
         <div
           key={action.label}
+          id={`lx-act-${i}`}
           class={i === selectedIndex ? 'lx-actitem sel' : 'lx-actitem'}
           role="menuitem"
           tabIndex={0}
-          aria-selected={i === selectedIndex}
           onMouseMove={() => onSelect(i)}
           onClick={() => onRun(i)}
         >

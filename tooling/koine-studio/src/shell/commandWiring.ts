@@ -162,19 +162,28 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
   // Register the static catalog once at construction — registration order === palette order.
   for (const cmd of buildStaticCatalog()) registry.register(cmd);
 
+  // The registered static catalog, hiding any command whose when() is currently false (the dev
+  // store-inspector, stop-compile) and the palette-toggle meta-command, with each hint platform-formatted.
+  // Both consumers compose from this: the palette (getCommands) appends the dynamic goto: rows; the
+  // launcher's `>` mode (launcherSources.commands) uses it as-is (#1145 review — was duplicated).
+  function enabledCommands(): Command[] {
+    return registry
+      .all()
+      .filter((c) => c.id !== PALETTE_COMMAND_ID && registry.isEnabled(c.id))
+      .map((c) => (c.hint ? { ...c, hint: formatChord(c.hint) } : c));
+  }
+
   function getCommands(): Command[] {
-    // The static catalog from the registry, hiding any command whose when() is currently false (the dev
-    // store-inspector and stop-compile) and the palette-toggle meta-command, then the dynamic goto:
-    // quick-open rows on top.
-    const cmds: Command[] = registry.all().filter((c) => c.id !== PALETTE_COMMAND_ID && registry.isEnabled(c.id));
+    const cmds = enabledCommands();
 
     // Surface every open file as a "Go to File" entry so the palette doubles as a
-    // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open.
+    // fuzzy quick-open (type part of a path to jump). The palette re-reads this on each open. Goto rows
+    // carry no hint, so appending them after enabledCommands()'s formatChord map is behaviour-identical.
     for (const buf of Array.from(deps.workspace.buffers().values()).sort((a, b) => a.relPath.localeCompare(b.relPath))) {
       cmds.push({ id: 'goto:' + buf.uri, title: buf.relPath, group: 'Go to File', run: () => deps.openUri(buf.uri) });
     }
 
-    return cmds.map((c) => (c.hint ? { ...c, hint: formatChord(c.hint) } : c));
+    return cmds;
   }
 
   // --- Spotlight launcher (#1143) -------------------------------------------
@@ -184,15 +193,9 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
   // (the catalog join) and LauncherActionDeps (the per-result effects) from the same injected `deps` the
   // rest of this module uses, so it stays import-light and unit-testable with stubs.
 
-  // The studio command list the launcher's `>` mode ranks: the enablement-filtered static catalog, MINUS
-  // the launcher-toggle meta-command and WITHOUT the dynamic goto: rows (those become the launcher's Files
-  // mode, sourced from LauncherSources.files()). Hints are platform-formatted, like getCommands().
-  function launcherCommands(): Command[] {
-    return registry
-      .all()
-      .filter((c) => c.id !== PALETTE_COMMAND_ID && registry.isEnabled(c.id))
-      .map((c) => (c.hint ? { ...c, hint: formatChord(c.hint) } : c));
-  }
+  // The launcher's `>` mode ranks exactly `enabledCommands()` (above): the enablement-filtered static
+  // catalog MINUS the launcher-toggle meta-command and WITHOUT the dynamic goto: rows (those become the
+  // launcher's Files mode, sourced from LauncherSources.files()).
 
   // LauncherSources.glossary() is SYNC, but the glossary entries come from the async model index; cache
   // them off each modelIndex() resolve (buildCatalog always awaits modelIndex() before reading glossary())
@@ -205,7 +208,7 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
       cachedGlossary = index.glossary.entries;
       return index;
     },
-    commands: () => launcherCommands(),
+    commands: () => enabledCommands(),
     files: () => Array.from(deps.workspace.buffers().values()),
     gitLog: () => (deps.canUseGit ? deps.gitLog() : null),
     canUseGit: deps.canUseGit,
@@ -224,14 +227,16 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
   }
 
   // Bind each high-level launcher action to the nearest real shell seam. Actions without a dedicated seam
-  // yet (peek, reveal-in-explorer, open-changes, rename, commit view/revert) DEGRADE to the closest one
+  // yet (peek, reveal-in-explorer, open-changes, commit view) DEGRADE to the closest reasonable one
   // (reveal/open, or the Source Control panel) — every one is safe to invoke; the report lists the degrades
-  // as follow-ups. `toast` is a no-op: LauncherPanel renders its own `.lx-toast` confirmation.
+  // as follow-ups. `rename` and `revert` are the exception: silently jumping / opening the wrong panel is
+  // MISLEADING (looks like it worked), so they honestly toast "not available yet" via the launcher's own
+  // `.lx-toast` (#1145 review). `toast` here stays a no-op — LauncherPanel renders its own confirmation.
   const actionDeps: LauncherActionDeps = {
     gotoDefinition: (entry) => gotoEntry(entry),
     findUsages: () => deps.search.focus(),
     peek: (entry) => gotoEntry(entry),
-    rename: (entry) => gotoEntry(entry),
+    rename: () => launcher.toast('Renaming a symbol isn’t available from the launcher yet.'),
     copy: (text) => void navigator.clipboard?.writeText?.(text),
     openFile: (entry) => {
       if (entry.file) deps.openUri(entry.file);
@@ -244,7 +249,7 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     findInModel: () => deps.search.focus(),
     gotoRule: (entry) => gotoEntry(entry),
     viewCommit: () => deps.controller.selectRight('source-control'),
-    revertCommit: () => deps.controller.selectRight('source-control'),
+    revertCommit: () => launcher.toast('Reverting a commit isn’t available from the launcher yet.'),
     runCommand: (entry) => {
       if (entry.cmdId) registry.run(entry.cmdId);
     },

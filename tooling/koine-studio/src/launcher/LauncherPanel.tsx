@@ -29,11 +29,15 @@ export interface LauncherPanelProps {
   /** The quick-action effect seam (issue #1143, task 6) — Task 8 supplies the concrete binding to
    * `lsp`/`platform`/`openUri`/clipboard; tests pass a stub (see `LauncherPanel.test.tsx`'s `makeActionDeps`). */
   actionDeps: LauncherActionDeps;
+  /** Hands the shell a callback that raises THIS panel's `.lx-toast` (issue #1145 review): commandWiring
+   * binds it so a degraded action (rename/revert-commit) can honestly say "not available yet" instead of a
+   * misleading silent jump. Optional so the unit tests mount the panel without it. */
+  onRegisterToast?(show: (message: string) => void): void;
 }
 
 /** The panel body. Exported for unit tests; the shell mounts it via {@link createLauncher}. */
 export function LauncherPanel(props: LauncherPanelProps) {
-  const { sources, visible, onClose, actionDeps } = props;
+  const { sources, visible, onClose, actionDeps, onRegisterToast } = props;
   const [input, setInput] = useState('');
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -73,6 +77,13 @@ export function LauncherPanel(props: LauncherPanelProps) {
 
   useEffect(() => () => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+  }, []);
+
+  // Expose showToast to the shell once (issue #1145 review). `showToast` only touches stable identities
+  // (setToastMessage + the timer ref), so the mount-time closure stays correct for the panel's life.
+  useEffect(() => {
+    onRegisterToast?.(showToast);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Wraps the injected `actionDeps.toast` so THIS panel instance renders the `.lx-toast` bubble for
@@ -144,7 +155,12 @@ export function LauncherPanel(props: LauncherPanelProps) {
   }, [visible]);
 
   function clearMode(): void {
-    setInput((value) => value.slice(1));
+    // Drop the mode-prefix char, and a single following space if there was one ("@ Order" → "Order"),
+    // mirroring parseMode's own leading-space trim so the cleared query is the bare term (#1145 review).
+    setInput((value) => {
+      const rest = value.slice(1);
+      return rest.startsWith(' ') ? rest.slice(1) : rest;
+    });
     inputRef.current?.focus();
   }
 
@@ -154,6 +170,13 @@ export function LauncherPanel(props: LauncherPanelProps) {
   // `.lx-scrim` overlay so arrows/↵/Tab/Esc/⌘K work while the query input keeps DOM focus (focus stays
   // trapped in the input; the container-level listener catches the bubbled keydown).
   function onKeyDown(e: KeyboardEvent): void {
+    if (!visible) return;
+    // The launcher is a modal overlay: while it's open it OWNS every keystroke, so stop the event from
+    // bubbling to the shell's GLOBAL window keydown listeners (commandWiring's ⌘K palette-toggle, ide.tsx's
+    // ⌘S save + ⌘Z/⌘Y undo/redo). Those gate on overlayOpen(), which historically didn't see `.lx-scrim`,
+    // so without this they'd fire on the editor beneath the open launcher (issue #1145 review). Typing
+    // still works — the input already received the keystroke; stopPropagation only stops the bubble.
+    e.stopPropagation();
     const keyState: LauncherKeyState = {
       query,
       selectedIndex,
@@ -237,6 +260,10 @@ export function LauncherPanel(props: LauncherPanelProps) {
             spellcheck={false}
             aria-label="Search commands, symbols, files…"
             placeholder="Search the model — symbols, events, files, commands…"
+            role="combobox"
+            aria-expanded={visibleResults.length > 0}
+            aria-controls="lx-results"
+            aria-activedescendant={selected ? `lx-opt-${selected.entry.id}` : undefined}
             value={input}
             onInput={(e) => setInput((e.target as HTMLInputElement).value)}
           />
@@ -246,6 +273,7 @@ export function LauncherPanel(props: LauncherPanelProps) {
         <div class="lx-body">
           <div
             ref={resultsRef}
+            id="lx-results"
             class="lx-results"
             role="listbox"
             aria-label="Results"

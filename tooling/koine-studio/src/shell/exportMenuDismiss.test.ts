@@ -62,6 +62,15 @@ describe('installExportMenuDismiss (#534)', () => {
     await waitFor(() => expect(details.hasAttribute('open')).toBe(false));
   });
 
+  test('opening the Spotlight launcher scrim (.lx-scrim) dismisses the open menu (#1145)', async () => {
+    const details = mountOpenExport();
+    teardown = installExportMenuDismiss(document);
+    const scrim = document.createElement('div');
+    scrim.className = 'lx-scrim';
+    document.body.appendChild(scrim);
+    await waitFor(() => expect(details.hasAttribute('open')).toBe(false));
+  });
+
   test('teardown removes the listeners (no dismissal after unmount)', () => {
     const details = mountOpenExport();
     const t = installExportMenuDismiss(document);

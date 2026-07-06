@@ -246,8 +246,9 @@ export interface TransitionInput {
   owner?: string;
 }
 
-/** A state-machine transition. See `stateOrTransitionPreview` below for how `previewFor` derives a
- * `{ from, to }` pair (or degrades) from the real catalog's single-named-state entries. */
+/** A state-machine transition builder. Kept for when REAL guarded-transition data (a `{ from, to }`
+ * pair) becomes available to the launcher; it is deliberately NOT called for enum-state entries, which
+ * only know a flat member list and must not fabricate an edge from declaration order (#1145 review). */
 export function transitionPreview(input: TransitionInput): PreviewViewModel {
   return {
     header: {
@@ -278,31 +279,18 @@ export function commitPreview(commit: GitLogEntry): PreviewViewModel {
 }
 
 /**
- * Pairs a selected enum state with an ADJACENT declared member to approximate a transition: prefers
- * the outgoing edge (this state → the next declared member), falling back to the incoming edge (the
- * previous declared member → this state) for the last member. This is a best-effort proxy off real
- * declaration order — Koine's actual guarded state-machine transitions aren't indexed by `ModelIndex`
- * today (documented gap, buildCatalog.ts's ruleEntries) — not a claim that declaration order IS the
- * guarded transition graph. Returns null (single/unresolvable state) when there's no adjacent member.
+ * `previewFor`'s rkind==='state' branch: the HONEST state-list view — the selected state, the enum's
+ * full declared member set, and a neutral note. It never synthesizes a `{ from, to }` transition from
+ * declaration order: Koine's guarded state-machine transitions aren't indexed by `ModelIndex` today
+ * (documented gap, buildCatalog.ts's ruleEntries), so an "A → B" edge would fabricate domain semantics
+ * the model can't derive (#1145 review). Real transition data, if it ever lands, uses `transitionPreview`.
  */
-function transitionForState(stateName: string, allStates: string[]): { from: string; to: string } | null {
-  const i = allStates.indexOf(stateName);
-  if (i === -1) return null;
-  if (i < allStates.length - 1) return { from: stateName, to: allStates[i + 1] };
-  if (i > 0) return { from: allStates[i - 1], to: stateName };
-  return null;
-}
-
-/** `previewFor`'s rkind==='state' branch: a real `{from,to}` transition when an adjacent declared
- * member exists (see `transitionForState`), else a graceful degrade to the enum's bare state list. */
 function stateOrTransitionPreview(entry: CatalogEntry, element: ModelElement): PreviewViewModel {
   const allStates = statesFor(element.modelMembers) ?? [];
-  const pair = transitionForState(entry.title, allStates);
-  if (pair) return transitionPreview({ from: pair.from, to: pair.to, owner: element.entry.name });
   return {
     header: { chipSlug: 'enum', name: entry.title, sub: `state · ${element.entry.name}` },
     states: allStates.length ? allStates : undefined,
-    note: 'No adjacent declared state to pair as a transition.',
+    note: 'A declared state of this enum. Guarded transitions aren’t indexed yet.',
   };
 }
 

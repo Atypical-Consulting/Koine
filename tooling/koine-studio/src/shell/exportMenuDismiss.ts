@@ -10,9 +10,11 @@
 // across hot-reloads / test boots.
 
 const EXPORT_OPEN_SELECTOR = 'details.koi-export[open]';
-// The same overlay signal the IDE uses (see `overlayOpen()` in ide.tsx): a visible modal or
-// command-palette backdrop. `[hidden]` backdrops are dormant and must not trigger a dismissal.
-const OVERLAY_SELECTOR = '.koi-palette-backdrop:not([hidden]), .koi-modal-backdrop:not([hidden])';
+// The same overlay signal the IDE uses (see `overlayOpen()` in overlays.ts): a visible modal or
+// command-palette backdrop, plus the Spotlight launcher's `.lx-scrim` (#1143). `[hidden]` backdrops are
+// dormant and must not trigger a dismissal.
+const OVERLAY_SELECTOR =
+  '.koi-palette-backdrop:not([hidden]), .koi-modal-backdrop:not([hidden]), .lx-scrim:not([hidden])';
 
 function closeOpenExportMenus(doc: Document): void {
   doc.querySelectorAll<HTMLDetailsElement>(EXPORT_OPEN_SELECTOR).forEach((d) => d.removeAttribute('open'));

@@ -19,6 +19,7 @@ vi.mock('@/host/browser/stopCompile', () => ({
 vi.mock('@/launcher/createLauncher', () => ({ createLauncher: vi.fn() }));
 
 let launcherToggle: ReturnType<typeof vi.fn>;
+let launcherToast: ReturnType<typeof vi.fn>;
 let launcherOpen = false;
 let capturedSources: LauncherSources;
 let capturedActionDeps: LauncherActionDeps;
@@ -115,6 +116,7 @@ describe('commandWiring', () => {
     // so a test can flip it to exercise the launcher-open overlay suppression.
     launcherOpen = false;
     launcherToggle = vi.fn();
+    launcherToast = vi.fn();
     const open = vi.fn();
     const close = vi.fn();
     vi.mocked(createLauncher).mockReset();
@@ -125,6 +127,7 @@ describe('commandWiring', () => {
         open,
         close,
         toggle: launcherToggle,
+        toast: launcherToast,
         get isOpen() {
           return launcherOpen;
         },
@@ -498,6 +501,24 @@ describe('commandWiring', () => {
       await capturedActionDeps.copy('OrderId');
       expect(writeText).toHaveBeenCalledWith('OrderId');
       vi.unstubAllGlobals();
+    });
+
+    it('rename / revert honestly toast "not available" instead of a misleading jump / panel swap (#1145)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const symbol = { id: 'sym:Ordering.Order', cat: 'symbol', title: 'Order' } as unknown as CatalogEntry;
+      capturedActionDeps.rename(symbol);
+      expect(launcherToast).toHaveBeenLastCalledWith(expect.stringContaining('isn’t available'));
+      // ...and it does NOT do the old misleading thing (jump to the definition).
+      expect(deps.revealLocation).not.toHaveBeenCalled();
+
+      const commit = { id: 'commit:abc', cat: 'commit', title: 'fix: bug', hash: 'abc1234' } as unknown as CatalogEntry;
+      capturedActionDeps.revertCommit(commit);
+      expect(launcherToast).toHaveBeenCalledTimes(2);
+      // ...and it does NOT silently open the Source Control panel as if a revert happened.
+      expect(deps.controller.selectRight).not.toHaveBeenCalled();
     });
 
     it('binds gotoDefinition to revealLocation using the entry\'s declaring file + nameRange', () => {

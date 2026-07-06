@@ -503,8 +503,8 @@ export function init(hooks: IdeHooks = {}): () => void {
     editor.gotoRange(loc.range.start, loc.range.end);
   }
 
-  // The Spotlight launcher's go-to (#1143): activate the declaring file — opening it from disk if it
-  // isn't a buffer yet (unlike navigateToDefinition) — then reveal the 0-based range. Best-effort.
+  // The Spotlight launcher's go-to (#1143): activate the declaring file (from disk if it isn't a buffer yet),
+  // then reveal the range ONLY once that file is actually active so a null token / failed open can't scroll the wrong doc (#1145 review).
   async function revealLocation(uri: string, range: Range): Promise<void> {
     try {
       if (uri !== workspace.activeUri()) {
@@ -514,7 +514,7 @@ export function init(hooks: IdeHooks = {}): () => void {
           if (token) await workspace.openFileToken(token);
         }
       }
-      editor.gotoRange(range.start, range.end);
+      if (uri === workspace.activeUri()) editor.gotoRange(range.start, range.end);
     } catch {
       /* best-effort launcher navigation */
     }

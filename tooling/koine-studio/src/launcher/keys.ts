@@ -39,7 +39,9 @@ export interface LauncherKeyState {
  * carries `false` so an unhandled key (plain typing) is never suppressed.
  */
 export type LauncherKeyResult =
-  | { kind: 'none'; preventDefault: false }
+  // `preventDefault` is usually `false` for `none` (plain typing must never be suppressed), but Tab with
+  // no selection returns `none` + `true` to TRAP focus inside the modal (issue #1145 review a11y fix).
+  | { kind: 'none'; preventDefault: boolean }
   | { kind: 'move'; selectedIndex: number; preventDefault: true }
   | { kind: 'runDefault'; preventDefault: true }
   | { kind: 'fill'; query: string; preventDefault: true }
@@ -97,7 +99,9 @@ export function handleKey(
     case 'Enter':
       return { kind: 'runDefault', preventDefault: true };
     case 'Tab':
-      if (state.selectedTitle === null) return NONE;
+      // No selection to fill, but Tab must still be trapped: letting the browser's default Tab run would
+      // move focus OUT of the modal overlay (issue #1145 review). Prevent default without an action.
+      if (state.selectedTitle === null) return { kind: 'none', preventDefault: true };
       return { kind: 'fill', query: state.modePrefix + state.selectedTitle, preventDefault: true };
     case 'Escape':
       return state.query !== ''

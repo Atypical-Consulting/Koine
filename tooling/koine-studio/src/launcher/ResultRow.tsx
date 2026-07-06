@@ -111,6 +111,9 @@ export function ResultRow(props: ResultRowProps) {
   return (
     <div
       class={selected ? 'lx-item sel' : 'lx-item'}
+      // Stable per-entry id so the input's `aria-activedescendant` can point AT-readers at the active
+      // option as ↑/↓ moves the selection (issue #1145 review); pairs with `role="option"` below.
+      id={`lx-opt-${entry.id}`}
       role="option"
       aria-selected={selected}
       data-id={entry.id}

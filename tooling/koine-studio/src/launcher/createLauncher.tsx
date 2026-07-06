@@ -20,6 +20,9 @@ export interface LauncherHandle {
   close(): void;
   toggle(): void;
   readonly isOpen: boolean;
+  /** Raise the launcher's own `.lx-toast` from shell code (issue #1145 review): the binding for a
+   * degraded quick-action that must honestly say "not available yet" instead of a misleading no-op. */
+  toast(message: string): void;
 }
 
 /**
@@ -34,9 +37,22 @@ export function createLauncher(sources: LauncherSources, actionDeps: LauncherAct
   document.body.appendChild(host);
   let isOpen = false;
   let opener: HTMLElement | null = null; // element focused before the launcher opened, restored on close
+  // Set once by the mounted panel (onRegisterToast) so `handle.toast(...)` can raise its `.lx-toast`.
+  let requestToast: ((message: string) => void) | null = null;
 
   function paint(): void {
-    render(<LauncherPanel sources={sources} visible={isOpen} onClose={close} actionDeps={actionDeps} />, host);
+    render(
+      <LauncherPanel
+        sources={sources}
+        visible={isOpen}
+        onClose={close}
+        actionDeps={actionDeps}
+        onRegisterToast={(fn) => {
+          requestToast = fn;
+        }}
+      />,
+      host,
+    );
   }
 
   function open(): void {
@@ -64,6 +80,9 @@ export function createLauncher(sources: LauncherSources, actionDeps: LauncherAct
     },
     get isOpen() {
       return isOpen;
+    },
+    toast(message: string) {
+      requestToast?.(message);
     },
   };
 }
