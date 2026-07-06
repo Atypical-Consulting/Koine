@@ -796,13 +796,6 @@ public sealed class ModelIndex
         return new OwnerResolution(OrdinalLeast(declaring), WasAmbiguous: true);
     }
 
-    /// <summary>
-    /// The owner alone (see <see cref="ResolveOwner(string, string)"/>) — a thin projection kept for the
-    /// existing <c>string?</c> call sites until they migrate to the <see cref="OwnerResolution"/>.
-    /// </summary>
-    public string? ResolveCanonicalOwner(string koineName, string referencingContext) =>
-        ResolveOwner(koineName, referencingContext).Owner;
-
     /// <summary>The ordinal-least element of a non-empty context list (a stable, allocation-free min).</summary>
     private static string OrdinalLeast(IReadOnlyList<string> contexts)
     {

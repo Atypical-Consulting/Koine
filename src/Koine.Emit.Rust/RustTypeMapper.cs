@@ -127,14 +127,14 @@ internal sealed class RustTypeMapper
 
     /// <summary>
     /// The single bounded context whose module emits a type, via the shared, deterministic
-    /// <see cref="ModelIndex.ResolveCanonicalOwner"/> policy (issue #1091) — so a <b>multi-owner</b> type
+    /// <see cref="ModelIndex.ResolveOwner(string, string)"/> policy (issue #1091) — so a <b>multi-owner</b> type
     /// referenced from a third context resolves to a canonical owner (<c>crate::&lt;owner&gt;::T</c>)
     /// rather than degrading to a bare, unresolvable name. Shared-kernel homing, unique-owner
     /// resolution, and the #437 same-module bind are all handled by that one policy. Null only in the
     /// legacy context-agnostic mode.
     /// </summary>
     private string? OwnerContextOf(string koineName) =>
-        _context is { } ctx ? _index.ResolveCanonicalOwner(koineName, ctx) : null;
+        _context is { } ctx ? _index.ResolveOwner(koineName, ctx).Owner : null;
 
     /// <summary>
     /// True for the named declared kinds that emit a Rust type into a context module (so a foreign one
