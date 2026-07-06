@@ -41,21 +41,38 @@ public sealed partial class KotlinEmitter
     /// <summary>
     /// The Kotlin package a bounded context's types live in: the configured remap for the (lowercased)
     /// context name if one is present, else <c>&lt;base&gt;.&lt;context&gt;</c> (e.g. base
-    /// <c>koine.generated</c> + context <c>Billing</c> → <c>koine.generated.billing</c>).
+    /// <c>koine.generated</c> + context <c>Billing</c> → <c>koine.generated.billing</c>). Each segment is
+    /// backtick-escaped when it collides with a Kotlin hard keyword (a context named <c>object</c> →
+    /// <c>koine.generated.`object`</c>), so the emitted <c>package</c> declaration and every cross-context
+    /// type qualification (<see cref="KotlinTypeMapper"/>, which consumes this same method) are valid Kotlin
+    /// and byte-for-byte identical. The single source of the qualified package: the <c>package</c> line and
+    /// the qualification never diverge. The <em>file path</em> (<see cref="FilePathFor"/>) strips the
+    /// backticks back off — a directory name carries no backticks. A user <see cref="PackageMap"/> override
+    /// is assumed already-valid and returned verbatim.
     /// </summary>
-    private string PackageFor(string context) =>
-        _options.PackageMap.TryGetValue(context.ToLowerInvariant(), out var mapped)
-            ? mapped
-            : $"{_options.BasePackage}.{KotlinNaming.ToPackageSegment(context)}";
+    private string PackageFor(string context)
+    {
+        if (_options.PackageMap.TryGetValue(context.ToLowerInvariant(), out var mapped))
+        {
+            return mapped;
+        }
+
+        // Escape per segment: only a keyword segment gets backticks, and the base package's own segments
+        // (a user could configure `com.when.app`) are escaped by the same rule.
+        var basePackage = string.Join('.', _options.BasePackage.Split('.').Select(KotlinNaming.EscapeIdentifier));
+        return $"{basePackage}.{KotlinNaming.ToPackageSegmentEscaped(context)}";
+    }
 
     /// <summary>
     /// The source path for a top-level type: the package's dot segments become directories and the Kotlin
     /// type name is the file stem (e.g. package <c>koine.generated.billing</c> + type <c>Money</c> →
     /// <c>koine/generated/billing/Money.kt</c>). <paramref name="kotlinTypeName"/> is the already-cased Kotlin
-    /// type name, so it matches the top-level type declared inside.
+    /// type name, so it matches the top-level type declared inside. Any backticks that
+    /// <see cref="PackageFor"/> put on a keyword segment are stripped first: they are Kotlin source syntax,
+    /// so a context named <c>object</c> still lands under the raw <c>object/</c> directory.
     /// </summary>
     private static string FilePathFor(string package, string kotlinTypeName) =>
-        package.Replace('.', '/') + "/" + kotlinTypeName + ".kt";
+        package.Replace("`", "", StringComparison.Ordinal).Replace('.', '/') + "/" + kotlinTypeName + ".kt";
 
     /// <summary>
     /// Wraps a rendered type body in its file header — the <c>// &lt;auto-generated/&gt;</c> banner and the
