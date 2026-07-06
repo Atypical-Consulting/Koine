@@ -213,8 +213,13 @@ function windowRange(
   scrollTop: number,
   viewportH: number,
   rowHeight: number,
+  bandHeight = 0,
 ): { first: number; last: number } {
-  const viewport = viewportH || rowHeight * FALLBACK_VIEWPORT_ROWS;
+  // The sticky ancestors band (#1106) sits ABOVE the window and covers `bandHeight` of the viewport, so the
+  // window only needs to fill the space BELOW it — subtract it so the mounted-row count stays bounded and the
+  // band never pushes extra rows into the DOM. `bandHeight` is 0 whenever the band is absent or unmeasured
+  // (happy-dom / a pre-layout paint), which recovers the pre-#1106 math exactly.
+  const viewport = Math.max(rowHeight, (viewportH || rowHeight * FALLBACK_VIEWPORT_ROWS) - bandHeight);
   const visibleCount = Math.ceil(viewport / rowHeight) + OVERSCAN * 2;
   const maxFirst = Math.max(0, total - visibleCount);
   const first = Math.min(maxFirst, Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN));
@@ -260,16 +265,42 @@ export function SyntaxTreePanel(props: {
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
   const [rowHeight, setRowHeight] = useState(ROW_HEIGHT);
+  // The measured pixel height of the sticky ancestors band (#1106), subtracted from the viewport so the
+  // window math stays bounded (see windowRange). 0 when the band is absent or under happy-dom (no layout),
+  // which recovers the pre-#1106 window exactly.
+  const [bandHeight, setBandHeight] = useState(0);
   // Deferred roving focus (#1098): moving focus onto a row currently OUTSIDE the render window can't focus
   // it synchronously — it isn't mounted yet. We record the target key; an effect focuses it on the next
   // render, once the scroll has pulled it into the window.
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const treeRef = useRef<HTMLDivElement>(null);
+  const bandRef = useRef<HTMLDivElement>(null);
 
   // The one source of truth for "which rows are visible", memoised so it is walked once per (tree,
   // expanded) change — NOT re-walked on every scroll frame, keydown, or caret move (the windowing that
   // makes big trees smooth must not itself reintroduce per-frame O(n) work).
   const rows = useMemo<Row[]>(() => (tree ? flattenVisible(tree, expanded) : []), [tree, expanded]);
+
+  // The mounted window over the flattened rows (#1098), memoised so the tree isn't re-walked on every scroll
+  // frame — it recomputes only when the offset/measurements or the row set change. Small (≤ threshold) trees
+  // render every row (virtualize=false). Computed here (before the loading/empty early returns) so the
+  // ancestor-band memo below can key off the window top while the hook order stays stable.
+  const windowSlice = useMemo(() => {
+    const count = rows.length;
+    if (count <= VIRTUALIZE_THRESHOLD) return { first: 0, last: count, virtualize: false };
+    return { ...windowRange(count, scrollTop, viewportH, rowHeight, bandHeight), virtualize: true };
+  }, [rows, scrollTop, viewportH, rowHeight, bandHeight]);
+  const { first, last, virtualize } = windowSlice;
+
+  // The sticky ancestors band (#1106): the ancestor chain (root..parent) of the window-top row, so a windowed
+  // flat tree keeps an unbroken aria-level chain in the DOM even when the real ancestors have scrolled out of
+  // the mounted slice. Memoised on the window top + the row set (which changes with the tree/expansion), so it
+  // recomputes only when the top row or the tree identity changes — never per scroll frame within one window.
+  // Empty unless virtualized and the window top is below a root (shallow/at-top trees render exactly as before).
+  const ancestorPath = useMemo<Row[]>(
+    () => (virtualize && tree && rows.length > 0 ? ancestorsOf(tree, rows[first].key, expanded) : []),
+    [virtualize, first, tree, rows, expanded],
+  );
 
   // A live mirror of the roving tab stop and the node it points at, so the async fetch resolve below can
   // read the CURRENT tab stop rather than the effect closure's stale capture (#1097). Assigned every
@@ -355,7 +386,8 @@ export function SyntaxTreePanel(props: {
   // state (drives which rows render) and the real container (so the browser scrollbar tracks it). Because
   // each row sits at content-y `index * rowHeight`, the offset maps directly. A no-op when it's in view.
   const scrollIndexIntoView = (index: number): void => {
-    const viewport = viewportH || rowHeight * FALLBACK_VIEWPORT_ROWS;
+    // Account for the sticky band (#1106) the same way windowRange does, so "is this row visible?" agrees.
+    const viewport = Math.max(rowHeight, (viewportH || rowHeight * FALLBACK_VIEWPORT_ROWS) - bandHeight);
     const rowTop = index * rowHeight;
     const rowBottom = rowTop + rowHeight;
     let next = scrollTop;
@@ -434,6 +466,15 @@ export function SyntaxTreePanel(props: {
     };
   }, [tree]);
 
+  // Measure the sticky ancestors band's pixel height (#1106) whenever its content changes, so windowRange can
+  // subtract it and keep the window bounded. happy-dom / a pre-layout paint report 0 (no layout) → the band
+  // never perturbs the window count under test; a real browser reports its true height. The functional update
+  // bails on an unchanged value, so a stable band can't drive a measure→re-render→measure feedback loop.
+  useEffect(() => {
+    const h = bandRef.current?.offsetHeight ?? 0;
+    setBandHeight((prev) => (prev === h ? prev : h));
+  }, [ancestorPath, rowHeight, tree]);
+
   /** Move roving focus to the row at `index` in the flattened `navRows`, making it the lone tab stop. An
    *  in-window row focuses immediately; an off-window row is scrolled into the window and focused once it
    *  mounts (the pending-focus effect) — so keyboard nav reaches every row, not just the mounted slice. */
@@ -441,8 +482,8 @@ export function SyntaxTreePanel(props: {
     if (index < 0 || index >= navRows.length) return;
     const key = navRows[index].key;
     setFocusedKey(key);
-    const { first, last } = windowRange(navRows.length, scrollTop, viewportH, rowHeight);
-    const mounted = navRows.length <= VIRTUALIZE_THRESHOLD || (index >= first && index < last);
+    const win = windowRange(navRows.length, scrollTop, viewportH, rowHeight, bandHeight);
+    const mounted = navRows.length <= VIRTUALIZE_THRESHOLD || (index >= win.first && index < win.last);
     if (mounted) {
       treeRef.current?.querySelector<HTMLElement>(`[data-key="${key}"]`)?.focus();
     } else {
@@ -548,11 +589,14 @@ export function SyntaxTreePanel(props: {
   // carries the spoken name. Clicking the row SELECTS it (highlights + fires `onNodeClick` → jump-to-span)
   // and takes the roving tab stop; the twisty is the separate expand/collapse affordance (keyboard still
   // toggles via Arrow/Enter/Space on the row). The caret-tracked or clicked node wears `--current`.
-  function renderRow(row: Row): JSX.Element {
+  function renderRow(row: Row, band = false): JSX.Element {
     const { key, node, level, setSize, posInSet, hasChildren, isExpanded } = row;
-    const tabbable = key === (focusedKey ?? ROOT_KEY);
+    // A band ancestor row (#1106) is context only: never the roving tab stop (that stays a single WINDOW
+    // row), so it can't become a duplicate/second tab stop for AT or keyboard users.
+    const tabbable = !band && key === (focusedKey ?? ROOT_KEY);
     const isCurrent = key === activeKey;
     const cls = ['koi-stree-item'];
+    if (band) cls.push('koi-stree-item--band');
     if (node.isError) cls.push('koi-stree-item--error');
     if (node.isMissing) cls.push('koi-stree-item--missing');
     if (isCurrent) cls.push('koi-stree-item--current');
@@ -626,14 +670,15 @@ export function SyntaxTreePanel(props: {
   // slice, offset by top/bottom padding that stands in for the rest so the region scrolls as if all rows
   // were present.
   const total = rows.length;
-  const virtualize = total > VIRTUALIZE_THRESHOLD;
-  const { first, last } = virtualize ? windowRange(total, scrollTop, viewportH, rowHeight) : { first: 0, last: total };
   const windowRows = rows.slice(first, last);
 
   // Two elements on purpose (#1098): the OUTER `.koi-stree-scroll` is the bounded scroll viewport
   // (`treeRef` — its `clientHeight`/`scrollTop` drive the window); the INNER `role="tree"` carries the
   // windowing padding + the mounted rows. Keeping the padding OFF the scroller is what stops the padding
-  // from inflating the scroller's measured height into a resize feedback loop.
+  // from inflating the scroller's measured height into a resize feedback loop. The sticky ancestors band
+  // (#1106) is the first child of the tree — a `position:sticky` block of the window-top row's ancestors so
+  // the aria-level chain stays unbroken in the DOM; the leading padding is reduced by its height so the total
+  // scroll height stays exact.
   return (
     <div class="koi-stree">
       <div
@@ -645,8 +690,20 @@ export function SyntaxTreePanel(props: {
           role="tree"
           aria-label="Syntax tree"
           onKeyDown={onKeyDown}
-          style={virtualize ? { paddingTop: `${first * rowHeight}px`, paddingBottom: `${(total - last) * rowHeight}px` } : undefined}
+          style={
+            virtualize
+              ? {
+                  paddingTop: `${Math.max(0, first * rowHeight - bandHeight)}px`,
+                  paddingBottom: `${(total - last) * rowHeight}px`,
+                }
+              : undefined
+          }
         >
+          {ancestorPath.length > 0 && (
+            <div class="koi-stree-band" ref={bandRef}>
+              {ancestorPath.map((row) => renderRow(row, true))}
+            </div>
+          )}
           {windowRows.map((row) => renderRow(row))}
         </div>
       </div>

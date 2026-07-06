@@ -456,6 +456,61 @@ describe('SyntaxTreePanel', () => {
     // The new tree renders from the top — the root (row 0) is present, not scrolled off into a blank window.
     await waitFor(() => expect(view.getByRole('treeitem', { name: /KoineModel/ })).toBeTruthy());
   });
+
+  // --- sticky ancestors band (#1106) -----------------------------------------------------------------
+  // When a windowed flat tree is scrolled deep, the window-top row's ancestors have scrolled out of the
+  // mounted slice — so an AT walking the raw DOM would see aria-level=N rows with no level-1..N-1 parents.
+  // The band re-materialises that ancestor chain, pinned above the window, keeping the levels unbroken.
+
+  test('a sticky ancestors band restores the unbroken aria-level chain when scrolled deep (#1106)', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(4000))} />);
+    await view.findByRole('tree');
+    const scroller = view.container.querySelector('.koi-stree-scroll') as HTMLElement;
+
+    // At the top the window-top row IS the root, so the band is empty — the pre-#1106 bounded window with
+    // no ancestor rows. Capture that baseline window count.
+    expect(view.container.querySelectorAll('.koi-stree-item--band').length).toBe(0);
+    const windowCountAtTop = view
+      .getAllByRole('treeitem')
+      .filter((el) => !el.className.includes('koi-stree-item--band')).length;
+
+    // Scroll far down so the window mounts only level-3 members; the root (level 1) + context (level 2)
+    // have scrolled out of the mounted slice.
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => 2000 * ROW_HEIGHT });
+    fireEvent.scroll(scroller);
+
+    await waitFor(() => {
+      expect(view.queryByRole('treeitem', { name: /Member m0:/ })).toBeNull(); // m0 windowed out
+      expect(view.container.querySelectorAll('.koi-stree-item--band').length).toBeGreaterThan(0);
+    });
+
+    const items = view.getAllByRole('treeitem');
+    const band = items.filter((el) => el.className.includes('koi-stree-item--band'));
+    const windowItems = items.filter((el) => !el.className.includes('koi-stree-item--band'));
+
+    // The band carries the ancestors that scrolled out, with their REAL aria-levels (root=1, context=2).
+    expect(band.map((el) => el.getAttribute('aria-level'))).toEqual(['1', '2']);
+    expect(band[0].getAttribute('aria-label')).toMatch(/^KoineModel/);
+    expect(band[1].getAttribute('aria-label')).toMatch(/^ContextNode Big/);
+
+    // Unbroken chain: band(1,2) + window(3) → the mounted DOM spans levels 1..3 with no gap above the
+    // visible members (the whole point of #1106).
+    const levels = [...new Set(items.map((el) => Number(el.getAttribute('aria-level'))))].sort((a, b) => a - b);
+    expect(levels).toEqual([1, 2, 3]);
+
+    // Pinned ABOVE the window: band rows lead the DOM order, the first window row (level 3) follows.
+    expect(items[0]).toBe(band[0]);
+    expect(items[2].getAttribute('aria-level')).toBe('3');
+
+    // The band does NOT inflate the mounted window — its height is subtracted from the viewport, so the
+    // window row count is unchanged vs. the no-band baseline for the same viewport (band height is 0 under
+    // happy-dom's layout-less DOM, so windowRange is byte-for-byte the pre-#1106 result here).
+    expect(windowItems.length).toBe(windowCountAtTop);
+    expect(windowItems.length).toBeLessThan(80);
+
+    // No new a11y violations with the band mounted (band rows carry honest aria-level/setsize/posinset).
+    expect(await axe(view.container)).toHaveNoViolations();
+  });
 });
 
 // The core correctness of the editor → tree half: deepest OWN-span containment (the client-side
