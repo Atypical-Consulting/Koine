@@ -27,6 +27,11 @@ import { createEditSession, type EditSession, type StagedEdit } from '@/ai/editS
 import { renderMarkdown } from '@/editor/editor';
 import { loadChat, saveChat, clearChat } from '@/settings/persistence';
 import { appStore, type AppState } from '@/store/index';
+import type {
+  ChangeSetFileState,
+  ChangeSetPhase,
+  ChatChangeSetState,
+} from '@/store/slices/chat';
 import type { StoreApi } from 'zustand/vanilla';
 
 /**
@@ -308,17 +313,17 @@ function lineDiff(oldText: string, newText: string): string {
 }
 
 /**
- * A handle to a rendered agentic change set, so the panel can retire it when it goes stale (issue #473):
- * a new turn supersedes a prior un-applied proposal whose `before` was computed against an older
- * workspace snapshot.
+ * The panel's live view over one rendered change set (#984 Task 4). `sync` is fed every
+ * `chat.changeSet` state change by the panel's single store subscription: a matching id repaints the
+ * controls from the slice state; a different id (or null) means this set was replaced or discarded —
+ * a set retired by `invalidateChangeSet` already painted its superseded treatment while it was still
+ * the store's current set.
  */
-interface ChangeSetHandle {
-  /**
-   * Disable Apply + every accept checkbox and announce `reason` in the status live region, so an
-   * obsolete panel can no longer be applied. A no-op once the set has already been applied (must not
-   * overwrite the terminal "Applied ✓").
-   */
-  invalidate(reason: string): void;
+interface ChangeSetView {
+  /** The slice-assigned id of the set this DOM was rendered for. */
+  readonly id: number;
+  /** Repaint (id match) or retire (id mismatch / null) from the store's current change set. */
+  sync(changeSet: ChatChangeSetState | null): void;
 }
 
 /**
@@ -328,20 +333,25 @@ interface ChangeSetHandle {
  * track the accepted count) and a "Discard" button. Apply commits only the still-accepted files via
  * `handlers.onApply`, then becomes a terminal "Applied ✓" and drops Discard; Discard removes the panel.
  *
- * `diagnostics` is the once-per-turn whole-staged-workspace validation summary (issue #474): when it
- * reports errors (`ok: false …`), they're shown alongside the file rows so a write that broke the model
- * is visible BEFORE the user applies; a clean (`ok: true …`) or absent result renders no extra noise.
+ * The set's diagnostics field is the once-per-turn whole-staged-workspace validation summary (issue
+ * #474): when it reports errors (`ok: false …`), they're shown alongside the file rows so a write that
+ * broke the model is visible BEFORE the user applies; a clean (`ok: true …`) or absent result renders
+ * no extra noise.
  *
- * Returns a {@link ChangeSetHandle} the caller keeps as the panel's active change set, so a later turn
- * can supersede this one (issue #473).
+ * Since #984 the sub-panel is a CONSUMER of the chat slice's change-set state machine: it renders the
+ * store's just-staged `chat.changeSet`, every gesture dispatches a slice action
+ * (`setChangeSetFileAccepted` / `markChangeSetDrift` / `beginChangeSetApply` /
+ * `resolveChangeSetApply` / `rejectChangeSetApply` / `discardChangeSet`), and every control state —
+ * Apply label + disabled, checkbox checked/disabled, drift warnings, the superseded treatment — is
+ * repainted from the slice state for this set's id via the returned {@link ChangeSetView}, which the
+ * panel's single change-set subscription feeds on every state change. A later turn supersedes this set
+ * with `invalidateChangeSet` (issue #473), whose phase change repaints the retired treatment here.
  */
 function renderChangeSet(
   bubble: HTMLElement,
-  staged: StagedEdit[],
-  before: Record<string, string>,
+  store: StoreApi<AppState>,
   handlers: {
     onApply: (accepted: StagedEdit[]) => Promise<{ failed: string[] }>;
-    onDiscard: () => void;
     /**
      * A LIVE read of the workspace text for `relPath`, taken at APPLY time (issue #473). Compared to
      * the send-time `before` to detect drift — a file the user edited while the turn ran — so a stale
@@ -349,32 +359,34 @@ function renderChangeSet(
      */
     currentText: (relPath: string) => string | undefined;
   },
-  diagnostics?: string | null,
-): ChangeSetHandle {
+): ChangeSetView {
+  // The just-staged set: the staging branch dispatches stageChangeSet immediately before rendering.
+  const initial = store.getState().chat.changeSet!;
+  const id = initial.id;
+
   const panel = document.createElement('div');
   panel.className = 'koi-changeset';
   // A labelled group so assistive tech announces the scope of the review (WCAG 2.1 AA 1.3.1 / 4.1.2).
   panel.setAttribute('role', 'group');
-  panel.setAttribute('aria-label', `${staged.length} proposed file change${staged.length === 1 ? '' : 's'}`);
+  panel.setAttribute(
+    'aria-label',
+    `${initial.files.length} proposed file change${initial.files.length === 1 ? '' : 's'}`,
+  );
 
-  // The set of still-accepted edits (all on by default); the Apply label + the committed list read from it.
-  const accepted = new Set<StagedEdit>(staged);
-  // The accept checkboxes, so a successful apply can disable them all (a toggle afterwards must not
-  // re-enable Apply and let the same change set be written to disk a second time).
+  // The accept checkboxes, so repaint can disable them all once the set turns terminal (a toggle
+  // afterwards must not re-enable Apply and let the same change set be written to disk a second time).
   const checkboxes: HTMLInputElement[] = [];
+  const checkByPath = new Map<string, HTMLInputElement>();
   // Each staged file's row, so a drift warning can be attached to the right one at apply time (#473).
-  const rowByFile = new Map<StagedEdit, HTMLElement>();
-  // Whether this set has been fully applied — once true, invalidation is a no-op so a later turn can't
-  // overwrite the terminal "Applied ✓" with a "superseded" notice (issue #473).
-  let applied = false;
-  // Whether this set has been superseded by a later turn (#473/#684) — once true, an apply that was
-  // already in flight when the panel was retired and settles AFTERWARDS is a no-op: it must not call
-  // refreshApply() (re-enabling Apply on a retired panel) nor overwrite the "superseded" notice. The
-  // reverse of the `applied` guard above, keeping "superseded" a terminal state.
-  let invalidated = false;
-  // Whether an onApply is currently pending. refreshApply folds it in so an accept-checkbox toggle
-  // during the in-flight window can't re-enable Apply and start a second, concurrent apply.
-  let inFlight = false;
+  const rowByPath = new Map<string, HTMLElement>();
+
+  // Wording context for the apply attempt in flight (#473): the live-region messages and the terminal
+  // "Applied N ✓" label count the files actually WRITTEN (the clean subset, minus drift skips), which
+  // the slice's phase doesn't carry — its `appliedCount` counts the accepted files at settle time.
+  let attempt: { cleanCount: number; skipped: string } | null = null;
+  // The last phase painted for THIS set, so `sync` on a replacement (different id / null) can tell a
+  // terminal panel ("Applied ✓" / already-superseded) apart from one retired without an invalidate.
+  let lastPhaseKind: ChangeSetPhase['kind'] = initial.phase.kind;
 
   const applyBtn = document.createElement('button');
   applyBtn.type = 'button';
@@ -391,13 +403,53 @@ function renderChangeSet(
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
 
-  function refreshApply(): void {
-    const n = accepted.size;
-    applyBtn.textContent = `Apply ${n} file${n === 1 ? '' : 's'}`;
-    applyBtn.disabled = n === 0 || inFlight;
+  // Repaint every control from the slice state for this set. The transient live-region wording (the
+  // apply outcome messages) is written by the apply handler AFTER it dispatches — the dispatch's
+  // synchronous repaint never touches `status` outside the invalidated phase, so the message survives.
+  function repaint(cs: ChatChangeSetState): void {
+    const terminal = cs.phase.kind === 'applied' || cs.phase.kind === 'invalidated';
+    for (const f of cs.files) {
+      const check = checkByPath.get(f.relPath);
+      if (check) {
+        check.checked = f.accepted;
+        check.disabled = terminal;
+      }
+      // Sticky per-file drift (#473): attach the persistent warning to the drifted file's row.
+      if (f.drifted) markDrift(f.relPath);
+    }
+    const n = cs.files.filter((f) => f.accepted).length;
+    switch (cs.phase.kind) {
+      case 'reviewing':
+        applyBtn.textContent = `Apply ${n} file${n === 1 ? '' : 's'}`;
+        applyBtn.disabled = n === 0;
+        break;
+      case 'applying':
+        // The in-flight window: the label still tracks the accepted count, but Apply stays disabled
+        // so an accept-checkbox toggle mid-apply can't start a second, concurrent apply.
+        applyBtn.textContent = `Apply ${n} file${n === 1 ? '' : 's'}`;
+        applyBtn.disabled = true;
+        break;
+      case 'applied': {
+        // Terminal: lock the review and drop Discard. The count is the clean subset actually written
+        // this attempt (drift skips excluded), falling back to the slice's accepted-at-settle count.
+        const count = attempt?.cleanCount ?? cs.phase.appliedCount;
+        applyBtn.textContent = `Applied ${count} file${count === 1 ? '' : 's'} ✓`;
+        applyBtn.disabled = true;
+        discardBtn.remove();
+        break;
+      }
+      case 'invalidated':
+        // Superseded by a newer turn (#473): retire the panel so a late click can't apply stale
+        // bodies, and announce it in the polite live region (WCAG 2.1 AA 4.1.3) with the reason.
+        panel.classList.add('koi-changeset-superseded');
+        applyBtn.disabled = true;
+        status.textContent = `This change set was ${cs.phase.reason} by a newer turn and can no longer be applied.`;
+        break;
+    }
+    lastPhaseKind = cs.phase.kind;
   }
 
-  for (const file of staged) {
+  for (const file of initial.files) {
     const row = document.createElement('div');
     row.className = 'koi-changeset-file';
 
@@ -407,11 +459,12 @@ function renderChangeSet(
     check.checked = true;
     check.setAttribute('aria-label', `Accept changes to ${file.relPath}`);
     check.addEventListener('change', () => {
-      if (check.checked) accepted.add(file);
-      else accepted.delete(file);
-      refreshApply();
+      // Stale-set guard: a toggle can only mean this set's file while this set is still current.
+      if (store.getState().chat.changeSet?.id !== id) return;
+      store.getState().setChangeSetFileAccepted(file.relPath, check.checked);
     });
     checkboxes.push(check);
+    checkByPath.set(file.relPath, check);
     row.appendChild(check);
 
     const badge = document.createElement('span');
@@ -426,32 +479,32 @@ function renderChangeSet(
 
     const diff = document.createElement('pre');
     diff.className = 'koi-changeset-diff';
-    diff.textContent = lineDiff(before[file.relPath] ?? '', file.body);
+    diff.textContent = lineDiff(file.before, file.body);
     row.appendChild(diff);
 
-    rowByFile.set(file, row);
+    rowByPath.set(file.relPath, row);
     panel.appendChild(row);
   }
 
   // Drift check (#473): has `file`'s LIVE text moved away from the send-time `before` it was staged
-  // against? A drifted file must be skipped so a stale full-file body can't clobber newer work.
-  function isDrifted(file: StagedEdit): boolean {
+  // against? A drifted file must be skipped so a stale full-file body can't clobber newer work. The
+  // slice normalizes an absent send-time text to '' (`before` is always a string).
+  function isDrifted(file: ChangeSetFileState): boolean {
     const cur = handlers.currentText(file.relPath);
-    const base = before[file.relPath];
     if (cur === undefined) {
       // The file isn't currently readable (closed/removed): safe only if there was nothing to overwrite
       // (base empty or absent); otherwise we can't confirm the target is still the reviewed text → warn.
-      return !(base === undefined || base === '');
+      return file.before !== '';
     }
     // A brand-new file whose path now EXISTS (cur defined): don't clobber a file created since SEND.
     if (file.isNew) return true;
     // An existing modification: drift iff the live text differs from the reviewed `before`.
-    return cur !== (base ?? '');
+    return cur !== file.before;
   }
 
   // Attach a persistent "changed since proposed" warning to a drifted file's row (idempotent).
-  function markDrift(file: StagedEdit): void {
-    const row = rowByFile.get(file);
+  function markDrift(relPath: string): void {
+    const row = rowByPath.get(relPath);
     if (!row || row.querySelector('.koi-changeset-drift')) return;
     const warn = document.createElement('span');
     warn.className = 'koi-changeset-drift';
@@ -460,25 +513,29 @@ function renderChangeSet(
   }
 
   applyBtn.addEventListener('click', () => {
-    if (inFlight) return; // belt-and-braces re-entrancy guard alongside the disabled button
-    const list = staged.filter((f) => accepted.has(f));
+    // Belt-and-braces re-entrancy guard alongside the disabled button: only the store's CURRENT set,
+    // still under review, can be applied — 'applying' (in flight) and the terminal phases bail here.
+    const cs = store.getState().chat.changeSet;
+    if (!cs || cs.id !== id || cs.phase.kind !== 'reviewing') return;
+    const list = cs.files.filter((f) => f.accepted);
     if (!list.length) return;
 
     // Partition the accepted files against a LIVE read taken NOW (#473): a file the user edited while
     // the turn ran (drift) is warned + skipped; only the clean subset is written. The send-time `before`
     // still backs the REVIEWED diff above — drift is judged against the current text at apply time.
+    // Detection stays here in the panel; the RESULT goes through the slice, whose repaint warns the rows.
     const drifted = list.filter(isDrifted);
     const clean = list.filter((f) => !drifted.includes(f));
-    for (const f of drifted) markDrift(f);
+    if (drifted.length) store.getState().markChangeSetDrift(drifted.map((f) => f.relPath));
 
     if (!clean.length) {
-      // Everything selected drifted: write nothing, keep the panel open with the warnings, and leave
-      // Apply usable for a fresh review (don't strand it in the in-flight disabled state).
+      // Everything selected drifted: write nothing (beginChangeSetApply is never dispatched — the
+      // phase stays reviewing, so Apply stays usable for a fresh review), keep the panel open with
+      // the warnings. Written AFTER the drift dispatch so the repaint can't clobber the message.
       status.textContent =
         `${drifted.length} file${drifted.length === 1 ? '' : 's'} changed since ` +
         `${drifted.length === 1 ? 'it was' : 'they were'} proposed; nothing was applied. ` +
         `Send again for a fresh proposal.`;
-      refreshApply();
       return;
     }
 
@@ -489,49 +546,49 @@ function renderChangeSet(
     // instant Apply is clicked; the async result below refines it to the final "Applied N" message.
     if (drifted.length) status.textContent = `Applying ${clean.length} clean file${clean.length === 1 ? '' : 's'}.${skipped}`;
 
-    inFlight = true;
-    applyBtn.disabled = true; // guard the in-flight window
-    void Promise.resolve(handlers.onApply(clean)).then((result) => {
-      inFlight = false;
-      // A panel superseded WHILE this apply was in flight is terminal (#684): a late settle must not
-      // un-retire it. Covers both the { failed } and the success branch below — no status overwrite,
-      // no refreshApply() re-enabling Apply on a panel the user can no longer act on.
-      if (invalidated) return;
+    attempt = { cleanCount: clean.length, skipped };
+    store.getState().beginChangeSetApply(); // reviewing → applying; the repaint guards the in-flight window
+    const payload: StagedEdit[] = clean.map((f) => ({ relPath: f.relPath, body: f.body, isNew: f.isNew }));
+    void Promise.resolve(handlers.onApply(payload)).then((result) => {
+      // A set superseded or replaced WHILE this apply was in flight is terminal (#684): a late settle
+      // must not un-retire it — the slice would no-op the dispatch anyway, and bailing here keeps the
+      // status live region from overwriting the "superseded" notice. Covers { failed } and success.
+      const cur = store.getState().chat.changeSet;
+      if (!cur || cur.id !== id || cur.phase.kind !== 'applying') return;
       if (result.failed.length) {
-        // Partial/total failure: report exactly which files didn't write and re-open Apply so the user
-        // can retry the still-checked set, rather than a false "Applied ✓".
+        // Partial/total failure: back to reviewing (no false "Applied ✓") with Apply re-opened by the
+        // repaint, and report exactly which files didn't write so the user can retry the checked set.
+        store.getState().resolveChangeSetApply({ failed: result.failed });
         const wrote = clean.length - result.failed.length;
         status.textContent =
           `${wrote ? `Applied ${wrote} file${wrote === 1 ? '' : 's'}; ` : ''}` +
           `couldn't write ${result.failed.length}: ${result.failed.join(', ')}. Re-apply to retry.` +
           skipped;
-        refreshApply();
         return;
       }
-      // Success: lock the review (disable the checkboxes so a later toggle can't trigger a second write)
-      // and mark Apply terminal.
-      applied = true;
-      for (const cb of checkboxes) cb.disabled = true;
-      applyBtn.textContent = `Applied ${clean.length} file${clean.length === 1 ? '' : 's'} ✓`;
+      // Success: terminal applied — the repaint locks the review (checkboxes disabled so a later
+      // toggle can't trigger a second write), flips Apply to "Applied ✓", and drops Discard.
+      store.getState().resolveChangeSetApply({ failed: [] });
       status.textContent = `Applied ${clean.length} file${clean.length === 1 ? '' : 's'}.` + skipped;
-      discardBtn.remove();
     }).catch((e) => {
-      inFlight = false;
-      // A panel superseded mid-apply stays terminal (#684): a late rejection must not re-enable Apply
-      // or replace the "superseded" notice with an "Apply failed" one that invites a retry on a retired
-      // change set.
-      if (invalidated) return;
+      // A set superseded mid-apply stays terminal (#684): a late rejection must not re-enable Apply
+      // or replace the "superseded" notice with an "Apply failed" one that invites a retry on a
+      // retired change set.
+      const cur = store.getState().chat.changeSet;
+      if (!cur || cur.id !== id || cur.phase.kind !== 'applying') return;
       // onApply REJECTED (#633): applyFileEdit only turns disk-write errors into a { failed } result;
       // an un-guarded throw from a non-disk op (renderer/LSP sync, dirty refresh, saved-callback) escapes
       // as a rejection. Without this catch the Apply button stays stuck disabled, the error is swallowed,
-      // and the rejection is unhandled. Re-open Apply (re-enabling retry of the still-checked set) and
-      // surface the error in the polite live region so the failure is announced and recoverable.
-      status.textContent = `Apply failed: ${String(e)}` + skipped;
-      refreshApply();
+      // and the rejection is unhandled. rejectChangeSetApply releases the in-flight lock back to
+      // reviewing (the repaint re-opens Apply for a retry of the still-checked set) and the error is
+      // surfaced in the polite live region so the failure is announced and recoverable.
+      const message = `Apply failed: ${String(e)}` + skipped;
+      store.getState().rejectChangeSetApply(message);
+      status.textContent = message;
     });
   });
   discardBtn.addEventListener('click', () => {
-    handlers.onDiscard();
+    store.getState().discardChangeSet();
     panel.remove();
   });
 
@@ -540,31 +597,34 @@ function renderChangeSet(
   // covers errors, warnings, and a "could not validate" note (e.g. the desktop MCP sidecar briefly
   // unreachable) — so a write that broke the model, or a validation that didn't actually run, is
   // reviewable/discardable BEFORE apply. A clean compile (or no validation at all) shows nothing.
-  if (diagnostics && !diagnostics.startsWith('ok: true')) {
+  if (initial.diagnostics && !initial.diagnostics.startsWith('ok: true')) {
     const diag = document.createElement('pre');
     diag.className = 'koi-changeset-diagnostics';
-    diag.textContent = diagnostics;
+    diag.textContent = initial.diagnostics;
     diag.setAttribute('aria-label', 'Validation diagnostics for the staged changes');
     panel.appendChild(diag);
   }
 
-  refreshApply();
+  repaint(initial);
   panel.append(applyBtn, discardBtn, status);
   bubble.appendChild(panel);
 
   return {
-    invalidate(reason: string): void {
-      // Once applied, the panel is terminal ("Applied ✓") — never overwrite that with a stale notice.
-      if (applied) return;
-      // Mark the panel terminal so an apply already in flight that settles AFTER this supersede can't
-      // un-retire it (#684 — the reverse of the `applied` guard above).
-      invalidated = true;
+    id,
+    sync(changeSet: ChatChangeSetState | null): void {
+      if (changeSet && changeSet.id === id) {
+        repaint(changeSet);
+        return;
+      }
+      // This set was replaced (a newer set staged) or discarded. A terminal panel keeps its painted
+      // treatment: "Applied ✓" must survive a later turn (#473), and an invalidated one already shows
+      // its superseded notice. A non-terminal set can only get here via its own Discard (a new send
+      // always invalidates BEFORE staging), whose handler removes the panel — retire the controls
+      // anyway, belt-and-braces, without inventing a reason for the live region.
+      if (lastPhaseKind === 'applied' || lastPhaseKind === 'invalidated') return;
       panel.classList.add('koi-changeset-superseded');
       applyBtn.disabled = true;
       for (const cb of checkboxes) cb.disabled = true;
-      // Announce in the polite live region so assistive tech learns the proposal can no longer be
-      // applied (WCAG 2.1 AA 4.1.3); the message carries the `reason` (e.g. "superseded").
-      status.textContent = `This change set was ${reason} by a newer turn and can no longer be applied.`;
     },
   };
 }
@@ -603,9 +663,15 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
   const chat = () => store.getState().chat;
   store.getState().hydrateChat(opts.getWorkspaceKey(), loadChat(opts.getWorkspaceKey()));
   let aborter: AbortController | null = null;
-  // The most recently rendered, still-un-applied agentic change set (issue #473). A new send supersedes
-  // it (its `before` was computed against an older workspace snapshot); cleared once it applies/discards.
-  let activeChangeSet: ChangeSetHandle | null = null;
+  // The most recently rendered change-set sub-panel (#984 Task 4): the slice's `chat.changeSet` is
+  // the state machine, this view is its DOM consumer. The panel owns ONE change-set subscription —
+  // on every `chat.changeSet` change it repaints the rendered set (matching id) or retires it
+  // (replaced/discarded). The panel is an app-lifetime singleton with no dispose path, so the
+  // subscription lives as long as its store does.
+  let changeSetView: ChangeSetView | null = null;
+  store.subscribe((state, prev) => {
+    if (state.chat.changeSet !== prev.chat.changeSet) changeSetView?.sync(state.chat.changeSet);
+  });
 
   opts.container.classList.add('koi-assistant');
   opts.container.innerHTML = '';
@@ -1006,9 +1072,10 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
 
     // #473: a new turn supersedes any still-un-applied change set from a prior turn — its staged bodies
     // were computed against an older workspace snapshot, so retire it (disable Apply + accept checkboxes,
-    // announce "superseded") rather than let a late click clobber everything done since.
-    activeChangeSet?.invalidate('superseded');
-    activeChangeSet = null;
+    // announce "superseded") rather than let a late click clobber everything done since. The slice
+    // no-ops on a terminal set (an "Applied ✓" survives, #473) and on none at all; the retired DOM
+    // treatment lands via the panel's change-set subscription.
+    store.getState().invalidateChangeSet('superseded');
 
     // Re-point at the CURRENT workspace before this turn touches history: the folder can switch in
     // place while the AI rail stays visible (the host only calls syncWorkspace on tab re-show), and
@@ -1253,31 +1320,17 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         // The model staged a multi-file change: render the body, then a reviewable per-file change set
         // the user accepts before any disk write (the single-file Apply gate is for non-staged replies).
         replyBubble.innerHTML = `<div class="koi-md">${renderMarkdown(full)}</div>`;
-        // Keep a handle to this turn's change set so the NEXT send can supersede it (#473). The
-        // onApply/onDiscard wrappers clear the ref once this set reaches a terminal state, so a later
-        // send doesn't try to invalidate an already-applied or discarded panel.
-        let handle: ChangeSetHandle | undefined;
-        handle = renderChangeSet(
-          replyBubble,
-          editSession.staged(),
-          wsFiles ?? {},
-          {
-            onApply: async (accepted) => {
-              const result = (await opts.onApplyChangeSet?.(accepted)) ?? { failed: [] };
-              if (result.failed.length === 0 && activeChangeSet === handle) activeChangeSet = null;
-              return result;
-            },
-            onDiscard: () => {
-              if (activeChangeSet === handle) activeChangeSet = null;
-            },
-            // A LIVE re-read at apply time (#473): the reviewed diff stays anchored on the send-time
-            // `wsFiles`, but drift is judged against the CURRENT workspace text, so a concurrent edit
-            // since SEND is detected and that file is skipped rather than clobbered.
-            currentText: (relPath) => opts.getWorkspaceFiles?.()?.[relPath],
-          },
-          stagedDiagnostics,
-        );
-        activeChangeSet = handle;
+        // Stage the set in the chat slice (#984): the state machine owns accepted/drift/phase — a
+        // later send supersedes it via invalidateChangeSet, and the sub-panel below is a consumer
+        // repainted by the panel's change-set subscription.
+        store.getState().stageChangeSet(editSession.staged(), wsFiles ?? {}, stagedDiagnostics);
+        changeSetView = renderChangeSet(replyBubble, store, {
+          onApply: async (accepted) => (await opts.onApplyChangeSet?.(accepted)) ?? { failed: [] },
+          // A LIVE re-read at apply time (#473): the reviewed diff stays anchored on the send-time
+          // `wsFiles`, but drift is judged against the CURRENT workspace text, so a concurrent edit
+          // since SEND is detected and that file is skipped rather than clobbered.
+          currentText: (relPath) => opts.getWorkspaceFiles?.()?.[relPath],
+        });
       } else {
         // The apply-gate lives here: a constrained turn validates (and, on the repair path, re-prompts)
         // before "Apply to editor" is enabled, so unparseable text can never be applied (#257).

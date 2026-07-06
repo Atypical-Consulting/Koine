@@ -86,7 +86,13 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   { file: 'src/editor/editor.ts', maxLines: 1780 },
   // Frozen 2026-07-02 at 1354 LOC, ceil(1354 × 1.02) = 1382. #990 ratchets this down as it decomposes
   // aiPanel.ts. Freezing prevents further regrowth; it does not mandate the split — #990 owns that.
-  { file: 'src/ai/aiPanel.ts', maxLines: 1382 },
+  // Raised 1382 → 1424: #984 Task 4 rewires the change-set sub-panel onto the chat slice's state
+  // machine — the closure state (accepted Set / applied / invalidated / inFlight booleans) becomes a
+  // state-driven repaint + one panel-level store subscription, with per-dispatch stale-set guards
+  // replacing the old flags. Behavior-preserving but structurally larger (~+50 LOC of consumer wiring,
+  // not feature growth). Measured end-state, no headroom — #990's decomposition (ChangeSetPanel et al.)
+  // ratchets this back down.
+  { file: 'src/ai/aiPanel.ts', maxLines: 1424 },
   // Frozen 2026-07-02 at 1301 LOC (grown from the audit's 1284 @ fc83bcf5), ceil(1301 × 1.02) = 1328.
   // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
   // not mandate the split — #989 owns that.

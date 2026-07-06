@@ -141,3 +141,170 @@ describe('aiPanel ↔ chat slice bridge (#984 Task 3)', () => {
     expect(loadChat('A').map((m) => m.content)).toEqual(['question in A', 'A reply']);
   });
 });
+
+// --- #984 Task 4: the change-set sub-panel is a CONSUMER of the slice's state machine ------------
+// The panel's change-set DOM (checkboxes, Apply, superseded treatment) is repainted from the store's
+// `chat.changeSet` by a single panel-level subscription, and every user gesture dispatches a slice
+// action — no closure-held accepted/applied/invalidated/inFlight state remains.
+describe('aiPanel ↔ chat slice change-set bridge (#984 Task 4)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.mocked(runAssistant).mockReset();
+  });
+  afterEach(() => {
+    localStorage.clear();
+    vi.mocked(runAssistant).mockReset();
+  });
+
+  // Options for a workspace turn that can stage multi-file edits, modeled on aiPanel.test.ts's
+  // change-set harness (tools on, a one-file workspace snapshot, a stub edit-tool executor).
+  function csOpts(
+    container: HTMLElement,
+    store: StoreApi<AppState>,
+    over: Partial<AssistantPanelOptions> = {},
+  ): AssistantPanelOptions {
+    return {
+      container,
+      store,
+      getProvider: () => 'anthropic',
+      getBaseUrl: () => '',
+      getApiKey: () => 'sk',
+      getModel: () => '',
+      getContext: () => ({ fileName: 'm.koi', source: 'context X {}', diagnostics: [] }),
+      onApplyModel: () => {},
+      onOpenPrefs: () => {},
+      getWorkspaceKey: () => 'ws',
+      getSelection: () => null,
+      getUseTools: () => true,
+      getConstrainGrammar: () => false,
+      getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+      runEditTool: vi.fn(async () => 'ok'),
+      onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
+      ...over,
+    };
+  }
+
+  // Drive a generative send via the first quick action (offerApply defaults true).
+  function fire(container: HTMLElement): void {
+    container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
+  }
+
+  test('a DOM-driven Apply walks the store through reviewing → applying → applied', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      req.onText('Edit.');
+      return 'Edit.';
+    });
+    const store = createAppStore();
+    // Record every change-set phase-kind transition, so the DOM gesture's path through the state
+    // machine is pinned (not just the terminal state).
+    const phases: string[] = [];
+    store.subscribe((s, prev) => {
+      if (s.chat.changeSet !== prev.chat.changeSet && s.chat.changeSet) {
+        const kind = s.chat.changeSet.phase.kind;
+        if (phases[phases.length - 1] !== kind) phases.push(kind);
+      }
+    });
+    const container = document.createElement('div');
+    createAssistantPanel(csOpts(container, store));
+
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    expect(store.getState().chat.changeSet?.phase).toEqual({ kind: 'reviewing' });
+
+    container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.click();
+    await vi.waitFor(() =>
+      expect(store.getState().chat.changeSet?.phase).toEqual({ kind: 'applied', appliedCount: 1 }),
+    );
+    expect(phases).toEqual(['reviewing', 'applying', 'applied']);
+  });
+
+  test('a Send with an un-applied set standing invalidates it as superseded in the store and the DOM', async () => {
+    // Turn 1 stages a set; turn 2 is a plain reply, so the store's set after turn 2 is still turn 1's
+    // — now invalidated('superseded') by the send, with the DOM treatment driven by the subscription.
+    let turn = 0;
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      turn++;
+      if (turn === 1) req.editSession?.stage('orders.koi', 'context Orders { /* t1 */ }');
+      req.onText('done');
+      return 'done';
+    });
+    const store = createAppStore();
+    const container = document.createElement('div');
+    createAssistantPanel(csOpts(container, store));
+
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    const stagedId = store.getState().chat.changeSet!.id;
+    const panel = container.querySelector('.koi-changeset')!;
+
+    fire(container);
+    await vi.waitFor(() =>
+      expect(store.getState().chat.changeSet?.phase).toEqual({ kind: 'invalidated', reason: 'superseded' }),
+    );
+    expect(store.getState().chat.changeSet?.id).toBe(stagedId);
+    // The superseded treatment reached the DOM via the store subscription (no closure handle).
+    expect(panel.classList.contains('koi-changeset-superseded')).toBe(true);
+    expect(panel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.disabled).toBe(true);
+    expect(panel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+  });
+
+  test('a REJECTED apply returns the store to reviewing with the error note and re-enables Apply (#633)', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      req.onText('Edit.');
+      return 'Edit.';
+    });
+    const store = createAppStore();
+    const container = document.createElement('div');
+    createAssistantPanel(
+      csOpts(container, store, {
+        onApplyChangeSet: vi.fn(async () => {
+          throw new Error('setDoc blew up');
+        }),
+      }),
+    );
+
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    const applyBtn = container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    applyBtn.click();
+
+    await vi.waitFor(() => {
+      const phase = store.getState().chat.changeSet?.phase;
+      expect(phase?.kind).toBe('reviewing');
+      expect(phase?.kind === 'reviewing' ? phase.note : undefined).toContain('setDoc blew up');
+    });
+    expect(applyBtn.disabled).toBe(false);
+  });
+
+  test('accept-checkbox toggles land in chat.changeSet.files[].accepted', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      req.editSession?.stage('events.koi', 'integration event OrderPlaced {}');
+      req.onText('Two edits.');
+      return 'Two edits.';
+    });
+    const store = createAppStore();
+    const container = document.createElement('div');
+    createAssistantPanel(csOpts(container, store));
+
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    const acceptedByPath = (): Record<string, boolean> =>
+      Object.fromEntries(store.getState().chat.changeSet!.files.map((f) => [f.relPath, f.accepted]));
+    expect(acceptedByPath()).toEqual({ 'orders.koi': true, 'events.koi': true });
+
+    const eventsRow = [...container.querySelectorAll('.koi-changeset-file')].find((r) =>
+      r.textContent?.includes('events.koi'),
+    )!;
+    const check = eventsRow.querySelector<HTMLInputElement>('.koi-changeset-accept')!;
+    check.checked = false;
+    check.dispatchEvent(new Event('change'));
+    expect(acceptedByPath()).toEqual({ 'orders.koi': true, 'events.koi': false });
+
+    check.checked = true;
+    check.dispatchEvent(new Event('change'));
+    expect(acceptedByPath()).toEqual({ 'orders.koi': true, 'events.koi': true });
+  });
+});
