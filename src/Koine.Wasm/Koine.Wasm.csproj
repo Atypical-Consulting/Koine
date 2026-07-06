@@ -95,6 +95,7 @@
     <TrimmerRootAssembly Include="Koine.Emit.Php" />
     <TrimmerRootAssembly Include="Koine.Emit.Rust" />
     <TrimmerRootAssembly Include="Koine.Emit.Java" />
+    <TrimmerRootAssembly Include="Koine.Emit.Kotlin" />
     <TrimmerRootAssembly Include="Koine.Emit.Glossary" />
     <TrimmerRootAssembly Include="Koine.Emit.Docs" />
     <TrimmerRootAssembly Include="Koine.Emit.AsyncApi" />

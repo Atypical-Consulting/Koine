@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { SyntaxTreeNode } from '@/lsp/protocol';
 import type { KoineLsp } from '@/lsp/lsp';
+import { handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
 
 // The Syntax Tree panel (issue #890): the right-rail view of the active document's raw parse tree — one
 // row per grammar construct (a `ValueObjectDecl`, `ContextNode`, `Member`, `BinaryExpr`, …), rendered as
@@ -513,8 +514,10 @@ export function SyntaxTreePanel(props: {
   // The WAI-ARIA tree keyboard model, delegated on the root: ArrowUp/Down across the flattened visible
   // rows, Home/End to the ends, ArrowRight to expand / descend, ArrowLeft to collapse / ascend. Enter/Space
   // SELECT the row and jump the editor to its span (mirroring a row click) — expand/collapse is Arrow-only,
-  // so keyboard users reach the tree → source navigation a mouse click gives (WCAG 2.1.1). Nav indexes into
-  // `flattenVisible` (not the DOM), so it reaches rows the virtualization has scrolled out of the window.
+  // so keyboard users reach the tree → source navigation a mouse click gives (WCAG 2.1.1). The key routing
+  // is the shared router (`shell/rovingTreeNav.ts`, #1105); this supplies a RovingTreeNav over the
+  // flattened `Row[]` window, so `focusIndex` reaches — and the deferred `focusRow` scrolls in — rows the
+  // virtualization has moved out of the mounted slice.
   function onKeyDown(ev: JSX.TargetedKeyboardEvent<HTMLDivElement>): void {
     if (tree == null) return;
     const navRows = rows;
@@ -522,56 +525,48 @@ export function SyntaxTreePanel(props: {
     const current = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[role="treeitem"]') ?? null;
     const key = current?.dataset.key ?? focusedKey ?? ROOT_KEY;
     const idx = navRows.findIndex((r) => r.key === key);
-    if (idx === -1) return;
-    const { node, hasChildren, isExpanded } = navRows[idx];
+    if (idx === -1) return; // a stale focus key with nothing to resolve — leave the key to the browser
 
-    switch (ev.key) {
-      case 'ArrowDown':
-        ev.preventDefault();
-        focusRow(navRows, Math.min(navRows.length - 1, idx + 1));
-        break;
-      case 'ArrowUp':
-        ev.preventDefault();
-        focusRow(navRows, Math.max(0, idx - 1));
-        break;
-      case 'Home':
-        ev.preventDefault();
-        focusRow(navRows, 0);
-        break;
-      case 'End':
-        ev.preventDefault();
-        focusRow(navRows, navRows.length - 1);
-        break;
-      case 'ArrowRight':
-        if (hasChildren) {
-          ev.preventDefault();
-          if (!isExpanded) {
-            toggle(key); // expand in place; focus stays on this row (its DOM node persists)
-            setFocusedKey(key);
-          } else {
-            focusRow(navRows, idx + 1); // already open → step into the first child (next visible row)
-          }
+    const nav: RovingTreeNav<Row> = {
+      items: () => navRows,
+      activeIndex: () => idx,
+      focusIndex: (i) => focusRow(navRows, i),
+      // ArrowRight: expand a collapsed row in place (focus stays; its DOM node persists), or step into an
+      // already-open row's first child. A leaf reports the key unhandled so it stays with the browser.
+      expand: (i) => {
+        const row = navRows[i];
+        if (!row.hasChildren) return false;
+        if (!row.isExpanded) {
+          toggle(row.key);
+          setFocusedKey(row.key);
+        } else {
+          focusRow(navRows, i + 1);
         }
-        break;
-      case 'ArrowLeft':
-        ev.preventDefault();
-        if (hasChildren && isExpanded) {
-          toggle(key); // collapse in place; focus stays on this (still-visible) row
-          setFocusedKey(key);
-        } else if (key.includes('/')) {
-          const parentKey = key.slice(0, key.lastIndexOf('/'));
+        return true;
+      },
+      // ArrowLeft: collapse an open row in place, else ascend to the parent row. Always consumed
+      // (the row never lets ArrowLeft fall through to the browser).
+      collapse: (i) => {
+        const row = navRows[i];
+        if (row.hasChildren && row.isExpanded) {
+          toggle(row.key);
+          setFocusedKey(row.key);
+        } else if (row.key.includes('/')) {
+          const parentKey = row.key.slice(0, row.key.lastIndexOf('/'));
           const parentIdx = navRows.findIndex((r) => r.key === parentKey);
           if (parentIdx !== -1) focusRow(navRows, parentIdx);
         }
-        break;
-      case 'Enter':
-      case ' ':
-        ev.preventDefault();
-        setFocusedKey(key);
-        setActiveKey(key);
-        onNodeClick?.(node); // select + jump to source, exactly as a row click does
-        break;
-    }
+        return true;
+      },
+      // Enter/Space: select the row and jump the editor to its span, exactly as a row click does.
+      activate: (i) => {
+        const row = navRows[i];
+        setFocusedKey(row.key);
+        setActiveKey(row.key);
+        onNodeClick?.(row.node);
+      },
+    };
+    handleTreeKeydown(nav, ev);
   }
 
   // --- empty / loading states (after the hooks, so the hook order is stable) ---

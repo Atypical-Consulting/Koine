@@ -15,6 +15,7 @@ survives long after the conversation or PR that produced it.
 | [0004](0004-concept-colors-single-palette-and-lsp-kind-modifiers.md) | Concept Colors — single palette + LSP kind modifiers | Proposed |
 | [0005](0005-eslint-gate-for-frontend-safety-conventions.md) | ESLint flat-config gate for the front-end safety conventions | Proposed |
 | [0006](0006-transport-presentation-as-opt-in-csharp-layers.md) | Transport/presentation as opt-in C# layers inside the csharp target | Proposed |
+| [0007](0007-kotlin-emitter-target.md) | Kotlin emitter target | Proposed |
 
 ## When to write one
 
