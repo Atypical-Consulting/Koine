@@ -65,7 +65,13 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2332 },
+  // Raised 2332 → 2355: #890 wires the new Syntax Tree right-rail view (RightView) into the controller —
+  // a self-fetching panel mirroring the sibling Source Control view that already lives here (the
+  // #rview-syntax-tree host lookup + renderSyntaxTree/loadSyntaxTree pair + the rightViews/label map
+  // entries + the selectRightView branch + the debounced doc-changed reload), ~23 LOC of legitimate
+  // composition-root wiring. Measured end-state (2355), no headroom — the next feature here should
+  // ratchet again rather than inherit slack; #985 still owns the eventual split.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2355 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   { file: 'src/settings/prefs.ts', maxLines: 2250 },

@@ -271,6 +271,7 @@ const APP_HTML = `
         <div id="right-body">
           <div id="inspector-host" class="rview" role="tabpanel"></div>
           <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
+          <div id="rview-syntax-tree" class="rview doc-view" role="tabpanel" hidden></div>
         </div>
       </aside>
       <div id="right-strip" class="pane" role="toolbar" aria-label="Tool windows" aria-orientation="vertical"></div>

@@ -38,6 +38,7 @@ import type {
   SetDocResult,
   SourceSpan,
   StructuredEdit,
+  SyntaxTreeNode,
 } from '@/lsp/lsp';
 import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/settings/persistence';
@@ -73,6 +74,7 @@ import { type InspectorElement, type InspectorHandlers } from '@/model/inspector
 import { buildModelIndex, lookupElement, resolveInspectableQn, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
 import { SourceControlPanel } from '@/model/SourceControlPanel';
+import { SyntaxTreePanel } from '@/model/SyntaxTreePanel';
 import { EventsPanel } from '@/model/EventsPanel';
 import { RelationshipsPanel } from '@/model/RelationshipsPanel';
 import { GlossaryPanel } from '@/model/GlossaryPanel';
@@ -117,6 +119,9 @@ export interface InspectorControllerLsp {
   check(baseline: string, baselineSources?: { uri: string; text: string }[]): Promise<CheckResult>;
   setDoc(id: string, text: string): Promise<SetDocResult>;
   documentSymbols(): Promise<DocumentSymbol[]>;
+  /** The active document's raw syntax tree (#890) — pulled by the self-fetching Syntax Tree panel; null on
+   *  an unknown/absent active uri. Structurally satisfies the panel's SyntaxTreeSource. */
+  syntaxTree(): Promise<SyntaxTreeNode | null>;
 }
 
 /** A minimal assistant handle (ide.ts owns the panel's lifecycle; the controller only nudges its tab). */
@@ -842,6 +847,25 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     lastDirtyCount = dc;
     if (sourceControlLoaded && s.right === 'source-control') renderSourceControl();
   });
+
+  // --- Syntax Tree (raw parse tree) right-rail panel (#890) ------------------
+  // Model-derived + self-fetching, mirroring Source Control: lazily mounted on first open, re-fetched on
+  // every re-open AND on the debounced doc-changed invalidation via a `revision` bump — the SyntaxTreePanel
+  // OWNS the LSP `syntaxTree()` fetch (guarding its own async race), so the controller just hands it `lsp`
+  // (structurally SyntaxTreeSource) and bumps the revision. Staleness rides the docViews 'syntax-tree' key.
+  const syntaxTreeRightView = domById('rview-syntax-tree');
+  let syntaxTreeLoaded = false;
+  let syntaxTreeRefresh = 0;
+  function renderSyntaxTree(): void {
+    render(<SyntaxTreePanel source={lsp} revision={syntaxTreeRefresh} />, syntaxTreeRightView);
+  }
+  function loadSyntaxTree(): void {
+    if (syntaxTreeLoaded) syntaxTreeRefresh += 1; // a re-open / edit re-fetches; first mount fetches on its own
+    syntaxTreeLoaded = true;
+    // markLoaded gates a repeat refreshActiveSurfaces from redundantly re-fetching; an edit re-stales it.
+    appStore.getState().markLoaded('syntax-tree', appStore.getState().currentToken('syntax-tree'));
+    renderSyntaxTree();
+  }
   const docsFail = (verb: string) => (e: unknown) => deps.setStatus(`Could not ${verb}: ${String(e)}`, 'error');
 
   // One handlers object the two pages share: each create resets only its OWN page's loaded flag and
@@ -1471,6 +1495,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (vis.includes('docs') && activeDocs() === 'glossary') void loadGlossary();
     if (vis.includes('technical')) ensureTechLoaded();
     if (vis.includes('output')) ensureOutputLoaded();
+    // The Syntax Tree is a RIGHT-rail model-derived surface (#890): reload it here (the model surfaces'
+    // debounced repaint home) when it's the active right view and an edit re-staled its docViews key.
+    if (appStore.getState().right === 'syntax-tree' && appStore.getState().isStale('syntax-tree')) loadSyntaxTree();
   }
 
   // Mark the cached, model-derived surfaces stale (e.g. after an edit or a file switch). A model edit
@@ -1520,11 +1547,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     props: 'Properties',
     assistant: 'AI Chat',
     'source-control': 'Source Control',
+    'syntax-tree': 'Syntax Tree',
   };
   const rightViews: Record<RightView, HTMLElement> = {
     props: inspectorHost,
     assistant: assistantView,
     'source-control': sourceControlRightView,
+    'syntax-tree': syntaxTreeRightView,
   };
   function selectRightView(view: RightView): void {
     appStore.getState().setRight(view);
@@ -1534,6 +1563,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // status on every re-open (so a save / external `git` since the last view is reflected — the panel
     // itself owns the in-place refresh). The canUseGit gate + the non-repo empty state live in the panel.
     if (view === 'source-control') loadSourceControl();
+    // The Syntax Tree is lazily mounted + model-derived (#890): mount on first open, re-fetch on re-open
+    // (loadSyntaxTree bumps the panel's revision); an edit reloads it via the docViews 'syntax-tree' key.
+    else if (view === 'syntax-tree') loadSyntaxTree();
     // The AI assistant is lazily created + interactive (#235): mount it on first open and re-sync the
     // conversation to the current folder + focus the input on every re-open.
     else if (view === 'assistant') ensureAssistantShown();
