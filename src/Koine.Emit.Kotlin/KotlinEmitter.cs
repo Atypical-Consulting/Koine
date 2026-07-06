@@ -63,11 +63,9 @@ public sealed partial class KotlinEmitter : IEmitter
             index,
             // Demand-driven operator emission (R9), shared with the C#/Java/Rust/Python/TS emitters so the
             // targets stay semantically aligned: a value object only gets a `plus`/`minus` where the model
-            // sums or adds/subtracts it, or a `times`/`div` where it is scaled by a scalar.
-            OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
-            OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
-            OperatorNeedsAnalyzer.BuildScalarDivisionNeeds(model, index),
-            OperatorNeedsAnalyzer.BuildValueObjectArithmeticNeeds(model, index),
+            // sums or adds/subtracts it, or a `times`/`div` where it is scaled by a scalar. One unified pass
+            // (#1126) exposes every per-VO signal off a single analyzer entry.
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index),
             BuildEnumMemberMap(model));
 
         var files = new List<EmittedFile>

@@ -311,14 +311,12 @@ public sealed partial class KotlinEmitter
             return true;
         }
 
+        var needs = emit.OperatorNeeds.GetValueOrDefault(vo.Name);
         var hasNumeric = stored.Any(m => m.Type.Name is "Int" or "Decimal");
-        var binaryOps = emit.BinaryNeeds.TryGetValue(vo.Name, out var ops) ? ops : EmptyBinaryOps;
-        return (hasNumeric && (emit.ScalarNeeds.ContainsKey(vo.Name) || emit.ScalarDivNeeds.ContainsKey(vo.Name)))
-            || emit.AdditiveNeeds.Contains(vo.Name)
-            || binaryOps.Count > 0;
+        return (hasNumeric && (needs?.MultiplyFactors.Count > 0 || needs?.DivideFactors.Count > 0))
+            || (needs?.IsSummable ?? false)
+            || needs?.BinaryOps.Count > 0;
     }
-
-    private static readonly IReadOnlySet<BinaryOp> EmptyBinaryOps = new HashSet<BinaryOp>();
 
     /// <summary>Appends a single blank-line separator before a body section, unless it is the first thing in the class body.</summary>
     private static void Separate(StringBuilder sb, ref bool wroteBody)
@@ -349,16 +347,16 @@ public sealed partial class KotlinEmitter
             return;
         }
 
-        IReadOnlySet<BinaryOp> binaryOps =
-            emit.BinaryNeeds.TryGetValue(vo.Name, out IReadOnlySet<BinaryOp>? ops) ? ops : EmptyBinaryOps;
+        var needs = emit.OperatorNeeds.GetValueOrDefault(vo.Name);
 
-        // `plus`: a `sum` fold over this value object, or a plain binary `+`. `minus`: a plain binary `-`.
-        if (emit.AdditiveNeeds.Contains(vo.Name) || binaryOps.Contains(BinaryOp.Add))
+        // `plus`: a `sum` fold over this value object, or a plain binary `+` (the analyzer precombines both
+        // into `NeedsAdd`). `minus`: a plain binary `-`.
+        if (needs?.NeedsAdd ?? false)
         {
             WriteAdditiveOp(sb, name, stored, "plus", "+", ref wroteBody);
         }
 
-        if (binaryOps.Contains(BinaryOp.Sub))
+        if (needs?.BinaryOps.Contains(BinaryOp.Sub) ?? false)
         {
             WriteAdditiveOp(sb, name, stored, "minus", "-", ref wroteBody);
         }
@@ -376,14 +374,15 @@ public sealed partial class KotlinEmitter
             return;
         }
 
-        if (emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? mulScalars))
+        var needs = emit.OperatorNeeds.GetValueOrDefault(vo.Name);
+        if (needs is { MultiplyFactors.Count: > 0 })
         {
-            WriteScalarOps(sb, name, stored, mulScalars, "times", "*", ref wroteBody);
+            WriteScalarOps(sb, name, stored, needs.MultiplyFactors, "times", "*", ref wroteBody);
         }
 
-        if (emit.ScalarDivNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? divScalars))
+        if (needs is { DivideFactors.Count: > 0 })
         {
-            WriteScalarOps(sb, name, stored, divScalars, "div", "/", ref wroteBody);
+            WriteScalarOps(sb, name, stored, needs.DivideFactors, "div", "/", ref wroteBody);
         }
     }
 

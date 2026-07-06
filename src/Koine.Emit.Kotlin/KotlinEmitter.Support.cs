@@ -24,14 +24,13 @@ public sealed partial class KotlinEmitter
     /// demand-driven value-object operator needs (which VOs need a <c>plus</c> from a <c>sum</c> fold or a
     /// plain <c>+</c>/<c>-</c>, which scalar types each is multiplied / divided by) so the value-object slice
     /// emits only the arithmetic operators the model actually uses, and an enum-member → owning-enum map that
-    /// disambiguates a bare reference to a member shared across enums.
+    /// disambiguates a bare reference to a member shared across enums. One unified per-VO need model (#1126)
+    /// exposes every signal — scalar factors, the <c>sum</c>-fold flag, the plain binary ops, and the
+    /// precomputed <c>NeedsAdd</c> union — off a single analyzer entry.
     /// </summary>
     internal sealed record KotlinEmitContext(
         ModelIndex Index,
-        IReadOnlySet<string> AdditiveNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarDivNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BinaryNeeds,
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> OperatorNeeds,
         IReadOnlyDictionary<string, string> EnumMemberToType);
 
     // ----------------------------------------------------------------------
