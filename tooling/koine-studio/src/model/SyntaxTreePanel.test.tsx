@@ -1,0 +1,328 @@
+import { describe, expect, test, vi } from 'vitest';
+import { act, fireEvent, render, waitFor } from '@testing-library/preact';
+import { SyntaxTreePanel, deepestContaining, type SyntaxTreeSource } from '@/model/SyntaxTreePanel';
+import type { SourceSpan, SyntaxTreeNode } from '@/lsp/protocol';
+import { axe } from 'vitest-axe';
+
+// A throwaway raw span — the panel renders structure, not coordinates, so every fixture node can share
+// one. (1-based, end-exclusive, matching the koine/syntaxTree wire shape.)
+const SPAN: SourceSpan = { line: 1, column: 1, endLine: 1, endColumn: 1, offset: 0, length: 0, file: null };
+
+/** Terse fixture-node builder so a tree literal stays readable. Non-leaf/flag fields default sensibly. */
+function node(kind: string, name: string | null, children: SyntaxTreeNode[] = [], extra: Partial<SyntaxTreeNode> = {}): SyntaxTreeNode {
+  return { kind, name, span: SPAN, isMissing: false, isError: false, leaf: null, children, ...extra };
+}
+
+// --- spanned fixtures (for the caret → node containment half of #890) -------------------------------
+// The root carries the wire's all-zero span; the real nodes carry NESTING own-spans so a caret resolves
+// to exactly one deepest containing node. Billing wraps lines 1–4; Money lines 2–3; the amount Member
+// sits on line 3, cols 5–19 (end-exclusive at 20).
+const zeroSpan: SourceSpan = { line: 0, column: 0, endLine: 0, endColumn: 0, offset: 0, length: 0, file: null };
+const span = (line: number, column: number, endLine: number, endColumn: number): SourceSpan => ({
+  line, column, endLine, endColumn, offset: 0, length: 0, file: 'file:///m.koi',
+});
+function spannedFixture(): SyntaxTreeNode {
+  return node('KoineModel', null, [
+    node('ContextNode', 'Billing', [
+      node('ValueObjectDecl', 'Money', [
+        node('Member', 'amount', [], { span: span(3, 5, 3, 20) }),
+      ], { span: span(2, 3, 4, 1) }),
+    ], { span: span(1, 1, 5, 1) }),
+  ], { span: zeroSpan });
+}
+
+// A small, realistic tree: the KoineModel root → one Billing context → a Money value object (with a
+// nested Member, collapsed by default) and a recovered ErrorNode sibling. The root + its top-level
+// context expand by default; deeper nodes (Money's Member) start collapsed.
+function fixture(): SyntaxTreeNode {
+  return node('KoineModel', null, [
+    node('ContextNode', 'Billing', [
+      node('ValueObjectDecl', 'Money', [
+        node('Member', 'amount', [node('TypeRef', null, [], { leaf: 'Decimal' })]),
+      ]),
+      node('ErrorNode', null, [], { isError: true, leaf: '??' }),
+      node('Invariant', null, [], { isMissing: true }),
+    ]),
+  ]);
+}
+
+/** A narrow fake source the panel fetches from — a single vi.fn matching {@link SyntaxTreeSource}. */
+function makeSource(tree: SyntaxTreeNode | null): SyntaxTreeSource {
+  return { syntaxTree: vi.fn(async () => tree) };
+}
+
+describe('SyntaxTreePanel', () => {
+  test('renders nested rows showing each node kind and name', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(fixture())} />);
+
+    // The root + its top-level context expand by default, so the root, the context, and the context's
+    // direct children (Money, the error, the missing node) are all visible; Money's Member is collapsed.
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    expect(root.getAttribute('aria-level')).toBe('1');
+
+    const ctx = view.getByRole('treeitem', { name: /ContextNode Billing/ });
+    expect(ctx.getAttribute('aria-level')).toBe('2');
+    expect(ctx.getAttribute('aria-expanded')).toBe('true');
+
+    const money = view.getByRole('treeitem', { name: /ValueObjectDecl Money/ });
+    expect(money.getAttribute('aria-level')).toBe('3');
+    // Money has children (a Member) but is collapsed by default.
+    expect(money.getAttribute('aria-expanded')).toBe('false');
+
+    // The collapsed Member is NOT rendered yet.
+    expect(view.queryByRole('treeitem', { name: /Member amount/ })).toBeNull();
+  });
+
+  test('an error-recovery row carries a distinct error class and an accessible marker', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(fixture())} />);
+
+    const errorRow = await view.findByRole('treeitem', { name: /ErrorNode/ });
+    expect(errorRow.className).toContain('koi-stree-item--error');
+    // The accessible name suffixes an explicit "(error)" marker so AT users hear the recovery state.
+    expect(errorRow.getAttribute('aria-label')).toMatch(/\(error\)/);
+
+    const missingRow = view.getByRole('treeitem', { name: /Invariant.*\(missing\)/ });
+    expect(missingRow.className).toContain('koi-stree-item--missing');
+  });
+
+  test('a null tree paints the empty-state instead of crashing', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(null)} />);
+    expect(await view.findByText(/No syntax tree/i)).toBeTruthy();
+    expect(view.queryByRole('tree')).toBeNull();
+  });
+
+  test('ArrowDown moves roving focus and ArrowRight expands a collapsed node', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(fixture())} />);
+
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    root.focus();
+    fireEvent.keyDown(root, { key: 'ArrowDown' });
+    // Focus lands on the next visible row (the Billing context).
+    expect((document.activeElement as HTMLElement).getAttribute('aria-label')).toMatch(/ContextNode Billing/);
+
+    const money = view.getByRole('treeitem', { name: /ValueObjectDecl Money/ });
+    money.focus();
+    fireEvent.keyDown(money, { key: 'ArrowRight' });
+    // Expanding Money reveals its nested Member row.
+    await waitFor(() => expect(view.getByRole('treeitem', { name: /Member amount/ })).toBeTruthy());
+  });
+
+  test('refetches when the revision prop changes', async () => {
+    const source = makeSource(fixture());
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+    await view.findByRole('treeitem', { name: /KoineModel/ });
+    expect(source.syntaxTree).toHaveBeenCalledTimes(1);
+
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    await waitFor(() => expect(source.syntaxTree).toHaveBeenCalledTimes(2));
+  });
+
+  test('preserves the roving tab stop on the same node across a revision refetch', async () => {
+    // The same tree comes back on every call — a typing edit that leaves the focused node intact.
+    const source = makeSource(fixture());
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+
+    // Arrow down from the root to the Billing context, taking the lone tab stop with it.
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    root.focus();
+    fireEvent.keyDown(root, { key: 'ArrowDown' });
+    const ctx = view.getByRole('treeitem', { name: /ContextNode Billing/ });
+    expect(ctx.getAttribute('tabindex')).toBe('0'); // it holds the roving tab stop now
+    expect(root.getAttribute('tabindex')).toBe('-1');
+
+    // A model edit bumps the revision → the panel refetches and rebuilds the tree.
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    await waitFor(() => expect(source.syntaxTree).toHaveBeenCalledTimes(2));
+
+    // The tab stop stays on Billing (same kind/name identity), NOT reset back to the root.
+    expect(view.getByRole('treeitem', { name: /ContextNode Billing/ }).getAttribute('tabindex')).toBe('0');
+    expect(view.getByRole('treeitem', { name: /KoineModel/ }).getAttribute('tabindex')).toBe('-1');
+  });
+
+  test('falls back to the root tab stop when the focused node is gone after a refetch', async () => {
+    // First the Billing tree; the refetch returns a DIFFERENT context at the same path (Shipping), so
+    // the previously-focused node's identity no longer matches at `0/0`.
+    const shipping = node('KoineModel', null, [
+      node('ContextNode', 'Shipping', [node('ValueObjectDecl', 'Address', [])]),
+    ]);
+    const syntaxTree = vi.fn().mockResolvedValueOnce(fixture()).mockResolvedValueOnce(shipping);
+    const source: SyntaxTreeSource = { syntaxTree };
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    root.focus();
+    fireEvent.keyDown(root, { key: 'ArrowDown' }); // tab stop → Billing (0/0)
+    expect(view.getByRole('treeitem', { name: /ContextNode Billing/ }).getAttribute('tabindex')).toBe('0');
+
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    await waitFor(() => expect(syntaxTree).toHaveBeenCalledTimes(2));
+
+    // The identity guard rejects Shipping-at-0/0 as a match, so the tab stop resets to the root.
+    await waitFor(() =>
+      expect(view.getByRole('treeitem', { name: /KoineModel/ }).getAttribute('tabindex')).toBe('0'),
+    );
+    expect(view.getByRole('treeitem', { name: /ContextNode Shipping/ }).getAttribute('tabindex')).toBe('-1');
+  });
+
+  test('re-homes DOM keyboard focus onto the preserved row when focus was in the tree', async () => {
+    const syntaxTree = vi.fn(async () => fixture());
+    const source: SyntaxTreeSource = { syntaxTree };
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    root.focus();
+    fireEvent.keyDown(root, { key: 'ArrowDown' }); // keyboard focus + tab stop → Billing (0/0)
+    const ctx = view.getByRole('treeitem', { name: /ContextNode Billing/ });
+    expect(document.activeElement).toBe(ctx);
+    // Spy on THIS row's focus so the test proves the re-focus EFFECT actively re-homes focus, rather than
+    // silently passing on Preact's incidental positional DOM reuse (which keeps `activeElement` on the row
+    // regardless). Removing the effect's scheduling block makes this expectation fail.
+    const focusSpy = vi.spyOn(ctx, 'focus');
+
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    // Let the async refetch resolve and the post-commit re-focus effect run.
+    await waitFor(() => expect(syntaxTree).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    // The effect called .focus() on the preserved Billing row, and focus ends up there (not <body>/root).
+    expect(focusSpy).toHaveBeenCalled();
+    expect(document.activeElement).toBe(view.getByRole('treeitem', { name: /ContextNode Billing/ }));
+    expect((document.activeElement as HTMLElement)?.getAttribute('aria-label')).toMatch(/ContextNode Billing/);
+    focusSpy.mockRestore();
+  });
+
+  test('does not steal focus into the tree when focus was elsewhere during a refetch', async () => {
+    const syntaxTree = vi.fn(async () => fixture());
+    const source: SyntaxTreeSource = { syntaxTree };
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+
+    // Establish Billing as the roving tab stop (so a row IS restorable), THEN move focus out of the tree.
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    root.focus();
+    fireEvent.keyDown(root, { key: 'ArrowDown' }); // tab stop → Billing (0/0)
+    (document.activeElement as HTMLElement | null)?.blur?.(); // focus leaves the tree → document.body
+    expect(view.container.contains(document.activeElement)).toBe(false);
+
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    // Let the async refetch resolve AND any post-commit re-focus effect run (Billing was already the tab
+    // stop, so there's no DOM change to await on — flush the microtask/effect queue explicitly instead).
+    await waitFor(() => expect(syntaxTree).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    // Even though the Billing tab stop is preserved, a refetch must NOT pull DOM focus back into the tree
+    // when focus was elsewhere — only the tab stop is restored, silently.
+    expect(view.container.contains(document.activeElement)).toBe(false);
+  });
+
+  test('an empty refetch resets to the root and paints the empty state without crashing', async () => {
+    const syntaxTree = vi.fn().mockResolvedValueOnce(fixture()).mockResolvedValueOnce(null);
+    const source: SyntaxTreeSource = { syntaxTree };
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    root.focus();
+    fireEvent.keyDown(root, { key: 'ArrowDown' }); // tab stop → Billing
+
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    // The now-empty tree paints the empty state (no tree role, no crash) with the tab stop reset.
+    expect(await view.findByText(/No syntax tree/i)).toBeTruthy();
+    expect(view.queryByRole('tree')).toBeNull();
+  });
+
+  test('clicking a row fires onNodeClick with that node and marks it current', async () => {
+    const onNodeClick = vi.fn();
+    const view = render(<SyntaxTreePanel source={makeSource(spannedFixture())} onNodeClick={onNodeClick} />);
+
+    const ctx = await view.findByRole('treeitem', { name: /ContextNode Billing/ });
+    fireEvent.click(ctx);
+
+    // The click selects the row (source ↔ tree): onNodeClick fires with the node's data…
+    expect(onNodeClick).toHaveBeenCalledTimes(1);
+    expect(onNodeClick.mock.calls[0][0].name).toBe('Billing');
+    expect(onNodeClick.mock.calls[0][0].span).toEqual(span(1, 1, 5, 1));
+    // …and exactly that one row wears the current highlight.
+    expect(ctx.className).toContain('koi-stree-item--current');
+    expect(ctx.getAttribute('aria-current')).toBe('true');
+    expect(view.container.querySelectorAll('.koi-stree-item--current').length).toBe(1);
+  });
+
+  test('pressing Enter on a row fires onNodeClick + marks it current (keyboard parity with a click)', async () => {
+    const onNodeClick = vi.fn();
+    const view = render(<SyntaxTreePanel source={makeSource(spannedFixture())} onNodeClick={onNodeClick} />);
+
+    // A leaf-ish row: keyboard activation must jump to source too, not just expandable parents (WCAG 2.1.1).
+    const ctx = await view.findByRole('treeitem', { name: /ContextNode Billing/ });
+    ctx.focus();
+    fireEvent.keyDown(ctx, { key: 'Enter' });
+
+    expect(onNodeClick).toHaveBeenCalledTimes(1);
+    expect(onNodeClick.mock.calls[0][0].name).toBe('Billing');
+    expect(ctx.getAttribute('aria-current')).toBe('true');
+  });
+
+  test('a caret highlights the deepest node whose span contains it, auto-expanding its ancestors', async () => {
+    // The caret sits inside the (default-collapsed) Member on line 3.
+    const view = render(<SyntaxTreePanel source={makeSource(spannedFixture())} caret={{ line: 3, column: 10 }} />);
+
+    // Money is collapsed by default, so the deepest match only appears because its ancestors auto-expand.
+    const member = await view.findByRole('treeitem', { name: /Member amount/ });
+    expect(member.className).toContain('koi-stree-item--current');
+    expect(member.getAttribute('aria-current')).toBe('true');
+    // Only one node is ever current.
+    expect(view.container.querySelectorAll('.koi-stree-item--current').length).toBe(1);
+  });
+
+  test('an out-of-range caret (and the all-zero-span root) highlights nothing', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(spannedFixture())} caret={{ line: 100, column: 1 }} />);
+    await view.findByRole('treeitem', { name: /KoineModel/ });
+    // A caret past every real span leaves no highlight — and the zero-span root is never a match.
+    expect(view.container.querySelector('.koi-stree-item--current')).toBeNull();
+  });
+
+  test('has no accessibility violations', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(fixture())} />);
+    await view.findByRole('tree', { name: /Syntax tree/i });
+    expect(await axe(view.container)).toHaveNoViolations();
+  });
+});
+
+// The core correctness of the editor → tree half: deepest OWN-span containment (the client-side
+// SyntaxGraph.FindNode heuristic), end-exclusive, skipping the all-zero root span.
+describe('deepestContaining', () => {
+  test('resolves the deepest node whose own span contains the caret', () => {
+    const tree = spannedFixture();
+    expect(deepestContaining(tree, 3, 10)?.node.name).toBe('amount'); // inside the Member
+    expect(deepestContaining(tree, 2, 5)?.node.name).toBe('Money'); // inside Money, not the Member
+    expect(deepestContaining(tree, 1, 1)?.node.name).toBe('Billing'); // inside Billing only
+  });
+
+  test('returns the deepest node key as an index-path from the root', () => {
+    const tree = spannedFixture();
+    expect(deepestContaining(tree, 3, 10)?.key).toBe('0/0/0/0'); // root → Billing → Money → amount
+  });
+
+  test('returns null when nothing — or only a zero-span node — contains the caret', () => {
+    const tree = spannedFixture();
+    expect(deepestContaining(tree, 100, 1)).toBeNull(); // out of range
+    expect(deepestContaining(tree, 5, 1)).toBeNull(); // == Billing's end (end-exclusive), so not contained
+  });
+
+  test('a SyntaxTreeNode.span typed as the shared SourceSpan keeps the line-0 root a no-jump sentinel (#1099)', () => {
+    // #1099 retyped SyntaxTreeNode.span from the deleted SyntaxSpan to the shared SourceSpan. Building
+    // the spans as SourceSpan must still type-check (same seven fields) AND preserve the sentinel: the
+    // all-zero root (line 0) resolves to no node, so the panel never jumps to 0:0.
+    const rootSpan: SourceSpan = { file: null, line: 0, column: 0, endLine: 0, endColumn: 0, offset: 0, length: 0 };
+    const childSpan: SourceSpan = { file: 'file:///m.koi', line: 1, column: 1, endLine: 3, endColumn: 1, offset: 0, length: 0 };
+    const tree: SyntaxTreeNode = node('KoineModel', null, [
+      node('ContextNode', 'Billing', [], { span: childSpan }),
+    ], { span: rootSpan });
+
+    // A caret inside the child resolves to it (jumpable); nothing resolves to the zero-span root.
+    expect(deepestContaining(tree, 2, 1)?.node.name).toBe('Billing');
+    expect(deepestContaining(tree, 0, 0)).toBeNull(); // the all-zero root is never a match → no jump
+  });
+});

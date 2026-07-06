@@ -186,6 +186,11 @@ export class WasmLspTransport implements LspTransport {
       case 'textDocument/documentSymbol':
         return [result(JSON.parse(await api.DocumentSymbols(this.docs.get(uri ?? '') ?? '')))];
 
+      case 'koine/syntaxTree':
+        // The WASM export takes the merged workspace + active uri (unlike DocumentSymbols' single
+        // source), returning the SyntaxTreeNode tree or the JSON literal `null` for an unknown uri.
+        return [result(JSON.parse(await api.SyntaxTree(this.filesJson(), uri ?? '')))];
+
       case 'textDocument/foldingRange':
         return [result(JSON.parse(await api.FoldingRanges(this.docs.get(uri ?? '') ?? '')))];
 

@@ -23,18 +23,27 @@ function mountStrip(): HTMLElement {
 }
 
 describe('RightStrip', () => {
-  it('emits one toggle button per RightView, in Properties·AI Chat·Source Control order', () => {
+  it('emits one toggle button per RightView, in Properties·AI Chat·Source Control·Syntax Tree order', () => {
     mountStrip();
     const views = [...document.querySelectorAll('#right-strip [data-rview]')].map(
       (b) => (b as HTMLElement).dataset.rview,
     );
-    expect(views).toEqual(['props', 'assistant', 'source-control']);
+    expect(views).toEqual(['props', 'assistant', 'source-control', 'syntax-tree']);
+  });
+
+  it('exposes the Syntax Tree toggle with its accessible name and data-rview id', () => {
+    mountStrip();
+    const btn = document.querySelector<HTMLButtonElement>('#right-strip [data-rview="syntax-tree"]');
+    expect(btn).not.toBeNull();
+    expect(btn!.getAttribute('aria-label')).toBe('Syntax Tree');
+    expect(btn!.getAttribute('data-tooltip')).toBe('Syntax Tree');
+    expect(btn!.querySelector('svg.tb-ico')).not.toBeNull();
   });
 
   it('every stripe button is an accessible toggle controlling #right', () => {
     mountStrip();
     const buttons = [...document.querySelectorAll<HTMLButtonElement>('#right-strip .rstrip-btn')];
-    expect(buttons).toHaveLength(3);
+    expect(buttons).toHaveLength(4);
     for (const b of buttons) {
       // The visible hover/focus label is a custom left-pointing tooltip driven by data-tooltip (CSS in
       // _inspector.scss), NOT the native `title` — so AT gets one name (aria-label) without a double tip.

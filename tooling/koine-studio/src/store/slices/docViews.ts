@@ -7,7 +7,8 @@ export type DocViewKey =
   | 'diagrams'
   | 'events'
   | 'relationships'
-  | 'contextmap';
+  | 'contextmap'
+  | 'syntax-tree';
 export interface DocView {
   /** True once a fetch for the CURRENT token has rendered. */
   loaded: boolean;
@@ -39,6 +40,7 @@ const KEYS: DocViewKey[] = [
   'events',
   'relationships',
   'contextmap',
+  'syntax-tree',
 ];
 const EDIT_DEBOUNCE_MS = 350;
 

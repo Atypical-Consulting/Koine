@@ -56,7 +56,7 @@ describe('railContract — koine-ui components satisfy the DOM contract Studio q
 
   it('the right strip emits exactly one rstrip-btn per RIGHT_STRIP_VIEWS, with matching data-rview values', () => {
     const buttons = document.querySelectorAll<HTMLElement>('#right-strip .' + RSTRIP_BTN_CLASS);
-    expect(buttons).toHaveLength(3);
+    expect(buttons).toHaveLength(4);
     const views = new Set([...buttons].map((b) => b.getAttribute(DATA_RVIEW)));
     expect(views).toEqual(new Set(RIGHT_STRIP_VIEWS));
   });

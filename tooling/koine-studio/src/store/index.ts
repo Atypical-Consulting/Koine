@@ -9,6 +9,7 @@ import { createHistorySlice, type HistorySlice } from '@/store/slices/history';
 import { createRouteSlice, type RouteSlice } from '@/store/slices/route';
 import { createEmitTargetSlice, type EmitTargetSlice } from '@/store/slices/emitTarget';
 import { createDocsCoverageSlice, type DocsCoverageSlice } from '@/store/slices/docsCoverage';
+import { createCursorSlice, type CursorSlice } from '@/store/slices/cursor';
 import { createDiagramsSlice, type DiagramsSlice } from '@/store/slices/diagrams';
 
 // The single Koine Studio state store: typed slices composed into one vanilla Zustand store. Vanilla
@@ -24,6 +25,7 @@ export type AppState = SelectionSlice &
   RouteSlice &
   EmitTargetSlice &
   DocsCoverageSlice &
+  CursorSlice &
   DiagramsSlice;
 
 export function createAppStore(): StoreApi<AppState> {
@@ -38,6 +40,7 @@ export function createAppStore(): StoreApi<AppState> {
     ...createRouteSlice(set, get),
     ...createEmitTargetSlice(set),
     ...createDocsCoverageSlice(set),
+    ...createCursorSlice(set),
     ...createDiagramsSlice(set),
   }));
 }

@@ -385,6 +385,7 @@ const APP_HTML = `
             <div id="inspector-host" class="rview" role="tabpanel"></div>
             <section id="view-assistant" class="rview" role="tabpanel" hidden></section>
             <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
+            <div id="rview-syntax-tree" class="rview doc-view" role="tabpanel" hidden></div>
           </div>
         </aside>
         <!-- Thin shell: init() injects the tool-window stripe's buttons via rightStripMarkup() (#500). -->

@@ -264,6 +264,17 @@ public sealed record WCheckResult(string? Error, bool HasBreakingChanges, WCheck
 /// </summary>
 public sealed record WSemanticTokens(int[] Data, string? ResultId = null);
 
+/// <summary>
+/// One node of the active buffer's parse/syntax tree (issue #890; recursive). A flat projection of
+/// <c>Koine.Compiler.Services.SyntaxTreeNode</c>: <see cref="Kind"/> is the node's runtime type name
+/// (e.g. <c>ValueObjectDecl</c>), <see cref="Name"/> the declaration identifier (null when it has none),
+/// <see cref="Span"/> its raw source range, <see cref="IsMissing"/>/<see cref="IsError"/> flag ANTLR
+/// phantom/recovery nodes, and <see cref="Leaf"/> is a truncated source preview set only for a childless
+/// node. Serialized identically by the desktop <c>koine/syntaxTree</c> LSP handler.
+/// </summary>
+public sealed record WSyntaxNode(
+    string Kind, string? Name, WSourceSpan Span, bool IsMissing, bool IsError, string? Leaf, WSyntaxNode[] Children);
+
 /// <summary>Input shape: one open document (uri + full text).</summary>
 public sealed record WSourceFileDto(string Uri, string Text);
 
@@ -317,4 +328,5 @@ public sealed record WSourceFileDto(string Uri, string Text);
 [JsonSerializable(typeof(WInDiagnostic[]))]
 [JsonSerializable(typeof(WCheckResult))]
 [JsonSerializable(typeof(WSemanticTokens))]
+[JsonSerializable(typeof(WSyntaxNode))]
 internal sealed partial class LangJson : JsonSerializerContext;

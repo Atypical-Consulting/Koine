@@ -462,3 +462,29 @@ export interface Diagram {
   mermaid: string; // the exact Mermaid snippet embedded in the file's Markdown
   graph: DiagramGraph;
 }
+
+// --- syntax tree (`koine/syntaxTree`, issue #890) ----------------------------
+// The raw parse/syntax tree of the active document — one node per grammar construct — that the
+// syntax-tree panel renders and maps back to the source. Same wire shape from both hosts (the desktop
+// `koine/syntaxTree` LSP request and the WASM `SyntaxTree` export). The whole response is `null` when
+// the active uri is unknown/absent.
+
+/**
+ * One node of the syntax tree (recursive). `kind` is the grammar construct (e.g. `ValueObjectDecl`);
+ * `name` is the declaration identifier, or null when the node has no identifier; `isMissing`/`isError`
+ * flag ANTLR phantom/recovery nodes; `leaf` is a truncated source preview set only on a childless node
+ * (else null). `span` is the node's RAW {@link SourceSpan} — 1-based, end-EXCLUSIVE source coordinates
+ * (NOT a 0-based LSP {@link Range}) — the same span shape the diagram graph carries (consolidated in
+ * #1099); the root is span-less and reads the all-zero sentinel `{ line: 0, …, file: null }`, so
+ * `span.line === 0` marks a no-jump node. Example root:
+ * `{ kind: 'KoineModel', name: null, span: <all-zero>, children: [...] }`.
+ */
+export interface SyntaxTreeNode {
+  kind: string;
+  name: string | null;
+  span: SourceSpan; // the node's raw source range (shared with the diagram graph; all-zero on the root)
+  isMissing: boolean;
+  isError: boolean;
+  leaf: string | null;
+  children: SyntaxTreeNode[];
+}

@@ -12,6 +12,7 @@ import { resolve } from 'node:path';
 import { createEditorSession, type EditorSessionDeps } from '@/shell/editorSession';
 import type { CodeAction, CompletionItem, HoverResult, Location, LspDiagnostic, Range } from '@/lsp/lsp';
 import { domById } from '@/shared/domById';
+import { appStore } from '@/store/index';
 
 // --- DOM seed ----------------------------------------------------------------
 // Exactly the ids editorSession looks up via document.getElementById, inlined so a drift from
@@ -268,6 +269,20 @@ describe('createEditorSession — onChange', () => {
     expect(seen.length).toBe(1);
     expect(seen[0].doc).toContain('// edit');
     expect(seen[0].uri).toBe(ACTIVE);
+  });
+});
+
+describe('createEditorSession — caret mirrors into the store cursor slice (#890)', () => {
+  test('moving the caret publishes its 1-based line/column to the store AND the status bar', () => {
+    const lsp = makeLsp();
+    const session = newSession(makeDeps(lsp));
+
+    // goto dispatches a selection change → the editor's onCursor → the status-bar write AND setCursor.
+    session.editor.goto(1, 8);
+
+    expect(appStore.getState().cursor).toEqual({ line: 1, column: 8 });
+    // The existing status-bar readout is unchanged (both sinks fire).
+    expect(domById('sb-cursor').textContent).toBe('Ln 1, Col 8');
   });
 });
 

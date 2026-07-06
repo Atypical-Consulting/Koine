@@ -46,6 +46,8 @@ export interface KoineWasmApi {
   WorkspaceSymbols(filesJson: string, query: string): Promise<string>;
   /** Single-file document outline → JSON DocumentSymbol[]. */
   DocumentSymbols(source: string): Promise<string>;
+  /** Raw syntax tree of the active buffer → JSON SyntaxTreeNode or `null` (#890). */
+  SyntaxTree(filesJson: string, activeUri: string): Promise<string>;
   /** Collapsible regions of a single file → JSON FoldingRange[] (`{startLine,endLine}`). */
   FoldingRanges(source: string): Promise<string>;
   /** Selection-range chains for a set of 0-based positions → JSON SelectionRange[] (parallel). */
@@ -128,6 +130,7 @@ const KOINE_WASM_EXPORT_MAP: Record<keyof KoineWasmApi, true> = {
   SignatureHelp: true,
   WorkspaceSymbols: true,
   DocumentSymbols: true,
+  SyntaxTree: true,
   FoldingRanges: true,
   SelectionRanges: true,
   CodeLenses: true,

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 const api = vi.hoisted(() => ({
   DiagnoseWorkspace: vi.fn<(f: string) => string>(() => '[]'),
   EmitPreview: vi.fn<(f: string, target: string) => string>(() => '{}'),
+  SyntaxTree: vi.fn<(f: string, u: string) => string>(() => 'null'),
   InlayHints:
     vi.fn<
       (f: string, u: string, sl: number, sc: number, el: number, ec: number) => string
@@ -93,6 +94,23 @@ describe('WasmLspTransport routing — inlay hints & call hierarchy', () => {
     const result = await roundtrip('callHierarchy/incomingCalls', {});
     expect(last(api.IncomingCalls.mock.calls)[1]).toBe('{}');
     expect(result).toEqual([]);
+  });
+
+  test('koine/syntaxTree routes to SyntaxTree with the filesJson envelope + active uri and returns the parsed tree (#890)', async () => {
+    const tree = { kind: 'KoineModel', name: null, span: { line: 0, column: 0, endLine: 0, endColumn: 0, offset: 0, length: 0, file: null }, isMissing: false, isError: false, leaf: null, children: [] };
+    api.SyntaxTree.mockReturnValue(JSON.stringify(tree));
+    const result = await roundtrip('koine/syntaxTree', { textDocument: { uri: URI } });
+    const call = last(api.SyntaxTree.mock.calls);
+    expect(JSON.parse(call[0])).toEqual([{ uri: URI, text: 'x' }]); // filesJson envelope
+    expect(call[1]).toBe(URI); // active uri
+    expect(result).toEqual(tree);
+  });
+
+  test('koine/syntaxTree passes through the JSON literal null for an unknown active uri (#890)', async () => {
+    api.SyntaxTree.mockReturnValue('null');
+    const result = await roundtrip('koine/syntaxTree', { textDocument: { uri: 'file:///nope.koi' } });
+    expect(last(api.SyntaxTree.mock.calls)[1]).toBe('file:///nope.koi');
+    expect(result).toBeNull();
   });
 });
 

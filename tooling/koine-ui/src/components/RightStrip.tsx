@@ -63,6 +63,21 @@ const STRIPE_BUTTONS: readonly StripeButton[] = [
       </>
     ),
   },
+  {
+    view: 'syntax-tree',
+    label: 'Syntax Tree',
+    // Hierarchy — a root node branching down through a horizontal bus to two children (an org-chart /
+    // parse-tree glyph). Deliberately distinct from the git-branch trunk above: top-centred root, two
+    // symmetric leaves below.
+    icon: (
+      <>
+        <circle cx="8" cy="3" r="1.6" />
+        <circle cx="3.5" cy="12.5" r="1.6" />
+        <circle cx="12.5" cy="12.5" r="1.6" />
+        <path d="M8 4.6V7M3.5 10.9V7h9v3.9" />
+      </>
+    ),
+  },
 ];
 
 /** The stripe's buttons: one icon toggle per RightView. Each carries a `data-tooltip` CSS reveals as a
