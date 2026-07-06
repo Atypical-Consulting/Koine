@@ -12,6 +12,7 @@ import type { ContextMapResult, GlossaryModel, ModelNode } from '@/lsp/lsp';
 import { constructForKind, constructIcon, countsByContext, type ModelOutlineHandlers } from '@/model/modelOutline';
 import { filterGlossaryModel, isAllContexts } from '@/model/activeContext';
 import { createFloatingMenu } from '@atypical/koine-ui';
+import { handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 
@@ -125,21 +126,54 @@ function focusTreeItem(tree: HTMLElement, item: HTMLElement): void {
   item.focus();
 }
 
+/** The treeitem a keydown targets: the event target's nearest treeitem, else the focused element's
+ *  (the listener is delegated on the root, so a keydown dispatched on the root carries the root as its
+ *  target and we fall back to `document.activeElement`). */
+function currentTreeItem(ev: KeyboardEvent): HTMLElement | null {
+  const focused = document.activeElement as HTMLElement | null;
+  return (
+    (ev.target as HTMLElement | null)?.closest<HTMLElement>('[role="treeitem"]') ??
+    focused?.closest<HTMLElement>('[role="treeitem"]') ??
+    null
+  );
+}
+
+/** A {@link RovingTreeNav} over a `role="tree"` root's live treeitems, built per keydown so it can read
+ *  the event's target. The navigator has no ArrowRight/Left (its trees never collapse a branch), so it
+ *  omits `expand`/`collapse` and keeps the default Home/End + Space-activation. */
+function treeNav(tree: HTMLElement, ev: KeyboardEvent): RovingTreeNav<HTMLElement> {
+  return {
+    items: () => treeItems(tree),
+    activeIndex: () => {
+      const current = currentTreeItem(ev);
+      return current ? treeItems(tree).indexOf(current) : -1;
+    },
+    focusIndex: (i) => {
+      const item = treeItems(tree)[i];
+      if (item) focusTreeItem(tree, item);
+    },
+    activate: () => {
+      // A `<button>` treeitem activates natively (leave the key to the browser); a wrapper row (the
+      // tactical rows) forwards Enter/Space to the primary control inside it.
+      const current = currentTreeItem(ev);
+      if (current && current.tagName !== 'BUTTON') {
+        current.querySelector<HTMLElement>('button')?.click();
+        return true;
+      }
+      return false;
+    },
+  };
+}
+
 /** Wire the WAI-ARIA tree keyboard model onto a `role="tree"` root: roving tabindex (one tab stop) plus
  * ArrowDown/Up across the visible treeitems, Home/End to the first/last, and Enter/Space to activate the
- * focused row (a treeitem that is itself a `<button>` activates natively; a wrapper row forwards to its
- * primary control). The listener is delegated on the root, so a keydown bubbling from any focused row —
- * or dispatched on the root itself — is handled in one place. */
+ * focused row — the shared router (`shell/rovingTreeNav.ts`, #1105) owns that key routing; this only
+ * supplies the item source and the panel-specific ContextMenu affordance. The listener is delegated on
+ * the root, so a keydown bubbling from any focused row — or dispatched on the root itself — is handled
+ * in one place. */
 function wireTreeNav(tree: HTMLElement): void {
   setRovingItem(tree, null); // seed the first treeitem as the single tab stop
   tree.addEventListener('keydown', (ev) => {
-    const items = treeItems(tree);
-    if (!items.length) return;
-    const focused = document.activeElement as HTMLElement | null;
-    const current =
-      (ev.target as HTMLElement | null)?.closest<HTMLElement>('[role="treeitem"]') ??
-      focused?.closest<HTMLElement>('[role="treeitem"]') ??
-      null;
     // Context-menu affordance: the dedicated ContextMenu key (or Shift+F10) opens the focused row's `⋯`
     // overflow, so keyboard users reach its cross-axis actions ("Reveal in Files") the mouse gets from the
     // `⋯` button (which roving tabindex keeps out of the tab order).
@@ -147,41 +181,14 @@ function wireTreeNav(tree: HTMLElement): void {
       // Only the row's OWN ⋯ qualifies (a leaf row appends it as a direct child). A bare descendant
       // lookup on an aggregate treeitem would descend into its nested group and open the first owned
       // leaf's menu — a wrongly-targeted action; an aggregate has no overflow, so the key no-ops there.
-      const more = current?.querySelector<HTMLElement>(':scope > .koi-tactical-more');
+      const more = currentTreeItem(ev)?.querySelector<HTMLElement>(':scope > .koi-tactical-more');
       if (more) {
         ev.preventDefault();
         more.click();
       }
       return;
     }
-    const idx = current ? items.indexOf(current) : -1;
-    switch (ev.key) {
-      case 'ArrowDown':
-        ev.preventDefault();
-        focusTreeItem(tree, items[Math.min(items.length - 1, idx + 1)] ?? items[0]);
-        break;
-      case 'ArrowUp':
-        ev.preventDefault();
-        focusTreeItem(tree, items[Math.max(0, idx - 1)] ?? items[0]);
-        break;
-      case 'Home':
-        ev.preventDefault();
-        focusTreeItem(tree, items[0]);
-        break;
-      case 'End':
-        ev.preventDefault();
-        focusTreeItem(tree, items[items.length - 1]);
-        break;
-      case 'Enter':
-      case ' ':
-        // A `<button>` treeitem activates natively; a wrapper row (the tactical rows) forwards to the
-        // primary control inside it.
-        if (current && current.tagName !== 'BUTTON') {
-          ev.preventDefault();
-          current.querySelector<HTMLElement>('button')?.click();
-        }
-        break;
-    }
+    handleTreeKeydown(treeNav(tree, ev), ev);
   });
 }
 
