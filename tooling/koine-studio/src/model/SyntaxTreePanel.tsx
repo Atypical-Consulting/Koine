@@ -50,6 +50,50 @@ function nodeAtKey(root: SyntaxTreeNode, key: string): SyntaxTreeNode | null {
   return node ?? null;
 }
 
+/** True when a node's OWN raw span contains the 1-based caret `(line, col)`:
+ *  `(span.line, span.column) <= (line, col) < (span.endLine, span.endColumn)` — lexicographic on
+ *  line-then-column, end-EXCLUSIVE. All-zero / span-less nodes (the root has a `line:0` span) contain
+ *  nothing, so they never match. */
+function spanContainsCaret(span: SyntaxTreeNode['span'], line: number, col: number): boolean {
+  if (span.line === 0) return false; // the all-zero root span / a span-less node contains nothing
+  const afterStart = line > span.line || (line === span.line && col >= span.column);
+  const beforeEnd = line < span.endLine || (line === span.endLine && col < span.endColumn);
+  return afterStart && beforeEnd;
+}
+
+/**
+ * The DEEPEST node (with its index-path key) whose OWN span contains the caret, or null when nothing
+ * does. This is the client-side {@link `SyntaxGraph.FindNode(offset)`} heuristic: `span` is each node's
+ * OWN range, not the bounding span the server would union over a subtree, so this resolves deepest
+ * own-span containment — the v1 fidelity. Ties (equal depth) resolve to the first in pre-order.
+ */
+export function deepestContaining(
+  root: SyntaxTreeNode,
+  line: number,
+  col: number,
+): { key: string; node: SyntaxTreeNode } | null {
+  let best: { key: string; node: SyntaxTreeNode } | null = null;
+  let bestDepth = -1;
+  const walk = (node: SyntaxTreeNode, key: string, depth: number): void => {
+    if (depth > bestDepth && spanContainsCaret(node.span, line, col)) {
+      best = { key, node };
+      bestDepth = depth;
+    }
+    node.children.forEach((c, i) => walk(c, `${key}/${i}`, depth + 1));
+  };
+  walk(root, ROOT_KEY, 0);
+  return best;
+}
+
+/** A new expanded-set that also has every ANCESTOR of `key` expanded (so the node at `key` renders). The
+ *  key itself is NOT force-expanded — only the path down to it. Returns `prev` unchanged when every
+ *  ancestor is already expanded, so the caller's `setExpanded` can bail without a re-render. */
+function withAncestorsExpanded(prev: Set<string>, key: string): Set<string> {
+  const next = new Set(prev);
+  for (let i = key.indexOf('/'); i !== -1; i = key.indexOf('/', i + 1)) next.add(key.slice(0, i));
+  return next.size === prev.size ? prev : next;
+}
+
 /** A single-line, whitespace-collapsed, length-capped preview of a leaf node's source text. */
 function previewLeaf(leaf: string): string {
   const t = leaf.replace(/\s+/g, ' ').trim();
@@ -74,8 +118,19 @@ export function SyntaxTreePanel(props: {
    * invalidation). Optional — omitted, the panel just fetches once on mount.
    */
   revision?: number;
+  /**
+   * Tree → editor (#890): fires when a row is selected (clicked, or Enter on a non-expandable row), with
+   * that node — the controller jumps the editor to `node.span`. Optional so the panel renders standalone.
+   */
+  onNodeClick?: (node: SyntaxTreeNode) => void;
+  /**
+   * Editor → tree (#890): the editor's 1-based caret. The panel highlights the DEEPEST node whose OWN
+   * span contains it (auto-expanding its ancestors and scrolling it into view). Omitted / out-of-range →
+   * no caret-driven highlight (a click selection, if any, is left untouched).
+   */
+  caret?: { line: number; column: number };
 }): JSX.Element {
-  const { source } = props;
+  const { source, onNodeClick, caret } = props;
 
   // `undefined` until the first fetch settles (loading); then the fetched node or `null` (empty).
   const [tree, setTree] = useState<SyntaxTreeNode | null | undefined>(undefined);
@@ -83,6 +138,10 @@ export function SyntaxTreePanel(props: {
   // The roving-tabindex active row: exactly one visible treeitem is tabbable at a time (one tab stop for
   // the whole tree). `null` falls back to the root, so a fresh tree is always reachable by Tab.
   const [focusedKey, setFocusedKey] = useState<string | null>(null);
+  // The single "active" (highlighted) node, driven by BOTH a row click (tree → editor) and a caret move
+  // (editor → tree): exactly one row wears `--current` + `aria-current` at a time. Distinct from
+  // `focusedKey` (the keyboard tab stop) — selecting/highlighting isn't the same as being the tab stop.
+  const [activeKey, setActiveKey] = useState<string | null>(null);
   const treeRef = useRef<HTMLDivElement>(null);
 
   // The single fetch path: pull the active document's tree on mount and whenever the source or the
@@ -100,17 +159,41 @@ export function SyntaxTreePanel(props: {
         setTree(t ?? null);
         setExpanded(t ? defaultExpanded(t) : new Set());
         setFocusedKey(null); // reset the roving tab stop to the (new) root
+        setActiveKey(null); // drop any stale highlight; the caret effect re-derives it for the new tree
       })
       .catch(() => {
         if (!alive) return;
         setTree(null);
         setExpanded(new Set());
         setFocusedKey(null);
+        setActiveKey(null);
       });
     return () => {
       alive = false;
     };
   }, [source, props.revision]);
+
+  // Editor → tree (#890): when the caret (or the tree) changes, highlight the deepest node whose OWN span
+  // contains the caret and expand its ancestors so it's visible. A missing caret (no source) leaves any
+  // click-driven highlight alone; an out-of-range caret clears the highlight (nothing contains it).
+  // Deps are the whole `caret` object (not its fields) so exhaustive-deps stays satisfied: the store hands
+  // a fresh `{line,column}` object only when the caret actually moves (setCursor), and a stable reference
+  // otherwise — so this re-runs on a real caret move, not on the panel's own state re-renders.
+  useEffect(() => {
+    if (!caret || tree == null) return;
+    const hit = deepestContaining(tree, caret.line, caret.column);
+    setActiveKey(hit?.key ?? null);
+    if (hit) setExpanded((prev) => withAncestorsExpanded(prev, hit.key));
+  }, [caret, tree]);
+
+  // Scroll the highlighted row into view once it (and its just-expanded ancestors) are in the DOM. Keyed
+  // on `activeKey` so a caret move that lands on the same node doesn't re-scroll; `scrollIntoView` is
+  // guarded (happy-dom / older engines may not implement it).
+  useEffect(() => {
+    if (activeKey == null) return;
+    const el = treeRef.current?.querySelector<HTMLElement>(`[data-key="${activeKey}"]`);
+    el?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeKey]);
 
   /** The visible treeitems in DOM (== visual) order — collapsed subtrees aren't in the DOM, so this is
    *  exactly the set Arrow keys traverse. Mirrors the domain navigator's `treeItems()`. */
@@ -213,15 +296,18 @@ export function SyntaxTreePanel(props: {
 
   // One row + (when expanded) its nested `role="group"` of children. The treeitem is the focusable unit;
   // the twisty, recovery badges and leaf preview are decorative (aria-hidden) — the isolated `aria-label`
-  // carries the spoken name. Clicking the row toggles an expandable node and takes the roving tab stop.
-  // TODO (Task 6): thread `onNodeClick(node)` / a `selectedKey` here for source ↔ tree navigation.
+  // carries the spoken name. Clicking the row SELECTS it (highlights + fires `onNodeClick` → jump-to-span)
+  // and takes the roving tab stop; the twisty is the separate expand/collapse affordance (keyboard still
+  // toggles via Arrow/Enter/Space on the row). The caret-tracked or clicked node wears `--current`.
   function renderNode(node: SyntaxTreeNode, level: number, key: string): JSX.Element {
     const hasChildren = node.children.length > 0;
     const isExpanded = hasChildren && expanded.has(key);
     const tabbable = key === (focusedKey ?? ROOT_KEY);
+    const isCurrent = key === activeKey;
     const cls = ['koi-stree-item'];
     if (node.isError) cls.push('koi-stree-item--error');
     if (node.isMissing) cls.push('koi-stree-item--missing');
+    if (isCurrent) cls.push('koi-stree-item--current');
     const leafPreview = !hasChildren && node.leaf ? previewLeaf(node.leaf) : null;
 
     return (
@@ -231,16 +317,32 @@ export function SyntaxTreePanel(props: {
         data-key={key}
         aria-level={level}
         aria-expanded={hasChildren ? isExpanded : undefined}
+        aria-current={isCurrent ? 'true' : undefined}
         aria-label={accessibleName(node)}
         tabIndex={tabbable ? 0 : -1}
         onClick={(e) => {
           e.stopPropagation();
-          if (hasChildren) toggle(key);
           setFocusedKey(key);
+          setActiveKey(key);
+          onNodeClick?.(node);
         }}
       >
         <div class="koi-stree-row" style={{ paddingInlineStart: `${(level - 1) * 0.85 + 0.2}rem` }}>
-          <span class={`koi-stree-twisty${hasChildren ? '' : ' koi-stree-twisty--leaf'}`} aria-hidden="true">
+          <span
+            class={`koi-stree-twisty${hasChildren ? '' : ' koi-stree-twisty--leaf'}`}
+            aria-hidden="true"
+            onClick={
+              hasChildren
+                ? (e) => {
+                    // The twisty is the expand/collapse affordance: toggle in place WITHOUT selecting the
+                    // row (stopPropagation keeps the treeitem's select+navigate handler from also firing).
+                    e.stopPropagation();
+                    toggle(key);
+                    setFocusedKey(key);
+                  }
+                : undefined
+            }
+          >
             {hasChildren ? (isExpanded ? '▾' : '▸') : ''}
           </span>
           <span class="koi-stree-kind">{node.kind}</span>

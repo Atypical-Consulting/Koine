@@ -229,8 +229,11 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
       downstreamOnChange?.(doc, deps.activeUri());
     },
     // Status-bar cursor segment (#923): mirror the caret's 1-based line/column on every edit/selection.
+    // Also publish it to the store's `cursor` slice (#890) so the Syntax Tree panel can highlight the
+    // deepest node containing the caret (source → tree navigation) — the status-bar write is unchanged.
     onCursor: (line, col) => {
       deps.sbCursor.textContent = `Ln ${line}, Col ${col}`;
+      appStore.getState().setCursor(line, col);
     },
     onHover: hover,
     onCompletion: completion,

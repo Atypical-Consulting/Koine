@@ -857,7 +857,23 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   let syntaxTreeLoaded = false;
   let syntaxTreeRefresh = 0;
   function renderSyntaxTree(): void {
-    render(<SyntaxTreePanel source={lsp} revision={syntaxTreeRefresh} />, syntaxTreeRightView);
+    render(
+      <SyntaxTreePanel
+        source={lsp}
+        revision={syntaxTreeRefresh}
+        // Tree → editor (#890): jump to the clicked node's span, GUARDING the all-zero span the model root
+        // and span-less nodes carry (line 0 → a no-op, never a jump to 0:0). `node.span` (a SyntaxSpan)
+        // structurally satisfies gotoSourceSpan's Pick<SourceSpan, …>.
+        onNodeClick={(node) => {
+          if (node.span.line > 0) deps.gotoSourceSpan(node.span);
+        }}
+        // Editor → tree (#890): the live caret, so the panel highlights the deepest node containing it.
+        // Read fresh at render time, so opening the panel (or an edit-driven re-render) already reflects
+        // the current caret; the debounced cursor subscription below re-renders on subsequent caret moves.
+        caret={appStore.getState().cursor ?? undefined}
+      />,
+      syntaxTreeRightView,
+    );
   }
   function loadSyntaxTree(): void {
     if (syntaxTreeLoaded) syntaxTreeRefresh += 1; // a re-open / edit re-fetches; first mount fetches on its own
@@ -866,6 +882,24 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     appStore.getState().markLoaded('syntax-tree', appStore.getState().currentToken('syntax-tree'));
     renderSyntaxTree();
   }
+  // Editor → tree caret sync (#890): the editor publishes its caret to the store's `cursor` slice
+  // (editorSession.onCursor). When the Syntax Tree is the active right view AND its panel is mounted,
+  // mirror a caret move into the panel (a fresh `caret` prop — same `revision`, so NO re-fetch) so it
+  // re-highlights the deepest containing node. DEBOUNCED because caret moves are frequent and this is a
+  // secondary affordance; when the view isn't active we skip the work (the next open re-renders with the
+  // then-current caret). Captured + unsubscribed on dispose (like unsubscribeDirtyCount) so a deferred
+  // re-render can't fire into a torn-down host; the timer is likewise cleared on dispose.
+  let caretSyncTimer: ReturnType<typeof setTimeout> | undefined;
+  const unsubscribeCursor = appStore.subscribe((s, prev) => {
+    if (s.cursor === prev.cursor) return; // an unrelated slice write
+    if (!syntaxTreeLoaded || s.right !== 'syntax-tree') return;
+    clearTimeout(caretSyncTimer);
+    caretSyncTimer = setTimeout(() => {
+      if (disposed) return;
+      if (!syntaxTreeLoaded || appStore.getState().right !== 'syntax-tree') return;
+      renderSyntaxTree();
+    }, 120);
+  });
   const docsFail = (verb: string) => (e: unknown) => deps.setStatus(`Could not ${verb}: ${String(e)}`, 'error');
 
   // One handlers object the two pages share: each create resets only its OWN page's loaded flag and
@@ -2283,12 +2317,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     clearTimeout(copyResetTimer);
     clearTimeout(editDebounce);
     clearTimeout(bottomPanelDebounce);
+    clearTimeout(caretSyncTimer); // #890: clear the debounced Syntax Tree caret-sync so it can't re-render a torn-down host
     clearTimeout(notifyTimer); // #648: clear the stripe-flash timer so it can't touch a torn-down DOM node
     // Drop the Domain navigator's store subscription so a deferred store change can't repaint a torn-down
     // host (the same hazard the debounce clears, for the navigator's #453 subscription).
     domainNavigator?.unmount();
     // Drop the Source Control dirty-count subscription (#470) for the same reason.
     unsubscribeDirtyCount();
+    // Drop the Syntax Tree caret-sync subscription (#890) too — its callback re-renders the panel, which
+    // must not fire into a torn-down host after dispose.
+    unsubscribeCursor();
     // Drop the activeContext subscription (#531) too — its callback re-renders scoped surfaces, which
     // would throw into a torn-down host if a deferred slice change fired after dispose.
     unsubscribeActiveContext();

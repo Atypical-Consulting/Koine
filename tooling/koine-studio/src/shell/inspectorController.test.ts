@@ -1168,6 +1168,72 @@ describe('createInspectorController — Syntax Tree right view (#890)', () => {
     expect(lsp.syntaxTree).not.toHaveBeenCalled();
     ctl.dispose();
   });
+
+  test('clicking a node jumps the editor to its span; the zero-span root is a no-op (#890)', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    stripBtn('syntax-tree').click();
+    const host = domById('rview-syntax-tree');
+    // Wait for the panel to mount its tree, then click the Billing context row (a leaf in this fixture).
+    const ctxRow = await waitFor(() => {
+      const el = host.querySelector<HTMLElement>('[role="treeitem"][aria-label*="ContextNode Billing"]');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    ctxRow.click();
+    // Tree → editor: the node's raw span is handed to the shared jump-to-source path.
+    expect(deps.gotoSourceSpan).toHaveBeenCalledWith(
+      expect.objectContaining({ file: 'file:///work/model.koi', line: 1, column: 1, endLine: 3, endColumn: 1 }),
+    );
+
+    // The KoineModel root carries an all-zero span (line 0): clicking it must never jump to 0:0.
+    vi.mocked(deps.gotoSourceSpan).mockClear();
+    host.querySelector<HTMLElement>('[role="treeitem"][aria-label*="KoineModel"]')!.click();
+    expect(deps.gotoSourceSpan).not.toHaveBeenCalled();
+    ctl.dispose();
+  });
+
+  test('a caret move while the Syntax Tree view is active highlights the deepest containing node (#890)', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    stripBtn('syntax-tree').click();
+    const host = domById('rview-syntax-tree');
+    await waitFor(() => expect(host.querySelector('[role="tree"]')).not.toBeNull());
+
+    // The editor publishes a caret inside Billing's span (lines 1–3) via the store's cursor slice.
+    deps.store.getState().setCursor(2, 1);
+
+    // Debounced (~120ms): the controller re-renders the panel with the new caret, which marks the deepest
+    // containing node (the Billing context — the root is span-less) as current.
+    await waitFor(
+      () => {
+        const current = host.querySelector('.koi-stree-item--current');
+        expect(current?.getAttribute('aria-label')).toMatch(/ContextNode Billing/);
+      },
+      { timeout: 2000 },
+    );
+    ctl.dispose();
+  });
+
+  test('a caret move while Syntax Tree is NOT the active view is a no-op (#890)', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init(); // Properties is the active right view; the Syntax Tree panel is never mounted
+
+    deps.store.getState().setCursor(2, 1);
+    await new Promise((r) => setTimeout(r, 200)); // past the 120ms caret debounce
+    // The panel was never mounted/rendered, so no tree (and no highlight) exists in its host.
+    expect(domById('rview-syntax-tree').querySelector('[role="tree"]')).toBeNull();
+    expect(lsp.syntaxTree).not.toHaveBeenCalled();
+    ctl.dispose();
+  });
 });
 
 describe('createInspectorController — construct palette', () => {

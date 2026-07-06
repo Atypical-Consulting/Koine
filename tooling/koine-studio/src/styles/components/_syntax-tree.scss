@@ -118,3 +118,11 @@
     font-style: italic;
   }
 }
+
+/* The active node (#890, source ↔ tree navigation): the row the editor caret currently sits in, or the
+   one just clicked. A distinct accent wash so it stands apart from the subtle hover feedback — only ever
+   one node is `--current` at a time. Doubly-classed so it wins over the equal-specificity hover rule even
+   while the current row is itself hovered. */
+.koi-stree-item.koi-stree-item--current > .koi-stree-row {
+  background: color-mix(in srgb, var(--koi-accent) 20%, transparent);
+}
