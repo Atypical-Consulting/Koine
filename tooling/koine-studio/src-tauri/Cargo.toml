@@ -1,6 +1,6 @@
 [package]
 name = "koine-studio"
-version = "0.246.0" # x-release-please-version
+version = "0.247.0" # x-release-please-version
 description = "Koine Studio — the desktop IDE for the Koine domain-specific language for Domain-Driven Design."
 authors = ["Philippe Matray <phmatray@gmail.com>"]
 edition = "2021"
