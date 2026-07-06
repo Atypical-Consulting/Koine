@@ -309,7 +309,9 @@ describe('runEditToolStaging — stage-only dispatch (issue #474)', () => {
       session,
     );
     // The body is staged...
-    expect(session.staged()).toEqual([{ relPath: 'orders.koi', body: 'context Orders {}', isNew: true }]);
+    expect(session.staged()).toEqual([
+      { key: 'orders.koi', relPath: 'orders.koi', body: 'context Orders {}', isNew: true },
+    ]);
     // ...and the result is EXACTLY the formatWriteFile confirmation — no appended `ok:` diagnostics. The
     // whole-staged-workspace validation moved to a single end-of-turn pass (no O(M×N) per-write compile).
     expect(result).toBe(formatWriteFile('orders.koi', true));
@@ -329,8 +331,8 @@ describe('runEditToolStaging — stage-only dispatch (issue #474)', () => {
       session,
     );
     expect(session.staged()).toEqual([
-      { relPath: 'a.koi', body: 'context A { /* v2 */ }', isNew: false },
-      { relPath: 'b.koi', body: 'context B {}', isNew: true },
+      { key: 'a.koi', relPath: 'a.koi', body: 'context A { /* v2 */ }', isNew: false },
+      { key: 'b.koi', relPath: 'b.koi', body: 'context B {}', isNew: true },
     ]);
     expect(r1).toBe(formatWriteFile('a.koi', false));
     expect(r2).toBe(formatWriteFile('b.koi', true));

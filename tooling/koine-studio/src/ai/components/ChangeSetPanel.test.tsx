@@ -14,8 +14,13 @@ import type { StoreApi } from 'zustand/vanilla';
 import { ChangeSetPanel } from '@/ai/components/ChangeSetPanel';
 
 const staged: StagedEdit[] = [
-  { relPath: 'ordering/order.koi', body: 'context Ordering {\n  aggregate Order {}\n}', isNew: false },
-  { relPath: 'billing/invoice.koi', body: 'context Billing {}', isNew: true },
+  {
+    key: 'ordering/order.koi',
+    relPath: 'ordering/order.koi',
+    body: 'context Ordering {\n  aggregate Order {}\n}',
+    isNew: false,
+  },
+  { key: 'billing/invoice.koi', relPath: 'billing/invoice.koi', body: 'context Billing {}', isNew: true },
 ];
 const before = { 'ordering/order.koi': 'context Ordering {\n}' };
 

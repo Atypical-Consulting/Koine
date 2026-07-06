@@ -77,7 +77,11 @@ describe('StoreInspector', () => {
       store.getState().startChatTurn();
       store
         .getState()
-        .stageChangeSet([{ relPath: 'order.koi', body: 'context Ordering', isNew: true }], {}, null);
+        .stageChangeSet(
+          [{ key: 'order.koi', relPath: 'order.koi', body: 'context Ordering', isNew: true }],
+          {},
+          null,
+        );
     });
 
     expect(field(container, 'chat')).toBe('streaming, 1 message, reviewing');

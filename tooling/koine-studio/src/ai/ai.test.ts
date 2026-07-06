@@ -424,7 +424,7 @@ describe('agentic edit tools (multi-file workspace mode)', () => {
     expect(editCalls).toEqual(['koine_list_files', 'koine_read_file', 'koine_write_file']);
     expect(compilerCalls).toEqual([]);
     // The write staged a brand-new file into the session, and the loop terminated with the final text.
-    expect(session.staged()).toEqual([{ relPath: 'b.koi', body: 'context B {}', isNew: true }]);
+    expect(session.staged()).toEqual([{ key: 'b.koi', relPath: 'b.koi', body: 'context B {}', isNew: true }]);
     expect(out).toBe('All good ✓');
   });
 

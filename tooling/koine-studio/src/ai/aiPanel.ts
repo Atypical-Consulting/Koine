@@ -410,7 +410,7 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
       note: drifted.length ? `Applying ${clean.length} clean ${files(clean.length)}.${skipped}` : null,
     });
     store.getState().beginChangeSetApply(); // reviewing → applying; the phase guards the in-flight window
-    const payload: StagedEdit[] = clean.map((f) => ({ relPath: f.relPath, body: f.body, isNew: f.isNew }));
+    const payload: StagedEdit[] = clean.map((f) => ({ key: f.relPath, relPath: f.relPath, body: f.body, isNew: f.isNew }));
     void Promise.resolve(opts.onApplyChangeSet?.(payload) ?? { failed: [] as string[] })
       .then((result) => {
         // A set superseded or replaced WHILE this apply was in flight is terminal (#684): a late settle

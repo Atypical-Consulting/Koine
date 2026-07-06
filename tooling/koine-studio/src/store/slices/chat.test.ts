@@ -311,6 +311,7 @@ describe('streaming turn', () => {
 });
 
 const edit = (relPath: string, body: string, isNew = false): StagedEdit => ({
+  key: relPath, // key === relPath for these single-root fixtures (#472)
   relPath,
   body,
   isNew,

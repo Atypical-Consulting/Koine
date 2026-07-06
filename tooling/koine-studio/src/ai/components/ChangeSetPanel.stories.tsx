@@ -37,8 +37,8 @@ const INVOICE_BODY = `context Billing {
 
 /** The staged set every story reviews: one modified file (a real line-diff) + one brand-new file. */
 const staged: StagedEdit[] = [
-  { relPath: 'ordering/order.koi', body: ORDER_AFTER, isNew: false },
-  { relPath: 'billing/invoice.koi', body: INVOICE_BODY, isNew: true },
+  { key: 'ordering/order.koi', relPath: 'ordering/order.koi', body: ORDER_AFTER, isNew: false },
+  { key: 'billing/invoice.koi', relPath: 'billing/invoice.koi', body: INVOICE_BODY, isNew: true },
 ];
 const before = { 'ordering/order.koi': ORDER_BEFORE };
 
