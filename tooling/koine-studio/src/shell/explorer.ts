@@ -14,6 +14,7 @@
 // the prompting; the actual fs work happens in the host via the ExplorerCallbacks. Dirty dot, active
 // state and the error/warning badge mirror ide.ts/renderTree so the visual language stays consistent.
 import type { FsEntry } from '@/host';
+import { handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
 import { createFloatingMenu, createModal, type ModalHandle } from '@atypical/koine-ui';
 
 export interface ExplorerCallbacks {
@@ -518,60 +519,85 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     li.focus();
   }
 
-  function onRowKeydown(ev: KeyboardEvent, li: HTMLLIElement, entry: FsEntry, parentDir: string): void {
-    // Each nested treeitem <li> is a DOM descendant of its ancestor directory <li>s, which also carry
-    // this handler. Stop here so a keydown on a nested row isn't re-run for every ancestor (which
-    // would move focus by the wrong index). The innermost (focused) li handles the event.
-    ev.stopPropagation();
-    const items = visibleItems();
-    const idx = items.indexOf(li);
+  // The WAI-ARIA tree keyboard model (ArrowUp/Down · ArrowRight/Left expand/descend/collapse/ascend ·
+  // Enter to activate) is shared with the domain navigator and the syntax-tree panel via
+  // handleTreeKeydown (#1105); the explorer supplies a DOM-backed RovingTreeNav adapter over its visible
+  // <li role="treeitem"> rows and keeps its own panel-specific keys (F2 rename, Delete, the ContextMenu
+  // key). It deliberately opts OUT of Home/End and Space-activation — this pane never wired them, so
+  // adopting the shared router must not silently add keys.
+  function rowNav(li: HTMLLIElement, entry: FsEntry): RovingTreeNav<HTMLLIElement> {
     const isDir = entry.kind === 'dir';
-
-    switch (ev.key) {
-      case 'ArrowDown':
-        ev.preventDefault();
-        if (idx >= 0 && idx < items.length - 1) focusItem(items[idx + 1]);
-        break;
-      case 'ArrowUp':
-        ev.preventDefault();
-        if (idx > 0) focusItem(items[idx - 1]);
-        break;
-      case 'ArrowRight':
-        ev.preventDefault();
+    // Snapshot the visible rows once per keydown: movement keys never mutate the tree, and the
+    // structural keys below only read this list in their non-mutating branch, so a single walk suffices
+    // (the pre-refactor handler likewise walked once).
+    const items = visibleItems();
+    return {
+      items: () => items,
+      activeIndex: () => items.indexOf(li),
+      focusIndex: (i) => {
+        const item = items[i];
+        if (item) focusItem(item);
+      },
+      // ArrowRight: open a closed directory, or step into an already-open one. Always reports the key
+      // consumed (the original unconditionally prevented default) — a file simply has nothing to expand.
+      expand: () => {
         if (isDir) {
-          if (li.getAttribute('aria-expanded') !== 'true') setExpanded(li, true);
-          else if (idx >= 0 && idx < items.length - 1) focusItem(items[idx + 1]);
+          if (li.getAttribute('aria-expanded') !== 'true') {
+            setExpanded(li, true);
+          } else {
+            const idx = items.indexOf(li);
+            if (idx >= 0 && idx < items.length - 1) focusItem(items[idx + 1]);
+          }
         }
-        break;
-      case 'ArrowLeft':
-        ev.preventDefault();
+        return true;
+      },
+      // ArrowLeft: collapse an open directory, else focus the parent row.
+      collapse: () => {
         if (isDir && li.getAttribute('aria-expanded') === 'true') {
           setExpanded(li, false);
         } else {
           const parent = parentItemOf(li);
           if (parent) focusItem(parent);
         }
-        break;
-      case 'Enter':
-        ev.preventDefault();
+        return true;
+      },
+      // Enter: toggle a directory, or open a file.
+      activate: () => {
         if (isDir) toggleDir(li);
         else cb.onOpenFile(entry.token);
-        break;
+        return true;
+      },
+      supportsHomeEnd: false,
+      supportsSpaceActivate: false,
+    };
+  }
+
+  function onRowKeydown(ev: KeyboardEvent, li: HTMLLIElement, entry: FsEntry, parentDir: string): void {
+    // Each nested treeitem <li> is a DOM descendant of its ancestor directory <li>s, which also carry
+    // this handler. Stop here so a keydown on a nested row isn't re-run for every ancestor (which
+    // would move focus by the wrong index). The innermost (focused) li handles the event.
+    ev.stopPropagation();
+
+    // Panel-specific keys the shared tree router doesn't own.
+    switch (ev.key) {
       case 'F2':
         ev.preventDefault();
         startRename(li, entry);
-        break;
+        return;
       case 'Delete':
         ev.preventDefault();
         void confirmDelete(entry);
-        break;
+        return;
       case 'ContextMenu': {
         ev.preventDefault();
         const r = li.getBoundingClientRect();
         openMenu(entry, parentDir, r.left, r.bottom);
-        break;
+        return;
       }
     }
+
+    // ArrowUp/Down · ArrowRight/Left · Enter → the shared roving-tree keyboard router.
+    handleTreeKeydown(rowNav(li, entry), ev);
   }
 
   function parentItemOf(li: HTMLLIElement): HTMLLIElement | null {
