@@ -1,11 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <RootNamespace>Koine.Compiler</RootNamespace>
-  </PropertyGroup>
+  <Import Project="..\Koine.Emit.props" />
 
   <!-- The TypeScript emitter, extracted from Koine.Compiler into its own assembly (issue #861) so a
        consumer can take just this target. Namespace is Koine.Compiler (assembly
@@ -16,12 +11,6 @@
     <Description>The TypeScript backend for the Koine DSL compiler — emits idiomatic, self-contained TypeScript from a Koine bounded-context model.</Description>
     <PackageTags>ddd;domain-driven-design;dsl;compiler;code-generation;koine;emitter;typescript</PackageTags>
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
-    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
-    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Koine.Emit.Common\Koine.Emit.Common.csproj" />
