@@ -33,6 +33,7 @@ public class DiagnosticDescriptorTests
         DiagnosticCodes.AclDirectUpstreamReference,    // SemanticValidator.cs:226
         DiagnosticCodes.AnnotationVersionAboveContext, // SemanticValidator.cs:86,96
         DiagnosticCodes.AggregateNameMatchesRoot,      // SemanticValidator.cs (AggregateDecl case)
+        DiagnosticCodes.AmbiguousMultiOwnerReference,  // CrossContextTypeValidator.cs
     };
 
     [Fact]
