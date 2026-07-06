@@ -178,10 +178,7 @@ public sealed partial class CSharpEmitter : IEmitter
         // methods so the emitter holds no mutable per-model fields (it stays reentrant).
         var emit = new EmitContext(
             Index: index,
-            ScalarNeeds: OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
-            ScalarDivNeeds: OperatorNeedsAnalyzer.BuildScalarDivisionNeeds(model, index),
-            AdditiveNeeds: OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
-            DirectArithmeticNeeds: OperatorNeedsAnalyzer.BuildValueObjectArithmeticNeeds(model, index),
+            OperatorNeeds: OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index),
             ContextNames: model.Contexts.Select(c => c.Name).ToList(),
             IdStrategies: BuildIdentityStrategies(model),
             Options: _options,

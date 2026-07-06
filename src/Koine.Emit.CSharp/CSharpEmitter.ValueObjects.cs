@@ -124,10 +124,19 @@ public sealed partial class CSharpEmitter
             // no one calls. Quantities (R9.2) are the exception — they always get unit-checked
             // arithmetic above. If a VO needs guaranteed operators, model it as a quantity.
 
+            // This value object's full operator demand, resolved once from the analyzer's single-pass
+            // model (#836): scalar multiply/divide factors, the `sum`-fold `IsSummable` flag, the plain
+            // binary `+`/`-` ops, and the precomputed `add`-need union. `null` = this VO needs no
+            // generated arithmetic (absent from the unified map, exactly as it was absent from all four
+            // separate maps before). Read null-safely below, matching PhpEmitter.EmitValueObject.
+            var needs = emit.OperatorNeeds.GetValueOrDefault(vo.Name);
+
             // Scalar arithmetic operators: emitted only when this value object is actually
             // multiplied (`*`) or divided (`/`, #832) by a scalar in a derived expression.
-            bool needsMul = emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? mulScalars);
-            bool needsDiv = emit.ScalarDivNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? divScalars);
+            IReadOnlySet<string>? mulScalars = needs?.MultiplyFactors;
+            IReadOnlySet<string>? divScalars = needs?.DivideFactors;
+            bool needsMul = mulScalars is { Count: > 0 };
+            bool needsDiv = divScalars is { Count: > 0 };
             if (needsMul || needsDiv)
             {
                 IReadOnlyList<Member> numericFields = NumericFields(bound);
@@ -146,13 +155,14 @@ public sealed partial class CSharpEmitter
             }
 
             // Additive (`+`) / subtractive (`-`) operators for a value object combined with its OWN
-            // type. `+` is demand-generated when the VO is folded with `sum` (emit.AdditiveNeeds) OR
-            // appears in a direct `fee + fee` (#833); `-` is demand-generated for a direct `fee - fee`
-            // (#833 — never generated for plain VOs before). Both route through the validating
-            // constructor, so e.g. a negative difference still throws the declared `invariant`.
-            emit.DirectArithmeticNeeds.TryGetValue(vo.Name, out IReadOnlySet<BinaryOp>? directOps);
-            bool needsAdd = emit.AdditiveNeeds.Contains(vo.Name) || (directOps?.Contains(BinaryOp.Add) ?? false);
-            bool needsSub = directOps?.Contains(BinaryOp.Sub) ?? false;
+            // type. The analyzer pre-computes the union of the two `+` demands — `needs.NeedsAdd` = a
+            // `sum` fold (issue #692) OR a direct `fee + fee` (#833) — so the emitter no longer
+            // recombines the additive-fold and binary-arithmetic maps itself (#836). `-` is
+            // demand-generated purely from the direct binary `-` demand (`fee - fee`, #833 — never
+            // generated for plain VOs before). Both route through the validating constructor, so e.g. a
+            // negative difference still throws the declared `invariant`.
+            bool needsAdd = needs?.NeedsAdd ?? false;
+            bool needsSub = needs is not null && needs.BinaryOps.Contains(BinaryOp.Sub);
             if (needsAdd || needsSub)
             {
                 IReadOnlyList<Member> numericFields = NumericFields(bound);
