@@ -228,7 +228,7 @@ wildcard import ([§16.2.2](#1622-wildcard-import)), and fully-qualified referen
 | `import`/qualifier names an unknown context | `UnknownContext` |
 | Import a name the target context does not export | `NotExported` |
 | Same type name in two contexts (`A.Money`, `B.Money`) | Allowed; local use resolves to the **local** type |
-| Same type name in two contexts, referenced from a **third** (via import/qualifier) | Allowed; flat-module targets qualify to a deterministic canonical owner and warn (`AmbiguousMultiOwnerReference`, KOI1419) — see [§16.3.4](#1634-multi-owner-types-in-flat-module-targets) |
+| Same type name in two contexts, referenced from a **third** (via qualifier/import/map-permit) | Allowed; flat-module targets qualify to a deterministic canonical owner — a warning (`AmbiguousMultiOwnerReference`, KOI1419) fires **only** when the owner is a genuine ordinal-least tie-break — see [§16.3.4](#1634-multi-owner-types-in-flat-module-targets) |
 
 To fix an `AmbiguousReference`, switch to a named import or a fully-qualified reference.
 Note that emitted C# adds `using <TargetContext>;` **only** for contexts actually
@@ -253,28 +253,34 @@ targets — Rust (`crate::<module>::Type`) and Java (`<package>.Type`) — canno
 bare name there: a bare `Money` in the third context's module would not resolve.
 
 So those emitters qualify a multi-owner cross-context reference to a **deterministic
-canonical owner**, chosen the same way build-to-build:
+canonical owner**, chosen the same way build-to-build, in order:
 
-1. the single context the name is **imported** from, when that is unambiguous (the
-   reference binds there, so the qualification names exactly that type); otherwise
-2. the **ordinal-least** declaring context — a stable fallback independent of
+1. an explicit **`Context.T` qualifier** you wrote — your stated intent wins, so
+   `Beta.Money` qualifies to `Beta` even when `Alpha` is the ordinal-least owner;
+2. otherwise the single context the name is **imported** from (the reference binds there,
+   so the qualification names exactly that type);
+3. otherwise the single context the **context map permits** an un-imported reference from
+   — a conformist, open-host, published-language, partnership, or shared-kernel relation
+   (see [Context maps & integration §17.2](/Koine/reference/context-maps-integration/));
+4. otherwise the **ordinal-least** declaring context — a stable fallback independent of
    declaration/file order.
 
-Because that choice is otherwise invisible in the generated code, the compiler raises a
-**warning**, `AmbiguousMultiOwnerReference` (`KOI1419`), on the reference — naming the
-declaring contexts and the owner it qualified to:
+The first three pin the owner **unambiguously** — the reference resolves to exactly the
+type it binds to. Only the step-4 fallback is a genuine guess, so **only then** does the
+compiler raise a **warning**, `AmbiguousMultiOwnerReference` (`KOI1419`), on the reference
+— naming the declaring contexts and the owner it qualified to:
 
 ```
-gamma.koi:9:20: warning KOI1419: type 'Money' is declared in contexts 'Alpha', 'Beta'
+gamma.koi:8:20: warning KOI1419: type 'Money' is declared in contexts 'Alpha', 'Beta'
 and referenced from 'Gamma'; qualifying to 'Alpha'
 ```
 
 The warning never blocks a build; it flags a genuine cross-context name collision so you
-can rename one type or import the intended owner explicitly. Two cases are deliberately
-**silent** because there is nothing to disambiguate: a reference from within one of the
-type's own owning contexts (it binds locally), and a **shared-kernel** type, which is
-physically homed in one canonical module by design (see
-[Context maps & integration §17.2](/Koine/reference/context-maps-integration/)).
+can rename one type, add an explicit `Context.T` qualifier, or import the intended owner.
+Every deterministic case above is deliberately **silent** because there is nothing to
+disambiguate — an explicit qualifier, a single import, or a single map-permit — as are a
+reference from within one of the type's own owning contexts (it binds locally) and a
+**shared-kernel** type, which is physically homed in one canonical module by design.
 
 :::tip
 `import` and `module` are **soft keywords** — they are perfectly legal as field names
