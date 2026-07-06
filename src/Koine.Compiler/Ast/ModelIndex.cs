@@ -738,25 +738,30 @@ public sealed class ModelIndex
     ///   regardless of the referencing context (R14.2, unchanged);</item>
     ///   <item>a name declared by no context has no qualifiable owner (<c>null</c>) — primitives, the
     ///   <c>*Id</c> convention, and genuinely-unknown names are re-materialized/handled locally;</item>
+    ///   <item>an <b>explicit <c>Context.T</c> qualifier</b> the modeller wrote wins — when it names an
+    ///   actual declaring context of the type (a stale/unknown qualifier is ignored here and surfaced by
+    ///   <see cref="ResolveReference"/>);</item>
     ///   <item>a reference from <b>within one of the type's own owning contexts</b> binds to that local
     ///   sibling (#437), so the referencing context itself is returned (the mapper then emits a bare
     ///   name because the owner and current module match);</item>
     ///   <item>a <b>uniquely-owned</b> type resolves to its single owner (unchanged);</item>
     ///   <item>a <b>multi-owner</b> type referenced from a third context resolves deterministically: to
-    ///   the single context the name is <b>imported</b> from when that is unambiguous (so the
-    ///   qualification matches the type the reference actually binds to), otherwise to the
-    ///   <b>ordinal-least</b> declaring context — a stable choice independent of declaration order, so
-    ///   output is reproducible build-to-build.</item>
+    ///   the single context the name is <b>imported</b> from, else the single context the <b>context map
+    ///   permits</b> it from without an import (conformist / open-host / published-language / partnership /
+    ///   shared-kernel), else — genuinely ambiguous — to the <b>ordinal-least</b> declaring context, a
+    ///   stable choice independent of declaration order so output is reproducible build-to-build.</item>
     /// </list>
     ///
-    /// <para><see cref="OwnerResolution.WasAmbiguous"/> is <c>true</c> for the whole multi-owner branch —
-    /// the KOI1419 case the validator surfaces — and <c>false</c> for every deterministic outcome above.</para>
+    /// <para><see cref="OwnerResolution.WasAmbiguous"/> is <c>true</c> <b>only</b> for that last
+    /// ordinal-least tie-break — the genuinely-ambiguous case KOI1419 surfaces — and <c>false</c> for
+    /// every deterministic outcome above (including an explicit qualifier, a single import, and a single
+    /// map-permit, each of which pins the owner unambiguously).</para>
     ///
     /// <para>Purely model data (context names, no target syntax), so it lives here next to
     /// <see cref="DeclaringContextsOf"/> / <see cref="IsSharedKernelType"/> / <see cref="KernelOwnerOfType"/>
     /// and is reachable by both the emitters and the semantic validator without inverting the layering.</para>
     /// </summary>
-    public OwnerResolution ResolveOwner(string koineName, string referencingContext)
+    public OwnerResolution ResolveOwner(string koineName, string? qualifier, string referencingContext)
     {
         // 1. A shared-kernel type is physically emitted into one canonical owner's module (R14.2) —
         //    resolved the same from any context, so this precedes every other rule.
@@ -769,6 +774,13 @@ public sealed class ModelIndex
         if (declaring.Count == 0)
         {
             return new OwnerResolution(null, WasAmbiguous: false);   // not a context-homed declared type
+        }
+
+        // 2. An explicit Context.T qualifier the modeller wrote pins the owner — provided it actually
+        //    declares the type. An unknown/stale qualifier falls through (ResolveReference reports it).
+        if (qualifier is { } q && ContainsOrdinal(declaring, q))
+        {
+            return new OwnerResolution(q, WasAmbiguous: false);
         }
 
         // 3. #437: a reference from within one of the type's own owning contexts binds locally.
@@ -784,16 +796,56 @@ public sealed class ModelIndex
         }
 
         // 5. Multi-owner from a third context. Prefer the single imported owner (the reference binds
-        //    there, so any other choice would qualify to a DIFFERENT same-named type); else fall back
-        //    to the stable ordinal-least declaring context. Either way the choice is the "ambiguous
-        //    multi-owner" case KOI1419 surfaces.
+        //    there, so any other choice would qualify to a DIFFERENT same-named type)...
         IReadOnlyList<string> importOwners = ImportOwnersOf(referencingContext, koineName);
         if (importOwners.Count == 1 && ContainsOrdinal(declaring, importOwners[0]))
         {
-            return new OwnerResolution(importOwners[0], WasAmbiguous: true);
+            return new OwnerResolution(importOwners[0], WasAmbiguous: false);
         }
 
+        // ...else the single owner the context map permits an un-imported reference to (mirrors what
+        //    ResolveReference already honors for binding), which likewise determines the owner...
+        if (SingleMapPermittedOwner(declaring, referencingContext) is { } permitted)
+        {
+            return new OwnerResolution(permitted, WasAmbiguous: false);
+        }
+
+        // ...else it is genuinely ambiguous: fall back to the stable ordinal-least declaring context and
+        //    flag the choice so KOI1419 surfaces it.
         return new OwnerResolution(OrdinalLeast(declaring), WasAmbiguous: true);
+    }
+
+    /// <summary>
+    /// The owner + ambiguity for a reference carrying no explicit qualifier — a thin delegator to
+    /// <see cref="ResolveOwner(string, string?, string)"/> (<paramref name="qualifier"/> <c>null</c>).
+    /// </summary>
+    public OwnerResolution ResolveOwner(string koineName, string referencingContext) =>
+        ResolveOwner(koineName, qualifier: null, referencingContext);
+
+    /// <summary>
+    /// The single declaring context the context map permits <paramref name="referencingContext"/> to
+    /// reference without an import (R14.1), or <c>null</c> when none — or more than one — does (the
+    /// latter is not determinate, so it stays the ambiguous ordinal-fallback case).
+    /// </summary>
+    private string? SingleMapPermittedOwner(IReadOnlyList<string> declaring, string referencingContext)
+    {
+        string? only = null;
+        foreach (var upstream in declaring)
+        {
+            if (!MapPermitsReference(referencingContext, upstream))
+            {
+                continue;
+            }
+
+            if (only is not null)
+            {
+                return null;   // two permitted owners — ambiguous, fall through to the ordinal tie-break
+            }
+
+            only = upstream;
+        }
+
+        return only;
     }
 
     /// <summary>The ordinal-least element of a non-empty context list (a stable, allocation-free min).</summary>

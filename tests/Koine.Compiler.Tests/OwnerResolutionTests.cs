@@ -136,12 +136,14 @@ public class OwnerResolutionTests
     }
 
     [Fact]
-    public void ResolveOwner_flags_the_multi_owner_import_choice_as_ambiguous()
+    public void ResolveOwner_does_not_flag_a_single_import_choice_as_ambiguous()
     {
         var index = IndexOf(MultiOwnerImportFromLarger);
+        // A single import determines the owner unambiguously — the reference IS Beta.Money — so the
+        // choice is NOT ambiguous (KOI1419 must stay silent for it), even though Money is multi-owner.
         var res = index.ResolveOwner("Money", "Gamma");
         res.Owner.ShouldBe("Beta");
-        res.WasAmbiguous.ShouldBeTrue();
+        res.WasAmbiguous.ShouldBeFalse();
     }
 
     [Fact]
@@ -178,5 +180,57 @@ public class OwnerResolutionTests
         var res = index.ResolveOwner("Nonexistent", "Gamma");
         res.Owner.ShouldBeNull();
         res.WasAmbiguous.ShouldBeFalse();
+    }
+
+    // ---- #1124: an explicit Context.T qualifier and a context-map permit both pin the owner ----
+
+    [Fact]
+    public void Explicit_qualifier_pins_the_owner_over_the_ordinal_default()
+    {
+        var index = IndexOf(MultiOwnerNoImport);
+        // Money is declared in Alpha and Beta; the ordinal-least default from a third context is Alpha,
+        // but an explicit `Beta.Money` qualifier is the modeller's intent and must win — determinately.
+        var res = index.ResolveOwner("Money", "Beta", "Gamma");
+        res.Owner.ShouldBe("Beta");
+        res.WasAmbiguous.ShouldBeFalse();
+    }
+
+    // Money in Alpha + Beta; the context map lets Gamma reference Beta's types without an import
+    // (`Beta -> Gamma : open-host`), so an un-imported, un-qualified reference resolves to Beta.
+    private const string MapPermittedUnimported = """
+        context Alpha {
+          value Money { amount: Int }
+        }
+        context Beta {
+          value Money { amount: Int }
+        }
+        context Gamma {
+          value Wallet { balance: Int }
+        }
+        contextmap {
+          Beta -> Gamma : open-host
+        }
+        """;
+
+    [Fact]
+    public void Map_permitted_un_imported_owner_resolves_to_that_owner()
+    {
+        var index = IndexOf(MapPermittedUnimported);
+        // A single map-permitted upstream (Beta) determines the owner — not the ordinal-least Alpha —
+        // and is not ambiguous.
+        var res = index.ResolveOwner("Money", null, "Gamma");
+        res.Owner.ShouldBe("Beta");
+        res.WasAmbiguous.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void An_invalid_qualifier_is_ignored_and_falls_back()
+    {
+        var index = IndexOf(MultiOwnerNoImport);
+        // A qualifier naming a context that does NOT declare the type is ignored by the resolver (it is
+        // surfaced by ResolveReference instead), so resolution falls through to the ordinal-least default.
+        var res = index.ResolveOwner("Money", "Nonexistent", "Gamma");
+        res.Owner.ShouldBe("Alpha");
+        res.WasAmbiguous.ShouldBeTrue();
     }
 }
