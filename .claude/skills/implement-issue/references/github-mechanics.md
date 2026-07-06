@@ -210,10 +210,9 @@ continue to Step 9 (full build/tests + format gate) — never push a merge you h
 - **Whole-file sed is forbidden.** Tick per task, not per repo — see §4.
 - **Empty commit is intentional.** It exists only so a draft PR can open before any code lands; the
   first real task commit immediately makes it meaningful. Don't squash it away mid-run.
-- **Sync before ready — merge, not rebase.** When the repo squash-merges (the profile's *Integration
-  style*), `git merge origin/main` (resolve once, no force-push) beats a rebase that replays conflicts
-  per-commit. Don't hand-merge derived files (snapshots, lockfiles) — regenerate them; and re-build after
-  resolving, because a clean text merge can still be a broken compile. See §7.
+- **Sync before ready — merge, not rebase.** The full procedure (and the why) is in
+  [`../../_shared/sync-with-main.md`](../../_shared/sync-with-main.md), summarized at §7; the one thing
+  to remember here is that a clean text merge can still be a broken compile, so re-build after resolving.
 - **Raw `git` network ops can be sandbox-blocked while `gh` works.** `gh api`/`gh pr …` succeed, but
   `git fetch`/`git push` (every per-task push in Step 6, and the `git fetch origin main` in Step 8) may
   time out with `Failed to connect to github.com port 443`. `gh` proves the host is reachable, so it's a
