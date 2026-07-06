@@ -31,10 +31,12 @@ internal static class CrossContextTypeValidator
     private static void Check(string fromContext, TypeRef tr, ModelIndex index, List<Diagnostic> diagnostics)
     {
         // The shared owner-resolution policy is the single source of truth for the multi-owner decision:
-        // it flags WasAmbiguous only for the multi-owner-from-a-third-context choice (shared-kernel,
-        // #437-local, and uniquely-owned references all resolve unambiguously), so gating on that flag
-        // reproduces exactly the case KOI1419 surfaces — no re-derived declaring-count/import gate needed.
-        ModelIndex.OwnerResolution res = index.ResolveOwner(tr.Name, fromContext);
+        // it flags WasAmbiguous only for the genuinely-ambiguous ordinal-fallback choice (shared-kernel,
+        // #437-local, uniquely-owned, an explicit qualifier, a single import, and a single map-permit all
+        // resolve deterministically), so gating on that flag surfaces exactly the case KOI1419 is about —
+        // no re-derived declaring-count/import gate needed. Threading the reference's own qualifier keeps
+        // the warning silent when the modeller explicitly disambiguated with `Context.T` (#1124).
+        ModelIndex.OwnerResolution res = index.ResolveOwner(tr.Name, tr.Qualifier, fromContext);
         if (res.WasAmbiguous)
         {
             IReadOnlyList<string> declaring = index.DeclaringContextsOf(tr.Name);

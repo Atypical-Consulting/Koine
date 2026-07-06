@@ -80,4 +80,24 @@ public class MultiOwnerDiagnosticTests
     {
         MultiOwnerWarnings(SingleImportFixture).ShouldBeEmpty();
     }
+
+    // Gamma references `Beta.Money` with an EXPLICIT qualifier — the modeller has disambiguated, so the
+    // reference is not ambiguous and KOI1419 must stay silent (it names the same owner the emitters pick).
+    private const string ExplicitQualifierFixture = """
+        context Alpha {
+          value Money { amount: Int }
+        }
+        context Beta {
+          value Money { amount: Int }
+        }
+        context Gamma {
+          value Wallet { balance: Beta.Money }
+        }
+        """;
+
+    [Fact]
+    public void An_explicit_qualifier_suppresses_the_ambiguous_multi_owner_warning()
+    {
+        MultiOwnerWarnings(ExplicitQualifierFixture).ShouldBeEmpty();
+    }
 }
