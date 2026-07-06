@@ -1469,6 +1469,112 @@ public static class TestSupport
     // -------------------------------------------------------------------------
 
     // -------------------------------------------------------------------------
+    // Kotlin conformance harness (the kotlinc analogue of the Roslyn Compile harness)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Result of a Kotlin compile run. <see cref="ToolchainAvailable"/> is false when no <c>kotlinc</c> could
+    /// be located — callers SKIP (not fail) so <c>dotnet test</c> stays green without a Kotlin toolchain. When
+    /// the toolchain IS usable, <see cref="Ok"/> reflects whether <c>kotlinc</c> reported errors.
+    /// </summary>
+    public readonly record struct KotlinCheck(bool ToolchainAvailable, bool Ok, IReadOnlyList<string> Errors)
+    {
+        /// <summary>A skipped result: no usable <c>kotlinc</c> toolchain present, so nothing was verified.</summary>
+        public static KotlinCheck Skipped { get; } =
+            new(ToolchainAvailable: false, Ok: false, Errors: Array.Empty<string>());
+    }
+
+    /// <summary>
+    /// Writes the emitted <c>.kt</c> files to a fresh temp source tree — each at its own
+    /// <see cref="EmittedFile.RelativePath"/>, so a context's package directory holds its sealed
+    /// <c>DomainEvent</c> interface next to the event data classes that implement it — and type-checks them by
+    /// compiling with <c>kotlinc</c> to a throwaway jar, the same role the Roslyn <see cref="Compile"/> harness
+    /// plays for C#.
+    /// <para>
+    /// <c>kotlinc</c> is resolved from a <c>KOINE_KOTLINC</c> override or PATH; when none is found the result is
+    /// <see cref="KotlinCheck.Skipped"/> so the suite stays green. It NEVER silently passes a real compile error
+    /// and NEVER fails merely because the toolchain is missing. CI is expected to install <c>kotlinc</c> and run
+    /// this for real.
+    /// </para>
+    /// </summary>
+    public static KotlinCheck CompileKotlin(IReadOnlyList<EmittedFile> files)
+    {
+        if (ResolveKotlinc() is not { } kotlinc)
+        {
+            return KotlinCheck.Skipped;
+        }
+
+        string root = Path.Combine(Path.GetTempPath(), "koine-kotlinc-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var sources = new List<string>();
+            foreach (EmittedFile f in files)
+            {
+                // Preserve each file's RelativePath so package directories are reproduced (a sealed interface
+                // and its implementers must share a package). kotlinc resolves cross-file references by
+                // compiling every source together, so the physical layout only needs to be self-consistent.
+                string path = Path.Combine(root, f.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, f.Contents);
+                if (f.RelativePath.EndsWith(".kt", StringComparison.OrdinalIgnoreCase))
+                {
+                    sources.Add(path);
+                }
+            }
+
+            if (sources.Count == 0)
+            {
+                // Nothing to compile — vacuously OK (a kotlinc toolchain was found).
+                return new KotlinCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>());
+            }
+
+            // One kotlinc invocation over every source file, so cross-file references (the sealed DomainEvent
+            // + its implementing event data classes, an entity + its branded id value class) resolve together;
+            // classes land in a throwaway jar that is wiped with the temp tree.
+            var args = new List<string>(kotlinc.Arguments) { "-d", Path.Combine(root, "out.jar") };
+            args.AddRange(sources);
+
+            if (RunProcess(kotlinc.FileName, args, root) is not { } run)
+            {
+                // kotlinc refused to launch (e.g. a broken JAVA_HOME); treat as no toolchain.
+                return KotlinCheck.Skipped;
+            }
+
+            if (run.ExitCode == 0)
+            {
+                return new KotlinCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>());
+            }
+
+            // kotlinc reports warnings and errors on stderr; keep only the lines flagged as errors so a
+            // benign warning never fails the gate.
+            var errors = (run.StdOut + run.StdErr)
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(l => l.Contains("error:", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            return new KotlinCheck(ToolchainAvailable: true, Ok: false, errors.Count > 0 ? errors : new List<string> { run.StdErr.Trim() });
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Locates a usable <c>kotlinc</c>: an explicit <c>KOINE_KOTLINC</c> override (always wins) or a
+    /// <c>kotlinc</c> on PATH. Returns <c>null</c> when none is found so the caller can skip.
+    /// </summary>
+    private static ToolInvocation? ResolveKotlinc()
+    {
+        if (Environment.GetEnvironmentVariable("KOINE_KOTLINC") is { Length: > 0 } overrideKotlinc)
+        {
+            return new ToolInvocation(overrideKotlinc, Array.Empty<string>());
+        }
+
+        return OnPath("kotlinc") is { } found ? new ToolInvocation(found, Array.Empty<string>()) : null;
+    }
+
+    // -------------------------------------------------------------------------
     // OpenAPI conformance harness (issue #126; mirrors the external-toolchain harnesses above)
     // -------------------------------------------------------------------------
 

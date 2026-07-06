@@ -554,6 +554,13 @@ internal sealed class KotlinExpressionTranslator
             case "none":
                 WriteQuantifier(call, t, "none", sb);
                 return;
+            case "distinctBy":
+                // "all distinct by the selector": the distinct-by-key list has the same size as the source.
+                // Kotlin's stdlib `distinctBy` keeps the first element per key, so equal sizes ⇔ no duplicates.
+                sb.Append(t).Append(".distinctBy { ").Append(LambdaParam(call)).Append(" -> ");
+                WriteLambdaBody(call, sb);
+                sb.Append(" }.size == ").Append(t).Append(".size");
+                return;
             case "sum":
                 WriteSum(call, t, sb);
                 return;
