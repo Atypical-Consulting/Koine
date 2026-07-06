@@ -110,14 +110,10 @@ public sealed partial class KotlinEmitter : IEmitter
                 files.Add(EmitEnum(emit, context, e));
                 break;
             case EntityDecl entity:
-                files.Add(EmitId(emit, context, entity));
+                EmitEntity(emit, files, context, entity);
                 break;
             case AggregateDecl agg:
-                foreach (TypeDecl nested in agg.Types)
-                {
-                    EmitType(emit, files, context, nested);
-                }
-
+                EmitAggregate(emit, files, context, agg);
                 break;
             default:
                 break;

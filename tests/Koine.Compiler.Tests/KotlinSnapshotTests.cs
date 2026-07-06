@@ -203,4 +203,120 @@ public class KotlinSnapshotTests
         access.ShouldContain("`object`,");   // a Kotlin hard keyword — backtick-escaped
         access.ShouldContain("normal;");     // not a keyword — verbatim
     }
+
+    // A plain data entity: identity + a validated member + a derived member, identity equality — no enum,
+    // behaviors, or events, so the snapshot is stable.
+    private const string EntityFixture = """
+        context People {
+          /// A customer, identified and validated.
+          entity Customer identified by CustomerId {
+            name:        String
+            displayName: String = name.trim
+            invariant name.trim.length > 0 "a customer needs a name"
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Kotlin_entity_emits_expected_kotlin()
+    {
+        var result = new KoineCompiler().Compile(EntityFixture, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var customer = result.Files.Single(f => f.RelativePath.EndsWith("Customer.kt", StringComparison.Ordinal)).Contents;
+        customer.ShouldContain("class Customer(");
+        customer.ShouldContain("val id: CustomerId = id");
+        customer.ShouldContain("val name: String = name");
+        customer.ShouldContain("init {");
+        customer.ShouldContain("private fun checkInvariants() {");
+        customer.ShouldContain("if (!(this.name.trim().length.toLong() > 0L)) throw koine.runtime.DomainException(\"a customer needs a name\")");
+        customer.ShouldContain("val displayName: String get() = this.name.trim()");
+        customer.ShouldContain("override fun equals(other: Any?): Boolean =");
+        customer.ShouldContain("this === other || (other is Customer && this.id == other.id)");
+        customer.ShouldContain("override fun hashCode(): Int = this.id.hashCode()");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    // An entity with guarded behaviors: read-only-outside mutable state (`var … private set`), preconditions,
+    // a transition, invariant re-check, and a recorded domain event. Uses an enum + event, so pinned with
+    // ShouldContain (the DomainEvent/event files are the messages task).
+    private const string BehaviorFixture = """
+        context Shop {
+          enum Status { Active, Suspended }
+          event Deposited { accountId: AccountId  amount: Int }
+          entity Account identified by AccountId {
+            balance: Int
+            status:  Status = Active
+            healthy: Bool = balance >= 0
+            invariant balance >= 0 "balance cannot go negative"
+            command deposit(amount: Int) {
+              requires status == Active "account must be active"
+              requires amount > 0 "deposit must be positive"
+              balance -> balance + amount
+              emit Deposited(accountId: id, amount: amount)
+            }
+            command suspend {
+              status -> Suspended
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Kotlin_entity_behaviors_guard_mutate_and_record_events()
+    {
+        var result = new KoineCompiler().Compile(BehaviorFixture, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var account = result.Files.Single(f => f.RelativePath.EndsWith("Account.kt", StringComparison.Ordinal)).Contents;
+        // Mutable state is read-only from outside (var … private set); a derived Bool member.
+        account.ShouldContain("var balance: Long = balance");
+        account.ShouldContain("private set");
+        account.ShouldContain("var status: Status = Status.Active");
+        account.ShouldContain("val healthy: Boolean get() = this.balance >= 0L");
+        account.ShouldContain("private val _domainEvents: MutableList<DomainEvent> = mutableListOf()");
+        // A behavior: preconditions -> transition -> invariant re-check -> recorded event.
+        account.ShouldContain("fun deposit(amount: Long) {");
+        account.ShouldContain("if (!(this.status == Status.Active)) throw koine.runtime.DomainException(\"account must be active\")");
+        account.ShouldContain("this.balance = this.balance + amount");
+        account.ShouldContain("checkInvariants()");
+        account.ShouldContain("this._domainEvents.add(Deposited(this.id, amount))");
+        account.ShouldContain("fun suspend() {");
+        account.ShouldContain("this.status = Status.Suspended");
+        account.ShouldContain("fun domainEvents(): List<DomainEvent> = this._domainEvents.toList()");
+    }
+
+    // A factory on an aggregate root: mints a UUID identity, checks a precondition, constructs, records a
+    // creation event, and returns the instance.
+    private const string FactoryFixture = """
+        context Sales {
+          event OrderOpened { orderId: OrderId  lineCount: Int }
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              lines: Int
+              create open(lines: Int) {
+                requires lines >= 1 "an order needs at least one line"
+                emit OrderOpened(orderId: id, lineCount: lines)
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Kotlin_factory_mints_identity_and_records_creation_event()
+    {
+        var result = new KoineCompiler().Compile(FactoryFixture, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.kt", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("companion object {");
+        order.ShouldContain("fun open(lines: Long): Order {");
+        order.ShouldContain("val id: OrderId = OrderId.generate()");
+        order.ShouldContain("if (!(lines >= 1L)) throw koine.runtime.DomainException(\"an order needs at least one line\")");
+        order.ShouldContain("val instance = Order(id, lines)");
+        order.ShouldContain("instance._domainEvents.add(OrderOpened(id, lines))");
+        order.ShouldContain("return instance");
+    }
 }
