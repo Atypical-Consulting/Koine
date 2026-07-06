@@ -378,3 +378,112 @@ describe('LauncherPanel — quick actions + action menu + toast (issue #1143, ta
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+describe('LauncherPanel — keyboard model (issue #1143, task 7)', () => {
+  test('ArrowDown moves the .sel row forward and wraps at the end', async () => {
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources);
+    // The curated empty-query default is [Order, Money, commit] (see the preview-pane describe above).
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item')).toHaveLength(3));
+    const scrim = view.container.querySelector('.lx-scrim') as HTMLElement;
+
+    fireEvent.keyDown(scrim, { key: 'ArrowDown' });
+    let items = view.container.querySelectorAll('.lx-item');
+    expect(items[1].className).toContain('sel');
+    expect(items[1].textContent).toContain('Money');
+
+    fireEvent.keyDown(scrim, { key: 'ArrowDown' });
+    items = view.container.querySelectorAll('.lx-item');
+    expect(items[2].className).toContain('sel');
+
+    fireEvent.keyDown(scrim, { key: 'ArrowDown' }); // wraps past the last row back to the top
+    items = view.container.querySelectorAll('.lx-item');
+    expect(items[0].className).toContain('sel');
+    expect(items[0].textContent).toContain('Order');
+  });
+
+  test('ArrowUp from the top row wraps to the last row', async () => {
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item')).toHaveLength(3));
+    const scrim = view.container.querySelector('.lx-scrim') as HTMLElement;
+
+    fireEvent.keyDown(scrim, { key: 'ArrowUp' });
+
+    const items = view.container.querySelectorAll('.lx-item');
+    expect(items[2].className).toContain('sel');
+  });
+
+  test('Tab fills the input with the mode-prefixed selected title', async () => {
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources);
+    const input = view.getByLabelText('Search commands, symbols, files…') as HTMLInputElement;
+    await waitFor(() => expect(sources.modelIndex).toHaveBeenCalled());
+
+    fireEvent.input(input, { target: { value: '@Or' } });
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+    const scrim = view.container.querySelector('.lx-scrim') as HTMLElement;
+
+    fireEvent.keyDown(scrim, { key: 'Tab' });
+
+    expect(input.value).toBe('@Order');
+  });
+
+  test('Escape clears a non-empty query before closing the launcher', async () => {
+    const onClose = vi.fn();
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources, onClose);
+    const input = view.getByLabelText('Search commands, symbols, files…') as HTMLInputElement;
+    fireEvent.input(input, { target: { value: 'Order' } });
+    const scrim = view.container.querySelector('.lx-scrim') as HTMLElement;
+
+    fireEvent.keyDown(scrim, { key: 'Escape' });
+    expect(input.value).toBe('');
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(scrim, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test('Cmd+K opens the quick-actions menu for the selected result', async () => {
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+    const scrim = view.container.querySelector('.lx-scrim') as HTMLElement;
+    expect(view.container.querySelector('.lx-actmenu')).toBeNull();
+
+    fireEvent.keyDown(scrim, { key: 'k', metaKey: true });
+
+    expect(view.container.querySelector('.lx-actmenu')).toBeTruthy();
+  });
+
+  test('in the action menu, ArrowDown moves the selection and Enter runs it against the injected deps', async () => {
+    const actionDeps = makeActionDeps();
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources, vi.fn(), actionDeps);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+    const scrim = view.container.querySelector('.lx-scrim') as HTMLElement;
+
+    fireEvent.keyDown(scrim, { key: 'k', metaKey: true }); // open the menu for the selected "Order" symbol
+    fireEvent.keyDown(scrim, { key: 'ArrowDown' }); // Go to definition -> Find usages
+    fireEvent.keyDown(scrim, { key: 'Enter' });
+
+    expect(actionDeps.findUsages).toHaveBeenCalledTimes(1);
+    expect(view.container.querySelector('.lx-actmenu')).toBeNull();
+  });
+
+  test('mouse-move over a row selects it', async () => {
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item')).toHaveLength(3));
+
+    const items = view.container.querySelectorAll('.lx-item');
+    expect(items[0].className).toContain('sel');
+
+    fireEvent.mouseMove(items[1]);
+
+    const after = view.container.querySelectorAll('.lx-item');
+    expect(after[1].className).toContain('sel');
+    expect(after[0].className).not.toContain('sel');
+  });
+});

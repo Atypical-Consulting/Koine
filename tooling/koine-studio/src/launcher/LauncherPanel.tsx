@@ -1,19 +1,20 @@
 // The Spotlight launcher's overlay shell: scrim + card + input row + prefix-mode pill + footer legend
 // (issue #1143, task 3), extended (task 4) to fill `.lx-results` with grouped, ranked result rows, and
 // (task 5) to resolve + render the live PREVIEW pane for the selected result. Per-result quick actions
-// (task 6, this task) add the `.lx-actmenu` popover + `.lx-toast` confirmation, wired through the
-// injected `LauncherActionDeps` seam (Task 8 binds the concrete effects). Full ↑/↓ keyboard nav (Task 7)
-// still isn't wired — "selected" is always the FIRST visible row (`deriveResults(...).visible[0]`) until
-// Task 7 supplies real keyboard-driven selection state; `menuOpen`/`menuIndex` below are tracked as
-// plain state in this same component so Task 7's keyboard handler can drive them directly. No extra
-// join is needed for the preview: `buildCatalog` (task 5) already attaches each symbol/event/rule
-// entry's joined `ModelElement`, so `previewFor(selected.entry, {})` reads straight off the catalog.
+// (task 6) add the `.lx-actmenu` popover + `.lx-toast` confirmation, wired through the injected
+// `LauncherActionDeps` seam (Task 8 binds the concrete effects). Task 7 (this task) formalizes
+// `selectedIndex` as real state (reset to 0 on every query/mode change) and wires the full keyboard
+// model (`keys.ts`'s pure `handleKey` reducer) plus mouse-move selection on top of it — see `onKeyDown`
+// below. No extra join is needed for the preview: `buildCatalog` (task 5) already attaches each
+// symbol/event/rule entry's joined `ModelElement`, so `previewFor(selected.entry, {})` reads straight
+// off the catalog.
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { actionsFor, type LauncherActionDeps } from '@/launcher/actions';
 import { ActionMenu } from '@/launcher/ActionMenu';
 import { buildCatalog, type LauncherSources } from '@/launcher/buildCatalog';
 import { MODES, PREFIX_CHARS, parseMode, type CatalogEntry } from '@/launcher/catalog';
 import { deriveResults } from '@/launcher/deriveResults';
+import { handleKey, type LauncherKeyState } from '@/launcher/keys';
 import { previewFor } from '@/launcher/preview';
 import { PreviewPane } from '@/launcher/PreviewPane';
 import { ResultRow } from '@/launcher/ResultRow';
@@ -35,22 +36,34 @@ export function LauncherPanel(props: LauncherPanelProps) {
   const { sources, visible, onClose, actionDeps } = props;
   const [input, setInput] = useState('');
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuIndex, setMenuIndex] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { mode, query } = parseMode(input);
   // Grouped/ranked results (Task 4) — see deriveResults.ts for the empty-query default vs. ranked-and-
-  // grouped derivation. `visible` is the same flat top-to-bottom row order Task 7's selection reducer
-  // will need; re-derive it from (catalog, mode, query) rather than threading it through props, since
-  // deriveResults is a pure function those tasks can call directly.
+  // grouped derivation. `visible` is the same flat top-to-bottom row order the keyboard reducer's ↑/↓
+  // indexes into; re-derive it from (catalog, mode, query) rather than threading it through props, since
+  // deriveResults is a pure function.
   const { sections, visible: visibleResults } = deriveResults(catalog, mode, query);
-  // "Selected" is always the first visible row until Task 7 lands real ↑/↓ selection state.
-  const selected = visibleResults[0];
+  // The keyboard-driven "selected" row (Task 7): `selectedIndex` is real state, reset to 0 below
+  // whenever the query/mode changes so a fresh search always starts at the top result.
+  const selected = visibleResults[selectedIndex];
   const previewModel = selected ? previewFor(selected.entry, {}) : null;
   const hasPreview = previewModel !== null;
+
+  // Reset the selection to the top result whenever the effective (mode, query) changes — matches the
+  // prototype's `input.addEventListener("input", () => { sel = 0; render(); ...})`.
+  useEffect(() => setSelectedIndex(0), [mode.key, query]);
+
+  // Best-effort: keep the keyboard-selected row in view as ↑/↓ moves past the visible viewport.
+  useEffect(() => {
+    resultsRef.current?.querySelector('.lx-item.sel')?.scrollIntoView({ block: 'nearest' });
+  }, [selectedIndex]);
 
   function showToast(message: string): void {
     setToastMessage(message);
@@ -124,6 +137,7 @@ export function LauncherPanel(props: LauncherPanelProps) {
   useEffect(() => {
     if (!visible) {
       setInput('');
+      setSelectedIndex(0);
       setMenuOpen(false);
       setToastMessage(null);
     }
@@ -134,16 +148,57 @@ export function LauncherPanel(props: LauncherPanelProps) {
     inputRef.current?.focus();
   }
 
+  // The full keyboard model (issue #1143, task 7): `keys.ts`'s pure `handleKey` reducer decides the
+  // intent from the current state; this handler just applies it (and calls `preventDefault()` when the
+  // reducer says to) — no key-specific branching lives here anymore. Attached (below) to the
+  // `.lx-scrim` overlay so arrows/↵/Tab/Esc/⌘K work while the query input keeps DOM focus (focus stays
+  // trapped in the input; the container-level listener catches the bubbled keydown).
   function onKeyDown(e: KeyboardEvent): void {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      // Esc closes the topmost overlay first: the action menu when it's open, else the launcher
-      // itself. (Full ↑/↓/↵ keyboard driving of the menu is Task 7 — this is just nested-overlay Esc.)
-      if (menuOpen) {
+    const keyState: LauncherKeyState = {
+      query,
+      selectedIndex,
+      resultCount: visibleResults.length,
+      menuOpen,
+      menuIndex,
+      menuCount: selectedActions.length,
+      selectedTitle: selected ? selected.entry.title : null,
+      modePrefix: mode.prefix,
+    };
+    const result = handleKey(e, keyState);
+    if (result.preventDefault) e.preventDefault();
+
+    switch (result.kind) {
+      case 'move':
+        setSelectedIndex(result.selectedIndex);
+        break;
+      case 'runDefault':
+        if (selected) runDefault(selected.entry);
+        break;
+      case 'fill':
+        setInput(result.query);
+        inputRef.current?.focus();
+        break;
+      case 'clearQuery':
+        setInput('');
+        break;
+      case 'close':
+        onClose();
+        break;
+      case 'toggleMenu':
+        if (menuOpen) closeMenu();
+        else openMenu();
+        break;
+      case 'menuMove':
+        setMenuIndex(result.menuIndex);
+        break;
+      case 'runMenu':
+        runMenuAction(menuIndex);
+        break;
+      case 'closeMenu':
         closeMenu();
-        return;
-      }
-      onClose();
+        break;
+      case 'none':
+        break;
     }
   }
 
@@ -189,7 +244,14 @@ export function LauncherPanel(props: LauncherPanelProps) {
           <kbd class="lx-esc">esc</kbd>
         </div>
         <div class="lx-body">
-          <div class="lx-results" role="listbox" aria-label="Results" data-mode={mode.key} data-query={query}>
+          <div
+            ref={resultsRef}
+            class="lx-results"
+            role="listbox"
+            aria-label="Results"
+            data-mode={mode.key}
+            data-query={query}
+          >
             {sections.length === 0 && (
               <div class="lx-empty">
                 <div class="le-big">No matches for "{query}"</div>
@@ -202,15 +264,19 @@ export function LauncherPanel(props: LauncherPanelProps) {
                   {section.label}
                   <span class="gl-n">{section.rows.length}</span>
                 </div>
-                {section.rows.map((row) => (
-                  <ResultRow
-                    key={row.entry.id}
-                    result={row}
-                    selected={row.entry.id === selected?.entry.id}
-                    onRun={() => runDefault(row.entry)}
-                    onOpenMenu={openMenu}
-                  />
-                ))}
+                {section.rows.map((row) => {
+                  const index = visibleResults.indexOf(row);
+                  return (
+                    <ResultRow
+                      key={row.entry.id}
+                      result={row}
+                      selected={index === selectedIndex}
+                      onHover={() => setSelectedIndex(index)}
+                      onRun={() => runDefault(row.entry)}
+                      onOpenMenu={openMenu}
+                    />
+                  );
+                })}
               </div>
             ))}
           </div>
