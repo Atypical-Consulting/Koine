@@ -80,31 +80,20 @@ internal sealed class JavaTypeMapper
     };
 
     /// <summary>
-    /// The Java type name for a member's declared type, threading the reference's explicit
-    /// <see cref="TypeRef.Qualifier"/> (a <c>Context.T</c> the modeller wrote) into owner resolution so a
-    /// qualified multi-owner reference qualifies to the named owner rather than the ordinal default (#1124).
-    /// </summary>
-    public string QualifyTypeName(TypeRef type) => QualifyTypeNameCore(type.Name, type.Qualifier);
-
-    /// <summary>
-    /// The Java type name for a declared Koine type named with no explicit qualifier. Delegates to
-    /// <see cref="QualifyTypeNameCore"/> with a <c>null</c> qualifier.
-    /// </summary>
-    public string QualifyTypeName(string koineName) => QualifyTypeNameCore(koineName, qualifier: null);
-
-    /// <summary>
-    /// The Java type name for a declared Koine type, package-qualified as
+    /// The Java type name for a member's declared type, package-qualified as
     /// <c>&lt;ownerPackage&gt;.&lt;Type&gt;</c> when the type is owned by a <em>different</em> bounded
     /// context than the one being emitted (so cross-context references resolve in the flat per-context
-    /// package layout). Bare PascalCase otherwise — in the legacy context-agnostic mode, for a same-context
-    /// (local) type, and for branded ID types, which are re-materialized locally by the emitter's unowned-id
-    /// pass rather than qualified.
+    /// package layout), threading the reference's explicit <see cref="TypeRef.Qualifier"/> (a
+    /// <c>Context.T</c> the modeller wrote) into owner resolution so a qualified multi-owner reference
+    /// qualifies to the named owner rather than the ordinal default (#1124). Bare PascalCase otherwise —
+    /// in the legacy context-agnostic mode, for a same-context (local) type, and for branded ID types,
+    /// which are re-materialized locally by the emitter's unowned-id pass rather than qualified.
     /// </summary>
-    private string QualifyTypeNameCore(string koineName, string? qualifier)
+    public string QualifyTypeName(TypeRef type)
     {
-        var pascal = JavaNaming.Type(koineName);
-        if (_context is null || _packageFor is null || !IsQualifiable(koineName)
-            || OwnerContextOf(koineName, qualifier) is not { } owner)
+        var pascal = JavaNaming.Type(type.Name);
+        if (_context is null || _packageFor is null || !IsQualifiable(type.Name)
+            || OwnerContextOf(type.Name, type.Qualifier) is not { } owner)
         {
             return pascal;
         }
@@ -124,7 +113,7 @@ internal sealed class JavaTypeMapper
     /// <paramref name="qualifier"/> (the reference's <c>Context.T</c>) pins the owner when set (#1124).
     /// Null only in the legacy context-agnostic mode.
     /// </summary>
-    private string? OwnerContextOf(string koineName, string? qualifier = null) =>
+    private string? OwnerContextOf(string koineName, string? qualifier) =>
         _context is { } ctx ? _index.ResolveOwner(koineName, qualifier, ctx).Owner : null;
 
     /// <summary>
