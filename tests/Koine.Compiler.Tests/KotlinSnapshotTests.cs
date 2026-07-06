@@ -236,6 +236,37 @@ public class KotlinSnapshotTests
         access.ShouldContain("normal;");     // not a keyword — verbatim
     }
 
+    // A bounded context named after a Kotlin hard keyword (`object`) must emit a VALID `package`
+    // declaration — the keyword segment backtick-escaped — and every cross-context reference into it must
+    // qualify with the same escaped segment, while the on-disk directory stays the raw `object/` (backticks
+    // are source syntax, not a filesystem convention). Regression for #1109.
+    private const string KeywordContextFixture = """
+        context object {
+          value Money { amount: Decimal }
+        }
+        context Shop {
+          import object.{ Money }
+          value Cart { total: Money }
+        }
+        """;
+
+    [Fact]
+    public void Kotlin_keyword_named_context_escapes_package_but_keeps_path_raw()
+    {
+        var result = new KoineCompiler().Compile(KeywordContextFixture, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.kt", StringComparison.Ordinal));
+        // The `package` declaration escapes the keyword segment...
+        money.Contents.ShouldContain("package koine.generated.`object`");
+        // ...but the file path keeps the raw directory (no backticks on disk).
+        money.RelativePath.ShouldBe("koine/generated/object/Money.kt");
+
+        // A cross-context reference into the keyword context qualifies with the escaped segment too.
+        var cart = result.Files.Single(f => f.RelativePath.EndsWith("Cart.kt", StringComparison.Ordinal)).Contents;
+        cart.ShouldContain("val total: koine.generated.`object`.Money");
+    }
+
     // A plain data entity: identity + a validated member + a derived member, identity equality — no enum,
     // behaviors, or events, so the snapshot is stable.
     private const string EntityFixture = """
