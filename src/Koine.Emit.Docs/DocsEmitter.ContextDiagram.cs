@@ -1,5 +1,6 @@
 using System.Text;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Services;
 
 namespace Koine.Compiler;
 
@@ -92,7 +93,7 @@ public sealed partial class DocsEmitter
         var edgeSeen = new HashSet<string>(StringComparer.Ordinal);
         foreach (ContextClassNode node in nodes)
         {
-            foreach (Member m in MembersOf(node.Type))
+            foreach (Member m in node.Type.MembersOf())
             {
                 foreach (ContextClassNode target in nodes)
                 {
@@ -156,15 +157,6 @@ public sealed partial class DocsEmitter
 
         sb.Append("```\n");
     }
-
-    /// <summary>The field members of a drawn type (value object / entity / event); enums have none.</summary>
-    private static IReadOnlyList<Member> MembersOf(TypeDecl type) => type switch
-    {
-        ValueObjectDecl v => v.Members,
-        EntityDecl e => e.Members,
-        EventDecl ev => ev.Members,
-        _ => [],
-    };
 
     /// <summary>
     /// How a field typed <paramref name="t"/> relates to the node <paramref name="target"/>, or

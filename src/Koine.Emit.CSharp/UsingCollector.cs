@@ -1,3 +1,5 @@
+using Koine.Compiler.Services;
+
 namespace Koine.Compiler;
 
 /// <summary>
@@ -146,9 +148,9 @@ internal sealed class UsingCollector
         var i = 0;
         while ((i = text.IndexOf(word, i, StringComparison.Ordinal)) >= 0)
         {
-            var before = i == 0 || !IsIdentChar(text[i - 1]);
+            var before = i == 0 || !SourceTextGeometry.IsIdentifierChar(text[i - 1]);
             var afterIdx = i + word.Length;
-            var after = afterIdx >= text.Length || !IsIdentChar(text[afterIdx]);
+            var after = afterIdx >= text.Length || !SourceTextGeometry.IsIdentifierChar(text[afterIdx]);
             if (before && after)
             {
                 return true;
@@ -158,8 +160,6 @@ internal sealed class UsingCollector
         }
         return false;
     }
-
-    private static bool IsIdentChar(char c) => char.IsLetterOrDigit(c) || c == '_';
 
     // System and System.* sort before everything else, mirroring the default
     // "System directives first" using-ordering.

@@ -1,0 +1,25 @@
+<Project>
+
+  <!-- Shared build config for the Koine.Emit.<Target> emitter projects (issue #977), explicitly
+       imported by each Koine.Emit.*.csproj. A folder-scoped Directory.Build.props would over-reach —
+       the emit projects sit directly under src/ alongside non-emit projects — so this is imported by
+       hand to scope the shared config to exactly the emitters. Holds the common target-framework /
+       language PropertyGroup and the per-project public-API contract gate (RS0016), mirroring
+       Koine.Compiler. The AdditionalFiles Include paths are relative to the *importing* csproj, so
+       each project's own PublicAPI.*.txt are the ones analyzed. Per-target metadata (IsPackable,
+       PackageId, Description, PackageTags, ProjectReference, InternalsVisibleTo) stays in each csproj. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Koine.Compiler</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+</Project>

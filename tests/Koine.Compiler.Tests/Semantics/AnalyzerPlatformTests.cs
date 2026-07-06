@@ -66,6 +66,7 @@ public class AnalyzerPlatformTests
             "koine.per-context",
             "koine.reference-discipline",
             "koine.satisfiability",
+            "koine.cross-context-type",
         });
     }
 

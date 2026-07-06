@@ -69,7 +69,13 @@ public sealed partial class TypeScriptEmitter
         }
         else
         {
-            if (emit.ScalarNeeds.ContainsKey(vo.Name) && ctorMembers.Any(m => m.Type.Name is "Int" or "Decimal"))
+            // This value object's full operator demand, resolved once from the analyzer's single-pass
+            // model (#836): scalar multiply/divide factors, the `sum`-fold `IsSummable` flag, the plain
+            // binary `+`/`-` ops, and the precomputed `add`-need union. `null` = this VO needs no
+            // generated arithmetic, read null-safely below (matching PhpEmitter.EmitValueObject).
+            var needs = emit.OperatorNeeds.GetValueOrDefault(vo.Name);
+
+            if (needs is { MultiplyFactors.Count: > 0 } && ctorMembers.Any(m => m.Type.Name is "Int" or "Decimal"))
             {
                 WriteScalarOp(sb, name, ctorMembers, "*");
             }
@@ -77,18 +83,19 @@ public sealed partial class TypeScriptEmitter
             // `divide` is the division dual of `multiply` (#879, follow-up to the C# emitter's #832):
             // demand-generated only where the model actually divides this value object by a scalar
             // (fee / 2), never emitted unconditionally.
-            if (emit.ScalarDivNeeds.ContainsKey(vo.Name) && ctorMembers.Any(m => m.Type.Name is "Int" or "Decimal"))
+            if (needs is { DivideFactors.Count: > 0 } && ctorMembers.Any(m => m.Type.Name is "Int" or "Decimal"))
             {
                 WriteScalarOp(sb, name, ctorMembers, "/");
             }
 
-            // `add` is demand-generated when the VO is folded with `sum` (AdditiveNeeds) OR appears in a
-            // plain binary `value + value` (#834); `subtract` is demand-generated for a plain
-            // `value - value` (#834 — never generated for plain VOs before). The translator already
-            // lowers both call sites to `.add(...)` / `.subtract(...)`; this emits the definitions.
-            emit.BinaryArithmeticNeeds.TryGetValue(vo.Name, out IReadOnlySet<BinaryOp>? arithmeticOps);
-            bool needsAdd = emit.AdditiveNeeds.Contains(vo.Name) || (arithmeticOps?.Contains(BinaryOp.Add) ?? false);
-            bool needsSub = arithmeticOps?.Contains(BinaryOp.Sub) ?? false;
+            // `add` is demand-generated when the VO is folded with `sum` OR appears in a plain binary
+            // `value + value` (#834) — the analyzer pre-computes that union as `needs.NeedsAdd` so the
+            // emitter no longer recombines the additive-fold and binary-arithmetic maps itself (#836).
+            // `subtract` is demand-generated purely from the plain binary `-` demand (`value - value`,
+            // #834 — never generated for plain VOs before). The translator already lowers both call
+            // sites to `.add(...)` / `.subtract(...)`; this emits the definitions.
+            bool needsAdd = needs?.NeedsAdd ?? false;
+            bool needsSub = needs is not null && needs.BinaryOps.Contains(BinaryOp.Sub);
             if (needsAdd)
             {
                 WriteValueObjectAdditiveMethod(sb, name, ctorMembers, "add", "+");
