@@ -12,26 +12,15 @@ namespace Koine.Compiler;
 /// The model index, used to compute precise cross-namespace usings (R13.2/R13.3) and to
 /// classify/resolve type references.
 /// </param>
-/// <param name="ScalarNeeds">
-/// Value-object name -> scalar C# types ("int"/"decimal") it is multiplied by in some
-/// derived expression. Drives demand-driven scalar operator generation (R9).
-/// </param>
-/// <param name="ScalarDivNeeds">
-/// Value-object name -> scalar C# types ("int"/"decimal") it is divided by in some derived
-/// expression. The division dual of <see cref="ScalarNeeds"/>; drives demand-driven
-/// <c>operator /</c> generation (#832), so <c>value-object / scalar</c> compiles.
-/// </param>
-/// <param name="AdditiveNeeds">
-/// Value-object names that are folded with <c>+</c> somewhere (e.g.
-/// <c>lines.sum(l =&gt; l.subtotal)</c> over a Money field). Drives generation of an
-/// additive operator (R9).
-/// </param>
-/// <param name="DirectArithmeticNeeds">
-/// Value-object name -> the additive operators (<see cref="BinaryOp.Add"/>/<see cref="BinaryOp.Sub"/>)
-/// it appears as an operand of in a DIRECT same-type binary expression (e.g. <c>fee + fee</c>,
-/// <c>fee - fee</c> — not a <c>sum</c> fold). Drives demand-driven generation of <c>operator +</c>
-/// (in addition to <see cref="AdditiveNeeds"/>) and <c>operator -</c> for plain value objects (#833),
-/// so direct same-type arithmetic compiles instead of emitting CS0019.
+/// <param name="OperatorNeeds">
+/// Value-object name -> its unified per-VO operator-demand record from the analyzer's single-pass
+/// model (#836): the scalar multiply/divide factors, the plain binary <c>+</c>/<c>-</c> ops, the
+/// <c>sum</c>-fold <see cref="OperatorNeedsAnalyzer.ValueObjectOperatorNeeds.IsSummable"/> flag, and
+/// the precomputed <see cref="OperatorNeedsAnalyzer.ValueObjectOperatorNeeds.NeedsAdd"/> union. Read
+/// via <c>GetValueOrDefault</c> so a value object with no arithmetic demand (absent key → <c>null</c>)
+/// treats every signal as false/empty, exactly as the four separate maps did before (#836 follow-up).
+/// Drives all demand-driven value-object operator generation (R9): scalar <c>*</c>/<c>/</c> (#832),
+/// additive <c>+</c> (sum-fold or direct <c>fee + fee</c>, #833), and subtractive <c>-</c> (#833).
 /// </param>
 /// <param name="ContextNames">
 /// All context (namespace) names in the model. Every type in a context shares the single
@@ -52,10 +41,7 @@ namespace Koine.Compiler;
 /// </param>
 internal sealed record EmitContext(
     ModelIndex Index,
-    IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
-    IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarDivNeeds,
-    IReadOnlySet<string> AdditiveNeeds,
-    IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> DirectArithmeticNeeds,
+    IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> OperatorNeeds,
     IReadOnlyList<string> ContextNames,
     IReadOnlyDictionary<string, (IdentityStrategy Strategy, string? Backing)> IdStrategies,
     CSharpEmitterOptions Options,

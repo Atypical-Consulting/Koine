@@ -19,10 +19,7 @@ public sealed partial class PythonEmitter
         IReadOnlyDictionary<string, string> EnumMemberToType,
         IReadOnlyList<PyTypeLocation> TypeLocations,
         IReadOnlyList<string> ContextNames,
-        IReadOnlySet<string> AdditiveNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarDivNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BinaryArithmeticNeeds);
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> OperatorNeeds);
 
     /// <summary>
     /// Where an emitted user type lives: its bounded context, the dotted import module
