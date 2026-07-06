@@ -172,13 +172,12 @@ git <commit-identity> commit -am "fix: <what you fixed for CI>"
 git push
 ```
 
-**Sync with `main` (for `BEHIND`/`DIRTY`).** Merge the latest base in and resolve conflicts. When the
-profile's *Integration style* is squash-merge, a `merge` (not rebase) is right — one pass per conflict,
-no force-push, throwaway merge commit vanishes on squash. The *Conflict hot-spots* (version, changelog,
-docs, snapshots, lockfiles, additive code) have known-correct resolutions — **union** additive files,
-**regenerate** derived files, **take the higher** version. Full table + finish/verify sequence in
-`references/merge-mechanics.md` §4 (identical to `implement-issue`'s Step 8). A clean *text* merge can
-still break the build — re-build/re-test before pushing.
+**Sync with `main` (for `BEHIND`/`DIRTY`).** Merge the latest base in and resolve conflicts so the PR
+is mergeable again. Follow the shared procedure in
+[`../_shared/sync-with-main.md`](../_shared/sync-with-main.md) (merge-not-rebase, the conflict
+rule-of-thumb keyed off the profile's *Conflict hot-spots*, and finish-and-verify);
+`references/merge-mechanics.md` §4 has the merge-pr framing. A clean *text* merge can still break the
+build — re-build/re-test before pushing.
 
 **Address unresolved review (for `CHANGES_REQUESTED` / open threads).** Read the comments and unresolved
 threads, implement the real asks in the worktree, commit + push, and reply to / resolve the threads so
