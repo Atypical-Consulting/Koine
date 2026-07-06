@@ -35,6 +35,18 @@ public sealed partial class KotlinEmitter
         var translator = new KotlinExpressionTranslator(
             emit.Index, vo.Members, typeMapper, context, memberReceiver: "this", emit.EnumMemberToType);
 
+        // A stored collection member (List/Set/Map) must be defensively copied into an immutable snapshot: a
+        // `data class` `val` would bind the caller's reference verbatim, and Kotlin's read-only interfaces are
+        // NOT immutable (a `MutableList` IS a `List`), so a caller keeping the reference could mutate the value
+        // object's contents after its invariants ran (#1110). A `data class` cannot copy a primary-constructor
+        // `val`, so such a VO emits as a plain class that copies each collection in its constructor and
+        // hand-writes the data-class freebies we lose (structural equals/hashCode/toString/copy). Collection-free
+        // value objects keep the pristine `data class` path below (byte-for-byte unchanged — the common case).
+        if (stored.Any(m => KotlinTypeMapper.IsCollection(m.Type)))
+        {
+            return EmitCollectionValueObject(emit, context, vo, name, stored, derived, typeMapper, translator);
+        }
+
         var sb = new StringBuilder();
         WriteKdoc(sb, vo.Doc, string.Empty);
         sb.Append("data class ").Append(name).Append("(\n");
@@ -96,6 +108,143 @@ public sealed partial class KotlinEmitter
 
         sb.Append("}\n");
         return TypeFile(context, name, sb.ToString());
+    }
+
+    /// <summary>
+    /// Emits a value object that has at least one stored collection member as a plain (non-<c>data</c>)
+    /// <c>class</c> that <b>defensively copies</b> each collection into an immutable snapshot in its constructor
+    /// (#1110). A collection member is a plain constructor parameter re-bound as a body <c>val</c> via
+    /// <see cref="DefensiveCopy"/> (<c>.toList()</c>/<c>.toSet()</c>/<c>.toMap()</c>, null-safe for an optional
+    /// collection) — exactly the shape the entity slice already uses; every other member stays a
+    /// constructor-property <c>val</c>, as in the <c>data class</c> path. The <c>init { }</c> invariants run over
+    /// the copies, and the <c>data class</c> freebies we forgo (<c>equals</c>/<c>hashCode</c>/<c>toString</c>/
+    /// <c>copy</c>) are hand-written with structural semantics, so downstream code sees no behavioral change.
+    /// </summary>
+    private EmittedFile EmitCollectionValueObject(
+        KotlinEmitContext emit, string context, ValueObjectDecl vo, string name,
+        IReadOnlyList<Member> stored, IReadOnlyList<Member> derived,
+        KotlinTypeMapper typeMapper, KotlinExpressionTranslator translator)
+    {
+        var sb = new StringBuilder();
+        WriteKdoc(sb, vo.Doc, string.Empty);
+
+        // Primary constructor: a collection member is a plain parameter (re-bound below as a copied body `val`);
+        // every other member stays a constructor-property `val`, exactly as the `data class` path emits it.
+        sb.Append("class ").Append(name).Append("(\n");
+        foreach (Member m in stored)
+        {
+            WriteKdoc(sb, m.Doc, Indent);
+            sb.Append(Indent);
+            if (!KotlinTypeMapper.IsCollection(m.Type))
+            {
+                sb.Append("val ");
+            }
+
+            sb.Append(KotlinNaming.ToMemberName(m.Name)).Append(": ").Append(typeMapper.Map(m.Type));
+            if (m.Initializer is not null)
+            {
+                sb.Append(" = ").Append(translator.Translate(
+                    m.Initializer, KotlinExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index)));
+            }
+
+            sb.Append(",\n");
+        }
+
+        sb.Append(") {\n");
+
+        var wroteBody = false;
+
+        // Defensive copies: each collection member becomes an immutable snapshot the caller cannot mutate. These
+        // lead the body so the `init { }` invariants (and any operators/derived below) read the snapshot.
+        foreach (Member m in stored.Where(m => KotlinTypeMapper.IsCollection(m.Type)))
+        {
+            var field = KotlinNaming.ToMemberName(m.Name);
+            sb.Append(Indent).Append("val ").Append(field).Append(": ").Append(typeMapper.Map(m.Type))
+              .Append(" = ").Append(DefensiveCopy(m, field)).Append('\n');
+            wroteBody = true;
+        }
+
+        // Invariants: an `init { }` guard over the copied `val`s (Parameter mode: bare property names).
+        if (vo.Invariants.Count > 0)
+        {
+            Separate(sb, ref wroteBody);
+            sb.Append(Indent).Append("init {\n");
+            foreach (Invariant inv in vo.Invariants)
+            {
+                WriteInvariantGuard(sb, inv, translator, Indent + Indent, KotlinExpressionTranslator.NameMode.Parameter);
+            }
+
+            sb.Append(Indent).Append("}\n");
+        }
+
+        // Derived (computed) members: get-only properties over the (copied) stored properties.
+        foreach (Member m in derived)
+        {
+            Separate(sb, ref wroteBody);
+            WriteDerivedProperty(sb, emit, m, typeMapper, translator);
+        }
+
+        // Demand-driven / quantity operators (unchanged — they construct through the copying primary ctor).
+        WriteValueObjectOperators(sb, emit, name, vo, stored, wroteBody);
+
+        // The hand-written data-class freebies over the copied components (wroteBody is already true — at least
+        // one copied `val` leads the body — so the equality block always gets its leading blank line).
+        WriteValueObjectStructuralMembers(sb, name, stored, typeMapper, ref wroteBody);
+
+        sb.Append("}\n");
+        return TypeFile(context, name, sb.ToString());
+    }
+
+    /// <summary>
+    /// Writes the structural members a <c>data class</c> would generate for free — <c>equals</c> (identity
+    /// shortcut, type check, then component-wise <c>==</c>, under which a copied collection compares by content),
+    /// <c>hashCode</c> (content-based via null-safe <c>java.util.Objects.hash</c>), <c>toString</c> (the
+    /// <c>Name(a=…, b=…)</c> data-class format), and a <c>copy(…)</c> whose per-member defaults re-copy any
+    /// collection argument through the defensively-copying primary constructor, so a copy is as sealed as the
+    /// original. Only <paramref name="stored"/> members participate (derived/computed members are get-only
+    /// properties, excluded from equality just as a data class excludes body properties).
+    /// </summary>
+    private static void WriteValueObjectStructuralMembers(
+        StringBuilder sb, string name, IReadOnlyList<Member> stored, KotlinTypeMapper typeMapper, ref bool wroteBody)
+    {
+        var fields = stored.Select(m => KotlinNaming.ToMemberName(m.Name)).ToList();
+
+        Separate(sb, ref wroteBody);
+        sb.Append(Indent).Append("override fun equals(other: Any?): Boolean =\n");
+        sb.Append(Indent).Append(Indent).Append("this === other || (other is ").Append(name);
+        foreach (var f in fields)
+        {
+            sb.Append(" && this.").Append(f).Append(" == other.").Append(f);
+        }
+
+        sb.Append(")\n");
+
+        Separate(sb, ref wroteBody);
+        sb.Append(Indent).Append("override fun hashCode(): Int = java.util.Objects.hash(")
+          .Append(string.Join(", ", fields.Select(f => "this." + f))).Append(")\n");
+
+        Separate(sb, ref wroteBody);
+        sb.Append(Indent).Append("override fun toString(): String = \"").Append(name).Append('(');
+        for (var i = 0; i < stored.Count; i++)
+        {
+            var field = KotlinNaming.ToMemberName(stored[i].Name);
+            if (i > 0)
+            {
+                sb.Append(", ");
+            }
+
+            // The label is the property name without any keyword backticks (a data-class toString shows `a=…`).
+            sb.Append(field.Trim('`')).Append("=${this.").Append(field).Append('}');
+        }
+
+        sb.Append(")\"\n");
+
+        Separate(sb, ref wroteBody);
+        sb.Append(Indent).Append("fun copy(")
+          .Append(string.Join(", ", stored.Select(m =>
+              KotlinNaming.ToMemberName(m.Name) + ": " + typeMapper.Map(m.Type) + " = this." + KotlinNaming.ToMemberName(m.Name))))
+          .Append("): ").Append(name).Append(" = ").Append(name).Append('(')
+          .Append(string.Join(", ", fields)).Append(")\n");
     }
 
     /// <summary>Emits a derived (computed) member as a get-only property reading through the stored properties.</summary>
