@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from 'vitest';
-import { applyTheme, initTheme, currentTheme, toggleTheme, setTheme, onThemeChange } from '@/settings/theme';
+import { applyTheme, initTheme, currentTheme, toggleTheme, setTheme } from '@/settings/theme';
 import { loadSettings, saveSettings, DEFAULT_SETTINGS } from '@/settings/persistence';
+import { appStore } from '@/store/index';
 
 // The active theme drives `document.documentElement.dataset.theme`. Read it back through this helper so
-// each assertion checks the real DOM mutation rather than the module's cached `active` value.
+// each assertion checks the real DOM mutation rather than the store's cached `theme` field.
 const domTheme = () => document.documentElement.dataset.theme;
 
 describe('theme apply + DOM mutation', () => {
@@ -21,11 +22,13 @@ describe('theme apply + DOM mutation', () => {
     expect(domTheme()).toBe('dark');
   });
 
-  it('currentTheme reflects the last applied theme without re-reading storage', () => {
+  it('currentTheme reflects the last applied theme via the store field', () => {
     applyTheme('light');
     expect(currentTheme()).toBe('light');
+    expect(appStore.getState().theme).toBe('light');
     applyTheme('dark');
     expect(currentTheme()).toBe('dark');
+    expect(appStore.getState().theme).toBe('dark');
   });
 });
 
@@ -49,6 +52,12 @@ describe('initTheme', () => {
     expect(t).toBe('light');
     expect(domTheme()).toBe('light');
   });
+
+  it('seeds the uiChrome store field from Settings', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, theme: 'light' });
+    initTheme();
+    expect(appStore.getState().theme).toBe('light');
+  });
 });
 
 describe('setTheme', () => {
@@ -57,16 +66,13 @@ describe('setTheme', () => {
     applyTheme('dark');
   });
 
-  it('persists, applies, and notifies listeners with the explicit theme', () => {
-    const seen: string[] = [];
-    onThemeChange((t) => seen.push(t));
-
+  it('persists, applies, and publishes the explicit theme to the store', () => {
     setTheme('light');
 
     expect(domTheme()).toBe('light'); // applied to the DOM
     expect(currentTheme()).toBe('light');
+    expect(appStore.getState().theme).toBe('light'); // published to the store field
     expect(loadSettings().theme).toBe('light'); // persisted
-    expect(seen).toEqual(['light']); // listener fired exactly once with the new value
   });
 });
 
@@ -91,31 +97,28 @@ describe('toggleTheme', () => {
     expect(domTheme()).toBe('dark');
     expect(loadSettings().theme).toBe('dark');
   });
-
-  it('notifies a registered listener with the toggled value', () => {
-    const seen: string[] = [];
-    onThemeChange((t) => seen.push(t));
-    toggleTheme(); // dark → light
-    expect(seen).toEqual(['light']);
-  });
 });
 
-describe('onThemeChange registry', () => {
+describe('theme store subscription', () => {
   beforeEach(() => {
     localStorage.clear();
     applyTheme('dark');
   });
 
-  it('fires every registered callback on each change', () => {
-    const a: string[] = [];
-    const b: string[] = [];
-    onThemeChange((t) => a.push(t));
-    onThemeChange((t) => b.push(t));
+  // The bus is now a plain store subscription: a subscriber registered BEFORE the changes captures
+  // every transition, and — unlike the old leak-shaped listener Set — its returned disposer stops it.
+  it('fires on each change and its unsubscribe stops further notifications', () => {
+    const seen: string[] = [];
+    const unsub = appStore.subscribe((s, prev) => {
+      if (s.theme !== prev.theme) seen.push(s.theme);
+    });
 
     setTheme('light');
     setTheme('dark');
+    expect(seen).toEqual(['light', 'dark']);
 
-    expect(a).toEqual(['light', 'dark']);
-    expect(b).toEqual(['light', 'dark']);
+    unsub();
+    setTheme('light'); // no subscriber left → not captured
+    expect(seen).toEqual(['light', 'dark']);
   });
 });

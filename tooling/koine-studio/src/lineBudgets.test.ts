@@ -73,7 +73,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // renderSyntaxTree onNodeClick/caret props + the debounced cursor-slice subscription (caret → panel
   // highlight) with its dispose cleanup, ~38 LOC of the same wiring. Measured end-state (2393), no
   // headroom — the next feature here should ratchet again rather than inherit slack; #985 owns the split.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2393 },
+  // Raised 2393 → 2402: merging main into #890 brought in #983/#1086's view-chrome consolidation, which
+  // re-homes railAxis + diagCollapsed onto the uiChrome slice — the setAxis/applyDiagCollapsed paths here
+  // become thin slice writers + seed-then-subscribe wiring (guarded readRaw/writeRaw helpers), net +9 LOC
+  // of legitimate composition-root glue. Measured end-state (2402), no headroom; #985 owns the split.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2402 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   { file: 'src/settings/prefs.ts', maxLines: 2250 },

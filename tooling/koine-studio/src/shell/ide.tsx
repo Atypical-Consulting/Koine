@@ -24,7 +24,7 @@ import { basename } from '@/shared/path';
 import { domById } from '@/shared/domById';
 import { createLifecycleBoot } from '@/shell/lifecycleBoot';
 import { createFormatActive } from '@/shell/formatActive';
-import { initTheme, onThemeChange } from '@/settings/theme';
+import { initTheme } from '@/settings/theme';
 import {
   peekLegacyScratch,
   effectiveSettings,
@@ -1221,9 +1221,8 @@ export function init(hooks: IdeHooks = {}): () => void {
   // controller owns the diagram cache + center state, so it decides whether to re-render now. The
   // integrated terminal (#751) paints from concrete xterm colours that can't read var(), so re-resolve
   // its theme here too — ide.tsx owns the panel handle and this fan-out (the same way it drives fit()).
-  onThemeChange(() => {
-    controller.onThemeChanged();
-    panelHost.applyTerminalTheme();
+  const unsubscribeTheme = appStore.subscribe((s, prev) => {
+    if (s.theme !== prev.theme) { controller.onThemeChanged(); panelHost.applyTerminalTheme(); }
   });
 
   // The export / share / save-to-disk surface — shareable link, .koi source zip, live-diagram export +
@@ -1363,6 +1362,7 @@ export function init(hooks: IdeHooks = {}): () => void {
       panels: () => panelHost.dispose(),
       reviewStoreSub: () => unsubReviewStore(),
       workspaceSeams: () => unsubWorkspaceSeams(),
+      theme: () => unsubscribeTheme(),
       autoSave: () => workspace.setAutoSave(false),
       exportMenuDismiss: () => teardownExportMenuDismiss(),
       editorKeys: () => disposeEditorKeys(),

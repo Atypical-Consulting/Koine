@@ -10,6 +10,7 @@
 import { initEdgeResizer } from '@/shell/resize';
 import { loadLayout, saveLayout, type LayoutState } from '@/shell/layoutStore';
 import { type LayoutActions } from '@/shell/layoutCommands';
+import { appStore } from '@/store/index';
 import { domById } from '@/shared/domById';
 import { LEFT_RAIL_IDS } from '@atypical/koine-ui';
 
@@ -29,7 +30,7 @@ export interface LayoutController {
   readonly actions: LayoutActions;
   /** ⌘B: show/hide the file tree by flipping the rail's Domain↔Files axis. */
   toggleFileTree(): void;
-  /** Release the edge resizers + the section-disclosure listeners. */
+  /** Release the layout subscription, the edge resizers, and the section-disclosure listeners. */
   dispose(): void;
 }
 
@@ -37,22 +38,24 @@ export function createLayoutController(deps: LayoutControllerDeps): LayoutContro
   const { splitEl } = deps;
   const filesSect = domById<HTMLElement>(LEFT_RAIL_IDS.filesPane);
 
-  // View-only state (orientation / panel side / side-rail side / whether the split is open and on which
-  // uri), persisted in localStorage via layoutStore — it NEVER round-trips into the .koi model. On boot
-  // we read it, paint #split's data-* attributes (CSS reflows the grid), and anchor the inspector /
+  // View-only state (panel side / side-rail side), persisted in localStorage via layoutStore — it NEVER
+  // round-trips into the .koi model. The runtime source of truth is the uiChrome slice now (#983),
+  // mirrored to layoutStore for persistence like the rightCollapsed/leftCollapsed collapse flags. We seed
+  // the slice from persistence via the setters BEFORE wiring the subscription (so the seed can't echo a
+  // write), then paint #split's data-* attributes (CSS reflows the grid) and anchor the inspector /
   // left-rail resizers on the side each pane currently sits.
-  // `let` (not const): each layout action below reassigns it from saveLayout's MERGED return value, so
-  // that return is the single source of truth the next action reads (no per-field manual shadow).
-  let layout = loadLayout();
+  const seed = loadLayout();
+  appStore.getState().setPanelSide(seed.panelSide);
+  appStore.getState().setSideRail(seed.sideRail);
 
   // Mirror the layout enums onto #split as data-* attributes; _split.scss keys the grid off them
   // (data-panel-side docks the bottom panel bottom/right; data-siderail-side moves the inspector rail
   // left/right).
-  function applyLayoutAttrs(l: LayoutState): void {
-    splitEl.dataset.panelSide = l.panelSide;
-    splitEl.dataset.siderailSide = l.sideRail;
+  function applyLayoutAttrs(panelSide: LayoutState['panelSide'], sideRail: LayoutState['sideRail']): void {
+    splitEl.dataset.panelSide = panelSide;
+    splitEl.dataset.siderailSide = sideRail;
   }
-  applyLayoutAttrs(layout);
+  applyLayoutAttrs(seed.panelSide, seed.sideRail);
 
   // The inspector + left-rail resizers anchor to the side each pane sits on. With the default layout the
   // inspector is the right rail and the file-rail is the left, so this matches the historical wiring;
@@ -88,23 +91,27 @@ export function createLayoutController(deps: LayoutControllerDeps): LayoutContro
     });
   }
 
-  wireRailResizers(layout.sideRail);
+  wireRailResizers(seed.sideRail);
 
-  // The layout palette commands' effects: each persists the change via saveLayout, then re-applies the
-  // #split data-* attributes (CSS does the reflow). The toggles flip the corresponding enum AND re-wire
-  // the affected resizer so its drag handle is live immediately (no reload). The persisted state is what
-  // boot reads, so the arrangement survives a reload too.
+  // The runtime home for panelSide/sideRail is the uiChrome slice now (#983), so the palette toggles just
+  // flip the slice — exactly like toggleProperties/toggleNavigator flip the collapse flags. The single
+  // captured subscription below owns the effects (repaint #split data-*, re-anchor the resizers on a
+  // side-rail flip, persist the transition to layoutStore), and is released in dispose() so the singleton
+  // subscription never leaks. saveLayout MERGES the partial into the stored blob, preserving
+  // rightCollapsed/leftCollapsed. Boot reads the persisted state, so the arrangement survives a reload too.
+  const unsubscribeLayout = appStore.subscribe((s, prev) => {
+    if (s.panelSide === prev.panelSide && s.sideRail === prev.sideRail) return;
+    applyLayoutAttrs(s.panelSide, s.sideRail);
+    if (s.sideRail !== prev.sideRail) wireRailResizers(s.sideRail); // re-anchor the handles live
+    saveLayout({ panelSide: s.panelSide, sideRail: s.sideRail });
+  });
+
   const actions: LayoutActions = {
     togglePanelSide() {
-      const next = layout.panelSide === 'bottom' ? 'right' : 'bottom';
-      layout = saveLayout({ panelSide: next });
-      applyLayoutAttrs(layout);
+      appStore.getState().togglePanelSide();
     },
     toggleSideRail() {
-      const next = layout.sideRail === 'right' ? 'left' : 'right';
-      layout = saveLayout({ sideRail: next });
-      applyLayoutAttrs(layout);
-      wireRailResizers(next); // re-point the inspector + left-rail handles to their swapped anchors live
+      appStore.getState().toggleSideRail();
     },
     toggleProperties() {
       // The right Properties panel's collapse flag is owned by the uiChrome slice; inspectorController
@@ -154,6 +161,7 @@ export function createLayoutController(deps: LayoutControllerDeps): LayoutContro
     actions,
     toggleFileTree,
     dispose() {
+      unsubscribeLayout();
       disposeInspectorResizer?.();
       disposeLeftRailResizer?.();
       for (const { head, onClick } of sectionHeads) head.removeEventListener('click', onClick);

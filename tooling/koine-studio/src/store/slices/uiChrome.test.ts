@@ -6,6 +6,8 @@ import {
   DEFAULT_CENTER,
   DEFAULT_DECK_STATE,
   DEFAULT_MOBILE_ZONE,
+  DEFAULT_SETTINGS_EDITOR_MODE,
+  DEFAULT_SETTINGS_JSON_SCOPE,
   isValidCenter,
   isValidDeckState,
   isValidMobileZone,
@@ -91,6 +93,118 @@ describe('uiChrome slice', () => {
     expect(s.getState().rightCollapsed).toBe(false);
     s.getState().toggleLeftCollapsed();
     expect(s.getState().leftCollapsed).toBe(false);
+  });
+});
+
+describe('uiChrome railAxis / diagCollapsed / contextMapView (#983)', () => {
+  test('railAxis defaults to domain and setRailAxis switches it', () => {
+    const s = make();
+    expect(s.getState().railAxis).toBe('domain');
+    s.getState().setRailAxis('files');
+    expect(s.getState().railAxis).toBe('files');
+    s.getState().setRailAxis('domain');
+    expect(s.getState().railAxis).toBe('domain');
+  });
+
+  test('diagCollapsed defaults to false and diagCollapsedPref to null (no explicit choice yet)', () => {
+    const s = make();
+    expect(s.getState().diagCollapsed).toBe(false);
+    expect(s.getState().diagCollapsedPref).toBeNull();
+  });
+
+  test('setDiagCollapsed sets BOTH the runtime flag and the explicit preference', () => {
+    const s = make();
+    s.getState().setDiagCollapsed(true);
+    expect(s.getState().diagCollapsed).toBe(true);
+    expect(s.getState().diagCollapsedPref).toBe(true);
+    s.getState().setDiagCollapsed(false);
+    expect(s.getState().diagCollapsed).toBe(false);
+    expect(s.getState().diagCollapsedPref).toBe(false);
+  });
+
+  test('applyDiagCollapsedDefault changes ONLY the runtime flag while the preference is unset', () => {
+    const s = make();
+    s.getState().applyDiagCollapsedDefault(true);
+    expect(s.getState().diagCollapsed).toBe(true);
+    expect(s.getState().diagCollapsedPref).toBeNull(); // runtime-only: no preference is recorded
+  });
+
+  test('applyDiagCollapsedDefault is a NO-OP once an explicit preference exists (the user always wins)', () => {
+    const s = make();
+    s.getState().setDiagCollapsed(false); // the user explicitly chose "expanded"
+    s.getState().applyDiagCollapsedDefault(true); // the #475 narrow-Docs default would collapse it...
+    expect(s.getState().diagCollapsed).toBe(false); // ...but the preference wins; runtime is untouched
+    expect(s.getState().diagCollapsedPref).toBe(false);
+  });
+
+  test('contextMapView defaults to graph and setContextMapView round-trips', () => {
+    const s = make();
+    expect(s.getState().contextMapView).toBe('graph');
+    s.getState().setContextMapView('table');
+    expect(s.getState().contextMapView).toBe('table');
+    s.getState().setContextMapView('graph');
+    expect(s.getState().contextMapView).toBe('graph');
+  });
+});
+
+describe('uiChrome panelSide / sideRail (#983)', () => {
+  test('panelSide defaults to bottom (matching DEFAULT_LAYOUT) and setPanelSide round-trips', () => {
+    const s = make();
+    expect(s.getState().panelSide).toBe('bottom');
+    s.getState().setPanelSide('right');
+    expect(s.getState().panelSide).toBe('right');
+    s.getState().setPanelSide('bottom');
+    expect(s.getState().panelSide).toBe('bottom');
+  });
+
+  test('togglePanelSide flips bottom↔right', () => {
+    const s = make();
+    expect(s.getState().panelSide).toBe('bottom');
+    s.getState().togglePanelSide();
+    expect(s.getState().panelSide).toBe('right');
+    s.getState().togglePanelSide();
+    expect(s.getState().panelSide).toBe('bottom');
+  });
+
+  test('sideRail defaults to right (matching DEFAULT_LAYOUT) and setSideRail round-trips', () => {
+    const s = make();
+    expect(s.getState().sideRail).toBe('right');
+    s.getState().setSideRail('left');
+    expect(s.getState().sideRail).toBe('left');
+    s.getState().setSideRail('right');
+    expect(s.getState().sideRail).toBe('right');
+  });
+
+  test('toggleSideRail flips right↔left independently of panelSide', () => {
+    const s = make();
+    expect(s.getState().sideRail).toBe('right');
+    s.getState().toggleSideRail();
+    expect(s.getState().sideRail).toBe('left');
+    expect(s.getState().panelSide).toBe('bottom'); // untouched
+    s.getState().toggleSideRail();
+    expect(s.getState().sideRail).toBe('right');
+  });
+});
+
+describe('uiChrome settingsEditorMode / settingsJsonScope (#983)', () => {
+  test('settingsEditorMode defaults to visual and setSettingsEditorMode round-trips', () => {
+    const s = make();
+    expect(s.getState().settingsEditorMode).toBe('visual');
+    expect(DEFAULT_SETTINGS_EDITOR_MODE).toBe('visual');
+    s.getState().setSettingsEditorMode('json');
+    expect(s.getState().settingsEditorMode).toBe('json');
+    s.getState().setSettingsEditorMode('visual');
+    expect(s.getState().settingsEditorMode).toBe('visual');
+  });
+
+  test('settingsJsonScope defaults to user and setSettingsJsonScope round-trips', () => {
+    const s = make();
+    expect(s.getState().settingsJsonScope).toBe('user');
+    expect(DEFAULT_SETTINGS_JSON_SCOPE).toBe('user');
+    s.getState().setSettingsJsonScope('workspace');
+    expect(s.getState().settingsJsonScope).toBe('workspace');
+    s.getState().setSettingsJsonScope('user');
+    expect(s.getState().settingsJsonScope).toBe('user');
   });
 });
 

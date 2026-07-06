@@ -1,9 +1,13 @@
+import { appStore } from '@/store/index';
+
 // The renderer↔IDE contract for the domain diagram canvas: the bubbling `CustomEvent` names a renderer
-// dispatches, their `detail` shapes, the empty-canvas doorways, and the small module-level state the IDE
-// flips into the renderer (editing on/off, per-workspace persist scope). It is deliberately FREE of any
-// DOM, any renderer (SVG or maxGraph), and any layout engine — so the IDE-side delegated listeners
-// (ide.tsx) and the persistence scope (inspectorController.tsx) couple to this stable contract, not to a
-// particular renderer implementation file. Swapping the renderer is then a one-line factory change.
+// dispatches, their `detail` shapes, the empty-canvas doorways, and the small view-state the IDE flips
+// into the renderer (editing on/off, per-workspace persist scope). That view-state lives in the `diagrams`
+// store slice (#983); the accessor functions here are thin facades over it, so call sites stay unchanged.
+// It is deliberately FREE of any DOM, any renderer (SVG or maxGraph), and any layout engine — so the
+// IDE-side delegated listeners (ide.tsx) and the persistence scope (inspectorController.tsx) couple to
+// this stable contract, not to a particular renderer implementation file. Swapping the renderer is then a
+// one-line factory change.
 
 /**
  * The bubbling `CustomEvent` a node group dispatches when clicked (issue #93, Task 4). `ide.ts`
@@ -142,18 +146,18 @@ export interface EmptyStatePickDetail {
 /**
  * Whether diagram nodes accept drag-to-edit gestures (issue #93, Task 5). Off by default so the
  * read-only Diagrams tab is byte-identical when editing is off; `ide.ts` flips it on once the
- * model→`.koi` round-trip seam (#91) is reachable.
+ * model→`.koi` round-trip seam (#91) is reachable. Backed by the `diagrams` store slice (#983); this
+ * pair stays the stable renderer-facing contract, delegating to the app store.
+ *
+ * Enable/disable drag-to-edit gestures on diagram nodes.
  */
-let editingEnabled = false;
-
-/** Enable/disable drag-to-edit gestures on diagram nodes. */
 export function setDiagramEditing(enabled: boolean): void {
-  editingEnabled = enabled;
+  appStore.getState().setDiagramEditing(enabled);
 }
 
 /** Whether drag-to-edit gestures are currently enabled (read by the active renderer). */
 export function isDiagramEditing(): boolean {
-  return editingEnabled;
+  return appStore.getState().diagramEditing;
 }
 
 /**
@@ -163,17 +167,17 @@ export function isDiagramEditing(): boolean {
  * flips it on below `$bp-narrow` and off above it. Deliberately INDEPENDENT of {@link isDiagramEditing}:
  * the mobile shell stays editing-capable (the palette + auto-arrange still author), it just swaps freehand
  * manipulation for tap-to-edit. The renderer reads this alongside the editing flag when wiring gestures.
+ * Backed by the `diagrams` store slice (#983).
+ *
+ * Enable/disable touch (tap-to-edit) presentation on the diagram canvas.
  */
-let touchMode = false;
-
-/** Enable/disable touch (tap-to-edit) presentation on the diagram canvas. */
 export function setDiagramTouchMode(on: boolean): void {
-  touchMode = on;
+  appStore.getState().setDiagramTouchMode(on);
 }
 
 /** Whether the canvas is currently in touch mode (read by the active renderer). */
 export function isDiagramTouchMode(): boolean {
-  return touchMode;
+  return appStore.getState().diagramTouchMode;
 }
 
 /**
@@ -194,43 +198,42 @@ export function clampZoomPercent(percent: number): number | null {
 
 /**
  * The default zoom (percent) a freshly-opened domain canvas uses when no per-diagram zoom is saved
- * (#762). Mirrors the {@link isDiagramTouchMode}/{@link setDiagramEditing} pattern: a module-level
- * value the IDE flips in from the loaded `Settings` (`defaultCanvasZoom`) so the renderer reads it
- * without importing the settings page. 100 keeps the canvas at its real 1:1 scale.
+ * (#762). Mirrors the {@link isDiagramTouchMode}/{@link setDiagramEditing} pattern: the IDE flips it in
+ * from the loaded `Settings` (`defaultCanvasZoom`) so the renderer reads it without importing the
+ * settings page. 100 keeps the canvas at its real 1:1 scale. Backed by the `diagrams` store slice
+ * (#983); the clamp lives in the slice action, reusing {@link clampZoomPercent}.
+ *
+ * Set the default canvas zoom (percent), clamped to the diagram zoom band (10–800); a non-finite value
+ * is ignored so the last good zoom is preserved. Called from `ide.tsx` when settings load/change.
  */
-let defaultCanvasZoom = 100;
-
-/** Set the default canvas zoom (percent), clamped to the diagram zoom band (10–800); a non-finite
- *  value is ignored so the last good zoom is preserved. Called from `ide.tsx` when settings load/change. */
 export function setDefaultCanvasZoom(percent: number): void {
-  const z = clampZoomPercent(percent);
-  if (z != null) defaultCanvasZoom = z;
+  appStore.getState().setDefaultCanvasZoom(percent);
 }
 
 /** The default canvas zoom (percent) the renderer applies to a freshly-opened canvas (default 100). */
 export function getDefaultCanvasZoom(): number {
-  return defaultCanvasZoom;
+  return appStore.getState().defaultCanvasZoom;
 }
 
 /**
  * The per-workspace scope for persisted node positions (the authoring canvas). `ide.ts` sets it to the
- * folder identity (or 'scratch') before each render so positions never bleed across projects.
+ * folder identity (or 'scratch') before each render so positions never bleed across projects. Backed by
+ * the `diagrams` store slice (#983); these stay the stable contract call sites couple to.
+ *
+ * Set the workspace scope for persisted node positions (folder identity, or 'scratch').
  */
-let persistScope = 'scratch';
-
-/** Set the workspace scope for persisted node positions (folder identity, or 'scratch'). */
 export function setDiagramPersistScope(scope: string): void {
-  persistScope = scope || 'scratch';
+  appStore.getState().setDiagramPersistScope(scope);
 }
 
 /** The current per-workspace persist scope (folder identity, or 'scratch'). */
 export function diagramPersistScope(): string {
-  return persistScope;
+  return appStore.getState().diagramPersistScope;
 }
 
 /** The storage key for the unified domain canvas's node positions, scoped to the active workspace. */
 export function positionKey(): string {
-  return `${persistScope}:koi-domain-diagram`;
+  return `${appStore.getState().diagramPersistScope}:koi-domain-diagram`;
 }
 
 /**

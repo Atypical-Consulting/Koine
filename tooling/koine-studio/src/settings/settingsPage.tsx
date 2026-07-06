@@ -13,6 +13,7 @@ import { createJsonSettingsEditor, type JsonSettingsEditor } from '@/editor/edit
 import { settingsToJsonDoc, jsonDocToSettings, workspaceOverridesToJsonDoc, jsonDocToWorkspaceOverrides, SETTINGS_JSON_SCHEMA, WORKSPACE_SETTINGS_JSON_SCHEMA } from '@/settings/settingsSchema';
 import { loadSettings, saveSettings, loadWorkspaceOverrides, replaceWorkspaceOverrides } from '@/settings/persistence';
 import { setTheme } from '@/settings/theme';
+import { appStore } from '@/store/index';
 import { el } from '@atypical/koine-ui';
 
 /** Which representation the page is showing. Persisted so the last-used one is restored on reopen. */
@@ -50,7 +51,13 @@ export interface SettingsPageHandle {
 
 /** Read the persisted representation, defaulting to Visual when absent/invalid. */
 function loadMode(): SettingsEditorMode {
-  return localStorage.getItem(MODE_KEY) === 'json' ? 'json' : 'visual';
+  try {
+    return localStorage.getItem(MODE_KEY) === 'json' ? 'json' : 'visual';
+  } catch {
+    // A storage-locked host (private mode / denied) must fall back to Visual, never let the read throw
+    // and break the page mount — matching the guard every sibling helper already has.
+    return 'visual';
+  }
 }
 
 function saveMode(mode: SettingsEditorMode): void {
@@ -98,7 +105,11 @@ export function createSettingsPage(
   cb: PrefsCallbacks,
   onClose?: () => void,
 ): SettingsPageHandle {
-  let mode: SettingsEditorMode = loadMode();
+  // The uiChrome slice is the runtime home for the page's representation + JSON scope (#983); persistence
+  // stays imperative + local here (loadMode/saveMode, loadScope/saveScope) because the page is transient
+  // (built by createSettingsPage, torn down in destroy()), so a store subscription would be the wrong shape.
+  // Seed the representation from persistence at construction — where the `mode` closure used to initialize.
+  appStore.getState().setSettingsEditorMode(loadMode());
 
   // The current workspace key (or null when no workspace is open / host doesn't scope settings).
   const wsKey = (): string | null => cb.workspaceKey?.() ?? null;
@@ -109,14 +120,15 @@ export function createSettingsPage(
   let diagnostics: HTMLElement | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // JSON scope state + the scope toggle control (only live while in JSON mode).
-  // Defaults to 'user' when no workspace is open; otherwise restores the persisted choice.
-  let scope: JsonScope = wsKey() === null ? 'user' : loadScope();
+  // JSON scope state lives in the slice (#983); the scope toggle control is only live while in JSON mode.
+  // Seed the scope: 'user' when no workspace is open; otherwise the persisted choice (buildBody re-derives
+  // this on each JSON build, mirroring the current rule).
+  appStore.getState().setSettingsJsonScope(wsKey() === null ? 'user' : loadScope());
 
   // Return the JSON schema for the active scope: the workspace schema is flat (no group nesting),
   // the user schema is the full grouped settings.json schema. Drives the editor's inline linting.
   function schemaForScope(): Record<string, unknown> {
-    return scope === 'workspace' ? WORKSPACE_SETTINGS_JSON_SCHEMA : SETTINGS_JSON_SCHEMA;
+    return appStore.getState().settingsJsonScope === 'workspace' ? WORKSPACE_SETTINGS_JSON_SCHEMA : SETTINGS_JSON_SCHEMA;
   }
   let scopeToggle: { el: HTMLElement; set(value: JsonScope): void; setDisabled(disabled: boolean): void } | null = null;
 
@@ -162,7 +174,7 @@ export function createSettingsPage(
   // Falls back to the user seed when no workspace key is available (defensive — the Workspace pill
   // is disabled when wsKey() is null, so this branch should not occur in normal use).
   function seedForScope(): string {
-    if (scope === 'workspace') {
+    if (appStore.getState().settingsJsonScope === 'workspace') {
       const key = wsKey();
       if (key === null) return settingsToJsonDoc(loadSettings()); // fallback: no workspace open
       return workspaceOverridesToJsonDoc(loadWorkspaceOverrides(key));
@@ -202,14 +214,14 @@ export function createSettingsPage(
   // debounce (abandoning an invalid draft — mirrors the Visual↔JSON swap behavior), clears stale
   // diagnostics, and re-seeds the editor from the scope's own document.
   function setScope(next: JsonScope): void {
-    if (next === scope) return;
+    if (next === appStore.getState().settingsJsonScope) return;
     if (next === 'workspace' && wsKey() === null) {
-      scopeToggle?.set(scope); // re-sync the toggle to the unchanged scope (Fix 4)
+      scopeToggle?.set(appStore.getState().settingsJsonScope); // re-sync the toggle to the unchanged scope (Fix 4)
       return;
     }
-    scope = next;
-    saveScope(scope);
-    scopeToggle?.set(scope);
+    appStore.getState().setSettingsJsonScope(next);
+    saveScope(next);
+    scopeToggle?.set(next);
     // Cancel any pending debounce so the old draft is never applied to the new scope.
     if (debounceTimer !== null) {
       clearTimeout(debounceTimer);
@@ -241,7 +253,7 @@ export function createSettingsPage(
   }
 
   function applyJsonText(text: string): void {
-    if (scope === 'workspace') {
+    if (appStore.getState().settingsJsonScope === 'workspace') {
       // Defensive guard: never enter the workspace apply path without a workspace key.
       const key = wsKey();
       if (key === null) return;
@@ -284,12 +296,12 @@ export function createSettingsPage(
   // concern directly. `cb.mcpEndpoint` is idempotent (it reuses a running sidecar), so re-resolving — e.g.
   // after a Visual↔JSON flip — reflects the live endpoint without ever spawning a second process.
   function startMcpOnShow(): void {
-    if (mode === 'visual') pane?.startMcpSidecar();
+    if (appStore.getState().settingsEditorMode === 'visual') pane?.startMcpSidecar();
     else void startMcpSidecarIfEnabled(cb);
   }
 
   function buildBody(): void {
-    if (mode === 'visual') {
+    if (appStore.getState().settingsEditorMode === 'visual') {
       pane = mountPreferencesPane(hosts.body, cb);
       // Repaint the pane (but DON'T focus the category tab — this is an embedded center page, not a modal,
       // so stealing focus onto a tab would be jarring); the sidecar (re)start is the startMcpOnShow call.
@@ -302,7 +314,7 @@ export function createSettingsPage(
       // --- JSON scope toggle (User | Workspace) — mounted into the header, beside the Visual/JSON toggle ---
       // Re-derive scope from persistence on each build: restores a persisted 'workspace' scope when a
       // folder opens mid-session (Fix 3); forces 'user' when no workspace is available.
-      scope = currentWsKey === null ? 'user' : loadScope();
+      appStore.getState().setSettingsJsonScope(currentWsKey === null ? 'user' : loadScope());
       scopeToggle = segmented<JsonScope>(
         'Settings JSON scope',
         [
@@ -311,7 +323,7 @@ export function createSettingsPage(
         ],
         setScope,
       );
-      scopeToggle.set(scope);
+      scopeToggle.set(appStore.getState().settingsJsonScope);
       // Reflect "no workspace": disable the Workspace pill via the shared group-level helper.
       const wsOpen = currentWsKey !== null;
       scopeToggle.setDisabled(!wsOpen);
@@ -387,11 +399,11 @@ export function createSettingsPage(
   // re-mounts from loadSettings() — the LAST VALID PERSISTED state — so if the just-abandoned JSON was
   // invalid (never saved), the form simply shows the last good settings rather than the broken draft.
   function setMode(next: SettingsEditorMode): void {
-    if (next === mode) return;
+    if (next === appStore.getState().settingsEditorMode) return;
     teardownBody();
-    mode = next;
-    saveMode(mode);
-    modeToggle.set(mode);
+    appStore.getState().setSettingsEditorMode(next);
+    saveMode(next);
+    modeToggle.set(next);
     buildBody();
   }
 
@@ -402,8 +414,8 @@ export function createSettingsPage(
     // A category deep-link (e.g. the About command) targets a Visual category tab; the JSON
     // representation has no tabs, so switch to Visual first — otherwise the requested category is silently
     // dropped and the page just shows the settings.json editor (#731).
-    if (category && mode === 'json') setMode('visual');
-    if (mode === 'visual') {
+    if (category && appStore.getState().settingsEditorMode === 'json') setMode('visual');
+    if (appStore.getState().settingsEditorMode === 'visual') {
       pane?.refresh(category, false); // repaint from live settings; land on `category` when given
     } else if (editor) {
       // If workspace availability changed since the body was built (e.g. a folder was opened or closed
@@ -434,7 +446,7 @@ export function createSettingsPage(
   }
 
   // Initial paint.
-  modeToggle.set(mode);
+  modeToggle.set(appStore.getState().settingsEditorMode);
   buildBody();
 
   return {
