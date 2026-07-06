@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="Koine app icon">
+  <rect width="120" height="120" rx="28" fill="#5aa9ff"></rect>
+  <svg x="20" y="20" width="80" height="80" viewBox="0 0 120 120" fill="none">
+    <g stroke="#08111f" stroke-linejoin="round" stroke-linecap="round">
+      <polygon points="106,60 83,99.84 37,99.84 14,60 37,20.16 83,20.16" stroke-width="6"></polygon>
+      <g stroke-width="7.5">
+        <path d="M48 36 V84"></path>
+        <path d="M48 60 L78 36"></path>
+        <path d="M48 60 L78 84"></path>
+      </g>
+    </g>
+  </svg>
+</svg>
