@@ -64,6 +64,20 @@ function formatDate(date: string): string {
   return m ? m[1] : date;
 }
 
+/** Best-effort `+added / −removed` line counts parsed from a unified diff, skipping the `+++`/`---`
+ *  file headers. `GitFile` carries no line counts and `gitDiff` is lazy (per-row), so a row can only
+ *  show real counts once ITS diff is open and parsed — otherwise the row falls back to a neutral
+ *  placeholder rather than a misleading `+0`. Eager numstat is a tracked follow-up. */
+function diffStat(text: string): { add: number; del: number } {
+  let add = 0;
+  let del = 0;
+  for (const line of text.split('\n')) {
+    if (line.startsWith('+') && !line.startsWith('+++')) add += 1;
+    else if (line.startsWith('-') && !line.startsWith('---')) del += 1;
+  }
+  return { add, del };
+}
+
 /** Which file's inline diff is open, keyed by (relPath, area) so the staged and unstaged rows of one path
  *  toggle independently — the same (file, area) identity git's diff is taken against. */
 interface OpenDiff {
@@ -287,35 +301,106 @@ export function SourceControlPanel(props: {
   // Surface the current branch even when it isn't in the local list (detached HEAD / fresh branch).
   const branchOptions = status && !branches.includes(status.branch) ? [status.branch, ...branches] : branches;
 
-  // One file row: a path button that toggles its inline diff (its glyph + screen-reader status), plus the
-  // Stage or Unstage action for its area. The action's label carries the path screen-reader-only so each
-  // button has a unique accessible name in a list of rows.
+  // One file row: a status glyph, a path button that toggles the inline diff, a best-effort +/− stat
+  // (swapped for the hover/focus action cluster), then the inline diff below when open. The path button's
+  // visible label is split into basename + muted dir, but its accessible name is pinned to
+  // `{relPath} {status}` so each row stays uniquely addressable and AT users hear the full path + kind.
   const fileRow = (f: GitFile) => {
     const expanded = openDiff?.relPath === f.relPath && openDiff?.staged === f.staged;
+    // Real +/− counts are only knowable once THIS row's diff is open and loaded (GitFile has none);
+    // otherwise a neutral placeholder, never a fake `+0`. See {@link diffStat}.
+    const stat = expanded && diffText ? diffStat(diffText) : null;
+    const slash = f.relPath.lastIndexOf('/');
+    const name = slash >= 0 ? f.relPath.slice(slash + 1) : f.relPath;
+    const dir = slash >= 0 ? f.relPath.slice(0, slash) : '';
     return (
       <li key={`${f.staged ? 's' : 'w'}:${f.relPath}`} class="koi-sc-file" data-relpath={f.relPath}>
         <div class="koi-sc-file-row">
+          <span class={`koi-sc-glyph koi-sc-glyph-${f.status}`} aria-hidden="true">
+            {STATUS_GLYPH[f.status]}
+          </span>
           <button
             type="button"
             class="koi-sc-file-open"
+            aria-label={`${f.relPath} ${STATUS_LABEL[f.status]}`}
             aria-expanded={expanded}
             onClick={() => void onToggleDiff(f)}
           >
-            <span class={`koi-sc-glyph koi-sc-glyph-${f.status}`} aria-hidden="true">
-              {STATUS_GLYPH[f.status]}
+            <span class="koi-sc-name" aria-hidden="true">
+              {name}
             </span>
-            <span class="koi-sc-file-path">{f.relPath}</span>
-            <span class="koi-sr-only"> {STATUS_LABEL[f.status]}</span>
+            {dir && (
+              <span class="koi-sc-dir" aria-hidden="true">
+                {dir}
+              </span>
+            )}
           </button>
-          {f.staged ? (
-            <button type="button" class="koi-sc-act" disabled={busy} onClick={() => onUnstage(f.relPath)}>
-              Unstage<span class="koi-sr-only"> {f.relPath}</span>
+          {/* Decorative +/− stat (mono); hidden on row hover to reveal the action cluster below. */}
+          <span class="koi-sc-stat" aria-hidden="true">
+            {stat ? (
+              <>
+                <span class="add">+{stat.add}</span>
+                <span class="del">−{stat.del}</span>
+              </>
+            ) : (
+              <span class="none">·</span>
+            )}
+          </span>
+          {/* Row actions, revealed on row hover / keyboard focus. Open changes + Stage/Unstage are wired;
+              Discard is a disabled placeholder — the Platform git surface exposes no discard/revert op, so
+              wiring it is a tracked follow-up (see the panel's design handoff). */}
+          <div class="koi-sc-row-actions">
+            <button
+              type="button"
+              class="koi-sc-ract"
+              title="Open changes"
+              aria-label={`Open changes ${f.relPath}`}
+              onClick={() => void onToggleDiff(f)}
+            >
+              <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4Z" />
+                <circle cx="8" cy="8" r="1.8" />
+              </svg>
             </button>
-          ) : (
-            <button type="button" class="koi-sc-act" disabled={busy} onClick={() => onStage(f.relPath)}>
-              Stage<span class="koi-sr-only"> {f.relPath}</span>
+            <button
+              type="button"
+              class="koi-sc-ract danger"
+              title="Discard changes (coming soon)"
+              aria-label={`Discard ${f.relPath} changes (coming soon)`}
+              disabled
+            >
+              <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M11.5 4.5 8 8m0 0L4.5 4.5M8 8l3.5 3.5M8 8l-3.5 3.5" />
+              </svg>
             </button>
-          )}
+            {f.staged ? (
+              <button
+                type="button"
+                class="koi-sc-ract"
+                title="Unstage changes"
+                aria-label={`Unstage ${f.relPath}`}
+                disabled={busy}
+                onClick={() => onUnstage(f.relPath)}
+              >
+                <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M4 8h8" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                type="button"
+                class="koi-sc-ract stage"
+                title="Stage changes"
+                aria-label={`Stage ${f.relPath}`}
+                disabled={busy}
+                onClick={() => onStage(f.relPath)}
+              >
+                <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M8 4v8M4 8h8" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
         {expanded && (
           <pre class="koi-sc-diff" aria-label={`Diff for ${f.relPath}`}>

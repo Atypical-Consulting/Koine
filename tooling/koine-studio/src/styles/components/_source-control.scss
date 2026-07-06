@@ -438,44 +438,29 @@
 
 .koi-sc-file {
   border-radius: var(--koi-radius-sm);
+}
+
+/* The row proper: glyph + path button + stat/actions. Negative side margins bleed the hover surface to
+   the rail edges; the stat and the action cluster occupy the same trailing slot (see below). */
+.koi-sc-file-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 -0.5rem;
+  padding: 5px 0.5rem;
+  border-radius: var(--koi-radius-sm);
 
   &:hover {
     background: color-mix(in srgb, var(--koi-fg) 6%, transparent);
   }
 }
 
-.koi-sc-file-row {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-/* The path is a button that toggles the inline diff — borderless so the row reads as a list, not a form. */
-.koi-sc-file-open {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex: 1;
-  min-width: 0;
-  background: none;
-  border: none;
-  color: var(--koi-fg);
-  font: inherit;
-  font-size: var(--koi-text-md);
-  text-align: left;
-  padding: 0.25rem 0.3rem;
-  cursor: pointer;
-  border-radius: var(--koi-radius-sm);
-
-  &:hover {
-    color: var(--koi-accent);
-  }
-}
-
+/* The status glyph — a mono gutter letter, tinted by change kind (accent / green / error). */
 .koi-sc-glyph {
   flex: none;
-  width: 1.1em;
+  width: 14px;
   text-align: center;
+  font-family: var(--koi-font-mono);
   font-weight: 700;
   font-size: var(--koi-text-sm);
   color: var(--koi-muted);
@@ -489,20 +474,123 @@
 
 .koi-sc-glyph-added,
 .koi-sc-glyph-untracked {
-  color: var(--koi-ok, #16a34a);
+  color: var(--koi-hl-string);
 }
 
 .koi-sc-glyph-deleted,
 .koi-sc-glyph-conflicted {
-  color: var(--koi-error, #b00020);
+  color: var(--koi-error);
 }
 
-.koi-sc-file-path {
+/* The path is a button that toggles the inline diff — borderless so the row reads as a list, not a form.
+   Its label is split into a foreground basename + a muted directory prefix. */
+.koi-sc-file-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+
+  &:hover .koi-sc-name {
+    color: var(--koi-accent);
+  }
+}
+
+.koi-sc-name {
+  flex: none;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--koi-fg);
+  font-size: var(--koi-text-md);
 }
 
+.koi-sc-dir {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--koi-muted);
+  font-size: var(--koi-text-sm);
+}
+
+/* Trailing +/− stat (mono) — hidden on row hover so the action cluster can take its place. */
+.koi-sc-stat {
+  flex: none;
+  display: inline-flex;
+  gap: 0.3rem;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+
+  .add {
+    color: var(--koi-hl-string);
+  }
+
+  .del {
+    color: var(--koi-error);
+  }
+
+  .none {
+    color: var(--koi-muted);
+  }
+}
+
+.koi-sc-file-row:hover .koi-sc-stat {
+  display: none;
+}
+
+/* Row action cluster: hidden until the row is hovered or an action is keyboard-focused. */
+.koi-sc-row-actions {
+  flex: none;
+  display: none;
+  align-items: center;
+  gap: 1px;
+}
+
+.koi-sc-file-row:hover .koi-sc-row-actions,
+.koi-sc-row-actions:focus-within {
+  display: inline-flex;
+}
+
+.koi-sc-ract {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--koi-radius-xs);
+  background: none;
+  border: 0;
+  color: var(--koi-muted);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+  }
+
+  &.danger:hover {
+    color: var(--koi-error);
+  }
+
+  &.stage:hover {
+    color: var(--koi-accent);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
+/* The Initialize-repository call-to-action in the not-a-repo empty state. */
 .koi-sc-act {
   flex: none;
   background: none;

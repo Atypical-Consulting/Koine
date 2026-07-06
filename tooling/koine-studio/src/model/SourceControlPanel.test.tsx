@@ -68,6 +68,33 @@ describe('SourceControlPanel', () => {
     expect(group(view.container, 'Untracked')!.textContent).toContain('c.koi');
   });
 
+  test('a file row shows its status glyph + change-stat, and hover row actions (Open changes / Stage / Unstage)', async () => {
+    const git = makeGit([
+      { relPath: 'a.koi', staged: true, status: 'modified' },
+      { relPath: 'b.koi', staged: false, status: 'modified' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    // The unstaged b.koi row carries a status glyph and a (best-effort) change-stat element.
+    const changes = await waitFor(() => {
+      const el = group(view.container, 'Changes');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(changes.querySelector('.koi-sc-glyph')).not.toBeNull();
+    expect(changes.querySelector('.koi-sc-stat')).not.toBeNull();
+
+    // The hover/focus row actions are reachable by accessible name: Open changes + Stage on the
+    // unstaged row, Unstage on the staged row.
+    expect(view.getByRole('button', { name: 'Open changes b.koi' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Stage b.koi' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Unstage a.koi' })).toBeTruthy();
+
+    // Splitting the filename into name/dir must NOT change the file-open button's accessible name.
+    expect(view.getByRole('button', { name: 'b.koi modified' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'a.koi modified' })).toBeTruthy();
+  });
+
   test('renders the branch switcher, the ahead/behind sync readout, and the Refresh control', async () => {
     const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
