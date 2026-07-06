@@ -862,8 +862,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         source={lsp}
         revision={syntaxTreeRefresh}
         // Tree → editor (#890): jump to the clicked node's span, GUARDING the all-zero span the model root
-        // and span-less nodes carry (line 0 → a no-op, never a jump to 0:0). `node.span` (a SyntaxSpan)
-        // structurally satisfies gotoSourceSpan's Pick<SourceSpan, …>.
+        // and span-less nodes carry (line 0 → a no-op, never a jump to 0:0). `node.span` is now the
+        // shared SourceSpan (#1099), so it directly satisfies gotoSourceSpan's Pick<SourceSpan, …>.
         onNodeClick={(node) => {
           if (node.span.line > 0) deps.gotoSourceSpan(node.span);
         }}
