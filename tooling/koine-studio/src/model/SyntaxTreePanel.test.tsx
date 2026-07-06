@@ -1,12 +1,12 @@
 import { describe, expect, test, vi } from 'vitest';
 import { act, fireEvent, render, waitFor } from '@testing-library/preact';
 import { SyntaxTreePanel, deepestContaining, type SyntaxTreeSource } from '@/model/SyntaxTreePanel';
-import type { SyntaxSpan, SyntaxTreeNode } from '@/lsp/protocol';
+import type { SourceSpan, SyntaxTreeNode } from '@/lsp/protocol';
 import { axe } from 'vitest-axe';
 
 // A throwaway raw span — the panel renders structure, not coordinates, so every fixture node can share
 // one. (1-based, end-exclusive, matching the koine/syntaxTree wire shape.)
-const SPAN: SyntaxSpan = { line: 1, column: 1, endLine: 1, endColumn: 1, offset: 0, length: 0, file: null };
+const SPAN: SourceSpan = { line: 1, column: 1, endLine: 1, endColumn: 1, offset: 0, length: 0, file: null };
 
 /** Terse fixture-node builder so a tree literal stays readable. Non-leaf/flag fields default sensibly. */
 function node(kind: string, name: string | null, children: SyntaxTreeNode[] = [], extra: Partial<SyntaxTreeNode> = {}): SyntaxTreeNode {
@@ -17,8 +17,8 @@ function node(kind: string, name: string | null, children: SyntaxTreeNode[] = []
 // The root carries the wire's all-zero span; the real nodes carry NESTING own-spans so a caret resolves
 // to exactly one deepest containing node. Billing wraps lines 1–4; Money lines 2–3; the amount Member
 // sits on line 3, cols 5–19 (end-exclusive at 20).
-const zeroSpan: SyntaxSpan = { line: 0, column: 0, endLine: 0, endColumn: 0, offset: 0, length: 0, file: null };
-const span = (line: number, column: number, endLine: number, endColumn: number): SyntaxSpan => ({
+const zeroSpan: SourceSpan = { line: 0, column: 0, endLine: 0, endColumn: 0, offset: 0, length: 0, file: null };
+const span = (line: number, column: number, endLine: number, endColumn: number): SourceSpan => ({
   line, column, endLine, endColumn, offset: 0, length: 0, file: 'file:///m.koi',
 });
 function spannedFixture(): SyntaxTreeNode {
@@ -309,5 +309,20 @@ describe('deepestContaining', () => {
     const tree = spannedFixture();
     expect(deepestContaining(tree, 100, 1)).toBeNull(); // out of range
     expect(deepestContaining(tree, 5, 1)).toBeNull(); // == Billing's end (end-exclusive), so not contained
+  });
+
+  test('a SyntaxTreeNode.span typed as the shared SourceSpan keeps the line-0 root a no-jump sentinel (#1099)', () => {
+    // #1099 retyped SyntaxTreeNode.span from the deleted SyntaxSpan to the shared SourceSpan. Building
+    // the spans as SourceSpan must still type-check (same seven fields) AND preserve the sentinel: the
+    // all-zero root (line 0) resolves to no node, so the panel never jumps to 0:0.
+    const rootSpan: SourceSpan = { file: null, line: 0, column: 0, endLine: 0, endColumn: 0, offset: 0, length: 0 };
+    const childSpan: SourceSpan = { file: 'file:///m.koi', line: 1, column: 1, endLine: 3, endColumn: 1, offset: 0, length: 0 };
+    const tree: SyntaxTreeNode = node('KoineModel', null, [
+      node('ContextNode', 'Billing', [], { span: childSpan }),
+    ], { span: rootSpan });
+
+    // A caret inside the child resolves to it (jumpable); nothing resolves to the zero-span root.
+    expect(deepestContaining(tree, 2, 1)?.node.name).toBe('Billing');
+    expect(deepestContaining(tree, 0, 0)).toBeNull(); // the all-zero root is never a match → no jump
   });
 });

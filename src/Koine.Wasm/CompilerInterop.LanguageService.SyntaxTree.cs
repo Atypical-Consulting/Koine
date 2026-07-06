@@ -43,7 +43,12 @@ public static partial class CompilerInterop
         node.Leaf,
         node.Children.Select(ToWSyntaxNode).ToArray());
 
-    /// <summary>Converts a raw (1-based, end-EXCLUSIVE) <see cref="SourceSpan"/> to a flat <see cref="WSyntaxSpan"/> — source coordinates, NOT a 0-based LSP range.</summary>
-    private static WSyntaxSpan ToWSyntaxSpan(SourceSpan span) => new(
-        span.Line, span.Column, span.EndLine, span.EndColumn, span.Offset, span.Length, span.File);
+    /// <summary>
+    /// Converts a raw (1-based, end-EXCLUSIVE) <see cref="SourceSpan"/> to the shared flat
+    /// <see cref="WSourceSpan"/> — source coordinates, NOT a 0-based LSP range. Reuses the diagram
+    /// graph's span DTO (#290) so the syntax tree carries no duplicate span shape (#1099); the
+    /// all-zero root span stays a non-null value (unlike the diagram's nullable <c>MapSourceSpan</c>).
+    /// </summary>
+    private static WSourceSpan ToWSyntaxSpan(SourceSpan span) => new(
+        span.File, span.Line, span.Column, span.EndLine, span.EndColumn, span.Offset, span.Length);
 }

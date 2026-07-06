@@ -273,15 +273,7 @@ public sealed record WSemanticTokens(int[] Data, string? ResultId = null);
 /// node. Serialized identically by the desktop <c>koine/syntaxTree</c> LSP handler.
 /// </summary>
 public sealed record WSyntaxNode(
-    string Kind, string? Name, WSyntaxSpan Span, bool IsMissing, bool IsError, string? Leaf, WSyntaxNode[] Children);
-
-/// <summary>
-/// A raw (1-based, end-EXCLUSIVE) source span for a <see cref="WSyntaxNode"/> — NOT a 0-based LSP range:
-/// the syntax-tree panel keeps source coordinates so it can slice/select the <c>.koi</c>. Flat by
-/// design (a <c>SourceSpan</c> record-struct has two constructors, so it is never source-gen serialized
-/// directly). <see cref="File"/> is the owning source uri (null when unknown).
-/// </summary>
-public sealed record WSyntaxSpan(int Line, int Column, int EndLine, int EndColumn, int Offset, int Length, string? File);
+    string Kind, string? Name, WSourceSpan Span, bool IsMissing, bool IsError, string? Leaf, WSyntaxNode[] Children);
 
 /// <summary>Input shape: one open document (uri + full text).</summary>
 public sealed record WSourceFileDto(string Uri, string Text);
