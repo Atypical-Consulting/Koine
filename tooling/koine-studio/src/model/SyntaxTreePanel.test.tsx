@@ -502,9 +502,8 @@ describe('SyntaxTreePanel', () => {
     expect(items[0]).toBe(band[0]);
     expect(items[2].getAttribute('aria-level')).toBe('3');
 
-    // The band does NOT inflate the mounted window — its height is subtracted from the viewport, so the
-    // window row count is unchanged vs. the no-band baseline for the same viewport (band height is 0 under
-    // happy-dom's layout-less DOM, so windowRange is byte-for-byte the pre-#1106 result here).
+    // The band does NOT inflate the mounted window — it is a pure overlay that windowRange ignores, so the
+    // window row count is unchanged vs. the no-band baseline for the same viewport.
     expect(windowItems.length).toBe(windowCountAtTop);
     expect(windowItems.length).toBeLessThan(80);
 
@@ -582,6 +581,32 @@ describe('SyntaxTreePanel', () => {
     });
     // And no leftover "Big" context from the discarded tree is anywhere in the DOM.
     expect(view.queryByRole('treeitem', { name: /ContextNode Big/ })).toBeNull();
+  });
+
+  test('the band names the VISIBLE-top context, not the overscan-top one (#1106)', async () => {
+    // Two contexts (Alpha: 200 members, Beta: 60) → a virtualized tree. Scroll so the row at the fold is the
+    // first Beta member while the overscan-top (OVERSCAN rows higher, which the raw window `first` points at)
+    // is still inside Alpha — the breadcrumb must follow what the user SEES, not the overscan row.
+    const ctx = (name: string, n: number) =>
+      node('ContextNode', name, Array.from({ length: n }, (_, i) => node('Member', `${name}${i}`, [], { leaf: 'Int' })));
+    const twoContexts = node('KoineModel', null, [ctx('Alpha', 200), ctx('Beta', 60)]);
+    const view = render(<SyntaxTreePanel source={makeSource(twoContexts)} />);
+    await view.findByRole('tree');
+    const scroller = view.container.querySelector('.koi-stree-scroll') as HTMLElement;
+
+    // Flat indices: root=0, Alpha=1, Alpha m0..m199 = 2..201, Beta=202, Beta m0=203. Park the fold on Beta m0;
+    // the overscan-top (203 - OVERSCAN) is still an Alpha member.
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => 203 * ROW_HEIGHT });
+    fireEvent.scroll(scroller);
+
+    await waitFor(() => {
+      const band = [...view.container.querySelectorAll('.koi-stree-item--band')];
+      expect(band.length).toBeGreaterThan(0);
+      // The band's level-2 context row is Beta (the fold row's context), NOT Alpha (the overscan-top's).
+      const ctxRow = band.find((el) => el.getAttribute('aria-level') === '2')!;
+      expect(ctxRow.getAttribute('aria-label')).toMatch(/ContextNode Beta/);
+      expect(ctxRow.getAttribute('aria-label')).not.toMatch(/Alpha/);
+    });
   });
 });
 
