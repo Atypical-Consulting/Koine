@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { fireEvent, render, waitFor } from '@testing-library/preact';
+import { fireEvent, render, waitFor, within } from '@testing-library/preact';
 import { SourceControlPanel, type GitSurface } from '@/model/SourceControlPanel';
 import type { GitFile, GitLogEntry, GitStatus } from '@/host/types';
 import { koiConfirm } from '@atypical/koine-ui';
@@ -47,7 +47,7 @@ function makeGit(initial: GitFile[]) {
 
 // The section element of one file group, addressed by its aria-label (the panel groups files into named
 // landmarks). Returns null when the group has no files — the panel omits an empty group entirely.
-const group = (c: Element, label: string) => c.querySelector(`[aria-label="${label}"]`);
+const group = (c: Element, label: string) => c.querySelector<HTMLElement>(`[aria-label="${label}"]`);
 
 describe('SourceControlPanel', () => {
   test('renders the branch and groups changed files into Staged / Changes / Untracked', async () => {
@@ -100,6 +100,65 @@ describe('SourceControlPanel', () => {
     // The re-fetch moves the file into Staged Changes and empties (so drops) the Changes group.
     await waitFor(() => expect(group(view.container, 'Staged Changes')?.textContent).toContain('b.koi'));
     expect(group(view.container, 'Changes')).toBeNull();
+  });
+
+  test('a group header toggle collapses and expands its file list', async () => {
+    const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    await waitFor(() => expect(group(view.container, 'Changes')).not.toBeNull());
+    // The group header's toggle is the button whose accessible name is the label + count (not a row action).
+    const toggle = () => within(group(view.container, 'Changes')!).getByRole('button', { name: /Changes/ });
+
+    // Groups default to expanded.
+    expect(group(view.container, 'Changes')!.classList.contains('collapsed')).toBe(false);
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+
+    // Clicking the toggle collapses the group (the file list hides via the `collapsed` class).
+    fireEvent.click(toggle());
+    expect(group(view.container, 'Changes')!.classList.contains('collapsed')).toBe(true);
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+
+    // Clicking again expands it back.
+    fireEvent.click(toggle());
+    expect(group(view.container, 'Changes')!.classList.contains('collapsed')).toBe(false);
+  });
+
+  test('a group header "Stage all" stages every file in that group', async () => {
+    const git = makeGit([
+      { relPath: 'b.koi', staged: false, status: 'modified' },
+      { relPath: 'c.koi', staged: false, status: 'modified' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    // The group action is named exactly "Stage all" so it never collides with the per-row "Stage b.koi".
+    const stageAll = await view.findByRole('button', { name: 'Stage all' });
+    fireEvent.click(stageAll);
+
+    await waitFor(() => expect(git.gitStage).toHaveBeenCalledWith(TOKEN, ['b.koi', 'c.koi']));
+  });
+
+  test('a staged group "Unstage all" unstages every staged file', async () => {
+    const git = makeGit([
+      { relPath: 'a.koi', staged: true, status: 'modified' },
+      { relPath: 'd.koi', staged: true, status: 'modified' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    const unstageAll = await view.findByRole('button', { name: 'Unstage all' });
+    fireEvent.click(unstageAll);
+
+    await waitFor(() => expect(git.gitUnstage).toHaveBeenCalledWith(TOKEN, ['a.koi', 'd.koi']));
+  });
+
+  test('the non-staged group renders a disabled Discard-all placeholder (unwired)', async () => {
+    const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    const discardAll = (await view.findByRole('button', {
+      name: /Discard all changes/i,
+    })) as HTMLButtonElement;
+    expect(discardAll.disabled).toBe(true);
   });
 
   test('typing a message and clicking Commit calls gitCommit with the message', async () => {

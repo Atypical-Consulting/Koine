@@ -117,6 +117,16 @@ export function SourceControlPanel(props: {
   // Purely presentational: the Refresh glyph flips this on each click so a toggled class spins it 360°
   // (a CSS transition). It carries no git state — the actual refresh is `reload()`.
   const [spin, setSpin] = useState(false);
+  // Which file groups are collapsed, keyed by label. Purely presentational + local — groups default to
+  // expanded (empty set); the toggle just hides that group's file list via a CSS `collapsed` class.
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleGroup = (label: string) =>
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
 
   // The single fetch path: pull status (+ log + branches) for the workspace folder whenever the host,
   // folder, an explicit refresh, or the nonce changes. Browser hosts (no git) never fetch. A rejected
@@ -317,14 +327,78 @@ export function SourceControlPanel(props: {
   };
 
   // A named group landmark (`<section aria-label>`) for one bucket of files, omitted entirely when empty
-  // so the rail doesn't carry hollow headers — the test relies on this to prove a file moved groups.
+  // so the rail doesn't carry hollow headers — the test relies on this to prove a file moved groups. Its
+  // head is a collapse toggle (chevron + label + count pill) plus a hover/focus-revealed action cluster:
+  // Stage all / Unstage all are wired through `mutate`; Discard all is a disabled placeholder (the git
+  // surface exposes no discard/revert op — wiring it is a tracked follow-up).
   const fileGroup = (label: string, list: GitFile[]) => {
     if (list.length === 0) return null;
+    const isStaged = list.every((f) => f.staged);
+    const collapsed = collapsedGroups.has(label);
+    const paths = list.map((f) => f.relPath);
     return (
-      <section class="koi-sc-group" aria-label={label}>
-        <h4 class="koi-sc-group-title">
-          {label} <span class="koi-sc-count muted">{list.length}</span>
-        </h4>
+      <section
+        class={`koi-sc-group${isStaged ? ' staged' : ''}${collapsed ? ' collapsed' : ''}`}
+        aria-label={label}
+      >
+        <div class="koi-sc-group-head">
+          <button
+            type="button"
+            class="koi-sc-group-toggle"
+            aria-expanded={!collapsed}
+            onClick={() => toggleGroup(label)}
+          >
+            <svg class="koi-sc-ico chev" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M4 6.5 8 10 12 6.5" />
+            </svg>
+            {label}
+            <span class="cnt">{list.length}</span>
+          </button>
+          <div class="koi-sc-group-actions">
+            {isStaged ? (
+              <button
+                type="button"
+                class="koi-sc-gact"
+                title="Unstage all"
+                aria-label="Unstage all"
+                disabled={busy}
+                onClick={() => void mutate(() => git.gitUnstage(folderToken, paths))}
+              >
+                <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M4 8h8" />
+                </svg>
+              </button>
+            ) : (
+              <>
+                {/* Discard has no backing Platform git op — render it as a disabled placeholder for visual
+                    fidelity; wiring Discard/Revert is a tracked follow-up (see the panel's design handoff). */}
+                <button
+                  type="button"
+                  class="koi-sc-gact danger"
+                  title="Discard all changes (coming soon)"
+                  aria-label="Discard all changes (coming soon)"
+                  disabled
+                >
+                  <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M6.5 3h3M3.5 4.5h9M11.5 4.5l-.5 8a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1l-.5-8" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  class="koi-sc-gact"
+                  title="Stage all"
+                  aria-label="Stage all"
+                  disabled={busy}
+                  onClick={() => void mutate(() => git.gitStage(folderToken, paths))}
+                >
+                  <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M8 4v8M4 8h8" />
+                  </svg>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
         <ul class="koi-sc-files">{list.map(fileRow)}</ul>
       </section>
     );

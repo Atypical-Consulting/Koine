@@ -303,6 +303,7 @@
   margin-bottom: 1rem;
 }
 
+/* The Recent-commits section still uses the plain <h4> title. */
 .koi-sc-group-title {
   display: flex;
   align-items: baseline;
@@ -316,6 +317,117 @@
 
 .koi-sc-count {
   font-size: var(--koi-text-sm);
+}
+
+/* File-group header: a collapse toggle (chevron + label + count pill) beside a hover/focus-revealed
+   action cluster (Stage all / Unstage all / Discard all). Negative side margins let the head's hover
+   surface bleed to the panel edges like the rows below it. */
+.koi-sc-group-head {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0 -0.5rem 0.4rem;
+  padding: 2px 0.5rem;
+}
+
+/* The toggle owns the label + count and drives the collapsed state; borderless, mono, uppercase. */
+.koi-sc-group-toggle {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: none;
+  border: 0;
+  padding: 3px 0;
+  cursor: pointer;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--koi-muted);
+
+  &:hover {
+    color: var(--koi-fg);
+  }
+
+  .chev {
+    width: 11px;
+    height: 11px;
+    flex: none;
+    transition: transform var(--koi-dur-fast) ease;
+  }
+
+  .cnt {
+    min-width: 16px;
+    height: 15px;
+    padding: 0 5px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--koi-radius-pill);
+    background: var(--koi-surface);
+    color: var(--koi-ink-soft);
+    font-size: var(--koi-text-2xs);
+  }
+}
+
+/* Collapsed: rotate the chevron and hide this group's file list (the log section reuses .collapsed too). */
+.koi-sc-group.collapsed .chev {
+  transform: rotate(-90deg);
+}
+
+.koi-sc-group.collapsed .koi-sc-files,
+.koi-sc-group.collapsed .koi-sc-log {
+  display: none;
+}
+
+/* The staged group tints its count pill with the accent to read as "ready to commit". */
+.koi-sc-group.staged .koi-sc-group-toggle .cnt {
+  background: color-mix(in srgb, var(--koi-accent) 20%, transparent);
+  color: var(--koi-accent);
+}
+
+/* Action cluster: hidden until the head is hovered or an action is keyboard-focused. */
+.koi-sc-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--koi-dur-fast) ease;
+}
+
+.koi-sc-group-head:hover .koi-sc-group-actions,
+.koi-sc-group-actions:focus-within {
+  opacity: 1;
+}
+
+.koi-sc-gact {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--koi-radius-xs);
+  background: none;
+  border: 0;
+  color: var(--koi-muted);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+  }
+
+  &.danger:hover {
+    color: var(--koi-error);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
 }
 
 .koi-sc-files {
