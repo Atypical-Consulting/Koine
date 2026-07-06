@@ -90,49 +90,14 @@ caveats — some analyzer diagnostics can't be auto-fixed and must be hand-corre
 
 ## 4. Sync with `main` and resolve conflicts (`BEHIND` / `DIRTY`)
 
-Mirrors `implement-issue`'s Step 8 (same resolutions, both sourced from the profile's *Conflict
-hot-spots*). When the profile's *Integration style* is squash-merge, **merge, don't rebase**: one pass
-per conflict, no force-push, merge commit squashed away at landing.
+Clears the `BEHIND`/`DIRTY` merge states in the corrections loop (SKILL.md Step 4): merge the latest
+base into the branch and resolve conflicts so the PR is mergeable again, then loop back to wait for CI
+(§3).
 
-```bash
-git fetch origin main
-git <commit-identity> merge origin/main
-```
-
-Passing the profile's `-c user.email/-c user.name` flags on the merge means the auto-created merge
-commit carries the right identity too.
-
-### Conflict hot-spots — known-correct resolutions
-
-The great majority of conflicts are mechanical with one right answer. The profile's *Conflict hot-spots*
-table lists them per file with the resolution for each — read it and resolve those yourself. The
-recurring shapes:
-
-- **Version file** — take the **higher** of the two bumps (never stack both into a double increment).
-- **Changelog** — **union**: keep *both* entries under the current heading.
-- **Docs** (README, roadmap, feature catalogue, site) — **union**: keep both sides' sections.
-- **Derived files** — snapshots and lockfiles must **not** be hand-merged: take *either* side, then
-  regenerate (re-run the affected test and accept the fresh snapshot; reinstall to rebuild the lockfile).
-- **Additive code/tests** — **union**: keep both sides' new methods/usings/tests; let the build catch a
-  genuine clash.
-
-Rule of thumb: **union** additive files (docs, tests, changelog), **regenerate** derived files
-(snapshots, lockfiles), **take-the-higher** for the version. Anything where both sides edited the *same
-logic* is a real semantic conflict — resolve by understanding both intents, or stop and surface it with
-both sides shown (Autonomy contract).
-
-### Finish and verify the merge
-
-A clean text merge can still break the build. Prove it before pushing:
-
-```bash
-git add -A
-git <commit-identity> commit --no-edit   # completes the merge
-# run the profile's Build command (+ the affected test filters); the full suite may need a CI-only prerequisite
-git push
-```
-
-Then loop back to wait for CI (§3) — never push a merge you haven't at least built.
+The procedure — merge-not-rebase, the union/regenerate/take-the-higher rule-of-thumb keyed off the
+profile's *Conflict hot-spots* table, and finish-and-verify — is shared with `implement-issue` and
+lives in [`../../_shared/sync-with-main.md`](../../_shared/sync-with-main.md). Never push a merge you
+haven't at least built.
 
 ---
 

@@ -79,6 +79,17 @@ internal static class KotlinNaming
     }
 
     /// <summary>
+    /// The Kotlin package segment for a bounded-context name, backtick-escaped when the lowercased result
+    /// collides with a hard keyword: <c>Billing</c> → <c>billing</c>, <c>OrderManagement</c> →
+    /// <c>ordermanagement</c>, but <c>object</c> → <c>`object`</c> and <c>when</c> → <c>`when`</c> so the
+    /// emitted <c>package</c> declaration and cross-context qualification stay valid Kotlin. The raw
+    /// <see cref="ToPackageSegment"/> is kept for the <em>file-path</em> sink, where a directory name must
+    /// not carry backticks. Composes the same casing + <see cref="EscapeIdentifier"/> escape the member
+    /// helpers use.
+    /// </summary>
+    public static string ToPackageSegmentEscaped(string raw) => EscapeIdentifier(ToPackageSegment(raw));
+
+    /// <summary>
     /// Backtick-escapes a Kotlin <b>hard keyword</b> used as an identifier (<c>when</c> → <c>`when`</c>,
     /// <c>object</c> → <c>`object`</c>, <c>in</c> → <c>`in`</c>) so the emitted name is legal; a
     /// non-keyword (or a soft/modifier keyword, which is legal as an identifier) passes through unchanged.
