@@ -62,7 +62,7 @@ public sealed partial class CSharpEmitter
             {
                 foreach (CommandDecl cmd in root.Commands)
                 {
-                    EmitCommandHandler(emit, files, registrations, ns, root, plural, cmd, index, typeMapper, enumMemberToType);
+                    EmitCommandHandler(emit, files, registrations, ns, root, plural, cmd, index, typeMapper, enumMemberToType, ctx);
                 }
             }
 
@@ -78,7 +78,7 @@ public sealed partial class CSharpEmitter
         // Query handlers (one per query object), projecting via the emitted read-model mapper.
         foreach (QueryDecl query in ctx.Types.OfType<QueryDecl>())
         {
-            EmitQueryHandler(emit, files, registrations, ns, query, aggregates, ctx);
+            EmitQueryHandler(emit, files, registrations, ns, query, ctx);
         }
 
         // I<Service> implementations (one per service with use cases).
@@ -116,7 +116,8 @@ public sealed partial class CSharpEmitter
         CommandDecl cmd,
         ModelIndex index,
         CSharpTypeMapper typeMapper,
-        IReadOnlyDictionary<string, string> enumMemberToType)
+        IReadOnlyDictionary<string, string> enumMemberToType,
+        ContextNode ctx)
     {
         var behavior = root.Name + CSharpNaming.ToPascalCase(cmd.Name);
         var requestType = behavior + "Request";
@@ -137,10 +138,29 @@ public sealed partial class CSharpEmitter
         // is the declared result type (nullable under the nullable policy). Defaults keep it null for a
         // void command, so the emitted handler stays byte-identical to today.
         var wantsAggregate = _options.HandlerResult == CSharpHandlerResult.Aggregate;
+        var wantsReadModel = _options.HandlerResult == CSharpHandlerResult.ReadModel;
         var nullableNotFound = _options.NotFound == CSharpNotFound.Nullable;
-        var baseResult = plainResult ?? ((wantsAggregate || nullableNotFound) ? root.Name : null);
-        var returnsAggregate = plainResult is null && baseResult is not null;
-        var effectiveResult = baseResult is null ? null : nullableNotFound ? baseResult + "?" : baseResult;
+        var resultNotFound = _options.NotFound == CSharpNotFound.Result;
+        // readModel projects the mutated aggregate to a read model (via the emitted To<RM>() mapper),
+        // falling back to the aggregate when the root has no read model.
+        var readModelName = wantsReadModel ? ReadModelForRoot(ctx, root) : null;
+        // A void command is promoted to return a value when aggregate/readModel is requested OR a
+        // not-found policy needs a value to return: the read model (readModel with one) else the aggregate.
+        var wantsValue = wantsAggregate || wantsReadModel;
+        var baseResult = plainResult ?? ((wantsValue || nullableNotFound || resultNotFound) ? (readModelName ?? root.Name) : null);
+        var returnsValue = plainResult is null && baseResult is not null;
+        var effectiveResult = baseResult is null ? null
+            : nullableNotFound ? baseResult + "?"
+            : resultNotFound ? $"Result<{baseResult}>"
+            : baseResult;
+
+        // The success value a promoted void command returns: a To<RM>() projection under readModel, else
+        // the aggregate itself.
+        var successExpr = readModelName is not null ? $"aggregate.To{readModelName}()" : "aggregate";
+
+        // Under the `result` policy the handler wraps its success value in Result<T>.Ok(...) and yields
+        // Result<T>.NotFound() on a miss (no nullable reference, no exception).
+        string Ok(string expr) => resultNotFound ? $"Result<{baseResult}>.Ok({expr})" : expr;
 
         // Request: the aggregate identity to load, then the command's parameters. The identity
         // property is normally "Id", but a command parameter named `id` (allowed for commands, only
@@ -166,13 +186,15 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append("var aggregate = await _unitOfWork.").Append(plural)
           .Append(".GetByIdAsync(request.").Append(idProp).Append(", ").Append(CtArg()).Append(")");
-        if (nullableNotFound)
+        if (nullableNotFound || resultNotFound)
         {
-            // Missing aggregate ⇒ return null (the caller maps it to a 404) instead of throwing.
+            // Missing aggregate ⇒ return the miss (null, or Result<T>.NotFound()) — the caller maps it to
+            // a 404 — instead of throwing.
+            var miss = resultNotFound ? $"Result<{baseResult}>.NotFound()" : "null";
             sb.Append(";\n");
             sb.Append(Indent).Append(Indent).Append("if (aggregate is null)\n");
             sb.Append(Indent).Append(Indent).Append("{\n");
-            sb.Append(Indent).Append(Indent).Append(Indent).Append("return null;\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("return ").Append(miss).Append(";\n");
             sb.Append(Indent).Append(Indent).Append("}\n\n");
         }
         else
@@ -186,13 +208,13 @@ public sealed partial class CSharpEmitter
         {
             sb.Append(Indent).Append(Indent).Append("var result = aggregate.").Append(method).Append('(').Append(args).Append(");\n");
             WriteCommit(sb);
-            sb.Append(Indent).Append(Indent).Append("return result;\n");
+            sb.Append(Indent).Append(Indent).Append("return ").Append(Ok("result")).Append(";\n");
         }
-        else if (returnsAggregate)
+        else if (returnsValue)
         {
             sb.Append(Indent).Append(Indent).Append("aggregate.").Append(method).Append('(').Append(args).Append(");\n");
             WriteCommit(sb);
-            sb.Append(Indent).Append(Indent).Append("return aggregate;\n");
+            sb.Append(Indent).Append(Indent).Append("return ").Append(Ok(successExpr)).Append(";\n");
         }
         else
         {
@@ -254,6 +276,14 @@ public sealed partial class CSharpEmitter
         registrations.Add(new AppRegistration("handler", MediatrHandlerService(requestType, root.Name), handlerType));
         EmitValidator(emit, files, registrations, ns, requestType, factory.Parameters, factory.Body, index, enumMemberToType);
     }
+
+    /// <summary>
+    /// The name of the first read model whose source is <paramref name="root"/>, or <c>null</c> when the
+    /// root has none — the projection a <c>--app-handler-result readModel</c> command handler returns
+    /// (via the emitted <c>To&lt;RM&gt;()</c> mapper). Declaration order keeps the choice deterministic.
+    /// </summary>
+    private static string? ReadModelForRoot(ContextNode ctx, EntityDecl root) =>
+        ctx.Types.OfType<ReadModelDecl>().FirstOrDefault(r => r.SourceType == root.Name)?.Name;
 
     /// <summary>
     /// Emits a request <c>record</c> file. In MediatR mode it is a <c>MediatR.IRequest&lt;TResponse&gt;</c>
@@ -456,6 +486,40 @@ public sealed partial class CSharpEmitter
     // ----------------------------------------------------------------------
 
     /// <summary>
+    /// Resolves a query to its by-identity load, or <c>null</c> when it is not one: a single-result
+    /// query over a read model whose source aggregate root's identity is exactly one criterion. Returns
+    /// the repository property (plural), the id-criterion property, and the root name. Shared by the
+    /// Application-layer query handler and the Api-layer endpoint so the two never disagree on which
+    /// queries wrap their result per the not-found policy (nullable/result).
+    /// </summary>
+    private static (string Plural, string Criterion, string Root)? ResolveByIdentityQuery(QueryDecl query, ContextNode ctx)
+    {
+        if (query.ResultType.Name == ModelIndex.ListTypeName)
+        {
+            return null;
+        }
+
+        ReadModelDecl? readModel = ctx.Types.OfType<ReadModelDecl>().FirstOrDefault(r => r.Name == query.ResultType.Name);
+        if (readModel is null)
+        {
+            return null;
+        }
+
+        EntityDecl? root = ctx.Types.OfType<AggregateDecl>()
+            .Select(a => a.RootEntity())
+            .FirstOrDefault(r => r is not null && r.Name == readModel.SourceType);
+        if (root is null)
+        {
+            return null;
+        }
+
+        Param? idCriterion = query.Criteria.FirstOrDefault(c => c.Type.Name == root.IdentityName);
+        return idCriterion is null
+            ? null
+            : (Pluralize(root.Name), CSharpNaming.ToPascalCase(idCriterion.Name), root.Name);
+    }
+
+    /// <summary>
     /// Emits a concrete <c>IQueryHandler&lt;TQuery,TResult&gt;</c>. A single-result query keyed by the
     /// source aggregate root's identity loads via the repository and projects with the emitted
     /// <c>To&lt;ReadModel&gt;</c> mapper; any other shape (list results, non-identity criteria) is a
@@ -467,7 +531,6 @@ public sealed partial class CSharpEmitter
         List<AppRegistration> registrations,
         string ns,
         QueryDecl query,
-        IReadOnlyList<AggregateDecl> aggregates,
         ContextNode ctx)
     {
         var isList = query.ResultType.Name == ModelIndex.ListTypeName;
@@ -477,27 +540,15 @@ public sealed partial class CSharpEmitter
 
         // Resolve the by-identity load: a single result over a read model whose source is an aggregate
         // root, with exactly one criterion typed as that root's identity.
-        ReadModelDecl? readModel = ctx.Types.OfType<ReadModelDecl>().FirstOrDefault(r => r.Name == resultName);
-        (string Plural, string Criterion, string Root)? byId = null;
-        if (!isList && readModel is not null)
-        {
-            AggregateDecl? agg = aggregates.FirstOrDefault(a => a.RootEntity()!.Name == readModel.SourceType);
-            EntityDecl? root = agg?.RootEntity();
-            if (root is not null)
-            {
-                Param? idCriterion = query.Criteria.FirstOrDefault(c => c.Type.Name == root.IdentityName);
-                if (idCriterion is not null)
-                {
-                    byId = (Pluralize(root.Name), CSharpNaming.ToPascalCase(idCriterion.Name), root.Name);
-                }
-            }
-        }
+        (string Plural, string Criterion, string Root)? byId = ResolveByIdentityQuery(query, ctx);
 
         // The by-identity load honors the not-found policy (W1): nullable ⇒ this handler returns its
-        // read model nullably and yields null on a miss, instead of throwing. Only the by-identity
-        // path has a not-found concept; a list/non-identity query is unaffected.
+        // read model nullably and yields null on a miss; result ⇒ it returns a Result<RM> and yields
+        // NotFound() on a miss; both instead of throwing. Only the by-identity path has a not-found
+        // concept; a list/non-identity query is unaffected.
         var nullableQuery = byId is not null && _options.NotFound == CSharpNotFound.Nullable;
-        var queryResultType = nullableQuery ? resultType + "?" : resultType;
+        var resultQuery = byId is not null && _options.NotFound == CSharpNotFound.Result;
+        var queryResultType = nullableQuery ? resultType + "?" : resultQuery ? $"Result<{resultType}>" : resultType;
         var service = $"Koine.Runtime.IQueryHandler<{query.Name}, {queryResultType}>";
 
         var sb = new StringBuilder();
@@ -514,12 +565,13 @@ public sealed partial class CSharpEmitter
             sb.Append(Indent).Append("{\n");
             sb.Append(Indent).Append(Indent).Append("var aggregate = await _unitOfWork.").Append(b.Plural)
               .Append(".GetByIdAsync(query.").Append(b.Criterion).Append(", ct)");
-            if (nullableQuery)
+            if (nullableQuery || resultQuery)
             {
+                var miss = resultQuery ? $"Result<{resultType}>.NotFound()" : "null";
                 sb.Append(";\n");
                 sb.Append(Indent).Append(Indent).Append("if (aggregate is null)\n");
                 sb.Append(Indent).Append(Indent).Append("{\n");
-                sb.Append(Indent).Append(Indent).Append(Indent).Append("return null;\n");
+                sb.Append(Indent).Append(Indent).Append(Indent).Append("return ").Append(miss).Append(";\n");
                 sb.Append(Indent).Append(Indent).Append("}\n\n");
             }
             else
@@ -528,7 +580,9 @@ public sealed partial class CSharpEmitter
                 sb.Append(Indent).Append(Indent).Append(Indent)
                   .Append("?? throw new InvalidOperationException($\"").Append(b.Root).Append(" '{query.").Append(b.Criterion).Append("}' was not found.\");\n");
             }
-            sb.Append(Indent).Append(Indent).Append("return aggregate.To").Append(resultName).Append("();\n");
+            var projected = $"aggregate.To{resultName}()";
+            sb.Append(Indent).Append(Indent).Append("return ")
+              .Append(resultQuery ? $"Result<{resultType}>.Ok({projected})" : projected).Append(";\n");
             sb.Append(Indent).Append("}\n");
         }
         else
