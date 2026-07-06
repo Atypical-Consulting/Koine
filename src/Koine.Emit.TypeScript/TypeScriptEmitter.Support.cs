@@ -15,10 +15,7 @@ public sealed partial class TypeScriptEmitter
     /// <summary>The immutable per-emit state threaded through every emit method (the emitter stays reentrant).</summary>
     internal sealed record TsEmitContext(
         ModelIndex Index,
-        IReadOnlySet<string> AdditiveNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarDivNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BinaryArithmeticNeeds,
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> OperatorNeeds,
         IReadOnlyList<string> ContextNames,
         IReadOnlyList<TsTypeLocation> TypeLocations,
         IReadOnlyDictionary<string, string> EnumMemberToType)
