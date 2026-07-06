@@ -57,6 +57,10 @@ const STATUS_LABEL: Record<GitFile['status'], string> = {
   conflicted: 'conflicted',
 };
 
+/** The Recent-commits section's label — also its collapse key in the shared `collapsedGroups` set and
+ *  its `aria-label` landmark, so it lives in one place to keep the three uses in lockstep. */
+const RECENT_COMMITS_LABEL = 'Recent commits';
+
 /** The `YYYY-MM-DD` calendar day of an ISO-8601 commit date (timezone-stable, locale-free), else the raw
  *  value — the same deterministic formatting the inspector's change-history rows use. */
 function formatDate(date: string): string {
@@ -75,16 +79,28 @@ function initials(author: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-/** Best-effort `+added / −removed` line counts parsed from a unified diff, skipping the `+++`/`---`
- *  file headers. `GitFile` carries no line counts and `gitDiff` is lazy (per-row), so a row can only
- *  show real counts once ITS diff is open and parsed — otherwise the row falls back to a neutral
- *  placeholder rather than a misleading `+0`. Eager numstat is a tracked follow-up. */
+/** Best-effort `+added / −removed` line counts parsed from a unified diff's hunk bodies (everything
+ *  after the first `@@`), so the file-header lines are skipped by position rather than by a text guard.
+ *  `GitFile` carries no line counts and `gitDiff` is lazy (per-row), so a row can only show real counts
+ *  once ITS diff is open and parsed — otherwise the row falls back to a neutral placeholder rather than a
+ *  misleading `+0`. Eager numstat is a tracked follow-up. */
 function diffStat(text: string): { add: number; del: number } {
   let add = 0;
   let del = 0;
+  // Count only inside the hunk body (after the first `@@` header). The file header lines (`--- a/…`,
+  // `+++ b/…`, `diff --git`, `index …`) live before it, so skipping them by position — rather than by a
+  // `startsWith('---'/'+++')` text guard — avoids miscounting a genuinely deleted/added source line that
+  // itself begins with `--`/`++` (e.g. a removed `-- comment`, which renders as `--- comment`).
+  let inHunk = false;
   for (const line of text.split('\n')) {
-    if (line.startsWith('+') && !line.startsWith('+++')) add += 1;
-    else if (line.startsWith('-') && !line.startsWith('---')) del += 1;
+    if (!inHunk) {
+      if (line.startsWith('@@')) inHunk = true;
+      continue;
+    }
+    // Within the body: `+`/`-` prefixed lines are additions/deletions; a later `@@` starts a new hunk and
+    // isn't a `+`/`-` line, so it's skipped naturally.
+    if (line.startsWith('+')) add += 1;
+    else if (line.startsWith('-')) del += 1;
   }
   return { add, del };
 }
@@ -313,7 +329,7 @@ export function SourceControlPanel(props: {
   const branchOptions = status && !branches.includes(status.branch) ? [status.branch, ...branches] : branches;
   // The recent-commit log is collapsible through the same `collapsedGroups`/`toggleGroup` infra the file
   // groups use — its section carries `collapsed` when its label is in the set (the CSS hides the list).
-  const logCollapsed = collapsedGroups.has('Recent commits');
+  const logCollapsed = collapsedGroups.has(RECENT_COMMITS_LABEL);
 
   // One file row: a status glyph, a path button that toggles the inline diff, a best-effort +/− stat
   // (swapped for the hover/focus action cluster), then the inline diff below when open. The path button's
@@ -522,7 +538,14 @@ export function SourceControlPanel(props: {
             <path d="M13 2.5V5h-2.5" />
           </svg>
         </button>
-        <button type="button" class="koi-sc-hdr-ico" title="Views and more actions" aria-label="Views and more actions">
+        {/* Overflow menu is a follow-up; disabled (not a live-but-inert control) so it doesn't mislead. */}
+        <button
+          type="button"
+          class="koi-sc-hdr-ico"
+          title="Views and more actions (coming soon)"
+          aria-label="Views and more actions (coming soon)"
+          disabled
+        >
           <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
             <circle cx="8" cy="3.5" r="1.1" fill="currentColor" stroke="none" />
             <circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none" />
@@ -549,28 +572,26 @@ export function SourceControlPanel(props: {
         ) : (
           <span class="koi-sc-branch koi-sc-branch-name">{status?.branch ?? '…'}</span>
         )}
-        {/* Best-effort ahead/behind placeholder — GitStatus carries no upstream counts, so this reads 0/0
-            until real sync wiring lands (a follow-up). Kept a labelled button to match the design chrome. */}
-        <button
-          type="button"
-          class="koi-sc-sync"
-          title={`Push 0 commits to origin/${status?.branch ?? 'main'}`}
-          aria-label={`Push 0 commits to origin/${status?.branch ?? 'main'}`}
-        >
-          <span class="ahead">
-            <i aria-hidden="true">↑</i>0
+        {/* Best-effort ahead/behind READOUT — GitStatus carries no upstream counts, so it reads 0/0 until
+            real sync wiring lands (a follow-up). A non-interactive readout (not a button): there is no
+            push action to invoke, so a labelled button would announce a dead control to AT users. The
+            compact ↑/↓ glyphs are aria-hidden; an sr-only sentence carries the meaning. */}
+        <div class="koi-sc-sync" title={`0 ahead · 0 behind origin/${status?.branch ?? 'main'}`}>
+          <span class="koi-sr-only">0 commits ahead of, 0 behind origin/{status?.branch ?? 'main'}</span>
+          <span class="ahead" aria-hidden="true">
+            <i>↑</i>0
           </span>
           <span class="sep" aria-hidden="true">
             ·
           </span>
-          <span class="behind">
-            <i aria-hidden="true">↓</i>0
+          <span class="behind" aria-hidden="true">
+            <i>↓</i>0
           </span>
           <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M13 8a5 5 0 1 1-1.5-3.6" />
             <path d="M13 2.5V5h-2.5" />
           </svg>
-        </button>
+        </div>
       </div>
 
       {actionError && (
@@ -617,13 +638,14 @@ export function SourceControlPanel(props: {
                     </kbd>
                   </span>
                 </button>
-                {/* Split caret — commit-options menu is a follow-up; a labelled placeholder for now. */}
+                {/* Split caret — the commit-options menu (amend / commit & push) is a follow-up, so it's
+                    always disabled: a labelled placeholder, never a live-but-inert control. */}
                 <button
                   type="button"
                   class="koi-sc-commit-caret"
-                  title="Commit options"
-                  aria-label="Commit options"
-                  disabled={commitDisabled}
+                  title="Commit options (coming soon)"
+                  aria-label="Commit options (coming soon)"
+                  disabled
                 >
                   <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
                     <path d="M4 6.5 8 10 12 6.5" />
@@ -644,22 +666,22 @@ export function SourceControlPanel(props: {
               follow-up). Each row is a mono initials avatar beside a message + SHA·author·date meta line. */}
           <section
             class={`koi-sc-group${logCollapsed ? ' collapsed' : ''}`}
-            aria-label="Recent commits"
+            aria-label={RECENT_COMMITS_LABEL}
           >
             <div class="koi-sc-group-head">
               <button
                 type="button"
                 class="koi-sc-group-toggle"
                 aria-expanded={!logCollapsed}
-                onClick={() => toggleGroup('Recent commits')}
+                onClick={() => toggleGroup(RECENT_COMMITS_LABEL)}
               >
                 <svg class="koi-sc-ico chev" viewBox="0 0 16 16" aria-hidden="true">
                   <path d="M4 6.5 8 10 12 6.5" />
                 </svg>
-                Recent commits
+                {RECENT_COMMITS_LABEL}
               </button>
-              {/* Full commit-history surface is a follow-up; a labelled placeholder for now. */}
-              <button type="button" class="koi-sc-viewall" aria-label="View all commits">
+              {/* Full commit-history surface is a follow-up; disabled placeholder, not a live-but-inert link. */}
+              <button type="button" class="koi-sc-viewall" aria-label="View all commits (coming soon)" disabled>
                 View all
               </button>
             </div>

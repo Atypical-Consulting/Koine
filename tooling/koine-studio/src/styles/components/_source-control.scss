@@ -110,6 +110,8 @@
 
 /* Best-effort ahead/behind sync readout (mono). GitStatus carries no upstream counts, so it reads 0/0
    until real sync wiring lands — the `ahead` count is tinted with the accent. */
+/* A non-interactive ahead/behind readout (a <div>, not a button) — no push action is wired, so it must
+   not read as a live control. */
 .koi-sc-sync {
   flex: none;
   display: inline-flex;
@@ -123,13 +125,6 @@
   color: var(--koi-ink-soft);
   font-family: var(--koi-font-mono);
   font-size: var(--koi-text-xs);
-  cursor: pointer;
-
-  &:hover {
-    background: var(--koi-surface);
-    color: var(--koi-fg);
-    border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
-  }
 
   .ahead {
     color: var(--koi-accent);
@@ -149,8 +144,8 @@
   margin: 0 0 0.6rem;
   padding: 0.35rem 0.5rem;
   border-radius: var(--koi-radius-sm);
-  color: var(--koi-error, #b00020);
-  background: color-mix(in srgb, var(--koi-error, #b00020) 12%, transparent);
+  color: var(--koi-error);
+  background: color-mix(in srgb, var(--koi-error) 12%, transparent);
   font-size: var(--koi-text-sm);
 }
 
@@ -425,8 +420,10 @@
 }
 
 /* The row proper: glyph + path button + stat/actions. Negative side margins bleed the hover surface to
-   the rail edges; the stat and the action cluster occupy the same trailing slot (see below). */
+   the rail edges; `position: relative` anchors the absolutely-positioned action cluster (see below),
+   which overlays the stat's trailing slot so revealing the actions never shifts the row's layout. */
 .koi-sc-file-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -504,13 +501,14 @@
   font-size: var(--koi-text-sm);
 }
 
-/* Trailing +/− stat (mono) — hidden on row hover so the action cluster can take its place. */
+/* Trailing +/− stat (mono) — fades out when the action cluster takes its place on hover/focus. */
 .koi-sc-stat {
   flex: none;
   display: inline-flex;
   gap: 0.3rem;
   font-family: var(--koi-font-mono);
   font-size: var(--koi-text-2xs);
+  transition: opacity var(--koi-dur-fast) ease;
 
   .add {
     color: var(--koi-hl-string);
@@ -525,21 +523,34 @@
   }
 }
 
-.koi-sc-file-row:hover .koi-sc-stat {
-  display: none;
-}
-
-/* Row action cluster: hidden until the row is hovered or an action is keyboard-focused. */
+/* Row action cluster: overlays the stat's trailing slot. It stays in the DOM (opacity/pointer-events,
+   NOT display:none) so its buttons remain in the tab order — a keyboard/AT user can Tab to per-row
+   Stage/Unstage/Open, which then reveals the cluster via the row's :focus-within. (display:none would
+   drop the buttons from the tab order, and :focus-within could never fire — an a11y regression.) */
 .koi-sc-row-actions {
-  flex: none;
-  display: none;
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
   align-items: center;
   gap: 1px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--koi-dur-fast) ease;
 }
 
 .koi-sc-file-row:hover .koi-sc-row-actions,
-.koi-sc-row-actions:focus-within {
-  display: inline-flex;
+.koi-sc-file-row:focus-within .koi-sc-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Swap keyed off the SAME hover/focus-within triggers as the reveal, so the stat and the action cluster
+   never show at once. */
+.koi-sc-file-row:hover .koi-sc-stat,
+.koi-sc-file-row:focus-within .koi-sc-stat {
+  opacity: 0;
 }
 
 .koi-sc-ract {
@@ -621,8 +632,13 @@
   padding: 3px 4px;
   border-radius: var(--koi-radius-xs);
 
-  &:hover {
+  &:hover:not(:disabled) {
     background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 }
 
