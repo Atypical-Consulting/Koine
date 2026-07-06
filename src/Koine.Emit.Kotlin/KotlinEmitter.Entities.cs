@@ -450,9 +450,18 @@ public sealed partial class KotlinEmitter
     // Shared entity analysis
     // ----------------------------------------------------------------------
 
-    /// <summary>The Kotlin expression that mints a factory's identity: <c>&lt;Id&gt;.generate()</c> for a UUID id (the only mintable kind).</summary>
+    /// <summary>
+    /// The Kotlin expression that mints a factory's identity: <c>&lt;Id&gt;.generate()</c> for a UUID id (the
+    /// only client-mintable kind). A sequence/natural identity is store-assigned or a real-world key — a factory
+    /// cannot mint it, and its <c>@JvmInline value class</c> is non-nullable, so (unlike Java's nullable
+    /// reference types) a <c>null</c> mint would not compile. We emit a <c>TODO(…)</c>, which type-checks (it
+    /// returns <c>Nothing</c>) and fails loudly at runtime — a factory over a non-mintable identity is a
+    /// validator-warned model shape that should supply the id as a parameter instead.
+    /// </summary>
     private static string MintExpression(EntityDecl entity, string idType) =>
-        KotlinIdBacking(entity).Kind == KotlinIdKind.Uuid ? idType + ".generate()" : "null";
+        KotlinIdBacking(entity).Kind == KotlinIdKind.Uuid
+            ? idType + ".generate()"
+            : $"TODO(\"{idType} is a store-assigned/natural identity and cannot be minted in a factory\")";
 
     /// <summary>The member names mutated by at least one behavior transition (so the property is a <c>var … private set</c>).</summary>
     private static ISet<string> MutatedFields(EntityDecl entity) =>

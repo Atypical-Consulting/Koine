@@ -175,11 +175,14 @@ public sealed partial class KotlinEmitter
     {
         if (vo.IsQuantity)
         {
+            // A quantity's additive combination is the unit-checked plus/minus (below), but the translator
+            // still lowers `quantity * scalar` / `quantity / scalar` to `times`/`div` — so a scaled quantity
+            // needs those demand-driven scalar operators too (in addition to its `scale` helper).
             WriteQuantityOps(sb, name, stored, ref wroteBody);
+            WriteScalarOperators(sb, emit, name, vo, stored, ref wroteBody);
             return;
         }
 
-        var hasNumeric = stored.Any(m => m.Type.Name is "Int" or "Decimal");
         IReadOnlySet<BinaryOp> binaryOps =
             emit.BinaryNeeds.TryGetValue(vo.Name, out IReadOnlySet<BinaryOp>? ops) ? ops : EmptyBinaryOps;
 
@@ -194,13 +197,25 @@ public sealed partial class KotlinEmitter
             WriteAdditiveOp(sb, name, stored, "minus", "-", ref wroteBody);
         }
 
-        // `times`/`div`: scalar scaling — one overload per scalar type the model uses.
-        if (hasNumeric && emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? mulScalars))
+        WriteScalarOperators(sb, emit, name, vo, stored, ref wroteBody);
+    }
+
+    /// <summary>Emits the demand-driven scalar-scaling operators (<c>times</c>/<c>div</c>) a value object's uses require — one overload per scalar type it is multiplied / divided by.</summary>
+    private static void WriteScalarOperators(
+        StringBuilder sb, KotlinEmitContext emit, string name, ValueObjectDecl vo, IReadOnlyList<Member> stored, ref bool wroteBody)
+    {
+        var hasNumeric = stored.Any(m => m.Type.Name is "Int" or "Decimal");
+        if (!hasNumeric)
+        {
+            return;
+        }
+
+        if (emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? mulScalars))
         {
             WriteScalarOps(sb, name, stored, mulScalars, "times", "*", ref wroteBody);
         }
 
-        if (hasNumeric && emit.ScalarDivNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? divScalars))
+        if (emit.ScalarDivNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? divScalars))
         {
             WriteScalarOps(sb, name, stored, divScalars, "div", "/", ref wroteBody);
         }

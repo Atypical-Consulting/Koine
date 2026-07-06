@@ -215,7 +215,10 @@ internal sealed class KotlinExpressionTranslator
     /// <summary>Writes an operand as an atom: a compound (binary/conditional/coalesce) is parenthesized so it composes safely as a receiver or a unary/argument operand.</summary>
     private void WriteAtom(Expr expr, StringBuilder sb)
     {
-        if (expr is IdentifierExpr or LiteralExpr or MemberAccessExpr or CallExpr or MatchExpr)
+        // A low-precedence Kotlin lowering (elvis `?:`, `if/else`, or a fold that lowers to `?: throw` / a
+        // bare `==`) is NOT a tight atom, so it must be parenthesized to compose as a receiver, a unary
+        // operand, or an argument that a surrounding operator would otherwise mis-group.
+        if (!IsLowPrecedence(expr) && expr is IdentifierExpr or LiteralExpr or MemberAccessExpr or CallExpr or MatchExpr)
         {
             Write(expr, sb);
         }
@@ -226,6 +229,22 @@ internal sealed class KotlinExpressionTranslator
             sb.Append(')');
         }
     }
+
+    /// <summary>
+    /// True when an expression LOWERS to a Kotlin form looser than a postfix/method-call term — a coalesce
+    /// (elvis <c>?:</c>), a conditional (<c>if … else …</c>), or a collection fold whose lowering carries a
+    /// top-level <c>?: throw</c> (<c>min</c>/<c>max</c>/a value-object <c>sum</c>) or a bare <c>==</c>
+    /// (<c>distinctBy</c>). Such a form must be parenthesized when it appears as a sub-expression, or the
+    /// surrounding operator mis-groups (e.g. <c>a ?: 1 * b</c> parses as <c>a ?: (1 * b)</c>). Java is
+    /// unaffected because it lowers these to tight postfix calls (<c>.orElse(…)</c>, <c>.orElseThrow(…)</c>).
+    /// </summary>
+    private static bool IsLowPrecedence(Expr expr) => expr switch
+    {
+        CoalesceExpr => true,
+        ConditionalExpr => true,
+        CallExpr { Method: "min" or "max" or "sum" or "distinctBy" } => true,
+        _ => false,
+    };
 
     // ------------------------------------------------------------------------
     // Binary operators — the (mostly Decimal-only) type-aware core
@@ -357,6 +376,16 @@ internal sealed class KotlinExpressionTranslator
         if (expr is BinaryExpr child && !NeedsParens(child.Op, parentOp, rightOperand))
         {
             WriteBinaryInner(child, sb);
+            return;
+        }
+
+        // A low-precedence lowering (elvis / if-else / a `?: throw` or `==` fold) as a binary operand must be
+        // parenthesized, or the surrounding operator swallows part of it (`a ?: 1 * b`, `if (c) a else b * c`).
+        if (IsLowPrecedence(expr))
+        {
+            sb.Append('(');
+            WriteTopLevel(expr, sb);
+            sb.Append(')');
             return;
         }
 

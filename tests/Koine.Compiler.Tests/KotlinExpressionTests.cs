@@ -32,6 +32,8 @@ public class KotlinExpressionTests
         new("code", new TypeRef("String"), null),
         new("name", new TypeRef("String"), null),
         new("description", new TypeRef("String", IsOptional: true), null),
+        new("discount", new TypeRef("Int", IsOptional: true), null),
+        new("amounts", new TypeRef("List", new TypeRef("Int")), null),
     };
 
     private static KotlinExpressionTranslator NewTranslator() => new(Index, Members, new KotlinTypeMapper(Index));
@@ -145,6 +147,52 @@ public class KotlinExpressionTests
 
         NewTranslator().Translate(new BinaryExpr(BinaryOp.Gt, trimLength, Int("0")))
             .ShouldBe("code.trim().length.toLong() > 0L");
+    }
+
+    // --- Precedence: Kotlin's low-precedence lowerings must parenthesize as sub-expressions (code-review) ---
+
+    [Fact]
+    public void Coalesce_as_a_binary_operand_is_parenthesized()
+    {
+        // (discount ?? 0) * quantity — elvis `?:` is lower precedence than `*`, so the coalesce must be
+        // parenthesized or Kotlin parses it as `discount ?: (0 * quantity)`.
+        var expr = new BinaryExpr(BinaryOp.Mul, new CoalesceExpr(Id("discount"), Int("0")), Id("quantity"));
+
+        NewTranslator().Translate(expr).ShouldBe("(discount ?: 0L) * quantity");
+    }
+
+    [Fact]
+    public void Conditional_as_a_binary_operand_is_parenthesized()
+    {
+        // (if active then 2 else 1) * quantity — an `if/else` expression greedily extends its else-branch,
+        // so it must be parenthesized as an operand.
+        var expr = new BinaryExpr(BinaryOp.Mul, new ConditionalExpr(Id("active"), Int("2"), Int("1")), Id("quantity"));
+
+        NewTranslator().Translate(expr).ShouldBe("(if (active) 2L else 1L) * quantity");
+    }
+
+    [Fact]
+    public void Min_and_max_folds_as_binary_operands_are_parenthesized()
+    {
+        // amounts.max(x => x) - amounts.min(x => x) — each fold lowers to `… ?: throw …` (low precedence),
+        // so both operands of the subtraction must be parenthesized to group correctly.
+        var expr = new BinaryExpr(
+            BinaryOp.Sub,
+            new CallExpr(Id("amounts"), "max", new Expr[] { new LambdaExpr("x", Id("x")) }),
+            new CallExpr(Id("amounts"), "min", new Expr[] { new LambdaExpr("x", Id("x")) }));
+
+        var kotlin = NewTranslator().Translate(expr);
+        kotlin.ShouldStartWith("(amounts.map { x -> x }.maxOrNull() ?: throw ");
+        kotlin.ShouldContain(") - (amounts.map { x -> x }.minOrNull() ?: throw ");
+        kotlin.ShouldEndWith(")");
+    }
+
+    [Fact]
+    public void Coalesce_at_top_level_is_not_parenthesized()
+    {
+        // A top-level coalesce (e.g. a derived-member body) needs no wrapping — the fix only parenthesizes
+        // a coalesce that is a SUB-expression.
+        NewTranslator().Translate(new CoalesceExpr(Id("description"), Id("name"))).ShouldBe("description ?: name");
     }
 
     [Fact]

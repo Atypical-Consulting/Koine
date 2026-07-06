@@ -123,6 +123,38 @@ public class KotlinSnapshotTests
         weight.ShouldContain("fun scale(factor: java.math.BigDecimal): Weight = Weight(this.amount.multiply(factor), this.unit)");
     }
 
+    // Regression (code-review): a quantity scaled by a scalar (`w * 2`) is lowered by the translator to
+    // `w.times(2L)`, so the quantity must ALSO emit the demand-driven `times`/`div` operators — not only
+    // its unit-checked plus/minus/scale (else `kotlinc` reports 'unresolved reference: times').
+    private const string ScaledQuantityFixture = """
+        context Q {
+          enum MassUnit { Gram, Kilogram }
+          quantity Weight {
+            amount: Decimal
+            unit:   MassUnit
+            invariant amount >= 0 "a weight cannot be negative"
+          }
+          value Bag {
+            net:     Weight
+            doubled: Weight = net * 2
+          }
+        }
+        """;
+
+    [Fact]
+    public void Kotlin_scaled_quantity_emits_the_times_operator()
+    {
+        var result = new KoineCompiler().Compile(ScaledQuantityFixture, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var weight = result.Files.Single(f => f.RelativePath.EndsWith("Weight.kt", StringComparison.Ordinal)).Contents;
+        // The scaled quantity gets a demand-driven `times(Long)` (in addition to its unit-checked plus/minus).
+        weight.ShouldContain("operator fun times(factor: Long): Weight = Weight(this.amount.multiply(java.math.BigDecimal.valueOf(factor)), this.unit)");
+
+        var bag = result.Files.Single(f => f.RelativePath.EndsWith("Bag.kt", StringComparison.Ordinal)).Contents;
+        bag.ShouldContain("val doubled: Weight get() = this.net.times(2L)");
+    }
+
     // Generated identity types: a UUID-backed id (with generate()), a natural String key (blank-checked), and
     // a sequence Long key. Only the id files are asserted (the entity class bodies are the entity task), so
     // this stays green when the entity task lands.

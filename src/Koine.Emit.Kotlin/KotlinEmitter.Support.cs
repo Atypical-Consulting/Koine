@@ -107,7 +107,9 @@ public sealed partial class KotlinEmitter
             sb.Append(indent).Append(" *");
             if (line.Length > 0)
             {
-                sb.Append(' ').Append(line);
+                // Neutralize an embedded `*/` so a doc string containing it can't close the KDoc block early
+                // (leaving the tail as stray tokens in declaration position).
+                sb.Append(' ').Append(line.Replace("*/", "* /", StringComparison.Ordinal));
             }
 
             sb.Append('\n');
