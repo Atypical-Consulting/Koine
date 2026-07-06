@@ -711,6 +711,102 @@ public sealed class ModelIndex
     public IReadOnlyList<string> DeclaringContextsOf(string typeName) =>
         _declaringContexts.TryGetValue(typeName, out List<string>? l) ? l : Array.Empty<string>();
 
+    /// <summary>
+    /// The single bounded context whose module a reference to <paramref name="koineName"/> from
+    /// <paramref name="referencingContext"/> qualifies to — the one, target-agnostic owner-resolution
+    /// policy every flat-module emitter (Rust <c>crate::&lt;owner&gt;::T</c>, Java <c>&lt;ownerPackage&gt;.T</c>)
+    /// delegates to (issue #1091). It resolves the previously-uncovered <b>multi-owner</b> case: a type
+    /// declared in more than one context and referenced from a THIRD, which the mappers used to degrade
+    /// to a bare, unresolvable name.
+    ///
+    /// <para>The policy, in order:</para>
+    /// <list type="number">
+    ///   <item>a <b>shared-kernel</b> type stays homed in its one canonical kernel owner's module,
+    ///   regardless of the referencing context (R14.2, unchanged);</item>
+    ///   <item>a name declared by no context has no qualifiable owner (<c>null</c>) — primitives, the
+    ///   <c>*Id</c> convention, and genuinely-unknown names are re-materialized/handled locally;</item>
+    ///   <item>a reference from <b>within one of the type's own owning contexts</b> binds to that local
+    ///   sibling (#437), so the referencing context itself is returned (the mapper then emits a bare
+    ///   name because the owner and current module match);</item>
+    ///   <item>a <b>uniquely-owned</b> type resolves to its single owner (unchanged);</item>
+    ///   <item>a <b>multi-owner</b> type referenced from a third context resolves deterministically: to
+    ///   the single context the name is <b>imported</b> from when that is unambiguous (so the
+    ///   qualification matches the type the reference actually binds to), otherwise to the
+    ///   <b>ordinal-least</b> declaring context — a stable choice independent of declaration order, so
+    ///   output is reproducible build-to-build.</item>
+    /// </list>
+    ///
+    /// <para>Purely model data (context names, no target syntax), so it lives here next to
+    /// <see cref="DeclaringContextsOf"/> / <see cref="IsSharedKernelType"/> / <see cref="KernelOwnerOfType"/>
+    /// and is reachable by both the emitters and the semantic validator without inverting the layering.</para>
+    /// </summary>
+    public string? ResolveCanonicalOwner(string koineName, string referencingContext)
+    {
+        // 1. A shared-kernel type is physically emitted into one canonical owner's module (R14.2) —
+        //    resolved the same from any context, so this precedes every other rule.
+        if (IsSharedKernelType(koineName) && KernelOwnerOfType(koineName) is { } kernelOwner)
+        {
+            return kernelOwner;
+        }
+
+        IReadOnlyList<string> declaring = DeclaringContextsOf(koineName);
+        if (declaring.Count == 0)
+        {
+            return null;                       // not a context-homed declared type — nothing to qualify
+        }
+
+        // 3. #437: a reference from within one of the type's own owning contexts binds locally.
+        if (ContainsOrdinal(declaring, referencingContext))
+        {
+            return referencingContext;
+        }
+
+        // 4. Uniquely owned — unchanged.
+        if (declaring.Count == 1)
+        {
+            return declaring[0];
+        }
+
+        // 5. Multi-owner from a third context. Prefer the single imported owner (the reference binds
+        //    there, so any other choice would qualify to a DIFFERENT same-named type); else fall back
+        //    to the stable ordinal-least declaring context.
+        IReadOnlyList<string> importOwners = ImportOwnersOf(referencingContext, koineName);
+        if (importOwners.Count == 1 && ContainsOrdinal(declaring, importOwners[0]))
+        {
+            return importOwners[0];
+        }
+
+        return OrdinalLeast(declaring);
+    }
+
+    /// <summary>The ordinal-least element of a non-empty context list (a stable, allocation-free min).</summary>
+    private static string OrdinalLeast(IReadOnlyList<string> contexts)
+    {
+        var least = contexts[0];
+        for (var i = 1; i < contexts.Count; i++)
+        {
+            if (string.CompareOrdinal(contexts[i], least) < 0)
+            {
+                least = contexts[i];
+            }
+        }
+
+        return least;
+    }
+
+    private static bool ContainsOrdinal(IReadOnlyList<string> contexts, string value)
+    {
+        foreach (var c in contexts)
+        {
+            if (string.Equals(c, value, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     // ---- Context map, shared kernel & integration events (R14) -------------
 
     /// <summary>Every relation on the context map whose endpoints are declared contexts.</summary>
