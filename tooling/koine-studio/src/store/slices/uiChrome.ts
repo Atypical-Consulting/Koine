@@ -104,6 +104,15 @@ export function isValidDeckState(v: unknown): v is DeckState {
  *  workspace Files tree. */
 export type RailAxis = 'domain' | 'files';
 
+/** The Settings page's editor representation (#983): the two-pane Visual form or the raw settings.json.
+ *  Inlined here (not imported from settingsPage) so the slice stays free of a settingsPage dependency —
+ *  it's structurally identical to settingsPage's `SettingsEditorMode`. */
+export type SettingsEditorMode = 'visual' | 'json';
+
+/** Which settings document the Settings JSON editor targets (#983): the user document or the
+ *  workspace-scoped overrides. Inlined for the same no-cycle reason as {@link SettingsEditorMode}. */
+export type SettingsJsonScope = 'user' | 'workspace';
+
 /** The Context Map's rendered view (#983): the interactive graph or the dense per-relation table. */
 export type ContextMapView = 'graph' | 'table';
 
@@ -112,6 +121,12 @@ export const DEFAULT_RAIL_AXIS: RailAxis = 'domain';
 
 /** The Context Map opens as the interactive graph; the table stays one click away. */
 export const DEFAULT_CONTEXT_MAP_VIEW: ContextMapView = 'graph';
+
+/** The Settings page opens on the Visual form; the raw settings.json is one toggle away. */
+export const DEFAULT_SETTINGS_EDITOR_MODE: SettingsEditorMode = 'visual';
+
+/** The Settings JSON editor targets the user document by default (workspace needs a folder open). */
+export const DEFAULT_SETTINGS_JSON_SCOPE: SettingsJsonScope = 'user';
 
 export interface UiChromeSlice {
   center: CenterView;
@@ -161,6 +176,13 @@ export interface UiChromeSlice {
    *  on the pane's last-used / default tab. Set by `showSettings(category?)`; read by the host that mounts
    *  the preferences pane. Like `settingsOpen`, it's transient and never persisted. */
   settingsCategory: string | null;
+  /** The Settings page's active representation (#983). Runtime home for what was a `settingsPage.tsx`
+   *  closure; the page seeds this from persistence and writes `koine.studio.settingsEditorMode`
+   *  imperatively (the page is transient, so persistence stays local, not a subscriber). */
+  settingsEditorMode: SettingsEditorMode;
+  /** The Settings JSON editor's active scope (#983). Runtime home for the page's `scope` closure; the
+   *  page seeds it per the wsKey rule and persists `koine.studio.settingsJsonScope` imperatively. */
+  settingsJsonScope: SettingsJsonScope;
   setCenter(v: CenterView): void;
   setTech(v: TechView): void;
   setOutput(v: OutputTab): void;
@@ -181,6 +203,8 @@ export interface UiChromeSlice {
    *  an explicit preference (`diagCollapsedPref !== null`), so a saved choice is never overridden. */
   applyDiagCollapsedDefault(v: boolean): void;
   setContextMapView(v: ContextMapView): void;
+  setSettingsEditorMode(v: SettingsEditorMode): void;
+  setSettingsJsonScope(v: SettingsJsonScope): void;
   /** Replace the whole deck state (used by restore/persistence). Keeps `center` in sync. */
   setDeck(deck: DeckState): void;
   /** Focus a surface 1-up — collapses any 2-up and leaves overview. Mirrors `center`. */
@@ -232,6 +256,8 @@ export function createUiChromeSlice(
     deck: DEFAULT_DECK_STATE,
     settingsOpen: false,
     settingsCategory: null,
+    settingsEditorMode: DEFAULT_SETTINGS_EDITOR_MODE,
+    settingsJsonScope: DEFAULT_SETTINGS_JSON_SCOPE,
 
     // `setCenter` = "go to this surface, full" — the legacy single-view semantics map to a 1-up focus.
     setCenter: (v) => get().focusPrimary(v),
@@ -283,6 +309,8 @@ export function createUiChromeSlice(
       set({ diagCollapsed: v });
     },
     setContextMapView: (v) => set({ contextMapView: v }),
+    setSettingsEditorMode: (v) => set({ settingsEditorMode: v }),
+    setSettingsJsonScope: (v) => set({ settingsJsonScope: v }),
 
     // --- Deck actions (ported from the Deck v2 POC interaction model) ---
     setDeck: (deck) => set({ deck, center: deck.primary }),

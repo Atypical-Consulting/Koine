@@ -6,6 +6,8 @@ import {
   DEFAULT_CENTER,
   DEFAULT_DECK_STATE,
   DEFAULT_MOBILE_ZONE,
+  DEFAULT_SETTINGS_EDITOR_MODE,
+  DEFAULT_SETTINGS_JSON_SCOPE,
   isValidCenter,
   isValidDeckState,
   isValidMobileZone,
@@ -142,6 +144,28 @@ describe('uiChrome railAxis / diagCollapsed / contextMapView (#983)', () => {
     expect(s.getState().contextMapView).toBe('table');
     s.getState().setContextMapView('graph');
     expect(s.getState().contextMapView).toBe('graph');
+  });
+});
+
+describe('uiChrome settingsEditorMode / settingsJsonScope (#983)', () => {
+  test('settingsEditorMode defaults to visual and setSettingsEditorMode round-trips', () => {
+    const s = make();
+    expect(s.getState().settingsEditorMode).toBe('visual');
+    expect(DEFAULT_SETTINGS_EDITOR_MODE).toBe('visual');
+    s.getState().setSettingsEditorMode('json');
+    expect(s.getState().settingsEditorMode).toBe('json');
+    s.getState().setSettingsEditorMode('visual');
+    expect(s.getState().settingsEditorMode).toBe('visual');
+  });
+
+  test('settingsJsonScope defaults to user and setSettingsJsonScope round-trips', () => {
+    const s = make();
+    expect(s.getState().settingsJsonScope).toBe('user');
+    expect(DEFAULT_SETTINGS_JSON_SCOPE).toBe('user');
+    s.getState().setSettingsJsonScope('workspace');
+    expect(s.getState().settingsJsonScope).toBe('workspace');
+    s.getState().setSettingsJsonScope('user');
+    expect(s.getState().settingsJsonScope).toBe('user');
   });
 });
 
