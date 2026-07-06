@@ -942,6 +942,23 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     onOpenGlossary: () => focusDocs(),
   };
 
+  // Guarded localStorage access (never throws in locked-down hosts) — the layoutStore readRaw/writeRaw
+  // shape, reused for the chrome keys this controller owns (#983).
+  const readRaw = (key: string): string | null => {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+  const writeRaw = (key: string, value: string): void => {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      // storage unavailable — the in-session choice still applies
+    }
+  };
+
   // --- rail axis switch: Domain vs Files (#453) ------------------------------
   // The left rail shows ONE of two top-level navigators: the Domain pane (#rail-domain-pane — the
   // strategic/tactical DDD navigator) or the Files pane (#rail-files — the workspace `.koi` tree). The
@@ -972,18 +989,25 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     for (const b of lstripAxisButtons) b.setAttribute('aria-pressed', String(b.getAttribute(DATA_LAXIS) === axis));
   }
 
+  // The active axis is owned by the uiChrome slice (runtime, #193/#983) and mirrored to
+  // `koine.studio.railAxis`. `setAxis` just writes the slice; the subscription below paints + persists.
   function setAxis(axis: RailAxis): void {
-    applyAxis(axis);
-    try {
-      localStorage.setItem(RAIL_AXIS_KEY, axis);
-    } catch {
-      // no persistence available — the in-session choice still applies
-    }
+    appStore.getState().setRailAxis(axis);
   }
 
   for (const b of axisButtons) {
     b.addEventListener('click', () => setAxis((b.getAttribute(DATA_AXIS) as RailAxis | null) ?? 'domain'));
   }
+
+  // Seed the runtime axis from persistence via the slice setter BEFORE wiring the subscription (so the
+  // seed can't echo), then paint once — mirroring the rightCollapsed/leftCollapsed seeds. Domain default.
+  appStore.getState().setRailAxis(readRaw(RAIL_AXIS_KEY) === 'files' ? 'files' : 'domain');
+  applyAxis(appStore.getState().railAxis);
+  const unsubscribeRailAxis = appStore.subscribe((s, prev) => {
+    if (s.railAxis === prev.railAxis) return;
+    applyAxis(s.railAxis);
+    writeRaw(RAIL_AXIS_KEY, s.railAxis);
+  });
 
   // The Domain navigator's TACTICAL leaf wiring (#453): a leaf click selects-and-jumps; its ⋯ overflow's
   // "Reveal in Files" switches the rail to the Files axis then reveals the node's `.koi`. Selection +
@@ -1855,49 +1879,36 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   });
   const diagCollapse = domById('diag-collapse');
   const DIAG_COLLAPSED_KEY = 'koine.studio.diagCollapsed';
+  // DOM/ARIA painter only (mirroring applyRightCollapsed) — the runtime truth is the slice's `diagCollapsed`
+  // (#983), and this runs from the captured subscription below on every transition.
   function applyDiagCollapsed(collapsed: boolean): void {
     diagEl.classList.toggle('collapsed', collapsed);
     diagCollapse.setAttribute('aria-expanded', String(!collapsed));
   }
-  // Whether the user has an EXPLICIT, persisted collapse choice (written by the #diag-collapse chevron
-  // below). `null` = unset, so the viewport-aware default may apply; a stored '0'/'1' is the user's own
-  // choice and always wins. localStorage can throw in locked-down hosts — treat a throw as "no preference".
-  function hasExplicitDiagCollapsePref(): boolean {
-    try {
-      return localStorage.getItem(DIAG_COLLAPSED_KEY) !== null;
-    } catch {
-      return false;
-    }
-  }
-  // The bottom strip's *default* collapsed state is viewport-aware (#475): below BP_NARROW the
-  // reading-heavy Documentation center view defaults the strip COLLAPSED so the reading pane gets full
-  // height on a phone; Visual/Code and every desktop width keep the expanded default. This sets only a
-  // DEFAULT — an explicit user preference always wins, so it's gated on the absence of one.
-  // Re-evaluated whenever the center chrome is applied (a center switch / boot) and on a narrow↔wide cross.
+  // The strip's *default* collapsed state is viewport-aware (#475): below BP_NARROW the reading-heavy
+  // Documentation view defaults COLLAPSED (full-height reading on a phone). Only a DEFAULT — the slice
+  // action is gated on `diagCollapsedPref`, so a saved choice always wins.
   function applyDefaultDiagCollapsed(): void {
-    if (hasExplicitDiagCollapsePref()) return; // the user's persisted choice wins
-    const center = activeCenter();
-    applyDiagCollapsed(isNarrowViewport() && center === 'docs');
+    appStore.getState().applyDiagCollapsedDefault(isNarrowViewport() && activeCenter() === 'docs');
   }
-  // Same throw-guard as hasExplicitDiagCollapsePref above: touching localStorage throws in locked-down
-  // hosts (Chromium with site data blocked), and this runs during controller construction — an unguarded
-  // throw here would abort the whole IDE boot. Default to not-collapsed.
-  let storedDiagCollapsed = '0';
-  try {
-    storedDiagCollapsed = localStorage.getItem(DIAG_COLLAPSED_KEY) ?? '0';
-  } catch {
-    // no persistence available — keep the expanded default
-  }
-  applyDiagCollapsed(storedDiagCollapsed === '1');
-  applyDefaultDiagCollapsed(); // override the expanded default with the narrow Docs default (#475)
-  diagCollapse.addEventListener('click', () => {
-    const collapsed = !diagEl.classList.contains('collapsed');
-    applyDiagCollapsed(collapsed);
-    try {
-      localStorage.setItem(DIAG_COLLAPSED_KEY, collapsed ? '1' : '0');
-    } catch {
-      // ignore — no persistence available
+  // Seed via the slice setters BEFORE wiring the subscription (so the seed can't echo). A STORED key is an
+  // explicit choice → setDiagCollapsed (its preference wins over the #475 default); ABSENT leaves it `null`.
+  const storedDiagCollapsed = readRaw(DIAG_COLLAPSED_KEY);
+  if (storedDiagCollapsed !== null) appStore.getState().setDiagCollapsed(storedDiagCollapsed === '1');
+  applyDefaultDiagCollapsed(); // apply the narrow-Docs default (#475) when there's no explicit preference
+  applyDiagCollapsed(appStore.getState().diagCollapsed); // paint the restored state once
+  // Paint on every runtime-flag transition; persist ONLY on an explicit-preference transition — so the #475
+  // default and the tab-click auto-expand never write the key. Captured + disposed like the siblings.
+  const unsubscribeDiagCollapsed = appStore.subscribe((s, prev) => {
+    if (s.diagCollapsed !== prev.diagCollapsed) applyDiagCollapsed(s.diagCollapsed);
+    if (s.diagCollapsedPref !== prev.diagCollapsedPref && s.diagCollapsedPref !== null) {
+      writeRaw(DIAG_COLLAPSED_KEY, s.diagCollapsedPref ? '1' : '0');
     }
+  });
+  diagCollapse.addEventListener('click', () => {
+    // Toggle from the runtime truth (the slice), and record it as an explicit preference so it persists.
+    const collapsed = !appStore.getState().diagCollapsed;
+    appStore.getState().setDiagCollapsed(collapsed);
     if (!collapsed) ensureBottomLoaded(activeBottomTab()); // expanding → fill the active table if stale
   });
 
@@ -1913,7 +1924,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     terminalPanel.hidden = tab !== 'terminal';
     reviewPanel.hidden = tab !== 'review';
     diagCountEl.hidden = tab !== 'problems';
-    if (diagEl.classList.contains('collapsed')) applyDiagCollapsed(false);
+    // A tab click always reveals its panel: a TRANSIENT runtime expand that moves only the slice's runtime
+    // flag (the subscription paints), never the preference — so it doesn't persist and a reload restores the
+    // saved choice (matching today), keeping the slice the single truth for every collapse read.
+    if (appStore.getState().diagCollapsed) appStore.setState({ diagCollapsed: false });
     ensureBottomLoaded(tab);
   }
   for (const t of bottomTabs) {
@@ -1974,13 +1988,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // SAME ContextMapResult, so the toggle never refetches — it repaints the stored result.
   const CONTEXT_MAP_VIEW_KEY = 'koine.studio.contextMapView';
   type ContextMapMode = 'graph' | 'table';
-  let contextMapMode: ContextMapMode = ((): ContextMapMode => {
-    try {
-      return localStorage.getItem(CONTEXT_MAP_VIEW_KEY) === 'table' ? 'table' : 'graph';
-    } catch {
-      return 'graph';
-    }
-  })();
+  // The active view is owned by the uiChrome slice (runtime, #983) and mirrored to
+  // `koine.studio.contextMapView`. Seed it via the slice setter BEFORE wiring the subscription (so the
+  // seed can't echo), then read `appStore.getState().contextMapView` at every use site. Graph default.
+  appStore.getState().setContextMapView(readRaw(CONTEXT_MAP_VIEW_KEY) === 'table' ? 'table' : 'graph');
   let lastContextMap: ContextMapResult | null = null;
   let contextMapGraphHandle: ContextMapGraphHandle | null = null;
   let contextMapRenderSeq = 0;
@@ -2045,7 +2056,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       b.className = 'ctxmap-tab';
       b.dataset.ctxmapView = mode;
       b.textContent = label;
-      b.setAttribute('aria-pressed', String(contextMapMode === mode));
+      b.setAttribute('aria-pressed', String(appStore.getState().contextMapView === mode));
       b.addEventListener('click', () => setContextMapMode(mode));
       return b;
     };
@@ -2062,16 +2073,16 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     return { stage, details };
   }
 
+  // Just write the slice; the captured subscription below persists the key and repaints on a change.
   function setContextMapMode(mode: ContextMapMode): void {
-    if (mode === contextMapMode) return;
-    contextMapMode = mode;
-    try {
-      localStorage.setItem(CONTEXT_MAP_VIEW_KEY, mode);
-    } catch {
-      // no persistence available — the in-session choice still applies
-    }
-    void paintContextMap();
+    appStore.getState().setContextMapView(mode);
   }
+  // Persist `koine.studio.contextMapView` and repaint on a toggle change. Captured + disposed like siblings.
+  const unsubscribeContextMapView = appStore.subscribe((s, prev) => {
+    if (s.contextMapView === prev.contextMapView) return;
+    writeRaw(CONTEXT_MAP_VIEW_KEY, s.contextMapView);
+    void paintContextMap();
+  });
 
   // Paint the active view from the stored ContextMapResult. A monotonic seq makes a superseded async graph
   // render (a later toggle/refresh) bail before it touches the DOM; the prior graph handle is disposed first.
@@ -2080,7 +2091,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     disposeContextMapGraph();
     const { stage, details } = ensureContextMapSkeleton();
     for (const b of contextMapView.querySelectorAll<HTMLButtonElement>('.ctxmap-tab')) {
-      b.setAttribute('aria-pressed', String(b.dataset.ctxmapView === contextMapMode));
+      b.setAttribute('aria-pressed', String(b.dataset.ctxmapView === appStore.getState().contextMapView));
     }
     showRelationDetails(details, null);
 
@@ -2090,7 +2101,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       return;
     }
 
-    if (contextMapMode === 'table') {
+    if (appStore.getState().contextMapView === 'table') {
       stage.innerHTML = `<div class="koi-md ctxmap-table">${renderContextMapHtml(res)}</div>`;
       return;
     }
@@ -2197,7 +2208,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     inv('events');
     inv('relationships');
     inv('contextmap');
-    if (activeBottomTab() === 'problems' || diagEl.classList.contains('collapsed')) return;
+    if (activeBottomTab() === 'problems' || appStore.getState().diagCollapsed) return;
     clearTimeout(bottomPanelDebounce);
     bottomPanelDebounce = setTimeout(() => ensureBottomLoaded(activeBottomTab()), 350);
   }
@@ -2211,14 +2222,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function init(): void {
     applyCenterChrome();
     setTarget(currentTarget);
-    // Restore the persisted rail axis (Domain default), painting the matching navigator pane (#453).
-    let storedAxis: RailAxis = 'domain';
-    try {
-      if (localStorage.getItem(RAIL_AXIS_KEY) === 'files') storedAxis = 'files';
-    } catch {
-      // no persistence available — fall back to the Domain default
-    }
-    applyAxis(storedAxis);
+    // The rail axis is hydrated + painted at construction now (#983 — via the uiChrome slice).
     // Mount the Deck: detach the four center-host sections first so rendering the stage into #center-body
     // doesn't destroy them, then let the DeckStage re-parent each into its card body (via a ref). The
     // DeckBar (Overview + filmstrip) renders into #deck-bar. Both are store-bound — the deck/facet
@@ -2266,6 +2270,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Drop the left-rail morph-collapse subscription (#730) for the same reason — it mutates the captured
     // #split / #rail-collapse nodes and persists.
     unsubscribeLeftCollapsed();
+    // Drop the #983 chrome subscriptions (rail axis, bottom-strip collapse, context-map view) — each paints
+    // captured DOM and/or persists, which must not fire into a torn-down host after dispose.
+    unsubscribeRailAxis();
+    unsubscribeDiagCollapsed();
+    unsubscribeContextMapView();
     // Drop the deck/facet subscription — its callback re-applies the center chrome + lazy-loads, which
     // must not fire into a torn-down host after dispose. Unmount the deck Preact trees too so their
     // window listeners (the DeckStage keyboard handler) detach.

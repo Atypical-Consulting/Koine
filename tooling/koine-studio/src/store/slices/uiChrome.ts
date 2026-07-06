@@ -100,6 +100,19 @@ export function isValidDeckState(v: unknown): v is DeckState {
   return true;
 }
 
+/** Which top-level navigator the left rail shows (#453): the strategic/tactical Domain pane or the
+ *  workspace Files tree. */
+export type RailAxis = 'domain' | 'files';
+
+/** The Context Map's rendered view (#983): the interactive graph or the dense per-relation table. */
+export type ContextMapView = 'graph' | 'table';
+
+/** The left rail opens on the Domain navigator — the strategic/tactical DDD view is the primary lens. */
+export const DEFAULT_RAIL_AXIS: RailAxis = 'domain';
+
+/** The Context Map opens as the interactive graph; the table stays one click away. */
+export const DEFAULT_CONTEXT_MAP_VIEW: ContextMapView = 'graph';
+
 export interface UiChromeSlice {
   center: CenterView;
   tech: TechView;
@@ -118,6 +131,21 @@ export interface UiChromeSlice {
   /** The active mobile zone (single source of truth for the narrow-viewport shell). ide.tsx mirrors it
    *  to #split[data-mobile-zone] so the @media rules show/hide zones; the MobileZoneBar reads + writes it. */
   mobileZone: MobileZone;
+  /** Which top-level navigator the left rail shows (#453). Runtime source of truth (#193/#983);
+   *  inspectorController mirrors it to `koine.studio.railAxis` for persistence, like the collapse flags. */
+  railAxis: RailAxis;
+  /** Whether the bottom diagnostics strip is collapsed. RUNTIME source of truth (#983 — was the DOM
+   *  `.collapsed` class): the chevron, the #475 viewport default, and the tab-click auto-expand all flow
+   *  through this, so every read (the chevron toggle target, the live-refresh gate) trusts the slice. */
+  diagCollapsed: boolean;
+  /** The user's EXPLICIT collapse choice for the bottom strip, or `null` when unset. `null` lets the #475
+   *  viewport-aware default apply; a non-null value is what inspectorController persists to
+   *  `koine.studio.diagCollapsed` ('1'/'0') and always wins over the default. Only {@link setDiagCollapsed}
+   *  records it — the default and the transient tab-click reveal never touch it, so they never persist. */
+  diagCollapsedPref: boolean | null;
+  /** The Context Map's rendered view (#983). Runtime source of truth; inspectorController mirrors it to
+   *  `koine.studio.contextMapView` for persistence and repaints the panel on a change. */
+  contextMapView: ContextMapView;
   /** The Explorer outline's type-to-filter query. Lives in the store (not panel-local state) because the
    *  controller unmounts + remounts the outline panel on every model reload, which would otherwise wipe a
    *  component-local query mid-task; here it survives the remount. */
@@ -145,6 +173,14 @@ export interface UiChromeSlice {
   toggleLeftCollapsed(): void;
   setOutlineFilter(q: string): void;
   setMobileZone(z: MobileZone): void;
+  setRailAxis(v: RailAxis): void;
+  /** Record an EXPLICIT collapse choice for the bottom strip: sets BOTH the runtime flag and the
+   *  persisted preference (so it wins over the #475 default and inspectorController persists it). */
+  setDiagCollapsed(v: boolean): void;
+  /** Apply the viewport-aware DEFAULT collapse state (#475) — RUNTIME-ONLY, and a NO-OP once the user has
+   *  an explicit preference (`diagCollapsedPref !== null`), so a saved choice is never overridden. */
+  applyDiagCollapsedDefault(v: boolean): void;
+  setContextMapView(v: ContextMapView): void;
   /** Replace the whole deck state (used by restore/persistence). Keeps `center` in sync. */
   setDeck(deck: DeckState): void;
   /** Focus a surface 1-up — collapses any 2-up and leaves overview. Mirrors `center`. */
@@ -189,6 +225,10 @@ export function createUiChromeSlice(
     leftCollapsed: false,
     outlineFilter: '',
     mobileZone: DEFAULT_MOBILE_ZONE,
+    railAxis: DEFAULT_RAIL_AXIS,
+    diagCollapsed: false,
+    diagCollapsedPref: null,
+    contextMapView: DEFAULT_CONTEXT_MAP_VIEW,
     deck: DEFAULT_DECK_STATE,
     settingsOpen: false,
     settingsCategory: null,
@@ -232,6 +272,17 @@ export function createUiChromeSlice(
     toggleLeftCollapsed: () => set({ leftCollapsed: !get().leftCollapsed }),
     setOutlineFilter: (q) => set({ outlineFilter: q }),
     setMobileZone: (z) => set({ mobileZone: z }),
+    setRailAxis: (v) => set({ railAxis: v }),
+    // The explicit chevron choice: runtime AND preference move together, so the persistence subscriber
+    // (which watches the preference) writes the key and the #475 default is thereafter suppressed.
+    setDiagCollapsed: (v) => set({ diagCollapsed: v, diagCollapsedPref: v }),
+    // The #475 viewport default only sets the runtime flag, and never over an explicit preference — so it
+    // never persists and never fights the user's saved choice.
+    applyDiagCollapsedDefault: (v) => {
+      if (get().diagCollapsedPref !== null) return;
+      set({ diagCollapsed: v });
+    },
+    setContextMapView: (v) => set({ contextMapView: v }),
 
     // --- Deck actions (ported from the Deck v2 POC interaction model) ---
     setDeck: (deck) => set({ deck, center: deck.primary }),

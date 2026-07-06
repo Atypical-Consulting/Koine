@@ -1744,3 +1744,91 @@ describe('createInspectorController — teardown / disposal, in-flight loader (#
   });
 });
 
+// #983 — railAxis / diagCollapsed / contextMapView are moving off bespoke closures + the DOM class into
+// the uiChrome slice. These tests PIN the persistence round-trips at their existing localStorage keys +
+// byte-identical value formats, so the refactor is proven behaviour-preserving (the keys and formats must
+// not drift). localStorage leaks between tests (the global beforeEach only re-seeds the DOM), so each
+// key is cleared explicitly around the cases.
+describe('createInspectorController — persistence round-trips (#983)', () => {
+  const RAIL_AXIS_KEY = 'koine.studio.railAxis';
+  const DIAG_KEY = 'koine.studio.diagCollapsed';
+  const CTXMAP_KEY = 'koine.studio.contextMapView';
+  const clearKeys = () => {
+    localStorage.removeItem(RAIL_AXIS_KEY);
+    localStorage.removeItem(DIAG_KEY);
+    localStorage.removeItem(CTXMAP_KEY);
+  };
+  beforeEach(clearKeys);
+  afterEach(clearKeys);
+
+  test('(a) toggling the rail axis to Files persists koine.studio.railAxis="files"', () => {
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    (document.querySelector('#rail-axis-switch [data-axis="files"]') as HTMLButtonElement).click();
+    expect(localStorage.getItem(RAIL_AXIS_KEY)).toBe('files');
+    ctl.dispose();
+  });
+
+  test('(a) boot with railAxis="files" stored surfaces #rail-files (Files axis restored)', () => {
+    localStorage.setItem(RAIL_AXIS_KEY, 'files');
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    expect(domById('rail-files').hidden).toBe(false);
+    expect(domById('rail-domain-pane').hidden).toBe(true);
+    ctl.dispose();
+  });
+
+  test('(b) the #diag-collapse chevron writes koine.studio.diagCollapsed as "1"/"0"', () => {
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    const chevron = domById('diag-collapse');
+    // Boots expanded (Visual, wide) → the chevron collapses it and persists '1'.
+    chevron.click();
+    expect(domById('diagnostics').classList.contains('collapsed')).toBe(true);
+    expect(localStorage.getItem(DIAG_KEY)).toBe('1');
+    // ...and back: expanding persists '0'.
+    chevron.click();
+    expect(domById('diagnostics').classList.contains('collapsed')).toBe(false);
+    expect(localStorage.getItem(DIAG_KEY)).toBe('0');
+    ctl.dispose();
+  });
+
+  test('(b) a bottom-tab click that auto-expands the strip writes NOTHING to koine.studio.diagCollapsed', () => {
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    // Collapse explicitly via the chevron → the persisted preference is now '1'.
+    domById('diag-collapse').click();
+    expect(domById('diagnostics').classList.contains('collapsed')).toBe(true);
+    expect(localStorage.getItem(DIAG_KEY)).toBe('1');
+    // Clicking a bottom tab reveals its panel (a transient runtime expand) but must NOT persist the
+    // expand — the saved preference stays '1' so a reload restores the user's collapse.
+    domById('tab-events').click();
+    expect(domById('diagnostics').classList.contains('collapsed')).toBe(false);
+    expect(localStorage.getItem(DIAG_KEY)).toBe('1');
+    ctl.dispose();
+  });
+
+  test('(c) the Graph/Table toggle persists koine.studio.contextMapView="table"', async () => {
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    ctl.selectOutput('contextmap');
+    await flush();
+    domById('panel-contextmap').querySelector<HTMLButtonElement>('[data-ctxmap-view="table"]')!.click();
+    await flush();
+    expect(localStorage.getItem(CTXMAP_KEY)).toBe('table');
+    ctl.dispose();
+  });
+
+  test('(c) boot with contextMapView="table" stored restores the dense table view', async () => {
+    localStorage.setItem(CTXMAP_KEY, 'table');
+    const ctl = createInspectorController(makeDeps(makeLsp()));
+    ctl.init();
+    ctl.selectOutput('contextmap');
+    await flush();
+    const panel = domById('panel-contextmap');
+    expect(panel.querySelector('[data-ctxmap-view="table"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(panel.innerHTML).toContain('koi-md');
+    ctl.dispose();
+  });
+});
+

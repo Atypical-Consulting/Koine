@@ -94,6 +94,57 @@ describe('uiChrome slice', () => {
   });
 });
 
+describe('uiChrome railAxis / diagCollapsed / contextMapView (#983)', () => {
+  test('railAxis defaults to domain and setRailAxis switches it', () => {
+    const s = make();
+    expect(s.getState().railAxis).toBe('domain');
+    s.getState().setRailAxis('files');
+    expect(s.getState().railAxis).toBe('files');
+    s.getState().setRailAxis('domain');
+    expect(s.getState().railAxis).toBe('domain');
+  });
+
+  test('diagCollapsed defaults to false and diagCollapsedPref to null (no explicit choice yet)', () => {
+    const s = make();
+    expect(s.getState().diagCollapsed).toBe(false);
+    expect(s.getState().diagCollapsedPref).toBeNull();
+  });
+
+  test('setDiagCollapsed sets BOTH the runtime flag and the explicit preference', () => {
+    const s = make();
+    s.getState().setDiagCollapsed(true);
+    expect(s.getState().diagCollapsed).toBe(true);
+    expect(s.getState().diagCollapsedPref).toBe(true);
+    s.getState().setDiagCollapsed(false);
+    expect(s.getState().diagCollapsed).toBe(false);
+    expect(s.getState().diagCollapsedPref).toBe(false);
+  });
+
+  test('applyDiagCollapsedDefault changes ONLY the runtime flag while the preference is unset', () => {
+    const s = make();
+    s.getState().applyDiagCollapsedDefault(true);
+    expect(s.getState().diagCollapsed).toBe(true);
+    expect(s.getState().diagCollapsedPref).toBeNull(); // runtime-only: no preference is recorded
+  });
+
+  test('applyDiagCollapsedDefault is a NO-OP once an explicit preference exists (the user always wins)', () => {
+    const s = make();
+    s.getState().setDiagCollapsed(false); // the user explicitly chose "expanded"
+    s.getState().applyDiagCollapsedDefault(true); // the #475 narrow-Docs default would collapse it...
+    expect(s.getState().diagCollapsed).toBe(false); // ...but the preference wins; runtime is untouched
+    expect(s.getState().diagCollapsedPref).toBe(false);
+  });
+
+  test('contextMapView defaults to graph and setContextMapView round-trips', () => {
+    const s = make();
+    expect(s.getState().contextMapView).toBe('graph');
+    s.getState().setContextMapView('table');
+    expect(s.getState().contextMapView).toBe('table');
+    s.getState().setContextMapView('graph');
+    expect(s.getState().contextMapView).toBe('graph');
+  });
+});
+
 describe('uiChrome mobileZone', () => {
   test('defaults to code', () => {
     const store = createAppStore();
