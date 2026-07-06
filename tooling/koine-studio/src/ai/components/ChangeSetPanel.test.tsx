@@ -248,3 +248,78 @@ describe('ChangeSetPanel (#990)', () => {
     expect(await axe(container)).toHaveNoViolations();
   });
 });
+
+// #472 Task 4: two roots of a multi-root workspace staging the SAME relPath must review as two
+// distinct rows. Rows key by the staged edit's opaque key; the shared relPath is displayed
+// disambiguated with the tool layer's marker scheme (`relPath@1`, `relPath@2`, … in row order) so the
+// label under review matches the one the model addressed, and every dispatch/callback carries the KEY
+// so a toggle or apply can never hit the wrong root.
+describe('colliding relPaths across roots (#472)', () => {
+  const wsA = 'file:///wsA/model.koi';
+  const wsB = 'file:///wsB/model.koi';
+  const colliding: StagedEdit[] = [
+    { key: wsA, relPath: 'model.koi', body: 'context A {\n  aggregate One {}\n}', isNew: false },
+    { key: wsB, relPath: 'model.koi', body: 'context B {\n  aggregate Two {}\n}', isNew: false },
+  ];
+  const collidingBefore = { [wsA]: 'context A {\n}', [wsB]: 'context B {\n}' };
+
+  function collidingStore(): StoreApi<AppState> {
+    const store = createAppStore();
+    store.getState().stageChangeSet(colliding, collidingBefore, null);
+    return store;
+  }
+
+  test('each row shows a DISTINCT disambiguated label and a diff derived from its OWN before', () => {
+    const { container } = mount(collidingStore());
+    const rows = [...container.querySelectorAll('.koi-changeset-file')];
+    expect(rows.length).toBe(2);
+    expect(rows.map((r) => r.querySelector('.koi-changeset-path')!.textContent)).toEqual([
+      'model.koi@1',
+      'model.koi@2',
+    ]);
+    // Per-row before: each diff keeps its own root's shared line (no last-writer collapse).
+    const diffs = rows.map((r) => r.querySelector('.koi-changeset-diff')!.textContent!);
+    expect(diffs[0]).toContain('  context A {');
+    expect(diffs[0]).toContain('+   aggregate One {}');
+    expect(diffs[0]).not.toContain('context B');
+    expect(diffs[1]).toContain('  context B {');
+    expect(diffs[1]).toContain('+   aggregate Two {}');
+    expect(diffs[1]).not.toContain('context A');
+    // The accept checkboxes are labelled with the disambiguated names too.
+    expect(rows.map((r) => r.querySelector('.koi-changeset-accept')!.getAttribute('aria-label'))).toEqual([
+      'Accept changes to model.koi@1',
+      'Accept changes to model.koi@2',
+    ]);
+  });
+
+  test('unchecking one colliding row dispatches setChangeSetFileAccepted with its KEY, twin untouched', () => {
+    const store = collidingStore();
+    const { container } = mount(store);
+    fireEvent.click(checkboxes(container)[1]); // uncheck wsB's row
+    const files = store.getState().chat.changeSet!.files;
+    expect(files.find((f) => f.key === wsB)?.accepted).toBe(false);
+    expect(files.find((f) => f.key === wsA)?.accepted).toBe(true);
+  });
+
+  test('Apply forwards the accepted entries with their STAGED keys', () => {
+    const store = collidingStore();
+    const onApply = vi.fn();
+    const { container } = mount(store, { onApply });
+    fireEvent.click(applyBtn(container));
+    expect(onApply).toHaveBeenCalledOnce();
+    expect(onApply.mock.calls[0][0].map((f: { key: string }) => f.key)).toEqual([wsA, wsB]);
+  });
+
+  test('unique relPaths keep their bare labels (no needless @n marker)', () => {
+    const { container } = mount(reviewingStore());
+    expect([...container.querySelectorAll('.koi-changeset-path')].map((el) => el.textContent)).toEqual([
+      'ordering/order.koi',
+      'billing/invoice.koi',
+    ]);
+  });
+
+  test('has no accessibility violations (disambiguated rows)', async () => {
+    const { container } = mount(collidingStore());
+    expect(await axe(container)).toHaveNoViolations();
+  });
+});

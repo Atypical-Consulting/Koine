@@ -108,7 +108,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // snapshotKeyFor reverse-lookup (relPath → snapshot key, also backing liveTextFor) and the payload
   // mint that resolves a revision's buffer uri / mints a brand-new file's `new:<relPath>` key, ~14 LOC
   // of multi-root wiring. Measured end-state, no headroom.
-  { file: 'src/ai/aiPanel.ts', maxLines: 919 },
+  // Lowered 919 → 910: #472 Task 4 rounds the key through the review rows — the apply payload uses
+  // each row's own key, so the snapshotKeyFor/liveTextFor reverse lookups are deleted and drift
+  // resolves per key against one fresh snapshot. Measured end-state, no headroom.
+  { file: 'src/ai/aiPanel.ts', maxLines: 910 },
   // Frozen 2026-07-02 at 1301 LOC (grown from the audit's 1284 @ fc83bcf5), ceil(1301 × 1.02) = 1328.
   // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
   // not mandate the split — #989 owns that.

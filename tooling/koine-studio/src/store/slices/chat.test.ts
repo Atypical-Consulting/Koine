@@ -318,7 +318,7 @@ const edit = (relPath: string, body: string, isNew = false): StagedEdit => ({
 });
 
 describe('change-set state machine', () => {
-  test('stageChangeSet yields a reviewing set: all accepted, none drifted, before per relPath', () => {
+  test('stageChangeSet yields a reviewing set: all accepted, none drifted, before per key', () => {
     const s = createAppStore();
     s.getState().stageChangeSet(
       [edit('billing.koi', 'context Billing {}'), edit('shipping.koi', 'context Shipping {}', true)],
@@ -331,6 +331,7 @@ describe('change-set state machine', () => {
     expect(cs?.diagnostics).toBe('2 errors');
     expect(cs?.files).toEqual([
       {
+        key: 'billing.koi',
         relPath: 'billing.koi',
         body: 'context Billing {}',
         isNew: false,
@@ -339,6 +340,7 @@ describe('change-set state machine', () => {
         drifted: false,
       },
       {
+        key: 'shipping.koi',
         relPath: 'shipping.koi',
         body: 'context Shipping {}',
         isNew: true,
@@ -551,5 +553,47 @@ describe('change-set state machine', () => {
     expect(s.getState().chat.changeSet).toBeNull();
     s.getState().discardChangeSet(); // already null: harmless
     expect(s.getState().chat.changeSet).toBeNull();
+  });
+});
+
+// #472 Task 4: the rows are keyed by the staged edit's OPAQUE key (buffer uri / new-file key), not by
+// relPath — two roots of a multi-root workspace can stage the SAME relPath, and each row must keep its
+// own send-time text and answer only its own accept/drift dispatches.
+describe('change-set keying by staged-edit key (#472)', () => {
+  const wsA = 'file:///wsA/model.koi';
+  const wsB = 'file:///wsB/model.koi';
+  const colliding: StagedEdit[] = [
+    { key: wsA, relPath: 'model.koi', body: 'context A { v2 }', isNew: false },
+    { key: wsB, relPath: 'model.koi', body: 'context B { v2 }', isNew: false },
+  ];
+  const before = { [wsA]: 'context A {}', [wsB]: 'context B {}' };
+
+  test('stageChangeSet keeps BOTH colliding-relPath rows, each with its own KEY-keyed before', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet(colliding, before, null);
+    const files = s.getState().chat.changeSet!.files;
+    expect(files.map((f) => f.key)).toEqual([wsA, wsB]);
+    expect(files.map((f) => f.relPath)).toEqual(['model.koi', 'model.koi']);
+    expect(files.map((f) => f.before)).toEqual(['context A {}', 'context B {}']);
+  });
+
+  test('setChangeSetFileAccepted keys by KEY: toggling one colliding row leaves its twin untouched', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet(colliding, before, null);
+    s.getState().setChangeSetFileAccepted(wsB, false);
+    const files = s.getState().chat.changeSet!.files;
+    expect(files.find((f) => f.key === wsB)?.accepted).toBe(false);
+    expect(files.find((f) => f.key === wsA)?.accepted).toBe(true);
+    s.getState().setChangeSetFileAccepted(wsB, true);
+    expect(s.getState().chat.changeSet!.files.every((f) => f.accepted)).toBe(true);
+  });
+
+  test('markChangeSetDrift keys by KEY: only the named row is marked', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet(colliding, before, null);
+    s.getState().markChangeSetDrift([wsA]);
+    const files = s.getState().chat.changeSet!.files;
+    expect(files.find((f) => f.key === wsA)?.drifted).toBe(true);
+    expect(files.find((f) => f.key === wsB)?.drifted).toBe(false);
   });
 });

@@ -46,7 +46,7 @@ import { AssistantChat } from '@/ai/components/AssistantChat';
 import type { ChangeSetAttempt } from '@/ai/components/ChangeSetPanel';
 import type { ComposerQuickAction } from '@/ai/components/Composer';
 import type { TranscriptNotice, TurnMechanism } from '@/ai/components/Transcript';
-import { createEditSession, newFileKey, type EditSession, type StagedEdit } from '@/ai/editSession';
+import { createEditSession, type EditSession, type StagedEdit } from '@/ai/editSession';
 import { loadChat, saveChat, clearChat } from '@/settings/persistence';
 import { appStore, type AppState } from '@/store/index';
 import type { ChangeSetFileState, ChatToolCall } from '@/store/slices/chat';
@@ -358,37 +358,26 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
     rerender();
   }
 
-  // Resolve a change-set row's relPath back to its snapshot key through the display map (identity in
-  // single-root hosts, where a key without a display entry IS its relPath). Until the change-set rows
-  // carry the key end-to-end (#472 Task 4), a relPath shared by several roots resolves to the FIRST
-  // matching key.
-  function snapshotKeyFor(relPath: string): string {
-    const snapshot = opts.getWorkspaceFiles?.();
-    if (snapshot) {
-      for (const [key, rel] of Object.entries(snapshot.displayPath)) {
-        if (rel === relPath) return key;
-      }
-    }
-    return relPath;
-  }
-
-  // The LIVE text behind a change-set row (#472) — the drift check's current-workspace read.
-  function liveTextFor(relPath: string): string | undefined {
-    return opts.getWorkspaceFiles?.().files[snapshotKeyFor(relPath)];
-  }
-
   // Drift check (#473): has `file`'s LIVE text moved away from the send-time `before` it was staged
-  // against? A drifted file must be skipped so a stale full-file body can't clobber newer work. The
-  // slice normalizes an absent send-time text to '' (`before` is always a string).
-  function isDrifted(file: ChangeSetFileState): boolean {
-    const cur = liveTextFor(file.relPath);
+  // against? A drifted file must be skipped so a stale full-file body can't clobber newer work.
+  // `fresh` is ONE live workspace read taken at apply time, uri-keyed like the send-time snapshot
+  // (#472 Task 4): an existing file resolves by the row's OWN key — never a same-relPath twin under
+  // another root. The slice normalizes an absent send-time text to '' (`before` is always a string).
+  function isDrifted(file: ChangeSetFileState, fresh: WorkspaceFilesSnapshot | null): boolean {
+    if (file.isNew) {
+      // A brand-new file's key is synthetic (`new:<relPath>`) and never appears in the live snapshot:
+      // drift iff the path it would CREATE now exists — in a root's display map, or as a raw key in a
+      // legacy relPath-keyed host — so a file created since SEND is never clobbered. Absent ⇒ still
+      // new ⇒ no drift.
+      if (!fresh) return false;
+      return Object.values(fresh.displayPath).includes(file.relPath) || file.relPath in fresh.files;
+    }
+    const cur = fresh?.files[file.key];
     if (cur === undefined) {
-      // The file isn't currently readable (closed/removed): safe only if there was nothing to overwrite
-      // (base empty or absent); otherwise we can't confirm the target is still the reviewed text → warn.
+      // The buffer isn't currently readable (closed/removed): safe only if there was nothing to
+      // overwrite (base empty); otherwise we can't confirm the target is still the reviewed text → warn.
       return file.before !== '';
     }
-    // A brand-new file whose path now EXISTS (cur defined): don't clobber a file created since SEND.
-    if (file.isNew) return true;
     // An existing modification: drift iff the live text differs from the reviewed `before`.
     return cur !== file.before;
   }
@@ -413,10 +402,11 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
     // Partition the accepted files against a LIVE read taken NOW (#473): a file the user edited while
     // the turn ran (drift) is warned + skipped; only the clean subset is written. The send-time `before`
     // still backs the REVIEWED diff — drift is judged against the current text at apply time. Detection
-    // stays here in the host; the RESULT goes through the slice, whose state warns the rows.
-    const drifted = list.filter((f) => isDrifted(f));
+    // stays here in the host; the RESULT goes through the slice, whose state warns the rows (by key).
+    const fresh = opts.getWorkspaceFiles?.() ?? null;
+    const drifted = list.filter((f) => isDrifted(f, fresh));
     const clean = list.filter((f) => !drifted.includes(f));
-    if (drifted.length) store.getState().markChangeSetDrift(drifted.map((f) => f.relPath));
+    if (drifted.length) store.getState().markChangeSetDrift(drifted.map((f) => f.key));
 
     if (!clean.length) {
       // Everything selected drifted: write nothing (beginChangeSetApply is never dispatched — the
@@ -444,11 +434,12 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
       note: drifted.length ? `Applying ${clean.length} clean ${files(clean.length)}.${skipped}` : null,
     });
     store.getState().beginChangeSetApply(); // reviewing → applying; the phase guards the in-flight window
-    // Address each write by its OPAQUE key (#472 Task 3): a revision resolves its buffer uri back
-    // through the snapshot's display map; a brand-new file mints its `new:<relPath>` key so the host
-    // CREATES rather than resolves. The relPath rides along as the failure report's display label.
+    // Address each write by the row's OWN opaque key (#472 Task 4): the rows carry the staged edit's
+    // key end-to-end through the review, so a revision applies to exactly the buffer it was staged
+    // from — even when several roots share the relPath — and a brand-new file keeps the `new:<relPath>`
+    // key it was staged under. The relPath rides along as the failure report's display label.
     const payload: StagedEdit[] = clean.map((f) => ({
-      key: f.isNew ? newFileKey(f.relPath) : snapshotKeyFor(f.relPath),
+      key: f.key,
       relPath: f.relPath,
       body: f.body,
       isNew: f.isNew,
@@ -828,14 +819,14 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
         attempt = null; // the fresh set has no apply attempt yet
         // Stage the set in the chat slice (#984): the state machine owns accepted/drift/phase — a
         // later send supersedes it via invalidateChangeSet, and the declarative ChangeSetPanel is
-        // its consumer. The slice's rows look up their send-time text by relPath (`before[f.relPath]`),
-        // so re-key the KEY-keyed snapshot to a relPath-keyed before map, one entry per staged edit
-        // (#472 — the full key round-trip through the review UI is Task 4; until then two roots
-        // staging the SAME relPath share the last writer's entry).
+        // its consumer. The slice's rows resolve their send-time text by the staged edit's KEY
+        // (`before[f.key]`, #472 Task 4), so the key-keyed snapshot feeds the before map directly —
+        // two roots staging the SAME relPath keep their own entries (a new file's minted key has no
+        // snapshot entry, so its before stays the slice default '').
         const before: Record<string, string> = {};
         for (const edit of editSession.staged()) {
           const sendTime = snapshot?.files[edit.key];
-          if (sendTime !== undefined) before[edit.relPath] = sendTime;
+          if (sendTime !== undefined) before[edit.key] = sendTime;
         }
         store.getState().stageChangeSet(editSession.staged(), before, stagedDiagnostics);
         rerender();

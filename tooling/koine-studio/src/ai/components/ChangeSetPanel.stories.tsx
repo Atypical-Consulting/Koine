@@ -129,3 +129,24 @@ export const WithDiagnostics: Story = {
     ),
   },
 };
+
+/** Two roots of a multi-root workspace staging the SAME relPath (#472): the rows stay distinct —
+ *  keyed by their buffer uris, each diffed against its own root's send-time text — and the labels
+ *  disambiguate with the tool layer's `@n` marker scheme (`model.koi@1`, `model.koi@2`, row order). */
+export const CollidingRelPaths: Story = {
+  render: (args) => {
+    const store = createAppStore();
+    store.getState().stageChangeSet(
+      [
+        { key: 'file:///backend/model.koi', relPath: 'model.koi', body: ORDER_AFTER, isNew: false },
+        { key: 'file:///frontend/model.koi', relPath: 'model.koi', body: INVOICE_BODY, isNew: false },
+      ],
+      {
+        'file:///backend/model.koi': ORDER_BEFORE,
+        'file:///frontend/model.koi': 'context Billing {\n}',
+      },
+      null,
+    );
+    return <ChangeSetPanel {...args} store={store} />;
+  },
+};

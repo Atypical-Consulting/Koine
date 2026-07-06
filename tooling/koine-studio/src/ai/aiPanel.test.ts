@@ -857,6 +857,51 @@ describe('multi-file change set (agentic edits)', () => {
     ]);
   });
 
+  // #472 Task 4: the review rows carry the staged edit's KEY end-to-end, so two roots staging the
+  // SAME relPath review as two disambiguated rows and apply to their OWN buffers — not a first-match
+  // duplicate resolved back from the colliding relPath at payload time.
+  test('colliding relPaths across roots: two disambiguated rows, apply forwards BOTH distinct keys', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('file:///wsA/model.koi', 'context A { v2 }');
+      req.editSession?.stage('file:///wsB/model.koi', 'context B { v2 }');
+      req.onText('Staged.');
+      return 'Staged.';
+    });
+    const onApplyChangeSet = vi.fn(
+      async (_files: { key: string; relPath: string; body: string; isNew: boolean }[]) => ({
+        failed: [] as string[],
+      }),
+    );
+    const container = document.createElement('div');
+    createAssistantChat(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({
+          files: { 'file:///wsA/model.koi': 'context A {}', 'file:///wsB/model.koi': 'context B {}' },
+          displayPath: { 'file:///wsA/model.koi': 'model.koi', 'file:///wsB/model.koi': 'model.koi' },
+        }),
+        runEditTool: vi.fn(async () => 'ok'), // stub — the mock stages directly
+        onApplyChangeSet,
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    // The review disambiguates the shared relPath per row (the tool layer's `@n` marker scheme).
+    expect([...container.querySelectorAll('.koi-changeset-path')].map((el) => el.textContent)).toEqual([
+      'model.koi@1',
+      'model.koi@2',
+    ]);
+
+    container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.click();
+    await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+    // Each row applied under its OWN root's uri, with its own body — no wrong-root clobber.
+    expect(onApplyChangeSet.mock.calls[0][0]).toEqual([
+      { key: 'file:///wsA/model.koi', relPath: 'model.koi', body: 'context A { v2 }', isNew: false },
+      { key: 'file:///wsB/model.koi', relPath: 'model.koi', body: 'context B { v2 }', isNew: false },
+    ]);
+  });
+
   test('surfaces the end-of-turn validation diagnostics in the change set, before apply (issue #474)', async () => {
     // The model stages a BROKEN file; the agentic loop's single end-of-turn validation reports the
     // error via onStagedValidation. The change-set panel must show those diagnostics alongside the

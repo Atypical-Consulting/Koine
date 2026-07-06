@@ -4,6 +4,12 @@ import type { StagedEdit } from '@/ai/editSession';
 
 /** One reviewed file inside the pending change set. */
 export interface ChangeSetFileState {
+  /**
+   * The staged edit's OPAQUE session key (buffer uri, or `new:<relPath>` for a brand-new file,
+   * #472): the row identity every per-file action keys by. `relPath` is only the display label —
+   * NOT unique across the roots of a multi-root workspace.
+   */
+  readonly key: string;
   readonly relPath: string;
   readonly body: string;
   /** From {@link StagedEdit}: brand-new file vs revision of an existing workspace file. */
@@ -140,17 +146,19 @@ export interface ChatSlice {
   setChatDraft(text: string): void;
   /**
    * Replace the change set with a fresh reviewing one (monotonic id, all files accepted, none
-   * drifted); `before` supplies each relPath's send-time text, defaulting to `''` for new files.
+   * drifted); `before` supplies each staged edit's send-time text keyed by its opaque KEY (#472),
+   * defaulting to `''` for new files.
    */
   stageChangeSet(
     files: readonly StagedEdit[],
     before: Record<string, string>,
     diagnostics: string | null,
   ): void;
-  /** Toggle one file's accept checkbox; works in reviewing AND applying, no-op once terminal. */
-  setChangeSetFileAccepted(relPath: string, accepted: boolean): void;
-  /** Set `drifted: true` on the named files — sticky (never unsets) and idempotent (#473). */
-  markChangeSetDrift(relPaths: readonly string[]): void;
+  /** Toggle one file's accept checkbox, addressed by its staged-edit KEY (#472); works in
+   *  reviewing AND applying, no-op once terminal. */
+  setChangeSetFileAccepted(key: string, accepted: boolean): void;
+  /** Set `drifted: true` on the files named by KEY — sticky (never unsets) and idempotent (#473). */
+  markChangeSetDrift(keys: readonly string[]): void;
   /** reviewing → applying; no-op unless reviewing with at least one accepted file. */
   beginChangeSetApply(): void;
   /**
@@ -263,10 +271,11 @@ export function createChatSlice(
       setChangeSet({
         id: nextChangeSetId++,
         files: files.map((f) => ({
+          key: f.key,
           relPath: f.relPath,
           body: f.body,
           isNew: f.isNew,
-          before: before[f.relPath] ?? '',
+          before: before[f.key] ?? '',
           accepted: true,
           drifted: false,
         })),
@@ -274,20 +283,20 @@ export function createChatSlice(
         phase: { kind: 'reviewing' },
       });
     },
-    setChangeSetFileAccepted: (relPath, accepted) => {
+    setChangeSetFileAccepted: (key, accepted) => {
       const cs = get().chat.changeSet;
       if (!cs || (cs.phase.kind !== 'reviewing' && cs.phase.kind !== 'applying')) return;
       setChangeSet({
         ...cs,
-        files: cs.files.map((f) => (f.relPath === relPath ? { ...f, accepted } : f)),
+        files: cs.files.map((f) => (f.key === key ? { ...f, accepted } : f)),
       });
     },
-    markChangeSetDrift: (relPaths) => {
+    markChangeSetDrift: (keys) => {
       const cs = get().chat.changeSet;
       if (!cs) return;
       setChangeSet({
         ...cs,
-        files: cs.files.map((f) => (relPaths.includes(f.relPath) ? { ...f, drifted: true } : f)),
+        files: cs.files.map((f) => (keys.includes(f.key) ? { ...f, drifted: true } : f)),
       });
     },
     beginChangeSetApply: () => {
