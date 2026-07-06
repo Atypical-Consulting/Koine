@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { koineMark, LOGO_SVG } from '@/shared/logo';
+// The committed file-based copy of the mark, inlined as a string (Vite `?raw`). The favicon, PWA
+// icons, README and website all derive from this brand family, so it is the canonical geometry the
+// runtime builder must not drift from.
+import brandMarkSvg from '@/assets/brand/koine-mark.svg?raw';
+import { koineMark } from '@/shared/logo';
 
-// The hexagon-κ geometry, kept identical to src/assets/brand/koine-mark.svg (the file-based copy).
-// If the design ever moves, update both together — this test is the sync guard.
+// The hexagon-κ geometry — the shared truth the builder and every file-based copy must agree on.
 const HEX_POINTS = '106,60 83,99.84 37,99.84 14,60 37,20.16 83,20.16';
 const KAPPA_STROKES = ['M48 36 V84', 'M48 60 L78 36', 'M48 60 L78 84'];
 
@@ -36,16 +39,18 @@ describe('koineMark (hexagon-κ)', () => {
     expect(svg).toContain('aria-label="Koine"');
   });
 
-  it('keeps a stable, callable signature (optional idSuffix) so the three call sites are untouched', () => {
-    // ide.tsx passes 'h', welcome.ts passes 'home', about.ts passes nothing.
-    expect(() => koineMark('h')).not.toThrow();
-    expect(() => koineMark('home')).not.toThrow();
-    // Single-ink now — no per-call gradient id — so the mark is deterministic across calls.
+  it('is id-free and deterministic — every call returns the identical mark, so copies never collide', () => {
     expect(koineMark()).toBe(koineMark());
   });
 
-  it('LOGO_SVG is the same hexagon-κ mark', () => {
-    expect(LOGO_SVG).toContain(HEX_POINTS);
-    expect(LOGO_SVG).toContain('stroke="var(--koi-accent)"');
+  it('stays geometry-synced with the committed brand SVG (src/assets/brand/koine-mark.svg)', () => {
+    // Only the ink differs between the two (file #5aa9ff vs builder var(--koi-accent) so it can theme
+    // it live) — the hexagon and κ geometry must match exactly, or the in-app mark has drifted from
+    // the file the favicon/PWA/README/website all derive from.
+    expect(brandMarkSvg).toContain(HEX_POINTS);
+    for (const d of KAPPA_STROKES) expect(brandMarkSvg).toContain(d);
+    const svg = koineMark();
+    expect(svg).toContain(HEX_POINTS);
+    for (const d of KAPPA_STROKES) expect(svg).toContain(d);
   });
 });
