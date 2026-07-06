@@ -3,7 +3,7 @@ name: Koine Studio
 # Cross-platform CI for the Koine IDE stack: publishes the `koine lsp` sidecar,
 # runs the headless LSP JSON-RPC tests, and builds Koine Studio (the Tauri v2
 # desktop app) on Linux, Windows, and macOS. Mirrors the action versions and
-# .NET setup used by ci.yml / release.yml.
+# .NET setup used by ci.yml.
 
 on:
   push:

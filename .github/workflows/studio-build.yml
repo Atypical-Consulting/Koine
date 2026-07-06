@@ -28,7 +28,7 @@ jobs:
   studio:
     name: studio (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -59,6 +59,15 @@ jobs:
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
           restore-keys: ${{ runner.os }}-nuget-
 
+      # Tauri v2 on Linux needs WebKitGTK + libsoup and the standard GTK/app-indicator
+      # system libraries (linked at `cargo build` time); Windows and macOS runners ship
+      # their web views already.
+      #
+      # We cache the .deb packages so warm runs restore them from the Actions cache and
+      # never touch Ubuntu's apt mirror — the Azure mirror intermittently stalls mid-fetch
+      # and apt's transfer timeout doesn't catch a slowly-trickling connection (one such
+      # stall burned ~50 min before being cancelled). Only a cold cache hits apt; the
+      # timeout config below makes that one fetch fail fast instead of hanging.
       - name: Cap apt acquire timeouts (cold-cache safety net)
         if: runner.os == 'Linux'
         run: |
@@ -109,10 +118,22 @@ jobs:
           cp "src/Koine.Cli/bin/publish/${{ matrix.rid }}/koine${ext}" \
              "tooling/koine-studio/src-tauri/binaries/koine-${{ matrix.triple }}${ext}"
 
+      # (c) Build Koine Studio: the Rust host (framing + broker, with unit tests) and
+      #     the web frontend (TypeScript typecheck + Vite bundle).
       - name: Build Rust host (cargo)
         working-directory: tooling/koine-studio/src-tauri
         shell: bash
         run: |
+          # The crate version tracks the Koine release version (bumped by release-please in
+          # Cargo.toml + tauri.conf.json). release-please can't cleanly rewrite Cargo.lock — a
+          # typed TOML updater reformats it (breaking --locked) and cargo strips generic-updater
+          # comments — so on a release PR the lock's own-package version lags Cargo.toml. Refresh
+          # just that one entry offline (surgical: touches only koine-studio's version line, no
+          # network, no dependency churn) so `--locked` stays a real dependency-reproducibility
+          # gate without going red on a version-only drift. That reasoning only holds when the
+          # Cargo registry cache above is warm; on a cold/partial cache (cache-hit != 'true') there
+          # is no local index for --offline to consult, so fall back to a network-allowed update
+          # (issue #1023).
           if [ "${{ steps.cargo-cache.outputs.cache-hit }}" = "true" ]; then
             cargo update -p koine-studio --offline
           else
@@ -134,6 +155,13 @@ jobs:
           working-directory: tooling/koine-studio
           cache-key-files: package-lock.json
 
+      # Issue #400: the Windows runner intermittently exhausts disk during the Vite module-transform
+      # phase, crashing vitest workers with "Error: disk full". The cause is drive placement, not
+      # total space: %TEMP% lives on C: (~30 GB free) where Vite/rolldown spill their transform temp,
+      # while the workspace drive D: has ~140 GB free. Point TEMP/TMP at D: (RUNNER_TEMP already lives
+      # there) so the transform has ample headroom. This replaces the previous approach of pruning
+      # toolchains off C:, which burned ~3.5 min per run on slow Remove-Item calls to reclaim space on
+      # the wrong drive. GITHUB_ENV makes the redirect apply to the vitest step below.
       - name: "Redirect temp to the D: drive for headroom (Windows)"
         if: runner.os == 'Windows'
         shell: pwsh
@@ -171,7 +199,7 @@ jobs:
           base="tooling/koine-studio/src-tauri/target/release/bundle"
           for f in "$base"/dmg/*.dmg \
                    "$base"/msi/*.msi "$base"/nsis/*.exe \
-                   "$base"/appimage/*.AppImage "$base"/deb/*.deb; do
+                   "$base"/appimage/*.AppImage "$base"/deb/*.deb "$base"/rpm/*.rpm; do
             cp "$f" "$dest/"
           done
           echo "Collected installers:"; ls -la "$dest"
@@ -183,4 +211,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release upload "${{ inputs.tag }}" studio-installers/* --clobber
+          shopt -s nullglob
+          files=(studio-installers/*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No Studio installers were collected — nothing to upload." >&2
+            exit 1
+          fi
+          gh release upload "${{ inputs.tag }}" "${files[@]}" --clobber
