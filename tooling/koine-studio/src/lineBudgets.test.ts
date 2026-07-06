@@ -61,7 +61,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // onOpenRecentSucceeded IdeHooks seam (openRecentFolder now reports a successful open, not just a
   // failed one, so the boot layer's one-shot "just cloned" tracking can clear on success too instead of
   // staying pinned to a path forever); measured end-state.
-  { file: 'src/shell/ide.tsx', maxLines: 1377 },
+  // Raised 1377 → 1401: #1143 wires the Spotlight launcher into the composition root — the four new
+  // CommandWiringDeps seams in the createCommandWiring() call (modelIndex / canUseGit / gitLog /
+  // revealLocation) plus the `revealLocation` open-file-and-reveal nav helper (a sibling of
+  // navigateToDefinition that opens an unopened file first), ~24 LOC of composition-root wiring for the
+  // launcher's go-to actions. Measured end-state.
+  { file: 'src/shell/ide.tsx', maxLines: 1401 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.

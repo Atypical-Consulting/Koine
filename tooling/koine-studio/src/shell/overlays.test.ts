@@ -46,6 +46,21 @@ describe('overlays', () => {
       expect(overlays.overlayOpen()).toBe(true);
     });
 
+    it('counts the Spotlight launcher scrim (.lx-scrim), and not when hidden (#1145)', () => {
+      const overlays = createOverlays(makeDeps());
+      const scrim = document.createElement('div');
+      scrim.className = 'lx-scrim';
+      scrim.hidden = true; // mounted-but-closed, as createLauncher keeps it
+      document.body.appendChild(scrim);
+      expect(overlays.overlayOpen()).toBe(false);
+
+      scrim.hidden = false; // launcher opened
+      expect(overlays.overlayOpen()).toBe(true);
+
+      scrim.hidden = true; // launcher closed again
+      expect(overlays.overlayOpen()).toBe(false);
+    });
+
     it('counts a visible Settings center panel (#center-panel-settings)', () => {
       const overlays = createOverlays(makeDeps());
       // No overlay open initially.

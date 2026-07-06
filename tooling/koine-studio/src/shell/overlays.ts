@@ -51,7 +51,10 @@ export function createOverlays(deps: OverlaysDeps): Overlays {
   function overlayOpen(): boolean {
     return (
       document.querySelector(
-        '.koi-palette-backdrop:not([hidden]), .koi-modal-backdrop:not([hidden]), #center-panel-settings:not([hidden])',
+        // `.lx-scrim` is the Spotlight launcher's own modal overlay (#1143); it must count here too so
+        // global chords don't fire on the editor beneath it — defense-in-depth beyond the launcher's
+        // own keydown trap (#1145 review).
+        '.koi-palette-backdrop:not([hidden]), .koi-modal-backdrop:not([hidden]), #center-panel-settings:not([hidden]), .lx-scrim:not([hidden])',
       ) !== null
     );
   }
