@@ -534,7 +534,7 @@ export function SourceControlPanel(props: {
       <div class="koi-sc-branchbar">
         {branchOptions.length > 0 ? (
           <select
-            class="koi-sc-branch-select koi-sc-branch"
+            class="koi-sc-branch"
             aria-label="Current branch — switch branch"
             value={status?.branch ?? ''}
             disabled={busy}
@@ -643,7 +643,7 @@ export function SourceControlPanel(props: {
               toggleGroup), with a "View all" placeholder as the header action (a full-history surface is a
               follow-up). Each row is a mono initials avatar beside a message + SHA·author·date meta line. */}
           <section
-            class={`koi-sc-group koi-sc-log-group${logCollapsed ? ' collapsed' : ''}`}
+            class={`koi-sc-group${logCollapsed ? ' collapsed' : ''}`}
             aria-label="Recent commits"
           >
             <div class="koi-sc-group-head">

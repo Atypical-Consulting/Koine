@@ -303,23 +303,6 @@
   margin-bottom: 1rem;
 }
 
-/* Superseded: the Recent-commits section now shares the collapsible `.koi-sc-group-head` treatment, so
-   this old <h4> title rule is no longer referenced (kept for Task 7's styling cleanup). */
-.koi-sc-group-title {
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  margin: 0 0 0.4rem;
-  font-size: var(--koi-text-base);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--koi-muted);
-}
-
-.koi-sc-count {
-  font-size: var(--koi-text-sm);
-}
-
 /* File-group header: a collapse toggle (chevron + label + count pill) beside a hover/focus-revealed
    action cluster (Stage all / Unstage all / Discard all). Negative side margins let the head's hover
    surface bleed to the panel edges like the rows below it. */
