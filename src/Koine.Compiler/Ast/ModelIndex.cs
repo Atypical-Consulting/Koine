@@ -700,6 +700,18 @@ public sealed class ModelIndex
     /// <summary>The outcome of resolving a reference, plus the candidate contexts (for the message).</summary>
     public readonly record struct RefResolution(RefKind Kind, IReadOnlyList<string> Candidates);
 
+    /// <summary>
+    /// The result of <see cref="ResolveOwner(string, string)"/>: the single bounded context whose module
+    /// qualifies a reference (<c>null</c> when the name is not a context-homed declared type), plus
+    /// <paramref name="WasAmbiguous"/> — <c>true</c> only when that owner was picked by the multi-owner
+    /// ordinal-least tie-break (no explicit qualifier, single import, or single map-permit determined it),
+    /// which is exactly the KOI1419 "ambiguous multi-owner reference" case. Every other outcome
+    /// (shared-kernel, not-declared, #437 local bind, unique owner) carries <c>WasAmbiguous = false</c>.
+    /// Purely target-agnostic model data (context names + a bool), so both the emitters and the semantic
+    /// validator can share this one decision instead of re-deriving it.
+    /// </summary>
+    public readonly record struct OwnerResolution(string? Owner, bool WasAmbiguous);
+
     /// <summary>True when <paramref name="name"/> is a declared bounded context.</summary>
     public bool IsContext(string name) => _contextNames.Contains(name);
 
@@ -715,9 +727,10 @@ public sealed class ModelIndex
     /// The single bounded context whose module a reference to <paramref name="koineName"/> from
     /// <paramref name="referencingContext"/> qualifies to — the one, target-agnostic owner-resolution
     /// policy every flat-module emitter (Rust <c>crate::&lt;owner&gt;::T</c>, Java <c>&lt;ownerPackage&gt;.T</c>)
-    /// delegates to (issue #1091). It resolves the previously-uncovered <b>multi-owner</b> case: a type
-    /// declared in more than one context and referenced from a THIRD, which the mappers used to degrade
-    /// to a bare, unresolvable name.
+    /// delegates to (issue #1091) — carried in an <see cref="OwnerResolution"/> together with whether the
+    /// choice was the ambiguous multi-owner tie-break. It resolves the previously-uncovered
+    /// <b>multi-owner</b> case: a type declared in more than one context and referenced from a THIRD,
+    /// which the mappers used to degrade to a bare, unresolvable name.
     ///
     /// <para>The policy, in order:</para>
     /// <list type="number">
@@ -736,48 +749,59 @@ public sealed class ModelIndex
     ///   output is reproducible build-to-build.</item>
     /// </list>
     ///
+    /// <para><see cref="OwnerResolution.WasAmbiguous"/> is <c>true</c> for the whole multi-owner branch —
+    /// the KOI1419 case the validator surfaces — and <c>false</c> for every deterministic outcome above.</para>
+    ///
     /// <para>Purely model data (context names, no target syntax), so it lives here next to
     /// <see cref="DeclaringContextsOf"/> / <see cref="IsSharedKernelType"/> / <see cref="KernelOwnerOfType"/>
     /// and is reachable by both the emitters and the semantic validator without inverting the layering.</para>
     /// </summary>
-    public string? ResolveCanonicalOwner(string koineName, string referencingContext)
+    public OwnerResolution ResolveOwner(string koineName, string referencingContext)
     {
         // 1. A shared-kernel type is physically emitted into one canonical owner's module (R14.2) —
         //    resolved the same from any context, so this precedes every other rule.
         if (IsSharedKernelType(koineName) && KernelOwnerOfType(koineName) is { } kernelOwner)
         {
-            return kernelOwner;
+            return new OwnerResolution(kernelOwner, WasAmbiguous: false);
         }
 
         IReadOnlyList<string> declaring = DeclaringContextsOf(koineName);
         if (declaring.Count == 0)
         {
-            return null;                       // not a context-homed declared type — nothing to qualify
+            return new OwnerResolution(null, WasAmbiguous: false);   // not a context-homed declared type
         }
 
         // 3. #437: a reference from within one of the type's own owning contexts binds locally.
         if (ContainsOrdinal(declaring, referencingContext))
         {
-            return referencingContext;
+            return new OwnerResolution(referencingContext, WasAmbiguous: false);
         }
 
         // 4. Uniquely owned — unchanged.
         if (declaring.Count == 1)
         {
-            return declaring[0];
+            return new OwnerResolution(declaring[0], WasAmbiguous: false);
         }
 
         // 5. Multi-owner from a third context. Prefer the single imported owner (the reference binds
         //    there, so any other choice would qualify to a DIFFERENT same-named type); else fall back
-        //    to the stable ordinal-least declaring context.
+        //    to the stable ordinal-least declaring context. Either way the choice is the "ambiguous
+        //    multi-owner" case KOI1419 surfaces.
         IReadOnlyList<string> importOwners = ImportOwnersOf(referencingContext, koineName);
         if (importOwners.Count == 1 && ContainsOrdinal(declaring, importOwners[0]))
         {
-            return importOwners[0];
+            return new OwnerResolution(importOwners[0], WasAmbiguous: true);
         }
 
-        return OrdinalLeast(declaring);
+        return new OwnerResolution(OrdinalLeast(declaring), WasAmbiguous: true);
     }
+
+    /// <summary>
+    /// The owner alone (see <see cref="ResolveOwner(string, string)"/>) — a thin projection kept for the
+    /// existing <c>string?</c> call sites until they migrate to the <see cref="OwnerResolution"/>.
+    /// </summary>
+    public string? ResolveCanonicalOwner(string koineName, string referencingContext) =>
+        ResolveOwner(koineName, referencingContext).Owner;
 
     /// <summary>The ordinal-least element of a non-empty context list (a stable, allocation-free min).</summary>
     private static string OrdinalLeast(IReadOnlyList<string> contexts)

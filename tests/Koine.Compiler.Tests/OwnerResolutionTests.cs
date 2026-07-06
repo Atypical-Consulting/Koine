@@ -121,4 +121,62 @@ public class OwnerResolutionTests
         var index = IndexOf(UniqueOwner);
         index.ResolveCanonicalOwner("Nonexistent", "Gamma").ShouldBeNull();
     }
+
+    // ---- ResolveOwner: the owner PLUS whether the choice was the ambiguous multi-owner tie-break ----
+    // WasAmbiguous is the single source of truth KOI1419 and the flat-module mappers now share, so it
+    // must be true ONLY for the multi-owner-from-a-third-context branch and false everywhere else.
+
+    [Fact]
+    public void ResolveOwner_flags_the_multi_owner_ordinal_fallback_as_ambiguous()
+    {
+        var index = IndexOf(MultiOwnerNoImport);
+        var res = index.ResolveOwner("Money", "Gamma");
+        res.Owner.ShouldBe("Alpha");
+        res.WasAmbiguous.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ResolveOwner_flags_the_multi_owner_import_choice_as_ambiguous()
+    {
+        var index = IndexOf(MultiOwnerImportFromLarger);
+        var res = index.ResolveOwner("Money", "Gamma");
+        res.Owner.ShouldBe("Beta");
+        res.WasAmbiguous.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ResolveOwner_does_not_flag_a_local_bind_as_ambiguous()
+    {
+        var index = IndexOf(MultiOwnerNoImport);
+        var res = index.ResolveOwner("Money", "Alpha");
+        res.Owner.ShouldBe("Alpha");
+        res.WasAmbiguous.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void ResolveOwner_does_not_flag_a_unique_owner_as_ambiguous()
+    {
+        var index = IndexOf(UniqueOwner);
+        var res = index.ResolveOwner("Widget", "Gamma");
+        res.Owner.ShouldBe("Alpha");
+        res.WasAmbiguous.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void ResolveOwner_does_not_flag_a_shared_kernel_type_as_ambiguous()
+    {
+        var index = IndexOf(SharedKernel);
+        var res = index.ResolveOwner("Coin", "Beta");
+        res.Owner.ShouldBe("Alpha");
+        res.WasAmbiguous.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void ResolveOwner_returns_a_null_owner_and_no_ambiguity_for_a_non_declared_name()
+    {
+        var index = IndexOf(UniqueOwner);
+        var res = index.ResolveOwner("Nonexistent", "Gamma");
+        res.Owner.ShouldBeNull();
+        res.WasAmbiguous.ShouldBeFalse();
+    }
 }
