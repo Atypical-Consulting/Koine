@@ -59,7 +59,7 @@ internal class BuildSettings : CommandSettings
     public string? AppMapping { get; init; }
 
     [CommandOption("--app-handler-result <MODE>")]
-    [Description("Application layer: what a command handler returns, void (default) or aggregate (the loaded, mutated aggregate root).")]
+    [Description("Application layer: what a command handler returns, void (default), aggregate (the loaded, mutated aggregate root), or readModel (a read-model projection of it).")]
     public string? AppHandlerResult { get; init; }
 
     [CommandOption("--app-not-found <MODE>")]
@@ -145,7 +145,7 @@ internal class BuildSettings : CommandSettings
         // silently fall back to void.
         if (applicationHandlerResult is { } handlerResult && !ValidHandlerResults.Contains(handlerResult))
         {
-            error = $"unknown app-handler-result '{handlerResult}' (valid modes: void, aggregate)";
+            error = $"unknown app-handler-result '{handlerResult}' (valid modes: void, aggregate, readModel)";
             return false;
         }
 
@@ -196,7 +196,7 @@ internal class BuildSettings : CommandSettings
     /// <c>application.handlerResult</c> (W1). An unknown value is a hard error, not a silent fall-back
     /// to <c>void</c>.</summary>
     private static readonly IReadOnlySet<string> ValidHandlerResults =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "void", "aggregate" };
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "void", "aggregate", "readmodel" };
 
     /// <summary>The missing-aggregate policies a user may request via <c>--app-not-found</c> /
     /// <c>application.notFound</c> (W1). An unknown value is a hard error, not a silent fall-back

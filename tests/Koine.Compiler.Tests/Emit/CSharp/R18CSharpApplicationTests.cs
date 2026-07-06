@@ -920,4 +920,96 @@ public class R18CSharpApplicationTests
         System.Text.RegularExpressions.Regex.Matches(endpoints, "result.IsSuccess").Count.ShouldBe(2);
         endpoints.ShouldContain("return Results.Ok(result);");
     }
+
+    // ------------------------------------------------------------------
+    // W1 (#1041) — --app-handler-result readModel: a void command's handler
+    // returns a read-model projection of the mutated aggregate instead of
+    // the aggregate. void (default) / aggregate are unchanged.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Config_parses_application_handler_result_read_model()
+    {
+        var opts = KoineConfig
+            .Parse("targets.csharp.application.handlerResult = readModel\n")
+            .OptionsFor("csharp");
+        opts.ApplicationHandlerResult.ShouldBe("readModel");
+    }
+
+    [Fact]
+    public void App_handler_result_read_model_flag_implies_the_application_layer()
+    {
+        var settings = new BuildSettings { Path = "x.koi", AppHandlerResult = "readModel" };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+        plan.Options.ApplicationHandlerResult.ShouldBe("readModel");
+    }
+
+    [Fact]
+    public void Known_app_handler_result_read_model_resolves_true_case_insensitively()
+    {
+        new BuildSettings { Path = "x.koi", AppHandlerResult = "readmodel" }
+            .TryResolve(out _, out var e1).ShouldBeTrue(e1);
+        new BuildSettings { Path = "x.koi", AppHandlerResult = "readModel" }
+            .TryResolve(out _, out var e2).ShouldBeTrue(e2);
+    }
+
+    [Fact]
+    public void Handler_result_read_model_returns_a_projection_of_the_mutated_aggregate()
+    {
+        var files = Emit(AppOn with { HandlerResult = CSharpHandlerResult.ReadModel });
+
+        // The void `place` command's handler now returns the OrderSummary read model projected from the
+        // mutated Order, via the emitted To<RM>() projection, instead of returning nothing.
+        var handler = File(files, "OrderPlaceHandler.cs").Contents;
+        handler.ShouldContain("public async Task<OrderSummary> HandleAsync(OrderPlaceRequest request, CancellationToken ct = default)");
+        handler.ShouldContain("aggregate.Place();");
+        handler.ShouldContain("return aggregate.ToOrderSummary();");
+        handler.ShouldNotContain("return aggregate;");
+    }
+
+    [Fact]
+    public void Handler_result_read_model_composes_with_the_nullable_not_found_policy()
+    {
+        var files = Emit(AppOn with { HandlerResult = CSharpHandlerResult.ReadModel, NotFound = CSharpNotFound.Nullable });
+        var handler = File(files, "OrderPlaceHandler.cs").Contents;
+        handler.ShouldContain("public async Task<OrderSummary?> HandleAsync(");
+        handler.ShouldContain("return null;");
+        handler.ShouldContain("return aggregate.ToOrderSummary();");
+    }
+
+    [Fact]
+    public void Handler_result_read_model_output_roslyn_compiles()
+    {
+        var (assembly, errors) = TestSupport.Compile(Emit(AppOn with { HandlerResult = CSharpHandlerResult.ReadModel }));
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    [Fact]
+    public void Handler_result_read_model_falls_back_to_the_aggregate_without_a_read_model()
+    {
+        // An aggregate with no read model cannot project, so readModel falls back to returning the
+        // mutated aggregate.
+        const string src = """
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Order root Order {
+                repository { operations: getById, add }
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+                  states status {
+                    Draft -> Placed
+                    Placed
+                  }
+                  command place {
+                    status -> Placed
+                  }
+                }
+              }
+            }
+            """;
+        var handler = File(Emit(AppOn with { HandlerResult = CSharpHandlerResult.ReadModel }, src), "OrderPlaceHandler.cs").Contents;
+        handler.ShouldContain("public async Task<Order> HandleAsync(");
+        handler.ShouldContain("return aggregate;");
+    }
 }

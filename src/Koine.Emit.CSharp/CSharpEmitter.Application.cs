@@ -62,7 +62,7 @@ public sealed partial class CSharpEmitter
             {
                 foreach (CommandDecl cmd in root.Commands)
                 {
-                    EmitCommandHandler(emit, files, registrations, ns, root, plural, cmd, index, typeMapper, enumMemberToType);
+                    EmitCommandHandler(emit, files, registrations, ns, root, plural, cmd, index, typeMapper, enumMemberToType, ctx);
                 }
             }
 
@@ -116,7 +116,8 @@ public sealed partial class CSharpEmitter
         CommandDecl cmd,
         ModelIndex index,
         CSharpTypeMapper typeMapper,
-        IReadOnlyDictionary<string, string> enumMemberToType)
+        IReadOnlyDictionary<string, string> enumMemberToType,
+        ContextNode ctx)
     {
         var behavior = root.Name + CSharpNaming.ToPascalCase(cmd.Name);
         var requestType = behavior + "Request";
@@ -137,14 +138,25 @@ public sealed partial class CSharpEmitter
         // is the declared result type (nullable under the nullable policy). Defaults keep it null for a
         // void command, so the emitted handler stays byte-identical to today.
         var wantsAggregate = _options.HandlerResult == CSharpHandlerResult.Aggregate;
+        var wantsReadModel = _options.HandlerResult == CSharpHandlerResult.ReadModel;
         var nullableNotFound = _options.NotFound == CSharpNotFound.Nullable;
         var resultNotFound = _options.NotFound == CSharpNotFound.Result;
-        var baseResult = plainResult ?? ((wantsAggregate || nullableNotFound || resultNotFound) ? root.Name : null);
-        var returnsAggregate = plainResult is null && baseResult is not null;
+        // readModel projects the mutated aggregate to a read model (via the emitted To<RM>() mapper),
+        // falling back to the aggregate when the root has no read model.
+        var readModelName = wantsReadModel ? ReadModelForRoot(ctx, root) : null;
+        // A void command is promoted to return a value when aggregate/readModel is requested OR a
+        // not-found policy needs a value to return: the read model (readModel with one) else the aggregate.
+        var wantsValue = wantsAggregate || wantsReadModel;
+        var baseResult = plainResult ?? ((wantsValue || nullableNotFound || resultNotFound) ? (readModelName ?? root.Name) : null);
+        var returnsValue = plainResult is null && baseResult is not null;
         var effectiveResult = baseResult is null ? null
             : nullableNotFound ? baseResult + "?"
             : resultNotFound ? $"Result<{baseResult}>"
             : baseResult;
+
+        // The success value a promoted void command returns: a To<RM>() projection under readModel, else
+        // the aggregate itself.
+        var successExpr = readModelName is not null ? $"aggregate.To{readModelName}()" : "aggregate";
 
         // Under the `result` policy the handler wraps its success value in Result<T>.Ok(...) and yields
         // Result<T>.NotFound() on a miss (no nullable reference, no exception).
@@ -198,11 +210,11 @@ public sealed partial class CSharpEmitter
             WriteCommit(sb);
             sb.Append(Indent).Append(Indent).Append("return ").Append(Ok("result")).Append(";\n");
         }
-        else if (returnsAggregate)
+        else if (returnsValue)
         {
             sb.Append(Indent).Append(Indent).Append("aggregate.").Append(method).Append('(').Append(args).Append(");\n");
             WriteCommit(sb);
-            sb.Append(Indent).Append(Indent).Append("return ").Append(Ok("aggregate")).Append(";\n");
+            sb.Append(Indent).Append(Indent).Append("return ").Append(Ok(successExpr)).Append(";\n");
         }
         else
         {
@@ -264,6 +276,14 @@ public sealed partial class CSharpEmitter
         registrations.Add(new AppRegistration("handler", MediatrHandlerService(requestType, root.Name), handlerType));
         EmitValidator(emit, files, registrations, ns, requestType, factory.Parameters, factory.Body, index, enumMemberToType);
     }
+
+    /// <summary>
+    /// The name of the first read model whose source is <paramref name="root"/>, or <c>null</c> when the
+    /// root has none — the projection a <c>--app-handler-result readModel</c> command handler returns
+    /// (via the emitted <c>To&lt;RM&gt;()</c> mapper). Declaration order keeps the choice deterministic.
+    /// </summary>
+    private static string? ReadModelForRoot(ContextNode ctx, EntityDecl root) =>
+        ctx.Types.OfType<ReadModelDecl>().FirstOrDefault(r => r.SourceType == root.Name)?.Name;
 
     /// <summary>
     /// Emits a request <c>record</c> file. In MediatR mode it is a <c>MediatR.IRequest&lt;TResponse&gt;</c>

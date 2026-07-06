@@ -47,7 +47,9 @@ public sealed class CSharpEmitterProvider : IEmitterProvider
         var regexMode = isSourceGeneratedRegex ? RegexMode.SourceGenerated : RegexMode.Inline;
         var handlerResult = string.Equals(options.ApplicationHandlerResult, "aggregate", StringComparison.OrdinalIgnoreCase)
             ? CSharpHandlerResult.Aggregate
-            : CSharpHandlerResult.Void;
+            : string.Equals(options.ApplicationHandlerResult, "readmodel", StringComparison.OrdinalIgnoreCase)
+                ? CSharpHandlerResult.ReadModel
+                : CSharpHandlerResult.Void;
         var notFound = string.Equals(options.ApplicationNotFound, "nullable", StringComparison.OrdinalIgnoreCase)
             ? CSharpNotFound.Nullable
             : string.Equals(options.ApplicationNotFound, "result", StringComparison.OrdinalIgnoreCase)
