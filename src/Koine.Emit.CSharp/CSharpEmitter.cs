@@ -221,6 +221,14 @@ public sealed partial class CSharpEmitter : IEmitter
             files.Add(EmitQueryHandlerInterface(emit));
         }
 
+        // The generated Result<T> is referenced only by the Application-layer handlers under the
+        // --app-not-found result policy (W1, #1041), so emit it exactly when both hold — otherwise the
+        // output stays byte-identical to the throw/nullable policies.
+        if (_options.EmitApplication && _options.NotFound == CSharpNotFound.Result)
+        {
+            files.Add(EmitResult(emit));
+        }
+
         // 2. Per-context user types. Aggregate-nested types are flattened into the
         //    context namespace; the aggregate boundary is marked via IAggregateRoot.
         foreach (ContextNode ctx in model.Contexts)

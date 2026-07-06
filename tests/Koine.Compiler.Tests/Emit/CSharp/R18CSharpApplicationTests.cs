@@ -801,4 +801,57 @@ public class R18CSharpApplicationTests
         var files = Emit(AppOn, src);
         files.ShouldNotContain(f => f.RelativePath.EndsWith("OrderPlaceHandler.cs", StringComparison.Ordinal));
     }
+
+    // ------------------------------------------------------------------
+    // W1 (#1041) — --app-not-found result: return a generated Result<T>
+    // instead of throwing/nulling on a missing aggregate. Task 1 plumbs the
+    // option and emits the Result<T> runtime type; Task 2 wires the returns.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Config_parses_application_not_found_result()
+    {
+        var opts = KoineConfig
+            .Parse("targets.csharp.application.notFound = result\n")
+            .OptionsFor("csharp");
+        opts.ApplicationNotFound.ShouldBe("result");
+    }
+
+    [Fact]
+    public void App_not_found_result_flag_implies_the_application_layer()
+    {
+        var settings = new BuildSettings { Path = "x.koi", AppNotFound = "result" };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+        plan.Options.ApplicationNotFound.ShouldBe("result");
+    }
+
+    [Fact]
+    public void Known_app_not_found_result_resolves_true_case_insensitively()
+    {
+        new BuildSettings { Path = "x.koi", AppNotFound = "result" }
+            .TryResolve(out _, out var e1).ShouldBeTrue(e1);
+        new BuildSettings { Path = "x.koi", AppNotFound = "Result" }
+            .TryResolve(out _, out var e2).ShouldBeTrue(e2);
+    }
+
+    [Fact]
+    public void Result_type_is_emitted_and_compiles_under_the_result_policy()
+    {
+        // Emit asserts a clean Roslyn compile of the whole model, so this also proves Result<T> compiles.
+        var files = Emit(AppOn with { NotFound = CSharpNotFound.Result });
+        var result = files.Single(f => f.RelativePath == "Koine/Runtime/Result.cs");
+        result.Contents.ShouldContain("public readonly struct Result<T>");
+        result.Contents.ShouldContain("public static Result<T> Ok(T value)");
+        result.Contents.ShouldContain("public static Result<T> NotFound()");
+        result.Contents.ShouldContain("public bool IsSuccess");
+    }
+
+    [Fact]
+    public void Result_type_is_absent_under_throw_and_nullable_policies()
+    {
+        Emit(AppOn).ShouldNotContain(f => f.RelativePath == "Koine/Runtime/Result.cs");
+        Emit(AppOn with { NotFound = CSharpNotFound.Nullable })
+            .ShouldNotContain(f => f.RelativePath == "Koine/Runtime/Result.cs");
+    }
 }

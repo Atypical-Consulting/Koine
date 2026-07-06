@@ -52,7 +52,10 @@ internal enum CSharpHandlerResult
 /// <c>InvalidOperationException</c>; <see cref="Nullable"/> returns a nullable result and yields
 /// <c>null</c> when the aggregate is absent, so a caller maps a miss to a 404 without catching an
 /// exception. A <c>nullable</c> command handler returns the aggregate (or its declared result) as a
-/// nullable type; a by-identity query handler returns its read model nullably.
+/// nullable type; a by-identity query handler returns its read model nullably. <see cref="Result"/>
+/// wraps the same value in a generated <c>Koine.Runtime.Result&lt;T&gt;</c> (emitted only under this
+/// policy): a miss yields <c>Result&lt;T&gt;.NotFound()</c> and a hit <c>Result&lt;T&gt;.Ok(value)</c>,
+/// so a caller distinguishes a miss from a value without a nullable reference or an exception.
 /// </summary>
 internal enum CSharpNotFound
 {
@@ -61,6 +64,9 @@ internal enum CSharpNotFound
 
     /// <summary>Return a nullable result and yield <c>null</c> when the aggregate is absent.</summary>
     Nullable,
+
+    /// <summary>Return a <c>Koine.Runtime.Result&lt;T&gt;</c> — <c>NotFound()</c> on a miss, <c>Ok(value)</c> on a hit.</summary>
+    Result,
 }
 
 /// <summary>

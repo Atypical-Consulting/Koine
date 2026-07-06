@@ -50,7 +50,9 @@ public sealed class CSharpEmitterProvider : IEmitterProvider
             : CSharpHandlerResult.Void;
         var notFound = string.Equals(options.ApplicationNotFound, "nullable", StringComparison.OrdinalIgnoreCase)
             ? CSharpNotFound.Nullable
-            : CSharpNotFound.Throw;
+            : string.Equals(options.ApplicationNotFound, "result", StringComparison.OrdinalIgnoreCase)
+                ? CSharpNotFound.Result
+                : CSharpNotFound.Throw;
         return new CSharpEmitterOptions(
             options.NamespaceMap, instant, options.EmitSourceMaps, options.ReferenceOnly,
             ParseLayers(options.Layers), options.ApplicationMediatr, mapping,
