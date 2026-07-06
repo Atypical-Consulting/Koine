@@ -12,42 +12,137 @@
   padding: 0;
 }
 
-.koi-sc-head {
+/* Header action row. The shell's #right-title already renders the "Source Control" title, so the panel
+   renders only its local actions (Refresh + overflow) — no in-panel title, to avoid double-titling. */
+.koi-sc-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
+  gap: 0.15rem;
+  margin-bottom: 0.35rem;
+}
+
+/* Ghost icon button (mirrors the toolbar chrome): transparent until hover. */
+.koi-sc-hdr-ico {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--koi-radius-sm);
+  color: var(--koi-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
+/* Shared line-icon recipe (mirrors .tb-ico): 1.4px strokes tinted by the button's text color. */
+.koi-sc-ico {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The Refresh glyph spins 360° when its button carries .is-spinning — a class toggled on each click. */
+.koi-sc-hdr-ico .koi-sc-ico {
+  transition: transform var(--koi-dur-mid) ease;
+}
+
+.koi-sc-hdr-ico.is-spinning .koi-sc-ico {
+  transform: rotate(360deg);
+}
+
+/* Branch + sync bar: the branch switcher (a native <select> styled as a pill) beside a best-effort
+   ahead/behind readout. */
+.koi-sc-branchbar {
+  display: flex;
+  align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.7rem;
+  margin-bottom: 0.9rem;
 }
 
 .koi-sc-branch {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
+  flex: 1;
   min-width: 0;
-}
-
-.koi-sc-branch-icon {
-  color: var(--koi-muted);
-}
-
-.koi-sc-branch-select {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 30px;
+  padding: 0 0.6rem;
+  border-radius: var(--koi-radius-sm);
+  border: 1px solid var(--koi-line);
+  background: var(--koi-surface);
+  color: var(--koi-fg);
   font: inherit;
   font-size: var(--koi-text-md);
-  color: var(--koi-fg);
-  background: var(--koi-surface);
-  border: 1px solid color-mix(in srgb, var(--koi-fg) 16%, transparent);
-  border-radius: var(--koi-radius-sm);
-  padding: 0.15rem 0.35rem;
-  max-width: 100%;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
+  }
 }
 
 .koi-sc-branch-name {
-  font-weight: 600;
-  color: var(--koi-fg);
+  cursor: default;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Best-effort ahead/behind sync readout (mono). GitStatus carries no upstream counts, so it reads 0/0
+   until real sync wiring lands — the `ahead` count is tinted with the accent. */
+.koi-sc-sync {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 30px;
+  padding: 0 0.6rem;
+  border-radius: var(--koi-radius-sm);
+  border: 1px solid var(--koi-line);
+  background: transparent;
+  color: var(--koi-ink-soft);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-xs);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--koi-surface);
+    color: var(--koi-fg);
+    border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
+  }
+
+  .ahead {
+    color: var(--koi-accent);
+  }
+
+  i {
+    font-style: normal;
+    margin-right: 0.15rem;
+  }
+
+  .sep {
+    opacity: 0.4;
+  }
 }
 
 .koi-sc-error {

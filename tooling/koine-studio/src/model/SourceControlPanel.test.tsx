@@ -68,6 +68,27 @@ describe('SourceControlPanel', () => {
     expect(group(view.container, 'Untracked')!.textContent).toContain('c.koi');
   });
 
+  test('renders the branch switcher, the ahead/behind sync readout, and the Refresh control', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    // The branch switcher still resolves by its displayed value (the current branch).
+    await view.findByDisplayValue('main');
+
+    // The branch/sync bar renders a best-effort ahead/behind readout referencing the upstream ref.
+    const sync = await waitFor(() => {
+      const el = view.container.querySelector('.koi-sc-sync');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(sync.textContent).toContain('↑0');
+    expect(sync.textContent).toContain('↓0');
+    expect(sync.getAttribute('title')).toMatch(/origin\/main/);
+
+    // The Refresh action is still present as an accessible button.
+    expect(view.getByRole('button', { name: /Refresh/i })).toBeTruthy();
+  });
+
   test('clicking Stage stages the file and re-fetches so it moves to the staged group', async () => {
     const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }]);
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);

@@ -114,6 +114,9 @@ export function SourceControlPanel(props: {
   // each guarded against an unmount-stale resolve.
   const [reloadTick, setReloadTick] = useState(0);
   const reload = () => setReloadTick((t) => t + 1);
+  // Purely presentational: the Refresh glyph flips this on each click so a toggled class spins it 360°
+  // (a CSS transition). It carries no git state — the actual refresh is `reload()`.
+  const [spin, setSpin] = useState(false);
 
   // The single fetch path: pull status (+ log + branches) for the workspace folder whenever the host,
   // folder, an explicit refresh, or the nonce changes. Browser hosts (no git) never fetch. A rejected
@@ -325,33 +328,73 @@ export function SourceControlPanel(props: {
 
   return (
     <div class="koi-sc">
-      <header class="koi-sc-head">
-        <div class="koi-sc-branch">
-          <span class="koi-sc-branch-icon" aria-hidden="true">
-            ⎇
-          </span>
-          {branchOptions.length > 0 ? (
-            <select
-              class="koi-sc-branch-select"
-              aria-label="Current branch — switch branch"
-              value={status?.branch ?? ''}
-              disabled={busy}
-              onChange={(e) => onCheckout((e.currentTarget as HTMLSelectElement).value)}
-            >
-              {branchOptions.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <span class="koi-sc-branch-name">{status?.branch ?? '…'}</span>
-          )}
-        </div>
-        <button type="button" class="koi-sc-refresh koi-docs-new-btn" disabled={busy} onClick={reload}>
-          Refresh
+      <div class="koi-sc-actions" role="toolbar" aria-label="Source control actions">
+        <button
+          type="button"
+          class={`koi-sc-hdr-ico${spin ? ' is-spinning' : ''}`}
+          title="Refresh"
+          aria-label="Refresh"
+          disabled={busy}
+          onClick={() => {
+            setSpin((s) => !s);
+            reload();
+          }}
+        >
+          <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M13 8a5 5 0 1 1-1.5-3.6" />
+            <path d="M13 2.5V5h-2.5" />
+          </svg>
         </button>
-      </header>
+        <button type="button" class="koi-sc-hdr-ico" title="Views and more actions" aria-label="Views and more actions">
+          <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="8" cy="3.5" r="1.1" fill="currentColor" stroke="none" />
+            <circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none" />
+            <circle cx="8" cy="12.5" r="1.1" fill="currentColor" stroke="none" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="koi-sc-branchbar">
+        {branchOptions.length > 0 ? (
+          <select
+            class="koi-sc-branch-select koi-sc-branch"
+            aria-label="Current branch — switch branch"
+            value={status?.branch ?? ''}
+            disabled={busy}
+            onChange={(e) => onCheckout((e.currentTarget as HTMLSelectElement).value)}
+          >
+            {branchOptions.map((b) => (
+              <option key={b} value={b}>
+                {b}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span class="koi-sc-branch koi-sc-branch-name">{status?.branch ?? '…'}</span>
+        )}
+        {/* Best-effort ahead/behind placeholder — GitStatus carries no upstream counts, so this reads 0/0
+            until real sync wiring lands (a follow-up). Kept a labelled button to match the design chrome. */}
+        <button
+          type="button"
+          class="koi-sc-sync"
+          title={`Push 0 commits to origin/${status?.branch ?? 'main'}`}
+          aria-label={`Push 0 commits to origin/${status?.branch ?? 'main'}`}
+        >
+          <span class="ahead">
+            <i aria-hidden="true">↑</i>0
+          </span>
+          <span class="sep" aria-hidden="true">
+            ·
+          </span>
+          <span class="behind">
+            <i aria-hidden="true">↓</i>0
+          </span>
+          <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M13 8a5 5 0 1 1-1.5-3.6" />
+            <path d="M13 2.5V5h-2.5" />
+          </svg>
+        </button>
+      </div>
 
       {actionError && (
         <p class="koi-sc-error" role="alert">
