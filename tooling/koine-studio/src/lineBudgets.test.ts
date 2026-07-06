@@ -104,7 +104,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // WorkspaceFilesSnapshot shape ({files, displayPath}), the liveTextFor display-map resolution behind
   // the drift check, and the relPath-keyed before-map derivation at stageChangeSet, ~40 LOC of
   // multi-root wiring (not regrowth of the retired DOM panel). Measured end-state, no headroom.
-  { file: 'src/ai/aiPanel.ts', maxLines: 905 },
+  // Raised 905 → 919: #472 Task 3 addresses the change-set apply by opaque key — the shared
+  // snapshotKeyFor reverse-lookup (relPath → snapshot key, also backing liveTextFor) and the payload
+  // mint that resolves a revision's buffer uri / mints a brand-new file's `new:<relPath>` key, ~14 LOC
+  // of multi-root wiring. Measured end-state, no headroom.
+  { file: 'src/ai/aiPanel.ts', maxLines: 919 },
   // Frozen 2026-07-02 at 1301 LOC (grown from the audit's 1284 @ fc83bcf5), ceil(1301 × 1.02) = 1328.
   // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
   // not mandate the split — #989 owns that.
@@ -119,7 +123,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 158 → 165: #1081 guards applyFileEdit's post-write lsp.didSave() against a write that went
   // stale before the freshness check (the same stillFresh gate its markSaved call already used) —
   // 161 LOC, ceil(161 × 1.02) = 165.
-  { file: 'src/shell/workspaceBuffers.ts', maxLines: 165 },
+  // Raised 165 → 173: #472 Task 3 re-keys applyFileEdit by the opaque session key — the O(1)
+  // buffers.get resolution, the `new:<relPath>` create-under-primary-root branch, and the
+  // unknown-key → null guard — 169 LOC, ceil(169 × 1.02) = 173.
+  { file: 'src/shell/workspaceBuffers.ts', maxLines: 173 },
   { file: 'src/shell/workspaceMutations.ts', maxLines: 179 },
   // Raised 178 → 195: #1009 guards saveActive/saveAllDirty's post-write lsp.didSave() against a
   // buffer switch during the write/format await AND a mid-write keystroke re-dirtying the saved

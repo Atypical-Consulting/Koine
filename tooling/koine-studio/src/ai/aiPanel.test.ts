@@ -818,6 +818,45 @@ describe('multi-file change set (agentic edits)', () => {
     expect(accepted[0].relPath).toBe('orders.koi');
   });
 
+  // #472 Task 3: the apply payload carries each staged edit's OPAQUE KEY — the snapshot key (buffer
+  // uri) for a revision of an existing file, a `new:<relPath>` key for a brand-new one — so the host's
+  // applyFileEdit resolves unambiguously across a multi-root workspace; the display relPath rides
+  // along for the partial-apply report. (Carrying the key through the review UI itself is Task 4.)
+  test('apply forwards the snapshot key (uri / new-file key) alongside the display relPath', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('file:///wsA/orders.koi', 'context Orders { v2 }'); // revision, by uri key
+      req.editSession?.stage('new:fresh.koi', 'context Fresh {}'); // brand-new file
+      req.onText('Staged.');
+      return 'Staged.';
+    });
+    const onApplyChangeSet = vi.fn(
+      async (_files: { key: string; relPath: string; body: string; isNew: boolean }[]) => ({
+        failed: [] as string[],
+      }),
+    );
+    const container = document.createElement('div');
+    createAssistantChat(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({
+          files: { 'file:///wsA/orders.koi': 'context Orders {}' },
+          displayPath: { 'file:///wsA/orders.koi': 'orders.koi' },
+        }),
+        runEditTool: vi.fn(async () => 'ok'), // stub — the mock stages directly
+        onApplyChangeSet,
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset-apply')).not.toBeNull());
+    container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.click();
+    await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+    expect(onApplyChangeSet.mock.calls[0][0]).toEqual([
+      { key: 'file:///wsA/orders.koi', relPath: 'orders.koi', body: 'context Orders { v2 }', isNew: false },
+      { key: 'new:fresh.koi', relPath: 'fresh.koi', body: 'context Fresh {}', isNew: true },
+    ]);
+  });
+
   test('surfaces the end-of-turn validation diagnostics in the change set, before apply (issue #474)', async () => {
     // The model stages a BROKEN file; the agentic loop's single end-of-turn validation reports the
     // error via onStagedValidation. The change-set panel must show those diagnostics alongside the

@@ -36,9 +36,11 @@ export interface PanelHostDeps {
   diagnosticsFor(uri: string): Array<{ range: { start: { line: number; character: number } }; severity?: number; message: string }>;
   workspace: {
     activeUri(): string;
+    /** Every open buffer, keyed by its file:// uri (the assistant's opaque session key, #472). */
     buffers: ReadonlyMap<string, { name?: string; relPath: string; text: string }>;
     folderRootToken(): string;
-    applyFileEdit(relPath: string, body: string): Promise<unknown>;
+    /** Keyed write: an open buffer's uri, or a `new:<relPath>` key creating under the primary root. */
+    applyFileEdit(key: string, body: string): Promise<unknown>;
   };
   /** The controller's cached domain index (two LSP recompiles), reused until the next edit clears it. */
   getCachedDomainIndex(): Promise<AssistantContext['domainIndex'] | null>;
@@ -202,12 +204,17 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
       // The GBNF comes from the host's resident compiler. Browser-host only — the desktop host omits
       // gbnfGrammar(), so the panel falls back to parse-and-repair there.
       getGrammar: deps.platform.gbnfGrammar ? () => deps.platform.gbnfGrammar!() : undefined,
-      // Workspace snapshot for multi-file agentic editing (#472): current text per snapshot key plus
-      // each key's display relPath. Still keyed by relPath here (identity displayPath) — keying by the
-      // buffer uri so two roots can hold the same relPath lands with #472 Task 3.
+      // Workspace snapshot for multi-file agentic editing (#472): the REAL uri-keyed map — EVERY open
+      // buffer contributes its own entry (two roots' `model.koi` both survive; no relPath collapse),
+      // with displayPath carrying each uri's workspace-relative label for the review UI.
       getWorkspaceFiles: () => {
-        const files = Object.fromEntries([...deps.workspace.buffers.values()].map((b) => [b.relPath, b.text]));
-        return { files, displayPath: Object.fromEntries(Object.keys(files).map((p) => [p, p])) };
+        const files: Record<string, string> = {};
+        const displayPath: Record<string, string> = {};
+        for (const [uri, buf] of deps.workspace.buffers) {
+          files[uri] = buf.text;
+          displayPath[uri] = buf.relPath;
+        }
+        return { files, displayPath };
       },
       // Host executor for the staged list/read/write edit tools (browser WASM / desktop MCP).
       runEditTool: deps.platform.runEditTool ? (name, argsJson, session) => deps.platform.runEditTool!(name, argsJson, session) : undefined,
@@ -215,13 +222,15 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
       // at end of turn (browser WASM DiagnoseWorkspace / desktop MCP koine_validate) instead of after
       // each write, and the panel surfaces the diagnostics for pre-apply review.
       validateStaged: deps.platform.validateStagedWorkspace ? (session) => deps.platform.validateStagedWorkspace!(session) : undefined,
-      // Commit an accepted multi-file change set through the controller (new files under the folder root).
-      // applyFileEdit returns null (not throw) on a failed write/create — collect those relPaths so the
-      // panel reports a partial apply instead of a false "Applied ✓".
+      // Commit an accepted multi-file change set through the controller, each write addressed by the
+      // staged edit's OPAQUE key (#472 Task 3): the buffer uri for a revision — unambiguous across the
+      // roots of a multi-root workspace — or a `new:<relPath>` key creating under the primary root.
+      // applyFileEdit returns null (not throw) on a failed write/create/unknown key — collect those
+      // files' DISPLAY relPaths so the panel reports a partial apply instead of a false "Applied ✓".
       onApplyChangeSet: async (files) => {
         const failed: string[] = [];
         for (const f of files) {
-          if ((await deps.workspace.applyFileEdit(f.relPath, f.body)) === null) failed.push(f.relPath);
+          if ((await deps.workspace.applyFileEdit(f.key, f.body)) === null) failed.push(f.relPath);
         }
         return { failed };
       },

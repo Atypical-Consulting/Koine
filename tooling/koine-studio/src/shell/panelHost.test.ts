@@ -13,7 +13,8 @@ const { handles, ctors } = vi.hoisted(() => {
   };
   const ctors = {
     createSettingsPage: vi.fn(() => handles.settings),
-    createAssistantChat: vi.fn(() => handles.assistant),
+    // Takes its options so the snapshot/apply seam tests (#472 Task 3) can read them back off the call.
+    createAssistantChat: vi.fn((_opts: unknown) => handles.assistant),
     createScenarioPanel: vi.fn(() => handles.scenario),
     createTerminalPanel: vi.fn(() => handles.terminal),
     createReviewPanel: vi.fn(() => handles.review),
@@ -113,6 +114,49 @@ describe('panelHost', () => {
     host.ensureTerminal();
     host.applyTerminalTheme();
     expect(handles.terminal.applyTheme).toHaveBeenCalledOnce();
+  });
+
+  // #472 Task 3: the snapshot producer keys by the buffer uri (the buffers Map key), so two roots
+  // holding the SAME relPath both survive — no collapse — while displayPath carries each key's
+  // workspace-relative label for the review UI.
+  it('snapshots the workspace keyed by buffer uri with relPath as the display path (#472)', () => {
+    const deps = makeDeps();
+    deps.workspace.buffers = new Map([
+      ['file:///wsA/model.koi', { relPath: 'model.koi', text: 'context A {}' }],
+      ['file:///wsB/model.koi', { relPath: 'model.koi', text: 'context B {}' }],
+    ]);
+    const host = createPanelHost(deps);
+    host.ensureAssistant();
+    const opts = ctors.createAssistantChat.mock.calls[0][0] as {
+      getWorkspaceFiles?: () => { files: Record<string, string>; displayPath: Record<string, string> };
+    };
+    expect(opts.getWorkspaceFiles!()).toEqual({
+      files: { 'file:///wsA/model.koi': 'context A {}', 'file:///wsB/model.koi': 'context B {}' },
+      displayPath: { 'file:///wsA/model.koi': 'model.koi', 'file:///wsB/model.koi': 'model.koi' },
+    });
+  });
+
+  // #472 Task 3: the change-set apply addresses each write by the staged edit's OPAQUE key (buffer
+  // uri, or `new:<relPath>` for a file to create) — never the ambiguous relPath — while the
+  // partial-apply failure report speaks the user's language: the DISPLAY relPath.
+  it('onApplyChangeSet forwards each staged edit by KEY and reports failures by display relPath (#472)', async () => {
+    const deps = makeDeps();
+    const applyFileEdit = vi.fn(async (key: string, _body: string) => (key.startsWith('new:') ? null : key));
+    deps.workspace.applyFileEdit = applyFileEdit;
+    const host = createPanelHost(deps);
+    host.ensureAssistant();
+    const opts = ctors.createAssistantChat.mock.calls[0][0] as {
+      onApplyChangeSet?: (
+        files: { key: string; relPath: string; body: string; isNew: boolean }[],
+      ) => Promise<{ failed: string[] }>;
+    };
+    const result = await opts.onApplyChangeSet!([
+      { key: 'file:///wsB/model.koi', relPath: 'model.koi', body: 'context B { v2 }', isNew: false },
+      { key: 'new:fresh.koi', relPath: 'fresh.koi', body: 'context Fresh {}', isNew: true },
+    ]);
+    expect(applyFileEdit).toHaveBeenNthCalledWith(1, 'file:///wsB/model.koi', 'context B { v2 }');
+    expect(applyFileEdit).toHaveBeenNthCalledWith(2, 'new:fresh.koi', 'context Fresh {}');
+    expect(result).toEqual({ failed: ['fresh.koi'] });
   });
 
   it('dispose tears down only the panels that were built', () => {

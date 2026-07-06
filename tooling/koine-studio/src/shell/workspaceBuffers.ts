@@ -3,6 +3,7 @@
 // decomposition, issue #982). It reads/writes the store-owned buffer set through the shared
 // WorkspaceModuleCtx and reuses the PURE path helpers (isUnder / nameOf) from workspaceMutations.
 import { pathToFileUri } from '@/shell/ideUtils';
+import { NEW_FILE_KEY_PREFIX } from '@/ai/editSession';
 import { isUnder, nameOf } from './workspaceMutations';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
 import type { Buffer } from '@/store/slices/workspace';
@@ -111,13 +112,18 @@ export function createWorkspaceBuffers(ctx: WorkspaceModuleCtx) {
     st().bumpWorkspaceEdit(); // the onBuffersChanged seam: ide.ts subscribes to workspaceEditSeq
   }
 
-  // Write one full-file body to `relPath` for the assistant's multi-file apply. An EXISTING open buffer
-  // (matched by relPath) is updated in place — reflected in the editor when it's the active one (so the
-  // change shows + fires onChange), synced to the LSP, persisted, and left clean UNLESS a keystroke
-  // landed mid-write (mirrors saveActive/saveAllDirty). A relPath with no open buffer is CREATED under
-  // the primary root and opened. Returns the file uri, or null on failure.
-  async function applyFileEdit(relPath: string, body: string): Promise<string | null> {
-    const existing = [...st().buffers.values()].find((b) => b.relPath === relPath);
+  // Write one full-file body for the assistant's multi-file apply, addressed by the file's OPAQUE
+  // session key (#472): an open buffer's uri — an O(1), unambiguous lookup even when two roots of a
+  // multi-root workspace hold the same relPath — or a `new:<relPath>` key for a file that doesn't exist
+  // yet. An EXISTING buffer is updated in place — reflected in the editor when it's the active one (so
+  // the change shows + fires onChange), synced to the LSP, persisted, and left clean UNLESS a keystroke
+  // landed mid-write (mirrors saveActive/saveAllDirty). A new-file key is CREATED under the PRIMARY
+  // root (a genuinely new path names no root of its own; routing the choice through the key keeps the
+  // seam a future root-picker slots into) and opened. Any other key — including a bare relPath — is
+  // unknown: return null rather than guess across roots or silently create. Returns the file uri, or
+  // null on failure.
+  async function applyFileEdit(key: string, body: string): Promise<string | null> {
+    const existing = st().buffers.get(key);
     if (existing) {
       const uri = existing.uri;
       const path = existing.path;
@@ -144,10 +150,12 @@ export function createWorkspaceBuffers(ctx: WorkspaceModuleCtx) {
       st().bumpSaved(); // #470: this buffer hit disk — the saveSeq subscriber refreshes the SC panel
       return uri;
     }
+    if (!key.startsWith(NEW_FILE_KEY_PREFIX)) return null; // unknown key: not an open buffer, not a new-file key
+    const relPath = key.slice(NEW_FILE_KEY_PREFIX.length);
     const owningRoot = st().roots[0];
     if (!owningRoot) return null;
     try {
-      const token = await platform.createFile(owningRoot, relPath, body); // new file under the folder root
+      const token = await platform.createFile(owningRoot, relPath, body); // new file under the primary root
       await refreshEntries();
       st().bumpSaved(); // #470: a new (untracked) file hit disk — the saveSeq subscriber refreshes the SC panel
       return await ensureBuffer(token);

@@ -46,7 +46,7 @@ import { AssistantChat } from '@/ai/components/AssistantChat';
 import type { ChangeSetAttempt } from '@/ai/components/ChangeSetPanel';
 import type { ComposerQuickAction } from '@/ai/components/Composer';
 import type { TranscriptNotice, TurnMechanism } from '@/ai/components/Transcript';
-import { createEditSession, type EditSession, type StagedEdit } from '@/ai/editSession';
+import { createEditSession, newFileKey, type EditSession, type StagedEdit } from '@/ai/editSession';
 import { loadChat, saveChat, clearChat } from '@/settings/persistence';
 import { appStore, type AppState } from '@/store/index';
 import type { ChangeSetFileState, ChatToolCall } from '@/store/slices/chat';
@@ -358,17 +358,23 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
     rerender();
   }
 
-  // The LIVE text behind a change-set row (#472): resolve the row's relPath back to a snapshot key
-  // through the display map (identity in single-root hosts). Until the change-set rows carry the key
-  // end-to-end (#472 Task 4), a relPath shared by several roots resolves to the FIRST matching key.
-  function liveTextFor(relPath: string): string | undefined {
+  // Resolve a change-set row's relPath back to its snapshot key through the display map (identity in
+  // single-root hosts, where a key without a display entry IS its relPath). Until the change-set rows
+  // carry the key end-to-end (#472 Task 4), a relPath shared by several roots resolves to the FIRST
+  // matching key.
+  function snapshotKeyFor(relPath: string): string {
     const snapshot = opts.getWorkspaceFiles?.();
-    if (!snapshot) return undefined;
-    for (const [key, rel] of Object.entries(snapshot.displayPath)) {
-      if (rel === relPath) return snapshot.files[key];
+    if (snapshot) {
+      for (const [key, rel] of Object.entries(snapshot.displayPath)) {
+        if (rel === relPath) return key;
+      }
     }
-    // A key without a display entry IS its relPath (legacy single-root shape).
-    return snapshot.files[relPath];
+    return relPath;
+  }
+
+  // The LIVE text behind a change-set row (#472) — the drift check's current-workspace read.
+  function liveTextFor(relPath: string): string | undefined {
+    return opts.getWorkspaceFiles?.().files[snapshotKeyFor(relPath)];
   }
 
   // Drift check (#473): has `file`'s LIVE text moved away from the send-time `before` it was staged
@@ -438,7 +444,15 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
       note: drifted.length ? `Applying ${clean.length} clean ${files(clean.length)}.${skipped}` : null,
     });
     store.getState().beginChangeSetApply(); // reviewing → applying; the phase guards the in-flight window
-    const payload: StagedEdit[] = clean.map((f) => ({ key: f.relPath, relPath: f.relPath, body: f.body, isNew: f.isNew }));
+    // Address each write by its OPAQUE key (#472 Task 3): a revision resolves its buffer uri back
+    // through the snapshot's display map; a brand-new file mints its `new:<relPath>` key so the host
+    // CREATES rather than resolves. The relPath rides along as the failure report's display label.
+    const payload: StagedEdit[] = clean.map((f) => ({
+      key: f.isNew ? newFileKey(f.relPath) : snapshotKeyFor(f.relPath),
+      relPath: f.relPath,
+      body: f.body,
+      isNew: f.isNew,
+    }));
     void Promise.resolve(opts.onApplyChangeSet?.(payload) ?? { failed: [] as string[] })
       .then((result) => {
         // A set superseded or replaced WHILE this apply was in flight is terminal (#684): a late settle
