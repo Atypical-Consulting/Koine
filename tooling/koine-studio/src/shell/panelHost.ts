@@ -226,7 +226,9 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
       // staged edit's OPAQUE key (#472 Task 3): the buffer uri for a revision — unambiguous across the
       // roots of a multi-root workspace — or a `new:<relPath>` key creating under the primary root.
       // applyFileEdit returns null (not throw) on a failed write/create/unknown key — collect those
-      // files' DISPLAY relPaths so the panel reports a partial apply instead of a false "Applied ✓".
+      // files' DISPLAY labels (the payload's relPath slot carries the tool layer's disambiguated
+      // `relPath@n` for colliding twins, #472) so the panel reports a partial apply naming the exact
+      // file instead of a false "Applied ✓".
       onApplyChangeSet: async (files) => {
         const failed: string[] = [];
         for (const f of files) {

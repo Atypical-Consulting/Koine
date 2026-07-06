@@ -16,6 +16,7 @@ import {
   formatReadFile,
   formatWriteFile,
   runEditToolStaging,
+  stagedWorkspaceFiles,
   summarizeForChip,
 } from '@/ai/assistantTools';
 import { createEditSession, newFileKey } from '@/ai/editSession';
@@ -428,6 +429,45 @@ describe('runEditToolStaging — multi-root display paths (#472)', () => {
       await runEditToolStaging('koine_read_file', JSON.stringify({ relPath: 'shared/events.koi' }), session),
     ).toContain('context E {}');
     expect(await runEditToolStaging('koine_list_files', '{}', session)).toContain('shared/events.koi');
+  });
+});
+
+// The ONE derivation both hosts' staged-workspace validation envelopes consume (#472): every session
+// file as { display, text }, labelled by the SAME disambiguated display paths the edit tools use
+// (buildDisplayIndex) — unique by construction, so an envelope never carries duplicate uris/paths
+// (Koine.Wasm's DiagnoseWorkspace throws on a duplicate Uri) and diagnostics name files with the
+// labels the model and the review use.
+describe('stagedWorkspaceFiles', () => {
+  test('colliding relPaths across roots yield DISTINCT display labels, in session.list() order', () => {
+    const session = createEditSession(
+      { 'mem://a/model.koi': 'context A {}', 'mem://b/model.koi': 'context B {}' },
+      { 'mem://a/model.koi': 'model.koi', 'mem://b/model.koi': 'model.koi' },
+    );
+    expect(stagedWorkspaceFiles(session)).toEqual([
+      { display: 'model.koi@1', text: 'context A {}' },
+      { display: 'model.koi@2', text: 'context B {}' },
+    ]);
+  });
+
+  test('unique relPaths keep their bare labels, and staged bodies read through', () => {
+    const session = createEditSession({ 'a.koi': 'context A {}', 'b.koi': 'context B {}' });
+    session.stage('a.koi', 'context A2 {}');
+    expect(stagedWorkspaceFiles(session)).toEqual([
+      { display: 'a.koi', text: 'context A2 {}' },
+      { display: 'b.koi', text: 'context B {}' },
+    ]);
+  });
+
+  test('a brand-new staged file contributes its minted relPath, never its new: key', () => {
+    const session = createEditSession(
+      { 'mem://a/model.koi': 'context A {}' },
+      { 'mem://a/model.koi': 'model.koi' },
+    );
+    session.stage(newFileKey('events.koi'), 'context E {}');
+    expect(stagedWorkspaceFiles(session)).toEqual([
+      { display: 'model.koi', text: 'context A {}' },
+      { display: 'events.koi', text: 'context E {}' },
+    ]);
   });
 });
 

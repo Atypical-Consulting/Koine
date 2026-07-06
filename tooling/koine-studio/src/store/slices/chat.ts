@@ -11,6 +11,13 @@ export interface ChangeSetFileState {
    */
   readonly key: string;
   readonly relPath: string;
+  /**
+   * The TOOL-LAYER display label the model addressed this file by (#472): the disambiguated
+   * `relPath@n` marker when several roots share the relPath, else the bare relPath. Carried onto the
+   * row at stage time — the SINGLE source the review renders — so the label under review can never
+   * swap relative to the paths the model listed/wrote (row order is STAGE order, not session order).
+   */
+  readonly display: string;
   readonly body: string;
   /** From {@link StagedEdit}: brand-new file vs revision of an existing workspace file. */
   readonly isNew: boolean;
@@ -156,12 +163,15 @@ export interface ChatSlice {
   /**
    * Replace the change set with a fresh reviewing one (monotonic id, all files accepted, none
    * drifted); `before` supplies each staged edit's send-time text keyed by its opaque KEY (#472),
-   * defaulting to `''` for new files.
+   * defaulting to `''` for new files. `display` supplies each key's tool-layer display label (the
+   * `relPath@n` marker for a relPath shared across roots); a key without an entry — or no map at
+   * all, for single-root/legacy callers — falls back to the bare relPath.
    */
   stageChangeSet(
     files: readonly StagedEdit[],
     before: Record<string, string>,
     diagnostics: string | null,
+    display?: Record<string, string>,
   ): void;
   /** Toggle one file's accept checkbox, addressed by its staged-edit KEY (#472); works in
    *  reviewing AND applying, no-op once terminal. */
@@ -286,12 +296,13 @@ export function createChatSlice(
     setChatDraft: (text) => {
       set({ chat: { ...get().chat, draft: text } });
     },
-    stageChangeSet: (files, before, diagnostics) => {
+    stageChangeSet: (files, before, diagnostics, display) => {
       setChangeSet({
         id: nextChangeSetId++,
         files: files.map((f) => ({
           key: f.key,
           relPath: f.relPath,
+          display: display?.[f.key] ?? f.relPath,
           body: f.body,
           isNew: f.isNew,
           before: before[f.key] ?? '',

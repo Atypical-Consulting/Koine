@@ -46,6 +46,7 @@ import { AssistantChat } from '@/ai/components/AssistantChat';
 import type { ChangeSetAttempt } from '@/ai/components/ChangeSetPanel';
 import type { ComposerQuickAction } from '@/ai/components/Composer';
 import type { TranscriptNotice, TurnMechanism } from '@/ai/components/Transcript';
+import { buildDisplayIndex } from '@/ai/assistantTools';
 import { createEditSession, type EditSession, type StagedEdit } from '@/ai/editSession';
 import { loadChat, saveChat, clearChat } from '@/settings/persistence';
 import { appStore, type AppState } from '@/store/index';
@@ -448,10 +449,12 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
     // Address each write by the row's OWN opaque key (#472 Task 4): the rows carry the staged edit's
     // key end-to-end through the review, so a revision applies to exactly the buffer it was staged
     // from — even when several roots share the relPath — and a brand-new file keeps the `new:<relPath>`
-    // key it was staged under. The relPath rides along as the failure report's display label.
+    // key it was staged under. The row's DISPLAY label rides in the relPath slot as the failure
+    // report's name, so a partial apply names the exact twin (a bare colliding relPath could mean
+    // either root); the write itself never reads it.
     const payload: StagedEdit[] = clean.map((f) => ({
       key: f.key,
-      relPath: f.relPath,
+      relPath: f.display,
       body: f.body,
       isNew: f.isNew,
     }));
@@ -839,7 +842,17 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
           const sendTime = snapshot?.files[edit.key];
           if (sendTime !== undefined) before[edit.key] = sendTime;
         }
-        store.getState().stageChangeSet(editSession.staged(), before, stagedDiagnostics);
+        // Carry the TOOL-LAYER display labels onto the staged rows — the SAME per-session index the
+        // edit tools addressed files by (buildDisplayIndex, #472) — so the review renders exactly the
+        // paths the model listed/wrote. Row order is STAGE order, which for colliding twins can be the
+        // OPPOSITE of the index's session order; a label re-derived from row order would swap them.
+        const displayFor = buildDisplayIndex(editSession).displayFor;
+        const display: Record<string, string> = {};
+        for (const edit of editSession.staged()) {
+          const label = displayFor.get(edit.key);
+          if (label !== undefined) display[edit.key] = label;
+        }
+        store.getState().stageChangeSet(editSession.staged(), before, stagedDiagnostics, display);
         rerender();
       } else {
         // The apply-gate lives here: a constrained turn validates (and, on the repair path, re-prompts)

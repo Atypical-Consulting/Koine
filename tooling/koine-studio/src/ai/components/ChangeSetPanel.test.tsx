@@ -250,10 +250,11 @@ describe('ChangeSetPanel (#990)', () => {
 });
 
 // #472 Task 4: two roots of a multi-root workspace staging the SAME relPath must review as two
-// distinct rows. Rows key by the staged edit's opaque key; the shared relPath is displayed
-// disambiguated with the tool layer's marker scheme (`relPath@1`, `relPath@2`, … in row order) so the
-// label under review matches the one the model addressed, and every dispatch/callback carries the KEY
-// so a toggle or apply can never hit the wrong root.
+// distinct rows. Rows key by the staged edit's opaque key; each row renders the DISPLAY label the
+// host carried from the tool layer's per-session index (`relPath@1`, `relPath@2`, …) on the slice
+// state — NOT a label re-derived from row order, which would swap the twins whenever the model staged
+// them in the opposite order — and every dispatch/callback carries the KEY so a toggle or apply can
+// never hit the wrong root.
 describe('colliding relPaths across roots (#472)', () => {
   const wsA = 'file:///wsA/model.koi';
   const wsB = 'file:///wsB/model.koi';
@@ -262,10 +263,12 @@ describe('colliding relPaths across roots (#472)', () => {
     { key: wsB, relPath: 'model.koi', body: 'context B {\n  aggregate Two {}\n}', isNew: false },
   ];
   const collidingBefore = { [wsA]: 'context A {\n}', [wsB]: 'context B {\n}' };
+  // The tool-layer display labels, keyed by session KEY — what the model addressed each file by.
+  const collidingDisplay = { [wsA]: 'model.koi@1', [wsB]: 'model.koi@2' };
 
   function collidingStore(): StoreApi<AppState> {
     const store = createAppStore();
-    store.getState().stageChangeSet(colliding, collidingBefore, null);
+    store.getState().stageChangeSet(colliding, collidingBefore, null, collidingDisplay);
     return store;
   }
 
@@ -308,6 +311,34 @@ describe('colliding relPaths across roots (#472)', () => {
     fireEvent.click(applyBtn(container));
     expect(onApply).toHaveBeenCalledOnce();
     expect(onApply.mock.calls[0][0].map((f: { key: string }) => f.key)).toEqual([wsA, wsB]);
+  });
+
+  test('labels follow the PROVIDED display field, not row order: reverse-staged twins keep their own labels', () => {
+    // The model staged the twins in the OPPOSITE order to the tool index (wsB first). A row-order
+    // re-derivation would label row 0 `model.koi@1` — i.e. wsB would masquerade as the path the model
+    // called `model.koi@1` (wsA), and the user would uncheck/accept the wrong root's file.
+    const store = createAppStore();
+    store.getState().stageChangeSet([colliding[1], colliding[0]], collidingBefore, null, collidingDisplay);
+    const { container } = mount(store);
+    const rows = [...container.querySelectorAll('.koi-changeset-file')];
+    expect(rows.map((r) => r.querySelector('.koi-changeset-path')!.textContent)).toEqual([
+      'model.koi@2', // row 0 IS wsB — its tool-layer label, not a recomputed @1
+      'model.koi@1',
+    ]);
+    expect(rows.map((r) => r.querySelector('.koi-changeset-accept')!.getAttribute('aria-label'))).toEqual([
+      'Accept changes to model.koi@2',
+      'Accept changes to model.koi@1',
+    ]);
+  });
+
+  test('a SINGLE staged twin keeps its root marker (never a bare relPath that could mean either root)', () => {
+    const store = createAppStore();
+    store.getState().stageChangeSet([colliding[1]], collidingBefore, null, { [wsB]: 'model.koi@2' });
+    const { container } = mount(store);
+    expect(container.querySelector('.koi-changeset-path')!.textContent).toBe('model.koi@2');
+    expect(container.querySelector('.koi-changeset-accept')!.getAttribute('aria-label')).toBe(
+      'Accept changes to model.koi@2',
+    );
   });
 
   test('unique relPaths keep their bare labels (no needless @n marker)', () => {

@@ -131,8 +131,9 @@ export const WithDiagnostics: Story = {
 };
 
 /** Two roots of a multi-root workspace staging the SAME relPath (#472): the rows stay distinct —
- *  keyed by their buffer uris, each diffed against its own root's send-time text — and the labels
- *  disambiguate with the tool layer's `@n` marker scheme (`model.koi@1`, `model.koi@2`, row order). */
+ *  keyed by their buffer uris, each diffed against its own root's send-time text — and each renders
+ *  the tool layer's disambiguated `display` label (`model.koi@1`, `model.koi@2`), carried by the host
+ *  from the same index the model addressed the files through. */
 export const CollidingRelPaths: Story = {
   render: (args) => {
     const store = createAppStore();
@@ -146,6 +147,10 @@ export const CollidingRelPaths: Story = {
         'file:///frontend/model.koi': 'context Billing {\n}',
       },
       null,
+      {
+        'file:///backend/model.koi': 'model.koi@1',
+        'file:///frontend/model.koi': 'model.koi@2',
+      },
     );
     return <ChangeSetPanel {...args} store={store} />;
   },

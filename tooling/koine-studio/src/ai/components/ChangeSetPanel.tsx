@@ -9,9 +9,10 @@ import type { ChangeSetFileState } from '@/store/slices/chat';
 // live region, per-file rows (accept checkbox / new-modified badge / relPath / inline line-diff),
 // sticky drift warnings (#473), the staged-workspace diagnostics block (#474), the reviewing-note
 // retry shape (#633), and the two terminal treatments ("Applied ✓", superseded). Rows are keyed —
-// state and gestures alike — by the staged edit's opaque session key (#472), with a relPath shared
-// across roots displayed disambiguated (`relPath@1`, `relPath@2`, … in row order, the tool layer's
-// marker scheme).
+// state and gestures alike — by the staged edit's opaque session key (#472), and each row renders the
+// `display` label the host carried from the tool layer's session index (`relPath@1`, `relPath@2`, …
+// for a relPath shared across roots) — NEVER a label re-derived here from row order, which would swap
+// colliding twins staged in the opposite order to the index.
 //
 // It is a PURE consumer of the chat slice's change-set state machine (#984): every control state —
 // Apply label + disabled, checkbox checked/disabled, the live-region text, the superseded class —
@@ -93,24 +94,6 @@ function lineDiff(oldText: string, newText: string): string {
 /** Pluralize the panel's file counts exactly as the imperative panel did. */
 const files = (n: number): string => `file${n === 1 ? '' : 's'}`;
 
-/**
- * Per-row display labels, in row order (#472): a relPath held by exactly one row displays as itself;
- * rows sharing a relPath (the same path under two roots of a multi-root workspace) are disambiguated
- * with the tool layer's marker scheme — `relPath@1`, `relPath@2`, … in row order — so the label the
- * user reviews matches the one the model addressed through the edit tools.
- */
-function displayLabels(rows: readonly ChangeSetFileState[]): string[] {
-  const counts = new Map<string, number>();
-  for (const f of rows) counts.set(f.relPath, (counts.get(f.relPath) ?? 0) + 1);
-  const seen = new Map<string, number>();
-  return rows.map((f) => {
-    if ((counts.get(f.relPath) ?? 0) < 2) return f.relPath;
-    const n = (seen.get(f.relPath) ?? 0) + 1;
-    seen.set(f.relPath, n);
-    return `${f.relPath}@${n}`;
-  });
-}
-
 export function ChangeSetPanel({ store, onApply, onDiscard, attempt }: ChangeSetPanelProps) {
   const changeSet = useAppStore(store, (s) => s.chat.changeSet);
   if (!changeSet) return null;
@@ -124,8 +107,6 @@ export function ChangeSetPanel({ store, onApply, onDiscard, attempt }: ChangeSet
   const terminal = phase.kind === 'applied' || phase.kind === 'invalidated';
   const accepted = changeSet.files.filter((f) => f.accepted);
   const n = accepted.length;
-  // Row-order display labels, disambiguating a relPath shared across roots (#472).
-  const labels = displayLabels(changeSet.files);
 
   // The terminal label counts the files actually WRITTEN this attempt (drift skips excluded) when the
   // host reported it, falling back to the slice's accepted-at-settle count.
@@ -156,22 +137,24 @@ export function ChangeSetPanel({ store, onApply, onDiscard, attempt }: ChangeSet
       role="group"
       aria-label={`${changeSet.files.length} proposed file change${changeSet.files.length === 1 ? '' : 's'}`}
     >
-      {changeSet.files.map((f, i) => (
+      {changeSet.files.map((f) => (
         // Rows key by the staged edit's opaque session key (#472): unique even when two roots of a
-        // multi-root workspace stage the SAME relPath, so a toggle can never hit the wrong root.
+        // multi-root workspace stage the SAME relPath, so a toggle can never hit the wrong root. The
+        // rendered label is the row's `display` — the tool layer's disambiguated path, carried on the
+        // slice state — so the user reviews exactly the file the model addressed.
         <div class="koi-changeset-file" key={f.key}>
           <input
             type="checkbox"
             class="koi-changeset-accept"
             checked={f.accepted}
             disabled={terminal}
-            aria-label={`Accept changes to ${labels[i]}`}
+            aria-label={`Accept changes to ${f.display}`}
             onChange={(e) => store.getState().setChangeSetFileAccepted(f.key, e.currentTarget.checked)}
           />
           <span class={`koi-changeset-badge ${f.isNew ? 'koi-changeset-badge-new' : 'koi-changeset-badge-modified'}`}>
             {f.isNew ? 'new' : 'modified'}
           </span>
-          <span class="koi-changeset-path">{labels[i]}</span>
+          <span class="koi-changeset-path">{f.display}</span>
           <pre class="koi-changeset-diff">{lineDiff(f.before, f.body)}</pre>
           {f.drifted && (
             // Sticky per-file drift (#473): the file changed since it was proposed, so apply skips it.

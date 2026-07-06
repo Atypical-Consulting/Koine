@@ -383,6 +383,30 @@ export function buildDisplayIndex(session: EditSession): DisplayIndex {
   return { keyFor, displayFor, ambiguous };
 }
 
+/** One staged-workspace validation entry: the disambiguated display path plus the current
+ *  (staged-or-initial) body. See {@link stagedWorkspaceFiles}. */
+export interface StagedWorkspaceFile {
+  display: string;
+  text: string;
+}
+
+/**
+ * Enumerate the session's files for the once-per-turn staged-workspace validation (issue #474),
+ * labelled by the SAME disambiguated display paths the edit tools use ({@link buildDisplayIndex}) —
+ * the ONE derivation both hosts' envelopes consume (#472). Unique by construction: labelling two
+ * roots' same-named files by their bare relPath would send duplicate uris/paths, which the compiler's
+ * DiagnoseWorkspace rejects (its Uri-keyed ToDictionary throws), turning EVERY multi-root staged
+ * validation into a "(validation failed)" diagnostic. Diagnostics also come back named with the same
+ * labels the model and the change-set review use.
+ */
+export function stagedWorkspaceFiles(session: EditSession): StagedWorkspaceFile[] {
+  const { displayFor } = buildDisplayIndex(session);
+  return session.list().map((key) => ({
+    display: displayFor.get(key) ?? session.relPathOf(key),
+    text: session.read(key) ?? '',
+  }));
+}
+
 /** The ambiguity refusal for a BARE colliding relPath, or null when `path` is not ambiguous. */
 function ambiguityError(index: DisplayIndex, path: string): string | null {
   const candidates = index.ambiguous.get(path);

@@ -123,6 +123,25 @@ describe('runEditTool', () => {
     ]);
   });
 
+  test('validateStagedWorkspace disambiguates colliding relPaths — two DISTINCT envelope uris (#472)', async () => {
+    api.DiagnoseWorkspace.mockClear();
+    api.DiagnoseWorkspace.mockReturnValue(JSON.stringify([{ uri: 'file:///model.koi@1', diagnostics: [] }]));
+    // Two roots hold the SAME relPath: labelling both entries `file:///model.koi` would send duplicate
+    // uris, which Koine.Wasm's DiagnoseWorkspace rejects (files.ToDictionary(f => f.Uri) throws) — so
+    // every multi-root staged validation would crash into a "(validation failed)" diagnostic. The
+    // envelope must carry the tool layer's disambiguated display paths instead.
+    const session = createEditSession(
+      { 'file:///wsA/model.koi': 'context A {}', 'file:///wsB/model.koi': 'context B {}' },
+      { 'file:///wsA/model.koi': 'model.koi', 'file:///wsB/model.koi': 'model.koi' },
+    );
+    await validateStagedWorkspace(session);
+    const sentFiles = JSON.parse(api.DiagnoseWorkspace.mock.calls[0][0]);
+    expect(sentFiles).toEqual([
+      { uri: 'file:///model.koi@1', text: 'context A {}' },
+      { uri: 'file:///model.koi@2', text: 'context B {}' },
+    ]);
+  });
+
   test('koine_write_file with a NEW relPath reports it as a new file', async () => {
     api.DiagnoseWorkspace.mockReturnValue(JSON.stringify([{ uri: 'file:///new.koi', diagnostics: [] }]));
     const session = createEditSession({ 'a.koi': 'context A {}' });

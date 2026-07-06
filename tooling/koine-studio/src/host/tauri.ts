@@ -23,7 +23,12 @@ import type {
 import { buildLogLArgs, parseLogL, type ChangeEntry } from '@/host/gitHistory';
 import { saveMetaFor } from '@/host/saveMeta';
 import { loadSettings } from '@/settings/persistence';
-import { normalizeCompileTarget, normalizeMcpValidate, runEditToolStaging } from '@/ai/assistantTools';
+import {
+  normalizeCompileTarget,
+  normalizeMcpValidate,
+  runEditToolStaging,
+  stagedWorkspaceFiles,
+} from '@/ai/assistantTools';
 import type { EditSession } from '@/ai/editSession';
 import { mcpCall } from '@/mcp/mcp';
 import { basename } from '@/shared/path';
@@ -256,8 +261,10 @@ export class TauriPlatform implements Platform {
   async validateStagedWorkspace(session: EditSession): Promise<string> {
     const endpoint = await this.mcpEndpoint();
     if (!endpoint) return '(could not validate: the Koine MCP server is not available)';
-    // Label each file by its RELPATH (the session key may be a buffer uri or a `new:` key, #472).
-    const files = session.list().map((k) => ({ path: session.relPathOf(k), source: session.read(k) ?? '' }));
+    // Label each file by the tool layer's disambiguated DISPLAY path via the shared
+    // stagedWorkspaceFiles derivation (#472) — never the opaque key, and never a bare relPath, which
+    // would duplicate when two roots hold the same path and fail the sidecar's Uri-keyed validate.
+    const files = stagedWorkspaceFiles(session).map((f) => ({ path: f.display, source: f.text }));
     return normalizeMcpValidate(await mcpCall(endpoint.url, 'koine_validate', { files }));
   }
 

@@ -887,7 +887,8 @@ describe('multi-file change set (agentic edits)', () => {
     fire(container);
 
     await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
-    // The review disambiguates the shared relPath per row (the tool layer's `@n` marker scheme).
+    // The review rows carry the SAME labels the tool loop listed (buildDisplayIndex over the session,
+    // in session snapshot order: wsA → @1, wsB → @2) — not labels re-derived from row order.
     expect([...container.querySelectorAll('.koi-changeset-path')].map((el) => el.textContent)).toEqual([
       'model.koi@1',
       'model.koi@2',
@@ -895,10 +896,58 @@ describe('multi-file change set (agentic edits)', () => {
 
     container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.click();
     await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
-    // Each row applied under its OWN root's uri, with its own body — no wrong-root clobber.
+    // Each row applied under its OWN root's uri, with its own body — no wrong-root clobber. The
+    // payload's failure-report label is the DISAMBIGUATED display path, so a partial-apply report can
+    // name the exact twin that didn't write (a bare `model.koi` could mean either root).
     expect(onApplyChangeSet.mock.calls[0][0]).toEqual([
-      { key: 'file:///wsA/model.koi', relPath: 'model.koi', body: 'context A { v2 }', isNew: false },
-      { key: 'file:///wsB/model.koi', relPath: 'model.koi', body: 'context B { v2 }', isNew: false },
+      { key: 'file:///wsA/model.koi', relPath: 'model.koi@1', body: 'context A { v2 }', isNew: false },
+      { key: 'file:///wsB/model.koi', relPath: 'model.koi@2', body: 'context B { v2 }', isNew: false },
+    ]);
+  });
+
+  // The FIX for the swapped-labels bug: the review labels are the tool layer's labels (single source),
+  // even when the model stages the twins in the OPPOSITE order to the session snapshot. A row-order
+  // re-derivation would label the first row `model.koi@1` — but that row is wsB, the file the tool loop
+  // called `model.koi@2` — so the user would uncheck/accept the wrong root's file.
+  test('reverse-staged colliding twins: review labels still equal the tool-visible paths, per KEY', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('file:///wsB/model.koi', 'context B { v2 }'); // wsB staged FIRST
+      req.editSession?.stage('file:///wsA/model.koi', 'context A { v2 }');
+      req.onText('Staged.');
+      return 'Staged.';
+    });
+    const onApplyChangeSet = vi.fn(
+      async (_files: { key: string; relPath: string; body: string; isNew: boolean }[]) => ({
+        failed: [] as string[],
+      }),
+    );
+    const container = document.createElement('div');
+    createAssistantChat(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({
+          files: { 'file:///wsA/model.koi': 'context A {}', 'file:///wsB/model.koi': 'context B {}' },
+          displayPath: { 'file:///wsA/model.koi': 'model.koi', 'file:///wsB/model.koi': 'model.koi' },
+        }),
+        runEditTool: vi.fn(async () => 'ok'), // stub — the mock stages directly
+        onApplyChangeSet,
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    // Rows render in STAGE order (wsB first), but each keeps the label the tool loop gave ITS key —
+    // `model.koi@1`/`@2` are assigned in session.list() (snapshot) order: wsA → @1, wsB → @2.
+    expect([...container.querySelectorAll('.koi-changeset-path')].map((el) => el.textContent)).toEqual([
+      'model.koi@2',
+      'model.koi@1',
+    ]);
+
+    container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.click();
+    await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+    expect(onApplyChangeSet.mock.calls[0][0]).toEqual([
+      { key: 'file:///wsB/model.koi', relPath: 'model.koi@2', body: 'context B { v2 }', isNew: false },
+      { key: 'file:///wsA/model.koi', relPath: 'model.koi@1', body: 'context A { v2 }', isNew: false },
     ]);
   });
 

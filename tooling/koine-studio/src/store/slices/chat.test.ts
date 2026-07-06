@@ -344,6 +344,7 @@ describe('change-set state machine', () => {
       {
         key: 'billing.koi',
         relPath: 'billing.koi',
+        display: 'billing.koi', // no display map → the bare relPath
         body: 'context Billing {}',
         isNew: false,
         before: 'context Old {}',
@@ -353,6 +354,7 @@ describe('change-set state machine', () => {
       {
         key: 'shipping.koi',
         relPath: 'shipping.koi',
+        display: 'shipping.koi',
         body: 'context Shipping {}',
         isNew: true,
         before: '', // a new file has no send-time text
@@ -651,5 +653,33 @@ describe('change-set keying by staged-edit key (#472)', () => {
     const files = s.getState().chat.changeSet!.files;
     expect(files.find((f) => f.key === wsA)?.drifted).toBe(true);
     expect(files.find((f) => f.key === wsB)?.drifted).toBe(false);
+  });
+
+  // The review label is the TOOL LAYER's disambiguated display path, carried onto the staged row at
+  // stage time (single source): re-deriving markers from row order would swap the twins whenever the
+  // model staged them in the opposite order to the session index.
+  test('stageChangeSet stores each row display from the display map, keyed by KEY', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet(colliding, before, null, { [wsA]: 'model.koi@1', [wsB]: 'model.koi@2' });
+    expect(s.getState().chat.changeSet!.files.map((f) => f.display)).toEqual(['model.koi@1', 'model.koi@2']);
+  });
+
+  test('stageChangeSet display defaults to the relPath: absent map entry, and absent map entirely', () => {
+    const s = createAppStore();
+    // Only wsB carries a label — wsA falls back to its relPath.
+    s.getState().stageChangeSet(colliding, before, null, { [wsB]: 'model.koi@2' });
+    expect(s.getState().chat.changeSet!.files.map((f) => f.display)).toEqual(['model.koi', 'model.koi@2']);
+    // No map at all (single-root/legacy callers): every display is the bare relPath.
+    s.getState().stageChangeSet(colliding, before, null);
+    expect(s.getState().chat.changeSet!.files.map((f) => f.display)).toEqual(['model.koi', 'model.koi']);
+  });
+
+  test('display is order-independent: staging the twins in reverse order keeps each row its OWN label', () => {
+    const s = createAppStore();
+    const display = { [wsA]: 'model.koi@1', [wsB]: 'model.koi@2' };
+    s.getState().stageChangeSet([colliding[1], colliding[0]], before, null, display);
+    const files = s.getState().chat.changeSet!.files;
+    expect(files.map((f) => f.key)).toEqual([wsB, wsA]); // row order = stage order
+    expect(files.map((f) => f.display)).toEqual(['model.koi@2', 'model.koi@1']); // labels follow the KEY
   });
 });

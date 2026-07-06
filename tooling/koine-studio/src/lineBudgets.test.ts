@@ -116,7 +116,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // a single pass with a once-per-apply display-path Set, and send()'s finally flushes a synchronous
   // rerender() before focusComposer() so focus lands on an ENABLED textarea; correctness wiring plus
   // its comments, not feature growth. Measured end-state, no headroom.
-  { file: 'src/ai/aiPanel.ts', maxLines: 926 },
+  // Raised 926 → 939: review-label fix on the same arc — the staging branch now carries the TOOL
+  // layer's display labels onto the staged rows (buildDisplayIndex over the turn's session → the
+  // stageChangeSet display map), so colliding-twin review rows can never swap relative to the paths
+  // the model addressed (#472); ~13 LOC of wiring plus its comments, and ChangeSetPanel.tsx DELETED
+  // its row-order label re-derivation in exchange. Measured end-state, no headroom.
+  { file: 'src/ai/aiPanel.ts', maxLines: 939 },
   // Frozen 2026-07-02 at 1301 LOC (grown from the audit's 1284 @ fc83bcf5), ceil(1301 × 1.02) = 1328.
   // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
   // not mandate the split — #989 owns that.
