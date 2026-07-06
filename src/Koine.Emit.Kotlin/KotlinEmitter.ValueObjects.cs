@@ -52,15 +52,7 @@ public sealed partial class KotlinEmitter
         sb.Append("data class ").Append(name).Append("(\n");
         foreach (Member m in stored)
         {
-            WriteKdoc(sb, m.Doc, Indent);
-            sb.Append(Indent).Append("val ").Append(KotlinNaming.ToMemberName(m.Name)).Append(": ").Append(typeMapper.Map(m.Type));
-            if (m.Initializer is not null)
-            {
-                sb.Append(" = ").Append(translator.Translate(
-                    m.Initializer, KotlinExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index)));
-            }
-
-            sb.Append(",\n");
+            WriteVoConstructorParam(sb, emit, m, typeMapper, translator, asProperty: true);
         }
 
         var hasBody = vo.Invariants.Count > 0 || derived.Count > 0 || VoHasOperators(emit, vo, stored);
@@ -111,6 +103,35 @@ public sealed partial class KotlinEmitter
     }
 
     /// <summary>
+    /// Writes one stored member as a value-object primary-constructor parameter — its KDoc, then
+    /// <c>[val ]&lt;name&gt;: &lt;type&gt;[ = &lt;default&gt;],</c>. <paramref name="asProperty"/> emits the leading
+    /// <c>val</c> that makes it a constructor property: a <c>data class</c> value object passes <c>true</c> for
+    /// every member, and a plain collection-bearing one passes <c>true</c> for every non-collection member; a
+    /// collection member passes <c>false</c> (a plain parameter re-bound as a defensively-copied body <c>val</c>).
+    /// Shared by both value-object emit paths so their constructor-parameter shape can never drift.
+    /// </summary>
+    private static void WriteVoConstructorParam(
+        StringBuilder sb, KotlinEmitContext emit, Member m, KotlinTypeMapper typeMapper,
+        KotlinExpressionTranslator translator, bool asProperty)
+    {
+        WriteKdoc(sb, m.Doc, Indent);
+        sb.Append(Indent);
+        if (asProperty)
+        {
+            sb.Append("val ");
+        }
+
+        sb.Append(KotlinNaming.ToMemberName(m.Name)).Append(": ").Append(typeMapper.Map(m.Type));
+        if (m.Initializer is not null)
+        {
+            sb.Append(" = ").Append(translator.Translate(
+                m.Initializer, KotlinExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index)));
+        }
+
+        sb.Append(",\n");
+    }
+
+    /// <summary>
     /// Emits a value object that has at least one stored collection member as a plain (non-<c>data</c>)
     /// <c>class</c> that <b>defensively copies</b> each collection into an immutable snapshot in its constructor
     /// (#1110). A collection member is a plain constructor parameter re-bound as a body <c>val</c> via
@@ -133,21 +154,7 @@ public sealed partial class KotlinEmitter
         sb.Append("class ").Append(name).Append("(\n");
         foreach (Member m in stored)
         {
-            WriteKdoc(sb, m.Doc, Indent);
-            sb.Append(Indent);
-            if (!KotlinTypeMapper.IsCollection(m.Type))
-            {
-                sb.Append("val ");
-            }
-
-            sb.Append(KotlinNaming.ToMemberName(m.Name)).Append(": ").Append(typeMapper.Map(m.Type));
-            if (m.Initializer is not null)
-            {
-                sb.Append(" = ").Append(translator.Translate(
-                    m.Initializer, KotlinExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index)));
-            }
-
-            sb.Append(",\n");
+            WriteVoConstructorParam(sb, emit, m, typeMapper, translator, asProperty: !KotlinTypeMapper.IsCollection(m.Type));
         }
 
         sb.Append(") {\n");
@@ -199,10 +206,11 @@ public sealed partial class KotlinEmitter
     /// Writes the structural members a <c>data class</c> would generate for free — <c>equals</c> (identity
     /// shortcut, type check, then component-wise <c>==</c>, under which a copied collection compares by content),
     /// <c>hashCode</c> (content-based via null-safe <c>java.util.Objects.hash</c>), <c>toString</c> (the
-    /// <c>Name(a=…, b=…)</c> data-class format), and a <c>copy(…)</c> whose per-member defaults re-copy any
-    /// collection argument through the defensively-copying primary constructor, so a copy is as sealed as the
-    /// original. Only <paramref name="stored"/> members participate (derived/computed members are get-only
-    /// properties, excluded from equality just as a data class excludes body properties).
+    /// <c>Name(a=…, b=…)</c> data-class format), a <c>copy(…)</c> whose per-member defaults re-copy any collection
+    /// argument through the defensively-copying primary constructor (so a copy is as sealed as the original), and
+    /// the <c>componentN()</c> destructuring operators (so <c>val (a, b) = vo</c> keeps compiling). Only
+    /// <paramref name="stored"/> members participate, in declaration order — derived/computed members are get-only
+    /// properties, excluded just as a data class excludes body properties.
     /// </summary>
     private static void WriteValueObjectStructuralMembers(
         StringBuilder sb, string name, IReadOnlyList<Member> stored, KotlinTypeMapper typeMapper, ref bool wroteBody)
@@ -245,6 +253,15 @@ public sealed partial class KotlinEmitter
               KotlinNaming.ToMemberName(m.Name) + ": " + typeMapper.Map(m.Type) + " = this." + KotlinNaming.ToMemberName(m.Name))))
           .Append("): ").Append(name).Append(" = ").Append(name).Append('(')
           .Append(string.Join(", ", fields)).Append(")\n");
+
+        // componentN destructuring operators (1-based, in declaration order) — the last data-class freebie, so a
+        // `val (a, b) = vo` destructuring declaration keeps compiling for a collection-bearing value object.
+        Separate(sb, ref wroteBody);
+        for (var i = 0; i < stored.Count; i++)
+        {
+            sb.Append(Indent).Append("operator fun component").Append(i + 1).Append("(): ")
+              .Append(typeMapper.Map(stored[i].Type)).Append(" = this.").Append(fields[i]).Append('\n');
+        }
     }
 
     /// <summary>Emits a derived (computed) member as a get-only property reading through the stored properties.</summary>
