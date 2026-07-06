@@ -1161,6 +1161,39 @@ describe('createWorkspaceController — applyFileEdit', () => {
     expect(platform.writes[0].contents).toBe('context A { v1 }\n');
     expect(ws.buffers.get(aUri)!.dirty).toBe(true);
   });
+
+  // Regression (#1081): markSaved correctly skipped on a mid-write keystroke (#1008), but the trailing
+  // lsp.didSave() only checked activeUri — so the server was still told the (still-dirty) active
+  // document had been saved, mirroring the saveActive/saveAllDirty staleness guard (#1055).
+  test('a keystroke landing during the disk write also skips didSave (content went stale)', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const origWrite = platform.writeTextFile.bind(platform);
+    let releaseWrite!: () => void;
+    const gate = new Promise<void>((res) => (releaseWrite = res));
+    platform.writeTextFile = async (path: string, contents: string) => {
+      await gate;
+      return origWrite(path, contents);
+    };
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const aUri = ws.activeUri(); // a.koi (first by relPath)
+
+    const apply = ws.applyFileEdit('a.koi', 'v1\n'); // synchronous until the awaited (gated) write
+    editor.setDoc('v2\n');
+    ws.syncActiveBuffer('v2\n'); // a keystroke lands mid-write — no buffer switch
+    releaseWrite();
+    await apply;
+
+    // v1 hit disk, but the buffer now holds v2 (still dirty) — the server must not be told the
+    // (now-stale) active document was just saved.
+    expect(platform.writes[0].contents).toBe('v1\n');
+    expect(ws.buffers.get(aUri)!.dirty).toBe(true);
+    expect(lsp.didSave).not.toHaveBeenCalled();
+  });
 });
 
 describe('createWorkspaceController — handleDelete', () => {
