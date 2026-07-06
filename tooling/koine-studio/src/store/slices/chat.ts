@@ -16,6 +16,41 @@ export interface ChangeSetFileState {
   readonly drifted: boolean;
 }
 
+/**
+ * One tool call inside the EPHEMERAL streaming turn (#990 Task 4): the state behind a
+ * `koi-assistant-tool` card. Mirrors exactly what the imperative panel's card displays — nothing more.
+ */
+export interface ChatToolCall {
+  /** The per-turn call id from ai.ts's ToolCallStart/End (1, 2, …) — the card correlation key. */
+  readonly id: number;
+  readonly name: string;
+  /** The raw argsJson the model produced (pretty-printed at render time, like the card's dataset.args). */
+  readonly args: string;
+  /** The card's data-state: pending on START, ok/error once the END event settles it. */
+  readonly state: 'pending' | 'ok' | 'error';
+  /** The chip text on the card's summary row (ToolCallEnd.summary); null while pending. */
+  readonly summary: string | null;
+  /**
+   * The card body's Result text — the tool's resultText on success, the error message on failure
+   * (the caller folds ToolCallEnd exactly as the imperative card did). Stored RAW; the renderer
+   * clamps it to TOOL_RESULT_CLAMP with a "(truncated)" note. Null while pending.
+   */
+  readonly result: string | null;
+  readonly durationMs: number | null;
+}
+
+/**
+ * The live turn while `status === 'streaming'` (#990 Task 4): the accumulated streamed text plus the
+ * tool-call cards opened so far, in call order. EPHEMERAL — NEVER persisted: persistence only ever
+ * saves `messages`; this exists solely so the declarative Transcript can render what the imperative
+ * panel kept as loose DOM (the streaming bubble and its live-DOM tool-card Map).
+ */
+export interface ChatStreamingTurn {
+  /** The streamed text so far. Reset when a tool call starts — that text was a "thinking" preamble. */
+  readonly text: string;
+  readonly toolCalls: readonly ChatToolCall[];
+}
+
 export type ChangeSetPhase =
   | { kind: 'reviewing'; note?: string } // note carries the #633 apply-failure / partial-failure message
   | { kind: 'applying' }
@@ -39,6 +74,11 @@ export interface ChatSlice {
     readonly messages: readonly ChatMessage[];
     /** Turn lifecycle: idle → streaming → idle (finish) or error (aborted with rollback). */
     readonly status: 'idle' | 'streaming' | 'error';
+    /**
+     * The EPHEMERAL live turn — non-null only while streaming, cleared by finish/abort. NEVER
+     * persisted (persistence only ever saves `messages`); see {@link ChatStreamingTurn}.
+     */
+    readonly turn: ChatStreamingTurn | null;
     /** The pending change-set review, or null when nothing is staged. */
     readonly changeSet: ChatChangeSetState | null;
   };
@@ -46,15 +86,39 @@ export interface ChatSlice {
   hydrateChat(workspaceKey: string, messages: readonly ChatMessage[]): void;
   /** Append one turn immutably (new array identity, prior snapshot untouched). */
   appendChatMessage(msg: ChatMessage): void;
-  /** idle|error → streaming; no-op if a turn is already streaming. */
+  /**
+   * idle|error → streaming, seeding an empty {@link ChatStreamingTurn}; no-op if a turn is already
+   * streaming (in particular, the live turn's accumulated text/cards are never clobbered).
+   */
   startChatTurn(): void;
-  /** streaming → idle. */
+  /** streaming → idle; drops the ephemeral turn. */
   finishChatTurn(): void;
   /**
-   * Abort the live turn. rollbackUserTurn: true pops exactly the trailing message if it is the
-   * just-sent user turn and sets status 'error'; false keeps the transcript intact → 'idle'.
+   * Abort the live turn (dropping the ephemeral turn). rollbackUserTurn: true pops exactly the
+   * trailing message if it is the just-sent user turn and sets status 'error'; false keeps the
+   * transcript intact → 'idle'.
    */
   abortChatTurn(opts: { rollbackUserTurn: boolean }): void;
+  /** Accumulate a streamed text delta onto the live turn; no-op when no turn is streaming. */
+  appendStreamingText(delta: string): void;
+  /**
+   * Open a pending tool-call card on the live turn. Also clears the accumulated text — anything
+   * streamed before a tool call was a "thinking" preamble, and the imperative panel cleared it so
+   * the card and the eventual answer render in chronological order. No-op when not streaming.
+   */
+  startToolCall(call: { id: number; name: string; args: string }): void;
+  /**
+   * Settle the SAME pending entry `startToolCall` opened (keyed by id, order preserved). `result`
+   * is the card body's Result text — resultText on ok, the error message on error. No-op when not
+   * streaming or when the id is unknown.
+   */
+  completeToolCall(end: {
+    id: number;
+    state: 'ok' | 'error';
+    summary: string;
+    result: string;
+    durationMs: number;
+  }): void;
   /** Empty the transcript (the workspace key and status are untouched). */
   clearChatTranscript(): void;
   /**
@@ -103,6 +167,7 @@ export function createChatSlice(
       workspaceKey: 'scratch',
       messages: [],
       status: 'idle',
+      turn: null,
       changeSet: null,
     },
     hydrateChat: (workspaceKey, messages) => {
@@ -117,20 +182,53 @@ export function createChatSlice(
     startChatTurn: () => {
       const chat = get().chat;
       if (chat.status === 'streaming') return;
-      set({ chat: { ...chat, status: 'streaming' } });
+      set({ chat: { ...chat, status: 'streaming', turn: { text: '', toolCalls: [] } } });
     },
     finishChatTurn: () => {
-      set({ chat: { ...get().chat, status: 'idle' } });
+      set({ chat: { ...get().chat, status: 'idle', turn: null } });
     },
     abortChatTurn: ({ rollbackUserTurn }) => {
       const chat = get().chat;
       if (rollbackUserTurn) {
         const last = chat.messages[chat.messages.length - 1];
         const messages = last?.role === 'user' ? chat.messages.slice(0, -1) : chat.messages;
-        set({ chat: { ...chat, messages, status: 'error' } });
+        set({ chat: { ...chat, messages, status: 'error', turn: null } });
       } else {
-        set({ chat: { ...chat, status: 'idle' } });
+        set({ chat: { ...chat, status: 'idle', turn: null } });
       }
+    },
+    appendStreamingText: (delta) => {
+      const chat = get().chat;
+      if (!chat.turn) return;
+      set({ chat: { ...chat, turn: { ...chat.turn, text: chat.turn.text + delta } } });
+    },
+    startToolCall: (call) => {
+      const chat = get().chat;
+      if (!chat.turn) return;
+      const opened: ChatToolCall = {
+        ...call,
+        state: 'pending',
+        summary: null,
+        result: null,
+        durationMs: null,
+      };
+      // Clear the streamed preamble alongside opening the card (see the interface doc).
+      set({ chat: { ...chat, turn: { text: '', toolCalls: [...chat.turn.toolCalls, opened] } } });
+    },
+    completeToolCall: ({ id, state, summary, result, durationMs }) => {
+      const chat = get().chat;
+      if (!chat.turn || !chat.turn.toolCalls.some((c) => c.id === id)) return;
+      set({
+        chat: {
+          ...chat,
+          turn: {
+            ...chat.turn,
+            toolCalls: chat.turn.toolCalls.map((c) =>
+              c.id === id ? { ...c, state, summary, result, durationMs } : c,
+            ),
+          },
+        },
+      });
     },
     clearChatTranscript: () => {
       set({ chat: { ...get().chat, messages: [] } });

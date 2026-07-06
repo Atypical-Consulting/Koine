@@ -112,6 +112,141 @@ describe('chat slice', () => {
   });
 });
 
+// The ephemeral streaming turn (#990 Task 4): the live text + tool-call cards the imperative panel
+// kept as loose DOM (the streaming bubble, the toolCards Map) as SLICE STATE, so the declarative
+// Transcript can render them. Never persisted — persistence only ever saves `messages`.
+describe('streaming turn', () => {
+  test('chat.turn starts null and startChatTurn seeds an empty streaming turn', () => {
+    const s = createAppStore();
+    expect(s.getState().chat.turn).toBeNull();
+    s.getState().startChatTurn();
+    expect(s.getState().chat.turn).toEqual({ text: '', toolCalls: [] });
+  });
+
+  test('startChatTurn while streaming does not reset the accumulated turn', () => {
+    const s = createAppStore();
+    s.getState().startChatTurn();
+    s.getState().appendStreamingText('partial');
+    s.getState().startChatTurn(); // no-op: must not clobber the live turn
+    expect(s.getState().chat.turn).toEqual({ text: 'partial', toolCalls: [] });
+  });
+
+  test('appendStreamingText accumulates deltas in order', () => {
+    const s = createAppStore();
+    s.getState().startChatTurn();
+    s.getState().appendStreamingText('Hello');
+    s.getState().appendStreamingText(', ');
+    s.getState().appendStreamingText('world');
+    expect(s.getState().chat.turn?.text).toBe('Hello, world');
+  });
+
+  test('appendStreamingText is a no-op when no turn is streaming', () => {
+    const s = createAppStore();
+    s.getState().appendStreamingText('stray delta'); // idle: must not throw or invent a turn
+    expect(s.getState().chat.turn).toBeNull();
+    s.getState().startChatTurn();
+    s.getState().finishChatTurn();
+    s.getState().appendStreamingText('late delta'); // settled: still a no-op
+    expect(s.getState().chat.turn).toBeNull();
+  });
+
+  test('startToolCall appends a pending call and clears the streamed preamble text', () => {
+    const s = createAppStore();
+    s.getState().startChatTurn();
+    // Text streamed before a tool call is a "thinking" preamble (the imperative addToolCard cleared
+    // it so the card and the eventual answer render in chronological order).
+    s.getState().appendStreamingText('Let me check that…');
+    s.getState().startToolCall({ id: 1, name: 'koine_validate', args: '{"source":"context A {}"}' });
+    expect(s.getState().chat.turn).toEqual({
+      text: '',
+      toolCalls: [
+        {
+          id: 1,
+          name: 'koine_validate',
+          args: '{"source":"context A {}"}',
+          state: 'pending',
+          summary: null,
+          result: null,
+          durationMs: null,
+        },
+      ],
+    });
+  });
+
+  test('completeToolCall settles the SAME entry keyed by id, order preserved', () => {
+    const s = createAppStore();
+    s.getState().startChatTurn();
+    s.getState().startToolCall({ id: 1, name: 'koine_validate', args: '{}' });
+    s.getState().startToolCall({ id: 2, name: 'koine_compile', args: '{"target":"csharp"}' });
+    s.getState().completeToolCall({ id: 1, state: 'ok', summary: 'valid', result: 'ok: true', durationMs: 312 });
+
+    const calls = s.getState().chat.turn!.toolCalls;
+    expect(calls.map((c) => c.id)).toEqual([1, 2]); // order preserved
+    expect(calls[0]).toEqual({
+      id: 1,
+      name: 'koine_validate',
+      args: '{}',
+      state: 'ok',
+      summary: 'valid',
+      result: 'ok: true',
+      durationMs: 312,
+    });
+    expect(calls[1].state).toBe('pending'); // the later call is untouched
+
+    // A failed call settles the same way, carrying the error text as its result body.
+    s.getState().completeToolCall({ id: 2, state: 'error', summary: 'failed', result: 'boom', durationMs: 45 });
+    expect(s.getState().chat.turn!.toolCalls[1]).toEqual({
+      id: 2,
+      name: 'koine_compile',
+      args: '{"target":"csharp"}',
+      state: 'error',
+      summary: 'failed',
+      result: 'boom',
+      durationMs: 45,
+    });
+  });
+
+  test('completeToolCall with an unknown id is a no-op', () => {
+    const s = createAppStore();
+    s.getState().startChatTurn();
+    s.getState().startToolCall({ id: 1, name: 'koine_validate', args: '{}' });
+    const before = s.getState().chat.turn;
+    s.getState().completeToolCall({ id: 99, state: 'ok', summary: 'x', result: 'x', durationMs: 1 });
+    expect(s.getState().chat.turn).toBe(before);
+  });
+
+  test('tool-call actions are no-ops when no turn is streaming', () => {
+    const s = createAppStore();
+    s.getState().startToolCall({ id: 1, name: 'koine_validate', args: '{}' }); // idle: must not throw
+    expect(s.getState().chat.turn).toBeNull();
+    s.getState().completeToolCall({ id: 1, state: 'ok', summary: 'x', result: 'x', durationMs: 1 });
+    expect(s.getState().chat.turn).toBeNull();
+  });
+
+  test('finishChatTurn clears the turn', () => {
+    const s = createAppStore();
+    s.getState().startChatTurn();
+    s.getState().appendStreamingText('done soon');
+    s.getState().startToolCall({ id: 1, name: 'koine_validate', args: '{}' });
+    s.getState().finishChatTurn();
+    expect(s.getState().chat.turn).toBeNull();
+  });
+
+  test('abortChatTurn clears the turn on both rollback variants', () => {
+    const s = createAppStore();
+    s.getState().appendChatMessage(user('q'));
+    s.getState().startChatTurn();
+    s.getState().appendStreamingText('partial');
+    s.getState().abortChatTurn({ rollbackUserTurn: true });
+    expect(s.getState().chat.turn).toBeNull();
+
+    s.getState().startChatTurn();
+    s.getState().appendStreamingText('partial again');
+    s.getState().abortChatTurn({ rollbackUserTurn: false });
+    expect(s.getState().chat.turn).toBeNull();
+  });
+});
+
 const edit = (relPath: string, body: string, isNew = false): StagedEdit => ({
   relPath,
   body,
