@@ -1012,4 +1012,73 @@ public class R18CSharpApplicationTests
         handler.ShouldContain("public async Task<Order> HandleAsync(");
         handler.ShouldContain("return aggregate;");
     }
+
+    // ------------------------------------------------------------------
+    // W1 (#1041) — the two options composed, and their less-travelled
+    // branches (declared-return command, MediatR mode, the api layer).
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Not_found_result_composes_with_read_model_handler_result()
+    {
+        // readModel + result: a void command's handler returns Result<OrderSummary> wrapping the To<RM>()
+        // projection on a hit and NotFound() on a miss.
+        var handler = File(Emit(AppOn with { HandlerResult = CSharpHandlerResult.ReadModel, NotFound = CSharpNotFound.Result }),
+            "OrderPlaceHandler.cs").Contents;
+        handler.ShouldContain("public async Task<Result<OrderSummary>> HandleAsync(");
+        handler.ShouldContain("return Result<OrderSummary>.NotFound();");
+        handler.ShouldContain("return Result<OrderSummary>.Ok(aggregate.ToOrderSummary());");
+    }
+
+    [Fact]
+    public void Not_found_result_wraps_a_declared_return_command()
+    {
+        // A command that declares its own return type keeps it, wrapped in Result<declared> — a distinct
+        // path from the promoted-void command that the other result tests exercise.
+        const string src = """
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Order root Order {
+                repository { operations: getById, add }
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+                  total:  Int = 0
+                  command bump(by: Int): Int {
+                    total -> total + by
+                    result total
+                  }
+                }
+              }
+            }
+            """;
+        var handler = File(Emit(AppOn with { NotFound = CSharpNotFound.Result }, src), "OrderBumpHandler.cs").Contents;
+        handler.ShouldContain("public async Task<Result<int>> HandleAsync(");
+        handler.ShouldContain("return Result<int>.NotFound();");
+        handler.ShouldContain("var result = aggregate.Bump(request.By);");
+        handler.ShouldContain("return Result<int>.Ok(result);");
+    }
+
+    [Fact]
+    public void Not_found_result_composes_with_mediatr_mode()
+    {
+        // Under MediatR the wrapped result flows through the two-arg IRequest/IRequestHandler shape.
+        var files = Emit(AppOn with { NotFound = CSharpNotFound.Result, ApplicationMediatr = true });
+        File(files, "OrderPlaceRequest.cs").Contents
+            .ShouldContain("public sealed record OrderPlaceRequest(OrderId Id) : MediatR.IRequest<Result<Order>>;");
+        var handler = File(files, "OrderPlaceHandler.cs").Contents;
+        handler.ShouldContain("MediatR.IRequestHandler<OrderPlaceRequest, Result<Order>>");
+        handler.ShouldContain("public async Task<Result<Order>> Handle(OrderPlaceRequest request, CancellationToken cancellationToken)");
+        handler.ShouldContain("return Result<Order>.Ok(aggregate);");
+    }
+
+    [Fact]
+    public void Api_layer_read_model_returns_the_projected_body()
+    {
+        // Regression: an --app-handler-result readModel command endpoint must return the projected read
+        // model (Results.Ok(result)), not discard it with an empty Results.Ok().
+        var endpoints = File(Emit(ApiOn with { HandlerResult = CSharpHandlerResult.ReadModel }), "SalesEndpoints.cs").Contents;
+        endpoints.ShouldContain("var result = await handler.HandleAsync(request, ct);");
+        endpoints.ShouldContain("return Results.Ok(result);");
+        endpoints.ShouldNotContain("return Results.Ok();");
+    }
 }

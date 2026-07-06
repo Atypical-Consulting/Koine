@@ -78,7 +78,7 @@ public sealed partial class CSharpEmitter
         // Query handlers (one per query object), projecting via the emitted read-model mapper.
         foreach (QueryDecl query in ctx.Types.OfType<QueryDecl>())
         {
-            EmitQueryHandler(emit, files, registrations, ns, query, aggregates, ctx);
+            EmitQueryHandler(emit, files, registrations, ns, query, ctx);
         }
 
         // I<Service> implementations (one per service with use cases).
@@ -486,6 +486,40 @@ public sealed partial class CSharpEmitter
     // ----------------------------------------------------------------------
 
     /// <summary>
+    /// Resolves a query to its by-identity load, or <c>null</c> when it is not one: a single-result
+    /// query over a read model whose source aggregate root's identity is exactly one criterion. Returns
+    /// the repository property (plural), the id-criterion property, and the root name. Shared by the
+    /// Application-layer query handler and the Api-layer endpoint so the two never disagree on which
+    /// queries wrap their result per the not-found policy (nullable/result).
+    /// </summary>
+    private static (string Plural, string Criterion, string Root)? ResolveByIdentityQuery(QueryDecl query, ContextNode ctx)
+    {
+        if (query.ResultType.Name == ModelIndex.ListTypeName)
+        {
+            return null;
+        }
+
+        ReadModelDecl? readModel = ctx.Types.OfType<ReadModelDecl>().FirstOrDefault(r => r.Name == query.ResultType.Name);
+        if (readModel is null)
+        {
+            return null;
+        }
+
+        EntityDecl? root = ctx.Types.OfType<AggregateDecl>()
+            .Select(a => a.RootEntity())
+            .FirstOrDefault(r => r is not null && r.Name == readModel.SourceType);
+        if (root is null)
+        {
+            return null;
+        }
+
+        Param? idCriterion = query.Criteria.FirstOrDefault(c => c.Type.Name == root.IdentityName);
+        return idCriterion is null
+            ? null
+            : (Pluralize(root.Name), CSharpNaming.ToPascalCase(idCriterion.Name), root.Name);
+    }
+
+    /// <summary>
     /// Emits a concrete <c>IQueryHandler&lt;TQuery,TResult&gt;</c>. A single-result query keyed by the
     /// source aggregate root's identity loads via the repository and projects with the emitted
     /// <c>To&lt;ReadModel&gt;</c> mapper; any other shape (list results, non-identity criteria) is a
@@ -497,7 +531,6 @@ public sealed partial class CSharpEmitter
         List<AppRegistration> registrations,
         string ns,
         QueryDecl query,
-        IReadOnlyList<AggregateDecl> aggregates,
         ContextNode ctx)
     {
         var isList = query.ResultType.Name == ModelIndex.ListTypeName;
@@ -507,21 +540,7 @@ public sealed partial class CSharpEmitter
 
         // Resolve the by-identity load: a single result over a read model whose source is an aggregate
         // root, with exactly one criterion typed as that root's identity.
-        ReadModelDecl? readModel = ctx.Types.OfType<ReadModelDecl>().FirstOrDefault(r => r.Name == resultName);
-        (string Plural, string Criterion, string Root)? byId = null;
-        if (!isList && readModel is not null)
-        {
-            AggregateDecl? agg = aggregates.FirstOrDefault(a => a.RootEntity()!.Name == readModel.SourceType);
-            EntityDecl? root = agg?.RootEntity();
-            if (root is not null)
-            {
-                Param? idCriterion = query.Criteria.FirstOrDefault(c => c.Type.Name == root.IdentityName);
-                if (idCriterion is not null)
-                {
-                    byId = (Pluralize(root.Name), CSharpNaming.ToPascalCase(idCriterion.Name), root.Name);
-                }
-            }
-        }
+        (string Plural, string Criterion, string Root)? byId = ResolveByIdentityQuery(query, ctx);
 
         // The by-identity load honors the not-found policy (W1): nullable ⇒ this handler returns its
         // read model nullably and yields null on a miss; result ⇒ it returns a Result<RM> and yields

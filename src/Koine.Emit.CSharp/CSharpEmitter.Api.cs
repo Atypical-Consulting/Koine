@@ -100,11 +100,11 @@ public sealed partial class CSharpEmitter
         var route = "/" + Kebab(root.Name) + "/" + Kebab(cmd.Name);
 
         // Mirror the Application layer's handler result shape (W1): the handler returns a value when the
-        // command declares a return type, or --app-handler-result aggregate, or --app-not-found
+        // command declares a return type, or --app-handler-result aggregate/readModel, or --app-not-found
         // nullable/result. A command always loads by id, so it honors the not-found policy — nullable
         // maps null → 404, result maps Result<T> → 200/404.
         var returnsValue = cmd.ReturnType is not null
-            || _options.HandlerResult == CSharpHandlerResult.Aggregate
+            || _options.HandlerResult is CSharpHandlerResult.Aggregate or CSharpHandlerResult.ReadModel
             || _options.NotFound is CSharpNotFound.Nullable or CSharpNotFound.Result;
         WriteMutationEndpoint(body, route, behavior, returnsValue, _options.NotFound);
     }
@@ -157,8 +157,9 @@ public sealed partial class CSharpEmitter
     {
         var route = "/" + Kebab(query.Name);
         // Only a by-identity query returns a wrapped value (nullable/Result<T>) — a list/non-identity
-        // query returns a plain value, so its endpoint stays a plain 200 regardless of the policy.
-        var miss = IsByIdentityQuery(query, ctx) ? _options.NotFound : CSharpNotFound.Throw;
+        // query returns a plain value, so its endpoint stays a plain 200 regardless of the policy. Uses
+        // the same resolution as the Application-layer handler, so the two never disagree.
+        var miss = ResolveByIdentityQuery(query, ctx) is not null ? _options.NotFound : CSharpNotFound.Throw;
         var i2 = Indent + Indent;
         var i3 = i2 + Indent;
 
@@ -177,31 +178,6 @@ public sealed partial class CSharpEmitter
         CSharpNotFound.Result => "return result.IsSuccess ? Results.Ok(result.Value) : Results.NotFound();\n",
         _ => "return Results.Ok(result);\n",
     };
-
-    /// <summary>
-    /// True when a query resolves to the single by-identity load — a single-result query over a read
-    /// model whose source aggregate root's identity is exactly one criterion. That is the only query
-    /// shape whose handler wraps its return per the not-found policy (nullable/result); mirrors the
-    /// resolution in <see cref="EmitQueryHandler"/>.
-    /// </summary>
-    private static bool IsByIdentityQuery(QueryDecl query, ContextNode ctx)
-    {
-        if (query.ResultType.Name == ModelIndex.ListTypeName)
-        {
-            return false;
-        }
-
-        ReadModelDecl? readModel = ctx.Types.OfType<ReadModelDecl>().FirstOrDefault(r => r.Name == query.ResultType.Name);
-        if (readModel is null)
-        {
-            return false;
-        }
-
-        EntityDecl? root = ctx.Types.OfType<AggregateDecl>()
-            .Select(a => a.RootEntity())
-            .FirstOrDefault(r => r is not null && r.Name == readModel.SourceType);
-        return root is not null && query.Criteria.Any(c => c.Type.Name == root.IdentityName);
-    }
 
     /// <summary>Kebab-cases a PascalCase name for a route segment (Order → order, OrderById → order-by-id).</summary>
     private static string Kebab(string name)
