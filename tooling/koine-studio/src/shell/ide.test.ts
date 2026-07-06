@@ -75,11 +75,19 @@ vi.mock('@/ai/aiPanel', async () => {
   };
 });
 
+// happy-dom doesn't implement scrollIntoView; the Spotlight launcher (#1143) calls it on its selected
+// result row when it opens (the ⌘K tests below open it).
+if (typeof (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView !== 'function') {
+  (HTMLElement.prototype as { scrollIntoView: () => void }).scrollIntoView = () => {};
+}
+
 // --- in-memory LspTransport --------------------------------------------------
 // Records every framed message the client sends and lets the test drive server→client messages. The
 // only server reply boot needs is the `initialize` response (KoineLsp.handshake awaits it before the
 // workspace opens); without it start() would hang on the 15s request timeout. We answer it
-// synchronously from `send` so `await lsp.start()` resolves promptly.
+// synchronously from `send` so `await lsp.start()` resolves promptly. We also answer the launcher's
+// model-index requests (glossaryModel / docs / model, #1143) with empty results so
+// controller.ensureModelIndex() — which buildCatalog awaits before listing commands — resolves.
 class FakeLspTransport implements LspTransport {
   sent: string[] = [];
   private onMsg: ((json: string) => void) | null = null;
@@ -90,10 +98,19 @@ class FakeLspTransport implements LspTransport {
   send(message: string): Promise<void> {
     this.sent.push(message);
     const msg = JSON.parse(message) as { id?: number; method?: string };
-    // Reply to the `initialize` request so the handshake completes. Any other request is left
-    // unanswered (boot does not depend on it); notifications carry no id.
-    if (msg.method === 'initialize' && typeof msg.id === 'number') {
-      this.reply({ jsonrpc: '2.0', id: msg.id, result: { capabilities: {} } });
+    // Reply to the `initialize` request so the handshake completes, and to the launcher's model-index
+    // requests with empty results (#1143). Any other request is left unanswered (boot does not depend on
+    // it); notifications carry no id.
+    if (typeof msg.id === 'number') {
+      if (msg.method === 'initialize') {
+        this.reply({ jsonrpc: '2.0', id: msg.id, result: { capabilities: {} } });
+      } else if (msg.method === 'koine/glossaryModel') {
+        this.reply({ jsonrpc: '2.0', id: msg.id, result: { entries: [] } });
+      } else if (msg.method === 'koine/docs') {
+        this.reply({ jsonrpc: '2.0', id: msg.id, result: { files: [] } });
+      } else if (msg.method === 'koine/model') {
+        this.reply({ jsonrpc: '2.0', id: msg.id, result: null });
+      }
     }
     return Promise.resolve();
   }
@@ -755,20 +772,28 @@ describe('ide init() — close/unload guard', () => {
 
 describe('ide init() — Save to disk', () => {
   // Chrome v2 (#923) dropped the Save-to-disk toolbar button; the flow is now reached through the ⌘K
-  // command palette (the `save-project-to-disk` command). Open the palette and click its row by title.
-  function runPaletteCommand(title: string): void {
+  // Spotlight launcher (#1143) — the `save-project-to-disk` command. Open the launcher, switch to
+  // Commands mode (`>`, which lists every enabled command), then click the row by title. Async because
+  // the launcher's catalog (buildCatalog) awaits the model index before its command rows appear.
+  async function runLauncherCommand(title: string): Promise<void> {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
-    const rows = Array.from(document.querySelectorAll('.koi-palette-item'));
-    const row = rows.find((r) => r.querySelector('.koi-palette-item-title')?.textContent === title);
-    if (!row) throw new Error(`command palette row not found: ${title}`);
-    (row as HTMLElement).click();
+    await settleBoot();
+    const input = document.querySelector<HTMLInputElement>('#lx-input')!;
+    input.value = '>'; // Commands mode + empty query ⇒ every enabled command listed
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await settleBoot();
+    const row = Array.from(document.querySelectorAll<HTMLElement>('.lx-item')).find(
+      (r) => r.querySelector('.lx-title')?.textContent === title,
+    );
+    if (!row) throw new Error(`launcher command row not found: ${title}`);
+    row.click();
   }
 
   test('Save to disk writes the open buffers as a named project', async () => {
     await boot();
     const saveSpy = (fakePlatform.current as FakePlatform).saveProjectToRoot;
 
-    runPaletteCommand('Save to disk…');
+    await runLauncherCommand('Save to disk…');
     await settleBoot(); // Koine's prompt modal opens (no window.prompt)
 
     // Name the project in the modal field and confirm with the primary action.
@@ -789,7 +814,7 @@ describe('ide init() — Save to disk', () => {
     await boot();
     const saveSpy = (fakePlatform.current as FakePlatform).saveProjectToRoot;
 
-    runPaletteCommand('Save to disk…');
+    await runLauncherCommand('Save to disk…');
     await settleBoot();
 
     // Dismiss the prompt with Cancel → ask() resolves null → nothing is written. The primary button
@@ -807,9 +832,14 @@ describe('ide init() — Save to disk', () => {
     (p as unknown as { canSaveProjects: boolean }).canSaveProjects = false;
     await boot({ platform: p });
     // The command's when() gate filters it out entirely (chrome v2, #923 removed the toolbar button whose
-    // `hidden` used to carry this): opening the palette offers no "Save to disk…" row.
+    // `hidden` used to carry this): the launcher's Commands mode offers no "Save to disk…" row.
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
-    const titles = Array.from(document.querySelectorAll('.koi-palette-item-title')).map((e) => e.textContent);
+    await settleBoot();
+    const input = document.querySelector<HTMLInputElement>('#lx-input')!;
+    input.value = '>';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await settleBoot();
+    const titles = Array.from(document.querySelectorAll('.lx-title')).map((e) => e.textContent);
     expect(titles).not.toContain('Save to disk…');
   });
 });
@@ -1071,13 +1101,19 @@ describe('ide init() — Settings entry points unify on the center overlay (#731
     'true';
   const settingsModalExists = () => document.querySelector('.koi-modal--settings') !== null;
 
-  /** Open the command palette (mod+K), click the row whose title matches — which runs it then closes. */
-  function runPaletteCommand(title: string): void {
+  /** Open the Spotlight launcher (mod+K), switch to Commands mode (`>`), click the row whose title
+   *  matches — which runs it. Async: the launcher's command rows appear only after buildCatalog resolves. */
+  async function runLauncherCommand(title: string): Promise<void> {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
-    const row = Array.from(document.querySelectorAll<HTMLElement>('.koi-palette-item')).find(
-      (r) => r.querySelector('.koi-palette-item-title')?.textContent === title,
+    await settleBoot();
+    const input = document.querySelector<HTMLInputElement>('#lx-input')!;
+    input.value = '>';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await settleBoot();
+    const row = Array.from(document.querySelectorAll<HTMLElement>('.lx-item')).find(
+      (r) => r.querySelector('.lx-title')?.textContent === title,
     );
-    if (!row) throw new Error(`palette command not found: ${title}`);
+    if (!row) throw new Error(`launcher command not found: ${title}`);
     row.click();
   }
 
@@ -1088,16 +1124,16 @@ describe('ide init() — Settings entry points unify on the center overlay (#731
     expect(paneMounted()).toBe(true);
   });
 
-  test('the "Settings…" palette command opens the overlay, not a modal', async () => {
+  test('the "Settings…" launcher command opens the overlay, not a modal', async () => {
     await boot();
-    runPaletteCommand('Settings…');
+    await runLauncherCommand('Settings…');
     expect(overlayShown()).toBe(true);
     expect(paneMounted()).toBe(true);
   });
 
-  test('the "About Koine Studio" palette command opens the overlay on the About tab', async () => {
+  test('the "About Koine Studio" launcher command opens the overlay on the About tab', async () => {
     await boot();
-    runPaletteCommand('About Koine Studio');
+    await runLauncherCommand('About Koine Studio');
     expect(overlayShown()).toBe(true);
     expect(aboutTabSelected()).toBe(true);
   });
@@ -1111,7 +1147,7 @@ describe('ide init() — Settings entry points unify on the center overlay (#731
   test("the Assistant's onOpenPrefs opens the overlay", async () => {
     await boot();
     // Showing the AI Chat right view lazily creates the assistant panel, capturing its onOpenPrefs.
-    runPaletteCommand('Show AI Chat');
+    await runLauncherCommand('Show AI Chat');
     expect(typeof assistantSeam.onOpenPrefs).toBe('function');
     assistantSeam.onOpenPrefs!();
     expect(overlayShown()).toBe(true);

@@ -6,6 +6,7 @@ import {
   KoineLsp,
   type GlossaryEntry,
   type Location,
+  type Range,
   type SourceSpan,
   type TextEdit,
 } from '@/lsp/lsp';
@@ -500,6 +501,23 @@ export function init(hooks: IdeHooks = {}): () => void {
       workspace.activateFile(loc.uri);
     }
     editor.gotoRange(loc.range.start, loc.range.end);
+  }
+
+  // The Spotlight launcher's go-to (#1143): activate the declaring file (from disk if it isn't a buffer yet),
+  // then reveal the range ONLY once that file is actually active so a null token / failed open can't scroll the wrong doc (#1145 review).
+  async function revealLocation(uri: string, range: Range): Promise<void> {
+    try {
+      if (uri !== workspace.activeUri()) {
+        if (workspace.buffers.has(uri)) workspace.activateFile(uri);
+        else {
+          const token = fileUriToPath(uri);
+          if (token) await workspace.openFileToken(token);
+        }
+      }
+      if (uri === workspace.activeUri()) editor.gotoRange(range.start, range.end);
+    } catch {
+      /* best-effort launcher navigation */
+    }
   }
 
   // Open a file from a USER-INITIATED affordance (a file-tree click, a Go-to-File palette pick). Takes an
@@ -1320,6 +1338,12 @@ export function init(hooks: IdeHooks = {}): () => void {
     openUri,
     overlayOpen: () => overlays.overlayOpen(),
     toggleFileTree: () => layoutController.toggleFileTree(),
+    // Spotlight launcher seams (#1143): the joined model index, the host git surface, and the
+    // open-file-and-reveal navigation the per-result quick actions dispatch to.
+    modelIndex: () => controller.ensureModelIndex(),
+    canUseGit: platform.canUseGit,
+    gitLog: () => (platform.canUseGit ? platform.gitLog(workspace.folderRootToken()) : null),
+    revealLocation: (uri, range) => void revealLocation(uri, range),
   });
 
   // The boot sequence (the lsp.start ladder + emit-target seed + the shared/single/restored/default
