@@ -59,11 +59,11 @@ internal class BuildSettings : CommandSettings
     public string? AppMapping { get; init; }
 
     [CommandOption("--app-handler-result <MODE>")]
-    [Description("Application layer: what a command handler returns, void (default) or aggregate (the loaded, mutated aggregate root).")]
+    [Description("Application layer: what a command handler returns, void (default), aggregate (the loaded, mutated aggregate root), or readModel (a read-model projection of it).")]
     public string? AppHandlerResult { get; init; }
 
     [CommandOption("--app-not-found <MODE>")]
-    [Description("Application layer: how a handler treats a missing aggregate, throw (default) or nullable (return null, e.g. for a 404).")]
+    [Description("Application layer: how a handler treats a missing aggregate, throw (default), nullable (return null, e.g. for a 404), or result (return a Result<T>).")]
     public string? AppNotFound { get; init; }
 
     [CommandOption("--regex-match-timeout-ms <MS>")]
@@ -145,14 +145,14 @@ internal class BuildSettings : CommandSettings
         // silently fall back to void.
         if (applicationHandlerResult is { } handlerResult && !ValidHandlerResults.Contains(handlerResult))
         {
-            error = $"unknown app-handler-result '{handlerResult}' (valid modes: void, aggregate)";
+            error = $"unknown app-handler-result '{handlerResult}' (valid modes: void, aggregate, readModel)";
             return false;
         }
 
         // The missing-aggregate policy (W1): throw (default) or nullable. Same hard-error-on-typo rule.
         if (applicationNotFound is { } notFound && !ValidNotFoundPolicies.Contains(notFound))
         {
-            error = $"unknown app-not-found '{notFound}' (valid modes: throw, nullable)";
+            error = $"unknown app-not-found '{notFound}' (valid modes: throw, nullable, result)";
             return false;
         }
 
@@ -196,13 +196,13 @@ internal class BuildSettings : CommandSettings
     /// <c>application.handlerResult</c> (W1). An unknown value is a hard error, not a silent fall-back
     /// to <c>void</c>.</summary>
     private static readonly IReadOnlySet<string> ValidHandlerResults =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "void", "aggregate" };
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "void", "aggregate", "readmodel" };
 
     /// <summary>The missing-aggregate policies a user may request via <c>--app-not-found</c> /
     /// <c>application.notFound</c> (W1). An unknown value is a hard error, not a silent fall-back
     /// to <c>throw</c>.</summary>
     private static readonly IReadOnlySet<string> ValidNotFoundPolicies =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "throw", "nullable" };
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "throw", "nullable", "result" };
 
     /// <summary>
     /// Resolves the layer selector: the explicit <c>--layers</c> flag wins over the config's

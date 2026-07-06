@@ -51,7 +51,7 @@ internal sealed class UsingCollector
     private static readonly string[] RuntimeMarkers =
     {
         "ValueObject", "IAggregateRoot", "IDomainEvent", "IIntegrationEvent",
-        "DomainInvariantViolationException", "Range<"
+        "DomainInvariantViolationException", "Range<", "Result<"
     };
 
     private readonly List<string> _usings = new();

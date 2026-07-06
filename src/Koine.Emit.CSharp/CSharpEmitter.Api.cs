@@ -66,7 +66,7 @@ public sealed partial class CSharpEmitter
 
         foreach (QueryDecl query in ctx.Types.OfType<QueryDecl>())
         {
-            WriteQueryEndpoint(body, query);
+            WriteQueryEndpoint(body, ctx, query);
             any = true;
         }
 
@@ -100,12 +100,13 @@ public sealed partial class CSharpEmitter
         var route = "/" + Kebab(root.Name) + "/" + Kebab(cmd.Name);
 
         // Mirror the Application layer's handler result shape (W1): the handler returns a value when the
-        // command declares a return type, or --app-handler-result aggregate, or --app-not-found nullable;
-        // and the value is nullable under the nullable not-found policy (→ 404 on null).
+        // command declares a return type, or --app-handler-result aggregate/readModel, or --app-not-found
+        // nullable/result. A command always loads by id, so it honors the not-found policy — nullable
+        // maps null → 404, result maps Result<T> → 200/404.
         var returnsValue = cmd.ReturnType is not null
-            || _options.HandlerResult == CSharpHandlerResult.Aggregate
-            || _options.NotFound == CSharpNotFound.Nullable;
-        WriteMutationEndpoint(body, route, behavior, returnsValue, _options.NotFound == CSharpNotFound.Nullable);
+            || _options.HandlerResult is CSharpHandlerResult.Aggregate or CSharpHandlerResult.ReadModel
+            || _options.NotFound is CSharpNotFound.Nullable or CSharpNotFound.Result;
+        WriteMutationEndpoint(body, route, behavior, returnsValue, _options.NotFound);
     }
 
     /// <summary>A factory → <c>POST /{entity}/{factory}</c>; it always returns the created aggregate.</summary>
@@ -113,15 +114,19 @@ public sealed partial class CSharpEmitter
     {
         var behavior = root.Name + CSharpNaming.ToPascalCase(factory.Name);
         var route = "/" + Kebab(root.Name) + "/" + Kebab(factory.Name);
-        WriteMutationEndpoint(body, route, behavior, returnsValue: true, nullable: false);
+        // A factory creates — it has no not-found concept — so it always returns the created aggregate
+        // plainly, regardless of the not-found policy.
+        WriteMutationEndpoint(body, route, behavior, returnsValue: true, CSharpNotFound.Throw);
     }
 
     /// <summary>
     /// Writes a POST endpoint that binds <c>&lt;Behavior&gt;Request</c> from the body and invokes the
     /// handler. In plain mode it injects the concrete handler and calls <c>HandleAsync</c>; in MediatR
-    /// mode it injects <c>IMediator</c> and calls <c>Send</c>.
+    /// mode it injects <c>IMediator</c> and calls <c>Send</c>. <paramref name="miss"/> shapes the HTTP
+    /// result from the handler's return: <c>Throw</c> ⇒ plain 200; <c>Nullable</c> ⇒ null → 404;
+    /// <c>Result</c> ⇒ a <c>Result&lt;T&gt;</c> → 200 with the value / 404.
     /// </summary>
-    private void WriteMutationEndpoint(StringBuilder body, string route, string behavior, bool returnsValue, bool nullable)
+    private void WriteMutationEndpoint(StringBuilder body, string route, string behavior, bool returnsValue, CSharpNotFound miss)
     {
         var requestType = behavior + "Request";
         var i2 = Indent + Indent;
@@ -141,19 +146,20 @@ public sealed partial class CSharpEmitter
         else
         {
             body.Append(i3).Append("var result = await ").Append(call).Append(";\n");
-            body.Append(i3).Append(nullable
-                ? "return result is null ? Results.NotFound() : Results.Ok(result);\n"
-                : "return Results.Ok(result);\n");
+            body.Append(i3).Append(HttpResultFor(miss));
         }
 
         body.Append(i2).Append("});\n");
     }
 
     /// <summary>A query → <c>GET /{query}</c> bound to <c>&lt;Query&gt;Handler</c>; criteria come from the query string.</summary>
-    private void WriteQueryEndpoint(StringBuilder body, QueryDecl query)
+    private void WriteQueryEndpoint(StringBuilder body, ContextNode ctx, QueryDecl query)
     {
         var route = "/" + Kebab(query.Name);
-        var nullable = _options.NotFound == CSharpNotFound.Nullable;
+        // Only a by-identity query returns a wrapped value (nullable/Result<T>) — a list/non-identity
+        // query returns a plain value, so its endpoint stays a plain 200 regardless of the policy. Uses
+        // the same resolution as the Application-layer handler, so the two never disagree.
+        var miss = ResolveByIdentityQuery(query, ctx) is not null ? _options.NotFound : CSharpNotFound.Throw;
         var i2 = Indent + Indent;
         var i3 = i2 + Indent;
 
@@ -161,11 +167,17 @@ public sealed partial class CSharpEmitter
             .Append(" query, ").Append(query.Name).Append("Handler handler, CancellationToken ct) =>\n");
         body.Append(i2).Append("{\n");
         body.Append(i3).Append("var result = await handler.HandleAsync(query, ct);\n");
-        body.Append(i3).Append(nullable
-            ? "return result is null ? Results.NotFound() : Results.Ok(result);\n"
-            : "return Results.Ok(result);\n");
+        body.Append(i3).Append(HttpResultFor(miss));
         body.Append(i2).Append("});\n");
     }
+
+    /// <summary>The <c>return</c> line mapping a handler's returned value to an HTTP result per the not-found policy.</summary>
+    private static string HttpResultFor(CSharpNotFound miss) => miss switch
+    {
+        CSharpNotFound.Nullable => "return result is null ? Results.NotFound() : Results.Ok(result);\n",
+        CSharpNotFound.Result => "return result.IsSuccess ? Results.Ok(result.Value) : Results.NotFound();\n",
+        _ => "return Results.Ok(result);\n",
+    };
 
     /// <summary>Kebab-cases a PascalCase name for a route segment (Order → order, OrderById → order-by-id).</summary>
     private static string Kebab(string name)
