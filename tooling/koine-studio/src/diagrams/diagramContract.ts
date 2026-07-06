@@ -146,11 +146,11 @@ export interface EmptyStatePickDetail {
 /**
  * Whether diagram nodes accept drag-to-edit gestures (issue #93, Task 5). Off by default so the
  * read-only Diagrams tab is byte-identical when editing is off; `ide.ts` flips it on once the
- * model→`.koi` round-trip seam (#91) is reachable. Now backed by the `diagrams` store slice (#983);
- * these stay the stable renderer-facing contract, delegating to the app store.
+ * model→`.koi` round-trip seam (#91) is reachable. Backed by the `diagrams` store slice (#983); this
+ * pair stays the stable renderer-facing contract, delegating to the app store.
+ *
+ * Enable/disable drag-to-edit gestures on diagram nodes.
  */
-
-/** Enable/disable drag-to-edit gestures on diagram nodes. */
 export function setDiagramEditing(enabled: boolean): void {
   appStore.getState().setDiagramEditing(enabled);
 }
@@ -167,9 +167,10 @@ export function isDiagramEditing(): boolean {
  * flips it on below `$bp-narrow` and off above it. Deliberately INDEPENDENT of {@link isDiagramEditing}:
  * the mobile shell stays editing-capable (the palette + auto-arrange still author), it just swaps freehand
  * manipulation for tap-to-edit. The renderer reads this alongside the editing flag when wiring gestures.
+ * Backed by the `diagrams` store slice (#983).
+ *
+ * Enable/disable touch (tap-to-edit) presentation on the diagram canvas.
  */
-
-/** Enable/disable touch (tap-to-edit) presentation on the diagram canvas. */
 export function setDiagramTouchMode(on: boolean): void {
   appStore.getState().setDiagramTouchMode(on);
 }
@@ -199,12 +200,12 @@ export function clampZoomPercent(percent: number): number | null {
  * The default zoom (percent) a freshly-opened domain canvas uses when no per-diagram zoom is saved
  * (#762). Mirrors the {@link isDiagramTouchMode}/{@link setDiagramEditing} pattern: the IDE flips it in
  * from the loaded `Settings` (`defaultCanvasZoom`) so the renderer reads it without importing the
- * settings page. 100 keeps the canvas at its real 1:1 scale. Now backed by the `diagrams` store slice
+ * settings page. 100 keeps the canvas at its real 1:1 scale. Backed by the `diagrams` store slice
  * (#983); the clamp lives in the slice action, reusing {@link clampZoomPercent}.
+ *
+ * Set the default canvas zoom (percent), clamped to the diagram zoom band (10–800); a non-finite value
+ * is ignored so the last good zoom is preserved. Called from `ide.tsx` when settings load/change.
  */
-
-/** Set the default canvas zoom (percent), clamped to the diagram zoom band (10–800); a non-finite
- *  value is ignored so the last good zoom is preserved. Called from `ide.tsx` when settings load/change. */
 export function setDefaultCanvasZoom(percent: number): void {
   appStore.getState().setDefaultCanvasZoom(percent);
 }
@@ -216,11 +217,11 @@ export function getDefaultCanvasZoom(): number {
 
 /**
  * The per-workspace scope for persisted node positions (the authoring canvas). `ide.ts` sets it to the
- * folder identity (or 'scratch') before each render so positions never bleed across projects. Now backed
- * by the `diagrams` store slice (#983); these stay the stable contract call sites couple to.
+ * folder identity (or 'scratch') before each render so positions never bleed across projects. Backed by
+ * the `diagrams` store slice (#983); these stay the stable contract call sites couple to.
+ *
+ * Set the workspace scope for persisted node positions (folder identity, or 'scratch').
  */
-
-/** Set the workspace scope for persisted node positions (folder identity, or 'scratch'). */
 export function setDiagramPersistScope(scope: string): void {
   appStore.getState().setDiagramPersistScope(scope);
 }
