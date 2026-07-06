@@ -58,6 +58,18 @@ public sealed partial class KotlinEmitter : IEmitter
 
     public IReadOnlyList<EmittedFile> Emit(KoineModel model, SemanticModel? semantic)
     {
+        ModelIndex index = (semantic ?? new SemanticModel(model)).Index;
+        var emit = new KotlinEmitContext(
+            index,
+            // Demand-driven operator emission (R9), shared with the C#/Java/Rust/Python/TS emitters so the
+            // targets stay semantically aligned: a value object only gets a `plus`/`minus` where the model
+            // sums or adds/subtracts it, or a `times`/`div` where it is scaled by a scalar.
+            OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
+            OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
+            OperatorNeedsAnalyzer.BuildScalarDivisionNeeds(model, index),
+            OperatorNeedsAnalyzer.BuildValueObjectArithmeticNeeds(model, index),
+            BuildEnumMemberMap(model));
+
         var files = new List<EmittedFile>
         {
             // The shared koine.runtime package (DomainException + the Range<T> interval type), always
@@ -66,8 +78,46 @@ public sealed partial class KotlinEmitter : IEmitter
             new(KotlinRuntime.FileName, KotlinRuntime.Source + "\n"),
         };
 
-        // The per-construct partials — value objects, generated IDs, smart enums, entities, aggregates,
-        // events/commands, repositories (Tasks 5-8) — append to this list as they land.
+        // Phase 1 tactical core — value objects, generated IDs, smart enums, entities, aggregates, events,
+        // and repositories — is emitted one top-level type per file by the split partials, dispatched from
+        // EmitType. The construct cases are wired incrementally per task (VOs + generated IDs first).
+        foreach (ContextNode ctx in model.Contexts)
+        {
+            foreach (TypeDecl type in ctx.Types)
+            {
+                EmitType(emit, files, ctx.Name, type);
+            }
+        }
+
         return files;
+    }
+
+    /// <summary>
+    /// Dispatches one top-level declaration to its construct emitter, appending one <see cref="EmittedFile"/>
+    /// per top-level Kotlin type. Mirrors the Java backend's <c>EmitType</c> switch; cases are wired
+    /// incrementally as the split partials land. An aggregate recurses into its nested types; each entity
+    /// contributes its generated identity <c>value class</c> (the entity class body itself is the entity
+    /// task). The Phase-2 application/CQRS kinds (read models, queries) fall through the <c>default</c>.
+    /// </summary>
+    private void EmitType(KotlinEmitContext emit, List<EmittedFile> files, string context, TypeDecl type)
+    {
+        switch (type)
+        {
+            case ValueObjectDecl vo:
+                files.Add(EmitValueObject(emit, context, vo));
+                break;
+            case EntityDecl entity:
+                files.Add(EmitId(emit, context, entity));
+                break;
+            case AggregateDecl agg:
+                foreach (TypeDecl nested in agg.Types)
+                {
+                    EmitType(emit, files, context, nested);
+                }
+
+                break;
+            default:
+                break;
+        }
     }
 }
