@@ -98,15 +98,39 @@ C# without installing anything.
 The hero above is the editor split — but Studio is a full IDE, and a single shot can't show it. Each
 surface below is a click away in the [live Studio](https://atypical-consulting.github.io/Koine/studio/):
 
-| IDE view | What it shows |
-|----------|---------------|
-| **Editor & live diagnostics** | Your `.koi` model on the left, the emitted code on the right, with error squiggles and quick info as you type — the same parser and validator the CLI runs. |
-| **Emit-target switcher** | Flip the *same* model between **C#**, **TypeScript**, **Python**, **PHP**, **Rust**, **Java**, and **Kotlin** output without leaving the page. |
-| **Context-map graph** | An interactive graph of the bounded contexts and the relationships between them. |
-| **Diagram views** | Aggregates and state machines rendered as diagrams straight from the model. |
-| **Ubiquitous-language glossary** | The generated glossary of every term in the domain, kept in lock-step with the model. |
-| **Model outline & panels** | A structural outline of the model plus a bottom **Events & Relationships** panel. |
-| **Syntax tree** | The raw parse tree of the active file in the right rail — every node's kind, name, and source span, with error-recovery markers made visible. Click a node to jump the editor to it; move the caret to highlight the matching node. |
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="https://atypical-consulting.github.io/Koine/studio/"><img src="assets/studio/emit-targets.png" width="100%" alt="Koine Studio with the emit target set to TypeScript — a .koi model on the left, the generated TypeScript on the right, and 'Emit TypeScript' in the toolbar." /></a>
+      <br /><b>Emit-target switcher</b> — flip the <em>same</em> model between C#, TypeScript, Python, PHP, Rust, Java, and Kotlin output without leaving the page.
+    </td>
+    <td width="50%" valign="top">
+      <a href="https://atypical-consulting.github.io/Koine/studio/"><img src="assets/studio/context-map.png" width="100%" alt="An interactive context-map graph — five bounded contexts (Billing, PaymentGateway, Entitlements, Subscription, Tenant) linked by labelled relationships such as AntiCorruptionLayer, CustomerSupplier and OpenHost." /></a>
+      <br /><b>Context-map graph</b> — an interactive graph of the bounded contexts and the relationships between them.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="https://atypical-consulting.github.io/Koine/studio/"><img src="assets/studio/diagram.png" width="100%" alt="The Subscription aggregate rendered as a diagram — its fields and methods, value objects and enums, and the Trialing → Active → Suspended → Cancelled state machine, straight from the model." /></a>
+      <br /><b>Diagram views</b> — aggregates and state machines rendered as diagrams straight from the model.
+    </td>
+    <td width="50%" valign="top">
+      <a href="https://atypical-consulting.github.io/Koine/studio/"><img src="assets/studio/glossary.png" width="100%" alt="The ubiquitous-language glossary — each domain term with its kind (context, enum, value) and description, tracked by a 'documented' progress bar." /></a>
+      <br /><b>Ubiquitous-language glossary</b> — the generated glossary of every term in the domain, kept in lock-step with the model.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="https://atypical-consulting.github.io/Koine/studio/"><img src="assets/studio/outline.png" width="100%" alt="The model outline in the left rail, the .koi source in the centre, and a bottom Events panel listing the domain events with their bounded context and 'when' descriptions." /></a>
+      <br /><b>Model outline &amp; panels</b> — a structural outline of the model plus a bottom <b>Events &amp; Relationships</b> panel.
+    </td>
+    <td width="50%" valign="top">
+      <b>Editor &amp; live diagnostics</b> — your <code>.koi</code> model on the left, the emitted code on the right, with error squiggles and quick info as you type (the hero split above) — the same parser and validator the CLI runs.
+      <br /><br />
+      <b>Syntax tree</b> — the raw parse tree of the active file in the right rail: every node's kind, name, and source span, with error-recovery markers made visible. Click a node to jump the editor to it; move the caret to highlight the matching node.
+    </td>
+  </tr>
+</table>
 
 - **[Koine Studio](https://atypical-consulting.github.io/Koine/studio/)** — the full web IDE (every
   view in the tour above), running the real compiler in your browser. *(Also ships as a native
