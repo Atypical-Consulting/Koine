@@ -22,10 +22,10 @@
        CapabilitiesTests guard against that exact value as the "informational version wasn't wired
        up" sentinel. -->
   <PropertyGroup>
-    <Version>0.246.0</Version> <!-- x-release-please-version -->
+    <Version>0.247.0</Version> <!-- x-release-please-version -->
     <!-- Carries the real version into the assembly so the CLI version command can read it
          (the four-part AssemblyVersion otherwise reports 1.0.0.0). -->
-    <InformationalVersion>0.246.0</InformationalVersion> <!-- x-release-please-version -->
+    <InformationalVersion>0.247.0</InformationalVersion> <!-- x-release-please-version -->
     <Authors>Philippe Matray</Authors>
     <Company>Atypical Consulting</Company>
     <RepositoryUrl>https://github.com/Atypical-Consulting/Koine</RepositoryUrl>

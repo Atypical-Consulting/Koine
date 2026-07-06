@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Koine is pre-1.0, so minor versions
 may include breaking changes.
 
+## [0.247.0](https://github.com/Atypical-Consulting/Koine/compare/v0.246.0...v0.247.0) (2026-07-06)
+
+
+### Features
+
+* **studio:** chat slice, Preact assistant panel, multi-root-safe agentic edits ([#984](https://github.com/Atypical-Consulting/Koine/issues/984), [#990](https://github.com/Atypical-Consulting/Koine/issues/990), [#472](https://github.com/Atypical-Consulting/Koine/issues/472)) ([#1119](https://github.com/Atypical-Consulting/Koine/issues/1119)) ([1004950](https://github.com/Atypical-Consulting/Koine/commit/10049509bbb4cb1f99c6ce0046a6007bc103d3ce))
+
+
+### Bug Fixes
+
+* **emit-core:** honor explicit qualifier + map-permission in flat-module owner resolution ([#1124](https://github.com/Atypical-Consulting/Koine/issues/1124)) ([#1128](https://github.com/Atypical-Consulting/Koine/issues/1128)) ([9bc7735](https://github.com/Atypical-Consulting/Koine/commit/9bc7735e46303174942c9ebf451e587e94737abf))
+* **emit:** qualify multi-owner cross-context type references; consolidate shared emitter infra ([#1091](https://github.com/Atypical-Consulting/Koine/issues/1091)) ([#1120](https://github.com/Atypical-Consulting/Koine/issues/1120)) ([3c37068](https://github.com/Atypical-Consulting/Koine/commit/3c3706886f291a72a528597af68035199c5a1419))
+
 ## [0.246.0](https://github.com/Atypical-Consulting/Koine/compare/v0.245.0...v0.246.0) (2026-07-06)
 
 
