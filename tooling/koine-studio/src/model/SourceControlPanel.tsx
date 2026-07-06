@@ -64,6 +64,17 @@ function formatDate(date: string): string {
   return m ? m[1] : date;
 }
 
+/** 1–2 uppercase initials for a commit author's avatar. A multi-word name takes the first letter of its
+ *  first + last words ("Philippe Matray" → "PM"); a single word takes its first two letters ("Ada" →
+ *  "AD"); a blank/whitespace name falls back to "?". Purely decorative — the avatar is `aria-hidden`, so
+ *  these letters never pollute the reading order (the author's full name stays in the row's meta text). */
+function initials(author: string): string {
+  const parts = author.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 /** Best-effort `+added / −removed` line counts parsed from a unified diff, skipping the `+++`/`---`
  *  file headers. `GitFile` carries no line counts and `gitDiff` is lazy (per-row), so a row can only
  *  show real counts once ITS diff is open and parsed — otherwise the row falls back to a neutral
@@ -300,6 +311,9 @@ export function SourceControlPanel(props: {
   const commitDisabled = busy || committing || message.trim().length === 0 || !hasStaged;
   // Surface the current branch even when it isn't in the local list (detached HEAD / fresh branch).
   const branchOptions = status && !branches.includes(status.branch) ? [status.branch, ...branches] : branches;
+  // The recent-commit log is collapsible through the same `collapsedGroups`/`toggleGroup` infra the file
+  // groups use — its section carries `collapsed` when its label is in the set (the CSS hides the list).
+  const logCollapsed = collapsedGroups.has('Recent commits');
 
   // One file row: a status glyph, a path button that toggles the inline diff, a best-effort +/− stat
   // (swapped for the hover/focus action cluster), then the inline diff below when open. The path button's
@@ -625,19 +639,54 @@ export function SourceControlPanel(props: {
 
           {files.length === 0 && <p class="koi-docs-empty">No changes — the working tree is clean.</p>}
 
-          <section class="koi-sc-group koi-sc-log-group" aria-label="Recent commits">
-            <h4 class="koi-sc-group-title">Recent commits</h4>
+          {/* Recent commits — the same collapsible group head as the file groups (chevron toggle reusing
+              toggleGroup), with a "View all" placeholder as the header action (a full-history surface is a
+              follow-up). Each row is a mono initials avatar beside a message + SHA·author·date meta line. */}
+          <section
+            class={`koi-sc-group koi-sc-log-group${logCollapsed ? ' collapsed' : ''}`}
+            aria-label="Recent commits"
+          >
+            <div class="koi-sc-group-head">
+              <button
+                type="button"
+                class="koi-sc-group-toggle"
+                aria-expanded={!logCollapsed}
+                onClick={() => toggleGroup('Recent commits')}
+              >
+                <svg class="koi-sc-ico chev" viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M4 6.5 8 10 12 6.5" />
+                </svg>
+                Recent commits
+              </button>
+              {/* Full commit-history surface is a follow-up; a labelled placeholder for now. */}
+              <button type="button" class="koi-sc-viewall" aria-label="View all commits">
+                View all
+              </button>
+            </div>
             {log.length === 0 ? (
               <p class="koi-docs-empty">No commits yet.</p>
             ) : (
               <ul class="koi-sc-log">
                 {log.slice(0, 10).map((c) => (
                   <li key={c.sha} class="koi-sc-log-item">
-                    <code class="koi-sc-log-sha">{c.sha.slice(0, 7)}</code>
-                    <span class="koi-sc-log-msg">{c.message}</span>
-                    <span class="koi-sc-log-meta muted">
-                      {c.author} · {formatDate(c.date)}
+                    {/* Decorative accent-tinted initials avatar; aria-hidden — the author is in the meta. */}
+                    <span class="koi-sc-avatar" aria-hidden="true">
+                      {initials(c.author)}
                     </span>
+                    <div class="koi-sc-log-main">
+                      <span class="koi-sc-log-msg">{c.message}</span>
+                      <span class="koi-sc-log-meta">
+                        <code>{c.sha.slice(0, 7)}</code>
+                        <span class="sep" aria-hidden="true">
+                          ·
+                        </span>
+                        {c.author}
+                        <span class="sep" aria-hidden="true">
+                          ·
+                        </span>
+                        {formatDate(c.date)}
+                      </span>
+                    </div>
                   </li>
                 ))}
               </ul>

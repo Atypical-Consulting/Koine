@@ -303,7 +303,8 @@
   margin-bottom: 1rem;
 }
 
-/* The Recent-commits section still uses the plain <h4> title. */
+/* Superseded: the Recent-commits section now shares the collapsible `.koi-sc-group-head` treatment, so
+   this old <h4> title rule is no longer referenced (kept for Task 7's styling cleanup). */
 .koi-sc-group-title {
   display: flex;
   align-items: baseline;
@@ -624,43 +625,96 @@
   white-space: pre;
 }
 
-/* Recent commits. */
+/* Recent commits. The section reuses the file-group head (collapse toggle) with a "View all" text action
+   that links (in a follow-up) to the full history surface. */
+.koi-sc-viewall {
+  flex: none;
+  background: none;
+  border: 0;
+  color: var(--koi-accent);
+  font: inherit;
+  font-size: var(--koi-text-sm);
+  cursor: pointer;
+  padding: 3px 4px;
+  border-radius: var(--koi-radius-xs);
+
+  &:hover {
+    background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+  }
+}
+
 .koi-sc-log {
   list-style: none;
   margin: 0;
   padding: 0;
+  display: flex;
+  flex-direction: column;
 }
 
+/* Each commit row: a round initials avatar beside a message + meta column. Negative side margins bleed
+   the hover surface to the rail edges, aligning the rows with the file rows above. */
 .koi-sc-log-item {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: baseline;
-  gap: 0.2rem 0.45rem;
-  padding: 0.3rem 0.3rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--koi-fg) 8%, transparent);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 0 -0.5rem;
+  padding: 0.5rem;
+  border-radius: var(--koi-radius-sm);
 
-  &:last-child {
-    border-bottom: none;
+  &:hover {
+    background: color-mix(in srgb, var(--koi-fg) 5%, transparent);
   }
 }
 
-.koi-sc-log-sha {
-  grid-row: 1;
-  color: var(--koi-muted);
-  font-family: var(--koi-font-mono, monospace);
-  font-size: var(--koi-text-sm);
+/* Round, accent-tinted monogram of the author's initials. Decorative (aria-hidden in the markup). */
+.koi-sc-avatar {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--koi-radius-pill);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--koi-accent);
+  background: color-mix(in srgb, var(--koi-accent) 18%, transparent);
+}
+
+/* The message + meta stack that fills the remaining width beside the avatar. */
+.koi-sc-log-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .koi-sc-log-msg {
-  grid-row: 1;
   color: var(--koi-fg);
+  font-size: var(--koi-text-md);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Muted mono-ish meta: short SHA · author · date, `·`-separated. */
 .koi-sc-log-meta {
-  grid-row: 2;
-  grid-column: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--koi-muted);
   font-size: var(--koi-text-sm);
+
+  code {
+    font-family: var(--koi-font-mono);
+    font-size: var(--koi-text-2xs);
+    color: color-mix(in srgb, var(--koi-accent) 80%, var(--koi-muted));
+  }
+
+  .sep {
+    opacity: 0.5;
+  }
 }

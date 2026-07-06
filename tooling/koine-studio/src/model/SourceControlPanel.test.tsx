@@ -293,6 +293,27 @@ describe('SourceControlPanel', () => {
     await waitFor(() => expect(view.queryByRole('button', { name: /Initialize Repository/i })).toBeNull());
   });
 
+  test('the recent-commits log renders each commit as an avatar + short SHA + message, plus a View all action', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    // The Recent commits landmark keeps its accessible name (region query / axe rely on it).
+    const recent = await view.findByRole('region', { name: 'Recent commits' });
+
+    // Each log row leads with a mono avatar of the author's initials — "Ada" → "AD" (single-word name
+    // → first two letters uppercased, matching the `initials` helper).
+    const avatar = recent.querySelector('.koi-sc-avatar');
+    expect(avatar).not.toBeNull();
+    expect(avatar!.textContent).toBe('AD');
+
+    // …beside the short 7-char SHA and the commit message.
+    expect(recent.textContent).toContain('abcdef1'); // sha 'abcdef1234567'.slice(0,7)
+    expect(recent.textContent).toContain('Seed the model');
+
+    // The section header exposes a "View all" placeholder action for the (future) full-history surface.
+    expect(view.getByRole('button', { name: /View all/i })).toBeTruthy();
+  });
+
   test('has no accessibility violations', async () => {
     const git = makeGit([
       { relPath: 'a.koi', staged: true, status: 'modified' },
