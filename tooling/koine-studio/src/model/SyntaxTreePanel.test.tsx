@@ -301,6 +301,118 @@ describe('SyntaxTreePanel', () => {
     expect(view.container.querySelector('.koi-stree-item--current')).toBeNull();
   });
 
+  // --- click ↔ caret-echo interaction (#1116): a single click must survive its own caret bounce -------
+  // The panel's bidirectional sync (#890) races itself: a row click jumps the editor, the editor parks the
+  // caret at the node's END-EXCLUSIVE span end, and that caret echoes back through the store as a fresh
+  // `caret` prop. Without a guard the caret effect re-derives selection via `deepestContaining` — and since
+  // the clicked node does NOT contain its own end, it resolves to the enclosing PARENT, clobbering the
+  // click. These drive that exact sequence (click → rerender with the echoed caret) and assert the CLICKED
+  // node stays current. Reused source object across render/rerender so the fetch effect doesn't refetch and
+  // reset the highlight.
+  test('a single click keeps the clicked node selected through its own caret echo (not the parent)', async () => {
+    const onNodeClick = vi.fn();
+    const source = makeSource(spannedFixture());
+    const view = render(<SyntaxTreePanel source={source} onNodeClick={onNodeClick} />);
+
+    // Money's own span is (2,3)-(4,1); clicking it selects it, and the editor jump would park the caret at
+    // its end-exclusive end (line 4, column 1) — a point NOT inside Money's own span but inside Billing's.
+    const money = await view.findByRole('treeitem', { name: /ValueObjectDecl Money/ });
+    fireEvent.click(money);
+    expect(onNodeClick).toHaveBeenCalledTimes(1);
+
+    // The store bounces that echoed caret back as a fresh prop.
+    view.rerender(<SyntaxTreePanel source={source} onNodeClick={onNodeClick} caret={{ line: 4, column: 1 }} />);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    // The clicked node — Money — must still wear the highlight; the enclosing ContextNode must NOT.
+    const moneyAfter = view.getByRole('treeitem', { name: /ValueObjectDecl Money/ });
+    const billing = view.getByRole('treeitem', { name: /ContextNode Billing/ });
+    expect(moneyAfter.className).toContain('koi-stree-item--current');
+    expect(moneyAfter.getAttribute('aria-current')).toBe('true');
+    expect(billing.className).not.toContain('koi-stree-item--current');
+    expect(view.container.querySelectorAll('.koi-stree-item--current').length).toBe(1);
+  });
+
+  test('Enter keeps the activated node selected through its own caret echo (keyboard parity)', async () => {
+    const onNodeClick = vi.fn();
+    const source = makeSource(spannedFixture());
+    const view = render(<SyntaxTreePanel source={source} onNodeClick={onNodeClick} />);
+
+    // Keyboard activation goes through the same editor jump, so it needs the same echo guard.
+    const money = await view.findByRole('treeitem', { name: /ValueObjectDecl Money/ });
+    money.focus();
+    fireEvent.keyDown(money, { key: 'Enter' });
+    expect(onNodeClick).toHaveBeenCalledTimes(1);
+
+    view.rerender(<SyntaxTreePanel source={source} onNodeClick={onNodeClick} caret={{ line: 4, column: 1 }} />);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    const moneyAfter = view.getByRole('treeitem', { name: /ValueObjectDecl Money/ });
+    expect(moneyAfter.className).toContain('koi-stree-item--current');
+    expect(moneyAfter.getAttribute('aria-current')).toBe('true');
+    expect(view.container.querySelectorAll('.koi-stree-item--current').length).toBe(1);
+  });
+
+  test('a genuine (non-echo) caret move after a click is still honored — the guard only swallows the echo', async () => {
+    const onNodeClick = vi.fn();
+    const source = makeSource(spannedFixture());
+    const view = render(<SyntaxTreePanel source={source} onNodeClick={onNodeClick} />);
+
+    const money = await view.findByRole('treeitem', { name: /ValueObjectDecl Money/ });
+    fireEvent.click(money); // arms the echo guard for the predicted end-exclusive caret (line 4, column 1)…
+
+    // …but a REAL caret move lands inside Member (line 3, col 10) — not the predicted echo — so the tree
+    // must re-derive selection onto the deepest containing node (Member), proving the guard consumes itself
+    // and never lingers to swallow a genuine editor → tree caret move.
+    view.rerender(<SyntaxTreePanel source={source} onNodeClick={onNodeClick} caret={{ line: 3, column: 10 }} />);
+    const member = await view.findByRole('treeitem', { name: /Member amount/ });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    expect(member.className).toContain('koi-stree-item--current');
+    expect(member.getAttribute('aria-current')).toBe('true');
+    expect(view.container.querySelectorAll('.koi-stree-item--current').length).toBe(1);
+  });
+
+  test('the echo guard is consumed on every caret effect — a stale echo never swallows a later genuine move', async () => {
+    const onNodeClick = vi.fn();
+    const source = makeSource(spannedFixture());
+    const view = render(<SyntaxTreePanel source={source} onNodeClick={onNodeClick} />);
+
+    const money = await view.findByRole('treeitem', { name: /ValueObjectDecl Money/ });
+    fireEvent.click(money); // arms the guard for the predicted echo {line: 4, column: 1}
+
+    // A genuine caret move that is NOT the echo lands inside Member (line 3, col 10) — a MISS, which must
+    // still CONSUME the armed echo rather than leave it stale. Member becomes current.
+    view.rerender(<SyntaxTreePanel source={source} onNodeClick={onNodeClick} caret={{ line: 3, column: 10 }} />);
+    const member = await view.findByRole('treeitem', { name: /Member amount/ });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(member.className).toContain('koi-stree-item--current');
+
+    // A LATER genuine caret move to the coord that WAS the predicted echo {4,1} must re-derive normally to
+    // the enclosing Billing — proving the earlier MISS consumed the ref, not left a stale {4,1} that would
+    // wrongly swallow this move. Locks the "consume on every caret effect, match or miss" invariant; a guard
+    // that cleared the ref only on a match would keep Money highlighted here instead of Billing.
+    view.rerender(<SyntaxTreePanel source={source} onNodeClick={onNodeClick} caret={{ line: 4, column: 1 }} />);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    const billing = view.getByRole('treeitem', { name: /ContextNode Billing/ });
+    expect(billing.className).toContain('koi-stree-item--current');
+    expect(view.getByRole('treeitem', { name: /ValueObjectDecl Money/ }).className).not.toContain(
+      'koi-stree-item--current',
+    );
+    expect(view.container.querySelectorAll('.koi-stree-item--current').length).toBe(1);
+  });
+
   test('has no accessibility violations', async () => {
     const view = render(<SyntaxTreePanel source={makeSource(fixture())} />);
     await view.findByRole('tree', { name: /Syntax tree/i });
