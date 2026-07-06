@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { KoineLsp } from '@/lsp/lsp';
-import type { CallHierarchyItem } from '@/lsp/lsp';
+import type { CallHierarchyItem, SyntaxTreeNode } from '@/lsp/lsp';
 import type { LspTransport } from '@/host/types';
 
 // Document-sync protocol coverage for KoineLsp, driven through a fake LspTransport that records every
@@ -181,6 +181,35 @@ function responder(reply: (method: string, params: any) => unknown) {
   return { lsp, sent };
 }
 
+// Like responder(), but answers every request with a JSON-RPC error instead of a result — models a
+// host that doesn't implement the method (e.g. an older desktop LSP build predating koine/syntaxTree),
+// so the request promise rejects. A guarded caller must swallow that and degrade to null.
+function errorResponder(code: number, message: string) {
+  const sent: Sent[] = [];
+  let onMessage: ((json: string) => void) | undefined;
+  const transport: LspTransport = {
+    start: () => Promise.resolve(),
+    send: (m: string) => {
+      const msg = JSON.parse(m) as Sent;
+      sent.push(msg);
+      if (msg.id != null) {
+        queueMicrotask(() => onMessage?.(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code, message } })));
+      }
+      return Promise.resolve();
+    },
+    onMessage: (cb) => {
+      onMessage = cb;
+    },
+    onExit: () => {},
+    onRestart: () => {},
+    stop: () => Promise.resolve(),
+  };
+  transport.onMessage((json) => lsp['handle'](JSON.parse(json)));
+  const lsp = new KoineLsp(transport);
+  lsp.setActive(URI);
+  return { lsp, sent };
+}
+
 const lastReq = (sent: Sent[], method: string) => {
   const all = byMethod(sent, method);
   return all[all.length - 1];
@@ -255,6 +284,49 @@ describe('KoineLsp call hierarchy', () => {
   test('outgoingCalls maps a null result to []', async () => {
     const { lsp } = responder(() => null);
     expect(await lsp.outgoingCalls(ITEM)).toEqual([]);
+  });
+});
+
+// A concrete syntax-tree node fixture matching the koine/syntaxTree wire shape (#890): the all-zero
+// KoineModel root over one ValueObjectDecl child, spans in RAW 1-based, end-exclusive source
+// coordinates (NOT a 0-based LSP range).
+const SYNTAX_TREE: SyntaxTreeNode = {
+  kind: 'KoineModel',
+  name: null,
+  span: { line: 0, column: 0, endLine: 0, endColumn: 0, offset: 0, length: 0, file: null },
+  isMissing: false,
+  isError: false,
+  leaf: null,
+  children: [
+    {
+      kind: 'ValueObjectDecl',
+      name: 'Money',
+      span: { line: 2, column: 3, endLine: 2, endColumn: 34, offset: 20, length: 30, file: URI },
+      isMissing: false,
+      isError: false,
+      leaf: null,
+      children: [],
+    },
+  ],
+};
+
+describe('KoineLsp syntax tree (#890)', () => {
+  test('syntaxTree() sends koine/syntaxTree with the active uri and returns the typed tree', async () => {
+    const { lsp, sent } = responder(() => SYNTAX_TREE);
+    const res = await lsp.syntaxTree();
+    const req = lastReq(sent, 'koine/syntaxTree');
+    expect(req.params.textDocument).toEqual({ uri: URI });
+    expect(res).toEqual(SYNTAX_TREE);
+  });
+
+  test('maps a null result (unknown/absent active uri) to null', async () => {
+    const { lsp } = responder(() => null);
+    expect(await lsp.syntaxTree()).toBeNull();
+  });
+
+  test('an unsupported host (the request errors) resolves to null instead of throwing', async () => {
+    const { lsp } = errorResponder(-32601, 'method not found: koine/syntaxTree');
+    await expect(lsp.syntaxTree()).resolves.toBeNull();
   });
 });
 
