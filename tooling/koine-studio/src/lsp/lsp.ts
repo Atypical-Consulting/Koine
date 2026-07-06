@@ -42,6 +42,7 @@ import type {
   SetDocResult,
   SignatureHelp,
   StructuredEdit,
+  SyntaxTreeNode,
   TextEdit,
   WorkspaceEdit,
   WorkspaceSymbol,
@@ -624,6 +625,23 @@ export class KoineLsp {
       textDocument: { uri: this.activeUri },
     });
     return res ?? [];
+  }
+
+  /**
+   * Raw syntax tree of the active document — one node per grammar construct, spans in RAW 1-based,
+   * end-exclusive source coordinates (issue #890). Resolves to null when the server returns null (an
+   * unknown/absent active uri) and, guarded, when the request itself fails — an older LSP build that
+   * doesn't implement `koine/syntaxTree` degrades to an empty panel rather than throwing.
+   */
+  async syntaxTree(): Promise<SyntaxTreeNode | null> {
+    try {
+      const res = await this.request<SyntaxTreeNode | null>('koine/syntaxTree', {
+        textDocument: { uri: this.activeUri },
+      });
+      return res ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /** Collapsible regions of the active document. Resolves to [] when the server returns null. */

@@ -16,7 +16,7 @@ export type BottomTab = 'problems' | 'events' | 'relationships' | 'terminal' | '
 // The AI assistant docks in the right rail (a RightView), not the center — it can stay open beside
 // Code/Canvas while you work, rather than competing for the main stage as a center tab. (Rules + Notes
 // were retired in #730: invariants show in Properties, Notes lives in the Deck's Docs surface.)
-export type RightView = 'props' | 'assistant' | 'source-control';
+export type RightView = 'props' | 'assistant' | 'source-control' | 'syntax-tree';
 // Compile-time proof RightView and koine-ui's RightStripView (the right-strip's rendered button set) stay
 // in lockstep: the right-strip switcher reads `data-rview` values the JSX emits, so a divergence between the
 // two unions would silently drop a switcher. The tuple annotation forces both `extends` directions to

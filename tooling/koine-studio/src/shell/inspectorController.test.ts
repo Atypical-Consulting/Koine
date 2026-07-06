@@ -35,6 +35,7 @@ import type {
   ModelNode,
   SetDocResult,
   SourceSpan,
+  SyntaxTreeNode,
 } from '@/lsp/lsp';
 
 // --- DOM seed ----------------------------------------------------------------
@@ -101,6 +102,7 @@ const APP_HTML = `
           <div id="inspector-host" class="rview" role="tabpanel"></div>
           <section id="view-assistant" class="rview" role="tabpanel" hidden></section>
           <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>
+          <div id="rview-syntax-tree" class="rview doc-view" role="tabpanel" hidden></div>
         </div>
       </aside>
       <div id="right-strip" class="pane" role="toolbar" aria-label="Tool windows" aria-orientation="vertical"></div>
@@ -149,6 +151,31 @@ function glossaryFixture(): GlossaryModel {
   return { entries };
 }
 
+// A minimal two-level syntax tree (root + one context child), so the SyntaxTreePanel renders a non-empty
+// tree rather than its empty state, and the panel's fetch is observable via the spy's call count.
+function syntaxTreeFixture(): SyntaxTreeNode {
+  const zeroSpan = { line: 0, column: 0, endLine: 0, endColumn: 0, offset: 0, length: 0, file: null };
+  return {
+    kind: 'KoineModel',
+    name: null,
+    span: zeroSpan,
+    isMissing: false,
+    isError: false,
+    leaf: null,
+    children: [
+      {
+        kind: 'ContextNode',
+        name: 'Billing',
+        span: { line: 1, column: 1, endLine: 3, endColumn: 1, offset: 0, length: 20, file: 'file:///work/model.koi' },
+        isMissing: false,
+        isError: false,
+        leaf: null,
+        children: [],
+      },
+    ],
+  };
+}
+
 // --- LSP stub ----------------------------------------------------------------
 // The content surface the loaders call, every method a vi.fn so a test can assert call counts (the
 // lazy-load-once / refetch-after-invalidate contracts) and swap return values per test.
@@ -169,6 +196,7 @@ function makeLsp() {
     check: vi.fn(async (): Promise<CheckResult> => ({ hasBreakingChanges: false, changes: [] })),
     setDoc: vi.fn(async (): Promise<SetDocResult> => ({ uri: null, edits: [] })),
     documentSymbols: vi.fn(async (): Promise<DocumentSymbol[]> => []),
+    syntaxTree: vi.fn(async (): Promise<SyntaxTreeNode | null> => syntaxTreeFixture()),
   };
 }
 type Lsp = ReturnType<typeof makeLsp>;
@@ -1083,6 +1111,131 @@ describe('createInspectorController — Source Control live refresh-on-save (#47
   });
 });
 
+// Real timers + waitFor throughout: the SyntaxTreePanel fetches in its own useEffect (a rAF/macrotask
+// under happy-dom, like the SourceControl panel), so assertions poll rather than flushing a microtask.
+describe('createInspectorController — Syntax Tree right view (#890)', () => {
+  test('selecting the Syntax Tree stripe mounts the panel, titles it, and hides the other rviews', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    // Click the Syntax Tree stripe icon (the user path: stripe click → selectRightView → loadSyntaxTree).
+    stripBtn('syntax-tree').click();
+    expect(deps.store.getState().right).toBe('syntax-tree');
+    expect(stripBtn('syntax-tree').getAttribute('aria-pressed')).toBe('true');
+    expect(domById('right-title').textContent).toBe('Syntax Tree');
+
+    // The panel owns its own fetch: it pulls the tree and renders the WAI-ARIA tree into #rview-syntax-tree.
+    await waitFor(() => expect(lsp.syntaxTree.mock.calls.length).toBeGreaterThanOrEqual(1));
+    const host = domById('rview-syntax-tree');
+    await waitFor(() => expect(host.querySelector('[role="tree"]')).not.toBeNull());
+    expect(host.hidden).toBe(false);
+
+    // The other right views are hidden while Syntax Tree is active.
+    expect(domById('inspector-host').hidden).toBe(true);
+    expect(domById('view-assistant').hidden).toBe(true);
+    expect(domById('rview-source-control').hidden).toBe(true);
+    ctl.dispose();
+  });
+
+  test('a doc edit while the Syntax Tree view is active refetches the tree (debounced)', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    stripBtn('syntax-tree').click();
+    await waitFor(() => expect(lsp.syntaxTree.mock.calls.length).toBeGreaterThanOrEqual(1));
+    const afterOpen = lsp.syntaxTree.mock.calls.length;
+
+    // An edit invalidates every model-derived surface (incl. the 'syntax-tree' docViews key) and, after the
+    // 350ms debounce, refreshActiveSurfaces reloads the active right view — bumping the panel's revision,
+    // which drives the panel's own re-fetch.
+    ctl.onDocEdited();
+    await waitFor(() => expect(lsp.syntaxTree.mock.calls.length).toBeGreaterThan(afterOpen), { timeout: 2000 });
+    ctl.dispose();
+  });
+
+  test('a doc edit while Syntax Tree is NOT the active view does not refetch it', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init(); // boots with Properties as the active right view
+
+    ctl.onDocEdited();
+    await new Promise((r) => setTimeout(r, 450)); // past the 350ms debounce — give an (erroneous) fetch time to fire
+    expect(lsp.syntaxTree).not.toHaveBeenCalled();
+    ctl.dispose();
+  });
+
+  test('clicking a node jumps the editor to its span; the zero-span root is a no-op (#890)', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    stripBtn('syntax-tree').click();
+    const host = domById('rview-syntax-tree');
+    // Wait for the panel to mount its tree, then click the Billing context row (a leaf in this fixture).
+    const ctxRow = await waitFor(() => {
+      const el = host.querySelector<HTMLElement>('[role="treeitem"][aria-label*="ContextNode Billing"]');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    ctxRow.click();
+    // Tree → editor: the node's raw span is handed to the shared jump-to-source path.
+    expect(deps.gotoSourceSpan).toHaveBeenCalledWith(
+      expect.objectContaining({ file: 'file:///work/model.koi', line: 1, column: 1, endLine: 3, endColumn: 1 }),
+    );
+
+    // The KoineModel root carries an all-zero span (line 0): clicking it must never jump to 0:0.
+    vi.mocked(deps.gotoSourceSpan).mockClear();
+    host.querySelector<HTMLElement>('[role="treeitem"][aria-label*="KoineModel"]')!.click();
+    expect(deps.gotoSourceSpan).not.toHaveBeenCalled();
+    ctl.dispose();
+  });
+
+  test('a caret move while the Syntax Tree view is active highlights the deepest containing node (#890)', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+
+    stripBtn('syntax-tree').click();
+    const host = domById('rview-syntax-tree');
+    await waitFor(() => expect(host.querySelector('[role="tree"]')).not.toBeNull());
+
+    // The editor publishes a caret inside Billing's span (lines 1–3) via the store's cursor slice.
+    deps.store.getState().setCursor(2, 1);
+
+    // Debounced (~120ms): the controller re-renders the panel with the new caret, which marks the deepest
+    // containing node (the Billing context — the root is span-less) as current.
+    await waitFor(
+      () => {
+        const current = host.querySelector('.koi-stree-item--current');
+        expect(current?.getAttribute('aria-label')).toMatch(/ContextNode Billing/);
+      },
+      { timeout: 2000 },
+    );
+    ctl.dispose();
+  });
+
+  test('a caret move while Syntax Tree is NOT the active view is a no-op (#890)', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init(); // Properties is the active right view; the Syntax Tree panel is never mounted
+
+    deps.store.getState().setCursor(2, 1);
+    await new Promise((r) => setTimeout(r, 200)); // past the 120ms caret debounce
+    // The panel was never mounted/rendered, so no tree (and no highlight) exists in its host.
+    expect(domById('rview-syntax-tree').querySelector('[role="tree"]')).toBeNull();
+    expect(lsp.syntaxTree).not.toHaveBeenCalled();
+    ctl.dispose();
+  });
+});
+
 describe('createInspectorController — construct palette', () => {
   test('clicking an enabled palette button calls onAddConstruct with its kind', () => {
     const onAddConstruct = vi.fn();
@@ -1201,7 +1354,7 @@ describe('createInspectorController — right-edge tool-window stripe (#500)', (
     const ctl = createInspectorController(makeDeps(makeLsp()));
     ctl.init();
     expect(splitEl().classList.contains('right-collapsed')).toBe(true);
-    for (const v of ['props', 'assistant', 'source-control']) {
+    for (const v of ['props', 'assistant', 'source-control', 'syntax-tree']) {
       expect(stripBtn(v).getAttribute('aria-pressed')).toBe('false');
     }
     ctl.dispose();
@@ -1421,7 +1574,7 @@ describe('createInspectorController — collapsed Properties panel + selection f
     // Pre-condition: panel is collapsed and no button is pressed.
     expect(domById('split').classList.contains('right-collapsed')).toBe(true);
     expect(deps.store.getState().rightCollapsed).toBe(true);
-    for (const v of ['props', 'assistant', 'source-control']) {
+    for (const v of ['props', 'assistant', 'source-control', 'syntax-tree']) {
       expect(stripBtn(v).getAttribute('aria-pressed')).toBe('false');
     }
 
@@ -1436,7 +1589,7 @@ describe('createInspectorController — collapsed Properties panel + selection f
     expect(stripBtn('props').classList.contains('rstrip-notify')).toBe(true);
 
     // None of the stripe buttons should be pressed (collapsed → all false).
-    for (const v of ['props', 'assistant', 'source-control']) {
+    for (const v of ['props', 'assistant', 'source-control', 'syntax-tree']) {
       expect(stripBtn(v).getAttribute('aria-pressed')).toBe('false');
     }
 

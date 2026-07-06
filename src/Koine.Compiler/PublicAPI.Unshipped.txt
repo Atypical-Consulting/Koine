@@ -164,6 +164,7 @@ Koine.Compiler.Services.KoineLanguageService.RenamePreviewAt(Koine.Compiler.Serv
 Koine.Compiler.Services.KoineLanguageService.RenamePreviewAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character, string! newName) -> Koine.Compiler.Services.RenamePreview?
 Koine.Compiler.Services.KoineLanguageService.Subtypes(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.TypeHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
 Koine.Compiler.Services.KoineLanguageService.Supertypes(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.TypeHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
+Koine.Compiler.Services.KoineLanguageService.SyntaxTree(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri) -> Koine.Compiler.Services.SyntaxTreeNode?
 Koine.Compiler.Services.KoineLanguageService.WorkspaceSymbols(Koine.Compiler.Services.KoineCompilation! compilation, string! query) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.WorkspaceSymbol!>!
 Koine.Compiler.Services.ModelEditResult
 Koine.Compiler.Services.ModelEditResult.Diagnostics.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>!
@@ -243,6 +244,23 @@ Koine.Compiler.Services.StructuredEdit.Type.init -> void
 Koine.Compiler.Services.StructuredEdit.Value.get -> string?
 Koine.Compiler.Services.StructuredEdit.Value.init -> void
 Koine.Compiler.Services.StructuredEditKind
+Koine.Compiler.Services.SyntaxTreeNode
+Koine.Compiler.Services.SyntaxTreeNode.Children.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SyntaxTreeNode!>!
+Koine.Compiler.Services.SyntaxTreeNode.Children.init -> void
+Koine.Compiler.Services.SyntaxTreeNode.IsError.get -> bool
+Koine.Compiler.Services.SyntaxTreeNode.IsError.init -> void
+Koine.Compiler.Services.SyntaxTreeNode.IsMissing.get -> bool
+Koine.Compiler.Services.SyntaxTreeNode.IsMissing.init -> void
+Koine.Compiler.Services.SyntaxTreeNode.Kind.get -> string!
+Koine.Compiler.Services.SyntaxTreeNode.Kind.init -> void
+Koine.Compiler.Services.SyntaxTreeNode.Leaf.get -> string?
+Koine.Compiler.Services.SyntaxTreeNode.Leaf.init -> void
+Koine.Compiler.Services.SyntaxTreeNode.Name.get -> string?
+Koine.Compiler.Services.SyntaxTreeNode.Name.init -> void
+Koine.Compiler.Services.SyntaxTreeNode.Span.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Services.SyntaxTreeNode.Span.init -> void
+Koine.Compiler.Services.SyntaxTreeNode.SyntaxTreeNode(string! Kind, string? Name, Koine.Compiler.Ast.SourceSpan Span, bool IsMissing, bool IsError, string? Leaf, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SyntaxTreeNode!>! Children) -> void
+Koine.Compiler.Services.SyntaxTreeProvider
 Koine.Compiler.Services.TypeHierarchyItem
 Koine.Compiler.Services.TypeHierarchyItem.Context.get -> string?
 Koine.Compiler.Services.TypeHierarchyItem.Context.init -> void
@@ -307,4 +325,5 @@ static Koine.Compiler.Services.ScenarioService.Catalog(Koine.Compiler.Ast.Semant
 static Koine.Compiler.Services.ScenarioService.Error(string! target, string! operation, string! note) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.Run(Koine.Compiler.Ast.SemanticModel! semantic, string! target, string! operation, System.Text.Json.JsonElement given, System.Text.Json.JsonElement args) -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
 static Koine.Compiler.Services.ScenarioService.WriteJson(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! tree) -> string!
+static Koine.Compiler.Services.SyntaxTreeProvider.Build(Koine.Compiler.Ast.KoineNode! root, string! source) -> Koine.Compiler.Services.SyntaxTreeNode!
 static Koine.Compiler.Services.VersionInfo.Display(System.Reflection.Assembly! assembly) -> string!

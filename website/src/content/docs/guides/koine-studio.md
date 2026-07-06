@@ -124,6 +124,18 @@ Koine Studio surfaces the **enriched** language server, the same one the VS Code
   a labelled region behind its member nodes and follows them as they move.
 - **Hover & navigation** — type/member hover cards and go-to-definition, served by the same LSP that
   powers the editors.
+- **Syntax tree** — a right-rail panel (the tree glyph in the tool stripe, beside Properties / AI Chat /
+  Source Control) that renders the **raw parse tree** of the active `.koi` file — the Koine equivalent of
+  Roslyn's *Syntax Visualizer*. One collapsible row per parse node shows its **kind** (the node's type
+  name, e.g. `ValueObjectDecl`, `Invariant`, `BinaryExpr`), its **name** where it has one, and its
+  **source span**. It's fed by a target-agnostic `koine/syntaxTree` request that walks the compiler's
+  grammar-agnostic syntax graph, so **every present and future grammar construct appears automatically**,
+  with no per-node code. Because the tree is built over Koine's **error-tolerant** parse, a half-typed
+  file still yields a recovered tree: `ErrorNode` and inserted-`IsMissing` nodes render with a distinct
+  style rather than blanking the panel — the point, not a failure. Navigation is **bidirectional**: click
+  a node to select its span in the editor, or move the caret to highlight the deepest node whose span
+  contains it. The tree collapses below the top-level contexts by default and expands on demand, and the
+  rows are a keyboard-navigable ARIA tree. Works in both the browser and desktop hosts.
 - **Workspace search & replace** — press **`Mod`+`Shift`+`F`** (⌘/Ctrl) to open the search panel and
   find a term across **every `.koi` file** in the open folder, including unsaved buffers. Toggle
   **match case**, **whole word**, and **regular expression** (with `$1` capture groups in the

@@ -1,0 +1,128 @@
+/* --- Syntax Tree right-rail panel (#890) -------------------------------------------------------
+   The active document's raw parse tree in the Properties rail: one row per grammar construct, rendered
+   as a keyboard-navigable WAI-ARIA tree (roving tabindex, ArrowUp/Down/Left/Right, Enter/Space). Shares
+   the docs/rview vocabulary (the empty state reuses `.koi-rview-empty`) so it reads of a piece with the
+   other rail panels. Error-recovery rows (`--error` / `--missing`) get a distinct, muted-danger tint so a
+   half-typed file's recovered tree is legible without shouting. */
+.koi-stree {
+  padding: 0.5rem 0.55rem 1.25rem;
+  font-size: var(--koi-text-base-plus);
+  min-height: 0;
+}
+
+.koi-stree-empty {
+  padding: 0.5rem 0.7rem;
+}
+
+/* The scrollable tree body: a wide tree scrolls inside its own region rather than pushing the rail. */
+.koi-stree-scroll {
+  overflow: auto;
+  max-height: 100%;
+
+  &:focus-visible {
+    outline: none;
+  }
+}
+
+/* One node row. The treeitem is the focusable unit; the row is its visible line. */
+.koi-stree-item {
+  border-radius: var(--koi-radius-sm);
+
+  /* The roving-tabindex focus ring lands on the treeitem itself. */
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: -1px;
+  }
+}
+
+.koi-stree-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.12rem 0.3rem;
+  border-radius: var(--koi-radius-sm);
+  cursor: default;
+  white-space: nowrap;
+
+  .koi-stree-item:hover > & {
+    background: color-mix(in srgb, var(--koi-fg) 6%, transparent);
+  }
+}
+
+/* The expand/collapse chevron — decorative (aria-hidden); a fixed slot keeps kinds column-aligned. */
+.koi-stree-twisty {
+  flex: none;
+  width: 0.85em;
+  text-align: center;
+  color: var(--koi-muted);
+  font-size: var(--koi-text-sm);
+  cursor: pointer;
+}
+
+.koi-stree-twisty--leaf {
+  cursor: default;
+}
+
+/* The grammar construct — the primary token, tinted like a type in the highlighter. */
+.koi-stree-kind {
+  color: var(--koi-hl-type, var(--koi-fg));
+  font-weight: 600;
+}
+
+/* The declaration identifier, when the node has one. */
+.koi-stree-name {
+  color: var(--koi-fg);
+}
+
+/* A recovery marker chip on an error / missing row. */
+.koi-stree-badge {
+  flex: none;
+  padding: 0 0.3rem;
+  border-radius: var(--koi-radius-sm);
+  font-size: var(--koi-text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.koi-stree-badge--error {
+  color: var(--koi-error, #b00020);
+  background: color-mix(in srgb, var(--koi-error, #b00020) 14%, transparent);
+}
+
+.koi-stree-badge--missing {
+  color: var(--koi-muted);
+  background: color-mix(in srgb, var(--koi-fg) 10%, transparent);
+}
+
+/* A truncated source preview shown on a leaf row (decorative — the aria-label carries it for AT). */
+.koi-stree-leaf {
+  color: var(--koi-hl-string, var(--koi-muted));
+  font-family: var(--koi-font-mono, monospace);
+  font-size: var(--koi-text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Error-recovery rows: a subtle danger tint on the whole row so the recovered subtree stands apart. */
+.koi-stree-item--error > .koi-stree-row {
+  background: color-mix(in srgb, var(--koi-error, #b00020) 8%, transparent);
+
+  .koi-stree-kind {
+    color: var(--koi-error, #b00020);
+  }
+}
+
+.koi-stree-item--missing > .koi-stree-row {
+  .koi-stree-kind {
+    color: var(--koi-muted);
+    font-style: italic;
+  }
+}
+
+/* The active node (#890, source ↔ tree navigation): the row the editor caret currently sits in, or the
+   one just clicked. A distinct accent wash so it stands apart from the subtle hover feedback — only ever
+   one node is `--current` at a time. Doubly-classed so it wins over the equal-specificity hover rule even
+   while the current row is itself hovered. */
+.koi-stree-item.koi-stree-item--current > .koi-stree-row {
+  background: color-mix(in srgb, var(--koi-accent) 20%, transparent);
+}

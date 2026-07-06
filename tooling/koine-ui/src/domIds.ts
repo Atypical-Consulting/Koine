@@ -23,7 +23,7 @@ export const DATA_LEXPAND = 'data-lexpand';
 export const RSTRIP_BTN_CLASS = 'rstrip-btn';
 export const DATA_RVIEW = 'data-rview';
 
-export const RIGHT_STRIP_VIEWS = ['props', 'assistant', 'source-control'] as const;
+export const RIGHT_STRIP_VIEWS = ['props', 'assistant', 'source-control', 'syntax-tree'] as const;
 export type RightStripView = (typeof RIGHT_STRIP_VIEWS)[number];
 
 export const byId = (id: string): string => `#${id}`;

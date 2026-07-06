@@ -262,6 +262,15 @@
                 <p class="muted">Loading source control…</p>
               </div>
             </div>
+            <!-- The Syntax Tree panel (#890) is painted by inspectorController on the first tab open
+                 (SyntaxTreePanel mounts the parse-tree view + owns its own fetch). The static content
+                 below is a pre-hydration fallback, replaced once the controller hydrates. -->
+            <div id="rview-syntax-tree" class="rview doc-view" role="tabpanel" hidden>
+              <div class="koi-rview-empty">
+                <h3 class="koi-rview-empty-title">Syntax tree</h3>
+                <p class="muted">Loading syntax tree…</p>
+              </div>
+            </div>
           </div>
         </aside>
 

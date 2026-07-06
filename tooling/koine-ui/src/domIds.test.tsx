@@ -59,7 +59,7 @@ describe('domIds — literal pins', () => {
   });
 
   it('RIGHT_STRIP_VIEWS deep-equals the right-rail view order', () => {
-    expect(RIGHT_STRIP_VIEWS).toEqual(['props', 'assistant', 'source-control']);
+    expect(RIGHT_STRIP_VIEWS).toEqual(['props', 'assistant', 'source-control', 'syntax-tree']);
   });
 
   it('the selector builders compose the pinned ids/attrs', () => {
@@ -86,7 +86,7 @@ describe('domIds — create-side tie', () => {
   it('the right strip emits one rstrip-btn per RIGHT_STRIP_VIEWS', () => {
     mountStrip();
     const buttons = [...document.querySelectorAll<HTMLElement>('.' + RSTRIP_BTN_CLASS + '[' + DATA_RVIEW + ']')];
-    expect(buttons).toHaveLength(3);
+    expect(buttons).toHaveLength(4);
     const views = new Set(buttons.map((b) => b.getAttribute(DATA_RVIEW)));
     expect(views).toEqual(new Set(RIGHT_STRIP_VIEWS));
   });
