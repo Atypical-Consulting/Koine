@@ -47,8 +47,27 @@
   `priority: low` (Tier 3 — differentiator / polish)
 - **Effort sizes:** `effort: S` (~hours–1 day) · `effort: M` (~a few days) ·
   `effort: L` (~1–2 weeks / cross-layer) · `effort: XL` (multi-week / phased)
-- **Scope/area:** `studio` — when the work concerns the Koine Studio IDE (`tooling/koine-studio`).
-  Don't invent other area labels; finer scope is captured by the issue-template *Area* dropdown.
+- **Area (exactly one per issue — the queryable functional area):**
+  `area: studio` (Koine Studio IDE, `tooling/koine-studio`) ·
+  `area: emit-cs` · `area: emit-ts` · `area: emit-py` · `area: emit-php` · `area: emit-rust` ·
+  `area: emit-kotlin` · `area: emit-java` (per-language emitters, `src/Koine.Emit.<Lang>`) ·
+  `area: emit-docs` (AsyncApi/OpenApi/GBNF/Glossary/Docs emitters) ·
+  `area: emit-core` (cross-target / shared emitter infra, `Koine.Emit.Common`) ·
+  `area: semantics` (semantic model & validation, `Ast/`, `Semantics/`) ·
+  `area: language` (grammar/lexer/parser, `.g4`, parse robustness) ·
+  `area: cli` (CLI/LSP/MCP/fmt/watch/editor tooling, `Services/`) ·
+  `area: docs` (docs site & website, `website/`, README) ·
+  `area: ci` (CI, build, release, test infra, dependency bumps) ·
+  `area: templates` (templates & demo domains, `templates/`, `demo/`).
+- **Studio sub-area (add ALSO on `area: studio` issues — the granular panel/feature tag):**
+  `studio: syntax-tree` (semantic/parse-tree view panel) · `studio: explorer` (files/workspace/save/load/OPFS) ·
+  `studio: settings` (settings & settings.json editor) · `studio: shell` (layout/panels/rails/tabs/properties) ·
+  `studio: canvas` (domain diagram / maxGraph) · `studio: web` (WASM boot/deploy/workers) ·
+  `studio: ai` (assistant/apply-gate/change-set) · `studio: terminal` · `studio: editor` (CodeMirror/highlight/semantic tokens) ·
+  `studio: desktop` (Tauri host) · `studio: mobile` (responsive/touch).
+  If a genuinely new Studio sub-area appears with no fitting label, **create** the `studio: <slug>` label
+  rather than dropping to `area: studio` alone — that's how the taxonomy grows honestly. Non-Studio areas
+  stay flat until one earns sub-labels by volume; don't pre-create empty sub-namespaces.
 
 ## Issue templates
 - **Location:** `.github/ISSUE_TEMPLATE/`
