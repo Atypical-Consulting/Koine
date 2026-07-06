@@ -49,6 +49,15 @@ export default defineConfig({
 		sitemap(),
 		starlight({
 			title: 'Koine',
+			// The hexagon-κ brand mark (issue #1141): a lowercase kappa inscribed in the
+			// ports-and-adapters hexagon. `light`/`dark` pick the ink mark on the light theme
+			// and the accent mark on the dark theme so it reads on either header background;
+			// replacesTitle is left false to keep the "Koine" wordmark beside the mark.
+			logo: {
+				light: './src/assets/koine-mark-ink.svg',
+				dark: './src/assets/koine-mark.svg',
+				alt: 'Koine',
+			},
 			description:
 				'Koine is a domain-specific language for Domain-Driven Design: write the ubiquitous language once in .koi files and generate idiomatic, self-contained C# (and TypeScript) — value objects, entities, aggregates, invariants, commands, events, state machines, CQRS and context maps.',
 			social: [
