@@ -50,7 +50,7 @@ Create a task per item and complete in order. For a batch of ideas, run steps 2-
 4. **Build the template-compliant body fields** — read the live issue template and fill it.
 5. **Brainstorm + Spec** — collapsible `<details>` sections (via `superpowers:brainstorming`).
 6. **Implementation plan** (via `superpowers:writing-plans`) — a *visible* section whose `- [ ]` checkboxes feed the progress meter; never inside a `<details>`.
-7. **Assemble the description, choose labels, create the issue** — one body, one `gh issue create`, labels (type + priority + effort + any scope) from the profile, then read the issue back.
+7. **Assemble the description, choose labels, create the issue** — one body, one `gh issue create`, labels (type + priority + effort + area, plus a `studio:` sub-area for Studio work) from the profile, then read the issue back.
 8. **Report** — list each issue with its URL, point the user at `/implement-issue`.
 
 ---
@@ -110,6 +110,7 @@ cat .github/ISSUE_TEMPLATE/feature_request.yml
 - Use **feature_request** for ideas/enhancements (common case); `bug_report` only for a clear defect.
 - For each `textarea`/`input` field, emit a `## <label>` heading and fill it. Honor `validations.required`.
 - For each `dropdown`, pick the best-fitting option and write it under its heading, verbatim from the live YAML.
+- The **Area** dropdown mirrors the profile's `area:` labels — pick the option matching the `area:` label you'll apply in Step 7 so the body and the label agree.
 - The template's declared `labels:` apply at creation in Step 7, not in the body.
 
 See `references/issue-template.md` for a worked feature_request example and the exact field→heading
@@ -226,9 +227,17 @@ Pick one label per axis (none are guesses — your analysis already implies them
 - **Type** — feature/idea for the common case (what feature_request declares), or bug for a defect; match the template you built from.
 - **Priority** — exactly one tier (the judgment your brainstorm's Recommendation makes).
 - **Effort** — exactly one size, the one you settled on in Step 6.
-- **Scope** — a profile scope label when the idea falls in its area; don't invent area labels (the *Area* dropdown captures finer scope in the body).
+- **Area** — **exactly one** `area: …` label (the profile's *Labels → Area* list). This is the queryable
+  functional-area tag, so a whole area is one filter away (`gh issue list --label "area: emit-php"`); the
+  scope you'd derive for the PR-title prefix (`emit-cs`, `emit-php`, …) usually names the area outright.
+- **Studio sub-area** — *only when Area is `area: studio`*, add **one** `studio: …` sub-label too
+  (`studio: syntax-tree`, `studio: explorer`, …). This is what makes a single panel findable
+  (`--label "studio: syntax-tree"`). If the work is a genuinely new Studio sub-area with no fitting label,
+  `gh label create "studio: <slug>" --color c5def5 --description "…"` first, then apply it — grow the
+  taxonomy rather than collapsing to `area: studio` alone.
 
-Decide, note the call in the report, don't open a triage Q&A. Create with all of them:
+Decide, note the call in the report, don't open a triage Q&A. Create with all of them (the `area:` label is
+required; add the `studio:` one only for Studio work):
 
 ```bash
 gh issue create \
@@ -236,7 +245,9 @@ gh issue create \
   --label "<type>" \
   --label "<priority tier>" \
   --label "<effort size>" \
+  --label "area: emit-py" \
   --body-file /tmp/koine-issue-<slug>.md
+# Studio example: … --label "area: studio" --label "studio: syntax-tree" …
 ```
 
 Capture the printed URL and number. If a chosen label isn't in the live list, create without it rather
