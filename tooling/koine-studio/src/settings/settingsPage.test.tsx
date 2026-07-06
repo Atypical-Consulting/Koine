@@ -303,6 +303,27 @@ describe('createSettingsPage', () => {
     expect(body.querySelector('.cm-editor')).not.toBeNull();
   });
 
+  // #983: a storage-locked host (private mode / denied) makes every localStorage read throw. loadMode()
+  // must swallow that and fall back to Visual instead of letting the throw escape and break the mount —
+  // every sibling helper (saveMode/loadScope/saveScope) is already guarded; loadMode was the last one.
+  it('falls back to Visual (never throws) when localStorage.getItem throws (#983)', () => {
+    // The test-setup shim is a plain object (getItem is an own property), so spy on the instance, not
+    // Storage.prototype — a locked host where every read throws.
+    const getItem = vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
+      throw new Error('denied');
+    });
+    try {
+      expect(() => {
+        handle = createSettingsPage({ header, body }, cb);
+      }).not.toThrow();
+      // Fell back to Visual: the two-pane form paints and the Visual radio is checked.
+      expect(visualRadio(header).getAttribute('aria-checked')).toBe('true');
+      expect(body.textContent).toContain('Appearance');
+    } finally {
+      getItem.mockRestore();
+    }
+  });
+
   it('destroy tears down the active pane and clears the header', () => {
     const h = createSettingsPage({ header, body }, cb);
     expect(header.querySelector('[role="radiogroup"]')).not.toBeNull();

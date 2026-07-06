@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, test } from 'vitest';
 import {
+  diagramPersistScope,
   getDefaultCanvasZoom,
   isDiagramEditing,
   isDiagramTouchMode,
+  positionKey,
   setDefaultCanvasZoom,
   setDiagramEditing,
+  setDiagramPersistScope,
   setDiagramTouchMode,
 } from '@/diagrams/diagramContract';
 
@@ -13,6 +16,7 @@ afterEach(() => {
   setDiagramTouchMode(false);
   setDiagramEditing(false);
   setDefaultCanvasZoom(100);
+  setDiagramPersistScope('scratch');
 });
 
 describe('diagram touch mode (mobile tap-to-edit)', () => {
@@ -63,5 +67,19 @@ describe('default canvas zoom (#762)', () => {
     setDefaultCanvasZoom(150);
     setDefaultCanvasZoom(Number.NaN);
     expect(getDefaultCanvasZoom()).toBe(150);
+  });
+});
+
+describe('per-workspace persist scope', () => {
+  test('setDiagramPersistScope sets the scope the positionKey is namespaced by', () => {
+    setDiagramPersistScope('ws-1');
+    expect(diagramPersistScope()).toBe('ws-1');
+    expect(positionKey()).toBe('ws-1:koi-domain-diagram');
+  });
+
+  test('an empty scope falls back to "scratch"', () => {
+    setDiagramPersistScope('');
+    expect(diagramPersistScope()).toBe('scratch');
+    expect(positionKey()).toBe('scratch:koi-domain-diagram');
   });
 });
