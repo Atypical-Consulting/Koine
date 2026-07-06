@@ -21,6 +21,11 @@ export const DATA_AXIS = 'data-axis';
 export const DATA_LAXIS = 'data-laxis';
 export const DATA_LEXPAND = 'data-lexpand';
 export const RSTRIP_BTN_CLASS = 'rstrip-btn';
+// The decorative hairline that groups the git tool-window (Source Control) apart from Properties/AI Chat
+// on the right-edge stripe (#1154). RightStrip.tsx renders it; its CSS lives Studio-side in
+// _inspector.scss (koine-ui ships no SCSS). Not imperatively queried by the controller — kept here only
+// to hold the cross-package class literal in one place, mirroring RSTRIP_BTN_CLASS.
+export const RSTRIP_SEP_CLASS = 'rstrip-sep';
 export const DATA_RVIEW = 'data-rview';
 
 export const RIGHT_STRIP_VIEWS = ['props', 'assistant', 'source-control', 'syntax-tree'] as const;

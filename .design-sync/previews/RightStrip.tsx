@@ -5,6 +5,10 @@
 // stretches the stripe into a wide horizontal bar. This owned preview replicates the story's decorator
 // so the stripe reads as the intended Rider-style vertical toolbar. RightStrip is prop-less and its icons
 // are internal, so no fixtures are needed. Mirrors src/components/RightStrip.stories.tsx.
+//
+// RightStrip emits a decorative `.rstrip-sep` hairline before the Source Control button (#1154) to group
+// the git tool-window; the separator is part of the component, so it appears here automatically. If a
+// future claude.ai/design re-sync of RightStrip regenerates the twin, the separator must survive it.
 import { RightStrip } from '@atypical/koine-ui';
 
 /** The stripe with all three tool-window toggles (Properties · AI Chat · Source Control). */

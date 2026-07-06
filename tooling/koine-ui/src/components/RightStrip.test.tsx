@@ -63,6 +63,36 @@ describe('RightStrip', () => {
     expect(await axe(container)).toHaveNoViolations();
   });
 
+  // Cosmetic parity with the PR #1140 handoff (#1154): a decorative hairline separator groups the git
+  // tool-window (Source Control) apart from Properties/AI Chat. It is purely visual — aria-hidden and
+  // non-interactive — so it must sit immediately before the Source Control button, carry no ARIA role in
+  // the reading order, and never become a focusable tab stop. The active-state contract is untouched.
+  it('renders the decorative .rstrip-sep hairline immediately before the Source Control button', () => {
+    mountStrip();
+    const sourceControl = document.querySelector<HTMLElement>('#right-strip [data-rview="source-control"]');
+    expect(sourceControl).not.toBeNull();
+    const prev = sourceControl!.previousElementSibling as HTMLElement | null;
+    expect(prev).not.toBeNull();
+    expect(prev!.classList.contains('rstrip-sep')).toBe(true);
+  });
+
+  it('emits the separator as an a11y-inert, non-focusable decorative node', () => {
+    const host = mountStrip();
+    const sep = host.querySelector<HTMLElement>('.rstrip-sep');
+    expect(sep).not.toBeNull();
+    // Decorative only — hidden from AT and never a tab stop or a button.
+    expect(sep!.getAttribute('aria-hidden')).toBe('true');
+    expect(sep!.hasAttribute('tabindex')).toBe(false);
+    expect(sep!.tagName).not.toBe('BUTTON');
+    // Exactly one separator: it groups the single git tool-window, it is not a per-button rule.
+    expect(host.querySelectorAll('.rstrip-sep')).toHaveLength(1);
+  });
+
+  it('keeps no axe violations once the separator is present', async () => {
+    const container = mountStrip();
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
   // Regression guard for F6/F7 (#759): the Rules and Notes right-rail tabs were retired in #730 (a
   // selected element's invariants now surface in Properties, model Notes live in the center Deck's Docs
   // surface). The stripe must never reintroduce them, and must never ship the bare "Coming soon."
