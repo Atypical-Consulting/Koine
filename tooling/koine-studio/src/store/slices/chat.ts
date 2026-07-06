@@ -1,5 +1,34 @@
 import type { StoreApi } from 'zustand/vanilla';
 import type { ChatMessage } from '@/ai/ai';
+import type { StagedEdit } from '@/ai/editSession';
+
+/** One reviewed file inside the pending change set. */
+export interface ChangeSetFileState {
+  readonly relPath: string;
+  readonly body: string;
+  /** From {@link StagedEdit}: brand-new file vs revision of an existing workspace file. */
+  readonly isNew: boolean;
+  /** Send-time text the reviewed diff was computed against (`''` for new files). */
+  readonly before: string;
+  /** The accept checkbox. */
+  readonly accepted: boolean;
+  /** Sticky once marked at apply time (#473) — never unset. */
+  readonly drifted: boolean;
+}
+
+export type ChangeSetPhase =
+  | { kind: 'reviewing'; note?: string } // note carries the #633 apply-failure / partial-failure message
+  | { kind: 'applying' }
+  | { kind: 'applied'; appliedCount: number } // terminal
+  | { kind: 'invalidated'; reason: string }; // terminal (#473/#684)
+
+export interface ChatChangeSetState {
+  /** Monotonic per staged set — strictly increasing across the store's lifetime, even across discard. */
+  readonly id: number;
+  readonly files: readonly ChangeSetFileState[];
+  readonly diagnostics: string | null;
+  readonly phase: ChangeSetPhase;
+}
 
 export interface ChatSlice {
   /** The assistant transcript and turn lifecycle for the active workspace. */
@@ -10,8 +39,8 @@ export interface ChatSlice {
     readonly messages: readonly ChatMessage[];
     /** Turn lifecycle: idle → streaming → idle (finish) or error (aborted with rollback). */
     readonly status: 'idle' | 'streaming' | 'error';
-    /** TODO(#984 Task 2): the pending change-set state machine; null-typed placeholder until then. */
-    readonly changeSet: null;
+    /** The pending change-set review, or null when nothing is staged. */
+    readonly changeSet: ChatChangeSetState | null;
   };
   /** Replace key + transcript on workspace switch. NO-OP while streaming — a mid-stream workspace reassignment must not clobber the live turn. */
   hydrateChat(workspaceKey: string, messages: readonly ChatMessage[]): void;
@@ -28,12 +57,47 @@ export interface ChatSlice {
   abortChatTurn(opts: { rollbackUserTurn: boolean }): void;
   /** Empty the transcript (the workspace key and status are untouched). */
   clearChatTranscript(): void;
+  /**
+   * Replace the change set with a fresh reviewing one (monotonic id, all files accepted, none
+   * drifted); `before` supplies each relPath's send-time text, defaulting to `''` for new files.
+   */
+  stageChangeSet(
+    files: readonly StagedEdit[],
+    before: Record<string, string>,
+    diagnostics: string | null,
+  ): void;
+  /** Toggle one file's accept checkbox; works in reviewing AND applying, no-op once terminal. */
+  setChangeSetFileAccepted(relPath: string, accepted: boolean): void;
+  /** Set `drifted: true` on the named files — sticky (never unsets) and idempotent (#473). */
+  markChangeSetDrift(relPaths: readonly string[]): void;
+  /** reviewing → applying; no-op unless reviewing with at least one accepted file. */
+  beginChangeSetApply(): void;
+  /**
+   * Settle an apply: no failures → terminal `applied` counting the accepted files; any failures →
+   * back to `reviewing` with a note naming them so retry stays open (no false Applied). No-op
+   * unless applying — in particular after invalidation (#684).
+   */
+  resolveChangeSetApply(result: { failed: readonly string[] }): void;
+  /** applying → reviewing with the error note (#633: the in-flight lock must never stay stuck); no-op unless applying (#684). */
+  rejectChangeSetApply(error: string): void;
+  /** reviewing | applying → invalidated; NO-OP on terminal `applied` (the "Applied ✓" survives) and on null. */
+  invalidateChangeSet(reason: string): void;
+  /** Drop the change set entirely. */
+  discardChangeSet(): void;
 }
 
 export function createChatSlice(
   set: StoreApi<ChatSlice>['setState'],
   get: StoreApi<ChatSlice>['getState'],
 ): ChatSlice {
+  // Strictly increasing across this store's lifetime, even across discard — a stale async apply
+  // resolving against a NEWER set can be detected by comparing ids.
+  let nextChangeSetId = 1;
+
+  const setChangeSet = (changeSet: ChatChangeSetState | null): void => {
+    set({ chat: { ...get().chat, changeSet } });
+  };
+
   return {
     chat: {
       workspaceKey: 'scratch',
@@ -70,6 +134,65 @@ export function createChatSlice(
     },
     clearChatTranscript: () => {
       set({ chat: { ...get().chat, messages: [] } });
+    },
+    stageChangeSet: (files, before, diagnostics) => {
+      setChangeSet({
+        id: nextChangeSetId++,
+        files: files.map((f) => ({
+          relPath: f.relPath,
+          body: f.body,
+          isNew: f.isNew,
+          before: before[f.relPath] ?? '',
+          accepted: true,
+          drifted: false,
+        })),
+        diagnostics,
+        phase: { kind: 'reviewing' },
+      });
+    },
+    setChangeSetFileAccepted: (relPath, accepted) => {
+      const cs = get().chat.changeSet;
+      if (!cs || (cs.phase.kind !== 'reviewing' && cs.phase.kind !== 'applying')) return;
+      setChangeSet({
+        ...cs,
+        files: cs.files.map((f) => (f.relPath === relPath ? { ...f, accepted } : f)),
+      });
+    },
+    markChangeSetDrift: (relPaths) => {
+      const cs = get().chat.changeSet;
+      if (!cs) return;
+      setChangeSet({
+        ...cs,
+        files: cs.files.map((f) => (relPaths.includes(f.relPath) ? { ...f, drifted: true } : f)),
+      });
+    },
+    beginChangeSetApply: () => {
+      const cs = get().chat.changeSet;
+      if (!cs || cs.phase.kind !== 'reviewing') return;
+      if (!cs.files.some((f) => f.accepted)) return;
+      setChangeSet({ ...cs, phase: { kind: 'applying' } });
+    },
+    resolveChangeSetApply: ({ failed }) => {
+      const cs = get().chat.changeSet;
+      if (!cs || cs.phase.kind !== 'applying') return;
+      const phase: ChangeSetPhase =
+        failed.length === 0
+          ? { kind: 'applied', appliedCount: cs.files.filter((f) => f.accepted).length }
+          : { kind: 'reviewing', note: `Failed to apply: ${failed.join(', ')}` };
+      setChangeSet({ ...cs, phase });
+    },
+    rejectChangeSetApply: (error) => {
+      const cs = get().chat.changeSet;
+      if (!cs || cs.phase.kind !== 'applying') return;
+      setChangeSet({ ...cs, phase: { kind: 'reviewing', note: error } });
+    },
+    invalidateChangeSet: (reason) => {
+      const cs = get().chat.changeSet;
+      if (!cs || (cs.phase.kind !== 'reviewing' && cs.phase.kind !== 'applying')) return;
+      setChangeSet({ ...cs, phase: { kind: 'invalidated', reason } });
+    },
+    discardChangeSet: () => {
+      setChangeSet(null);
     },
   };
 }
