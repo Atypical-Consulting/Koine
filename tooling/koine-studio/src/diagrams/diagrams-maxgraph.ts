@@ -1142,10 +1142,17 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   // not-yet-measurable DOM. `render()` calls this where it used to call `chrome.fit()`.
   // Read-only canvases (context-map, event-flow): if a saved zoom exists restore it; otherwise fit the
   // content to the viewport (the default "see everything" experience). Domain canvas: saved ?? default.
+  // True once applyInitialZoom has framed the canvas at its chosen open zoom WHILE the host was
+  // measurable. It signals the ResizeObserver below that the initial 0→measurable transition — which
+  // fires when render() inserts this canvas into the DOM, right after applyInitialZoom — has already been
+  // framed, so that transition must NOT re-fit: re-fitting there stomped the intended open zoom (#762)
+  // with a fit-to-viewport and left the % readout stale. A canvas mounted hidden (mobile zone) is not
+  // measurable here, so the flag stays false and the genuine reveal-refit (#529) still fires.
+  let initialZoomApplied = false;
   const applyInitialZoom = (): void => {
     // Read-only with no saved zoom: fall back to fit() so the content frames to the viewport. The readout
     // syncs display-only — persisting the fitted scale would count as a chosen zoom and kill the fallback.
-    if (saved === null && readOnly) { fit(); showPct(); return; }
+    if (saved === null && readOnly) { fit(); showPct(); if (isMeasurable()) initialZoomApplied = true; return; }
     const target = saved ?? getDefaultCanvasZoom();
     try {
       graph.zoomTo(target / 100, false);
@@ -1154,6 +1161,7 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
       /* container not measurable yet — ignore; the readout still syncs to the real scale below */
     }
     syncPct();
+    if (isMeasurable()) initialZoomApplied = true;
   };
 
   const button = (glyph: string, label: string, onClick: () => void): HTMLButtonElement => {
@@ -1240,19 +1248,22 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   // the content or re-measures the Outline. `refit()` re-frames the VIEW (scale/center) and rebuilds the
   // Outline against the now-sized host — it never reloads the layout or rebuilds nodes, so manual node
   // positions and pan are preserved.
-  const refit = (): void => {
-    fit();
-    // Rebuild the minimap ONLY when the host is measurable. The refit event is broadcast on `document`, so
-    // it can also reach a still-hidden sibling canvas (the read-only context-map / event-flow chrome);
-    // rebuilding the Outline against that zero-size host would just recreate the oversized empty box. A
-    // hidden sibling re-fits itself when IT is revealed (its own ResizeObserver / the next dispatch).
+  // Rebuild the minimap against the now-measured host, WITHOUT touching the view scale/center. The
+  // Outline reads laid-out geometry at construction; a minimap first built against a zero-size host (the
+  // oversized empty box) must be replaced by a correct thumbnail once the surface is measurable. No-op
+  // while still hidden: the refit event is broadcast on `document` and can reach a still-hidden sibling
+  // canvas (the read-only context-map / event-flow chrome), where rebuilding against a zero-size host
+  // would just recreate the empty box — that sibling rebuilds when IT is revealed.
+  const rebuildOutline = (): void => {
     if (!isMeasurable()) return;
-    // The Outline reads laid-out geometry at construction; rebuild it so a minimap built against a
-    // zero-size host (the oversized empty box) is replaced by a correct thumbnail. If it was removed
-    // because it could never construct, re-append a host so it has somewhere to live.
     if (!outlineDiv.isConnected) host.appendChild(outlineDiv);
     outline?.destroy();
     buildOutline();
+  };
+  const refit = (): void => {
+    fit();
+    rebuildOutline();
+    showPct(); // keep the % readout truthful after a reframe (display-only: a fit isn't a chosen zoom)
   };
 
   // A canvas first painted inside a hidden mobile zone mounts at zero size, so `fit()` no-op'd and the
@@ -1266,7 +1277,18 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
       const measurable = isMeasurable();
       if (measurable && !wasMeasurable) {
         wasMeasurable = true;
-        refit();
+        // The FIRST measurable transition is render() inserting this canvas into the DOM, right after
+        // applyInitialZoom already framed it (desktop open). Keep that zoom — only rebuild the minimap
+        // against the now-measured host and refresh the readout; re-fitting here is what stomped the
+        // intended open zoom (#762). Consume the flag so a genuine later hide→reveal still refits (#529).
+        // A canvas mounted hidden (mobile) never got the initial framing, so it refits on its reveal.
+        if (initialZoomApplied) {
+          initialZoomApplied = false;
+          rebuildOutline();
+          showPct();
+        } else {
+          refit();
+        }
       } else if (!measurable) {
         wasMeasurable = false;
       }
