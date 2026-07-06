@@ -287,7 +287,12 @@ public sealed record WSyntaxSpan(int Line, int Column, int EndLine, int EndColum
 public sealed record WSourceFileDto(string Uri, string Text);
 
 /// <summary>Source-generated (trim-safe) serialization context for the language-service DTOs.</summary>
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+// MaxDepth 256 lifts the System.Text.Json default (64) well above any realistic model (#1098): the
+// WSyntaxNode projection nests {…, "children": […]} ~2× per tree level, so a deep expression chain
+// (~32+ levels) would otherwise throw, the [JSExport] SyntaxTree catch returns the literal "null", and
+// Studio's syntax-tree panel silently blanks. Kept identical to the stdio LSP host (SerializerOptions)
+// so both serialize the same wire shape at the same ceiling (~127 tree levels).
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, MaxDepth = 256)]
 [JsonSerializable(typeof(WSourceFileDto[]))]
 [JsonSerializable(typeof(WFileDiagnostics[]))]
 [JsonSerializable(typeof(WEmitPreviewResult))]

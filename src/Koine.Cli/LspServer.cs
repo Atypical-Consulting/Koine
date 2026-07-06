@@ -2653,6 +2653,13 @@ internal sealed class LspServer
         // Relaxed escaping: stdio JSON-RPC, not HTML — keep messages readable
         // (don't escape quotes/symbols in diagnostic text to \uXXXX).
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+
+        // Lift the System.Text.Json default MaxDepth (64) well above any realistic model (#1098). The
+        // koine/syntaxTree projection nests {…, "children": […]} ~2× per tree level, so a deep
+        // expression chain (~32+ levels) would otherwise trip the limit; the throw is swallowed by the
+        // request loop and Studio's syntax-tree panel silently blanks. 256 ≈ 127 tree levels — a
+        // generous ceiling that stays identical to the WASM host (LangJson) so both serialize alike.
+        MaxDepth = 256,
     };
 
     private string? ReadMessage()
