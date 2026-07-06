@@ -183,14 +183,15 @@ body[data-route='home'] #toolbar {
     height: 30px;
     width: 30px;
     display: block;
-    border-radius: 9px;
-    /* Chrome v2 (#923): the accent glow is a hover affordance, not a permanent halo. */
-    transition: box-shadow var(--koi-dur-mid) ease;
+    /* Chrome v2 (#923): the accent glow is a hover affordance, not a permanent halo. The hexagon-κ
+       mark (#1141) is an un-tiled, transparent stroked glyph — so the glow is a `drop-shadow` that
+       hugs the strokes, not a `box-shadow` that would draw a rectangle behind the empty corners. */
+    transition: filter var(--koi-dur-mid) ease;
   }
 }
 
 .brand:hover .brand-logo svg {
-  box-shadow: 0 2px 12px color-mix(in srgb, var(--koi-accent) 35%, transparent);
+  filter: drop-shadow(0 2px 8px color-mix(in srgb, var(--koi-accent) 45%, transparent));
 }
 
 .brand-text {

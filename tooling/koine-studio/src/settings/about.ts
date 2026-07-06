@@ -28,8 +28,8 @@ export function createAboutPanel(): AboutPanel {
   const logo = document.createElement('div');
   logo.className = 'koi-welcome-logo koi-about-logo'; // shared logo container
   logo.setAttribute('aria-hidden', 'true');
-  // koineMark() mints a fresh gradient id, so this monogram never collides with the welcome overlay's
-  // copy (a shared id would leave this tile unfilled once the overlay is dismissed to display:none).
+  // The shared, single-ink brand mark (logo.ts): id-free, so this copy and the welcome overlay's can
+  // never collide, and it tracks the theme via stroke=var(--koi-accent).
   logo.innerHTML = koineMark();
 
   const wordmark = document.createElement('p');

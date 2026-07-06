@@ -1,14 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="Koine">
-  <defs>
-    <linearGradient id="koi-fav" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#5aa9ff"/>
-      <stop offset="1" stop-color="#34d3c4"/>
-    </linearGradient>
-  </defs>
-  <rect x="1" y="1" width="30" height="30" rx="8.5" fill="url(#koi-fav)"/>
-  <rect x="1.6" y="1.6" width="28.8" height="28.8" rx="8" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1"/>
-  <g fill="#08111f" transform="translate(4.82,3.96) scale(0.86)">
-    <rect x="2" y="3" width="4.4" height="22" rx="1.6"/>
-    <path d="M8.2 13.6 18 3h5.6l-9.5 10.3L24 25h-5.9l-7.8-9.3-2.1 2.2z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" fill="none" role="img" aria-label="Koine">
+  <!-- The favicon copy of the in-app hexagon-κ mark (koineMark() in src/shared/logo.ts). A browser
+       tab has no --koi-* tokens, so the stroke flips by prefers-color-scheme instead: the light
+       accent on a light tab, the lighter accent on a dark tab — the same adaptive treatment the docs
+       site uses (website/public/favicon.svg). Keep the geometry in sync with the builder. -->
+  <g stroke-linejoin="round" stroke-linecap="round">
+    <polygon points="106,60 83,99.84 37,99.84 14,60 37,20.16 83,20.16" stroke-width="6"/>
+    <g stroke-width="7.5">
+      <path d="M48 36 V84"/>
+      <path d="M48 60 L78 36"/>
+      <path d="M48 60 L78 84"/>
+    </g>
   </g>
+  <style>
+    g { stroke: #2f7fe0; }
+    @media (prefers-color-scheme: dark) { g { stroke: #5aa9ff; } }
+  </style>
 </svg>

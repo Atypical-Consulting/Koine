@@ -190,10 +190,10 @@ export function init(hooks: IdeHooks = {}): () => void {
   // assistant reads it lazily per request, long after this resolves.
   void initSecrets();
 
-  // Render the header monogram from the shared template ('h' = a stable gradient id) so the welcome,
-  // about, and header marks all flow from logo.ts and can't drift apart on the next tweak.
+  // Render the header mark from the shared builder (logo.ts) so the welcome, about, and header marks
+  // all flow from one source and can't drift apart on the next tweak.
   const brandLogo = document.querySelector('.brand-logo');
-  if (brandLogo) brandLogo.innerHTML = koineMark('h'); // eslint-disable-line no-restricted-syntax -- static, trusted brand monogram from logo.ts (koineMark returns a fixed SVG); same-line keeps the lineBudgets line count
+  if (brandLogo) brandLogo.innerHTML = koineMark(); // eslint-disable-line no-restricted-syntax -- static, trusted brand mark from logo.ts (koineMark returns a fixed SVG); same-line keeps the lineBudgets line count
 
   // Apply the persisted theme + appearance (accent, reduced motion, editor metrics) before
   // CodeMirror is created so the editor picks up the right tokens / size on first paint.
