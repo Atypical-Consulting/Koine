@@ -1,3 +1,5 @@
+using Koine.Compiler.Services;
+
 namespace Koine.Compiler.Ast;
 
 /// <summary>
@@ -281,14 +283,7 @@ internal sealed class SymbolTable
             return null;
         }
 
-        IReadOnlyList<Member>? members = decl switch
-        {
-            ValueObjectDecl v => v.Members,
-            EntityDecl e => e.Members,
-            EventDecl ev => ev.Members,
-            IntegrationEventDecl ie => ie.Members,
-            _ => null
-        };
+        IReadOnlyList<Member>? members = decl.MembersOfOrNull();
 
         Member? m = members?.FirstOrDefault(x => string.Equals(x.Name, memberName, StringComparison.Ordinal));
         return m is not null && !m.NameSpan.IsNone ? MemberSymbolOf(m) : null;
