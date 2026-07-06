@@ -1,17 +1,26 @@
-// The Assistant inspector tab: a small chat UI over the Anthropic Messages API (src/ai.ts). It
-// streams replies, keeps the current model + diagnostics in the system prompt so answers stay
-// grounded in what's on screen, offers quick actions (explain diagnostics, suggest invariants,
-// review, generate), and lets the user apply a generated `.koi` model straight into the editor.
+// The AI assistant host factory. `createAssistantChat` binds the host deps (provider settings, editor
+// context, the compiler/edit tools, persistence) into the send effect behind the declarative
+// AssistantChat view (src/ai/components/AssistantChat.tsx — Transcript + ChangeSetPanel + Composer
+// over the store's `chat` slice) and returns the small imperative handle the shell consumes
+// (focusInput / syncWorkspace / explainSelection).
 //
-// Needs a user-supplied Anthropic API key (set in Preferences, stored locally). With no key it
-// shows a prompt to add one rather than calling the API.
+// #990 Task 6 retired the imperative DOM panel that used to live here (transcript bubbles, tool
+// cards, the change-set island, the controls row — all repainted by hand): rendering is now Preact
+// over the chat slice, and this module keeps ONLY the effectful host logic — the AbortController, the
+// agentic turn loop wiring (ai.ts), the grammar-constraint/repair loop (#257/#446), the apply-gate
+// (#444/#561), the change-set apply flow with drift detection (#473/#633/#684), the saveChat commit
+// points, and the workspace-sync deferral. Ephemeral view state the slice deliberately doesn't carry
+// (the API-key/error notice, the "Stopped." marker, the mechanism chip + repair counter, the per-apply
+// wording) lives in this factory's closure and re-renders AssistantChat as props.
+//
+// Needs a user-supplied API key for remote providers (set in Preferences, stored locally). With no
+// key it shows a prompt to add one rather than calling the API.
+import { createElement, render } from 'preact';
 import {
   isLocalProviderUrl,
   runAssistant,
   type AiProvider,
   type ChatMessage,
-  type ToolCallEnd,
-  type ToolCallStart,
 } from '@/ai/ai';
 import {
   chooseMechanism,
@@ -24,7 +33,7 @@ import {
 } from '@/ai/grammarConstraint';
 // The pure prompt builders + context types (the system/explain/repair prompts) live in ./aiPrompts;
 // re-export them so existing importers keep resolving `import { … } from '@/ai/aiPanel'` unchanged,
-// and import the subset this panel's turn loop references.
+// and import the subset this factory's turn loop references.
 export * from '@/ai/aiPrompts';
 import {
   buildExplainPrompt,
@@ -33,15 +42,14 @@ import {
   WORKSPACE_EDIT_GUIDE,
   type AssistantContext,
 } from '@/ai/aiPrompts';
+import { AssistantChat } from '@/ai/components/AssistantChat';
+import type { ChangeSetAttempt } from '@/ai/components/ChangeSetPanel';
+import type { ComposerQuickAction } from '@/ai/components/Composer';
+import type { TranscriptNotice, TurnMechanism } from '@/ai/components/Transcript';
 import { createEditSession, type EditSession, type StagedEdit } from '@/ai/editSession';
-import { renderMarkdown } from '@/editor/editor';
 import { loadChat, saveChat, clearChat } from '@/settings/persistence';
 import { appStore, type AppState } from '@/store/index';
-import type {
-  ChangeSetFileState,
-  ChangeSetPhase,
-  ChatChangeSetState,
-} from '@/store/slices/chat';
+import type { ChangeSetFileState, ChatToolCall } from '@/store/slices/chat';
 import type { StoreApi } from 'zustand/vanilla';
 
 /**
@@ -133,11 +141,11 @@ export interface AssistantPanel {
   /** Move keyboard focus into the prompt input. */
   focusInput(): void;
   /**
-   * Re-point the panel at the current workspace's conversation when the folder changed: reload the
-   * transcript from storage and rebuild the bubbles. A no-op when the workspace key is unchanged, so
-   * the host can call it on every tab show without recreating the panel. Deferred until the in-flight
-   * request settles when one is streaming (a mid-stream rebuild would detach the streaming bubble and
-   * swap the transcript array out from under the turn being committed).
+   * Re-point the panel at the current workspace's conversation when the folder changed: rehydrate the
+   * chat slice from storage. A no-op when the workspace key is unchanged, so the host can call it on
+   * every tab show without recreating the panel. Deferred until the in-flight request settles when one
+   * is streaming (a mid-stream hydrate would swap the transcript out from under the turn being
+   * committed — the slice's own no-op is the belt-and-braces half).
    */
   syncWorkspace(): void;
   /**
@@ -159,567 +167,43 @@ function extractKoine(markdown: string): string | null {
   return any ? any[1].replace(/\n+$/, '') : null;
 }
 
-/**
- * A minimal line-level diff for the change-set preview: an LCS walk marks lines only in the new body
- * with `+`, lines only in the old with `-`, and shared lines with a leading space. Presentation only
- * (the test asserts the badges/toggles/apply, not the diff content), so a compact LCS is plenty.
- */
-function lineDiff(oldText: string, newText: string): string {
-  const a = oldText.length ? oldText.split('\n') : [];
-  const b = newText.length ? newText.split('\n') : [];
-  const m = a.length;
-  const n = b.length;
-  // lcs[i][j] = length of the longest common subsequence of a[i..] and b[j..].
-  const lcs: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
-  for (let i = m - 1; i >= 0; i--) {
-    for (let j = n - 1; j >= 0; j--) {
-      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
-    }
-  }
-  const out: string[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < m && j < n) {
-    if (a[i] === b[j]) {
-      out.push(`  ${a[i]}`);
-      i++;
-      j++;
-    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
-      out.push(`- ${a[i]}`);
-      i++;
-    } else {
-      out.push(`+ ${b[j]}`);
-      j++;
-    }
-  }
-  while (i < m) out.push(`- ${a[i++]}`);
-  while (j < n) out.push(`+ ${b[j++]}`);
-  return out.join('\n');
-}
-
-/**
- * The panel's live view over one rendered change set (#984 Task 4). `sync` is fed every
- * `chat.changeSet` state change by the panel's single store subscription: a matching id repaints the
- * controls from the slice state; a different id (or null) means this set was replaced or discarded —
- * a set retired by `invalidateChangeSet` already painted its superseded treatment while it was still
- * the store's current set.
- */
-interface ChangeSetView {
-  /** The slice-assigned id of the set this DOM was rendered for. */
-  readonly id: number;
-  /** Repaint (id match) or retire (id mismatch / null) from the store's current change set. */
-  sync(changeSet: ChatChangeSetState | null): void;
-}
-
-/**
- * Render a reviewable, per-file change set for an AGENTIC turn that STAGED multi-file edits: one row
- * per staged file (an accept checkbox, a new/modified badge, the relPath, and an inline line-diff of
- * the file's before-text vs the staged body), plus an "Apply N files" button (whose label/disabled
- * track the accepted count) and a "Discard" button. Apply commits only the still-accepted files via
- * `handlers.onApply`, then becomes a terminal "Applied ✓" and drops Discard; Discard removes the panel.
- *
- * The set's diagnostics field is the once-per-turn whole-staged-workspace validation summary (issue
- * #474): when it reports errors (`ok: false …`), they're shown alongside the file rows so a write that
- * broke the model is visible BEFORE the user applies; a clean (`ok: true …`) or absent result renders
- * no extra noise.
- *
- * Since #984 the sub-panel is a CONSUMER of the chat slice's change-set state machine: it renders the
- * store's just-staged `chat.changeSet`, every gesture dispatches a slice action
- * (`setChangeSetFileAccepted` / `markChangeSetDrift` / `beginChangeSetApply` /
- * `resolveChangeSetApply` / `rejectChangeSetApply` / `discardChangeSet`), and every control state —
- * Apply label + disabled, checkbox checked/disabled, drift warnings, the superseded treatment — is
- * repainted from the slice state for this set's id via the returned {@link ChangeSetView}, which the
- * panel's single change-set subscription feeds on every state change. A later turn supersedes this set
- * with `invalidateChangeSet` (issue #473), whose phase change repaints the retired treatment here.
- */
-function renderChangeSet(
-  bubble: HTMLElement,
-  store: StoreApi<AppState>,
-  handlers: {
-    onApply: (accepted: StagedEdit[]) => Promise<{ failed: string[] }>;
-    /**
-     * A LIVE read of the workspace text for `relPath`, taken at APPLY time (issue #473). Compared to
-     * the send-time `before` to detect drift — a file the user edited while the turn ran — so a stale
-     * staged body can't silently clobber newer work. `undefined` ⇒ the file isn't currently readable.
-     */
-    currentText: (relPath: string) => string | undefined;
-  },
-): ChangeSetView {
-  // The just-staged set: the staging branch dispatches stageChangeSet immediately before rendering.
-  const initial = store.getState().chat.changeSet!;
-  const id = initial.id;
-
-  const panel = document.createElement('div');
-  panel.className = 'koi-changeset';
-  // A labelled group so assistive tech announces the scope of the review (WCAG 2.1 AA 1.3.1 / 4.1.2).
-  panel.setAttribute('role', 'group');
-  panel.setAttribute(
-    'aria-label',
-    `${initial.files.length} proposed file change${initial.files.length === 1 ? '' : 's'}`,
-  );
-
-  // The accept checkboxes, so repaint can disable them all once the set turns terminal (a toggle
-  // afterwards must not re-enable Apply and let the same change set be written to disk a second time).
-  const checkboxes: HTMLInputElement[] = [];
-  const checkByPath = new Map<string, HTMLInputElement>();
-  // Each staged file's row, so a drift warning can be attached to the right one at apply time (#473).
-  const rowByPath = new Map<string, HTMLElement>();
-
-  // Wording context for the apply attempt in flight (#473): the live-region messages and the terminal
-  // "Applied N ✓" label count the files actually WRITTEN (the clean subset, minus drift skips), which
-  // the slice's phase doesn't carry — its `appliedCount` counts the accepted files at settle time.
-  let attempt: { cleanCount: number; skipped: string } | null = null;
-  // The last phase painted for THIS set, so `sync` on a replacement (different id / null) can tell a
-  // terminal panel ("Applied ✓" / already-superseded) apart from one retired without an invalidate.
-  let lastPhaseKind: ChangeSetPhase['kind'] = initial.phase.kind;
-
-  const applyBtn = document.createElement('button');
-  applyBtn.type = 'button';
-  applyBtn.className = 'koi-changeset-apply';
-
-  const discardBtn = document.createElement('button');
-  discardBtn.type = 'button';
-  discardBtn.className = 'koi-changeset-discard';
-  discardBtn.textContent = 'Discard';
-
-  // A polite live region so a screen reader announces the apply outcome (WCAG 2.1 AA 4.1.3).
-  const status = document.createElement('div');
-  status.className = 'koi-changeset-status';
-  status.setAttribute('role', 'status');
-  status.setAttribute('aria-live', 'polite');
-
-  // Repaint every control from the slice state for this set. The transient live-region wording (the
-  // apply outcome messages) is written by the apply handler AFTER it dispatches — the dispatch's
-  // synchronous repaint never touches `status` outside the invalidated phase, so the message survives.
-  function repaint(cs: ChatChangeSetState): void {
-    const terminal = cs.phase.kind === 'applied' || cs.phase.kind === 'invalidated';
-    for (const f of cs.files) {
-      const check = checkByPath.get(f.relPath);
-      if (check) {
-        check.checked = f.accepted;
-        check.disabled = terminal;
-      }
-      // Sticky per-file drift (#473): attach the persistent warning to the drifted file's row.
-      if (f.drifted) markDrift(f.relPath);
-    }
-    const n = cs.files.filter((f) => f.accepted).length;
-    switch (cs.phase.kind) {
-      case 'reviewing':
-        applyBtn.textContent = `Apply ${n} file${n === 1 ? '' : 's'}`;
-        applyBtn.disabled = n === 0;
-        break;
-      case 'applying':
-        // The in-flight window: the label still tracks the accepted count, but Apply stays disabled
-        // so an accept-checkbox toggle mid-apply can't start a second, concurrent apply.
-        applyBtn.textContent = `Apply ${n} file${n === 1 ? '' : 's'}`;
-        applyBtn.disabled = true;
-        break;
-      case 'applied': {
-        // Terminal: lock the review and drop Discard. The count is the clean subset actually written
-        // this attempt (drift skips excluded), falling back to the slice's accepted-at-settle count.
-        const count = attempt?.cleanCount ?? cs.phase.appliedCount;
-        applyBtn.textContent = `Applied ${count} file${count === 1 ? '' : 's'} ✓`;
-        applyBtn.disabled = true;
-        discardBtn.remove();
-        break;
-      }
-      case 'invalidated':
-        // Superseded by a newer turn (#473): retire the panel so a late click can't apply stale
-        // bodies, and announce it in the polite live region (WCAG 2.1 AA 4.1.3) with the reason.
-        panel.classList.add('koi-changeset-superseded');
-        applyBtn.disabled = true;
-        status.textContent = `This change set was ${cs.phase.reason} by a newer turn and can no longer be applied.`;
-        break;
-    }
-    lastPhaseKind = cs.phase.kind;
-  }
-
-  for (const file of initial.files) {
-    const row = document.createElement('div');
-    row.className = 'koi-changeset-file';
-
-    const check = document.createElement('input');
-    check.type = 'checkbox';
-    check.className = 'koi-changeset-accept';
-    check.checked = true;
-    check.setAttribute('aria-label', `Accept changes to ${file.relPath}`);
-    check.addEventListener('change', () => {
-      // Stale-set guard: a toggle can only mean this set's file while this set is still current.
-      if (store.getState().chat.changeSet?.id !== id) return;
-      store.getState().setChangeSetFileAccepted(file.relPath, check.checked);
-    });
-    checkboxes.push(check);
-    checkByPath.set(file.relPath, check);
-    row.appendChild(check);
-
-    const badge = document.createElement('span');
-    badge.className = `koi-changeset-badge ${file.isNew ? 'koi-changeset-badge-new' : 'koi-changeset-badge-modified'}`;
-    badge.textContent = file.isNew ? 'new' : 'modified';
-    row.appendChild(badge);
-
-    const path = document.createElement('span');
-    path.className = 'koi-changeset-path';
-    path.textContent = file.relPath;
-    row.appendChild(path);
-
-    const diff = document.createElement('pre');
-    diff.className = 'koi-changeset-diff';
-    diff.textContent = lineDiff(file.before, file.body);
-    row.appendChild(diff);
-
-    rowByPath.set(file.relPath, row);
-    panel.appendChild(row);
-  }
-
-  // Drift check (#473): has `file`'s LIVE text moved away from the send-time `before` it was staged
-  // against? A drifted file must be skipped so a stale full-file body can't clobber newer work. The
-  // slice normalizes an absent send-time text to '' (`before` is always a string).
-  function isDrifted(file: ChangeSetFileState): boolean {
-    const cur = handlers.currentText(file.relPath);
-    if (cur === undefined) {
-      // The file isn't currently readable (closed/removed): safe only if there was nothing to overwrite
-      // (base empty or absent); otherwise we can't confirm the target is still the reviewed text → warn.
-      return file.before !== '';
-    }
-    // A brand-new file whose path now EXISTS (cur defined): don't clobber a file created since SEND.
-    if (file.isNew) return true;
-    // An existing modification: drift iff the live text differs from the reviewed `before`.
-    return cur !== file.before;
-  }
-
-  // Attach a persistent "changed since proposed" warning to a drifted file's row (idempotent).
-  function markDrift(relPath: string): void {
-    const row = rowByPath.get(relPath);
-    if (!row || row.querySelector('.koi-changeset-drift')) return;
-    const warn = document.createElement('span');
-    warn.className = 'koi-changeset-drift';
-    warn.textContent = 'Changed since this was proposed — skipped to protect your edits.';
-    row.appendChild(warn);
-  }
-
-  applyBtn.addEventListener('click', () => {
-    // Belt-and-braces re-entrancy guard alongside the disabled button: only the store's CURRENT set,
-    // still under review, can be applied — 'applying' (in flight) and the terminal phases bail here.
-    const cs = store.getState().chat.changeSet;
-    if (!cs || cs.id !== id || cs.phase.kind !== 'reviewing') return;
-    const list = cs.files.filter((f) => f.accepted);
-    if (!list.length) return;
-
-    // Partition the accepted files against a LIVE read taken NOW (#473): a file the user edited while
-    // the turn ran (drift) is warned + skipped; only the clean subset is written. The send-time `before`
-    // still backs the REVIEWED diff above — drift is judged against the current text at apply time.
-    // Detection stays here in the panel; the RESULT goes through the slice, whose repaint warns the rows.
-    const drifted = list.filter(isDrifted);
-    const clean = list.filter((f) => !drifted.includes(f));
-    if (drifted.length) store.getState().markChangeSetDrift(drifted.map((f) => f.relPath));
-
-    if (!clean.length) {
-      // Everything selected drifted: write nothing (beginChangeSetApply is never dispatched — the
-      // phase stays reviewing, so Apply stays usable for a fresh review), keep the panel open with
-      // the warnings. Written AFTER the drift dispatch so the repaint can't clobber the message.
-      status.textContent =
-        `${drifted.length} file${drifted.length === 1 ? '' : 's'} changed since ` +
-        `${drifted.length === 1 ? 'it was' : 'they were'} proposed; nothing was applied. ` +
-        `Send again for a fresh proposal.`;
-      return;
-    }
-
-    const skipped = drifted.length
-      ? ` Skipped ${drifted.length} that changed since ${drifted.length === 1 ? 'it was' : 'they were'} proposed.`
-      : '';
-    // Announce the skip synchronously (drift detection is synchronous) so the warning is visible the
-    // instant Apply is clicked; the async result below refines it to the final "Applied N" message.
-    if (drifted.length) status.textContent = `Applying ${clean.length} clean file${clean.length === 1 ? '' : 's'}.${skipped}`;
-
-    attempt = { cleanCount: clean.length, skipped };
-    store.getState().beginChangeSetApply(); // reviewing → applying; the repaint guards the in-flight window
-    const payload: StagedEdit[] = clean.map((f) => ({ relPath: f.relPath, body: f.body, isNew: f.isNew }));
-    void Promise.resolve(handlers.onApply(payload)).then((result) => {
-      // A set superseded or replaced WHILE this apply was in flight is terminal (#684): a late settle
-      // must not un-retire it — the slice would no-op the dispatch anyway, and bailing here keeps the
-      // status live region from overwriting the "superseded" notice. Covers { failed } and success.
-      const cur = store.getState().chat.changeSet;
-      if (!cur || cur.id !== id || cur.phase.kind !== 'applying') return;
-      if (result.failed.length) {
-        // Partial/total failure: back to reviewing (no false "Applied ✓") with Apply re-opened by the
-        // repaint, and report exactly which files didn't write so the user can retry the checked set.
-        store.getState().resolveChangeSetApply({ failed: result.failed });
-        const wrote = clean.length - result.failed.length;
-        status.textContent =
-          `${wrote ? `Applied ${wrote} file${wrote === 1 ? '' : 's'}; ` : ''}` +
-          `couldn't write ${result.failed.length}: ${result.failed.join(', ')}. Re-apply to retry.` +
-          skipped;
-        return;
-      }
-      // Success: terminal applied — the repaint locks the review (checkboxes disabled so a later
-      // toggle can't trigger a second write), flips Apply to "Applied ✓", and drops Discard.
-      store.getState().resolveChangeSetApply({ failed: [] });
-      status.textContent = `Applied ${clean.length} file${clean.length === 1 ? '' : 's'}.` + skipped;
-    }).catch((e) => {
-      // A set superseded mid-apply stays terminal (#684): a late rejection must not re-enable Apply
-      // or replace the "superseded" notice with an "Apply failed" one that invites a retry on a
-      // retired change set.
-      const cur = store.getState().chat.changeSet;
-      if (!cur || cur.id !== id || cur.phase.kind !== 'applying') return;
-      // onApply REJECTED (#633): applyFileEdit only turns disk-write errors into a { failed } result;
-      // an un-guarded throw from a non-disk op (renderer/LSP sync, dirty refresh, saved-callback) escapes
-      // as a rejection. Without this catch the Apply button stays stuck disabled, the error is swallowed,
-      // and the rejection is unhandled. rejectChangeSetApply releases the in-flight lock back to
-      // reviewing (the repaint re-opens Apply for a retry of the still-checked set) and the error is
-      // surfaced in the polite live region so the failure is announced and recoverable.
-      const message = `Apply failed: ${String(e)}` + skipped;
-      store.getState().rejectChangeSetApply(message);
-      status.textContent = message;
-    });
-  });
-  discardBtn.addEventListener('click', () => {
-    store.getState().discardChangeSet();
-    panel.remove();
-  });
-
-  // End-of-turn whole-staged-workspace validation diagnostics (issue #474): surface them whenever the
-  // single end-of-turn validation reported anything other than a CLEAN compile (`ok: true …`) — that
-  // covers errors, warnings, and a "could not validate" note (e.g. the desktop MCP sidecar briefly
-  // unreachable) — so a write that broke the model, or a validation that didn't actually run, is
-  // reviewable/discardable BEFORE apply. A clean compile (or no validation at all) shows nothing.
-  if (initial.diagnostics && !initial.diagnostics.startsWith('ok: true')) {
-    const diag = document.createElement('pre');
-    diag.className = 'koi-changeset-diagnostics';
-    diag.textContent = initial.diagnostics;
-    diag.setAttribute('aria-label', 'Validation diagnostics for the staged changes');
-    panel.appendChild(diag);
-  }
-
-  repaint(initial);
-  panel.append(applyBtn, discardBtn, status);
-  bubble.appendChild(panel);
-
-  return {
-    id,
-    sync(changeSet: ChatChangeSetState | null): void {
-      if (changeSet && changeSet.id === id) {
-        repaint(changeSet);
-        return;
-      }
-      // This set was replaced (a newer set staged) or discarded. A terminal panel keeps its painted
-      // treatment: "Applied ✓" must survive a later turn (#473), and an invalidated one already shows
-      // its superseded notice. A non-terminal set can only get here via its own Discard (a new send
-      // always invalidates BEFORE staging), whose handler removes the panel — retire the controls
-      // anyway, belt-and-braces, without inventing a reason for the live region.
-      if (lastPhaseKind === 'applied' || lastPhaseKind === 'invalidated') return;
-      panel.classList.add('koi-changeset-superseded');
-      applyBtn.disabled = true;
-      for (const cb of checkboxes) cb.disabled = true;
-    },
-  };
-}
-
-/**
- * The maximum number of characters of a tool's raw result rendered inside an expandable tool-call
- * card. A tool like `koine_compile` can return a large blob; the card clamps its Result `<pre>` to
- * this cap (with a visible `(truncated)` note) so one noisy result can't blow up the transcript.
- */
-export const TOOL_RESULT_CLAMP: number = 8 * 1024;
-
-/** Format a tool's execution time for its card: `312 ms` under a second, `1.4 s` at/above 1000 ms. */
-function formatToolDuration(ms: number): string {
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
-}
-
-/**
- * Pretty-print a tool's raw `argsJson` with a 2-space indent for the card's Arguments block; fall back
- * to the raw string when it doesn't parse (a malformed / non-JSON args blob is still shown verbatim
- * rather than dropped).
- */
-function prettyToolArgs(argsJson: string): string {
-  try {
-    return JSON.stringify(JSON.parse(argsJson), null, 2);
-  } catch {
-    return argsJson;
-  }
-}
-
-export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPanel {
+export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel {
   // The transcript + turn lifecycle live in the app store's `chat` slice (#984): chat.messages is
   // the conversation for the workspace this panel is pointed at, chat.workspaceKey tracks which one,
-  // and chat.status drives busy(). Restored from storage on mount and re-pointed by syncWorkspace()
-  // when the folder changes.
+  // and chat.status drives the busy treatment. Restored from storage on mount and re-pointed by
+  // syncWorkspace() when the folder changes.
   const store = opts.store ?? appStore;
   const chat = () => store.getState().chat;
   store.getState().hydrateChat(opts.getWorkspaceKey(), loadChat(opts.getWorkspaceKey()));
+
   let aborter: AbortController | null = null;
-  // The most recently rendered change-set sub-panel (#984 Task 4): the slice's `chat.changeSet` is
-  // the state machine, this view is its DOM consumer. The panel owns ONE change-set subscription —
-  // on every `chat.changeSet` change it repaints the rendered set (matching id) or retires it
-  // (replaced/discarded). The panel is an app-lifetime singleton with no dispose path, so the
-  // subscription lives as long as its store does.
-  let changeSetView: ChangeSetView | null = null;
-  store.subscribe((state, prev) => {
-    if (state.chat.changeSet !== prev.chat.changeSet) changeSetView?.sync(state.chat.changeSet);
-  });
 
-  opts.container.classList.add('koi-assistant');
-  opts.container.innerHTML = '';
-
-  const transcript = document.createElement('div');
-  transcript.className = 'koi-assistant-transcript';
-  opts.container.appendChild(transcript);
-
-  // Empty-state hint shown until the first message.
-  const intro = document.createElement('div');
-  intro.className = 'koi-assistant-intro';
-  intro.innerHTML =
-    '<p><strong>Domain copilot.</strong> Describe a domain to model, or ask about the current one. ' +
-    'Use the quick actions below, or type a prompt.</p>';
-  transcript.appendChild(intro);
-
-  // --- controls (quick actions + input) -------------------------------------
-  const controls = document.createElement('div');
-  controls.className = 'koi-assistant-controls';
-  opts.container.appendChild(controls);
-
-  const quick = document.createElement('div');
-  quick.className = 'koi-assistant-quick';
-  controls.appendChild(quick);
-
-  const QUICK_ACTIONS: { label: string; build: (ctx: AssistantContext) => string }[] = [
-    {
-      label: 'Explain diagnostics',
-      build: (ctx) =>
-        ctx.diagnostics.length
-          ? 'Explain each current diagnostic in plain language and show how to fix it.'
-          : 'The model currently compiles with no diagnostics. Point out any latent modeling risks anyway.',
-    },
-    { label: 'Suggest invariants', build: () => 'Suggest domain invariants this model is probably missing, with the Koine syntax to add each.' },
-    { label: 'Review model', build: () => 'Review this model for DDD smells (anemic types, leaked identity, missing aggregates, wrong boundaries) and suggest concrete fixes.' },
-    { label: 'Add an aggregate', build: () => 'Propose one additional aggregate that would round out this domain, and give the full updated model.' },
-  ];
-
-  const input = document.createElement('textarea');
-  input.className = 'koi-assistant-input';
-  input.rows = 3;
-  input.placeholder = 'Describe a domain to model, or ask about this one…  (⌘/Ctrl+Enter to send)';
-  input.setAttribute('aria-label', 'Assistant prompt');
-
-  const row = document.createElement('div');
-  row.className = 'koi-assistant-inputrow';
-
-  const sendBtn = document.createElement('button');
-  sendBtn.type = 'button';
-  sendBtn.className = 'koi-assistant-send';
-  sendBtn.textContent = 'Send';
-
-  const stopBtn = document.createElement('button');
-  stopBtn.type = 'button';
-  stopBtn.className = 'koi-assistant-stop';
-  stopBtn.textContent = 'Stop';
-  stopBtn.hidden = true;
-
-  row.append(input, sendBtn, stopBtn);
-  controls.append(quick, row);
-
-  for (const action of QUICK_ACTIONS) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'koi-assistant-action';
-    b.textContent = action.label;
-    b.addEventListener('click', () => {
-      if (busy()) return;
-      // Await getContext once and reuse it for both the action prompt and the system prompt.
-      void (async () => {
-        const ctx = await opts.getContext();
-        await send(action.build(ctx), ctx);
-      })();
-    });
-    quick.appendChild(b);
-  }
-
-  // "Explain this construct": an EXPLANATORY turn for a non-coding domain expert — explains the
-  // selection (or whole model) in plain language, with the Apply affordance suppressed (offerApply
-  // false) since the reply is prose, not a model to apply. Reuses the resolved context for both prompts.
-  async function runExplain(): Promise<void> {
-    if (busy()) return;
-    const sel = opts.getSelection();
-    const ctx = await opts.getContext();
-    await send(buildExplainPrompt(sel?.text ?? null, ctx.source), ctx, { offerApply: false });
-  }
-
-  const explainBtn = document.createElement('button');
-  explainBtn.type = 'button';
-  explainBtn.className = 'koi-assistant-action';
-  explainBtn.textContent = 'Explain this construct';
-  explainBtn.addEventListener('click', () => {
-    if (busy()) return;
-    void runExplain();
-  });
-  quick.appendChild(explainBtn);
-
-  // Forget this workspace's conversation: empty the in-memory history, reset the transcript to the
-  // empty state, and drop the stored blob. Refused while a request is in flight so it can't race the
-  // streaming reply (which would re-persist the half-finished turn after the clear).
-  const clearBtn = document.createElement('button');
-  clearBtn.type = 'button';
-  clearBtn.className = 'koi-assistant-clear';
-  clearBtn.textContent = 'Clear conversation';
-  clearBtn.addEventListener('click', () => {
-    if (busy()) return;
-    store.getState().clearChatTranscript();
-    rebuildTranscript();
-    clearChat(opts.getWorkspaceKey());
-  });
-  quick.appendChild(clearBtn);
+  // --- ephemeral view state the slice deliberately doesn't carry (never persisted) --------------
+  // Each field re-renders AssistantChat as a prop when it changes; the durable conversation renders
+  // from the chat slice, to which the components subscribe on their own.
+  let notice: TranscriptNotice | null = null;
+  let stoppedPartial = false;
+  let mechanismView: TurnMechanism | null = null;
+  // The trailing turn's settled tool cards: snapshotted off the ephemeral chat.turn at commit time so
+  // they stay visible above the reply after the turn ends (as the imperative transcript kept them).
+  let toolCardsView: readonly ChatToolCall[] | null = null;
+  let attempt: ChangeSetAttempt | null = null;
+  // The live apply-gate (#444): registered per generative turn BEFORE the reply commits, so the
+  // committed bubble's `getApplyCandidate` call resolves with THIS turn's validated (possibly
+  // repaired, #257) candidate instead of re-running the legacy re-validation.
+  let liveGate: { content: string; promise: Promise<string | null> } | null = null;
 
   function busy(): boolean {
     return chat().status === 'streaming';
   }
 
-  function setBusy(on: boolean): void {
-    sendBtn.disabled = on;
-    stopBtn.hidden = !on;
-    input.disabled = on;
-    for (const b of Array.from(quick.querySelectorAll('button'))) (b as HTMLButtonElement).disabled = on;
-  }
-
-  function addBubble(role: 'user' | 'assistant'): HTMLDivElement {
-    if (intro.parentNode) intro.remove();
-    const bubble = document.createElement('div');
-    bubble.className = `koi-msg koi-msg-${role}`;
-    transcript.appendChild(bubble);
-    transcript.scrollTop = transcript.scrollHeight;
-    return bubble;
-  }
-
-  // Attach an enabled "Apply to editor" button that applies the GIVEN source (which, on the repair
-  // path, is the validated/repaired candidate — not necessarily the text in the rendered markdown).
-  function attachApplyButton(bubble: HTMLElement, source: string): void {
-    const apply = document.createElement('button');
-    apply.type = 'button';
-    apply.className = 'koi-assistant-apply';
-    apply.textContent = 'Apply to editor';
-    apply.addEventListener('click', () => {
-      opts.onApplyModel(source);
-      apply.textContent = 'Applied ✓';
-      apply.disabled = true;
-    });
-    bubble.appendChild(apply);
-  }
-
-  // Append an "Apply to editor" affordance when the assistant produced a model — re-validating the
-  // candidate first so the two LEGACY entry points (transcript replay, stop-mid-stream) can't apply a
-  // model that never passed the live apply-gate (#444). Both reach here without the live path's
-  // validation, so we re-run the SAME adapter via {@link shouldOfferApply} before offering.
-  //
-  // Candidate recovery mirrors the live path (#561): a genuinely grammar-constrained reply is a BARE
-  // `.koi` program with NO ```koine fence (the GBNF root can't emit one), so `extractKoine` returns
-  // null for it. When there's no fence AND the constraint toggle is on, fall back to the trimmed body
-  // as the candidate — only on the constrained path, since the bare-program shape only arises there, so
-  // this preserves the legacy "off ⇒ fenced-only" behavior. The candidate still clears `shouldOfferApply`
-  // either way, so a valid bare model is offered Apply, prose that doesn't parse is rejected, and the
-  // #444 bypass stays closed (no Apply without validation).
-  async function maybeOfferApply(bubble: HTMLElement, markdown: string): Promise<void> {
-    const candidate =
-      extractKoine(markdown) ?? (opts.getConstrainGrammar() ? markdown.trim() || null : null);
-    if (candidate && (await shouldOfferApply(candidate))) attachApplyButton(bubble, candidate);
+  // The validate seam for the apply-gate: adapt the host's `koine_validate` tool (in-WASM in the
+  // browser, the MCP sidecar on desktop) into a {ok, diagnostics}. Null when the host can't run tools,
+  // in which case the gate is skipped (we can't parse, so we fall back to the unguarded affordance).
+  function makeValidate(): ((source: string) => Promise<{ ok: boolean; diagnostics: string }>) | null {
+    const run = opts.runCompilerTool;
+    if (!run) return null;
+    return async (source) => parseValidationOutcome(await run('koine_validate', JSON.stringify({ source })));
   }
 
   // Should a model-bearing LEGACY turn (transcript replay / stop-mid-stream partial) offer Apply?
@@ -738,32 +222,255 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     }
   }
 
-  // A small status chip on an assistant turn ("grammar-constrained" / "parse-and-repair"). Returns the
-  // element so the caller can relabel it if the mechanism degrades mid-turn (gbnf → repair, #446).
-  function addChip(bubble: HTMLElement, label: string): HTMLElement {
-    const chip = document.createElement('span');
-    chip.className = 'koi-assistant-chip';
-    // Status indicator, not decoration: expose the mechanism to assistive tech (WCAG 2.1 AA 4.1.3).
-    chip.setAttribute('role', 'status');
-    chip.textContent = label;
-    bubble.appendChild(chip);
-    return chip;
+  // The apply-gate behind every assistant bubble's "Apply to editor" affordance. A STABLE closure
+  // (the bubble's mount effect depends on it — a fresh identity per render would re-validate every
+  // bubble on every re-render). The LIVE turn resolves through `liveGate` (whose candidate may be the
+  // REPAIRED source, not the text in the markdown); the two legacy entry points — transcript replay
+  // and the stop-mid-stream partial — re-validate here (#444), recovering a BARE grammar-constrained
+  // candidate (no ```koine fence) when the constraint toggle is on (#561) and staying fenced-only
+  // (never validating) when it's off.
+  const getApplyCandidate = async (markdown: string): Promise<string | null> => {
+    const gate = liveGate;
+    if (gate && gate.content === markdown) return gate.promise;
+    const candidate = extractKoine(markdown) ?? (opts.getConstrainGrammar() ? markdown.trim() || null : null);
+    if (!candidate) return null;
+    return (await shouldOfferApply(candidate)) ? candidate : null;
+  };
+
+  // The canned quick-action prompts by Composer identity; each is built from FRESH editor context.
+  const QUICK_PROMPTS: Record<ComposerQuickAction, (ctx: AssistantContext) => string> = {
+    'explain-diagnostics': (ctx) =>
+      ctx.diagnostics.length
+        ? 'Explain each current diagnostic in plain language and show how to fix it.'
+        : 'The model currently compiles with no diagnostics. Point out any latent modeling risks anyway.',
+    'suggest-invariants': () =>
+      'Suggest domain invariants this model is probably missing, with the Koine syntax to add each.',
+    'review-model': () =>
+      'Review this model for DDD smells (anemic types, leaked identity, missing aggregates, wrong boundaries) and suggest concrete fixes.',
+    'add-aggregate': () =>
+      'Propose one additional aggregate that would round out this domain, and give the full updated model.',
+  };
+
+  // Drop the trailing-turn ephemera (the notice/error bubble, the "Stopped." marker, the mechanism
+  // chip/counter, the live gate) — called whenever the transcript moves on: a new send, a workspace
+  // swap, Clear conversation. The caller re-renders.
+  function clearTurnEphemera(): void {
+    notice = null;
+    stoppedPartial = false;
+    mechanismView = null;
+    toolCardsView = null;
+    liveGate = null;
   }
 
-  // The validate seam for the apply-gate: adapt the host's `koine_validate` tool (in-WASM in the
-  // browser, the MCP sidecar on desktop) into a {ok, diagnostics}. Null when the host can't run tools,
-  // in which case the gate is skipped (we can't parse, so we fall back to the unguarded affordance).
-  function makeValidate(): ((source: string) => Promise<{ ok: boolean; diagnostics: string }>) | null {
-    const run = opts.runCompilerTool;
-    if (!run) return null;
-    return async (source) => parseValidationOutcome(await run('koine_validate', JSON.stringify({ source })));
+  function focusComposer(): void {
+    opts.container.querySelector<HTMLTextAreaElement>('.koi-assistant-input')?.focus();
+  }
+
+  // (Re)render AssistantChat with the current ephemeral state. Preact diffs against the previous
+  // render, so component state (a bubble's resolved Apply candidate, an open tool card) survives.
+  function rerender(): void {
+    render(
+      createElement(AssistantChat, {
+        store,
+        onApplyModel: opts.onApplyModel,
+        onOpenPrefs: opts.onOpenPrefs,
+        getApplyCandidate,
+        notice,
+        stoppedPartial,
+        mechanism: mechanismView,
+        settledToolCalls: toolCardsView,
+        changeSetAttempt: attempt,
+        onApplyChangeSet: applyChangeSet,
+        onDiscardChangeSet: () => store.getState().discardChangeSet(),
+        onSend: (draft) => void send(draft, undefined, { fromInput: true }),
+        onStop: () => aborter?.abort(),
+        onQuickAction: (id) => {
+          if (busy()) return;
+          // Await getContext once and reuse it for both the action prompt and the system prompt.
+          void (async () => {
+            const ctx = await opts.getContext();
+            await send(QUICK_PROMPTS[id](ctx), ctx);
+          })();
+        },
+        onExplain: () => {
+          if (busy()) return;
+          void runExplain();
+        },
+        // Forget this workspace's conversation: empty the slice history and drop the stored blob.
+        // Refused while a request is in flight (the Composer also disables the button) so it can't
+        // race the streaming reply (which would re-persist the half-finished turn after the clear).
+        onClear: () => {
+          if (busy()) return;
+          store.getState().clearChatTranscript();
+          clearChat(opts.getWorkspaceKey());
+          clearTurnEphemera();
+          rerender();
+        },
+      }),
+      opts.container,
+    );
+  }
+
+  // "Explain this construct": an EXPLANATORY turn for a non-coding domain expert — explains the
+  // selection (or whole model) in plain language, with the Apply affordance suppressed (offerApply
+  // false) since the reply is prose, not a model to apply. Reuses the resolved context for both prompts.
+  async function runExplain(): Promise<void> {
+    if (busy()) return;
+    const sel = opts.getSelection();
+    const ctx = await opts.getContext();
+    await send(buildExplainPrompt(sel?.text ?? null, ctx.source), ctx, { offerApply: false });
+  }
+
+  // Whether a workspace sync arrived while a request was streaming; send()'s finally replays it.
+  let pendingSync = false;
+
+  // Re-point the panel at the current workspace's conversation when the folder changed. Deferred
+  // while a request is in flight: a mid-stream hydrate would swap the slice transcript out from under
+  // the in-flight turn, cross-wiring one workspace's transcript into another's storage key. The
+  // slice's hydrateChat is itself a no-op while streaming (belt-and-braces); the pendingSync flag is
+  // the SCHEDULING half — send()'s finally replays the deferred sync once the turn settles.
+  function syncWorkspace(): void {
+    if (busy()) {
+      pendingSync = true;
+      return;
+    }
+    pendingSync = false;
+    const key = opts.getWorkspaceKey();
+    if (key === chat().workspaceKey) return;
+    store.getState().hydrateChat(key, loadChat(key));
+    // The replaced transcript takes its trailing ephemera with it (the imperative rebuild did too).
+    clearTurnEphemera();
+    rerender();
+  }
+
+  // Drift check (#473): has `file`'s LIVE text moved away from the send-time `before` it was staged
+  // against? A drifted file must be skipped so a stale full-file body can't clobber newer work. The
+  // slice normalizes an absent send-time text to '' (`before` is always a string).
+  function isDrifted(file: ChangeSetFileState): boolean {
+    const cur = opts.getWorkspaceFiles?.()?.[file.relPath];
+    if (cur === undefined) {
+      // The file isn't currently readable (closed/removed): safe only if there was nothing to overwrite
+      // (base empty or absent); otherwise we can't confirm the target is still the reviewed text → warn.
+      return file.before !== '';
+    }
+    // A brand-new file whose path now EXISTS (cur defined): don't clobber a file created since SEND.
+    if (file.isNew) return true;
+    // An existing modification: drift iff the live text differs from the reviewed `before`.
+    return cur !== file.before;
+  }
+
+  const files = (n: number): string => `file${n === 1 ? '' : 's'}`;
+
+  // Apply the change set under review (#984's state machine renders it; this owns the EFFECT): a
+  // LIVE workspace read partitions the accepted files into drifted (warned + skipped, #473) and clean;
+  // only the clean subset is written via the host, and the settle dispatches walk the slice —
+  // beginChangeSetApply → resolveChangeSetApply / rejectChangeSetApply (#633) — with the stale-set
+  // guards keeping a late settle from un-retiring a superseded set (#684). The per-attempt wording
+  // (the clean count, the skip notices) rides `attempt` into the panel's live region.
+  function applyChangeSet(accepted: readonly ChangeSetFileState[]): void {
+    // Belt-and-braces re-entrancy guard alongside the disabled button: only the CURRENT set, still
+    // under review, can be applied — 'applying' (in flight) and the terminal phases bail here.
+    const cs = store.getState().chat.changeSet;
+    if (!cs || cs.phase.kind !== 'reviewing') return;
+    const id = cs.id;
+    const list = accepted.filter((f) => f.accepted);
+    if (!list.length) return;
+
+    // Partition the accepted files against a LIVE read taken NOW (#473): a file the user edited while
+    // the turn ran (drift) is warned + skipped; only the clean subset is written. The send-time `before`
+    // still backs the REVIEWED diff — drift is judged against the current text at apply time. Detection
+    // stays here in the host; the RESULT goes through the slice, whose state warns the rows.
+    const drifted = list.filter((f) => isDrifted(f));
+    const clean = list.filter((f) => !drifted.includes(f));
+    if (drifted.length) store.getState().markChangeSetDrift(drifted.map((f) => f.relPath));
+
+    if (!clean.length) {
+      // Everything selected drifted: write nothing (beginChangeSetApply is never dispatched — the
+      // phase stays reviewing, so Apply stays usable for a fresh review), keep the panel open with
+      // the warnings and announce why in the live region.
+      setAttempt({
+        forId: id,
+        appliedCount: null,
+        note:
+          `${drifted.length} ${files(drifted.length)} changed since ` +
+          `${drifted.length === 1 ? 'it was' : 'they were'} proposed; nothing was applied. ` +
+          `Send again for a fresh proposal.`,
+      });
+      return;
+    }
+
+    const skipped = drifted.length
+      ? ` Skipped ${drifted.length} that changed since ${drifted.length === 1 ? 'it was' : 'they were'} proposed.`
+      : '';
+    // Announce the skip synchronously (drift detection is synchronous) so the warning is visible the
+    // instant Apply is clicked; the async result below refines it to the final "Applied N" message.
+    setAttempt({
+      forId: id,
+      appliedCount: clean.length,
+      note: drifted.length ? `Applying ${clean.length} clean ${files(clean.length)}.${skipped}` : null,
+    });
+    store.getState().beginChangeSetApply(); // reviewing → applying; the phase guards the in-flight window
+    const payload: StagedEdit[] = clean.map((f) => ({ relPath: f.relPath, body: f.body, isNew: f.isNew }));
+    void Promise.resolve(opts.onApplyChangeSet?.(payload) ?? { failed: [] as string[] })
+      .then((result) => {
+        // A set superseded or replaced WHILE this apply was in flight is terminal (#684): a late settle
+        // must not un-retire it — the slice would no-op the dispatch anyway, and bailing here keeps the
+        // status live region from overwriting the "superseded" notice. Covers { failed } and success.
+        const cur = store.getState().chat.changeSet;
+        if (!cur || cur.id !== id || cur.phase.kind !== 'applying') return;
+        if (result.failed.length) {
+          // Partial/total failure: back to reviewing (no false "Applied ✓") with Apply re-opened by the
+          // phase, and report exactly which files didn't write so the user can retry the checked set.
+          store.getState().resolveChangeSetApply({ failed: result.failed });
+          const wrote = clean.length - result.failed.length;
+          setAttempt({
+            forId: id,
+            appliedCount: null,
+            note:
+              `${wrote ? `Applied ${wrote} ${files(wrote)}; ` : ''}` +
+              `couldn't write ${result.failed.length}: ${result.failed.join(', ')}. Re-apply to retry.` +
+              skipped,
+          });
+          return;
+        }
+        // Success: terminal applied — the phase locks the review (checkboxes disabled so a later
+        // toggle can't trigger a second write), flips Apply to "Applied ✓", and drops Discard.
+        store.getState().resolveChangeSetApply({ failed: [] });
+        setAttempt({ forId: id, appliedCount: clean.length, note: `Applied ${clean.length} ${files(clean.length)}.` + skipped });
+      })
+      .catch((e) => {
+        // A set superseded mid-apply stays terminal (#684): a late rejection must not re-enable Apply
+        // or replace the "superseded" notice with an "Apply failed" one that invites a retry on a
+        // retired change set.
+        const cur = store.getState().chat.changeSet;
+        if (!cur || cur.id !== id || cur.phase.kind !== 'applying') return;
+        // onApply REJECTED (#633): applyFileEdit only turns disk-write errors into a { failed } result;
+        // an un-guarded throw from a non-disk op (renderer/LSP sync, dirty refresh, saved-callback)
+        // escapes as a rejection. rejectChangeSetApply releases the in-flight lock back to reviewing
+        // (re-opening Apply for a retry of the still-checked set) and the error is surfaced in the
+        // polite live region so the failure is announced and recoverable.
+        const message = `Apply failed: ${String(e)}` + skipped;
+        store.getState().rejectChangeSetApply(message);
+        setAttempt({ forId: id, appliedCount: null, note: message });
+      });
+  }
+
+  function setAttempt(next: ChangeSetAttempt | null): void {
+    attempt = next;
+    rerender();
+  }
+
+  function setMechanism(patch: Partial<TurnMechanism>): void {
+    mechanismView = { chip: null, repairCounter: '', invalidNotice: null, ...mechanismView, ...patch };
+    rerender();
   }
 
   /**
-   * Render a finished, CONSTRAINED assistant reply (issue #257): the markdown body, then — for a
-   * generative turn that produced a `.koi` candidate — a mechanism chip and a gated "Apply" button.
+   * Settle a finished, CONSTRAINED generative reply (issue #257) into the trailing bubble's view
+   * state: the mechanism chip, the live "repair k/N" counter, and — through `resolveGate` — the
+   * apply-gate candidate the bubble offers "Apply to editor" for.
    *
-   *  • `off`    → exactly the legacy behavior: offer Apply unconditionally.
+   *  • `off`    → exactly the legacy behavior: offer Apply unconditionally (no chip).
    *  • `gbnf`   → the output is meant to be valid by construction; we validate, and the "grammar-constrained"
    *               chip stays only while that holds. If the backend silently ignored the grammar so the
    *               candidate fails to parse, the path SELF-HEALS into the same bounded repair loop as
@@ -771,51 +478,47 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
    *               strictly worse than parse-and-repair.
    *  • `repair` → bounded parse-and-repair against the real Koine parser, a live "repair k/N" counter
    *               and a "parse-and-repair" chip; Apply is enabled only when a candidate finally parses,
-   *               else a "couldn't produce valid Koine" notice is shown and Apply stays disabled.
+   *               else a "couldn't produce valid Koine" notice is shown and Apply stays withheld.
    *
    * Never throws — a failed/aborted repair turn is folded into an `ok:false` outcome — so it can be
    * awaited inside `send`'s try without disturbing its abort/error handling.
    */
-  async function renderConstrainedReply(
-    bubble: HTMLElement,
+  async function resolveConstrainedOutcome(
     content: string,
     offerApply: boolean,
     mechanism: ConstraintMechanism,
     ctx: AssistantContext,
+    resolveGate: (candidate: string | null) => void,
   ): Promise<void> {
-    bubble.innerHTML = `<div class="koi-md">${renderMarkdown(content)}</div>`;
-    if (!offerApply) return; // explanatory turn — no model to apply, no chip, no gate
-
+    if (!offerApply) {
+      resolveGate(null); // explanatory turn — no model to apply, no chip, no gate
+      return;
+    }
     // On the grammar-constrained path the GBNF root is a BARE `.koi` program — the grammar can't emit a
     // ```` ```koine ```` fence — so a genuinely constrained reply is the model itself with no fence.
     // Fall back to the whole body there; the other paths still require a fenced block (prose ⇒ nothing).
-    const candidate =
-      extractKoine(content) ?? (mechanism === 'gbnf' ? content.trim() || null : null);
-    if (!candidate) return; // prose reply — nothing to apply or gate
-
+    const candidate = extractKoine(content) ?? (mechanism === 'gbnf' ? content.trim() || null : null);
+    if (!candidate) {
+      resolveGate(null); // prose reply — nothing to apply or gate
+      return;
+    }
     const validate = makeValidate();
     // Legacy / no-gate path: the toggle is off, or the host can't validate, so behave as before.
     if (mechanism === 'off' || !validate) {
-      attachApplyButton(bubble, candidate);
+      resolveGate(candidate);
       return;
     }
 
-    const chip = addChip(bubble, mechanism === 'gbnf' ? 'grammar-constrained' : 'parse-and-repair');
+    setMechanism({ chip: mechanism === 'gbnf' ? 'grammar-constrained' : 'parse-and-repair' });
 
-    // Both 'gbnf' and 'repair' now self-heal (issue #446): validate once and, on failure, fall into the
+    // Both 'gbnf' and 'repair' self-heal (issue #446): validate once and, on failure, fall into the
     // SAME bounded repair loop — so the gbnf path is never strictly worse than parse-and-repair. A
     // grammar that was honored makes the first candidate valid (rounds:0 → no repair, chip unchanged); a
     // grammar the backend silently ignored (Ollama) fails that validate and degrades into the repair
-    // loop. The round budget lives in `repairBudgetFor` so the policy is in one place.
+    // loop. The round budget lives in `repairBudgetFor` so the policy is in one place. The counter is
+    // ticked only when a repair round actually runs (so it stays empty on the gbnf happy path and a
+    // first-try-valid repair); its polite live region announces each tick (WCAG 4.1.3).
     const maxRounds = repairBudgetFor(mechanism, MAX_REPAIR_ROUNDS);
-    // A live "repair k/N" counter, ticked only when a repair round actually runs (so it stays empty on
-    // the gbnf happy path and a first-try-valid repair). A live region announces each tick (WCAG 4.1.3).
-    const counter = document.createElement('div');
-    counter.className = 'koi-assistant-repair-counter';
-    counter.setAttribute('role', 'status');
-    counter.setAttribute('aria-live', 'polite');
-    bubble.appendChild(counter);
-
     let round = 0;
     let result: { source: string; ok: boolean; rounds: number };
     try {
@@ -825,7 +528,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
           validate,
           regenerate: async (previous, diagnostics) => {
             round++;
-            counter.textContent = `repair ${round}/${maxRounds}`;
+            setMechanism({ repairCounter: `repair ${round}/${maxRounds}` });
             const repaired = await runAssistant({
               provider: opts.getProvider(),
               baseUrl: opts.getBaseUrl(),
@@ -835,7 +538,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
               system: buildSystem(ctx),
               messages: [...chat().messages, { role: 'user', content: buildRepairPrompt(previous, diagnostics) }],
               signal: aborter?.signal,
-              // Stream nothing into the bubble — we only want the corrected candidate, not a second body.
+              // Stream nothing into the transcript — we only want the corrected candidate, not a second body.
               onText: () => {},
             });
             return extractKoine(repaired) ?? repaired;
@@ -849,74 +552,18 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     }
 
     // A gbnf turn that had to repair means the grammar wasn't actually honored — relabel the chip so it
-    // stops claiming a constraint that didn't hold (Task 2's probe makes this case rare to begin with).
-    if (mechanism === 'gbnf' && result.rounds > 0) chip.textContent = 'parse-and-repair';
+    // stops claiming a constraint that didn't hold (the capability probe makes this case rare to begin with).
+    if (mechanism === 'gbnf' && result.rounds > 0) setMechanism({ chip: 'parse-and-repair' });
 
     if (result.ok) {
-      attachApplyButton(bubble, result.source);
+      resolveGate(result.source);
     } else {
-      const notice = document.createElement('div');
-      notice.className = 'koi-assistant-invalid';
-      // The failure + disabled-Apply state is conveyed only by this text, so announce it (WCAG 2.1 AA 4.1.3).
-      notice.setAttribute('role', 'alert');
       // Both paths spend repair rounds now, so the message reflects the attempts that were made.
-      notice.textContent = `Couldn't produce valid Koine after ${maxRounds} repair attempt${maxRounds === 1 ? '' : 's'} — Apply is disabled.`;
-      bubble.appendChild(notice);
+      setMechanism({
+        invalidNotice: `Couldn't produce valid Koine after ${maxRounds} repair attempt${maxRounds === 1 ? '' : 's'} — Apply is disabled.`,
+      });
+      resolveGate(null);
     }
-  }
-
-  // Render a finished assistant reply into a bubble: the markdown body, plus the "Apply to editor"
-  // affordance unless this turn opted out (an explanatory turn whose reply must not be applied).
-  // Used by transcript replay. Apply is now gated on re-validation (#444): the bubble paints
-  // immediately and the button attaches asynchronously once the model is confirmed to parse (never
-  // if it doesn't) — fire-and-forget, so replay stays synchronous and bubble order is preserved.
-  function renderAssistantReply(bubble: HTMLElement, content: string, offerApply: boolean): void {
-    bubble.innerHTML = `<div class="koi-md">${renderMarkdown(content)}</div>`;
-    if (offerApply) void maybeOfferApply(bubble, content);
-  }
-
-  // Render one stored turn into a bubble: user text verbatim, assistant markdown with the apply
-  // affordance honoring the turn's persisted opt-out (so a replayed Explain reply stays apply-free).
-  // Shared by mount and syncWorkspace replay.
-  function replayMessage(m: ChatMessage): void {
-    const bubble = addBubble(m.role);
-    if (m.role === 'assistant') {
-      renderAssistantReply(bubble, m.content, m.offerApply !== false);
-    } else {
-      bubble.textContent = m.content;
-    }
-  }
-
-  // Clear the transcript DOM back to the empty state (intro only), then replay the slice's history.
-  // Used on mount and whenever syncWorkspace swaps to another workspace's conversation.
-  function rebuildTranscript(): void {
-    transcript.innerHTML = '';
-    transcript.appendChild(intro);
-    for (const m of chat().messages) replayMessage(m);
-  }
-
-  // Restore the current workspace's conversation on first paint.
-  rebuildTranscript();
-
-  // Whether a workspace sync arrived while a request was streaming; send()'s finally replays it.
-  let pendingSync = false;
-
-  // Re-point the panel at the current workspace's conversation when the folder changed. Deferred
-  // while a request is in flight: rebuilding the transcript mid-stream would detach the streaming
-  // bubble (addToolCard inserts tool cards before it) and swap the slice transcript out from under
-  // the in-flight turn, cross-wiring one workspace's transcript into another's storage key. The
-  // slice's hydrateChat is itself a no-op while streaming (belt-and-braces); the pendingSync flag is
-  // the SCHEDULING half — send()'s finally replays the deferred sync once the turn settles.
-  function syncWorkspace(): void {
-    if (busy()) {
-      pendingSync = true;
-      return;
-    }
-    pendingSync = false;
-    const key = opts.getWorkspaceKey();
-    if (key === chat().workspaceKey) return;
-    store.getState().hydrateChat(key, loadChat(key));
-    rebuildTranscript();
   }
 
   async function send(
@@ -925,7 +572,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     sendOpts?: { offerApply?: boolean; fromInput?: boolean },
   ): Promise<void> {
     const offerApply = sendOpts?.offerApply ?? true;
-    // Whether the prompt came from the textarea (Send button / Ctrl+Enter). Quick actions and
+    // Whether the prompt came from the composer (Send button / Ctrl+Enter). Quick actions and
     // Explain pass their own built prompt, so they must not clear — or, on rollback, overwrite —
     // a draft the user typed but hasn't sent.
     const fromInput = sendOpts?.fromInput ?? false;
@@ -943,23 +590,15 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     // (Ollama / LM Studio on localhost) need no auth, so a blank key is fine there.
     const needsKey = provider === 'anthropic' || !isLocalProviderUrl(baseUrl);
     if (needsKey && !hasKey) {
-      const note = addBubble('assistant');
-      note.classList.add('koi-msg-note');
-      note.innerHTML = 'Add your API key in Settings to use the assistant. ';
-      const open = document.createElement('button');
-      open.type = 'button';
-      open.className = 'koi-link-btn';
-      open.textContent = 'Open Settings';
-      open.addEventListener('click', () => opts.onOpenPrefs());
-      note.appendChild(open);
+      notice = { kind: 'note', text: 'Add your API key in Settings to use the assistant. ', openSettings: true };
+      rerender();
       return;
     }
 
     // #473: a new turn supersedes any still-un-applied change set from a prior turn — its staged bodies
     // were computed against an older workspace snapshot, so retire it (disable Apply + accept checkboxes,
     // announce "superseded") rather than let a late click clobber everything done since. The slice
-    // no-ops on a terminal set (an "Applied ✓" survives, #473) and on none at all; the retired DOM
-    // treatment lands via the panel's change-set subscription.
+    // no-ops on a terminal set (an "Applied ✓" survives, #473) and on none at all.
     store.getState().invalidateChangeSet('superseded');
 
     // Re-point at the CURRENT workspace before this turn touches history: the folder can switch in
@@ -967,109 +606,13 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     // this turn must never be pushed onto the previous folder's transcript.
     syncWorkspace();
 
-    if (fromInput) input.value = '';
-    const userBubble = addBubble('user');
-    userBubble.textContent = prompt;
+    // The transcript moves on: the prior turn's trailing ephemera (a notice, a Stopped marker, the
+    // mechanism chip) must not annotate this turn's bubbles.
+    clearTurnEphemera();
+    rerender();
+
+    if (fromInput) store.getState().setChatDraft('');
     store.getState().appendChatMessage({ role: 'user', content: prompt });
-
-    const replyBubble = addBubble('assistant');
-    replyBubble.textContent = '…';
-
-    // An expandable card per tool call the model makes, inserted above the final reply so the user can
-    // see the assistant ran a koine tool (and its arguments/result) rather than answering blind. Tracked
-    // so a full turn rollback removes them too (no orphaned tool cards above a removed user bubble), and
-    // keyed by the per-turn call id so the END event can find the card its START opened.
-    const toolNodes: HTMLElement[] = [];
-    const toolCards = new Map<number, HTMLElement>();
-
-    // START: open a native <details> tool card in the "pending" state, above the reply bubble. The
-    // status glyph is decorative (aria-hidden); the meaning rides a visually-hidden "running" label and
-    // the data-state, so it never depends on colour alone (WCAG 2.1 AA 1.4.1). The raw argsJson (which
-    // rides the START, not the END, event) is stashed on the element so completeToolCard can render the
-    // Arguments block.
-    const addToolCard = (start: ToolCallStart): void => {
-      // Any text streamed this round was a "thinking" preamble before the tool call — clear it so the
-      // card and the eventual answer render in chronological order (ai.ts keeps it out of history).
-      full = '';
-      replyBubble.textContent = '…';
-
-      const card = document.createElement('details');
-      card.className = 'koi-assistant-tool';
-      card.dataset.state = 'pending';
-      card.dataset.args = start.argsJson;
-
-      const summary = document.createElement('summary');
-      const glyph = document.createElement('span');
-      glyph.className = 'koi-tool-glyph';
-      glyph.setAttribute('aria-hidden', 'true');
-      glyph.textContent = '…';
-      const state = document.createElement('span');
-      state.className = 'koi-sr-only koi-tool-state';
-      state.textContent = 'running';
-      const name = document.createElement('span');
-      name.className = 'koi-tool-name';
-      name.textContent = start.name;
-      const summaryText = document.createElement('span');
-      summaryText.className = 'koi-tool-summary';
-      summaryText.textContent = '…';
-      const duration = document.createElement('span');
-      duration.className = 'koi-tool-duration';
-      summary.append(glyph, state, name, summaryText, duration);
-      card.appendChild(summary);
-
-      transcript.insertBefore(card, replyBubble);
-      toolNodes.push(card);
-      toolCards.set(start.id, card);
-      transcript.scrollTop = transcript.scrollHeight;
-    };
-
-    // END: finalize the card its START opened — flip the state (ok/error), the glyph (✓/✕) and the
-    // visually-hidden label, set the chip summary + formatted duration, and build the expandable <dl>
-    // body: pretty-printed Arguments, and the clamped Result (or the error message on failure).
-    const completeToolCard = (end: ToolCallEnd): void => {
-      const card = toolCards.get(end.id);
-      if (!card) return;
-      card.dataset.state = end.ok ? 'ok' : 'error';
-
-      const glyph = card.querySelector('.koi-tool-glyph');
-      if (glyph) glyph.textContent = end.ok ? '✓' : '✕';
-      const state = card.querySelector('.koi-tool-state');
-      if (state) state.textContent = end.ok ? 'succeeded' : 'failed';
-      const summaryText = card.querySelector('.koi-tool-summary');
-      if (summaryText) summaryText.textContent = end.summary;
-      const duration = card.querySelector('.koi-tool-duration');
-      if (duration) duration.textContent = formatToolDuration(end.durationMs);
-
-      const dl = document.createElement('dl');
-      dl.className = 'koi-tool-detail';
-
-      const argsTerm = document.createElement('dt');
-      argsTerm.textContent = 'Arguments';
-      const argsDef = document.createElement('dd');
-      const argsPre = document.createElement('pre');
-      argsPre.textContent = prettyToolArgs(card.dataset.args ?? '');
-      argsDef.appendChild(argsPre);
-
-      const resultTerm = document.createElement('dt');
-      resultTerm.textContent = 'Result';
-      const resultDef = document.createElement('dd');
-      const resultPre = document.createElement('pre');
-      // On failure the executor sends an empty resultText + an `error` message — show that as the body.
-      const rawResult = end.ok ? end.resultText : end.error ?? 'failed';
-      const truncated = rawResult.length > TOOL_RESULT_CLAMP;
-      resultPre.textContent = truncated ? rawResult.slice(0, TOOL_RESULT_CLAMP) : rawResult;
-      resultDef.appendChild(resultPre);
-      if (truncated) {
-        const note = document.createElement('span');
-        note.className = 'koi-tool-truncated';
-        note.textContent = '(truncated)';
-        resultDef.appendChild(note);
-      }
-
-      dl.append(argsTerm, argsDef, resultTerm, resultDef);
-      card.appendChild(dl);
-      transcript.scrollTop = transcript.scrollHeight;
-    };
 
     // Acquire the busy lock synchronously — BEFORE the first await — so a second rapid send (Enter
     // twice, or Enter then a quick action) can't slip past the busy() guard while getContext, now
@@ -1079,15 +622,22 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     // streaming, so the slice transcript can't be swapped out from under the in-flight turn.
     aborter = new AbortController();
     store.getState().startChatTurn();
-    setBusy(true);
     const workspaceKey = opts.getWorkspaceKey();
     // Commit a finished assistant turn to history + storage under the captured key, carrying the apply
-    // opt-out so a replay of an explanatory turn stays apply-free.
+    // opt-out so a replay of an explanatory turn stays apply-free. Clearing the ephemeral turn keeps
+    // the committed bubble from double-rendering next to the stale streaming one while the busy window
+    // stays open (the repair loop below still runs under it).
     const commitAssistantTurn = (content: string): void => {
       const turn: ChatMessage = { role: 'assistant', content };
       if (!offerApply) turn.offerApply = false;
+      // The turn's tool cards outlive the ephemeral chat.turn: snapshot them before it is dropped, so
+      // they stay above the committed reply (imperative contract) until the conversation moves on.
+      const calls = chat().turn?.toolCalls ?? [];
+      toolCardsView = calls.length ? calls : null;
       store.getState().appendChatMessage(turn);
       saveChat(workspaceKey, [...chat().messages]);
+      store.getState().clearStreamingTurn();
+      rerender();
     };
     let full = '';
     try {
@@ -1112,7 +662,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         // the repair loop. Probe the endpoint's ACTUAL behaviour (cached per endpoint) with a tiny
         // sentinel-only grammar, and only attach the real GBNF when the probe confirms the grammar took.
         // A not-capable / errored probe leaves `gbnf` null → `chooseMechanism` returns 'repair' → the
-        // honest parse-and-repair path (and Task 1's gbnf self-heal is the belt-and-braces backstop).
+        // honest parse-and-repair path (and the gbnf self-heal is the belt-and-braces backstop).
         const honoursGrammar = await probeGrammarCapability(provider, baseUrl, (grammar) =>
           runAssistant({
             provider,
@@ -1157,7 +707,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
 
       // The once-per-turn whole-staged-workspace validation (issue #474): the loop runs `validateStaged`
       // a single time at end of turn and hands the diagnostics back here via `onStagedValidation`, so
-      // the change-set panel can show a write that broke the model BEFORE the user applies it.
+      // the change-set review can show a write that broke the model BEFORE the user applies it.
       let stagedDiagnostics: string | null = null;
 
       full = await runAssistant({
@@ -1175,8 +725,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         ...(mechanism === 'gbnf' && gbnf ? { grammar: gbnf } : {}),
         onText: (delta) => {
           full += delta;
-          replyBubble.textContent = full;
-          transcript.scrollTop = transcript.scrollHeight;
+          store.getState().appendStreamingText(delta);
         },
         // Withhold the tools when the user hasn't opted into the agentic loop (plain streaming request —
         // no `tools` ⇒ local servers stream instead of buffering), AND whenever the grammar is effective
@@ -1186,7 +735,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         // Offer the multi-file edit surface alongside the compiler tools when this is a workspace turn.
         ...(editSession && opts.runEditTool ? { editSession, runEditTool: opts.runEditTool } : {}),
         // Validate the staged workspace ONCE at end of turn (issue #474): bind the host validator to
-        // this turn's session, and capture the diagnostics for the change-set panel below.
+        // this turn's session, and capture the diagnostics for the change-set review below.
         ...(editSession && opts.validateStaged
           ? {
               validateStaged: () => opts.validateStaged!(editSession),
@@ -1195,59 +744,73 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
               },
             }
           : {}),
-        // Expandable tool-call cards: open a live "pending" card on START (above the reply bubble),
-        // then finalize it on END (ok/error state, summary, duration, and the expandable body).
-        onToolCallStart: addToolCard,
-        onToolCallEnd: completeToolCard,
+        // Expandable tool-call cards render from the EPHEMERAL chat.turn (#984): open a live "pending"
+        // card on START, then settle the SAME entry on END (ok/error state, summary, duration, result).
+        onToolCallStart: (start) => {
+          // Any text streamed this round was a "thinking" preamble before the tool call — the slice
+          // clears the turn text (so the card and the eventual answer render in chronological order),
+          // and the local accumulator must agree so the eventual commit is the post-tools answer only.
+          full = '';
+          store.getState().startToolCall({ id: start.id, name: start.name, args: start.argsJson });
+        },
+        onToolCallEnd: (end) => {
+          store.getState().completeToolCall({
+            id: end.id,
+            state: end.ok ? 'ok' : 'error',
+            summary: end.summary,
+            // On failure the executor sends an empty resultText + an `error` message — that's the body.
+            result: end.ok ? end.resultText : (end.error ?? 'failed'),
+            durationMs: end.durationMs,
+          });
+        },
       });
+      // Register the live apply-gate BEFORE the commit renders the bubble: the bubble's mount effect
+      // asks `getApplyCandidate` for this content, and it must resolve with THIS turn's outcome (the
+      // repaired candidate, or null for a staged/explanatory/invalid turn) rather than re-validating.
+      let resolveGate!: (candidate: string | null) => void;
+      liveGate = {
+        content: full,
+        promise: new Promise<string | null>((r) => {
+          resolveGate = r;
+        }),
+      };
       commitAssistantTurn(full);
       if (editSession && editSession.staged().length > 0) {
-        // The model staged a multi-file change: render the body, then a reviewable per-file change set
-        // the user accepts before any disk write (the single-file Apply gate is for non-staged replies).
-        replyBubble.innerHTML = `<div class="koi-md">${renderMarkdown(full)}</div>`;
+        // The model staged a multi-file change: review it per file BEFORE any disk write. The
+        // single-file Apply gate is for non-staged replies, so this turn's bubble offers nothing.
+        resolveGate(null);
+        attempt = null; // the fresh set has no apply attempt yet
         // Stage the set in the chat slice (#984): the state machine owns accepted/drift/phase — a
-        // later send supersedes it via invalidateChangeSet, and the sub-panel below is a consumer
-        // repainted by the panel's change-set subscription.
+        // later send supersedes it via invalidateChangeSet, and the declarative ChangeSetPanel is
+        // its consumer.
         store.getState().stageChangeSet(editSession.staged(), wsFiles ?? {}, stagedDiagnostics);
-        changeSetView = renderChangeSet(replyBubble, store, {
-          onApply: async (accepted) => (await opts.onApplyChangeSet?.(accepted)) ?? { failed: [] },
-          // A LIVE re-read at apply time (#473): the reviewed diff stays anchored on the send-time
-          // `wsFiles`, but drift is judged against the CURRENT workspace text, so a concurrent edit
-          // since SEND is detected and that file is skipped rather than clobbered.
-          currentText: (relPath) => opts.getWorkspaceFiles?.()?.[relPath],
-        });
+        rerender();
       } else {
         // The apply-gate lives here: a constrained turn validates (and, on the repair path, re-prompts)
         // before "Apply to editor" is enabled, so unparseable text can never be applied (#257).
-        await renderConstrainedReply(replyBubble, full, offerApply, mechanism, ctx);
+        await resolveConstrainedOutcome(full, offerApply, mechanism, ctx, resolveGate);
       }
     } catch (e) {
       // Keep the stored history in lock-step with the transcript on both failure paths.
       const aborted = aborter?.signal.aborted ?? false;
       if (aborted && full.trim()) {
         // Stopped mid-stream with usable output: commit the (user, partial-assistant) pair so the
-        // visible reply and the history agree, and still offer to apply a generated model.
+        // visible reply and the history agree, mark the bubble with the ephemeral "Stopped." note, and
+        // still offer to apply a generated model — through the SAME legacy gate as a replay, so a
+        // truncated/invalid partial must clear re-validation before Apply is offered (#444/#561).
+        liveGate = null;
         commitAssistantTurn(full);
-        replyBubble.innerHTML = `<div class="koi-md">${renderMarkdown(full)}</div>`;
-        const note = document.createElement('div');
-        note.className = 'koi-assistant-stopped';
-        note.textContent = 'Stopped.';
-        replyBubble.appendChild(note);
-        // Re-validate before offering Apply: a stopped stream can leave a truncated/invalid `.koi`,
-        // so the partial must clear the same gate the live path enforces (#444).
-        if (offerApply) await maybeOfferApply(replyBubble, full);
+        stoppedPartial = true;
+        rerender();
       } else {
-        // Aborted with nothing, or a real error: roll the whole turn back from BOTH history and
-        // transcript (no dangling user turn or orphaned tool lines), and restore the prompt to retry.
+        // Aborted with nothing, or a real error: roll the whole turn back from BOTH history and the
+        // ephemeral turn (no dangling user turn or orphaned tool cards), and restore the prompt to retry.
         store.getState().abortChatTurn({ rollbackUserTurn: true });
-        userBubble.remove();
-        for (const n of toolNodes) n.remove();
-        // Restore the prompt for a retry only when it came from the input; a quick action's canned
+        // Restore the prompt for a retry only when it came from the composer; a quick action's canned
         // prompt must not overwrite a draft the user typed but hasn't sent.
-        if (fromInput) input.value = prompt;
+        if (fromInput) store.getState().setChatDraft(prompt);
         if (aborted) {
-          replyBubble.classList.add('koi-msg-error');
-          replyBubble.textContent = 'Stopped.';
+          notice = { kind: 'error', text: 'Stopped.' };
         } else {
           const raw = e instanceof Error ? e.message : String(e);
           // A rejected/invalid key (the pre-flight check only catches a BLANK key) surfaces a raw
@@ -1256,24 +819,21 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
           const isAuth = /\b401\b|authentication|invalid[\s_-]*(x-)?api[\s_-]*key|unauthor/i.test(raw);
           const jsonMsg = raw.match(/"message"\s*:\s*"([^"]+)"/)?.[1];
           if (isAuth) {
-            replyBubble.classList.add('koi-msg-note');
             // "Rejected" only makes sense if a key was actually sent; a 401 with no usable key (a
             // keyless local/remote endpoint that still demands auth) is a missing-key situation, not
             // a bad one — so word it as "not configured" to match the pre-flight guard (#530).
-            replyBubble.textContent = hasKey
-              ? 'The provider rejected your API key. Check it in Settings → Assistant. '
-              : 'No API key configured — add one in Settings → Assistant. ';
-            const open = document.createElement('button');
-            open.type = 'button';
-            open.className = 'koi-link-btn';
-            open.textContent = 'Open Settings';
-            open.addEventListener('click', () => opts.onOpenPrefs());
-            replyBubble.appendChild(open);
+            notice = {
+              kind: 'note',
+              text: hasKey
+                ? 'The provider rejected your API key. Check it in Settings → Assistant. '
+                : 'No API key configured — add one in Settings → Assistant. ',
+              openSettings: true,
+            };
           } else {
-            replyBubble.classList.add('koi-msg-error');
-            replyBubble.textContent = 'Request failed: ' + (jsonMsg ?? raw);
+            notice = { kind: 'error', text: 'Request failed: ' + (jsonMsg ?? raw) };
           }
         }
+        rerender();
       }
     } finally {
       aborter = null;
@@ -1281,25 +841,21 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       // completed (or aborted with a usable partial) settles streaming → idle here; the rollback
       // path already left 'error' via abortChatTurn, which must not be clobbered back to idle.
       if (chat().status === 'streaming') store.getState().finishChatTurn();
-      setBusy(false);
       // Replay a workspace sync that arrived mid-stream, now that the transcript is quiescent.
       if (pendingSync) syncWorkspace();
-      input.focus();
+      focusComposer();
     }
   }
 
-  sendBtn.addEventListener('click', () => void send(input.value, undefined, { fromInput: true }));
-  stopBtn.addEventListener('click', () => aborter?.abort());
-  input.addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-      e.preventDefault();
-      void send(input.value, undefined, { fromInput: true });
-    }
-  });
+  opts.container.classList.add('koi-assistant');
+  // Start from a clean host node (panelHost hands us a fresh mount, but a re-created panel must not
+  // leave stale non-Preact content behind for render() to contend with).
+  opts.container.replaceChildren();
+  rerender();
 
   return {
     focusInput() {
-      input.focus();
+      focusComposer();
     },
     syncWorkspace,
     explainSelection() {

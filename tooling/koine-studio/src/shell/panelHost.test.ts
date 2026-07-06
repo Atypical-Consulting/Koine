@@ -13,7 +13,7 @@ const { handles, ctors } = vi.hoisted(() => {
   };
   const ctors = {
     createSettingsPage: vi.fn(() => handles.settings),
-    createAssistantPanel: vi.fn(() => handles.assistant),
+    createAssistantChat: vi.fn(() => handles.assistant),
     createScenarioPanel: vi.fn(() => handles.scenario),
     createTerminalPanel: vi.fn(() => handles.terminal),
     createReviewPanel: vi.fn(() => handles.review),
@@ -21,7 +21,7 @@ const { handles, ctors } = vi.hoisted(() => {
   return { handles, ctors };
 });
 vi.mock('@/settings/settingsPage', () => ({ createSettingsPage: ctors.createSettingsPage }));
-vi.mock('@/ai/aiPanel', () => ({ createAssistantPanel: ctors.createAssistantPanel }));
+vi.mock('@/ai/aiPanel', () => ({ createAssistantChat: ctors.createAssistantChat }));
 vi.mock('@/scenarios/scenarioPanel', () => ({ createScenarioPanel: ctors.createScenarioPanel }));
 vi.mock('@/shell/terminal/terminalPanel', () => ({ createTerminalPanel: ctors.createTerminalPanel }));
 vi.mock('@/review/ReviewPanel', () => ({ createReviewPanel: ctors.createReviewPanel }));
@@ -70,7 +70,7 @@ beforeEach(() => {
 describe('panelHost', () => {
   it('builds nothing at construction (every panel is lazy)', () => {
     createPanelHost(makeDeps());
-    expect(ctors.createAssistantPanel).not.toHaveBeenCalled();
+    expect(ctors.createAssistantChat).not.toHaveBeenCalled();
     expect(ctors.createScenarioPanel).not.toHaveBeenCalled();
     expect(ctors.createTerminalPanel).not.toHaveBeenCalled();
     expect(ctors.createReviewPanel).not.toHaveBeenCalled();
@@ -81,7 +81,7 @@ describe('panelHost', () => {
     const host = createPanelHost(makeDeps());
 
     expect(host.ensureAssistant()).toBe(host.ensureAssistant());
-    expect(ctors.createAssistantPanel).toHaveBeenCalledTimes(1);
+    expect(ctors.createAssistantChat).toHaveBeenCalledTimes(1);
 
     expect(host.ensureScenarios()).toBe(host.ensureScenarios());
     expect(ctors.createScenarioPanel).toHaveBeenCalledTimes(1);

@@ -1,11 +1,12 @@
-// Bridge tests for #984 Task 3: the assistant panel's transcript + turn lifecycle live in the app
-// store's `chat` slice, not in panel-local closures. Each test drives the panel through its DOM
-// (the same fake-provider harness as aiPanel.test.ts) while observing the INJECTED store, proving
-// the slice is the single source of truth for the conversation: a completed send lands the turn in
-// `chat.messages` with an idle → streaming → idle lifecycle, syncWorkspace() hydrates the slice from
-// the new folder's stored transcript, and the mid-stream deferral is now observable in state.
+// Bridge tests for #984 Task 3 (ported to the #990 Task 6 assembly): the assistant's transcript +
+// turn lifecycle live in the app store's `chat` slice, not in host closures. Each test drives the
+// assembled AssistantChat through its DOM (the same fake-provider harness as aiPanel.test.ts) while
+// observing the INJECTED store, proving the slice is the single source of truth for the conversation:
+// a completed send lands the turn in `chat.messages` with an idle → streaming → idle lifecycle,
+// syncWorkspace() hydrates the slice from the new folder's stored transcript, and the mid-stream
+// deferral is observable in state.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { createAssistantPanel, type AssistantPanelOptions } from '@/ai/aiPanel';
+import { createAssistantChat, type AssistantPanelOptions } from '@/ai/aiPanel';
 import { runAssistant } from '@/ai/ai';
 import { loadChat, saveChat } from '@/settings/persistence';
 import { createAppStore, type AppState } from '@/store/index';
@@ -21,7 +22,7 @@ vi.mock('@/ai/ai', async (orig) => ({
   }),
 }));
 
-describe('aiPanel ↔ chat slice bridge (#984 Task 3)', () => {
+describe('assistant ↔ chat slice bridge (#984 Task 3)', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.mocked(runAssistant).mockImplementation(async (req: { onText: (t: string) => void }) => {
@@ -56,9 +57,12 @@ describe('aiPanel ↔ chat slice bridge (#984 Task 3)', () => {
     };
   }
 
-  // Type a prompt and send it via the Send button (the from-input path).
+  // Type a prompt through the CONTROLLED composer (the input listener lands it in chat.draft
+  // synchronously) and send it via the Send button (the from-input path).
   function typeSend(container: HTMLElement, text: string): void {
-    container.querySelector<HTMLTextAreaElement>('.koi-assistant-input')!.value = text;
+    const input = container.querySelector<HTMLTextAreaElement>('.koi-assistant-input')!;
+    input.value = text;
+    input.dispatchEvent(new Event('input'));
     container.querySelector<HTMLButtonElement>('.koi-assistant-send')!.click();
   }
 
@@ -70,7 +74,7 @@ describe('aiPanel ↔ chat slice bridge (#984 Task 3)', () => {
       if (s.chat.status !== prev.chat.status) transitions.push(s.chat.status);
     });
     const container = document.createElement('div');
-    createAssistantPanel(opts(container, store));
+    createAssistantChat(opts(container, store));
 
     typeSend(container, 'hello');
     await vi.waitFor(() => expect(transitions).toEqual(['idle', 'streaming', 'idle']));
@@ -91,7 +95,7 @@ describe('aiPanel ↔ chat slice bridge (#984 Task 3)', () => {
     let key = 'A';
     const store = createAppStore();
     const container = document.createElement('div');
-    const panel = createAssistantPanel(opts(container, store, { getWorkspaceKey: () => key }));
+    const panel = createAssistantChat(opts(container, store, { getWorkspaceKey: () => key }));
 
     // Mount pointed the slice at the initial workspace.
     expect(store.getState().chat.workspaceKey).toBe('A');
@@ -120,7 +124,7 @@ describe('aiPanel ↔ chat slice bridge (#984 Task 3)', () => {
     });
     const store = createAppStore();
     const container = document.createElement('div');
-    const panel = createAssistantPanel(opts(container, store, { getWorkspaceKey: () => key }));
+    const panel = createAssistantChat(opts(container, store, { getWorkspaceKey: () => key }));
 
     typeSend(container, 'question in A');
     await vi.waitFor(() => expect(store.getState().chat.status).toBe('streaming'));
@@ -142,11 +146,11 @@ describe('aiPanel ↔ chat slice bridge (#984 Task 3)', () => {
   });
 });
 
-// --- #984 Task 4: the change-set sub-panel is a CONSUMER of the slice's state machine ------------
-// The panel's change-set DOM (checkboxes, Apply, superseded treatment) is repainted from the store's
-// `chat.changeSet` by a single panel-level subscription, and every user gesture dispatches a slice
+// --- #984 Task 4: the change-set review is a CONSUMER of the slice's state machine ---------------
+// The change-set DOM (checkboxes, Apply, superseded treatment) renders from the store's
+// `chat.changeSet` (the declarative ChangeSetPanel), and every user gesture dispatches a slice
 // action — no closure-held accepted/applied/invalidated/inFlight state remains.
-describe('aiPanel ↔ chat slice change-set bridge (#984 Task 4)', () => {
+describe('assistant ↔ chat slice change-set bridge (#984 Task 4)', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.mocked(runAssistant).mockReset();
@@ -206,7 +210,7 @@ describe('aiPanel ↔ chat slice change-set bridge (#984 Task 4)', () => {
       }
     });
     const container = document.createElement('div');
-    createAssistantPanel(csOpts(container, store));
+    createAssistantChat(csOpts(container, store));
 
     fire(container);
     await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
@@ -221,7 +225,7 @@ describe('aiPanel ↔ chat slice change-set bridge (#984 Task 4)', () => {
 
   test('a Send with an un-applied set standing invalidates it as superseded in the store and the DOM', async () => {
     // Turn 1 stages a set; turn 2 is a plain reply, so the store's set after turn 2 is still turn 1's
-    // — now invalidated('superseded') by the send, with the DOM treatment driven by the subscription.
+    // — now invalidated('superseded') by the send, with the DOM treatment rendered by ChangeSetPanel.
     let turn = 0;
     vi.mocked(runAssistant).mockImplementation(async (req: any) => {
       turn++;
@@ -231,7 +235,7 @@ describe('aiPanel ↔ chat slice change-set bridge (#984 Task 4)', () => {
     });
     const store = createAppStore();
     const container = document.createElement('div');
-    createAssistantPanel(csOpts(container, store));
+    createAssistantChat(csOpts(container, store));
 
     fire(container);
     await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
@@ -243,8 +247,8 @@ describe('aiPanel ↔ chat slice change-set bridge (#984 Task 4)', () => {
       expect(store.getState().chat.changeSet?.phase).toEqual({ kind: 'invalidated', reason: 'superseded' }),
     );
     expect(store.getState().chat.changeSet?.id).toBe(stagedId);
-    // The superseded treatment reached the DOM via the store subscription (no closure handle).
-    expect(panel.classList.contains('koi-changeset-superseded')).toBe(true);
+    // The superseded treatment reached the DOM from the slice state (no imperative handle).
+    await vi.waitFor(() => expect(panel.classList.contains('koi-changeset-superseded')).toBe(true));
     expect(panel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.disabled).toBe(true);
     expect(panel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
   });
@@ -257,7 +261,7 @@ describe('aiPanel ↔ chat slice change-set bridge (#984 Task 4)', () => {
     });
     const store = createAppStore();
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       csOpts(container, store, {
         onApplyChangeSet: vi.fn(async () => {
           throw new Error('setDoc blew up');
@@ -275,7 +279,7 @@ describe('aiPanel ↔ chat slice change-set bridge (#984 Task 4)', () => {
       expect(phase?.kind).toBe('reviewing');
       expect(phase?.kind === 'reviewing' ? phase.note : undefined).toContain('setDoc blew up');
     });
-    expect(applyBtn.disabled).toBe(false);
+    await vi.waitFor(() => expect(applyBtn.disabled).toBe(false));
   });
 
   test('accept-checkbox toggles land in chat.changeSet.files[].accepted', async () => {
@@ -287,7 +291,7 @@ describe('aiPanel ↔ chat slice change-set bridge (#984 Task 4)', () => {
     });
     const store = createAppStore();
     const container = document.createElement('div');
-    createAssistantPanel(csOpts(container, store));
+    createAssistantChat(csOpts(container, store));
 
     fire(container);
     await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());

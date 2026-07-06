@@ -96,7 +96,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // buildExplainPrompt/buildRepairPrompt + WORKSPACE_EDIT_GUIDE + the DomainIndex/AssistantContext
   // types) to aiPrompts.ts, leaving re-exports. Measured end-state, no headroom — the remaining #990
   // tasks keep ratcheting down.
-  { file: 'src/ai/aiPanel.ts', maxLines: 1309 },
+  // Lowered 1309 → 865: #990 Task 6 retires the imperative DOM panel — rendering moved to the
+  // declarative AssistantChat composition (Transcript/ChangeSetPanel/Composer over the chat slice),
+  // leaving only the host factory (the send effect, grammar-constraint/repair loop, apply-gate, and
+  // change-set apply flow). Measured end-state, no headroom.
+  { file: 'src/ai/aiPanel.ts', maxLines: 865 },
   // Frozen 2026-07-02 at 1301 LOC (grown from the audit's 1284 @ fc83bcf5), ceil(1301 × 1.02) = 1328.
   // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
   // not mandate the split — #989 owns that.

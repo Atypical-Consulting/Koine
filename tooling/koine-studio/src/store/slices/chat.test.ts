@@ -286,6 +286,28 @@ describe('streaming turn', () => {
     s.getState().abortChatTurn({ rollbackUserTurn: false });
     expect(s.getState().chat.turn).toBeNull();
   });
+
+  test('clearStreamingTurn drops the live turn but KEEPS the streaming status (#990 Task 6)', () => {
+    const s = createAppStore();
+    s.getState().startChatTurn();
+    s.getState().appendStreamingText('committed elsewhere');
+    s.getState().clearStreamingTurn();
+    expect(s.getState().chat.turn).toBeNull();
+    // The busy window stays open: the send effect's post-turn work (the repair loop) still runs
+    // under it, so hydrateChat stays a no-op and a second start can't seed a new turn mid-window.
+    expect(s.getState().chat.status).toBe('streaming');
+    s.getState().startChatTurn();
+    expect(s.getState().chat.turn).toBeNull();
+    s.getState().hydrateChat('elsewhere', []);
+    expect(s.getState().chat.workspaceKey).not.toBe('elsewhere');
+  });
+
+  test('clearStreamingTurn is a no-op when no turn is live', () => {
+    const s = createAppStore();
+    s.getState().clearStreamingTurn(); // idle: must not throw
+    expect(s.getState().chat.turn).toBeNull();
+    expect(s.getState().chat.status).toBe('idle');
+  });
 });
 
 const edit = (relPath: string, body: string, isNew = false): StagedEdit => ({

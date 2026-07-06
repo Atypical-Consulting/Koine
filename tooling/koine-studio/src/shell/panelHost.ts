@@ -6,7 +6,7 @@
 // it just moves out of init() and reaches the editor / workspace / host through the injected `deps`.
 import { createElement, render } from 'preact';
 import { createSettingsPage, type SettingsPageHandle } from '@/settings/settingsPage';
-import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
+import { createAssistantChat, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
 import { AssistantView, ASSISTANT_MOUNT_CLASS } from '@atypical/koine-ui';
 import { createScenarioPanel, type ScenarioPanel } from '@/scenarios/scenarioPanel';
 import { createTerminalPanel, type TerminalPanel } from '@/shell/terminal/terminalPanel';
@@ -146,14 +146,15 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
   function ensureAssistant(): AssistantPanel {
     if (assistant) return assistant;
     // The #view-assistant host content is owned by the AssistantView Preact island (#759): render it once
-    // (synchronously creating the mount node), then mount the imperative aiPanel into that node. Preact
-    // doesn't flush effects within render(), so we query the node and build the panel synchronously here —
+    // (synchronously creating the mount node), then build the assistant into that node. Preact doesn't
+    // flush effects within render(), so we query the node and build the panel synchronously here —
     // keeping ensureAssistant's synchronous, idempotent contract (the inspector controller + palette use
-    // the returned panel immediately). AssistantView never re-renders, so it never clobbers aiPanel's DOM.
+    // the returned handle immediately). AssistantView never re-renders, so it never contends with the
+    // factory's own AssistantChat render root inside the mount node (#990 Task 6).
     render(createElement(AssistantView, null), assistantView);
     const assistantMount = assistantView.querySelector<HTMLElement>(`.${ASSISTANT_MOUNT_CLASS}`);
     if (!assistantMount) throw new Error('missing assistant mount node');
-    assistant = createAssistantPanel({
+    assistant = createAssistantChat({
       container: assistantMount,
       getProvider: () => loadSettings().aiProvider,
       getBaseUrl: () => loadSettings().aiBaseUrl,

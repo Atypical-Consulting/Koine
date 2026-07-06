@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { Fragment, type ComponentChildren } from 'preact';
 import type { StoreApi } from 'zustand/vanilla';
 import { useAppStore } from '@/store/hooks';
 import type { AppState } from '@/store/index';
@@ -35,6 +36,19 @@ export interface TranscriptNotice {
   readonly openSettings?: boolean;
 }
 
+/**
+ * The host's grammar-constraint view state for the TRAILING assistant turn (#257/#446): the mechanism
+ * chip ("grammar-constrained" / "parse-and-repair"), the live "repair k/N" counter the repair loop
+ * ticks, and the terminal "couldn't produce valid Koine" notice when every round failed. EPHEMERAL —
+ * host-rendered per live turn, never persisted, so a replayed turn renders none of it (exactly like
+ * the imperative panel, which attached these as loose DOM on the live bubble only).
+ */
+export interface TurnMechanism {
+  readonly chip: string | null;
+  readonly repairCounter: string;
+  readonly invalidNotice: string | null;
+}
+
 export interface TranscriptProps {
   /** The app store carrying the chat slice (#984); tests and stories inject their own createAppStore(). */
   store: StoreApi<AppState>;
@@ -58,13 +72,31 @@ export interface TranscriptProps {
    * panel — and like there, the marker is NOT persisted, so a replay renders the partial plain.
    */
   stoppedPartial?: boolean;
+  /**
+   * The grammar-constraint treatment for the TRAILING assistant turn (chip / repair counter /
+   * invalid notice), or null/absent for none. Like {@link stoppedPartial}, it scopes to the last
+   * bubble only and is never persisted.
+   */
+  mechanism?: TurnMechanism | null;
+  /**
+   * The TRAILING turn's settled tool cards, host-kept so they outlive the ephemeral `chat.turn`
+   * (which finish/commit clears): the imperative transcript kept a turn's cards above its reply
+   * bubble after the turn ended, and this renders them in exactly that spot. Never persisted — a
+   * replay renders none, and the host drops them when the conversation moves on.
+   */
+  settledToolCalls?: readonly ChatToolCall[] | null;
+  /**
+   * Extra content rendered at the END of the transcript scroller — the host mounts the change-set
+   * review here (#990 Task 6) so a long per-file diff scrolls with the conversation, as the
+   * imperative panel's in-bubble change set did.
+   */
+  children?: ComponentChildren;
 }
 
 /**
  * The maximum number of characters of a tool's raw result rendered inside an expandable tool-call
  * card, with a visible `(truncated)` note past it — so one noisy `koine_compile` blob can't blow up
- * the transcript. Mirrors the imperative panel's constant (aiPanel.ts), which #990 Task 6 deletes
- * along with its island.
+ * the transcript. Moved here from the imperative panel when #990 Task 6 retired its island.
  */
 export const TOOL_RESULT_CLAMP: number = 8 * 1024;
 
@@ -96,12 +128,14 @@ function AssistantBubble({
   content,
   offerApply,
   stopped,
+  mechanism,
   getApplyCandidate,
   onApplyModel,
 }: {
   content: string;
   offerApply: boolean;
   stopped: boolean;
+  mechanism?: TurnMechanism | null;
   getApplyCandidate?: (markdown: string) => Promise<string | null>;
   onApplyModel: (source: string) => void;
 }) {
@@ -129,6 +163,20 @@ function AssistantBubble({
     <div class="koi-msg koi-msg-assistant">
       <MdHtml md={content} />
       {stopped && <div class="koi-assistant-stopped">Stopped.</div>}
+      {/* The grammar-constraint treatment (#257/#446), in the imperative panel's order: the mechanism
+          chip (a status indicator, not decoration — WCAG 2.1 AA 4.1.3), then the live "repair k/N"
+          counter (present-but-empty until a repair round actually runs, so the polite live region
+          announces each tick), then — mutually exclusive with Apply — the failure notice. */}
+      {mechanism?.chip && (
+        <span class="koi-assistant-chip" role="status">
+          {mechanism.chip}
+        </span>
+      )}
+      {mechanism && (
+        <div class="koi-assistant-repair-counter" role="status" aria-live="polite">
+          {mechanism.repairCounter}
+        </div>
+      )}
       {candidate != null && (
         <button
           type="button"
@@ -141,6 +189,12 @@ function AssistantBubble({
         >
           {applied ? 'Applied ✓' : 'Apply to editor'}
         </button>
+      )}
+      {mechanism?.invalidNotice && (
+        // The failure + withheld-Apply state is conveyed only by this text, so announce it (WCAG 4.1.3).
+        <div class="koi-assistant-invalid" role="alert">
+          {mechanism.invalidNotice}
+        </div>
       )}
     </div>
   );
@@ -194,6 +248,9 @@ export function Transcript({
   getApplyCandidate,
   notice,
   stoppedPartial,
+  mechanism,
+  settledToolCalls,
+  children,
 }: TranscriptProps) {
   const messages = useAppStore(store, (s) => s.chat.messages);
   const status = useAppStore(store, (s) => s.chat.status);
@@ -223,23 +280,28 @@ export function Transcript({
           </p>
         </div>
       )}
-      {messages.map((m, i) =>
-        m.role === 'assistant' ? (
-          <AssistantBubble
-            key={`m${i}`}
-            content={m.content}
-            offerApply={m.offerApply !== false}
-            stopped={!!stoppedPartial && i === last}
-            getApplyCandidate={getApplyCandidate}
-            onApplyModel={onApplyModel}
-          />
-        ) : (
-          // User text verbatim — never through the markdown renderer.
-          <div key={`m${i}`} class="koi-msg koi-msg-user">
-            {m.content}
-          </div>
-        ),
-      )}
+      {messages.map((m, i) => (
+        <Fragment key={`m${i}`}>
+          {/* The finished trailing turn's tool cards sit ABOVE its reply bubble, exactly where they
+              streamed (the imperative insertBefore contract survives the turn's completion). */}
+          {i === last &&
+            m.role === 'assistant' &&
+            settledToolCalls?.map((c) => <ToolCard key={`st${c.id}`} call={c} />)}
+          {m.role === 'assistant' ? (
+            <AssistantBubble
+              content={m.content}
+              offerApply={m.offerApply !== false}
+              stopped={!!stoppedPartial && i === last}
+              mechanism={i === last ? mechanism : null}
+              getApplyCandidate={getApplyCandidate}
+              onApplyModel={onApplyModel}
+            />
+          ) : (
+            // User text verbatim — never through the markdown renderer.
+            <div class="koi-msg koi-msg-user">{m.content}</div>
+          )}
+        </Fragment>
+      ))}
       {streaming && (
         <>
           {/* Tool cards sit ABOVE the streaming bubble (the imperative insertBefore contract). */}
@@ -263,6 +325,7 @@ export function Transcript({
           )}
         </div>
       )}
+      {children}
     </div>
   );
 }

@@ -101,6 +101,14 @@ export interface ChatSlice {
   /** streaming → idle; drops the ephemeral turn. */
   finishChatTurn(): void;
   /**
+   * Drop the ephemeral turn while KEEPING the streaming status (#990 Task 6). The send effect
+   * commits the finished reply to `messages` BEFORE its post-turn work settles (the bounded
+   * parse-and-repair loop still runs LLM turns under the same busy window), so without this the
+   * transcript would render the committed bubble AND the stale streaming bubble side by side.
+   * No-op when no turn is live.
+   */
+  clearStreamingTurn(): void;
+  /**
    * Abort the live turn (dropping the ephemeral turn). rollbackUserTurn: true pops exactly the
    * trailing message if it is the just-sent user turn and sets status 'error'; false keeps the
    * transcript intact → 'idle'.
@@ -196,6 +204,11 @@ export function createChatSlice(
     },
     finishChatTurn: () => {
       set({ chat: { ...get().chat, status: 'idle', turn: null } });
+    },
+    clearStreamingTurn: () => {
+      const chat = get().chat;
+      if (!chat.turn) return;
+      set({ chat: { ...chat, turn: null } });
     },
     abortChatTurn: ({ rollbackUserTurn }) => {
       const chat = get().chat;

@@ -113,7 +113,11 @@ export function Composer({ store, onSend, onStop, onQuickAction, onExplain, onCl
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
               e.preventDefault();
-              if (!busy) onSend(draft);
+              // Read the draft from the STORE at gesture time (not the render closure): the input
+              // listener lands every keystroke in chat.draft synchronously, so a send in the same
+              // tick as a keystroke can never capture a stale value — the imperative panel likewise
+              // read input.value at click time.
+              if (!busy) onSend(store.getState().chat.draft);
             }
           }}
         />
@@ -122,7 +126,8 @@ export function Composer({ store, onSend, onStop, onQuickAction, onExplain, onCl
           class="koi-assistant-send"
           disabled={busy}
           onClick={() => {
-            if (!busy) onSend(draft);
+            // Gesture-time store read — see the ⌘/Ctrl+Enter handler above.
+            if (!busy) onSend(store.getState().chat.draft);
           }}
         >
           Send

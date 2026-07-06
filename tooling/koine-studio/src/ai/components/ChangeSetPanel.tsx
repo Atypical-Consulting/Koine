@@ -18,6 +18,22 @@ import type { ChangeSetFileState } from '@/store/slices/chat';
 // `beginChangeSetApply`, the write, `resolveChangeSetApply`/`rejectChangeSetApply` — belongs to the
 // host (Task 6), never to this component.
 
+/**
+ * The host's per-apply-attempt outcome (#473/#633), which the slice's phase deliberately doesn't
+ * carry: the live-region wording counts the files actually WRITTEN this attempt (the clean subset,
+ * minus drift skips — `phase.appliedCount` counts the accepted files at settle time instead), and the
+ * drift/partial/reject messages name the exact skips/failures. Keyed by the set id so a stale attempt
+ * from a replaced set is ignored without the host having to clear it.
+ */
+export interface ChangeSetAttempt {
+  /** The id of the set this attempt belongs to; ignored unless it matches the rendered set. */
+  readonly forId: number;
+  /** The live-region message for this attempt, or null to fall back to the phase wording. */
+  readonly note: string | null;
+  /** The clean-count actually written, overriding `phase.appliedCount` in the terminal label. */
+  readonly appliedCount: number | null;
+}
+
 export interface ChangeSetPanelProps {
   /** The app store carrying the chat slice (#984); tests and stories inject their own createAppStore(). */
   store: StoreApi<AppState>;
@@ -28,12 +44,14 @@ export interface ChangeSetPanelProps {
   onApply: (accepted: readonly ChangeSetFileState[]) => void;
   /** Discard clicked: the host dispatches `discardChangeSet` plus any teardown it owns. */
   onDiscard: () => void;
+  /** The host's per-attempt outcome for the CURRENT set, or null/absent for the phase-derived wording. */
+  attempt?: ChangeSetAttempt | null;
 }
 
 /**
  * A minimal line-level diff for the change-set preview: an LCS walk marks lines only in the new body
  * with `+`, lines only in the old with `-`, and shared lines with a leading space. Presentation only.
- * Mirrors the imperative panel's helper (aiPanel.ts), which #990 Task 6 deletes along with its island.
+ * Moved here from the imperative panel when #990 Task 6 retired its island.
  */
 function lineDiff(oldText: string, newText: string): string {
   const a = oldText.length ? oldText.split('\n') : [];
@@ -71,34 +89,41 @@ function lineDiff(oldText: string, newText: string): string {
 /** Pluralize the panel's file counts exactly as the imperative panel did. */
 const files = (n: number): string => `file${n === 1 ? '' : 's'}`;
 
-export function ChangeSetPanel({ store, onApply, onDiscard }: ChangeSetPanelProps) {
+export function ChangeSetPanel({ store, onApply, onDiscard, attempt }: ChangeSetPanelProps) {
   const changeSet = useAppStore(store, (s) => s.chat.changeSet);
   if (!changeSet) return null;
 
   const { phase, diagnostics } = changeSet;
+  // Honor the host's per-attempt outcome only for the set it was made against — a stale attempt from
+  // a replaced set must not word the fresh review.
+  const at = attempt && attempt.forId === changeSet.id ? attempt : null;
   // Terminal phases lock the review: a checkbox toggle after "Applied ✓" must not re-enable Apply and
   // let the same change set be written to disk a second time; a superseded set can never be applied.
   const terminal = phase.kind === 'applied' || phase.kind === 'invalidated';
   const accepted = changeSet.files.filter((f) => f.accepted);
   const n = accepted.length;
 
-  const applyLabel =
-    phase.kind === 'applied' ? `Applied ${phase.appliedCount} ${files(phase.appliedCount)} ✓` : `Apply ${n} ${files(n)}`;
+  // The terminal label counts the files actually WRITTEN this attempt (drift skips excluded) when the
+  // host reported it, falling back to the slice's accepted-at-settle count.
+  const appliedN = phase.kind === 'applied' ? (at?.appliedCount ?? phase.appliedCount) : 0;
+  const applyLabel = phase.kind === 'applied' ? `Applied ${appliedN} ${files(appliedN)} ✓` : `Apply ${n} ${files(n)}`;
   // Reviewing: openable whenever at least one file is accepted (a reviewing note — an apply failure,
   // #633 — leaves Apply RE-ENABLED for retry). Applying keeps the in-flight lock; terminal stays shut.
   const applyDisabled = phase.kind !== 'reviewing' || n === 0;
 
-  // The polite live region (WCAG 2.1 AA 4.1.3), derived from the phase alone: the apply-failure /
-  // partial-failure note while reviewing (#633), the settled outcome once applied, and the superseded
-  // notice once invalidated (#473).
+  // The polite live region (WCAG 2.1 AA 4.1.3). The superseded notice always wins (#684: a late apply
+  // settle on a retired set must not overwrite it); otherwise the host's per-attempt wording (drift
+  // skips, partial failures, the clean-count "Applied N.") takes precedence over the phase-derived
+  // fallbacks — the apply-failure note while reviewing (#633) and the settled count once applied.
   const statusText =
-    phase.kind === 'reviewing'
-      ? (phase.note ?? '')
-      : phase.kind === 'applied'
-        ? `Applied ${phase.appliedCount} ${files(phase.appliedCount)}.`
-        : phase.kind === 'invalidated'
-          ? `This change set was ${phase.reason} by a newer turn and can no longer be applied.`
-          : '';
+    phase.kind === 'invalidated'
+      ? `This change set was ${phase.reason} by a newer turn and can no longer be applied.`
+      : (at?.note ??
+        (phase.kind === 'reviewing'
+          ? (phase.note ?? '')
+          : phase.kind === 'applied'
+            ? `Applied ${appliedN} ${files(appliedN)}.`
+            : ''));
 
   return (
     <div

@@ -1,5 +1,5 @@
 // Tests for MdHtml (#990 Task 2): the single escaped-markdown render boundary for assistant
-// content. The component owns the ONLY permitted `dangerouslySetInnerHTML` site over
+// content. The component owns the ONLY permitted raw-HTML sink over
 // `renderMarkdown` output, so the suite proves both halves of that contract: the markdown subset
 // renders as real elements inside `.koi-md`, and hostile model output stays inert TEXT — no
 // `img`/`script` element is ever injected (see src/editor/markdown.ts for why: the whole input is
