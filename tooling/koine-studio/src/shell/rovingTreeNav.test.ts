@@ -212,4 +212,16 @@ describe('handleTreeKeydown', () => {
     handleTreeKeydown(h.nav, ev);
     expect(h.focus).toEqual([0]);
   });
+
+  test('with no active item (-1), structural/activation keys never index into items() (no -1 deref)', () => {
+    const h = makeNav({ activeIndex: () => -1 });
+    for (const key of ['ArrowRight', 'ArrowLeft', 'Enter', ' ']) {
+      const { ev, prevented } = keydown(key);
+      handleTreeKeydown(h.nav, ev);
+      expect(prevented()).toBe(false);
+    }
+    expect(h.expandArg).toEqual([]);
+    expect(h.collapseArg).toEqual([]);
+    expect(h.activateArg).toEqual([]);
+  });
 });

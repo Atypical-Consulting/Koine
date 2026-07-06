@@ -527,11 +527,15 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
   // adopting the shared router must not silently add keys.
   function rowNav(li: HTMLLIElement, entry: FsEntry): RovingTreeNav<HTMLLIElement> {
     const isDir = entry.kind === 'dir';
+    // Snapshot the visible rows once per keydown: movement keys never mutate the tree, and the
+    // structural keys below only read this list in their non-mutating branch, so a single walk suffices
+    // (the pre-refactor handler likewise walked once).
+    const items = visibleItems();
     return {
-      items: () => visibleItems(),
-      activeIndex: () => visibleItems().indexOf(li),
+      items: () => items,
+      activeIndex: () => items.indexOf(li),
       focusIndex: (i) => {
-        const item = visibleItems()[i];
+        const item = items[i];
         if (item) focusItem(item);
       },
       // ArrowRight: open a closed directory, or step into an already-open one. Always reports the key
@@ -541,9 +545,8 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
           if (li.getAttribute('aria-expanded') !== 'true') {
             setExpanded(li, true);
           } else {
-            const list = visibleItems();
-            const idx = list.indexOf(li);
-            if (idx >= 0 && idx < list.length - 1) focusItem(list[idx + 1]);
+            const idx = items.indexOf(li);
+            if (idx >= 0 && idx < items.length - 1) focusItem(items[idx + 1]);
           }
         }
         return true;

@@ -87,15 +87,17 @@ export function handleTreeKeydown<T>(nav: RovingTreeNav<T>, ev: KeyboardEvent): 
       nav.focusIndex(items.length - 1);
       break;
     case 'ArrowRight':
-      if (nav.expand?.(current)) ev.preventDefault();
+      // Structural/activation keys need a real row to act on; with nothing active (`current < 0`) they
+      // are no-ops, so an adapter whose expand/collapse/activate index into `items()[i]` never sees -1.
+      if (current >= 0 && nav.expand?.(current)) ev.preventDefault();
       break;
     case 'ArrowLeft':
-      if (nav.collapse?.(current)) ev.preventDefault();
+      if (current >= 0 && nav.collapse?.(current)) ev.preventDefault();
       break;
     case 'Enter':
     case ' ':
       if (ev.key === ' ' && nav.supportsSpaceActivate === false) break;
-      if (!nav.activate) break;
+      if (current < 0 || !nav.activate) break;
       if (nav.activate(current) !== false) ev.preventDefault();
       break;
   }

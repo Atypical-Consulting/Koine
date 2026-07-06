@@ -142,14 +142,17 @@ function currentTreeItem(ev: KeyboardEvent): HTMLElement | null {
  *  the event's target. The navigator has no ArrowRight/Left (its trees never collapse a branch), so it
  *  omits `expand`/`collapse` and keeps the default Home/End + Space-activation. */
 function treeNav(tree: HTMLElement, ev: KeyboardEvent): RovingTreeNav<HTMLElement> {
+  // Snapshot the treeitems once per keydown: the navigator's trees never mutate mid-handler (it has no
+  // expand/collapse), so a single querySelectorAll serves items()/activeIndex()/focusIndex().
+  const items = treeItems(tree);
   return {
-    items: () => treeItems(tree),
+    items: () => items,
     activeIndex: () => {
       const current = currentTreeItem(ev);
-      return current ? treeItems(tree).indexOf(current) : -1;
+      return current ? items.indexOf(current) : -1;
     },
     focusIndex: (i) => {
-      const item = treeItems(tree)[i];
+      const item = items[i];
       if (item) focusTreeItem(tree, item);
     },
     activate: () => {
