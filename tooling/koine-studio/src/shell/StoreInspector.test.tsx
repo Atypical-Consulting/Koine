@@ -65,6 +65,24 @@ describe('StoreInspector', () => {
     expect(raw).toContain('"canUndo": true');
   });
 
+  test('summarizes the assistant chat slice and tracks it live', () => {
+    const store = createAppStore();
+    const { container } = render(<StoreInspector store={store} />);
+
+    // Defaults: idle transcript, no messages, nothing staged (— for the null change set).
+    expect(field(container, 'chat')).toBe('idle, 0 messages, —');
+
+    act(() => {
+      store.getState().appendChatMessage({ role: 'user', content: 'add an Order aggregate' });
+      store.getState().startChatTurn();
+      store
+        .getState()
+        .stageChangeSet([{ relPath: 'order.koi', body: 'context Ordering', isNew: true }], {}, null);
+    });
+
+    expect(field(container, 'chat')).toBe('streaming, 1 message, reviewing');
+  });
+
   test('has no accessibility violations', async () => {
     const store = createAppStore();
     const { container } = render(<StoreInspector store={store} />);

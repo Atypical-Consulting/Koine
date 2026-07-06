@@ -36,6 +36,10 @@ the store, typed and axe-tested. Coexistence of paradigms *during* the rollout i
   islands that own and mutate their own DOM/lifecycle. We may wrap them in a thin Preact host that
   mounts/unmounts them, but we do **not** re-render their internals through Preact. Do not "migrate" them.
 - The **`src/host/` seam** stays imperative.
+- The assistant **`aiPanel`**'s DOM stays imperative for now, but its *state* — the transcript, turn
+  lifecycle, and change-set review — now lives in the store's `chat` slice (`src/store/slices/chat.ts`),
+  so the panel already reads and writes through the reactive center. That state-first move is the
+  precursor to the JSX migration tracked in #990, which retires this island.
 
 ## Per-panel recipe (6 steps)
 
