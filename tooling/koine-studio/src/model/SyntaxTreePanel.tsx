@@ -50,6 +50,14 @@ function nodeAtKey(root: SyntaxTreeNode, key: string): SyntaxTreeNode | null {
   return node ?? null;
 }
 
+/** Do two nodes look like the SAME construct? The index-path key is only shape-stable, so after a
+ *  rebuild a bare key match can land on a different node if an earlier sibling was inserted/removed;
+ *  matching `kind` + `name` rejects that so the roving tab stop is only restored onto the node the
+ *  keyboard user actually left it on. */
+function sameIdentity(a: SyntaxTreeNode, b: SyntaxTreeNode): boolean {
+  return a.kind === b.kind && a.name === b.name;
+}
+
 /** True when a node's OWN raw span contains the 1-based caret `(line, col)`:
  *  `(span.line, span.column) <= (line, col) < (span.endLine, span.endColumn)` — lexicographic on
  *  line-then-column, end-EXCLUSIVE. All-zero / span-less nodes (the root has a `line:0` span) contain
@@ -144,6 +152,15 @@ export function SyntaxTreePanel(props: {
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const treeRef = useRef<HTMLDivElement>(null);
 
+  // A live mirror of the roving tab stop and the node it points at, so the async fetch resolve below can
+  // read the CURRENT tab stop rather than the effect closure's stale capture (#1097). Assigned every
+  // render — cheaper than an effect and always up to date by the time a microtask-resolved fetch reads it.
+  const focusedRef = useRef<{ key: string | null; node: SyntaxTreeNode | null }>({ key: null, node: null });
+  focusedRef.current = {
+    key: focusedKey,
+    node: focusedKey && tree ? nodeAtKey(tree, focusedKey) : null,
+  };
+
   // The single fetch path: pull the active document's tree on mount and whenever the source or the
   // controller's `revision` changes. The `alive` latch guards against both an unmount-stale resolve and
   // an out-of-order response — a superseded fetch (revision bumped again) has its cleanup flip `alive`
@@ -156,9 +173,18 @@ export function SyntaxTreePanel(props: {
       .then(() => source.syntaxTree())
       .then((t) => {
         if (!alive) return;
+        // Preserve the roving tab stop across the rebuild (#1097): keep it on the previously-focused
+        // node when the SAME index-path still resolves to a node of the same identity in the new tree
+        // (a typing edit that left it intact); otherwise fall back to the root. Re-expand its ancestors
+        // so the restored row actually renders.
+        const prev = focusedRef.current;
+        const hit = t && prev.key ? nodeAtKey(t, prev.key) : null;
+        const restore = hit && prev.node && sameIdentity(hit, prev.node) ? prev.key : null;
         setTree(t ?? null);
-        setExpanded(t ? defaultExpanded(t) : new Set());
-        setFocusedKey(null); // reset the roving tab stop to the (new) root
+        setExpanded(
+          t ? (restore ? withAncestorsExpanded(defaultExpanded(t), restore) : defaultExpanded(t)) : new Set(),
+        );
+        setFocusedKey(restore); // preserved tab stop, or null → the (new) root
         setActiveKey(null); // drop any stale highlight; the caret effect re-derives it for the new tree
       })
       .catch(() => {

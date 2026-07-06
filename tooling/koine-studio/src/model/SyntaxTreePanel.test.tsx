@@ -117,6 +117,68 @@ describe('SyntaxTreePanel', () => {
     await waitFor(() => expect(source.syntaxTree).toHaveBeenCalledTimes(2));
   });
 
+  test('preserves the roving tab stop on the same node across a revision refetch', async () => {
+    // The same tree comes back on every call — a typing edit that leaves the focused node intact.
+    const source = makeSource(fixture());
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+
+    // Arrow down from the root to the Billing context, taking the lone tab stop with it.
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    root.focus();
+    fireEvent.keyDown(root, { key: 'ArrowDown' });
+    const ctx = view.getByRole('treeitem', { name: /ContextNode Billing/ });
+    expect(ctx.getAttribute('tabindex')).toBe('0'); // it holds the roving tab stop now
+    expect(root.getAttribute('tabindex')).toBe('-1');
+
+    // A model edit bumps the revision → the panel refetches and rebuilds the tree.
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    await waitFor(() => expect(source.syntaxTree).toHaveBeenCalledTimes(2));
+
+    // The tab stop stays on Billing (same kind/name identity), NOT reset back to the root.
+    expect(view.getByRole('treeitem', { name: /ContextNode Billing/ }).getAttribute('tabindex')).toBe('0');
+    expect(view.getByRole('treeitem', { name: /KoineModel/ }).getAttribute('tabindex')).toBe('-1');
+  });
+
+  test('falls back to the root tab stop when the focused node is gone after a refetch', async () => {
+    // First the Billing tree; the refetch returns a DIFFERENT context at the same path (Shipping), so
+    // the previously-focused node's identity no longer matches at `0/0`.
+    const shipping = node('KoineModel', null, [
+      node('ContextNode', 'Shipping', [node('ValueObjectDecl', 'Address', [])]),
+    ]);
+    const syntaxTree = vi.fn().mockResolvedValueOnce(fixture()).mockResolvedValueOnce(shipping);
+    const source: SyntaxTreeSource = { syntaxTree };
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    root.focus();
+    fireEvent.keyDown(root, { key: 'ArrowDown' }); // tab stop → Billing (0/0)
+    expect(view.getByRole('treeitem', { name: /ContextNode Billing/ }).getAttribute('tabindex')).toBe('0');
+
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    await waitFor(() => expect(syntaxTree).toHaveBeenCalledTimes(2));
+
+    // The identity guard rejects Shipping-at-0/0 as a match, so the tab stop resets to the root.
+    await waitFor(() =>
+      expect(view.getByRole('treeitem', { name: /KoineModel/ }).getAttribute('tabindex')).toBe('0'),
+    );
+    expect(view.getByRole('treeitem', { name: /ContextNode Shipping/ }).getAttribute('tabindex')).toBe('-1');
+  });
+
+  test('an empty refetch resets to the root and paints the empty state without crashing', async () => {
+    const syntaxTree = vi.fn().mockResolvedValueOnce(fixture()).mockResolvedValueOnce(null);
+    const source: SyntaxTreeSource = { syntaxTree };
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+    root.focus();
+    fireEvent.keyDown(root, { key: 'ArrowDown' }); // tab stop → Billing
+
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    // The now-empty tree paints the empty state (no tree role, no crash) with the tab stop reset.
+    expect(await view.findByText(/No syntax tree/i)).toBeTruthy();
+    expect(view.queryByRole('tree')).toBeNull();
+  });
+
   test('clicking a row fires onNodeClick with that node and marks it current', async () => {
     const onNodeClick = vi.fn();
     const view = render(<SyntaxTreePanel source={makeSource(spannedFixture())} onNodeClick={onNodeClick} />);
