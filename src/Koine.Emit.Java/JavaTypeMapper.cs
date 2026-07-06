@@ -101,19 +101,16 @@ internal sealed class JavaTypeMapper
             : ownerPackage + "." + pascal;
     }
 
-    /// <summary>The single bounded context whose package emits a type, or null when unknown/ambiguous.</summary>
-    private string? OwnerContextOf(string koineName)
-    {
-        // A shared-kernel type is physically emitted into one canonical owner's package (e.g. the
-        // pizzeria's `Currency`, jointly owned by Menu and Ordering, lands in Menu's package).
-        if (_index.IsSharedKernelType(koineName) && _index.KernelOwnerOfType(koineName) is { } kernelOwner)
-        {
-            return kernelOwner;
-        }
-
-        IReadOnlyList<string> declaring = _index.DeclaringContextsOf(koineName);
-        return declaring.Count == 1 ? declaring[0] : null;
-    }
+    /// <summary>
+    /// The single bounded context whose package emits a type, via the shared, deterministic
+    /// <see cref="ModelIndex.ResolveCanonicalOwner"/> policy (issue #1091) — so a <b>multi-owner</b> type
+    /// referenced from a third context resolves to a canonical owner (<c>&lt;ownerPackage&gt;.T</c>)
+    /// rather than degrading to a bare, unresolvable name. Shared-kernel homing, unique-owner
+    /// resolution, and the #437 same-package bind are all handled by that one policy. Null only in the
+    /// legacy context-agnostic mode.
+    /// </summary>
+    private string? OwnerContextOf(string koineName) =>
+        _context is { } ctx ? _index.ResolveCanonicalOwner(koineName, ctx) : null;
 
     /// <summary>
     /// True for the named declared kinds that emit a Java type into a context package (so a foreign one is
