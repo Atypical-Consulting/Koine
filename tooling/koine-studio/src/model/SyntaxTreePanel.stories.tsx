@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
+import { expect, waitFor } from 'storybook/test';
 import { SyntaxTreePanel, type SyntaxTreeSource } from '@/model/SyntaxTreePanel';
 import type { SourceSpan, SyntaxTreeNode } from '@/lsp/protocol';
 
@@ -89,6 +90,36 @@ export const RecoveredErrorTree: Story = {
  *  against the @storybook/addon-a11y axe pass (Chromium/CI). */
 export const LargeTree: Story = {
   args: { source: makeSource(largeTree) },
+};
+
+/** The large model scrolled DEEP (#1106): the window-top row is a level-3 member whose level-1/2 ancestors
+ *  have scrolled out of the mounted slice, so the sticky ancestors band mounts above the window to keep the
+ *  aria-level chain unbroken in the DOM. The `play` scrolls the bounded viewport and waits for the band, so
+ *  the @storybook/addon-a11y axe pass exercises the banded state that the top-of-list stories never reach.
+ *  Rendered inside a fixed-height host so the tree body is a real windowing viewport (the panel is
+ *  `height:100%`, sized by the right rail in the app). */
+export const LargeTreeScrolledToBand: Story = {
+  args: { source: makeSource(largeTree) },
+  render: (args) => (
+    <div style="height:360px;display:flex;flex-direction:column;border:1px solid var(--koi-line);border-radius:8px;overflow:hidden">
+      <SyntaxTreePanel {...args} />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    // The panel fetches its tree asynchronously, so `.koi-stree-scroll` only mounts a few microtasks after
+    // the story first renders (until then it paints the "Parsing…" state). Re-query INSIDE `waitFor` and
+    // return the element once it exists — capturing the scroller once, up front, would close over a `null`
+    // (the fetch hasn't settled) that `waitFor` can never see mount.
+    const scroller = await waitFor(() => {
+      const el = canvasElement.querySelector<HTMLElement>('.koi-stree-scroll');
+      expect(el?.querySelector('[role="tree"]')).toBeTruthy();
+      return el!;
+    });
+    // Scroll deep so the window mounts only level-3 members; the root/context ancestors move into the band.
+    scroller.scrollTop = Math.floor(scroller.scrollHeight * 0.5);
+    scroller.dispatchEvent(new Event('scroll'));
+    await waitFor(() => expect(canvasElement.querySelector('.koi-stree-item--band')).toBeTruthy());
+  },
 };
 
 /** An unknown/absent active document (`syntaxTree` resolves null): the panel paints its empty state

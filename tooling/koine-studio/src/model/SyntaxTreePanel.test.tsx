@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import { act, fireEvent, render, waitFor } from '@testing-library/preact';
-import { SyntaxTreePanel, deepestContaining, type SyntaxTreeSource } from '@/model/SyntaxTreePanel';
+import { SyntaxTreePanel, deepestContaining, ancestorsOf, flattenVisible, type SyntaxTreeSource } from '@/model/SyntaxTreePanel';
 import type { SourceSpan, SyntaxTreeNode } from '@/lsp/protocol';
 import { axe } from 'vitest-axe';
 
@@ -456,6 +456,158 @@ describe('SyntaxTreePanel', () => {
     // The new tree renders from the top — the root (row 0) is present, not scrolled off into a blank window.
     await waitFor(() => expect(view.getByRole('treeitem', { name: /KoineModel/ })).toBeTruthy());
   });
+
+  // --- sticky ancestors band (#1106) -----------------------------------------------------------------
+  // When a windowed flat tree is scrolled deep, the window-top row's ancestors have scrolled out of the
+  // mounted slice — so an AT walking the raw DOM would see aria-level=N rows with no level-1..N-1 parents.
+  // The band re-materialises that ancestor chain, pinned above the window, keeping the levels unbroken.
+
+  test('a sticky ancestors band restores the unbroken aria-level chain when scrolled deep (#1106)', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(4000))} />);
+    await view.findByRole('tree');
+    const scroller = view.container.querySelector('.koi-stree-scroll') as HTMLElement;
+
+    // At the top the window-top row IS the root, so the band is empty — the pre-#1106 bounded window with
+    // no ancestor rows. Capture that baseline window count.
+    expect(view.container.querySelectorAll('.koi-stree-item--band').length).toBe(0);
+    const windowCountAtTop = view
+      .getAllByRole('treeitem')
+      .filter((el) => !el.className.includes('koi-stree-item--band')).length;
+
+    // Scroll far down so the window mounts only level-3 members; the root (level 1) + context (level 2)
+    // have scrolled out of the mounted slice.
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => 2000 * ROW_HEIGHT });
+    fireEvent.scroll(scroller);
+
+    await waitFor(() => {
+      expect(view.queryByRole('treeitem', { name: /Member m0:/ })).toBeNull(); // m0 windowed out
+      expect(view.container.querySelectorAll('.koi-stree-item--band').length).toBeGreaterThan(0);
+    });
+
+    const items = view.getAllByRole('treeitem');
+    const band = items.filter((el) => el.className.includes('koi-stree-item--band'));
+    const windowItems = items.filter((el) => !el.className.includes('koi-stree-item--band'));
+
+    // The band carries the ancestors that scrolled out, with their REAL aria-levels (root=1, context=2).
+    expect(band.map((el) => el.getAttribute('aria-level'))).toEqual(['1', '2']);
+    expect(band[0].getAttribute('aria-label')).toMatch(/^KoineModel/);
+    expect(band[1].getAttribute('aria-label')).toMatch(/^ContextNode Big/);
+
+    // Unbroken chain: band(1,2) + window(3) → the mounted DOM spans levels 1..3 with no gap above the
+    // visible members (the whole point of #1106).
+    const levels = [...new Set(items.map((el) => Number(el.getAttribute('aria-level'))))].sort((a, b) => a - b);
+    expect(levels).toEqual([1, 2, 3]);
+
+    // Pinned ABOVE the window: band rows lead the DOM order, the first window row (level 3) follows.
+    expect(items[0]).toBe(band[0]);
+    expect(items[2].getAttribute('aria-level')).toBe('3');
+
+    // The band does NOT inflate the mounted window — it is a pure overlay that windowRange ignores, so the
+    // window row count is unchanged vs. the no-band baseline for the same viewport.
+    expect(windowItems.length).toBe(windowCountAtTop);
+    expect(windowItems.length).toBeLessThan(80);
+
+    // No new a11y violations with the band mounted (band rows carry honest aria-level/setsize/posinset).
+    expect(await axe(view.container)).toHaveNoViolations();
+  });
+
+  test('band ancestor rows are not a second tab stop — the roving tabindex stays one window row (#1106)', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(5000))} />);
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+
+    // End moves the roving tab stop onto the last member (deep in the window) and scrolls there, so the
+    // ancestors band mounts above the window.
+    root.focus();
+    fireEvent.keyDown(root, { key: 'End' });
+    await waitFor(() => {
+      expect((document.activeElement as HTMLElement | null)?.getAttribute('aria-label')).toMatch(/Member m4999/);
+      expect(view.container.querySelectorAll('.koi-stree-item--band').length).toBeGreaterThan(0);
+    });
+
+    // Exactly one tabbable row across BOTH the band and the window — the focused window member; the band
+    // ancestors are context, never tab stops.
+    const tabbables = view.container.querySelectorAll('[role="treeitem"][tabindex="0"]');
+    expect(tabbables.length).toBe(1);
+    expect((tabbables[0] as HTMLElement).getAttribute('aria-label')).toMatch(/Member m4999/);
+    expect(view.container.querySelectorAll('.koi-stree-item--band[tabindex="0"]').length).toBe(0);
+  });
+
+  test('activating a band ancestor scrolls its real row into the window and moves roving focus there (#1106)', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(5000))} />);
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+
+    // Scroll deep (via End) so the root/context ancestors live ONLY in the band — their real window rows
+    // have scrolled out of the mounted slice.
+    root.focus();
+    fireEvent.keyDown(root, { key: 'End' });
+    await waitFor(() => expect(view.container.querySelectorAll('.koi-stree-item--band').length).toBeGreaterThan(0));
+
+    const bandContext = [...view.container.querySelectorAll('.koi-stree-item--band')].find((el) =>
+      /ContextNode Big/.test(el.getAttribute('aria-label') ?? ''),
+    ) as HTMLElement;
+    expect(bandContext).toBeTruthy();
+
+    // Activating it is NAVIGATION, not selection: scroll its real row back into the window and move the
+    // single roving tab stop onto the REAL (non-band) row — never a duplicate tab stop.
+    fireEvent.click(bandContext);
+    await waitFor(() => {
+      const focused = document.activeElement as HTMLElement | null;
+      expect(focused?.getAttribute('aria-label')).toMatch(/ContextNode Big/);
+      expect(focused?.className.includes('koi-stree-item--band')).toBe(false);
+    });
+    expect(view.container.querySelectorAll('[role="treeitem"][tabindex="0"]').length).toBe(1);
+  });
+
+  test('a refetch recomputes the band — no stale ancestor survives a shrunk tree (#1106/#1097)', async () => {
+    // A huge tree first, then a refetch to a SMALL tree (below the virtualize threshold → no band at all).
+    const syntaxTree = vi.fn().mockResolvedValueOnce(wideFixture(5000)).mockResolvedValueOnce(fixture());
+    const source: SyntaxTreeSource = { syntaxTree };
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+    await view.findByRole('treeitem', { name: /KoineModel/ });
+    const scroller = view.container.querySelector('.koi-stree-scroll') as HTMLElement;
+
+    // Scroll deep so the band mounts the big tree's ancestors.
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => 3000 * ROW_HEIGHT });
+    fireEvent.scroll(scroller);
+    await waitFor(() => expect(view.container.querySelectorAll('.koi-stree-item--band').length).toBeGreaterThan(0));
+
+    // Refetch → the small `fixture()` tree resets the scroll to the top and rebuilds the rows; the band must
+    // recompute from the NEW model, leaving no ancestor row from the old (now-gone) big tree behind.
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    await waitFor(() => expect(syntaxTree).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('.koi-stree-item--band').length).toBe(0);
+      expect(view.getByRole('treeitem', { name: /ContextNode Billing/ })).toBeTruthy();
+    });
+    // And no leftover "Big" context from the discarded tree is anywhere in the DOM.
+    expect(view.queryByRole('treeitem', { name: /ContextNode Big/ })).toBeNull();
+  });
+
+  test('the band names the VISIBLE-top context, not the overscan-top one (#1106)', async () => {
+    // Two contexts (Alpha: 200 members, Beta: 60) → a virtualized tree. Scroll so the row at the fold is the
+    // first Beta member while the overscan-top (OVERSCAN rows higher, which the raw window `first` points at)
+    // is still inside Alpha — the breadcrumb must follow what the user SEES, not the overscan row.
+    const ctx = (name: string, n: number) =>
+      node('ContextNode', name, Array.from({ length: n }, (_, i) => node('Member', `${name}${i}`, [], { leaf: 'Int' })));
+    const twoContexts = node('KoineModel', null, [ctx('Alpha', 200), ctx('Beta', 60)]);
+    const view = render(<SyntaxTreePanel source={makeSource(twoContexts)} />);
+    await view.findByRole('tree');
+    const scroller = view.container.querySelector('.koi-stree-scroll') as HTMLElement;
+
+    // Flat indices: root=0, Alpha=1, Alpha m0..m199 = 2..201, Beta=202, Beta m0=203. Park the fold on Beta m0;
+    // the overscan-top (203 - OVERSCAN) is still an Alpha member.
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => 203 * ROW_HEIGHT });
+    fireEvent.scroll(scroller);
+
+    await waitFor(() => {
+      const band = [...view.container.querySelectorAll('.koi-stree-item--band')];
+      expect(band.length).toBeGreaterThan(0);
+      // The band's level-2 context row is Beta (the fold row's context), NOT Alpha (the overscan-top's).
+      const ctxRow = band.find((el) => el.getAttribute('aria-level') === '2')!;
+      expect(ctxRow.getAttribute('aria-label')).toMatch(/ContextNode Beta/);
+      expect(ctxRow.getAttribute('aria-label')).not.toMatch(/Alpha/);
+    });
+  });
 });
 
 // The core correctness of the editor → tree half: deepest OWN-span containment (the client-side
@@ -492,5 +644,52 @@ describe('deepestContaining', () => {
     // A caret inside the child resolves to it (jumpable); nothing resolves to the zero-span root.
     expect(deepestContaining(tree, 2, 1)?.node.name).toBe('Billing');
     expect(deepestContaining(tree, 0, 0)).toBeNull(); // the all-zero root is never a match → no jump
+  });
+});
+
+// The ancestor derivation behind the sticky ancestors band (#1106): given the first-visible (window-top)
+// row's index-path key, produce the chain of ancestor Rows (root..parent) that scrolled out above the
+// window — so an AT enumerating the raw DOM sees an unbroken aria-level chain, not a window of orphaned
+// aria-level=N rows.
+describe('ancestorsOf', () => {
+  // A deep tree with SIBLINGS at each level, so the derivation must pick the real parent chain
+  // (root → context → value-object), not merely adjacent rows.
+  function deepFixture(): SyntaxTreeNode {
+    return node('KoineModel', null, [
+      node('ContextNode', 'Billing', [
+        node('ValueObjectDecl', 'Money', [
+          node('Member', 'amount', []), // 0/0/0/0 — the level-4 target
+          node('Member', 'currency', []), // 0/0/0/1 — a sibling member
+        ]),
+        node('ValueObjectDecl', 'Rate', []), // 0/0/1 — a sibling value object
+      ]),
+      node('ContextNode', 'Shipping', []), // 0/1 — a sibling context
+    ]);
+  }
+
+  test('returns root..parent (with real aria-levels + sibling metadata) of a deep row', () => {
+    const root = deepFixture();
+    const expanded = new Set(['0', '0/0', '0/0/0']); // fully expand down to the members
+    const rows = flattenVisible(root, expanded);
+
+    // The first-visible row landing on the level-4 Member `amount` yields its three real ancestors, in
+    // root..parent order, each carrying the aria-level it would have inline.
+    const target = rows.findIndex((r) => r.key === '0/0/0/0');
+    expect(rows[target].level).toBe(4);
+    const path = ancestorsOf(root, rows[target].key, expanded);
+    expect(path.map((r) => r.node.kind)).toEqual(['KoineModel', 'ContextNode', 'ValueObjectDecl']);
+    expect(path.map((r) => r.level)).toEqual([1, 2, 3]);
+    expect(path.map((r) => r.key)).toEqual(['0', '0/0', '0/0/0']);
+    // Honest sibling metadata is carried through: Money is child 1 of Billing's two value objects.
+    expect(path[2].posInSet).toBe(1);
+    expect(path[2].setSize).toBe(2);
+  });
+
+  test('a first-visible row that IS a root has no ancestors — the band collapses to empty', () => {
+    const root = deepFixture();
+    const expanded = new Set(['0', '0/0', '0/0/0']);
+    const rows = flattenVisible(root, expanded);
+    expect(rows[0].level).toBe(1);
+    expect(ancestorsOf(root, rows[0].key, expanded)).toEqual([]);
   });
 });

@@ -138,3 +138,23 @@
 .koi-stree-item.koi-stree-item--current > .koi-stree-row {
   background: color-mix(in srgb, var(--koi-accent) 20%, transparent);
 }
+
+/* The sticky ancestors band (#1106): when a large tree is windowed (#1098) and scrolled deep, the window-top
+   row's ancestors have scrolled out of the mounted slice — so a screen reader enumerating the raw DOM would
+   see aria-level=N rows with no level-1..N-1 parents. This band re-materialises that ancestor chain as real
+   `role="treeitem"` rows pinned above the window: the aria-level chain stays unbroken in the DOM and sighted
+   users get a frozen breadcrumb of context. It sticks to the top of the scroll viewport (the outer
+   `.koi-stree-scroll`); an opaque panel background + a hairline divider occlude the rows scrolling beneath it.
+   Bounded by tree depth (≤ a handful of rows). It's a pure overlay — `windowRange` is left unchanged by it,
+   so it never grows the mounted-row count; its measured height only trims the leading virtualization padding
+   so the scroll region stays exact. */
+.koi-stree-band {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  /* An opaque panel background + a hairline divider separate the pinned band from the rows scrolling beneath
+     it. The band is NOT text-dimmed (e.g. opacity) — that would risk dropping the row text below WCAG AA
+     contrast; its pinned elevation is what sets it apart from the live window rows. */
+  background: var(--koi-surface);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--koi-fg) 12%, transparent);
+}
