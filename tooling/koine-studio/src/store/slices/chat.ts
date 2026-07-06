@@ -81,6 +81,13 @@ export interface ChatSlice {
     readonly turn: ChatStreamingTurn | null;
     /** The pending change-set review, or null when nothing is staged. */
     readonly changeSet: ChatChangeSetState | null;
+    /**
+     * The composer textarea's text (#990 Task 5), so the declarative Composer renders it CONTROLLED
+     * and the host's error-rollback restore lands as a plain `setChatDraft(prompt)` dispatch.
+     * EPHEMERAL — never persisted (persistence only ever saves `messages`), and untouched by the
+     * turn lifecycle / hydrateChat, so unsent text survives a failed turn and a workspace swap.
+     */
+    readonly draft: string;
   };
   /** Replace key + transcript on workspace switch. NO-OP while streaming — a mid-stream workspace reassignment must not clobber the live turn. */
   hydrateChat(workspaceKey: string, messages: readonly ChatMessage[]): void;
@@ -121,6 +128,8 @@ export interface ChatSlice {
   }): void;
   /** Empty the transcript (the workspace key and status are untouched). */
   clearChatTranscript(): void;
+  /** Replace the composer draft ('' clears it). The only writer of `chat.draft`. */
+  setChatDraft(text: string): void;
   /**
    * Replace the change set with a fresh reviewing one (monotonic id, all files accepted, none
    * drifted); `before` supplies each relPath's send-time text, defaulting to `''` for new files.
@@ -169,6 +178,7 @@ export function createChatSlice(
       status: 'idle',
       turn: null,
       changeSet: null,
+      draft: '',
     },
     hydrateChat: (workspaceKey, messages) => {
       const chat = get().chat;
@@ -232,6 +242,9 @@ export function createChatSlice(
     },
     clearChatTranscript: () => {
       set({ chat: { ...get().chat, messages: [] } });
+    },
+    setChatDraft: (text) => {
+      set({ chat: { ...get().chat, draft: text } });
     },
     stageChangeSet: (files, before, diagnostics) => {
       setChangeSet({

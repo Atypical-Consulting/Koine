@@ -112,6 +112,47 @@ describe('chat slice', () => {
   });
 });
 
+// The composer draft (#990 Task 5): the textarea's text as slice state, so the declarative Composer
+// renders it controlled and the host's error-rollback restore (setChatDraft(prompt)) lands
+// declaratively. EPHEMERAL — never persisted (persistence only ever saves `messages`).
+describe('composer draft', () => {
+  test('chat.draft starts empty; setChatDraft sets and clears it', () => {
+    const s = createAppStore();
+    expect(s.getState().chat.draft).toBe('');
+    s.getState().setChatDraft('model a billing domain');
+    expect(s.getState().chat.draft).toBe('model a billing domain');
+    s.getState().setChatDraft('');
+    expect(s.getState().chat.draft).toBe('');
+  });
+
+  test('the draft survives the turn lifecycle (start/finish and both abort variants)', () => {
+    const s = createAppStore();
+    s.getState().setChatDraft('typed but not sent');
+    s.getState().startChatTurn();
+    expect(s.getState().chat.draft).toBe('typed but not sent');
+    s.getState().finishChatTurn();
+    expect(s.getState().chat.draft).toBe('typed but not sent');
+
+    s.getState().appendChatMessage(user('sent turn'));
+    s.getState().startChatTurn();
+    s.getState().abortChatTurn({ rollbackUserTurn: true });
+    expect(s.getState().chat.draft).toBe('typed but not sent');
+
+    s.getState().startChatTurn();
+    s.getState().abortChatTurn({ rollbackUserTurn: false });
+    expect(s.getState().chat.draft).toBe('typed but not sent');
+  });
+
+  test('the draft survives hydrateChat and clearChatTranscript (workspace swap keeps unsent text)', () => {
+    const s = createAppStore();
+    s.getState().setChatDraft('unsent draft');
+    s.getState().hydrateChat('ws-1', [user('old')]);
+    expect(s.getState().chat.draft).toBe('unsent draft');
+    s.getState().clearChatTranscript();
+    expect(s.getState().chat.draft).toBe('unsent draft');
+  });
+});
+
 // The ephemeral streaming turn (#990 Task 4): the live text + tool-call cards the imperative panel
 // kept as loose DOM (the streaming bubble, the toolCards Map) as SLICE STATE, so the declarative
 // Transcript can render them. Never persisted — persistence only ever saves `messages`.
