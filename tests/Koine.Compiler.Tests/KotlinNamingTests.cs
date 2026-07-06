@@ -49,6 +49,18 @@ public class KotlinNamingTests
         KotlinNaming.ToPackageSegment(input).ShouldBe(expected);
     }
 
+    [Theory]
+    [InlineData("object", "`object`")]        // lowercases to a hard keyword -> backtick-escaped
+    [InlineData("when", "`when`")]
+    [InlineData("Object", "`object`")]         // casing doesn't matter: lowercase collides -> escaped
+    [InlineData("Billing", "billing")]         // not a keyword: lowercased, unchanged
+    [InlineData("Order_Management", "ordermanagement")]  // separators dropped, not a keyword
+    [InlineData("value", "value")]             // a SOFT keyword: legal as a package segment, unchanged
+    public void ToPackageSegmentEscaped_backticks_keyword_segments(string input, string expected)
+    {
+        KotlinNaming.ToPackageSegmentEscaped(input).ShouldBe(expected);
+    }
+
     // --- KotlinNaming: hard-keyword backtick escaping ---
 
     [Theory]
