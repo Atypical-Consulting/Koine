@@ -15,7 +15,7 @@ namespace Koine.Compiler.Tests;
 public class EmitterRegistryTests
 {
     private static readonly string[] UnifiedTargets =
-        { "csharp", "typescript", "python", "php", "rust", "glossary", "docs", "asyncapi", "openapi" };
+        { "csharp", "typescript", "python", "php", "rust", "java", "glossary", "docs", "asyncapi", "openapi" };
 
     [Fact]
     public void Unified_registry_exposes_the_full_target_list_in_display_order()
@@ -59,10 +59,11 @@ public class EmitterRegistryTests
     }
 
     [Fact]
-    public void BuiltInEmitterProviders_All_lists_the_nine_targets_in_display_order()
+    public void BuiltInEmitterProviders_All_lists_every_built_in_target_in_display_order()
     {
         // The Koine.Emit.All aggregator (issue #861) owns the built-in set — the single source of truth
-        // the hosts feed into the registry. Its display order must stay the canonical nine.
+        // the hosts feed into the registry. Its display order must stay the canonical target list
+        // (java joined the code targets after rust — issue #858).
         BuiltInEmitterProviders.All.Select(p => p.Target).ShouldBe(UnifiedTargets);
     }
 
@@ -111,6 +112,7 @@ public class EmitterRegistryTests
             new EmitTargetInfo("python", "Python", ".py"),
             new EmitTargetInfo("php", "PHP", ".php"),
             new EmitTargetInfo("rust", "Rust", ".rs"),
+            new EmitTargetInfo("java", "Java", ".java"),
             new EmitTargetInfo("asyncapi", "AsyncAPI", ".yaml"),
             new EmitTargetInfo("openapi", "OpenAPI", ".yaml"),
         });

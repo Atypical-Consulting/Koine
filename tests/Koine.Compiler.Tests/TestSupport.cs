@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Text;
+using System.Text.RegularExpressions;
 using Koine.Compiler.Emit;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -1316,6 +1317,153 @@ public static class TestSupport
         }
 
         return null;
+    }
+
+    // -------------------------------------------------------------------------
+
+    // -------------------------------------------------------------------------
+    // Java conformance harness (the javac analogue of the Roslyn Compile harness)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Result of a Java compile run. <see cref="ToolchainAvailable"/> is false when no <c>javac</c> could
+    /// be located OR when the located <c>javac</c> is older than JDK 17 (the emitted <c>record</c>s and
+    /// sealed types require Java 17) — in both cases callers SKIP (not fail) so <c>dotnet test</c> stays
+    /// green without a modern JDK. When the toolchain IS usable, <see cref="Ok"/> reflects whether
+    /// <c>javac --release 17</c> reported errors.
+    /// </summary>
+    public readonly record struct JavaCheck(bool ToolchainAvailable, bool Ok, IReadOnlyList<string> Errors)
+    {
+        /// <summary>A skipped result: no usable JDK 17+ toolchain present, so nothing was verified.</summary>
+        public static JavaCheck Skipped { get; } =
+            new(ToolchainAvailable: false, Ok: false, Errors: Array.Empty<string>());
+    }
+
+    /// <summary>
+    /// Writes the emitted <c>.java</c> files to a fresh temp source tree — each at its own
+    /// <see cref="EmittedFile.RelativePath"/>, so a context's package directory holds its sealed
+    /// <c>DomainEvent</c> interface next to the event records it <c>permits</c> — and compiles them with
+    /// <c>javac --release 17</c>, the same role the Roslyn <see cref="Compile"/> harness plays for C#.
+    /// <para>
+    /// The emitted code targets Java 17 (records, sealed types), so the located <c>javac</c> must be JDK
+    /// 17 or newer: the resolver runs <c>javac -version</c> and PARSES the major version, treating a JDK
+    /// older than 17 as an ABSENT toolchain (<see cref="JavaCheck.Skipped"/>) rather than failing the
+    /// compile with a spurious "records/sealed are a preview feature" error. (Notably, an older JDK's
+    /// <c>javac --release 17</c> is itself an error — <c>--release</c> only accepts values up to that
+    /// JDK's own version — so gating on the parsed <c>-version</c> is the correct pre-check.) When no
+    /// <c>javac</c> is found — or the found one is too old — the result is <see cref="JavaCheck.Skipped"/>
+    /// so the suite stays green. It NEVER silently passes a real compile error and NEVER fails merely
+    /// because the toolchain is missing/old. CI is expected to install a JDK 17+ and run this for real.
+    /// </para>
+    /// </summary>
+    public static JavaCheck CompileJava(IReadOnlyList<EmittedFile> files)
+    {
+        if (ResolveJavac() is not { } javac || JavacMajorVersion(javac) is not { } major || major < 17)
+        {
+            return JavaCheck.Skipped;
+        }
+
+        string root = Path.Combine(Path.GetTempPath(), "koine-javac-" + Guid.NewGuid().ToString("N"));
+        string classesDir = Path.Combine(root, "classes");
+        Directory.CreateDirectory(classesDir);
+        try
+        {
+            var sources = new List<string>();
+            foreach (EmittedFile f in files)
+            {
+                // Preserve each file's RelativePath so package directories are reproduced: javac resolves
+                // a sealed interface and its permitted records only when they share a package directory.
+                string path = Path.Combine(root, f.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, f.Contents);
+                if (f.RelativePath.EndsWith(".java", StringComparison.OrdinalIgnoreCase))
+                {
+                    sources.Add(path);
+                }
+            }
+
+            if (sources.Count == 0)
+            {
+                // Nothing to compile — vacuously OK (a JDK 17+ toolchain was found).
+                return new JavaCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>());
+            }
+
+            // One javac invocation over every source file, so cross-file references (the sealed
+            // DomainEvent + its permitted event records, an entity + its branded id record) resolve
+            // together; classes land under an isolated output dir that is wiped with the temp tree.
+            var args = new List<string>(javac.Arguments) { "--release", "17", "-d", classesDir };
+            args.AddRange(sources);
+
+            if (RunProcess(javac.FileName, args, root) is not { } run)
+            {
+                // javac refused to launch (e.g. a broken JAVA_HOME); treat as no toolchain.
+                return JavaCheck.Skipped;
+            }
+
+            if (run.ExitCode == 0)
+            {
+                return new JavaCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>());
+            }
+
+            var errors = (run.StdOut + run.StdErr)
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+            return new JavaCheck(ToolchainAvailable: true, Ok: false, errors);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// Locates a usable <c>javac</c>: an explicit <c>KOINE_JAVAC</c> override (always wins) or a direct
+    /// <c>javac</c> on PATH. Returns <c>null</c> when none is found so the caller can skip. The JDK
+    /// version gate is applied separately (<see cref="JavacMajorVersion"/>), so the override is honored
+    /// even when it is not on PATH — its version is still parsed and checked.
+    /// </summary>
+    private static ToolInvocation? ResolveJavac()
+    {
+        if (Environment.GetEnvironmentVariable("KOINE_JAVAC") is { Length: > 0 } overrideJavac)
+        {
+            return new ToolInvocation(overrideJavac, Array.Empty<string>());
+        }
+
+        return OnPath("javac") is { } found ? new ToolInvocation(found, Array.Empty<string>()) : null;
+    }
+
+    /// <summary>
+    /// Runs <c>&lt;javac&gt; -version</c> and returns the parsed major version (see
+    /// <see cref="ParseJavacMajorVersion"/>), or <c>null</c> when the binary refuses to launch or its
+    /// banner does not parse. <c>javac -version</c> historically printed to stderr (JDK 8) and later to
+    /// stdout (JDK 9+), so both streams are scanned.
+    /// </summary>
+    private static int? JavacMajorVersion(ToolInvocation javac)
+    {
+        var args = new List<string>(javac.Arguments) { "-version" };
+        return RunProcess(javac.FileName, args) is { } run
+            ? ParseJavacMajorVersion(run.StdOut + "\n" + run.StdErr)
+            : null;
+    }
+
+    /// <summary>
+    /// Parses the major version from a <c>javac -version</c> banner: <c>"javac 17.0.9"</c> → 17,
+    /// <c>"javac 21"</c> → 21, and the legacy <c>"javac 1.8.0_302"</c> → 8. Returns <c>null</c> when no
+    /// <c>javac &lt;version&gt;</c> token is present. Pure (takes the banner text rather than launching a
+    /// process) so the JDK-version gate is unit-testable without a JDK installed — the same
+    /// value-not-environment shape as <see cref="ParseRequireConformance"/>.
+    /// </summary>
+    internal static int? ParseJavacMajorVersion(string versionOutput)
+    {
+        Match m = Regex.Match(versionOutput, @"javac\s+(\d+)(?:\.(\d+))?");
+        if (!m.Success)
+        {
+            return null;
+        }
+
+        int first = int.Parse(m.Groups[1].Value);
+        // Legacy "1.N" scheme (JDK ≤ 8): the real feature version is the SECOND component (1.8 → 8).
+        return first == 1 && m.Groups[2].Success ? int.Parse(m.Groups[2].Value) : first;
     }
 
     // -------------------------------------------------------------------------
