@@ -162,3 +162,16 @@ jobs:
       # TODO: publish to NuGet once a NUGET_API_KEY secret is configured:
       # dotnet nuget push ./artifacts/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} \
       #   --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+  # Studio desktop installers (.dmg/.msi or NSIS .exe/.AppImage/.deb), UNSIGNED, attached to the
+  # release. Reuses the same build as CI via the reusable workflow; publish only on a real release.
+  studio-desktop:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/studio-build.yml
+    with:
+      bundle: ${{ needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
+      publish: ${{ needs.release-please.outputs.release_created == 'true' }}
+      tag: ${{ needs.release-please.outputs.tag_name }}
