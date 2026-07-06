@@ -1,5 +1,8 @@
 import type { StoreApi } from 'zustand/vanilla';
 import type { RightStripView } from '@atypical/koine-ui';
+// TYPE-ONLY: persistence.ts imports runtime from this slice, so a value import would cycle; a type
+// import is erased at build time and safe.
+import type { ThemeName } from '@/settings/persistence';
 
 export type CenterView = 'visual' | 'technical' | 'output' | 'docs';
 // Code is authoring-only now: the editor + the scenario runner. The compiler-PRODUCED artifacts
@@ -161,6 +164,11 @@ export interface UiChromeSlice {
   /** The Context Map's rendered view (#983). Runtime source of truth; inspectorController mirrors it to
    *  `koine.studio.contextMapView` for persistence and repaints the panel on a change. */
   contextMapView: ContextMapView;
+  /** The active UI theme (#983). Runtime source of truth for what was `theme.ts`'s module-local `active`;
+   *  `applyTheme`/`setTheme` publish here and `currentTheme()` reads it, so the theme fan-out (diagrams +
+   *  terminal re-theme) is a plain store subscription instead of a bespoke listener Set. Persistence stays
+   *  in `Settings.theme` (via `patchSettings`). */
+  theme: ThemeName;
   /** The Explorer outline's type-to-filter query. Lives in the store (not panel-local state) because the
    *  controller unmounts + remounts the outline panel on every model reload, which would otherwise wipe a
    *  component-local query mid-task; here it survives the remount. */
@@ -203,6 +211,9 @@ export interface UiChromeSlice {
    *  an explicit preference (`diagCollapsedPref !== null`), so a saved choice is never overridden. */
   applyDiagCollapsedDefault(v: boolean): void;
   setContextMapView(v: ContextMapView): void;
+  /** Publish the active theme (#983). Called by `theme.ts`'s `applyTheme`; the DOM apply + persistence
+   *  stay in `theme.ts`, this only mirrors the value so subscribers can react. */
+  setTheme(v: ThemeName): void;
   setSettingsEditorMode(v: SettingsEditorMode): void;
   setSettingsJsonScope(v: SettingsJsonScope): void;
   /** Replace the whole deck state (used by restore/persistence). Keeps `center` in sync. */
@@ -253,6 +264,7 @@ export function createUiChromeSlice(
     diagCollapsed: false,
     diagCollapsedPref: null,
     contextMapView: DEFAULT_CONTEXT_MAP_VIEW,
+    theme: 'dark',
     deck: DEFAULT_DECK_STATE,
     settingsOpen: false,
     settingsCategory: null,
@@ -309,6 +321,7 @@ export function createUiChromeSlice(
       set({ diagCollapsed: v });
     },
     setContextMapView: (v) => set({ contextMapView: v }),
+    setTheme: (v) => set({ theme: v }),
     setSettingsEditorMode: (v) => set({ settingsEditorMode: v }),
     setSettingsJsonScope: (v) => set({ settingsJsonScope: v }),
 
