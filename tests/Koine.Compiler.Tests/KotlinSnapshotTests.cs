@@ -62,6 +62,80 @@ public class KotlinSnapshotTests
         return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
     }
 
+    // A value object with a collection member (#1110): a `data class val` would alias the caller's mutable
+    // collection (read-only ≠ immutable in Kotlin), so a collection-bearing VO emits as a plain class that
+    // defensively snapshots each collection (`.toList()`/`.toMap()`) and hand-writes the data-class freebies.
+    // A collection-free VO (Sku) still emits as a `data class` — the common path is unchanged.
+    private const string CollectionValueObjectFixture = """
+        context Catalog {
+          /// A set of free-form tags plus a note — the List is snapshotted, the note stays a plain val.
+          value TagList {
+            tags: List<String>
+            note: String
+            invariant tags.isNotEmpty "a tag list cannot be empty"
+          }
+
+          /// A localized label map (locale code -> display text).
+          value LabelSet {
+            labels: Map<String, String>
+          }
+
+          /// A set of applied discount codes, snapshotted with .toSet().
+          value DiscountCodes {
+            codes: Set<String>
+          }
+
+          /// A collection-free value object — stays a data class.
+          value Sku {
+            code: String
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Kotlin_collection_value_objects_defensively_copy()
+    {
+        var result = new KoineCompiler().Compile(CollectionValueObjectFixture, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // A List-bearing VO: a plain class (NOT a data class), the collection is a plain ctor param re-bound as a
+        // defensively-copied `val` (the plain `note` stays a constructor `val`), the invariant guards the
+        // snapshot, and the data-class freebies (equals/hashCode/toString/copy/componentN) are hand-written.
+        var tagList = result.Files.Single(f => f.RelativePath.EndsWith("TagList.kt", StringComparison.Ordinal)).Contents;
+        tagList.ShouldContain("class TagList(");
+        tagList.ShouldNotContain("data class");
+        tagList.ShouldContain("    tags: List<String>,");        // collection member: a plain parameter (no `val`)
+        tagList.ShouldContain("    val note: String,");          // non-collection member: a constructor `val`
+        tagList.ShouldContain("val tags: List<String> = tags.toList()");
+        tagList.ShouldContain("if (!(tags.isNotEmpty())) throw koine.runtime.DomainException(\"a tag list cannot be empty\")");
+        tagList.ShouldContain("override fun equals(other: Any?): Boolean =");
+        tagList.ShouldContain("this === other || (other is TagList && this.tags == other.tags && this.note == other.note)");
+        tagList.ShouldContain("override fun hashCode(): Int = java.util.Objects.hash(this.tags, this.note)");
+        tagList.ShouldContain("override fun toString(): String = \"TagList(tags=${this.tags}, note=${this.note})\"");
+        tagList.ShouldContain("fun copy(tags: List<String> = this.tags, note: String = this.note): TagList = TagList(tags, note)");
+        tagList.ShouldContain("operator fun component1(): List<String> = this.tags");
+        tagList.ShouldContain("operator fun component2(): String = this.note");
+
+        // A Map-bearing VO defensively copies with `.toMap()`.
+        var labelSet = result.Files.Single(f => f.RelativePath.EndsWith("LabelSet.kt", StringComparison.Ordinal)).Contents;
+        labelSet.ShouldContain("class LabelSet(");
+        labelSet.ShouldNotContain("data class");
+        labelSet.ShouldContain("val labels: Map<String, String> = labels.toMap()");
+        labelSet.ShouldContain("fun copy(labels: Map<String, String> = this.labels): LabelSet = LabelSet(labels)");
+
+        // A Set-bearing VO defensively copies with `.toSet()`.
+        var discountCodes = result.Files.Single(f => f.RelativePath.EndsWith("DiscountCodes.kt", StringComparison.Ordinal)).Contents;
+        discountCodes.ShouldContain("class DiscountCodes(");
+        discountCodes.ShouldNotContain("data class");
+        discountCodes.ShouldContain("val codes: Set<String> = codes.toSet()");
+
+        // A collection-free VO is unchanged — still a data class.
+        var sku = result.Files.Single(f => f.RelativePath.EndsWith("Sku.kt", StringComparison.Ordinal)).Contents;
+        sku.ShouldContain("data class Sku(");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
     // A plain value object scaled by an Int — Money gets a demand-driven `operator fun times(factor: Long)`,
     // and Line's derived member lowers `unitPrice * quantity` to `unitPrice.times(quantity)`. No enum/entity,
     // so the snapshot is stable.
