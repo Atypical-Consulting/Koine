@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { SyntaxTreeNode } from '@/lsp/protocol';
 import type { KoineLsp } from '@/lsp/lsp';
@@ -121,7 +121,8 @@ interface Row {
   isExpanded: boolean;
 }
 
-/** The fixed row height (px) the window math assumes — mirrors `--koi-stree-row-h` in _syntax-tree.scss. */
+/** Fallback row height (px) for the window math until the real (font-scaled) row height is measured from
+ *  a mounted row — used under happy-dom / a pre-layout paint where `offsetHeight` is 0. */
 const ROW_HEIGHT = 24;
 /** At/below this many visible rows, render every row (windowing is pure overhead for a small tree). */
 const VIRTUALIZE_THRESHOLD = 100;
@@ -148,11 +149,20 @@ function flattenVisible(root: SyntaxTreeNode, expanded: Set<string>): Row[] {
 
 /** The half-open range `[first, last)` of row indices to mount for a scroll offset + viewport height
  *  (padded by overscan). Shared by the render and the keyboard/caret nav so "is this row mounted?" agrees
- *  everywhere. Because each row sits at content-y `index * ROW_HEIGHT`, the offset maps directly. */
-function windowRange(total: number, scrollTop: number, viewportH: number): { first: number; last: number } {
-  const viewport = viewportH || ROW_HEIGHT * FALLBACK_VIEWPORT_ROWS;
-  const first = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
-  const last = Math.min(total, first + Math.ceil(viewport / ROW_HEIGHT) + OVERSCAN * 2);
+ *  everywhere. Because each row sits at content-y `index * rowHeight`, the offset maps directly. `first`
+ *  is clamped to `total - visibleCount` so a STALE `scrollTop` (e.g. left over from a larger tree that
+ *  just shrank) can never push the window past the end and blank the panel. */
+function windowRange(
+  total: number,
+  scrollTop: number,
+  viewportH: number,
+  rowHeight: number,
+): { first: number; last: number } {
+  const viewport = viewportH || rowHeight * FALLBACK_VIEWPORT_ROWS;
+  const visibleCount = Math.ceil(viewport / rowHeight) + OVERSCAN * 2;
+  const maxFirst = Math.max(0, total - visibleCount);
+  const first = Math.min(maxFirst, Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN));
+  const last = Math.min(total, first + visibleCount);
   return { first, last };
 }
 
@@ -187,17 +197,23 @@ export function SyntaxTreePanel(props: {
   // (editor → tree): exactly one row wears `--current` + `aria-current` at a time. Distinct from
   // `focusedKey` (the keyboard tab stop) — selecting/highlighting isn't the same as being the tab stop.
   const [activeKey, setActiveKey] = useState<string | null>(null);
-  // Windowing state (#1098): the live scroll offset and measured viewport height drive which slice of the
-  // flattened rows is mounted. Both stay 0 for a small (unwindowed) tree, and 0 under happy-dom (no
-  // layout), where the render falls back to a fixed-size window.
+  // Windowing state (#1098): the live scroll offset drives which slice of the flattened rows is mounted;
+  // the viewport height and the (measured) row height size the window. viewportH/rowHeight fall back to
+  // fixed defaults under happy-dom / a pre-layout paint (no layout → 0); scrollTop stays 0 for a small
+  // (unwindowed) tree.
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
+  const [rowHeight, setRowHeight] = useState(ROW_HEIGHT);
   // Deferred roving focus (#1098): moving focus onto a row currently OUTSIDE the render window can't focus
-  // it synchronously — it isn't mounted yet. We record the target key and bump a nonce; an effect focuses
-  // it on the next render, once the scroll has pulled it into the window.
-  const [pendingFocus, setPendingFocus] = useState(0);
-  const pendingKeyRef = useRef<string | null>(null);
+  // it synchronously — it isn't mounted yet. We record the target key; an effect focuses it on the next
+  // render, once the scroll has pulled it into the window.
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
   const treeRef = useRef<HTMLDivElement>(null);
+
+  // The one source of truth for "which rows are visible", memoised so it is walked once per (tree,
+  // expanded) change — NOT re-walked on every scroll frame, keydown, or caret move (the windowing that
+  // makes big trees smooth must not itself reintroduce per-frame O(n) work).
+  const rows = useMemo<Row[]>(() => (tree ? flattenVisible(tree, expanded) : []), [tree, expanded]);
 
   // The single fetch path: pull the active document's tree on mount and whenever the source or the
   // controller's `revision` changes. The `alive` latch guards against both an unmount-stale resolve and
@@ -215,6 +231,7 @@ export function SyntaxTreePanel(props: {
         setExpanded(t ? defaultExpanded(t) : new Set());
         setFocusedKey(null); // reset the roving tab stop to the (new) root
         setActiveKey(null); // drop any stale highlight; the caret effect re-derives it for the new tree
+        setScrollTop(0); // a NEW (possibly smaller) tree scrolls to the top — never keep a stale offset
       })
       .catch(() => {
         if (!alive) return;
@@ -222,6 +239,7 @@ export function SyntaxTreePanel(props: {
         setExpanded(new Set());
         setFocusedKey(null);
         setActiveKey(null);
+        setScrollTop(0);
       });
     return () => {
       alive = false;
@@ -243,11 +261,11 @@ export function SyntaxTreePanel(props: {
 
   // Bring the row at `index` into the mounted window by adjusting the scroll offset — both the `scrollTop`
   // state (drives which rows render) and the real container (so the browser scrollbar tracks it). Because
-  // each row sits at content-y `index * ROW_HEIGHT`, the offset maps directly. A no-op when it's in view.
+  // each row sits at content-y `index * rowHeight`, the offset maps directly. A no-op when it's in view.
   const scrollIndexIntoView = (index: number): void => {
-    const viewport = viewportH || ROW_HEIGHT * FALLBACK_VIEWPORT_ROWS;
-    const rowTop = index * ROW_HEIGHT;
-    const rowBottom = rowTop + ROW_HEIGHT;
+    const viewport = viewportH || rowHeight * FALLBACK_VIEWPORT_ROWS;
+    const rowTop = index * rowHeight;
+    const rowBottom = rowTop + rowHeight;
     let next = scrollTop;
     if (rowTop < scrollTop) next = rowTop;
     else if (rowBottom > scrollTop + viewport) next = rowBottom - viewport;
@@ -259,16 +277,15 @@ export function SyntaxTreePanel(props: {
 
   // Editor → tree scroll (#890/#1098): once the highlighted row (and its just-expanded ancestors) settle,
   // bring it into view. In a windowed tree the target may not be mounted, so scroll by INDEX to pull it
-  // into the window; otherwise fall back to the element's own `scrollIntoView` (guarded — happy-dom / older
-  // engines may not implement it). Keyed on `activeKey` so only a NEW caret target scrolls — re-running on
-  // the user's own scroll (`scrollTop`) or an unrelated expand (`expanded`) would fight them, so those are
-  // read as their latest value here, not as triggers.
+  // into the window (which also scrolls the container to reveal it); otherwise scroll the element itself
+  // into view (guarded — happy-dom / older engines may not implement it). Keyed on `activeKey` so only a
+  // NEW caret target scrolls — re-running on the user's own scroll (`scrollTop`) or an unrelated expand
+  // (`expanded`) would fight them, so those (and `rows`) are read as their latest value here, not triggers.
   useEffect(() => {
-    if (activeKey == null || tree == null) return;
-    const navRows = flattenVisible(tree, expanded);
-    const index = navRows.findIndex((r) => r.key === activeKey);
+    if (activeKey == null) return;
+    const index = rows.findIndex((r) => r.key === activeKey);
     if (index === -1) return;
-    if (navRows.length > VIRTUALIZE_THRESHOLD) scrollIndexIntoView(index);
+    if (rows.length > VIRTUALIZE_THRESHOLD) scrollIndexIntoView(index);
     else treeRef.current?.querySelector<HTMLElement>(`[data-key="${activeKey}"]`)?.scrollIntoView?.({ block: 'nearest' });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fire only on a new caret target (see comment)
   }, [activeKey]);
@@ -277,20 +294,32 @@ export function SyntaxTreePanel(props: {
   // pressed. Runs after the scroll-driven re-render mounts it; a no-op for the common in-window case, which
   // `focusRow` focuses synchronously.
   useEffect(() => {
-    const key = pendingKeyRef.current;
-    if (key == null) return;
-    treeRef.current?.querySelector<HTMLElement>(`[data-key="${key}"]`)?.focus();
-    pendingKeyRef.current = null;
-  }, [pendingFocus]);
+    if (pendingKey == null) return;
+    treeRef.current?.querySelector<HTMLElement>(`[data-key="${pendingKey}"]`)?.focus();
+    setPendingKey(null);
+  }, [pendingKey]);
 
-  // Measure the scroll viewport (#1098) so a windowed tree mounts exactly the rows it needs. happy-dom
-  // and a pre-layout first paint report 0 height — the render then falls back to a fixed-size window.
-  // Re-measured on window resize; re-runs when the tree changes (a new document can change the rail size).
+  // Measure the scroll viewport AND the real row height (#1098) so the window mounts exactly the rows it
+  // needs and its padding lines up with the actual (font-scaled) row height — not a hard-coded pixel guess.
+  // A ResizeObserver tracks the container itself (the right-rail splitter resizes it WITHOUT a window
+  // resize event); the window listener covers font/zoom changes. happy-dom / a pre-layout paint report 0 —
+  // the render then falls back to ROW_HEIGHT and a fixed-size window.
   useEffect(() => {
-    const measure = (): void => setViewportH(treeRef.current?.clientHeight ?? 0);
+    const el = treeRef.current;
+    if (!el) return;
+    const measure = (): void => {
+      setViewportH(el.clientHeight);
+      const rowEl = el.querySelector<HTMLElement>('.koi-stree-item');
+      if (rowEl && rowEl.offsetHeight > 0) setRowHeight(rowEl.offsetHeight);
+    };
     measure();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
     window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
   }, [tree]);
 
   /** Move roving focus to the row at `index` in the flattened `navRows`, making it the lone tab stop. An
@@ -300,14 +329,13 @@ export function SyntaxTreePanel(props: {
     if (index < 0 || index >= navRows.length) return;
     const key = navRows[index].key;
     setFocusedKey(key);
-    const { first, last } = windowRange(navRows.length, scrollTop, viewportH);
+    const { first, last } = windowRange(navRows.length, scrollTop, viewportH, rowHeight);
     const mounted = navRows.length <= VIRTUALIZE_THRESHOLD || (index >= first && index < last);
     if (mounted) {
       treeRef.current?.querySelector<HTMLElement>(`[data-key="${key}"]`)?.focus();
     } else {
       scrollIndexIntoView(index);
-      pendingKeyRef.current = key;
-      setPendingFocus((n) => n + 1);
+      setPendingKey(key);
     }
   }
 
@@ -326,15 +354,13 @@ export function SyntaxTreePanel(props: {
   // `flattenVisible` (not the DOM), so it reaches rows the virtualization has scrolled out of the window.
   function onKeyDown(ev: JSX.TargetedKeyboardEvent<HTMLDivElement>): void {
     if (tree == null) return;
-    const navRows = flattenVisible(tree, expanded);
+    const navRows = rows;
     if (!navRows.length) return;
     const current = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[role="treeitem"]') ?? null;
     const key = current?.dataset.key ?? focusedKey ?? ROOT_KEY;
     const idx = navRows.findIndex((r) => r.key === key);
     if (idx === -1) return;
-    const node = navRows[idx].node;
-    const hasChildren = node.children.length > 0;
-    const isExpanded = expanded.has(key);
+    const { node, hasChildren, isExpanded } = navRows[idx];
 
     switch (ev.key) {
       case 'ArrowDown':
@@ -422,6 +448,10 @@ export function SyntaxTreePanel(props: {
 
     return (
       <div
+        // Keyed by the stable index-path so the sliding window reconciles rows by IDENTITY, not DOM
+        // position — otherwise a scroll would rewrite an in-place node's content while browser focus and
+        // the roving tabindex stayed pinned to that physical node, desyncing focus from the row (#1098).
+        key={key}
         role="treeitem"
         class={cls.join(' ')}
         data-key={key}
@@ -479,28 +509,34 @@ export function SyntaxTreePanel(props: {
     );
   }
 
-  // Flatten to the ordered visible rows, then mount only the viewport window (#1098). A small tree
-  // (≤ threshold) renders every row in normal flow — byte-for-byte the pre-virtualization behaviour;
-  // a large one mounts just the slice, offset by top/bottom padding that stands in for the rest so the
-  // region scrolls as if all rows were present.
-  const rows = flattenVisible(tree, expanded);
+  // Mount only the viewport window of the (memoised) visible rows (#1098). A small tree (≤ threshold)
+  // renders every row in normal flow — the pre-virtualization behaviour; a large one mounts just the
+  // slice, offset by top/bottom padding that stands in for the rest so the region scrolls as if all rows
+  // were present.
   const total = rows.length;
   const virtualize = total > VIRTUALIZE_THRESHOLD;
-  const { first, last } = virtualize ? windowRange(total, scrollTop, viewportH) : { first: 0, last: total };
+  const { first, last } = virtualize ? windowRange(total, scrollTop, viewportH, rowHeight) : { first: 0, last: total };
   const windowRows = rows.slice(first, last);
 
+  // Two elements on purpose (#1098): the OUTER `.koi-stree-scroll` is the bounded scroll viewport
+  // (`treeRef` — its `clientHeight`/`scrollTop` drive the window); the INNER `role="tree"` carries the
+  // windowing padding + the mounted rows. Keeping the padding OFF the scroller is what stops the padding
+  // from inflating the scroller's measured height into a resize feedback loop.
   return (
     <div class="koi-stree">
       <div
         ref={treeRef}
-        class={`koi-stree-scroll${virtualize ? ' koi-stree-scroll--virtual' : ''}`}
-        role="tree"
-        aria-label="Syntax tree"
-        onKeyDown={onKeyDown}
+        class="koi-stree-scroll"
         onScroll={virtualize ? (e) => setScrollTop(e.currentTarget.scrollTop) : undefined}
-        style={virtualize ? { paddingTop: `${first * ROW_HEIGHT}px`, paddingBottom: `${(total - last) * ROW_HEIGHT}px` } : undefined}
       >
-        {windowRows.map((row) => renderRow(row))}
+        <div
+          role="tree"
+          aria-label="Syntax tree"
+          onKeyDown={onKeyDown}
+          style={virtualize ? { paddingTop: `${first * rowHeight}px`, paddingBottom: `${(total - last) * rowHeight}px` } : undefined}
+        >
+          {windowRows.map((row) => renderRow(row))}
+        </div>
       </div>
     </div>
   );

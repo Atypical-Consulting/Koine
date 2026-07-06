@@ -202,9 +202,9 @@ describe('SyntaxTreePanel', () => {
 
     const items = view.getAllByRole('treeitem');
     // Only a viewport-sized window is in the DOM — far fewer than the 5002 visible rows (root + context
-    // + 5000 members).
+    // + 5000 members). Bound near the fallback window (~56) so a ~2× windowing regression is caught.
     expect(items.length).toBeGreaterThan(0);
-    expect(items.length).toBeLessThan(120);
+    expect(items.length).toBeLessThan(80);
 
     // The scroll region still accounts for EVERY row: the window is padded above + below by the
     // off-window rows' collapsed height, so the container scrolls as if all 5002 rows were present.
@@ -235,7 +235,7 @@ describe('SyntaxTreePanel', () => {
     await view.findByRole('treeitem', { name: /KoineModel/ });
 
     const items = view.getAllByRole('treeitem');
-    expect(items.length).toBeLessThan(120); // windowed, not 4002 in the DOM
+    expect(items.length).toBeLessThan(80); // windowed near the ~56-row fallback, not 4002 in the DOM
 
     // The members are one flat sibling set: each rendered member reports the full set size and its
     // 1-based position, even though only a window of the set is present.
@@ -298,6 +298,47 @@ describe('SyntaxTreePanel', () => {
     expect(view.container.querySelectorAll('[role="treeitem"][tabindex="0"]').length).toBe(1);
     // No WCAG violations with only a window of the 3002 rows mounted (aria-level/setsize/posinset honest).
     expect(await axe(view.container)).toHaveNoViolations();
+  });
+
+  test('the window sizes to the MEASURED viewport height and re-windows on scroll (#1098)', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(5000))} />);
+    await view.findByRole('tree');
+    // The bounded scroll viewport is the OUTER `.koi-stree-scroll` (the `role="tree"` carrying the rows
+    // is its child), so clientHeight/scrollTop are mocked on it — that is what the window math measures.
+    const scroller = view.container.querySelector('.koi-stree-scroll') as HTMLElement;
+
+    // happy-dom reports 0 layout, so give the scroller a real measured height and let the resize path
+    // re-measure. The window must now size to the viewport (~10 rows + overscan), NOT the 56-row fallback.
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => 240 }); // 10 rows tall
+    window.dispatchEvent(new Event('resize'));
+    await waitFor(() => {
+      const n = view.getAllByRole('treeitem').length;
+      expect(n).toBeGreaterThan(10);
+      expect(n).toBeLessThan(40); // ceil(240/24) + 2*overscan ≈ 26, well below the fallback window
+    });
+
+    // Scroll far down: the window follows the offset — the top rows drop out, rows near ~row 50 mount.
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => 50 * 24 });
+    fireEvent.scroll(scroller);
+    await waitFor(() => {
+      expect(view.queryByRole('treeitem', { name: /Member m0:/ })).toBeNull();
+      expect(view.getByRole('treeitem', { name: /Member m50:/ })).toBeTruthy();
+    });
+  });
+
+  test('a stale scroll offset from a previous large tree cannot blank a re-fetched tree (#1098)', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(5000))} revision={0} />);
+    await view.findByRole('tree');
+    const scroller = view.container.querySelector('.koi-stree-scroll') as HTMLElement;
+
+    // Scroll deep, then re-fetch a fresh tree via a revision bump. The offset must NOT carry over and
+    // leave the new tree's window scrolled past its end (an empty slice = blank panel).
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => 120000 });
+    fireEvent.scroll(scroller);
+    view.rerender(<SyntaxTreePanel source={makeSource(wideFixture(4000))} revision={1} />);
+
+    // The new tree renders from the top — the root (row 0) is present, not scrolled off into a blank window.
+    await waitFor(() => expect(view.getByRole('treeitem', { name: /KoineModel/ })).toBeTruthy());
   });
 });
 
