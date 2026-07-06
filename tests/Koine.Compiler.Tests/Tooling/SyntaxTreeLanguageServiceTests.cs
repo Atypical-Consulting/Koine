@@ -145,6 +145,50 @@ public class SyntaxTreeLanguageServiceTests
         RunSession(Initialize()).ShouldContain("\"koineSyntaxTree\":true");
     }
 
+    // ---- deep-chain robustness (#1098): a deep expression must serialize, not blank the panel -------
+
+    [Fact]
+    public void Lsp_koine_syntaxTree_serializes_a_deep_expression_chain_without_blanking()
+    {
+        // A pathologically deep expression: a long left-associative fold `1 + 1 + … + 1` nests one
+        // BinaryExpr per `+`, so the projected SyntaxTreeNode tree — and its ~2×-deep JSON — blows past
+        // the System.Text.Json default MaxDepth of 64. Before the #1098 fix the serialize throws, the
+        // request loop swallows it, and NO koine/syntaxTree result is ever sent (the panel silently
+        // paints its empty state — the whole tree lost, not just the deep branch).
+        const string uri = "file:///deep.koi";
+        var fold = string.Join(" + ", Enumerable.Repeat("1", 80));
+        var source =
+            "context Deep {\n" +
+            "  value N {\n" +
+            "    amount: Int\n" +
+            $"    invariant amount >= {fold} \"deep\"\n" +
+            "  }\n" +
+            "}\n";
+
+        var output = RunSession(Initialize(), DidOpen(uri, source), SyntaxTreeRequest(uri));
+
+        // The response is actually sent (not lost to a swallowed depth-exceeded throw) …
+        TryResultForId(output, 88, out var result).ShouldBeTrue();
+        result.ValueKind.ShouldBe(JsonValueKind.Object);
+        // … and it preserves the full nesting rather than dropping the deep branch.
+        JsonTreeDepth(result).ShouldBeGreaterThanOrEqualTo(80);
+    }
+
+    /// <summary>Node-level nesting depth of a syntax-tree JSON element (counting its own level).</summary>
+    private static int JsonTreeDepth(JsonElement node)
+    {
+        var max = 0;
+        if (node.TryGetProperty("children", out var kids) && kids.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var child in kids.EnumerateArray())
+            {
+                max = Math.Max(max, JsonTreeDepth(child));
+            }
+        }
+
+        return max + 1;
+    }
+
     // ---- minimal LSP session harness (self-contained; mirrors LspServerTests) ---------------------
 
     private static string RunSession(params byte[][] messages)
@@ -186,7 +230,9 @@ public class SyntaxTreeLanguageServiceTests
     {
         foreach (var body in TestSupport.JsonRpcFrames(output))
         {
-            using var doc = JsonDocument.Parse(body);
+            // Match the server's raised serialize MaxDepth (#1098) so this harness can read a deep
+            // syntax-tree frame the LSP now correctly emits (JsonDocument.Parse defaults to 64 too).
+            using var doc = JsonDocument.Parse(body, new JsonDocumentOptions { MaxDepth = 256 });
             var root = doc.RootElement;
             if (root.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number && idEl.GetInt32() == id
                 && root.TryGetProperty("result", out var r))

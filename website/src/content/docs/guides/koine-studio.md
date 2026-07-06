@@ -135,7 +135,11 @@ Koine Studio surfaces the **enriched** language server, the same one the VS Code
   style rather than blanking the panel — the point, not a failure. Navigation is **bidirectional**: click
   a node to select its span in the editor, or move the caret to highlight the deepest node whose span
   contains it. The tree collapses below the top-level contexts by default and expands on demand, and the
-  rows are a keyboard-navigable ARIA tree. Works in both the browser and desktop hosts.
+  rows are a keyboard-navigable ARIA tree. A **large or deeply-nested model stays smooth**: the panel
+  *virtualizes* the render, mounting only the rows in (or near) the viewport while the arrow keys, the
+  caret highlight, and the single roving tab stop still reach every row — an off-screen target is scrolled
+  into view before it is focused or highlighted — so keyboard navigation and WCAG 2.1 AA hold across the
+  whole tree, however big. Works in both the browser and desktop hosts.
 - **Workspace search & replace** — press **`Mod`+`Shift`+`F`** (⌘/Ctrl) to open the search panel and
   find a term across **every `.koi` file** in the open folder, including unsaved buffers. Toggle
   **match case**, **whole word**, and **regular expression** (with `$1` capture groups in the

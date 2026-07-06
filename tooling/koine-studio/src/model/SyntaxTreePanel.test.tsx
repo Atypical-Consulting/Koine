@@ -46,6 +46,24 @@ function fixture(): SyntaxTreeNode {
   ]);
 }
 
+/** A model whose single (default-expanded) context holds `n` sibling members — a huge, fully-visible
+ *  flat list of `n + 2` rows (root + context + members). Exercises windowing under breadth (#1098). */
+function wideFixture(n: number): SyntaxTreeNode {
+  const members = Array.from({ length: n }, (_, i) => node('Member', `m${i}`, [], { leaf: 'Int' }));
+  return node('KoineModel', null, [node('ContextNode', 'Big', members)]);
+}
+
+/** Like {@link wideFixture} but the member at `target` carries a real span (on line `target + 10`) so a
+ *  caret there resolves to it — a deep, off-window caret target for the virtualized caret-scroll (#1098). */
+function wideSpannedFixture(n: number, target: number): SyntaxTreeNode {
+  const members = Array.from({ length: n }, (_, i) =>
+    node('Member', `m${i}`, [], i === target ? { span: span(i + 10, 1, i + 10, 30) } : {}),
+  );
+  return node('KoineModel', null, [node('ContextNode', 'Big', members, { span: span(1, 1, n + 100, 1) })], {
+    span: zeroSpan,
+  });
+}
+
 /** A narrow fake source the panel fetches from — a single vi.fn matching {@link SyntaxTreeSource}. */
 function makeSource(tree: SyntaxTreeNode | null): SyntaxTreeSource {
   return { syntaxTree: vi.fn(async () => tree) };
@@ -287,6 +305,156 @@ describe('SyntaxTreePanel', () => {
     const view = render(<SyntaxTreePanel source={makeSource(fixture())} />);
     await view.findByRole('tree', { name: /Syntax tree/i });
     expect(await axe(view.container)).toHaveNoViolations();
+  });
+
+  // --- windowed virtualization (#1098) ---------------------------------------------------------------
+  // ROW_HEIGHT mirrors `--koi-stree-row-h` (24px) in _syntax-tree.scss — the fixed row height the window
+  // math assumes. happy-dom reports no layout, so the panel falls back to a fixed-size window.
+  const ROW_HEIGHT = 24;
+
+  test('a large tree renders only a bounded window of rows while representing the full count', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(5000))} />);
+    await view.findByRole('treeitem', { name: /KoineModel/ });
+
+    const items = view.getAllByRole('treeitem');
+    // Only a viewport-sized window is in the DOM — far fewer than the 5002 visible rows (root + context
+    // + 5000 members). Bound near the fallback window (~56) so a ~2× windowing regression is caught.
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.length).toBeLessThan(80);
+
+    // The scroll region still accounts for EVERY row: the window is padded above + below by the
+    // off-window rows' collapsed height, so the container scrolls as if all 5002 rows were present.
+    const treeEl = view.getByRole('tree');
+    const pad = (parseFloat(treeEl.style.paddingTop) || 0) + (parseFloat(treeEl.style.paddingBottom) || 0);
+    expect(Math.round(pad / ROW_HEIGHT) + items.length).toBe(5002);
+  });
+
+  test('a small tree renders every row unwindowed (virtualization transparent below the threshold)', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(fixture())} />);
+    await view.findByRole('treeitem', { name: /KoineModel/ });
+
+    // The default-expanded rows in pre-order with their aria-levels: root, Billing, then Billing's three
+    // children (Money — collapsed, has a child — the error, the missing node). No row is windowed out.
+    const rows = view.getAllByRole('treeitem').map((el) => ({
+      label: el.getAttribute('aria-label'),
+      level: el.getAttribute('aria-level'),
+    }));
+    expect(rows.map((r) => r.level)).toEqual(['1', '2', '3', '3', '3']);
+    expect(rows[0].label).toMatch(/^KoineModel/);
+    expect(rows[1].label).toMatch(/^ContextNode Billing/);
+    // No windowing scaffolding for a small tree — the scroll region isn't padded.
+    expect(view.getByRole('tree').style.paddingTop).toBe('');
+  });
+
+  test('a huge single sibling list windows to a bounded slice with honest aria-setsize/posinset', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(4000))} />);
+    await view.findByRole('treeitem', { name: /KoineModel/ });
+
+    const items = view.getAllByRole('treeitem');
+    expect(items.length).toBeLessThan(80); // windowed near the ~56-row fallback, not 4002 in the DOM
+
+    // The members are one flat sibling set: each rendered member reports the full set size and its
+    // 1-based position, even though only a window of the set is present.
+    const members = items.filter((el) => /^Member /.test(el.getAttribute('aria-label') ?? ''));
+    expect(members.length).toBeGreaterThan(0);
+    for (const m of members) expect(m.getAttribute('aria-setsize')).toBe('4000');
+    // Positions are honest and contiguous within the window (posinset increases by 1 per rendered row).
+    const positions = members.map((m) => Number(m.getAttribute('aria-posinset')));
+    for (let i = 1; i < positions.length; i++) expect(positions[i]).toBe(positions[i - 1] + 1);
+  });
+
+  // --- keyboard nav, caret highlight-scroll & WCAG across virtualized rows (#1098) --------------------
+
+  test('keyboard nav reaches rows outside the render window (End/Home scroll them in, then focus)', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(5000))} />);
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+
+    // Only a window is mounted, so the last member (m4999) is NOT initially in the DOM.
+    expect(view.queryByRole('treeitem', { name: /Member m4999/ })).toBeNull();
+
+    // End must still reach it: the panel scrolls it into the window, then moves roving focus onto it.
+    root.focus();
+    fireEvent.keyDown(root, { key: 'End' });
+    await waitFor(() =>
+      expect((document.activeElement as HTMLElement | null)?.getAttribute('aria-label')).toMatch(/Member m4999/),
+    );
+    // The roving tabindex stays a single tab stop across the windowed jump.
+    expect(view.container.querySelectorAll('[role="treeitem"][tabindex="0"]').length).toBe(1);
+
+    // Home jumps back to the (now off-window) root, scrolling it back into the window first.
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Home' });
+    await waitFor(() =>
+      expect((document.activeElement as HTMLElement | null)?.getAttribute('aria-label')).toMatch(/KoineModel/),
+    );
+  });
+
+  test('a caret on a row outside the window scrolls it in and marks it current', async () => {
+    // 300 members (> threshold) so the tree virtualizes; member #250 carries a real span far down.
+    const view = render(
+      <SyntaxTreePanel source={makeSource(wideSpannedFixture(300, 250))} caret={{ line: 260, column: 5 }} />,
+    );
+    await view.findByRole('treeitem', { name: /KoineModel/ });
+
+    // The caret's deepest containing node (m250, well outside the initial window) is scrolled into the
+    // window, mounted, and highlighted.
+    await waitFor(() => {
+      const current = view.container.querySelector('.koi-stree-item--current');
+      expect(current).not.toBeNull();
+      expect(current!.getAttribute('aria-label')).toMatch(/Member m250/);
+      expect(current!.getAttribute('aria-current')).toBe('true');
+    });
+    expect(view.container.querySelectorAll('.koi-stree-item--current').length).toBe(1);
+  });
+
+  test('a virtualized large tree is accessibility-clean with a single roving tab stop', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(3000))} />);
+    await view.findByRole('tree', { name: /Syntax tree/i });
+
+    // Exactly one tabbable row — a single tab stop across the whole (windowed) tree.
+    expect(view.container.querySelectorAll('[role="treeitem"][tabindex="0"]').length).toBe(1);
+    // No WCAG violations with only a window of the 3002 rows mounted (aria-level/setsize/posinset honest).
+    expect(await axe(view.container)).toHaveNoViolations();
+  });
+
+  test('the window sizes to the MEASURED viewport height and re-windows on scroll (#1098)', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(5000))} />);
+    await view.findByRole('tree');
+    // The bounded scroll viewport is the OUTER `.koi-stree-scroll` (the `role="tree"` carrying the rows
+    // is its child), so clientHeight/scrollTop are mocked on it — that is what the window math measures.
+    const scroller = view.container.querySelector('.koi-stree-scroll') as HTMLElement;
+
+    // happy-dom reports 0 layout, so give the scroller a real measured height and let the resize path
+    // re-measure. The window must now size to the viewport (~10 rows + overscan), NOT the 56-row fallback.
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => 240 }); // 10 rows tall
+    window.dispatchEvent(new Event('resize'));
+    await waitFor(() => {
+      const n = view.getAllByRole('treeitem').length;
+      expect(n).toBeGreaterThan(10);
+      expect(n).toBeLessThan(40); // ceil(240/24) + 2*overscan ≈ 26, well below the fallback window
+    });
+
+    // Scroll far down: the window follows the offset — the top rows drop out, rows near ~row 50 mount.
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => 50 * 24 });
+    fireEvent.scroll(scroller);
+    await waitFor(() => {
+      expect(view.queryByRole('treeitem', { name: /Member m0:/ })).toBeNull();
+      expect(view.getByRole('treeitem', { name: /Member m50:/ })).toBeTruthy();
+    });
+  });
+
+  test('a stale scroll offset from a previous large tree cannot blank a re-fetched tree (#1098)', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(5000))} revision={0} />);
+    await view.findByRole('tree');
+    const scroller = view.container.querySelector('.koi-stree-scroll') as HTMLElement;
+
+    // Scroll deep, then re-fetch a fresh tree via a revision bump. The offset must NOT carry over and
+    // leave the new tree's window scrolled past its end (an empty slice = blank panel).
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => 120000 });
+    fireEvent.scroll(scroller);
+    view.rerender(<SyntaxTreePanel source={makeSource(wideFixture(4000))} revision={1} />);
+
+    // The new tree renders from the top — the root (row 0) is present, not scrolled off into a blank window.
+    await waitFor(() => expect(view.getByRole('treeitem', { name: /KoineModel/ })).toBeTruthy());
   });
 });
 
