@@ -18,10 +18,7 @@ public sealed partial class RustEmitter
         ModelIndex Index,
         IReadOnlyDictionary<string, string> EnumMemberToType,
         IReadOnlyDictionary<(string Context, string Enum), IReadOnlyDictionary<string, string>> EnumVariants,
-        IReadOnlySet<string> AdditiveNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<string>> ScalarDivNeeds,
-        IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> BinaryArithmeticNeeds);
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> OperatorNeeds);
 
     internal const string Indent = "    ";
 
