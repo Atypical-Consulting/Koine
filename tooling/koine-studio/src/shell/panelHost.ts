@@ -202,8 +202,13 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
       // The GBNF comes from the host's resident compiler. Browser-host only — the desktop host omits
       // gbnfGrammar(), so the panel falls back to parse-and-repair there.
       getGrammar: deps.platform.gbnfGrammar ? () => deps.platform.gbnfGrammar!() : undefined,
-      // Workspace snapshot for multi-file agentic editing: relPath→current text of every open buffer.
-      getWorkspaceFiles: () => Object.fromEntries([...deps.workspace.buffers.values()].map((b) => [b.relPath, b.text])),
+      // Workspace snapshot for multi-file agentic editing (#472): current text per snapshot key plus
+      // each key's display relPath. Still keyed by relPath here (identity displayPath) — keying by the
+      // buffer uri so two roots can hold the same relPath lands with #472 Task 3.
+      getWorkspaceFiles: () => {
+        const files = Object.fromEntries([...deps.workspace.buffers.values()].map((b) => [b.relPath, b.text]));
+        return { files, displayPath: Object.fromEntries(Object.keys(files).map((p) => [p, p])) };
+      },
       // Host executor for the staged list/read/write edit tools (browser WASM / desktop MCP).
       runEditTool: deps.platform.runEditTool ? (name, argsJson, session) => deps.platform.runEditTool!(name, argsJson, session) : undefined,
       // Once-per-turn whole-staged-workspace validation (issue #474): the loop calls this a single time

@@ -18,7 +18,7 @@ import {
   runEditToolStaging,
   summarizeForChip,
 } from '@/ai/assistantTools';
-import { createEditSession } from '@/ai/editSession';
+import { createEditSession, newFileKey } from '@/ai/editSession';
 
 const ALL_SIX = [
   'koine_compile',
@@ -308,9 +308,9 @@ describe('runEditToolStaging — stage-only dispatch (issue #474)', () => {
       JSON.stringify({ relPath: 'orders.koi', contents: 'context Orders {}' }),
       session,
     );
-    // The body is staged...
+    // The body is staged (under a minted new-file key — the path was unknown to the session, #472)...
     expect(session.staged()).toEqual([
-      { key: 'orders.koi', relPath: 'orders.koi', body: 'context Orders {}', isNew: true },
+      { key: newFileKey('orders.koi'), relPath: 'orders.koi', body: 'context Orders {}', isNew: true },
     ]);
     // ...and the result is EXACTLY the formatWriteFile confirmation — no appended `ok:` diagnostics. The
     // whole-staged-workspace validation moved to a single end-of-turn pass (no O(M×N) per-write compile).
@@ -332,7 +332,7 @@ describe('runEditToolStaging — stage-only dispatch (issue #474)', () => {
     );
     expect(session.staged()).toEqual([
       { key: 'a.koi', relPath: 'a.koi', body: 'context A { /* v2 */ }', isNew: false },
-      { key: 'b.koi', relPath: 'b.koi', body: 'context B {}', isNew: true },
+      { key: newFileKey('b.koi'), relPath: 'b.koi', body: 'context B {}', isNew: true },
     ]);
     expect(r1).toBe(formatWriteFile('a.koi', false));
     expect(r2).toBe(formatWriteFile('b.koi', true));
@@ -355,6 +355,79 @@ describe('runEditToolStaging — stage-only dispatch (issue #474)', () => {
     expect(
       await runEditToolStaging('koine_write_file', JSON.stringify({ relPath: '../escape.koi', contents: 'x' }), session),
     ).toContain('Unsafe');
+  });
+});
+
+// --- multi-root display paths (#472 Task 2) ---------------------------------------------------
+// The session is keyed by OPAQUE keys (buffer uris); the model addresses files by workspace-relative
+// DISPLAY paths. When two roots hold the same relPath, the dispatch must disambiguate — the model can
+// never be handed two identical paths that mean different files.
+describe('runEditToolStaging — multi-root display paths (#472)', () => {
+  // Two roots each holding a model.koi: distinct opaque keys, the SAME workspace-relative path.
+  const files = { 'mem://a/model.koi': 'context A {}', 'mem://b/model.koi': 'context B {}' };
+  const display = { 'mem://a/model.koi': 'model.koi', 'mem://b/model.koi': 'model.koi' };
+
+  test('koine_list_files disambiguates two keys sharing a relPath into two DISTINCT paths', async () => {
+    const session = createEditSession(files, display);
+    const out = await runEditToolStaging('koine_list_files', '{}', session);
+    // Deterministic index-stable markers in session.list() order — never the raw opaque keys.
+    expect(out).toContain('model.koi@1');
+    expect(out).toContain('model.koi@2');
+    expect(out).not.toContain('mem://');
+  });
+
+  test('koine_read_file with each disambiguated path returns that root\'s body', async () => {
+    const session = createEditSession(files, display);
+    const r1 = await runEditToolStaging('koine_read_file', JSON.stringify({ relPath: 'model.koi@1' }), session);
+    const r2 = await runEditToolStaging('koine_read_file', JSON.stringify({ relPath: 'model.koi@2' }), session);
+    expect(r1).toContain('context A {}');
+    expect(r2).toContain('context B {}');
+  });
+
+  test('koine_write_file to one colliding path stages THAT key; the other root is untouched', async () => {
+    const session = createEditSession(files, display);
+    const out = await runEditToolStaging(
+      'koine_write_file',
+      JSON.stringify({ relPath: 'model.koi@2', contents: 'context B { /* v2 */ }' }),
+      session,
+    );
+    expect(out).toContain('staged');
+    expect(session.staged()).toEqual([
+      { key: 'mem://b/model.koi', relPath: 'model.koi', body: 'context B { /* v2 */ }', isNew: false },
+    ]);
+    expect(session.read('mem://a/model.koi')).toBe('context A {}');
+  });
+
+  test('a BARE colliding path is rejected as ambiguous, naming the candidates (no silent pick, no phantom new file)', async () => {
+    const session = createEditSession(files, display);
+    const read = await runEditToolStaging('koine_read_file', JSON.stringify({ relPath: 'model.koi' }), session);
+    expect(read).toContain('ambiguous');
+    expect(read).toContain('model.koi@1');
+    expect(read).toContain('model.koi@2');
+    const write = await runEditToolStaging(
+      'koine_write_file',
+      JSON.stringify({ relPath: 'model.koi', contents: 'x' }),
+      session,
+    );
+    expect(write).toContain('ambiguous');
+    expect(session.staged()).toEqual([]);
+  });
+
+  test('koine_write_file to a brand-new path mints a new-file key (isNew true), addressable afterwards', async () => {
+    const session = createEditSession(files, display);
+    await runEditToolStaging(
+      'koine_write_file',
+      JSON.stringify({ relPath: 'shared/events.koi', contents: 'context E {}' }),
+      session,
+    );
+    expect(session.staged()).toEqual([
+      { key: newFileKey('shared/events.koi'), relPath: 'shared/events.koi', body: 'context E {}', isNew: true },
+    ]);
+    // The fresh file is addressable by its path on later calls (the index is rebuilt per dispatch).
+    expect(
+      await runEditToolStaging('koine_read_file', JSON.stringify({ relPath: 'shared/events.koi' }), session),
+    ).toContain('context E {}');
+    expect(await runEditToolStaging('koine_list_files', '{}', session)).toContain('shared/events.koi');
   });
 });
 

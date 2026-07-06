@@ -45,11 +45,13 @@ export async function runWasmTool(name: string, argsJson: string): Promise<strin
   }
 }
 
-/** The `[{uri,text}]` envelope for the WHOLE staged workspace (every relPath the session knows,
- *  reading through to staged-or-initial bodies). relPaths map to `file:///<relPath>` uris. */
+/** The `[{uri,text}]` envelope for the WHOLE staged workspace (every key the session knows, reading
+ *  through to staged-or-initial bodies). Each entry is labelled `file:///<relPath>` via the session's
+ *  display resolution (#472) — never the opaque key, which may be a buffer uri or a `new:`-prefixed
+ *  new-file key. */
 function workspaceEnvelope(session: EditSession): string {
   return JSON.stringify(
-    session.list().map((relPath) => ({ uri: `file:///${relPath}`, text: session.read(relPath) ?? '' })),
+    session.list().map((key) => ({ uri: `file:///${session.relPathOf(key)}`, text: session.read(key) ?? '' })),
   );
 }
 

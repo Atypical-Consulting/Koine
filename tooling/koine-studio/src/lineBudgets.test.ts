@@ -100,7 +100,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // declarative AssistantChat composition (Transcript/ChangeSetPanel/Composer over the chat slice),
   // leaving only the host factory (the send effect, grammar-constraint/repair loop, apply-gate, and
   // change-set apply flow). Measured end-state, no headroom.
-  { file: 'src/ai/aiPanel.ts', maxLines: 865 },
+  // Raised 865 → 905: #472 Task 2 keys the workspace snapshot by opaque session key — the documented
+  // WorkspaceFilesSnapshot shape ({files, displayPath}), the liveTextFor display-map resolution behind
+  // the drift check, and the relPath-keyed before-map derivation at stageChangeSet, ~40 LOC of
+  // multi-root wiring (not regrowth of the retired DOM panel). Measured end-state, no headroom.
+  { file: 'src/ai/aiPanel.ts', maxLines: 905 },
   // Frozen 2026-07-02 at 1301 LOC (grown from the audit's 1284 @ fc83bcf5), ceil(1301 × 1.02) = 1328.
   // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
   // not mandate the split — #989 owns that.

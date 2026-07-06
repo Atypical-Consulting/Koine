@@ -181,7 +181,11 @@ describe('assistant ↔ chat slice change-set bridge (#984 Task 4)', () => {
       getSelection: () => null,
       getUseTools: () => true,
       getConstrainGrammar: () => false,
-      getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+      // The #472 snapshot shape: single-root harness — relPath keys with an identity display map.
+      getWorkspaceFiles: () => ({
+        files: { 'orders.koi': 'context Orders {}' },
+        displayPath: { 'orders.koi': 'orders.koi' },
+      }),
       runEditTool: vi.fn(async () => 'ok'),
       onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
       ...over,

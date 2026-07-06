@@ -45,6 +45,12 @@ export interface EditSession {
   stage(key: string, body: string): void;
   /** Whether `key` is a brand-new file (not among the session's initial workspace files). */
   isNew(key: string): boolean;
+  /**
+   * The display/validation relPath for `key`: the `display` entry, else the key itself (with a
+   * {@link NEW_FILE_KEY_PREFIX} stripped). The edit-tool dispatch builds its model-facing path index
+   * from this, and the hosts label the staged-workspace validation envelope with it (#472).
+   */
+  relPathOf(key: string): string;
   /** One entry per key staged this session, in stage order, each flagged new vs modified. */
   staged(): StagedEdit[];
   /** Empty the staging area: `staged()` → `[]` and `read()` falls back to `initial` again. */
@@ -130,6 +136,10 @@ export function createEditSession(
 
     isNew(key: string): boolean {
       return !initialSet.has(key);
+    },
+
+    relPathOf(key: string): string {
+      return resolveRelPath(key);
     },
 
     staged(): StagedEdit[] {

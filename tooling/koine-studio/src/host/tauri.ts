@@ -256,7 +256,8 @@ export class TauriPlatform implements Platform {
   async validateStagedWorkspace(session: EditSession): Promise<string> {
     const endpoint = await this.mcpEndpoint();
     if (!endpoint) return '(could not validate: the Koine MCP server is not available)';
-    const files = session.list().map((p) => ({ path: p, source: session.read(p) ?? '' }));
+    // Label each file by its RELPATH (the session key may be a buffer uri or a `new:` key, #472).
+    const files = session.list().map((k) => ({ path: session.relPathOf(k), source: session.read(k) ?? '' }));
     return normalizeMcpValidate(await mcpCall(endpoint.url, 'koine_validate', { files }));
   }
 

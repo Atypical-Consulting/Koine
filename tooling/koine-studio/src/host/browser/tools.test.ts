@@ -107,6 +107,22 @@ describe('runEditTool', () => {
     expect(out).toContain('ok: true');
   });
 
+  test('validateStagedWorkspace labels the envelope by relPath, not by opaque session key (#472)', async () => {
+    api.DiagnoseWorkspace.mockClear();
+    api.DiagnoseWorkspace.mockReturnValue(JSON.stringify([{ uri: 'file:///model.koi', diagnostics: [] }]));
+    // A uri-keyed session (multi-root, #472) plus a brand-new file staged through the executor (which
+    // mints a `new:`-prefixed key): the envelope must carry each file's RELPATH label, never the key.
+    const session = createEditSession({ 'mem://a/model.koi': 'context A {}' }, { 'mem://a/model.koi': 'model.koi' });
+    await runEditTool('koine_write_file', JSON.stringify({ relPath: 'events.koi', contents: 'context E {}' }), session);
+
+    await validateStagedWorkspace(session);
+    const sentFiles = JSON.parse(api.DiagnoseWorkspace.mock.calls[0][0]);
+    expect(sentFiles).toEqual([
+      { uri: 'file:///model.koi', text: 'context A {}' },
+      { uri: 'file:///events.koi', text: 'context E {}' },
+    ]);
+  });
+
   test('koine_write_file with a NEW relPath reports it as a new file', async () => {
     api.DiagnoseWorkspace.mockReturnValue(JSON.stringify([{ uri: 'file:///new.koi', diagnostics: [] }]));
     const session = createEditSession({ 'a.koi': 'context A {}' });

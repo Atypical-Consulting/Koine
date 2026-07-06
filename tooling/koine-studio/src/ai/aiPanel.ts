@@ -59,6 +59,20 @@ import type { StoreApi } from 'zustand/vanilla';
  */
 export const MAX_REPAIR_ROUNDS: number = 3;
 
+/**
+ * The per-send workspace snapshot for multi-file agentic editing (#472): the current text of every
+ * `.koi` buffer keyed by its OPAQUE session key (the buffer uri — unique even when two roots of a
+ * multi-root workspace hold the same workspace-relative path; single-root/legacy hosts key by relPath),
+ * plus each key's workspace-relative display path. The keys seed the per-turn {@link EditSession}; the
+ * display paths are what the model (and the change-set review) see.
+ */
+export interface WorkspaceFilesSnapshot {
+  /** Current text per session key (buffer uri, or relPath in single-root hosts). */
+  files: Record<string, string>;
+  /** Workspace-relative display path per key — NOT unique across the roots of a multi-root workspace. */
+  displayPath: Record<string, string>;
+}
+
 export interface AssistantPanelOptions {
   container: HTMLElement;
   /**
@@ -115,10 +129,11 @@ export interface AssistantPanelOptions {
    */
   getGrammar?: () => Promise<string>;
   /**
-   * Snapshot the open workspace's .koi files as relPath→current-text, captured fresh per send. When
-   * present & non-empty together with {@link runEditTool}, the assistant can edit ACROSS files.
+   * Snapshot the open workspace's .koi files (key→current-text plus key→display-relPath, #472),
+   * captured fresh per send. When present & non-empty together with {@link runEditTool}, the
+   * assistant can edit ACROSS files.
    */
-  getWorkspaceFiles?: () => Record<string, string>;
+  getWorkspaceFiles?: () => WorkspaceFilesSnapshot;
   /** Host executor for the list/read/write edit tools against the per-turn staging session. */
   runEditTool?: (name: string, argsJson: string, session: EditSession) => Promise<string>;
   /**
@@ -343,11 +358,24 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
     rerender();
   }
 
+  // The LIVE text behind a change-set row (#472): resolve the row's relPath back to a snapshot key
+  // through the display map (identity in single-root hosts). Until the change-set rows carry the key
+  // end-to-end (#472 Task 4), a relPath shared by several roots resolves to the FIRST matching key.
+  function liveTextFor(relPath: string): string | undefined {
+    const snapshot = opts.getWorkspaceFiles?.();
+    if (!snapshot) return undefined;
+    for (const [key, rel] of Object.entries(snapshot.displayPath)) {
+      if (rel === relPath) return snapshot.files[key];
+    }
+    // A key without a display entry IS its relPath (legacy single-root shape).
+    return snapshot.files[relPath];
+  }
+
   // Drift check (#473): has `file`'s LIVE text moved away from the send-time `before` it was staged
   // against? A drifted file must be skipped so a stale full-file body can't clobber newer work. The
   // slice normalizes an absent send-time text to '' (`before` is always a string).
   function isDrifted(file: ChangeSetFileState): boolean {
-    const cur = opts.getWorkspaceFiles?.()?.[file.relPath];
+    const cur = liveTextFor(file.relPath);
     if (cur === undefined) {
       // The file isn't currently readable (closed/removed): safe only if there was nothing to overwrite
       // (base empty or absent); otherwise we can't confirm the target is still the reviewed text → warn.
@@ -700,10 +728,14 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
       // Build the per-turn multi-file staging session ONLY for a GENERATIVE workspace turn: offerApply
       // (an Explain turn must never stage/apply edits) AND tools are effective (so not a gbnf turn) AND
       // the host supplies the edit executor AND there are workspace files to edit across. The model's
-      // writes land in `editSession`; after the turn resolves, `editSession.staged()` holds the files.
-      const wsFiles =
+      // writes land in `editSession`, keyed by the snapshot's opaque keys with the display map carrying
+      // each key's relPath (#472); after the turn resolves, `editSession.staged()` holds the files.
+      const snapshot =
         offerApply && toolsEffective && opts.runEditTool && opts.getWorkspaceFiles ? opts.getWorkspaceFiles() : null;
-      const editSession = wsFiles && Object.keys(wsFiles).length > 0 ? createEditSession(wsFiles) : null;
+      const editSession =
+        snapshot && Object.keys(snapshot.files).length > 0
+          ? createEditSession(snapshot.files, snapshot.displayPath)
+          : null;
 
       // The once-per-turn whole-staged-workspace validation (issue #474): the loop runs `validateStaged`
       // a single time at end of turn and hands the diagnostics back here via `onStagedValidation`, so
@@ -782,8 +814,16 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
         attempt = null; // the fresh set has no apply attempt yet
         // Stage the set in the chat slice (#984): the state machine owns accepted/drift/phase — a
         // later send supersedes it via invalidateChangeSet, and the declarative ChangeSetPanel is
-        // its consumer.
-        store.getState().stageChangeSet(editSession.staged(), wsFiles ?? {}, stagedDiagnostics);
+        // its consumer. The slice's rows look up their send-time text by relPath (`before[f.relPath]`),
+        // so re-key the KEY-keyed snapshot to a relPath-keyed before map, one entry per staged edit
+        // (#472 — the full key round-trip through the review UI is Task 4; until then two roots
+        // staging the SAME relPath share the last writer's entry).
+        const before: Record<string, string> = {};
+        for (const edit of editSession.staged()) {
+          const sendTime = snapshot?.files[edit.key];
+          if (sendTime !== undefined) before[edit.relPath] = sendTime;
+        }
+        store.getState().stageChangeSet(editSession.staged(), before, stagedDiagnostics);
         rerender();
       } else {
         // The apply-gate lives here: a constrained turn validates (and, on the repair path, re-prompts)

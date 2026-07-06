@@ -142,6 +142,16 @@ describe('multi-root keying (#472): opaque keys + display relPaths', () => {
     expect(() => session.stage('new:C:\\evil.koi', 'x')).toThrow(); // Windows drive
   });
 
+  test('relPathOf() resolves a key through the display map, strips a new-file prefix, else echoes the key', () => {
+    const session = createEditSession(
+      { 'mem://a/model.koi': 'context A {}' },
+      { 'mem://a/model.koi': 'model.koi' },
+    );
+    expect(session.relPathOf('mem://a/model.koi')).toBe('model.koi'); // display entry wins
+    expect(session.relPathOf(newFileKey('shared/events.koi'))).toBe('shared/events.koi'); // prefix stripped
+    expect(session.relPathOf('orders.koi')).toBe('orders.koi'); // legacy key === relPath
+  });
+
   test('newFileKey() mints the key the session resolves back to the same relPath', () => {
     expect(newFileKey('nested/extra.koi')).toBe('new:nested/extra.koi');
 

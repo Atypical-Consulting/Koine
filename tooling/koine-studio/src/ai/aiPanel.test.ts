@@ -32,6 +32,15 @@ async function settle(): Promise<void> {
   await new Promise((r) => setTimeout(r, 50));
 }
 
+// The getWorkspaceFiles shape since #472 Task 2: `{ files, displayPath }` keyed by opaque session key.
+// These single-root harnesses key by relPath with an identity display map (the legacy behavior).
+function wsSnapshot(files: Record<string, string>): {
+  files: Record<string, string>;
+  displayPath: Record<string, string>;
+} {
+  return { files, displayPath: Object.fromEntries(Object.keys(files).map((p) => [p, p])) };
+}
+
 // Type a prompt through the CONTROLLED composer (the input listener lands it in chat.draft
 // synchronously) and send it via the Send button (the from-input path).
 function typeSend(container: HTMLElement, text: string): void {
@@ -774,7 +783,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'), // stub — the mock stages directly
         onApplyChangeSet,
       }),
@@ -824,7 +833,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         validateStaged: vi.fn(async () => DIAG),
         onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
@@ -853,7 +862,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         validateStaged: vi.fn(async () => 'ok: true — no diagnostics. The model compiles.'),
         onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
@@ -880,7 +889,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         validateStaged: vi.fn(async () => NOTE),
         onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
@@ -905,7 +914,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
       }),
@@ -931,7 +940,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -970,7 +979,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1012,7 +1021,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1068,7 +1077,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
       }),
@@ -1117,7 +1126,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
       }),
@@ -1171,7 +1180,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1229,7 +1238,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1286,7 +1295,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1335,7 +1344,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ws, // a LIVE read — currentText reflects concurrent edits at apply time
+        getWorkspaceFiles: () => wsSnapshot(ws), // a LIVE read — currentText reflects concurrent edits at apply time
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1378,7 +1387,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ws,
+        getWorkspaceFiles: () => wsSnapshot(ws),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1413,7 +1422,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ws,
+        getWorkspaceFiles: () => wsSnapshot(ws),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1463,7 +1472,7 @@ describe('multi-file change set (agentic edits)', () => {
     createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ws,
+        getWorkspaceFiles: () => wsSnapshot(ws),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
