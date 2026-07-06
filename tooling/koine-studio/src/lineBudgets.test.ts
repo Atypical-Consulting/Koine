@@ -92,7 +92,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // capture, and the save/dirty facade wraps — 832 LOC, ceil(832 × 1.02) = 849. The three modules stay
   // frozen at their post-split sizes so no single one regrows toward a god-file.
   { file: 'src/shell/workspaceController.ts', maxLines: 849 },
-  { file: 'src/shell/workspaceBuffers.ts', maxLines: 158 },
+  // Raised 158 → 165: #1081 guards applyFileEdit's post-write lsp.didSave() against a write that went
+  // stale before the freshness check (the same stillFresh gate its markSaved call already used) —
+  // 161 LOC, ceil(161 × 1.02) = 165.
+  { file: 'src/shell/workspaceBuffers.ts', maxLines: 165 },
   { file: 'src/shell/workspaceMutations.ts', maxLines: 179 },
   // Raised 178 → 195: #1009 guards saveActive/saveAllDirty's post-write lsp.didSave() against a
   // buffer switch during the write/format await AND a mid-write keystroke re-dirtying the saved

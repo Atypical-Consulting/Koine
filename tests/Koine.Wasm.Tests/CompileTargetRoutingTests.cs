@@ -42,6 +42,7 @@ public class CompileTargetRoutingTests
             ["python"] = ".py",
             ["php"] = ".php",
             ["rust"] = ".rs",
+            ["java"] = ".java",
             ["glossary"] = ".md",
             ["docs"] = ".md",
             ["asyncapi"] = ".yaml",

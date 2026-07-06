@@ -1,0 +1,13 @@
+#nullable enable
+Koine.Compiler.JavaEmitter
+Koine.Compiler.JavaEmitter.CacheDiscriminator.get -> string!
+Koine.Compiler.JavaEmitter.Emit(Koine.Compiler.Ast.KoineModel! model) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.JavaEmitter.Emit(Koine.Compiler.Ast.KoineModel! model, Koine.Compiler.Ast.SemanticModel? semantic) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>!
+Koine.Compiler.JavaEmitter.JavaEmitter() -> void
+Koine.Compiler.JavaEmitter.TargetName.get -> string!
+Koine.Compiler.JavaEmitterProvider
+Koine.Compiler.JavaEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! options) -> Koine.Compiler.Emit.IEmitter!
+Koine.Compiler.JavaEmitterProvider.DisplayName.get -> string!
+Koine.Compiler.JavaEmitterProvider.FileExtension.get -> string!
+Koine.Compiler.JavaEmitterProvider.JavaEmitterProvider() -> void
+Koine.Compiler.JavaEmitterProvider.Target.get -> string!

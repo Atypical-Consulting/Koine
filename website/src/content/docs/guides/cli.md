@@ -19,7 +19,7 @@ Want to try the compiler without installing anything? The <a class="koi-try" hre
 
 ```bash
 koine --version
-koine build <file.koi|dir> [--target csharp|typescript|python|php|rust|glossary|docs|openapi] [--out <dir>] [--glossary <file.md>] [--config <file>]
+koine build <file.koi|dir> [--target csharp|typescript|python|php|rust|java|glossary|docs|openapi] [--out <dir>] [--glossary <file.md>] [--config <file>]
 koine watch <file.koi|dir> [--target …] [--out …] [--config <file>]   # rebuild on every change
 koine fmt   <file.koi|dir> [--check]            # canonically format .koi (--check: verify only)
 koine init  [dir] [--force]                    # scaffold a starter project
@@ -52,7 +52,7 @@ Parses and validates the model, then — if you ask for output — emits files.
 | Flag | Default | What it does |
 |------|---------|--------------|
 | *(positional)* | — | The `.koi` file or directory to compile. Required. |
-| `--target` | `csharp` | The emitter: `csharp`, `typescript`, `python`, `php`, `rust`, `glossary`, `docs`, or `openapi`. |
+| `--target` | `csharp` | The emitter: `csharp`, `typescript`, `python`, `php`, `rust`, `java`, `glossary`, `docs`, or `openapi`. |
 | `--layers <list>` | `domain` | Comma-separated layers to emit: `domain` (the model + application contracts) and/or `infrastructure` (a runnable realization — EF Core for C#; a dependency-light in-memory realization for TypeScript & Python). `infrastructure` implies `domain`. See [C# infrastructure layer](#c-infrastructure-layer---layers) and [TypeScript & Python infrastructure](#typescript--python-infrastructure---layers). |
 | `--out <dir>` | *(none)* | Write the emitted files under this directory. Omit to only validate. |
 | `--layers <list>` | `domain` | Comma-separated output layers (`domain`, `application`). `application` implies `domain`. C# only. See [the Application layer](#the-c-application-layer). |
@@ -205,7 +205,7 @@ out = generated
 
 The first one found wins; if none is found, no defaults are applied. A flag on the command line always overrides the config.
 
-**Keys read today.** The flat keys `target` (`csharp`, `typescript`, `python`, `php`, `rust`, `glossary`, `docs`, or `openapi`) and `out` (the output directory) are honoured, plus these per-target keys:
+**Keys read today.** The flat keys `target` (`csharp`, `typescript`, `python`, `php`, `rust`, `java`, `glossary`, `docs`, or `openapi`) and `out` (the output directory) are honoured, plus these per-target keys:
 
 - `targets.csharp.layers` (e.g. `domain,infrastructure`) — the config equivalent of [`--layers`](#c-infrastructure-layer---layers), overridden by an explicit `--layers` flag.
 - `targets.<target>.regexMatchTimeoutMs` (default `1000` for C#) — the per-call match-timeout budget in milliseconds for the [`matches`-invariant ReDoS guard](/Koine/reference/invariants/#bounded-evaluation-redos-hardening): set it tighter for hostile-input value objects or looser for an expensive pattern on trusted batch input. The neutral key reaches every code target, each honoring it as its runtime allows — C# and Python **honor** it as a real per-call timeout, TypeScript **plumbs** it into the advisory `regexMatch` seam, PHP **substitutes** the PCRE-limit note (see the [per-target table](/Koine/reference/invariants/#bounded-evaluation-redos-hardening)). It must be a positive integer — `0` or a negative value is rejected at build time. For a single-invocation override without editing the config, use the [`--regex-match-timeout-ms <ms>` flag](#koine-build) — the flag wins over this key.

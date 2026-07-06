@@ -135,8 +135,11 @@ export function createWorkspaceBuffers(ctx: WorkspaceModuleCtx) {
       // Keystrokes landing while the write is in flight replace the buffer (via syncBufferText) — only
       // mark clean when it still holds exactly what hit disk (mirrors saveActive / saveAllDirty).
       const after = st().buffers.get(uri);
-      if (after && after.text === body) st().markSaved([uri]);
-      if (uri === st().activeUri) lsp.didSave(); // didSave() targets the ACTIVE doc — only valid then
+      const stillFresh = !!after && after.text === body;
+      if (stillFresh) st().markSaved([uri]);
+      // didSave() targets the ACTIVE doc — only valid when it's still the one just written AND that
+      // write still holds (mirrors saveActive/saveAllDirty's shouldNotifyDidSave guard, #1055).
+      if (stillFresh && uri === st().activeUri) lsp.didSave();
       renderTree(); // repaint the explorer dirty dot to match the dirty flag as it now stands
       st().bumpSaved(); // #470: this buffer hit disk — the saveSeq subscriber refreshes the SC panel
       return uri;

@@ -29,6 +29,7 @@ export const BUILTIN_EMIT_TARGETS: readonly EmitTarget[] = [
   { id: 'python', displayName: 'Python', fileExtension: '.py' },
   { id: 'php', displayName: 'PHP', fileExtension: '.php' },
   { id: 'rust', displayName: 'Rust', fileExtension: '.rs' },
+  { id: 'java', displayName: 'Java', fileExtension: '.java' },
   { id: 'asyncapi', displayName: 'AsyncAPI', fileExtension: '.yaml' },
   { id: 'openapi', displayName: 'OpenAPI', fileExtension: '.yaml' },
 ];
