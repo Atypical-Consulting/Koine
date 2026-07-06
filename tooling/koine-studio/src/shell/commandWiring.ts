@@ -8,7 +8,7 @@
 // reaches the rest of the shell through `deps`. The command-registry sibling (#758) is not yet landed,
 // so getCommands() is moved verbatim (the inline Command[] it already built); when #758 ships, this is
 // where the declarative registry composes in, with no change to init().
-import { createCommandPalette, createCommandRegistry, type Command } from '@atypical/koine-ui';
+import { createCommandRegistry, type Command } from '@atypical/koine-ui';
 import { domById } from '@/shared/domById';
 import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
 import { devCommands } from '@/shell/devCommands';
@@ -16,6 +16,13 @@ import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
 import { formatChord } from '@/shared/platform';
 import { toggleTheme } from '@/settings/theme';
 import { buildOverflowItems, toggleOverflowMenu } from '@/shell/toolbarOverflow';
+import { createLauncher } from '@/launcher/createLauncher';
+import type { LauncherSources } from '@/launcher/buildCatalog';
+import type { LauncherActionDeps } from '@/launcher/actions';
+import type { CatalogEntry } from '@/launcher/catalog';
+import type { ModelIndex } from '@/model/modelIndex';
+import type { GlossaryEntry, Range } from '@/lsp/lsp';
+import type { GitLogEntry } from '@/host/types';
 
 // The actions the command surface dispatches to. Each is a thunk into an init() closure or another
 // controller, so commandWiring imports none of them directly and stays unit-testable with stubs.
@@ -38,7 +45,7 @@ export interface CommandWiringDeps {
     selectCenter(view: 'visual'): void;
     splitCodeCanvas(): void;
     selectTech(view: 'scenarios'): void;
-    selectRight(view: 'assistant'): void;
+    selectRight(view: 'assistant' | 'source-control'): void;
     selectBottomTab(tab: 'review'): void;
   };
   generateProject: { open(): void };
@@ -59,6 +66,19 @@ export interface CommandWiringDeps {
   /** True while the palette or a modal dialog is open — global chords don't fire through an overlay. */
   overlayOpen(): boolean;
   toggleFileTree(): void;
+
+  // --- Spotlight launcher seams (#1143) -------------------------------------
+  // The launcher's live catalog + per-result effects reach the shell through these thunks (the same
+  // injected-controller idiom as the rest of this bag), so commandWiring builds LauncherSources /
+  // LauncherActionDeps without importing the LSP client or the host platform directly.
+  /** The joined workspace model index (ide.tsx wires controller.ensureModelIndex). Awaited per open. */
+  modelIndex(): Promise<ModelIndex>;
+  /** True when the host exposes git (desktop). Gates the launcher's "Recent commits" group. */
+  canUseGit: boolean;
+  /** The host git log (newest first), or null when the host has no git / can't read it. */
+  gitLog(): Promise<GitLogEntry[]> | null;
+  /** Open a workspace file and reveal a 0-based range — the launcher's go-to-symbol/rule effect. */
+  revealLocation(uri: string, range: Range): void;
 }
 
 export interface CommandWiring {
@@ -157,11 +177,86 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     return cmds.map((c) => (c.hint ? { ...c, hint: formatChord(c.hint) } : c));
   }
 
-  const palette = createCommandPalette(() => getCommands());
+  // --- Spotlight launcher (#1143) -------------------------------------------
+  // The old ⌘K command palette is retired in favour of the Spotlight launcher: one overlay that folds the
+  // command catalog (`>` mode), open-file quick-open (`/` mode), and the domain model (symbols / events /
+  // rules / glossary / commits) into a single fuzzy surface. commandWiring builds its live LauncherSources
+  // (the catalog join) and LauncherActionDeps (the per-result effects) from the same injected `deps` the
+  // rest of this module uses, so it stays import-light and unit-testable with stubs.
 
-  // Register the palette-toggle command (#758): global chords (and #432's keybindings registry) address
-  // it by id through run(); getCommands() filters PALETTE_COMMAND_ID out so it never appears as a row.
-  registry.register({ id: PALETTE_COMMAND_ID, title: 'Command palette', run: () => palette.toggle() });
+  // The studio command list the launcher's `>` mode ranks: the enablement-filtered static catalog, MINUS
+  // the launcher-toggle meta-command and WITHOUT the dynamic goto: rows (those become the launcher's Files
+  // mode, sourced from LauncherSources.files()). Hints are platform-formatted, like getCommands().
+  function launcherCommands(): Command[] {
+    return registry
+      .all()
+      .filter((c) => c.id !== PALETTE_COMMAND_ID && registry.isEnabled(c.id))
+      .map((c) => (c.hint ? { ...c, hint: formatChord(c.hint) } : c));
+  }
+
+  // LauncherSources.glossary() is SYNC, but the glossary entries come from the async model index; cache
+  // them off each modelIndex() resolve (buildCatalog always awaits modelIndex() before reading glossary())
+  // and return the cache — an empty list until the first open.
+  let cachedGlossary: GlossaryEntry[] = [];
+
+  const launcherSources: LauncherSources = {
+    modelIndex: async () => {
+      const index = await deps.modelIndex();
+      cachedGlossary = index.glossary.entries;
+      return index;
+    },
+    commands: () => launcherCommands(),
+    files: () => Array.from(deps.workspace.buffers().values()),
+    gitLog: () => (deps.canUseGit ? deps.gitLog() : null),
+    canUseGit: deps.canUseGit,
+    glossary: () => cachedGlossary,
+  };
+
+  // Resolve a symbol / event / rule entry to its declaring file + 0-based range and reveal it. Prefers the
+  // joined diagram node's sourceSpan (the file the declaration lives in) with the entry's nameRange; falls
+  // back to a plain open when only a file uri is known, and is a safe no-op when neither is present (an
+  // undrawn element carries no source location — see the task report's degrade list).
+  function gotoEntry(entry: CatalogEntry): void {
+    const file = entry.element?.node?.sourceSpan?.file ?? entry.file ?? null;
+    const range = entry.nameRange ?? entry.element?.entry.nameRange ?? null;
+    if (file && range) deps.revealLocation(file, range);
+    else if (file) deps.openUri(file);
+  }
+
+  // Bind each high-level launcher action to the nearest real shell seam. Actions without a dedicated seam
+  // yet (peek, reveal-in-explorer, open-changes, rename, commit view/revert) DEGRADE to the closest one
+  // (reveal/open, or the Source Control panel) — every one is safe to invoke; the report lists the degrades
+  // as follow-ups. `toast` is a no-op: LauncherPanel renders its own `.lx-toast` confirmation.
+  const actionDeps: LauncherActionDeps = {
+    gotoDefinition: (entry) => gotoEntry(entry),
+    findUsages: () => deps.search.focus(),
+    peek: (entry) => gotoEntry(entry),
+    rename: (entry) => gotoEntry(entry),
+    copy: (text) => void navigator.clipboard?.writeText?.(text),
+    openFile: (entry) => {
+      if (entry.file) deps.openUri(entry.file);
+    },
+    openFileChanges: () => deps.controller.selectRight('source-control'),
+    revealFile: (entry) => {
+      if (entry.file) deps.openUri(entry.file);
+    },
+    openGlossary: () => deps.controller.selectDocsTab('glossary'),
+    findInModel: () => deps.search.focus(),
+    gotoRule: (entry) => gotoEntry(entry),
+    viewCommit: () => deps.controller.selectRight('source-control'),
+    revertCommit: () => deps.controller.selectRight('source-control'),
+    runCommand: (entry) => {
+      if (entry.cmdId) registry.run(entry.cmdId);
+    },
+    toast: () => {},
+  };
+
+  const launcher = createLauncher(launcherSources, actionDeps);
+
+  // Register the launcher-toggle meta-command under the SAME id the old palette used (#758): global chords
+  // (and #432's keybindings registry) address "open the launcher" by id through run(); getCommands()
+  // filters PALETTE_COMMAND_ID out so it never appears as a row.
+  registry.register({ id: PALETTE_COMMAND_ID, title: 'Command launcher', run: () => launcher.toggle() });
 
   // --- toolbar buttons unique to this phase ---------------------------------
   // The command bar (chrome v2, #923): a full command field (search glyph + placeholder + keycap) that
@@ -202,7 +297,7 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     toggleOverflowMenu(overflowBtn, () =>
       buildOverflowItems({
         commands: getCommands(),
-        openPalette: () => palette.open(),
+        openPalette: () => launcher.open(),
         installAvailable: !domById<HTMLElement>('install-affordance').hidden,
         install: () => domById<HTMLButtonElement>('btn-install').click(),
       }),
@@ -225,7 +320,9 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
       registry.run(PALETTE_COMMAND_ID);
       return;
     }
-    if (deps.overlayOpen()) return;
+    // The launcher renders its own overlay (`.lx-scrim`), which the shell's overlayOpen() doesn't see, so
+    // OR its open state into the guard: while it's open no other global chord acts on the editor beneath.
+    if (deps.overlayOpen() || launcher.isOpen) return;
 
     if (mod && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
       // Mod+Shift+F → open/focus the workspace search panel (toggle closes it).

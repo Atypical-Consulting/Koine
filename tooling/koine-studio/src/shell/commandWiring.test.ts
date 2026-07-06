@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCommandWiring, PALETTE_COMMAND_ID, type CommandWiringDeps } from '@/shell/commandWiring';
 import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
+import { createLauncher, type LauncherHandle } from '@/launcher/createLauncher';
+import type { LauncherSources } from '@/launcher/buildCatalog';
+import type { LauncherActionDeps } from '@/launcher/actions';
+import type { CatalogEntry } from '@/launcher/catalog';
 
 // Mock the runaway-compile gate so tests can flip stop-compile's when() predicate. Defaults to false
 // (Stop hidden), matching an idle editor; individual tests opt into true.
@@ -8,6 +12,16 @@ vi.mock('@/host/browser/stopCompile', () => ({
   canStopCompile: vi.fn(() => false),
   stopRunawayCompile: vi.fn(),
 }));
+
+// The Spotlight launcher (#1143) is mounted for real by createLauncher; mock it so these tests observe
+// the WIRING — which LauncherSources / LauncherActionDeps commandWiring builds, and that ⌘K toggles the
+// handle — without rendering the Preact overlay into happy-dom. beforeEach captures the args + handle.
+vi.mock('@/launcher/createLauncher', () => ({ createLauncher: vi.fn() }));
+
+let launcherToggle: ReturnType<typeof vi.fn>;
+let launcherOpen = false;
+let capturedSources: LauncherSources;
+let capturedActionDeps: LauncherActionDeps;
 
 // happy-dom doesn't implement scrollIntoView; the palette calls it on open (the Cmd-K tests open it).
 if (typeof (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView !== 'function') {
@@ -77,6 +91,11 @@ function makeDeps(over: Partial<CommandWiringDeps> = {}): CommandWiringDeps {
     openUri: vi.fn(),
     overlayOpen: vi.fn(() => false),
     toggleFileTree: vi.fn(),
+    // Spotlight launcher seams (#1143): an empty model index, no git, a no-op reveal.
+    modelIndex: vi.fn(async () => ({ glossary: { entries: [] }, byQn: new Map(), qnByCtxName: new Map() })),
+    canUseGit: false,
+    gitLog: vi.fn(() => null),
+    revealLocation: vi.fn(),
     ...over,
   };
 }
@@ -92,6 +111,25 @@ describe('commandWiring', () => {
     document.body.innerHTML = '';
     mountToolbar();
     vi.mocked(canStopCompile).mockReturnValue(false);
+    // Fresh launcher handle + captured wiring per test. `launcherOpen` backs the handle's isOpen getter,
+    // so a test can flip it to exercise the launcher-open overlay suppression.
+    launcherOpen = false;
+    launcherToggle = vi.fn();
+    const open = vi.fn();
+    const close = vi.fn();
+    vi.mocked(createLauncher).mockReset();
+    vi.mocked(createLauncher).mockImplementation((sources, actionDeps) => {
+      capturedSources = sources;
+      capturedActionDeps = actionDeps;
+      return {
+        open,
+        close,
+        toggle: launcherToggle,
+        get isOpen() {
+          return launcherOpen;
+        },
+      } as unknown as LauncherHandle;
+    });
   });
 
   afterEach(() => {
@@ -219,17 +257,15 @@ describe('commandWiring', () => {
   });
 
   describe('global keyboard shortcuts', () => {
-    it('mod+K toggles the command palette through the registered palette command (#758)', () => {
+    it('mod+K toggles the Spotlight launcher through the registered palette command (#1143)', () => {
       const wiring = createCommandWiring(makeDeps());
       dispose = wiring.dispose;
-      const backdrop = () => document.body.querySelector<HTMLElement>('.koi-palette-backdrop')!;
-      expect(backdrop().hidden).toBe(true);
 
       window.dispatchEvent(key({ key: 'k', ctrlKey: true }));
-      expect(backdrop().hidden).toBe(false); // opened via registry.run(PALETTE_COMMAND_ID)
+      expect(launcherToggle).toHaveBeenCalledTimes(1); // opened via registry.run(PALETTE_COMMAND_ID)
 
       window.dispatchEvent(key({ key: 'k', ctrlKey: true }));
-      expect(backdrop().hidden).toBe(true); // toggled closed
+      expect(launcherToggle).toHaveBeenCalledTimes(2); // toggled again
     });
 
     it('dispatches mod+N → requestNewModel, mod+Shift+F → search.toggle, F1 → toggleHelp', () => {
@@ -267,6 +303,21 @@ describe('commandWiring', () => {
 
       window.dispatchEvent(key({ key: 'n', ctrlKey: true }));
       expect(deps.requestNewModel).not.toHaveBeenCalled();
+    });
+
+    it('suppresses chords (except mod+K) while the Spotlight launcher is open (#1143)', () => {
+      // The launcher renders its own overlay (`.lx-scrim`), which the shell's overlayOpen() does NOT see;
+      // commandWiring ORs launcher.isOpen into the guard so global chords don't reach the editor beneath.
+      const deps = makeDeps({ overlayOpen: vi.fn(() => false) });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      launcherOpen = true;
+      window.dispatchEvent(key({ key: 'n', ctrlKey: true }));
+      expect(deps.requestNewModel).not.toHaveBeenCalled();
+      // mod+K still toggles it — it runs BEFORE the guard.
+      window.dispatchEvent(key({ key: 'k', ctrlKey: true }));
+      expect(launcherToggle).toHaveBeenCalledTimes(1);
     });
 
     it('stops listening after dispose()', () => {
@@ -345,13 +396,11 @@ describe('commandWiring', () => {
     it('registers the palette-toggle command but keeps it out of the palette list', () => {
       const wiring = createCommandWiring(makeDeps());
       dispose = wiring.dispose;
-      // Not a row (the palette never lists the command that opens itself)...
+      // Not a row (the launcher never lists the command that opens itself)...
       expect(wiring.getCommands().map((c) => c.id)).not.toContain(PALETTE_COMMAND_ID);
-      // ...but registered & enabled, so run() toggles the palette open.
-      const backdrop = () => document.body.querySelector<HTMLElement>('.koi-palette-backdrop')!;
-      expect(backdrop().hidden).toBe(true);
+      // ...but registered & enabled, so run() toggles the launcher.
       wiring.run(PALETTE_COMMAND_ID);
-      expect(backdrop().hidden).toBe(false);
+      expect(launcherToggle).toHaveBeenCalledTimes(1);
     });
 
     it('no-ops Save-to-disk dispatch when the host cannot save projects (when-gated, not unknown)', () => {
@@ -376,6 +425,96 @@ describe('commandWiring', () => {
       vi.mocked(canStopCompile).mockReturnValue(true);
       wiring.run('stop-compile'); // enabled ⇒ fires
       expect(stopRunawayCompile).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('Spotlight launcher wiring (#1143)', () => {
+    it('builds LauncherSources.commands() from the studio catalog, without the palette-toggle or goto rows', () => {
+      const buffers = new Map([['file:///a.koi', { uri: 'file:///a.koi', relPath: 'a.koi' }]]);
+      const deps = makeDeps({ workspace: { saveAllDirty: vi.fn(), buffers: () => buffers } });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const ids = capturedSources.commands().map((c) => c.id);
+      expect(ids).toEqual(expect.arrayContaining(['undo', 'format', 'search', 'view-assistant']));
+      // The command that opens the launcher is never a launcher row...
+      expect(ids).not.toContain(PALETTE_COMMAND_ID);
+      // ...and the open-file quick-open rows are NOT commands — they become the launcher's Files mode.
+      expect(ids.some((id) => id.startsWith('goto:'))).toBe(false);
+    });
+
+    it('exposes the open buffers to LauncherSources.files() (the `/` Files quick-open source)', () => {
+      const buffers = new Map([
+        ['file:///a.koi', { uri: 'file:///a.koi', relPath: 'a.koi' }],
+        ['file:///b.koi', { uri: 'file:///b.koi', relPath: 'b.koi' }],
+      ]);
+      const deps = makeDeps({ workspace: { saveAllDirty: vi.fn(), buffers: () => buffers } });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      expect(capturedSources.files().map((f) => f.uri)).toEqual(['file:///a.koi', 'file:///b.koi']);
+    });
+
+    it('re-reads the buffers thunk so LauncherSources.files() reflects files opened after construction', () => {
+      let buffers = new Map<string, { uri: string; relPath: string }>();
+      const deps = makeDeps({ workspace: { saveAllDirty: vi.fn(), buffers: () => buffers } });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+      expect(capturedSources.files()).toHaveLength(0);
+      buffers = new Map([['file:///a.koi', { uri: 'file:///a.koi', relPath: 'a.koi' }]]);
+      expect(capturedSources.files().map((f) => f.uri)).toEqual(['file:///a.koi']);
+    });
+
+    it('gates the "Recent commits" group behind canUseGit (browser host = no commits)', () => {
+      const off = createCommandWiring(makeDeps({ canUseGit: false, gitLog: vi.fn(() => null) }));
+      dispose = off.dispose;
+      expect(capturedSources.canUseGit).toBe(false);
+      expect(capturedSources.gitLog()).toBeNull();
+    });
+
+    it('routes the "Search across files…" command to search.focus() (the text-search panel stays)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+      capturedSources.commands().find((c) => c.id === 'search')!.run();
+      expect(deps.search.focus).toHaveBeenCalledOnce();
+    });
+
+    it('binds the action seam: runCommand → registry.run(cmdId), openFile → openUri, copy → clipboard', async () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const cmd: CatalogEntry = { id: 'cmd:new-model', cat: 'action', title: 'New model', cmdId: 'new-model' };
+      capturedActionDeps.runCommand(cmd);
+      expect(deps.requestNewModel).toHaveBeenCalledOnce();
+
+      const file: CatalogEntry = { id: 'file:x', cat: 'file', title: 'x.koi', file: 'file:///x.koi' };
+      capturedActionDeps.openFile(file);
+      expect(deps.openUri).toHaveBeenCalledWith('file:///x.koi');
+
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      vi.stubGlobal('navigator', { clipboard: { writeText } });
+      await capturedActionDeps.copy('OrderId');
+      expect(writeText).toHaveBeenCalledWith('OrderId');
+      vi.unstubAllGlobals();
+    });
+
+    it('binds gotoDefinition to revealLocation using the entry\'s declaring file + nameRange', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const range = { start: { line: 3, character: 2 }, end: { line: 3, character: 7 } };
+      const entry = {
+        id: 'sym:Ordering.Order',
+        cat: 'symbol',
+        title: 'Order',
+        nameRange: range,
+        element: { node: { sourceSpan: { file: 'file:///order.koi' } } },
+      } as unknown as CatalogEntry;
+      capturedActionDeps.gotoDefinition(entry);
+      expect(deps.revealLocation).toHaveBeenCalledWith('file:///order.koi', range);
     });
   });
 });

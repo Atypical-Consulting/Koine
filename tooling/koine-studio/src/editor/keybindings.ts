@@ -15,6 +15,11 @@ export type BindingId = 'goToDefinition' | 'format' | 'rename' | 'findReferences
 // becomes "add a row pointing at an existing command id" (#758's command layer) rather than authoring a
 // literal `keydown` branch. The field is optional and unset on every current row, so behaviour here is
 // unchanged; it only documents and types the join point #432 builds on.
+//
+// #432 note (#1143): the ⌘K chord now toggles the Spotlight launcher, dispatched today via
+// commandWiring.ts's `onKeydown` branch `registry.run(PALETTE_COMMAND_ID)`. When #432 lands, that chord
+// folds in here as a `{ id, defaultKey: 'Mod-k', commandId: PALETTE_COMMAND_ID }` row instead of the
+// hand-written keydown branch.
 export interface KeyBindingRow {
   id: BindingId;
   label: string;
