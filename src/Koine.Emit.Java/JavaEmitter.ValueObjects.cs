@@ -63,8 +63,6 @@ public sealed partial class JavaEmitter
         return TypeFile(context, name, sb.ToString());
     }
 
-    private static readonly IReadOnlySet<BinaryOp> EmptyBinaryOps = new HashSet<BinaryOp>();
-
     /// <summary>
     /// Emits the demand-driven arithmetic methods a value object's uses require (R9), the Java analogue of
     /// the Rust backend's <c>impl Add/Mul/Div</c>: <c>plus</c>/<c>minus</c> for additive combination (a
@@ -76,31 +74,34 @@ public sealed partial class JavaEmitter
     private static void WriteValueObjectOperators(
         StringBuilder sb, JavaEmitContext emit, string name, ValueObjectDecl vo, IReadOnlyList<Member> stored)
     {
-        IReadOnlySet<BinaryOp> binaryOps =
-            emit.BinaryNeeds.TryGetValue(vo.Name, out IReadOnlySet<BinaryOp>? ops) ? ops : EmptyBinaryOps;
+        // This value object's full operator demand, resolved once from the analyzer's single-pass model
+        // (#1126): the `sum`-fold/`NeedsAdd` union, the plain binary `+`/`-` ops, and the scalar
+        // multiply/divide factors. `null` = this VO needs no generated arithmetic (absent from the unified
+        // map, exactly as it was absent from all four separate maps before). Read null-safely below.
+        var needs = emit.OperatorNeeds.GetValueOrDefault(vo.Name);
         var hasNumeric = stored.Any(m => m.Type.Name is "Int" or "Decimal");
 
-        // `plus`: a `sum` fold over this value object, or a plain binary `+`.
-        if (emit.AdditiveNeeds.Contains(vo.Name) || binaryOps.Contains(BinaryOp.Add))
+        // `plus`: a `sum` fold over this value object, or a plain binary `+` (the analyzer precombines both).
+        if (needs?.NeedsAdd ?? false)
         {
             WriteAdditiveMethod(sb, name, stored, "plus", "+");
         }
 
         // `minus`: a plain binary `-`.
-        if (binaryOps.Contains(BinaryOp.Sub))
+        if (needs?.BinaryOps.Contains(BinaryOp.Sub) ?? false)
         {
             WriteAdditiveMethod(sb, name, stored, "minus", "-");
         }
 
         // `times`/`dividedBy`: scalar scaling — one overload per scalar type the model uses.
-        if (hasNumeric && emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? mulScalars))
+        if (hasNumeric && needs is { MultiplyFactors.Count: > 0 })
         {
-            WriteScalarMethods(sb, name, stored, mulScalars, "times", "*");
+            WriteScalarMethods(sb, name, stored, needs.MultiplyFactors, "times", "*");
         }
 
-        if (hasNumeric && emit.ScalarDivNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? divScalars))
+        if (hasNumeric && needs is { DivideFactors.Count: > 0 })
         {
-            WriteScalarMethods(sb, name, stored, divScalars, "dividedBy", "/");
+            WriteScalarMethods(sb, name, stored, needs.DivideFactors, "dividedBy", "/");
         }
     }
 
