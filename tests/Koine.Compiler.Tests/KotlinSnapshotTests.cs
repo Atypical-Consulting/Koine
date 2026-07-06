@@ -319,4 +319,78 @@ public class KotlinSnapshotTests
         order.ShouldContain("instance._domainEvents.add(OrderOpened(id, lines))");
         order.ShouldContain("return instance");
     }
+
+    // Events (domain + integration) as data classes under a sealed DomainEvent, a repository with tuned
+    // operations + finders, and an unowned foreign identity (CustomerId, referenced but not owned here).
+    private const string MessagesFixture = """
+        context Sales {
+          value Money {
+            amount: Decimal
+            invariant amount >= 0 "an amount cannot be negative"
+          }
+          event OrderPlaced { orderId: OrderId  total: Money }
+          integration event OrderShipped { orderId: OrderId }
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              customer: CustomerId
+            }
+            repository {
+              operations: getById, add, update
+              find byCustomer(customer: CustomerId): List<Order>
+              find mostRecent(customer: CustomerId): Order
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public Task Kotlin_events_and_repository_emit_expected_kotlin()
+    {
+        var result = new KoineCompiler().Compile(MessagesFixture, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var placed = result.Files.Single(f => f.RelativePath.EndsWith("OrderPlaced.kt", StringComparison.Ordinal)).Contents;
+        placed.ShouldContain("data class OrderPlaced(");
+        placed.ShouldContain(") : DomainEvent");
+
+        var domainEvent = result.Files.Single(f => f.RelativePath.EndsWith("DomainEvent.kt", StringComparison.Ordinal)).Contents;
+        domainEvent.ShouldContain("sealed interface DomainEvent");
+
+        var repo = result.Files.Single(f => f.RelativePath.EndsWith("OrderRepository.kt", StringComparison.Ordinal)).Contents;
+        repo.ShouldContain("interface OrderRepository {");
+        repo.ShouldContain("fun getById(id: OrderId): Order?");
+        repo.ShouldContain("fun add(aggregate: Order)");
+        repo.ShouldContain("fun byCustomer(customer: CustomerId): List<Order>");
+        repo.ShouldContain("fun mostRecent(customer: CustomerId): Order?");
+        repo.ShouldNotContain("fun remove(");   // `operations` excludes remove
+
+        // CustomerId is referenced by Order but owned by no local entity — materialized as a minimal brand.
+        var customerId = result.Files.Single(f => f.RelativePath.EndsWith("CustomerId.kt", StringComparison.Ordinal)).Contents;
+        customerId.ShouldContain("value class CustomerId(val value: java.util.UUID)");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    // End-to-end: the real billing starter template — value objects, a smart enum, entities, an aggregate with
+    // a nested enum/value/entity, a demand-driven scalar-Mul member, a `when`-guarded invariant, the default
+    // repository interface, and the unowned ProductId brand.
+    [Fact]
+    public Task Kotlin_billing_template_emits_expected_kotlin()
+    {
+        var result = new KoineCompiler().Compile(TestSupport.BillingFixture, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var repo = result.Files.Single(f => f.RelativePath.EndsWith("OrderRepository.kt", StringComparison.Ordinal)).Contents;
+        repo.ShouldContain("interface OrderRepository {");
+        repo.ShouldContain("fun getById(id: OrderId): Order?");
+        repo.ShouldContain("fun remove(id: OrderId)");   // default ops include remove
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.kt", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("operator fun times(factor: Long): Money");   // demand-driven scalar op
+
+        var productId = result.Files.Single(f => f.RelativePath.EndsWith("ProductId.kt", StringComparison.Ordinal)).Contents;
+        productId.ShouldContain("value class ProductId(");   // unowned id materialized
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
 }

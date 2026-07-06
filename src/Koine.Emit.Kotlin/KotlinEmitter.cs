@@ -87,6 +87,8 @@ public sealed partial class KotlinEmitter : IEmitter
             {
                 EmitType(emit, files, ctx.Name, type);
             }
+
+            EmitContextExtras(emit, files, ctx);
         }
 
         return files;
@@ -114,6 +116,12 @@ public sealed partial class KotlinEmitter : IEmitter
                 break;
             case AggregateDecl agg:
                 EmitAggregate(emit, files, context, agg);
+                break;
+            case EventDecl ev:
+                files.Add(EmitEvent(emit, context, ev.Name, ev.Members));
+                break;
+            case IntegrationEventDecl iev:
+                files.Add(EmitEvent(emit, context, iev.Name, iev.Members));
                 break;
             default:
                 break;

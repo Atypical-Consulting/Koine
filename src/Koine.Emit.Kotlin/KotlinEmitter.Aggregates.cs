@@ -22,5 +22,10 @@ public sealed partial class KotlinEmitter
         {
             EmitType(emit, files, context, nested);
         }
+
+        // The aggregate root's persistence-ignorant repository interface. The per-context DomainEvent sealed
+        // interface is emitted once per context by EmitContextExtras (not here), so a same-named event nested in
+        // the aggregate still lands in the single context-wide sum.
+        EmitAggregateExtras(emit, files, context, agg);
     }
 }
