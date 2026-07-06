@@ -53,6 +53,15 @@
   @include a.rail-panel-pad;
 }
 
+/* Right-rail tool windows that reuse the .doc-view scroller (Source Control, Syntax Tree) carry their
+   own inner content padding (.koi-sc / .koi-stree / .koi-rview-empty), so the shared rail vertical inset
+   (koi-space-4) stacks on top and reads as too much headroom under #right-header. Drop the vertical rail
+   inset for these panels — only the Properties inspector (#inspector-host, a bare .rview, not a
+   .doc-view) keeps the koi-space-4 rail margin. */
+.rview.doc-view {
+  padding-block: 0;
+}
+
 /* --- right-edge tool-window stripe buttons (#500) ---
    Square icon toggles in the vertical #right-strip (container layout in _split.scss). They wear the
    toolbar line-icon idiom (.tb-ico) but read as a tool-window stripe: a clear pressed state — the icon
