@@ -312,6 +312,15 @@ export function SyntaxTreePanel(props: {
     node: focusedKey && tree ? nodeAtKey(tree, focusedKey) : null,
   };
 
+  // Self-echo guard for the click ↔ caret feedback loop (#1116). A row click/activate selects the node AND
+  // jumps the editor to its span; `jumpToRange` (editor.ts) parks the caret HEAD at the span END, which the
+  // store then bounces back as a fresh `caret` prop. Because syntax-tree spans are end-EXCLUSIVE, that
+  // echoed caret sits one past the clicked node's own span — so the caret effect below would re-derive
+  // selection onto the enclosing PARENT and clobber the click (the "needs a second click" bug). We record
+  // the PREDICTED echo `{line: span.endLine, column: span.endColumn}` here and skip exactly that one caret
+  // re-derivation. A ref (not state): it must not trigger a render, only bridge the click to its echo.
+  const caretEchoRef = useRef<{ line: number; column: number } | null>(null);
+
   // A one-shot request to re-focus the restored row after a refetch commit (#1097). The fetch resolve
   // sets the key + bumps `refocusTick` ONLY when keyboard focus was inside the tree at rebuild time, so
   // the effect below re-homes an active keyboard user onto the preserved row without ever STEALING focus
@@ -378,6 +387,13 @@ export function SyntaxTreePanel(props: {
   // otherwise — so this re-runs on a real caret move, not on the panel's own state re-renders.
   useEffect(() => {
     if (!caret || tree == null) return;
+    // Skip the click's own predicted caret echo (#1116) so a single click's selection stands. Consume the
+    // ref on the first caret effect after a click no matter what: a MATCH is the echo (keep the click's
+    // selection, return before touching activeKey); a MISS is a genuine caret move (clear the ref, then
+    // re-derive as normal) — so the guard can never linger and swallow a later real editor → tree move.
+    const echo = caretEchoRef.current;
+    caretEchoRef.current = null;
+    if (echo && echo.line === caret.line && echo.column === caret.column) return;
     const hit = deepestContaining(tree, caret.line, caret.column);
     setActiveKey(hit?.key ?? null);
     if (hit) setExpanded((prev) => withAncestorsExpanded(prev, hit.key));
@@ -558,11 +574,14 @@ export function SyntaxTreePanel(props: {
         }
         return true;
       },
-      // Enter/Space: select the row and jump the editor to its span, exactly as a row click does.
+      // Enter/Space: select the row and jump the editor to its span, exactly as a row click does — so it
+      // needs the same self-echo guard (#1116) or keyboard selection would be clobbered by its caret bounce.
       activate: (i) => {
         const row = navRows[i];
         setFocusedKey(row.key);
         setActiveKey(row.key);
+        caretEchoRef.current =
+          row.node.span.line > 0 ? { line: row.node.span.endLine, column: row.node.span.endColumn } : null;
         onNodeClick?.(row.node);
       },
     };
@@ -639,6 +658,11 @@ export function SyntaxTreePanel(props: {
                 e.stopPropagation();
                 setFocusedKey(key);
                 setActiveKey(key);
+                // Arm the self-echo guard (#1116) for the caret this click's editor jump will bounce back
+                // (mirroring the controller's `node.span.line > 0` jump guard — a span-less node fires no
+                // jump, so there's no echo to suppress).
+                caretEchoRef.current =
+                  node.span.line > 0 ? { line: node.span.endLine, column: node.span.endColumn } : null;
                 onNodeClick?.(node);
               }
         }
