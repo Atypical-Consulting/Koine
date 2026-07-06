@@ -1,6 +1,7 @@
 using System.Text;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
+using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Semantics;
 
@@ -125,7 +126,7 @@ public sealed class SemanticValidator
                 type.Span));
         }
 
-        foreach (Member m in AnnotatableMembers(type))
+        foreach (Member m in type.MembersOf())
         {
             if (m.Since is { } memberSince && memberSince > ceiling)
             {
@@ -144,16 +145,6 @@ public sealed class SemanticValidator
             }
         }
     }
-
-    /// <summary>The member-bearing fields of a type (value/entity/event/integration event); empty otherwise.</summary>
-    private static IReadOnlyList<Member> AnnotatableMembers(TypeDecl type) => type switch
-    {
-        ValueObjectDecl v => v.Members,
-        EntityDecl e => e.Members,
-        EventDecl ev => ev.Members,
-        IntegrationEventDecl ie => ie.Members,
-        _ => Array.Empty<Member>()
-    };
 
     /// <summary>
     /// Validates a context's imports, module names, and cross-context references (R13.2/R13.3):
