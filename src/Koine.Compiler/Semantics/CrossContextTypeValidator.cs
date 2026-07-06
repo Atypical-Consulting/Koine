@@ -7,7 +7,7 @@ namespace Koine.Compiler.Semantics;
 /// Issue #1091 — warns (KOI1419) when a type declared in <b>more than one</b> bounded context (and not
 /// a shared-kernel type) is referenced from a <b>third</b> context. The flat-module emitters (Rust,
 /// Java) cannot emit a bare name there — they must pick a deterministic canonical owner to qualify the
-/// reference (<see cref="ModelIndex.ResolveCanonicalOwner"/>). This focused validator surfaces that
+/// reference (<see cref="ModelIndex.ResolveOwner(string, string)"/>). This focused validator surfaces that
 /// otherwise-silent choice to the modeller, naming the declaring contexts and the owner the reference
 /// qualifies to, so a genuine cross-context name collision is visible rather than hidden behind
 /// generated code.
@@ -30,20 +30,19 @@ internal static class CrossContextTypeValidator
 
     private static void Check(string fromContext, TypeRef tr, ModelIndex index, List<Diagnostic> diagnostics)
     {
-        // A shared-kernel type is physically homed in one canonical module (R14.2) — never ambiguous.
-        // A type declared in >1 context and referenced from a context that is NOT one of its owners is
-        // the multi-owner case the emitters qualify to a canonical owner; surface that choice once.
-        if (!index.IsSharedKernelType(tr.Name))
+        // The shared owner-resolution policy is the single source of truth for the multi-owner decision:
+        // it flags WasAmbiguous only for the genuinely-ambiguous ordinal-fallback choice (shared-kernel,
+        // #437-local, uniquely-owned, an explicit qualifier, a single import, and a single map-permit all
+        // resolve deterministically), so gating on that flag surfaces exactly the case KOI1419 is about —
+        // no re-derived declaring-count/import gate needed. Threading the reference's own qualifier keeps
+        // the warning silent when the modeller explicitly disambiguated with `Context.T` (#1124).
+        ModelIndex.OwnerResolution res = index.ResolveOwner(tr.Name, tr.Qualifier, fromContext);
+        if (res.WasAmbiguous)
         {
             IReadOnlyList<string> declaring = index.DeclaringContextsOf(tr.Name);
-            if (declaring.Count > 1
-                && !Contains(declaring, fromContext)
-                && index.ResolveCanonicalOwner(tr.Name, fromContext) is { } owner)
-            {
-                diagnostics.Add(Diagnostic.Warning(DiagnosticCodes.AmbiguousMultiOwnerReference,
-                    $"type '{tr.Name}' is declared in contexts '{string.Join("', '", declaring)}' and referenced from '{fromContext}'; qualifying to '{owner}'",
-                    tr.Span));
-            }
+            diagnostics.Add(Diagnostic.Warning(DiagnosticCodes.AmbiguousMultiOwnerReference,
+                $"type '{tr.Name}' is declared in contexts '{string.Join("', '", declaring)}' and referenced from '{fromContext}'; qualifying to '{res.Owner}'",
+                tr.Span));
         }
 
         // A generic's element / value type argument may itself be a multi-owner reference.
@@ -56,18 +55,5 @@ internal static class CrossContextTypeValidator
         {
             Check(fromContext, tr.Value, index, diagnostics);
         }
-    }
-
-    private static bool Contains(IReadOnlyList<string> contexts, string value)
-    {
-        foreach (var c in contexts)
-        {
-            if (string.Equals(c, value, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 }

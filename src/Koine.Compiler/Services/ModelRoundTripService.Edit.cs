@@ -813,14 +813,7 @@ public static partial class ModelRoundTripService
         }
     }
 
-    private static IReadOnlyList<Member>? FieldsOf(TypeDecl type) => type switch
-    {
-        ValueObjectDecl v => v.Members,
-        EntityDecl e => e.Members,
-        EventDecl ev => ev.Members,
-        IntegrationEventDecl ie => ie.Members,
-        _ => null,
-    };
+    private static IReadOnlyList<Member>? FieldsOf(TypeDecl type) => type.MembersOfOrNull();
 
     // ---- Small text + name helpers ---------------------------------------
 

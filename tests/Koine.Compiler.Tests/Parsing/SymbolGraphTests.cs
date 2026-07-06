@@ -134,6 +134,35 @@ public class SymbolGraphTests
     }
 
     [Fact]
+    public void MemberOf_BindsAFieldButLeavesAnEnumSelectorUnbound()
+    {
+        // Exercises SymbolTable.MemberOf's two arms: a field-bearing kind (Money) surfaces its member,
+        // while a non-field-bearing kind (the enum Phase) hits the `_ => null` arm — so the selector
+        // stays unbound (ErrorSymbol) rather than binding to a fabricated member.
+        const string src = """
+            context C {
+              value Money { amount: Decimal }
+              enum Phase { Draft, Active }
+              entity Order identified by OrderId {
+                total: Money
+                phase: Phase
+                invariant total.amount > 0
+                invariant phase.rank > 0
+              }
+            }
+            """;
+        var sema = Build(src);
+
+        MemberAccessExpr amount = Descendants(sema).OfType<MemberAccessExpr>().Single(m => m.MemberName == "amount");
+        var member = sema.GetSymbolInfo(amount).ShouldBeOfType<MemberSymbol>();
+        member.Name.ShouldBe("amount");
+        member.OwnerType.ShouldBe("Money");
+
+        MemberAccessExpr enumSelector = Descendants(sema).OfType<MemberAccessExpr>().Single(m => m.MemberName == "rank");
+        sema.GetSymbolInfo(enumSelector).ShouldBeSameAs(ErrorSymbol.Instance);
+    }
+
+    [Fact]
     public void Binder_BindsCommandParameterReference()
     {
         var sema = Build(CommandSrc);

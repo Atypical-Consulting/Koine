@@ -328,4 +328,12 @@ static Koine.Compiler.Services.ScenarioService.WriteJson(System.Collections.Gene
 static Koine.Compiler.Services.SyntaxTreeProvider.Build(Koine.Compiler.Ast.KoineNode! root, string! source) -> Koine.Compiler.Services.SyntaxTreeNode!
 static Koine.Compiler.Services.VersionInfo.Display(System.Reflection.Assembly! assembly) -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.AmbiguousMultiOwnerReference = "KOI1419" -> string!
-Koine.Compiler.Ast.ModelIndex.ResolveCanonicalOwner(string! koineName, string! referencingContext) -> string?
+Koine.Compiler.Ast.ModelIndex.OwnerResolution
+Koine.Compiler.Ast.ModelIndex.OwnerResolution.OwnerResolution() -> void
+Koine.Compiler.Ast.ModelIndex.OwnerResolution.OwnerResolution(string? Owner, bool WasAmbiguous) -> void
+Koine.Compiler.Ast.ModelIndex.OwnerResolution.Owner.get -> string?
+Koine.Compiler.Ast.ModelIndex.OwnerResolution.Owner.init -> void
+Koine.Compiler.Ast.ModelIndex.OwnerResolution.WasAmbiguous.get -> bool
+Koine.Compiler.Ast.ModelIndex.OwnerResolution.WasAmbiguous.init -> void
+Koine.Compiler.Ast.ModelIndex.ResolveOwner(string! koineName, string! referencingContext) -> Koine.Compiler.Ast.ModelIndex.OwnerResolution
+Koine.Compiler.Ast.ModelIndex.ResolveOwner(string! koineName, string? qualifier, string! referencingContext) -> Koine.Compiler.Ast.ModelIndex.OwnerResolution

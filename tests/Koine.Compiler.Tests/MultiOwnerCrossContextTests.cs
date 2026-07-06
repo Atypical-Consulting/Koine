@@ -83,6 +83,57 @@ public class MultiOwnerCrossContextTests
         money.ShouldContain("record Money");
     }
 
+    /// <summary>
+    /// Same three contexts, but Gamma references <c>Beta.Money</c> with an EXPLICIT qualifier (no import).
+    /// The qualifier is the modeller's intent, so the reference must qualify to <b>Beta</b> — not the
+    /// ordinal-least <c>Alpha</c> a bare name would fall back to (issue #1124).
+    /// </summary>
+    private const string QualifiedMultiOwnerFixture = """
+        context Alpha {
+          value Money {
+            amount: Int
+          }
+        }
+
+        context Beta {
+          value Money {
+            amount: Int
+          }
+        }
+
+        context Gamma {
+          value Wallet {
+            balance: Beta.Money
+          }
+        }
+        """;
+
+    [Fact]
+    public void Rust_qualifies_an_explicit_qualifier_to_the_named_owner_not_the_ordinal_default()
+    {
+        var result = new KoineCompiler().Compile(QualifiedMultiOwnerFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var gamma = result.Files.Single(f => f.RelativePath.EndsWith("gamma.rs", StringComparison.Ordinal)).Contents;
+
+        // The explicit `Beta.Money` qualifier must win: qualify to Beta's module, NOT Alpha's.
+        gamma.ShouldContain("balance: crate::beta::Money");
+        gamma.ShouldNotContain("crate::alpha::Money");
+    }
+
+    [Fact]
+    public void Java_qualifies_an_explicit_qualifier_to_the_named_owner_not_the_ordinal_default()
+    {
+        var result = new KoineCompiler().Compile(QualifiedMultiOwnerFixture, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var wallet = result.Files.Single(f => f.RelativePath.EndsWith("gamma/Wallet.java", StringComparison.Ordinal)).Contents;
+
+        // The explicit `Beta.Money` qualifier must win: package-qualify to Beta, NOT Alpha.
+        wallet.ShouldContain("koine.generated.beta.Money");
+        wallet.ShouldNotContain("koine.generated.alpha.Money");
+    }
+
     [Fact]
     public void Rust_multi_owner_cross_context_crate_compiles()
     {

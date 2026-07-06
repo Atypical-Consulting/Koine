@@ -63,11 +63,10 @@ public sealed partial class RustEmitter : IEmitter
             BuildEnumVariantMap(model),
             // Demand-driven operator emission (R9), shared with the C#/Python emitters so the targets
             // stay semantically aligned: a value object only gets an additive `Add` where the model
-            // `sum`s it, or a scalar `Mul` where the model multiplies it by a scalar.
-            OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
-            OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
-            OperatorNeedsAnalyzer.BuildScalarDivisionNeeds(model, index),
-            OperatorNeedsAnalyzer.BuildValueObjectArithmeticNeeds(model, index));
+            // `sum`s it, or a scalar `Mul` where the model multiplies it by a scalar. One unified pass
+            // (#1126) exposes every per-VO signal — scalar factors, `sum`-fold, plain binary `+`/`-`,
+            // and the precomputed `NeedsAdd` union — off a single analyzer entry.
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index));
 
         var files = new List<EmittedFile>
         {

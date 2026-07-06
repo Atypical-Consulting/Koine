@@ -73,10 +73,24 @@ internal sealed class RustTypeMapper
                 return $"Range<{MapArg(type.Element)}>";
             default:
                 // value / entity / aggregate / enum / ID / unknown types map to their Rust type name,
-                // qualified to their owning context's module when referenced from a different context.
-                return QualifyTypeName(type.Name);
+                // qualified to their owning context's module when referenced from a different context —
+                // honoring any explicit `Context.T` qualifier the reference carries (#1124).
+                return QualifyTypeName(type);
         }
     }
+
+    /// <summary>
+    /// The Rust type name for a member's declared type, threading the reference's explicit
+    /// <see cref="TypeRef.Qualifier"/> (a <c>Context.T</c> the modeller wrote) into owner resolution so a
+    /// qualified multi-owner reference qualifies to the named owner rather than the ordinal default (#1124).
+    /// </summary>
+    public string QualifyTypeName(TypeRef type) => QualifyTypeNameCore(type.Name, type.Qualifier);
+
+    /// <summary>
+    /// The Rust type name for a declared Koine type named with no explicit qualifier (event / enum /
+    /// read-model call sites). Delegates to <see cref="QualifyTypeNameCore"/> with a <c>null</c> qualifier.
+    /// </summary>
+    public string QualifyTypeName(string koineName) => QualifyTypeNameCore(koineName, qualifier: null);
 
     /// <summary>
     /// The Rust type name for a declared Koine type, qualified as
@@ -85,10 +99,10 @@ internal sealed class RustTypeMapper
     /// per-context module layout). Bare PascalCase otherwise — including in the legacy context-agnostic
     /// mode and for branded ID newtypes, which are re-materialized locally rather than qualified.
     /// </summary>
-    public string QualifyTypeName(string koineName)
+    private string QualifyTypeNameCore(string koineName, string? qualifier)
     {
         var pascal = RustNaming.ToPascalCase(koineName);
-        if (_context is null || !IsQualifiable(koineName) || OwnerContextOf(koineName) is not { } owner)
+        if (_context is null || !IsQualifiable(koineName) || OwnerContextOf(koineName, qualifier) is not { } owner)
         {
             return pascal;
         }
@@ -127,14 +141,15 @@ internal sealed class RustTypeMapper
 
     /// <summary>
     /// The single bounded context whose module emits a type, via the shared, deterministic
-    /// <see cref="ModelIndex.ResolveCanonicalOwner"/> policy (issue #1091) — so a <b>multi-owner</b> type
+    /// <see cref="ModelIndex.ResolveOwner(string, string)"/> policy (issue #1091) — so a <b>multi-owner</b> type
     /// referenced from a third context resolves to a canonical owner (<c>crate::&lt;owner&gt;::T</c>)
     /// rather than degrading to a bare, unresolvable name. Shared-kernel homing, unique-owner
-    /// resolution, and the #437 same-module bind are all handled by that one policy. Null only in the
-    /// legacy context-agnostic mode.
+    /// resolution, and the #437 same-module bind are all handled by that one policy. An explicit
+    /// <paramref name="qualifier"/> (the reference's <c>Context.T</c>) pins the owner when set (#1124).
+    /// Null only in the legacy context-agnostic mode.
     /// </summary>
-    private string? OwnerContextOf(string koineName) =>
-        _context is { } ctx ? _index.ResolveCanonicalOwner(koineName, ctx) : null;
+    private string? OwnerContextOf(string koineName, string? qualifier = null) =>
+        _context is { } ctx ? _index.ResolveOwner(koineName, qualifier, ctx).Owner : null;
 
     /// <summary>
     /// True for the named declared kinds that emit a Rust type into a context module (so a foreign one

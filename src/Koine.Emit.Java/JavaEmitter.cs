@@ -62,10 +62,8 @@ public sealed partial class JavaEmitter : IEmitter
             // targets stay semantically aligned: a value object only gets a `plus`/`minus` where the model
             // sums or adds/subtracts it, or a `times`/`dividedBy` where it is scaled by a scalar. Java
             // reference types carry no operators, so these lower to method calls (JavaExpressionTranslator).
-            OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index),
-            OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index),
-            OperatorNeedsAnalyzer.BuildScalarDivisionNeeds(model, index),
-            OperatorNeedsAnalyzer.BuildValueObjectArithmeticNeeds(model, index));
+            // One unified pass (#1126) exposes every per-VO signal off a single analyzer entry.
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index));
 
         var files = new List<EmittedFile>
         {

@@ -8,8 +8,13 @@ namespace Koine.Compiler.Tests;
 /// <see cref="OperatorNeedsAnalyzer"/> — the analysis that decides which generated arithmetic
 /// operators each value object needs. These guard the behaviour-preserving unification of the
 /// analyzer's separate scalar / sum-fold / binary passes into one single-pass per-VO model
-/// (issue #836): a fast, snapshot-independent net that fails the instant any of the four
-/// projections drifts.
+/// (issue #836): a fast, snapshot-independent net that fails the instant any per-VO need signal
+/// (<see cref="OperatorNeedsAnalyzer.ValueObjectOperatorNeeds.MultiplyFactors"/> /
+/// <see cref="OperatorNeedsAnalyzer.ValueObjectOperatorNeeds.DivideFactors"/> /
+/// <see cref="OperatorNeedsAnalyzer.ValueObjectOperatorNeeds.IsSummable"/> /
+/// <see cref="OperatorNeedsAnalyzer.ValueObjectOperatorNeeds.BinaryOps"/>) drifts — read off the
+/// single unified <see cref="OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds"/> surface every
+/// emitter now consumes.
 ///
 /// <para>The fixture is engineered so each analysis fires on a <b>distinct</b> value object —
 /// scalar <c>*</c>/<c>/</c> on <c>Price</c>, the <c>sum</c> fold on <c>Weight</c>, plain binary
@@ -68,11 +73,13 @@ public class OperatorNeedsAnalyzerTests
     {
         var (model, index) = Build();
 
-        IReadOnlyDictionary<string, IReadOnlySet<string>> needs =
-            OperatorNeedsAnalyzer.BuildScalarOperatorNeeds(model, index);
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> needs =
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index);
 
-        needs.Keys.ShouldBe(new[] { "Price" });
-        needs["Price"].ShouldBe(new[] { "int", "decimal" }, ignoreOrder: true);
+        needs["Price"].MultiplyFactors.ShouldBe(new[] { "int", "decimal" }, ignoreOrder: true);
+        // Only Price is multiplied by a scalar — no other VO records a multiply factor.
+        needs.Where(kv => kv.Value.MultiplyFactors.Count > 0).Select(kv => kv.Key)
+            .ShouldBe(new[] { "Price" });
     }
 
     [Fact]
@@ -80,11 +87,13 @@ public class OperatorNeedsAnalyzerTests
     {
         var (model, index) = Build();
 
-        IReadOnlyDictionary<string, IReadOnlySet<string>> needs =
-            OperatorNeedsAnalyzer.BuildScalarDivisionNeeds(model, index);
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> needs =
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index);
 
-        needs.Keys.ShouldBe(new[] { "Price" });
-        needs["Price"].ShouldBe(new[] { "int" }, ignoreOrder: true);
+        needs["Price"].DivideFactors.ShouldBe(new[] { "int" }, ignoreOrder: true);
+        // Non-commutative: only the value-object-on-the-left form is recorded, and only for Price.
+        needs.Where(kv => kv.Value.DivideFactors.Count > 0).Select(kv => kv.Key)
+            .ShouldBe(new[] { "Price" });
     }
 
     [Fact]
@@ -92,9 +101,12 @@ public class OperatorNeedsAnalyzerTests
     {
         var (model, index) = Build();
 
-        IReadOnlySet<string> needs = OperatorNeedsAnalyzer.BuildAdditiveOperatorNeeds(model, index);
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> needs =
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index);
 
-        needs.ShouldBe(new[] { "Weight" }, ignoreOrder: true);
+        // Only Weight is folded by a sum(selector), so only it is summable.
+        needs.Where(kv => kv.Value.IsSummable).Select(kv => kv.Key)
+            .ShouldBe(new[] { "Weight" });
     }
 
     [Fact]
@@ -102,11 +114,13 @@ public class OperatorNeedsAnalyzerTests
     {
         var (model, index) = Build();
 
-        IReadOnlyDictionary<string, IReadOnlySet<BinaryOp>> needs =
-            OperatorNeedsAnalyzer.BuildValueObjectArithmeticNeeds(model, index);
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> needs =
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index);
 
-        needs.Keys.ShouldBe(new[] { "Length" });
-        needs["Length"].ShouldBe(new[] { BinaryOp.Add, BinaryOp.Sub }, ignoreOrder: true);
+        needs["Length"].BinaryOps.ShouldBe(new[] { BinaryOp.Add, BinaryOp.Sub }, ignoreOrder: true);
+        // Only Length is used directly in plain binary +/-.
+        needs.Where(kv => kv.Value.BinaryOps.Count > 0).Select(kv => kv.Key)
+            .ShouldBe(new[] { "Length" });
     }
 
     /// <summary>

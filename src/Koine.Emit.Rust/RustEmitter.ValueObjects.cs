@@ -63,7 +63,15 @@ public sealed partial class RustEmitter
         }
         else
         {
-            if (emit.ScalarNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? scalars)
+            // This value object's full operator demand, resolved once from the analyzer's single-pass
+            // model (#1126): scalar multiply/divide factors, the `sum`-fold `IsSummable` flag, the plain
+            // binary `+`/`-` ops, and the precomputed `NeedsAdd` union. `null` = this VO needs no
+            // generated arithmetic (absent from the unified map, exactly as it was absent from all four
+            // separate maps before). Read null-safely below, mirroring CSharpEmitter/PhpEmitter.
+            var needs = emit.OperatorNeeds.GetValueOrDefault(vo.Name);
+
+            IReadOnlySet<string>? scalars = needs?.MultiplyFactors;
+            if (scalars is { Count: > 0 }
                 && stored.Any(m => m.Type.Name is "Int" or "Decimal"))
             {
                 WriteScalarOp(sb, name, stored, scalars, "*");
@@ -71,18 +79,19 @@ public sealed partial class RustEmitter
             // `Div` is the division dual of `Mul` (#879, follow-up to the C# emitter's #832):
             // demand-generated only where the model actually divides this value object by a scalar
             // (fee / 2), never emitted unconditionally.
-            if (emit.ScalarDivNeeds.TryGetValue(vo.Name, out IReadOnlySet<string>? divScalars)
+            IReadOnlySet<string>? divScalars = needs?.DivideFactors;
+            if (divScalars is { Count: > 0 }
                 && stored.Any(m => m.Type.Name is "Int" or "Decimal"))
             {
                 WriteScalarOp(sb, name, stored, divScalars, "/");
             }
-            // `Add` is demand-generated when the VO is folded with `sum` (emit.AdditiveNeeds) OR appears
-            // in a plain `base + base` (#887); `Sub` is demand-generated for a plain `base - base` (#887
-            // — never generated for plain VOs before). The call-site lowering in RustExpressionTranslator
-            // already emits the native `+`/`-`, i.e. `std::ops::Add`/`std::ops::Sub`; this writes the impls.
-            emit.BinaryArithmeticNeeds.TryGetValue(vo.Name, out IReadOnlySet<BinaryOp>? arithmeticOps);
-            bool needsAdd = emit.AdditiveNeeds.Contains(vo.Name) || (arithmeticOps?.Contains(BinaryOp.Add) ?? false);
-            bool needsSub = arithmeticOps?.Contains(BinaryOp.Sub) ?? false;
+            // `Add` is demand-generated when the VO is folded with `sum` OR appears in a plain
+            // `base + base` (#887) — the analyzer precombines both into `NeedsAdd`; `Sub` is
+            // demand-generated for a plain `base - base` (#887 — never generated for plain VOs before).
+            // The call-site lowering in RustExpressionTranslator already emits the native `+`/`-`, i.e.
+            // `std::ops::Add`/`std::ops::Sub`; this writes the impls.
+            bool needsAdd = needs?.NeedsAdd ?? false;
+            bool needsSub = needs?.BinaryOps.Contains(BinaryOp.Sub) ?? false;
             if (needsAdd)
             {
                 WriteAdditiveOp(sb, name, stored, "+");
