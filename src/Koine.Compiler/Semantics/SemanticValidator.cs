@@ -27,6 +27,7 @@ public sealed class SemanticValidator
         new PerContextAnalyzer(),
         new ReferenceDisciplineAnalyzer(),
         new SatisfiabilityAnalyzer(),
+        new CrossContextTypeAnalyzer(),
     };
 
     private readonly IReadOnlyList<IModelAnalyzer> _externalAnalyzers;
