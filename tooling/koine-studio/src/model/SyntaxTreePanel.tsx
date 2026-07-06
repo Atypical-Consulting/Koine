@@ -218,7 +218,9 @@ export function SyntaxTreePanel(props: {
     });
 
   // The WAI-ARIA tree keyboard model, delegated on the root: ArrowUp/Down across visible rows, Home/End
-  // to the ends, ArrowRight to expand / descend, ArrowLeft to collapse / ascend, Enter/Space to toggle.
+  // to the ends, ArrowRight to expand / descend, ArrowLeft to collapse / ascend. Enter/Space SELECT the
+  // row and jump the editor to its span (mirroring a row click) — expand/collapse is Arrow-only, so
+  // keyboard users reach the tree → source navigation that a mouse click gives (WCAG 2.1.1).
   function onKeyDown(ev: JSX.TargetedKeyboardEvent<HTMLDivElement>): void {
     const items = visibleItems();
     if (!items.length || tree == null) return;
@@ -266,10 +268,11 @@ export function SyntaxTreePanel(props: {
         break;
       case 'Enter':
       case ' ':
-        if (hasChildren && key) {
+        if (key && node) {
           ev.preventDefault();
-          toggle(key);
           setFocusedKey(key);
+          setActiveKey(key);
+          onNodeClick?.(node); // select + jump to source, exactly as a row click does
         }
         break;
     }

@@ -17,6 +17,10 @@ export interface CursorSlice {
 export function createCursorSlice(set: StoreApi<CursorSlice>['setState']): CursorSlice {
   return {
     cursor: null,
-    setCursor: (line, column) => set({ cursor: { line, column } }),
+    // No-op when the caret hasn't actually moved: onCursor fires on every edit too, and a redundant
+    // report would otherwise notify subscribers → a debounced panel re-render + full-tree caret walk for
+    // nothing. Returning the SAME state object skips zustand's notification (Object.is short-circuit).
+    setCursor: (line, column) =>
+      set((s) => (s.cursor && s.cursor.line === line && s.cursor.column === column ? s : { cursor: { line, column } })),
   };
 }

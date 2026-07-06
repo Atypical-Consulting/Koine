@@ -134,6 +134,20 @@ describe('SyntaxTreePanel', () => {
     expect(view.container.querySelectorAll('.koi-stree-item--current').length).toBe(1);
   });
 
+  test('pressing Enter on a row fires onNodeClick + marks it current (keyboard parity with a click)', async () => {
+    const onNodeClick = vi.fn();
+    const view = render(<SyntaxTreePanel source={makeSource(spannedFixture())} onNodeClick={onNodeClick} />);
+
+    // A leaf-ish row: keyboard activation must jump to source too, not just expandable parents (WCAG 2.1.1).
+    const ctx = await view.findByRole('treeitem', { name: /ContextNode Billing/ });
+    ctx.focus();
+    fireEvent.keyDown(ctx, { key: 'Enter' });
+
+    expect(onNodeClick).toHaveBeenCalledTimes(1);
+    expect(onNodeClick.mock.calls[0][0].name).toBe('Billing');
+    expect(ctx.getAttribute('aria-current')).toBe('true');
+  });
+
   test('a caret highlights the deepest node whose span contains it, auto-expanding its ancestors', async () => {
     // The caret sits inside the (default-collapsed) Member on line 3.
     const view = render(<SyntaxTreePanel source={makeSource(spannedFixture())} caret={{ line: 3, column: 10 }} />);
