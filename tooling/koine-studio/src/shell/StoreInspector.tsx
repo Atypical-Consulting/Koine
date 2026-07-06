@@ -7,8 +7,9 @@ import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
 // A read-only live view of the app store — the single source of truth made visible (#193 follow-up).
 // It exists to diagnose the cross-panel-sync class of bug the Zustand refactor set out to kill: when a
 // panel looks wrong, this overlay shows exactly what the store thinks RIGHT NOW (selection, scope, the
-// chrome view fields, the active file, the dirty/diagnostics rollups, and the doc-view staleness
-// tokens). Read-only and dev-facing — it owns NO setters, so it can't perturb the state it observes.
+// chrome view fields, the active file, the dirty/diagnostics rollups, the doc-view staleness
+// tokens, and the assistant chat rollup). Read-only and dev-facing — it owns NO setters, so it can't
+// perturb the state it observes.
 //
 // Each scalar is its own selector (so a change to one slice repaints only this overlay, never loops);
 // the object slices (diagnostics/buffers/docViews) are selected by their immutable reference and
@@ -27,6 +28,8 @@ export function StoreInspector(props: { store: StoreApi<AppState> }) {
   const buffers = useStore(s, (st) => st.buffers);
   const byUri = useStore(s, (st) => st.diagnosticsByUri);
   const docViews = useStore(s, (st) => st.docViews);
+  // The chat slice is replaced wholesale on every mutation, so its reference is the repaint signal.
+  const chat = useStore(s, (st) => st.chat);
   // Subscribe to the whole state for the raw dump below: the curated scalars above don't cover every
   // slice (e.g. History's canUndo/canRedo), so relying on them alone would leave the snapshot stale on
   // a change to an unsubscribed field. Zustand replaces the top-level state object on every set(), so
@@ -39,6 +42,8 @@ export function StoreInspector(props: { store: StoreApi<AppState> }) {
   const docViewSummary = Object.entries(docViews)
     .map(([k, v]) => `${k}:${v.loaded ? 'ok' : 'stale'}#${v.token}`)
     .join('  ');
+  const msgs = chat.messages.length;
+  const chatSummary = `${chat.status}, ${msgs} message${msgs === 1 ? '' : 's'}, ${chat.changeSet ? chat.changeSet.phase.kind : '—'}`;
 
   // The curated rows above are a summary; this dumps the WHOLE store so nothing is hidden. fullState
   // (the identity-selected snapshot) keeps it tracking every change; drop the function-valued setters
@@ -77,6 +82,7 @@ export function StoreInspector(props: { store: StoreApi<AppState> }) {
         {row('Dirty files', 'dirty', String(dirty))}
         {row('Problems', 'problems', `${errors} error${errors === 1 ? '' : 's'}, ${warnings} warning${warnings === 1 ? '' : 's'}`)}
         {row('Doc views', 'docViews', docViewSummary)}
+        {row('Assistant', 'chat', chatSummary)}
       </dl>
       <details class="koi-store-inspector-raw">
         <summary>Raw state</summary>

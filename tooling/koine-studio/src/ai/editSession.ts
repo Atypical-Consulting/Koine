@@ -3,13 +3,32 @@
 // staged set and applies (or discards) it in one go. A pure-logic module — no DOM, no WASM — so the
 // dispatch layer and the review/apply panel can both build on it and unit-test it in isolation.
 //
-// `initial` is a snapshot of the workspace's current `.koi` files keyed by relPath; the session reads
-// through to it for any relPath the model has not (yet) staged, so `read()` always reflects the body
-// the model should be revising.
+// `initial` is a snapshot of the workspace's current `.koi` files keyed by an OPAQUE `key` — the
+// buffer uri for a workspace file (unique even when two roots of a multi-root workspace hold the same
+// workspace-relative path, #472). The session reads through to it for any key the model has not (yet)
+// staged, so `read()` always reflects the body the model should be revising. The workspace-relative
+// path (`relPath`) is only a display + validation label, resolved through the optional `display` map;
+// without a `display` entry the key IS the relPath, so single-root/legacy callers behave exactly as
+// before the re-keying.
 
-/** One staged full-file edit. `isNew` distinguishes a brand-new file from a revision of an existing
- *  workspace file (a relPath that was NOT among the session's `initial` keys). */
+/** Prefix of the synthetic key minted for a file that does not exist in the workspace yet. */
+export const NEW_FILE_KEY_PREFIX = 'new:';
+
+/**
+ * Mint the session key for a brand-new file (one with no buffer uri yet): `new:<relPath>`. The
+ * session resolves such a key's relPath by stripping the prefix, so the safety/extension guards in
+ * {@link EditSession.stage} apply to the real path.
+ */
+export function newFileKey(relPath: string): string {
+  return `${NEW_FILE_KEY_PREFIX}${relPath}`;
+}
+
+/** One staged full-file edit. `key` is the file's opaque session identity (buffer uri, or a
+ *  {@link newFileKey} for a brand-new file); `relPath` is its display/validation label and is NOT
+ *  unique across the roots of a multi-root workspace. `isNew` distinguishes a brand-new file from a
+ *  revision of an existing workspace file (a key that was NOT among the session's `initial` keys). */
 export interface StagedEdit {
+  key: string;
   relPath: string;
   body: string;
   isNew: boolean;
@@ -17,16 +36,22 @@ export interface StagedEdit {
 
 /** The staging area returned by {@link createEditSession}. */
 export interface EditSession {
-  /** RelPaths known to the session: the initial keys (insertion order) then any newly-staged keys
+  /** Keys known to the session: the initial keys (insertion order) then any newly-staged keys
    *  (stage order), deduped. */
   list(): string[];
-  /** The staged body if `relPath` was staged this session, else the initial body, else `null`. */
-  read(relPath: string): string | null;
-  /** Stage a full-file body for `relPath`. Staging the same relPath again replaces the body. */
-  stage(relPath: string, body: string): void;
-  /** Whether `relPath` is a brand-new file (not among the session's initial workspace files). */
-  isNew(relPath: string): boolean;
-  /** One entry per relPath staged this session, in stage order, each flagged new vs modified. */
+  /** The staged body if `key` was staged this session, else the initial body, else `null`. */
+  read(key: string): string | null;
+  /** Stage a full-file body for `key`. Staging the same key again replaces the body. */
+  stage(key: string, body: string): void;
+  /** Whether `key` is a brand-new file (not among the session's initial workspace files). */
+  isNew(key: string): boolean;
+  /**
+   * The display/validation relPath for `key`: the `display` entry, else the key itself (with a
+   * {@link NEW_FILE_KEY_PREFIX} stripped). The edit-tool dispatch builds its model-facing path index
+   * from this, and the hosts label the staged-workspace validation envelope with it (#472).
+   */
+  relPathOf(key: string): string;
+  /** One entry per key staged this session, in stage order, each flagged new vs modified. */
   staged(): StagedEdit[];
   /** Empty the staging area: `staged()` → `[]` and `read()` falls back to `initial` again. */
   clear(): void;
@@ -54,53 +79,75 @@ export function assertSafeRelPath(relPath: string): void {
 }
 
 /**
- * Create an edit-staging area over a snapshot of the current workspace files (`initial`, keyed by
- * relPath). Staged edits live only in this session until applied; nothing here mutates `initial`.
+ * Create an edit-staging area over a snapshot of the current workspace files (`initial`, keyed by the
+ * opaque session `key`). `display` maps each key to its workspace-relative path for labels and safety
+ * validation; a key without an entry resolves to itself (after stripping a {@link NEW_FILE_KEY_PREFIX}),
+ * which is exactly today's single-root behavior where key === relPath. Staged edits live only in this
+ * session until applied; nothing here mutates `initial`.
  */
-export function createEditSession(initial: Record<string, string>): EditSession {
+export function createEditSession(
+  initial: Record<string, string>,
+  display: Record<string, string> = {},
+): EditSession {
   const initialKeys = Object.keys(initial);
   const initialSet = new Set(initialKeys);
   // Map preserves insertion (stage) order, which `staged()` and `list()` rely on for determinism.
   const stagedMap = new Map<string, string>();
 
+  /** The display/validation relPath for `key`: the `display` entry, else the key itself (a new-file
+   *  key contributes the relPath it was minted from). */
+  const resolveRelPath = (key: string): string => {
+    const shown = display[key];
+    if (shown !== undefined) return shown;
+    return key.startsWith(NEW_FILE_KEY_PREFIX) ? key.slice(NEW_FILE_KEY_PREFIX.length) : key;
+  };
+
   return {
     list(): string[] {
       const out = [...initialKeys];
-      for (const relPath of stagedMap.keys()) {
-        if (!initialSet.has(relPath)) {
-          out.push(relPath);
+      for (const key of stagedMap.keys()) {
+        if (!initialSet.has(key)) {
+          out.push(key);
         }
       }
       return out;
     },
 
-    read(relPath: string): string | null {
-      assertSafeRelPath(relPath);
-      if (stagedMap.has(relPath)) {
-        return stagedMap.get(relPath)!;
+    read(key: string): string | null {
+      assertSafeRelPath(resolveRelPath(key));
+      if (stagedMap.has(key)) {
+        return stagedMap.get(key)!;
       }
-      return relPath in initial ? initial[relPath] : null;
+      return key in initial ? initial[key] : null;
     },
 
-    stage(relPath: string, body: string): void {
+    stage(key: string, body: string): void {
+      // Guard the RESOLVED relPath — for a brand-new file that is the path the apply step will
+      // create, so an unsafe or non-model path must be rejected here, at stage time.
+      const relPath = resolveRelPath(key);
       assertSafeRelPath(relPath);
       // The assistant edits the workspace's `.koi` model, not arbitrary project files — reject any other
       // extension so a write tool can't create/overwrite a README, lockfile, etc. inside the folder.
       if (!relPath.toLowerCase().endsWith('.koi')) {
         throw new Error(`Unsafe relPath (only .koi files can be edited): ${relPath}`);
       }
-      stagedMap.set(relPath, body);
+      stagedMap.set(key, body);
     },
 
-    isNew(relPath: string): boolean {
-      return !initialSet.has(relPath);
+    isNew(key: string): boolean {
+      return !initialSet.has(key);
+    },
+
+    relPathOf(key: string): string {
+      return resolveRelPath(key);
     },
 
     staged(): StagedEdit[] {
-      return [...stagedMap.entries()].map(([relPath, body]) => ({
-        relPath,
+      return [...stagedMap.entries()].map(([key, body]) => ({
+        key,
+        relPath: resolveRelPath(key),
         body,
-        isNew: !initialSet.has(relPath),
+        isNew: !initialSet.has(key),
       }));
     },
 

@@ -16,6 +16,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@/mcp/mcp', () => ({ mcpCall: mcpCallMock }));
 
 import { TauriPlatform } from '@/host/tauri';
+import { createEditSession } from '@/ai/editSession';
 
 beforeEach(() => {
   localStorage.clear();
@@ -69,5 +70,42 @@ describe('TauriPlatform MCP surface', () => {
 
     expect(mcpCallMock).toHaveBeenCalledWith('http://127.0.0.1:56463/mcp', 'koine_format', { source: 'context X {}' });
     expect(out).toBe('formatted');
+  });
+
+  it('(e) validateStagedWorkspace labels each file by relPath (single-root: bare labels)', async () => {
+    invokeMock.mockResolvedValue({ url: 'http://127.0.0.1:56463/mcp', requestedPort: 56463, fallback: false });
+    mcpCallMock.mockResolvedValue('{"ok":true,"errorCount":0,"warningCount":0,"diagnostics":[]}');
+    const session = createEditSession({ 'a.koi': 'context A {}', 'b.koi': 'context B {}' });
+    session.stage('a.koi', 'context A2 {}');
+
+    await new TauriPlatform().validateStagedWorkspace(session);
+
+    expect(mcpCallMock).toHaveBeenCalledWith('http://127.0.0.1:56463/mcp', 'koine_validate', {
+      files: [
+        { path: 'a.koi', source: 'context A2 {}' },
+        { path: 'b.koi', source: 'context B {}' },
+      ],
+    });
+  });
+
+  it('(e) validateStagedWorkspace disambiguates colliding relPaths — two DISTINCT paths (#472)', async () => {
+    invokeMock.mockResolvedValue({ url: 'http://127.0.0.1:56463/mcp', requestedPort: 56463, fallback: false });
+    mcpCallMock.mockResolvedValue('{"ok":true,"errorCount":0,"warningCount":0,"diagnostics":[]}');
+    // Two roots hold the SAME relPath: labelling both `model.koi` would send duplicate paths, which the
+    // sidecar's validate rejects the same way the browser WASM's DiagnoseWorkspace does (a Uri-keyed
+    // ToDictionary). The envelope must carry the tool layer's disambiguated display paths.
+    const session = createEditSession(
+      { 'file:///wsA/model.koi': 'context A {}', 'file:///wsB/model.koi': 'context B {}' },
+      { 'file:///wsA/model.koi': 'model.koi', 'file:///wsB/model.koi': 'model.koi' },
+    );
+
+    await new TauriPlatform().validateStagedWorkspace(session);
+
+    expect(mcpCallMock).toHaveBeenCalledWith('http://127.0.0.1:56463/mcp', 'koine_validate', {
+      files: [
+        { path: 'model.koi@1', source: 'context A {}' },
+        { path: 'model.koi@2', source: 'context B {}' },
+      ],
+    });
   });
 });

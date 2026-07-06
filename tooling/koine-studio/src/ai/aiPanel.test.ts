@@ -1,18 +1,19 @@
+// Integration tests for the assembled assistant (#990 Task 6): `createAssistantChat` binds the host
+// deps into the send effect and renders the declarative AssistantChat (Transcript + ChangeSetPanel +
+// Composer) over the chat slice. Ported from the imperative panel's suites (createAssistantPanel) with
+// every behavioral assertion preserved: the explain flow, the grammar-constraint mechanisms (#257/#446
+// — chips + repair counter), tool cards, the change set (#473/#474/#633/#684 — apply/partial/reject/
+// supersede/drift), the apply-gate at the legacy entry points (#444), bare-candidate recovery (#561),
+// and workspace switching (mid-stream deferral). One deliberate port: the change-set review is now a
+// SINGLE live surface over `chat.changeSet` (the slice holds one set), so the old two-panels-at-once
+// assertions became "the retired treatment shows until the new turn's set replaces it" — the guards
+// themselves (supersede, no un-retire, drift) are asserted unchanged.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import {
-  buildExplainPrompt,
-  buildRepairPrompt,
-  buildSystem,
-  createAssistantPanel,
-  formatDomainIndex,
-  MAX_REPAIR_ROUNDS,
-  type AssistantContext,
-  type AssistantPanelOptions,
-  type DomainIndex,
-} from '@/ai/aiPanel';
+import { createAssistantChat, MAX_REPAIR_ROUNDS, type AssistantPanelOptions } from '@/ai/aiPanel';
 import { runAssistant } from '@/ai/ai';
 import { GRAMMAR_PROBE_GBNF, GRAMMAR_PROBE_SENTINEL, resetGrammarCapabilityCache } from '@/ai/grammarConstraint';
 import { loadChat, saveChat } from '@/settings/persistence';
+import { createAppStore } from '@/store/index';
 
 // Stream a fenced ```koine block as the reply so a generative turn would normally offer "Apply"; the
 // Explain path must suppress that affordance while still rendering the reply bubble.
@@ -25,129 +26,36 @@ vi.mock('@/ai/ai', async (orig) => ({
   }),
 }));
 
-// A representative, populated domain index: ≥2 contexts, ≥1 aggregate with a root, ≥1 relation,
-// and a partial glossary coverage (4/7).
-const populatedIndex: DomainIndex = {
-  contexts: ['Sales', 'Shipping'],
-  aggregates: [
-    { name: 'Order', root: 'Order' },
-    { name: 'Cart', root: '' },
-  ],
-  relations: [{ upstream: 'Sales', downstream: 'Shipping', kind: 'customer-supplier' }],
-  glossaryCoverage: { documented: 4, total: 7 },
-};
-
-const emptyIndex: DomainIndex = {
-  contexts: [],
-  aggregates: [],
-  relations: [],
-  glossaryCoverage: { documented: 0, total: 0 },
-};
-
-function baseCtx(): AssistantContext {
-  return {
-    fileName: 'shop.koi',
-    source: 'context Sales {\n  aggregate Order root Order { }\n}',
-    diagnostics: [
-      { line: 2, col: 3, severity: 'error', message: 'unknown type Money' },
-      { line: 5, col: 1, severity: 'warning', message: 'unused value' },
-    ],
-  };
+// Flush the async send + Preact's deferred effects (useEffect schedules on rAF/timeout, not a
+// microtask), so a NEGATIVE assertion after `settle()` is meaningful — the gate had time to run.
+async function settle(): Promise<void> {
+  await new Promise((r) => setTimeout(r, 50));
 }
 
-describe('formatDomainIndex', () => {
-  test('renders contexts, aggregate→root list, relations, and glossary coverage', () => {
-    const out = formatDomainIndex(populatedIndex);
-    expect(out).toContain('Compiled domain structure');
-    // contexts
-    expect(out).toContain('Sales');
-    expect(out).toContain('Shipping');
-    // aggregate with a root that differs only when non-empty/differing → here equal, so just the name;
-    // and an aggregate with an empty root renders as just its name. Pin the suppression branch: an
-    // equal root must NOT render as `Order → Order`, nor an empty root as `Cart → `.
-    expect(out).toContain('Order');
-    expect(out).toContain('Cart');
-    expect(out).not.toContain('Order → Order');
-    expect(out).not.toContain('Cart →');
-    // relations
-    expect(out).toContain('Sales');
-    expect(out).toContain('customer-supplier');
-    // coverage
-    expect(out).toContain('4/7');
-  });
+// The getWorkspaceFiles shape since #472 Task 2: `{ files, displayPath }` keyed by opaque session key.
+// These single-root harnesses key by relPath with an identity display map (the legacy behavior).
+function wsSnapshot(files: Record<string, string>): {
+  files: Record<string, string>;
+  displayPath: Record<string, string>;
+} {
+  return { files, displayPath: Object.fromEntries(Object.keys(files).map((p) => [p, p])) };
+}
 
-  test('renders an aggregate as `name → root` when root is non-empty and differs', () => {
-    const idx: DomainIndex = {
-      contexts: ['Sales'],
-      aggregates: [{ name: 'Order', root: 'OrderHead' }],
-      relations: [],
-      glossaryCoverage: { documented: 1, total: 1 },
-    };
-    expect(formatDomainIndex(idx)).toContain('Order → OrderHead');
-  });
+// Type a prompt through the CONTROLLED composer (the input listener lands it in chat.draft
+// synchronously) and send it via the Send button (the from-input path).
+function typeSend(container: HTMLElement, text: string): void {
+  const input = container.querySelector<HTMLTextAreaElement>('.koi-assistant-input')!;
+  input.value = text;
+  input.dispatchEvent(new Event('input'));
+  container.querySelector<HTMLButtonElement>('.koi-assistant-send')!.click();
+}
 
-  test('a fully-empty index renders the empty string', () => {
-    expect(formatDomainIndex(emptyIndex)).toBe('');
-  });
-});
-
-describe('buildSystem', () => {
-  test('with no domainIndex does not inject the compiled domain structure', () => {
-    const ctx = baseCtx();
-    const out = buildSystem(ctx);
-    expect(out).not.toContain('Compiled domain structure');
-  });
-
-  test('with a populated domainIndex appends the formatted summary after the source block', () => {
-    const ctx: AssistantContext = { ...baseCtx(), domainIndex: populatedIndex };
-    const out = buildSystem(ctx);
-    const baseline = buildSystem(baseCtx());
-    const summary = formatDomainIndex(populatedIndex);
-
-    // The summary is appended verbatim, separated by a blank line, and ends the prompt.
-    expect(out).toContain(summary);
-    expect(out.endsWith(summary)).toBe(true);
-    // It is the baseline plus the summary block (byte-identical prefix).
-    expect(out.startsWith(baseline)).toBe(true);
-    // The summary comes AFTER the model source block.
-    expect(out.indexOf('Compiled domain structure')).toBeGreaterThan(out.indexOf('Current model source'));
-  });
-
-  test('with an empty domainIndex injects nothing', () => {
-    const ctx: AssistantContext = { ...baseCtx(), domainIndex: emptyIndex };
-    expect(buildSystem(ctx)).toBe(buildSystem(baseCtx()));
-  });
-});
-
-describe('buildExplainPrompt', () => {
-  const SELECTION = 'value Money { amount: Decimal\n  invariant amount >= 0 "non-negative" }';
-  const FILE = 'context Sales {\n  value Money { amount: Decimal }\n}';
-
-  test('a non-blank selection is the code explained, wrapped in a ```koine block', () => {
-    const out = buildExplainPrompt(SELECTION, FILE);
-    // Plain-language, domain-expert framing.
-    expect(out.toLowerCase()).toContain('plain language');
-    expect(out.toLowerCase()).toContain("doesn't code");
-    // Explicitly explanatory, not generative.
-    expect(out.toLowerCase()).toContain('do not output');
-    expect(out.toLowerCase()).toContain('explanation only');
-    // The SELECTION is the wrapped code, not the whole file.
-    expect(out).toContain('```koine\n' + SELECTION + '\n```');
-    expect(out).not.toContain(FILE);
-  });
-
-  test('null selection falls back to the whole file source', () => {
-    const out = buildExplainPrompt(null, FILE);
-    expect(out).toContain('```koine\n' + FILE + '\n```');
-    expect(out.toLowerCase()).toContain('explanation only');
-    expect(out.toLowerCase()).toContain('do not output');
-  });
-
-  test('a blank/whitespace selection falls back to the whole file source', () => {
-    const out = buildExplainPrompt('   \n  ', FILE);
-    expect(out).toContain('```koine\n' + FILE + '\n```');
-  });
-});
+// Type into the composer WITHOUT sending (the draft-preservation tests).
+function typeDraft(container: HTMLElement, text: string): void {
+  const input = container.querySelector<HTMLTextAreaElement>('.koi-assistant-input')!;
+  input.value = text;
+  input.dispatchEvent(new Event('input'));
+}
 
 describe('explain action (panel integration)', () => {
   beforeEach(() => {
@@ -160,6 +68,9 @@ describe('explain action (panel integration)', () => {
   function makeOpts(container: HTMLElement, overrides: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
     return {
       container,
+      // A fresh store per constructed panel, so the app-store singleton doesn't leak chat state
+      // across tests (the chat slice, not panel closures, holds the transcript since #984).
+      store: createAppStore(),
       getProvider: () => 'anthropic',
       getBaseUrl: () => '',
       getApiKey: () => 'sk',
@@ -177,35 +88,29 @@ describe('explain action (panel integration)', () => {
     };
   }
 
-  // The streamed reply contains a ```koine block, so the run completes; await a few microtasks for the
-  // async send to settle, then check whether the Apply affordance was attached.
-  async function settle(): Promise<void> {
-    for (let i = 0; i < 10; i++) await Promise.resolve();
-  }
-
   test('explain suppresses Apply but still renders the reply', async () => {
     const container = document.createElement('div');
-    const panel = createAssistantPanel(makeOpts(container));
+    const panel = createAssistantChat(makeOpts(container));
     panel.explainSelection();
-    await settle();
 
-    // Explanatory run: no "Apply to editor" button even though the reply carries a ```koine block.
+    // The reply DID render (the run completed end-to-end)…
+    await vi.waitFor(() => expect(container.querySelector('.koi-msg-assistant .koi-md')).not.toBeNull());
+    await settle();
+    // …but the explanatory run offers no "Apply to editor" even though the reply carries a ```koine block.
     expect(container.querySelector('.koi-assistant-apply')).toBeNull();
-    // The reply DID render (the run completed end-to-end).
-    expect(container.querySelector('.koi-msg-assistant .koi-md')).not.toBeNull();
   });
 
   test('a rejected API key shows actionable guidance, not a raw 401 JSON blob', async () => {
     const container = document.createElement('div');
     let openedPrefs = false;
-    createAssistantPanel(makeOpts(container, { onOpenPrefs: () => (openedPrefs = true) }));
+    createAssistantChat(makeOpts(container, { onOpenPrefs: () => (openedPrefs = true) }));
     // The provider rejects a present-but-invalid key (the pre-flight check only catches a BLANK key).
     vi.mocked(runAssistant).mockRejectedValueOnce(
       new Error('401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}'),
     );
     container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
-    await settle();
 
+    await vi.waitFor(() => expect(container.querySelector('.koi-msg-note')).not.toBeNull());
     const reply = container.querySelector('.koi-msg-assistant:last-of-type');
     expect(reply?.textContent).toMatch(/rejected your API key/i);
     expect(reply?.textContent).not.toMatch(/401|\{|authentication_error/); // no raw blob
@@ -220,7 +125,7 @@ describe('explain action (panel integration)', () => {
     // openai + a loopback baseUrl ⇒ needsKey === false, so the pre-flight blank-key guard is bypassed
     // and the request actually goes out with no key; the server still 401s (e.g. a local proxy that
     // requires auth, or a future call site). The error mapper must not claim a key was "rejected".
-    createAssistantPanel(
+    createAssistantChat(
       makeOpts(container, {
         getProvider: () => 'openai',
         getBaseUrl: () => 'http://localhost:1234/v1',
@@ -231,8 +136,8 @@ describe('explain action (panel integration)', () => {
       new Error('401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}'),
     );
     container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
-    await settle();
 
+    await vi.waitFor(() => expect(container.querySelector('.koi-msg-note')).not.toBeNull());
     const reply = container.querySelector('.koi-msg-assistant:last-of-type');
     expect(reply?.textContent).toMatch(/no api key configured/i);
     expect(reply?.textContent).not.toMatch(/rejected/i);
@@ -244,11 +149,11 @@ describe('explain action (panel integration)', () => {
     const container = document.createElement('div');
     // anthropic (default) ⇒ needsKey; a whitespace-only stored key is truthy but unusable — the
     // pre-flight guard must short-circuit to the "add a key" note WITHOUT calling the provider.
-    createAssistantPanel(makeOpts(container, { getApiKey: () => '   ' }));
+    createAssistantChat(makeOpts(container, { getApiKey: () => '   ' }));
     vi.mocked(runAssistant).mockClear();
     container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
-    await settle();
 
+    await vi.waitFor(() => expect(container.querySelector('.koi-msg-note')).not.toBeNull());
     const reply = container.querySelector('.koi-msg-assistant:last-of-type');
     expect(reply?.textContent).toMatch(/add your api key in settings/i);
     expect(vi.mocked(runAssistant)).not.toHaveBeenCalled();
@@ -256,13 +161,13 @@ describe('explain action (panel integration)', () => {
 
   test('a non-auth request failure surfaces the JSON "message", not the whole blob', async () => {
     const container = document.createElement('div');
-    createAssistantPanel(makeOpts(container));
+    createAssistantChat(makeOpts(container));
     vi.mocked(runAssistant).mockRejectedValueOnce(
       new Error('500 {"error":{"message":"upstream timeout"}}'),
     );
     container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
-    await settle();
 
+    await vi.waitFor(() => expect(container.querySelector('.koi-msg-error')).not.toBeNull());
     const reply = container.querySelector('.koi-msg-assistant:last-of-type');
     expect(reply?.textContent).toContain('upstream timeout');
     expect(reply?.textContent).not.toContain('{');
@@ -270,23 +175,22 @@ describe('explain action (panel integration)', () => {
 
   test('a normal generative turn DOES offer Apply (contrast)', async () => {
     const container = document.createElement('div');
-    createAssistantPanel(makeOpts(container));
+    createAssistantChat(makeOpts(container));
     // Drive a normal send via a quick-action button (offerApply defaults to true).
     const action = container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action');
     expect(action).not.toBeNull();
     action!.click();
-    await settle();
 
-    expect(container.querySelector('.koi-assistant-apply')).not.toBeNull();
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
   });
 
   // Quick actions (and Explain) pass their own built prompt — they must neither clear a draft the
   // user typed but hasn't sent, nor (on failure) overwrite that draft with the canned action text.
   test('a quick action preserves a typed-but-unsent draft', async () => {
     const container = document.createElement('div');
-    createAssistantPanel(makeOpts(container));
+    createAssistantChat(makeOpts(container));
     const input = container.querySelector<HTMLTextAreaElement>('.koi-assistant-input')!;
-    input.value = 'my half-written domain question';
+    typeDraft(container, 'my half-written domain question');
     container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
     await settle();
 
@@ -295,9 +199,9 @@ describe('explain action (panel integration)', () => {
 
   test('a FAILED quick action does not replace the typed draft with the canned prompt', async () => {
     const container = document.createElement('div');
-    createAssistantPanel(makeOpts(container));
+    createAssistantChat(makeOpts(container));
     const input = container.querySelector<HTMLTextAreaElement>('.koi-assistant-input')!;
-    input.value = 'my half-written domain question';
+    typeDraft(container, 'my half-written domain question');
     vi.mocked(runAssistant).mockRejectedValueOnce(new Error('endpoint unreachable'));
     container.querySelector<HTMLButtonElement>('.koi-assistant-quick .koi-assistant-action')!.click();
     await settle();
@@ -308,43 +212,30 @@ describe('explain action (panel integration)', () => {
 
   test('a typed send still clears the input, and a failure restores the TYPED prompt', async () => {
     const container = document.createElement('div');
-    createAssistantPanel(makeOpts(container));
+    createAssistantChat(makeOpts(container));
     const input = container.querySelector<HTMLTextAreaElement>('.koi-assistant-input')!;
-    input.value = 'typed question';
-    container.querySelector<HTMLButtonElement>('.koi-assistant-send')!.click();
-    await settle();
-    expect(input.value).toBe(''); // sent from the input ⇒ cleared
+    typeSend(container, 'typed question');
+    await vi.waitFor(() => expect(input.value).toBe('')); // sent from the input ⇒ cleared
 
-    input.value = 'second question';
     vi.mocked(runAssistant).mockRejectedValueOnce(new Error('boom'));
-    container.querySelector<HTMLButtonElement>('.koi-assistant-send')!.click();
-    await settle();
-    expect(input.value).toBe('second question'); // failed ⇒ restored for a retry
+    typeSend(container, 'second question');
+    await vi.waitFor(() => expect(input.value).toBe('second question')); // failed ⇒ restored for a retry
   });
 
   test('a persisted explain turn replays without Apply (suppression survives reload)', async () => {
     const c1 = document.createElement('div');
-    const panel = createAssistantPanel(makeOpts(c1));
+    const panel = createAssistantChat(makeOpts(c1));
     panel.explainSelection();
-    await settle();
+    await vi.waitFor(() => expect(c1.querySelector('.koi-msg-assistant .koi-md')).not.toBeNull());
 
     // A fresh panel pointed at the SAME workspace key replays the stored explain turn. Even though
     // the persisted reply carries a ```koine block, the apply opt-out was stored with the turn, so
     // the replayed bubble must stay apply-free (the live suppression survives the reload).
     const c2 = document.createElement('div');
-    createAssistantPanel(makeOpts(c2));
+    createAssistantChat(makeOpts(c2));
     expect(c2.querySelector('.koi-msg-assistant .koi-md')).not.toBeNull(); // the turn replayed
+    await settle();
     expect(c2.querySelector('.koi-assistant-apply')).toBeNull(); // …without Apply
-  });
-});
-
-describe('buildRepairPrompt', () => {
-  test('feeds the previous model AND the line:column diagnostics back, asking for ONLY a koine block', () => {
-    const out = buildRepairPrompt('context X {', 'ok: false — 1 error(s):\n- [error] 1:11 expected }');
-    expect(out).toContain('does not parse');
-    expect(out.toLowerCase()).toContain('only');
-    expect(out).toContain('```koine\ncontext X {\n```'); // the previous candidate, fenced
-    expect(out).toContain('- [error] 1:11 expected }'); // the diagnostics verbatim
   });
 });
 
@@ -403,6 +294,9 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
   function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
     return {
       container,
+      // A fresh store per constructed panel, so the app-store singleton doesn't leak chat state
+      // across tests (the chat slice, not panel closures, holds the transcript since #984).
+      store: createAppStore(),
       getProvider: () => 'openai',
       getBaseUrl: () => 'http://localhost:1234/v1',
       getApiKey: () => 'sk',
@@ -426,7 +320,7 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
   test('gbnf path: attaches the grammar to the request, shows the chip, enables Apply when valid', async () => {
     mockReply();
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getGrammar: () => Promise.resolve('root ::= "x"'),
         runCompilerTool: () => Promise.resolve(CLEAN),
@@ -449,7 +343,7 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     // A genuinely grammar-constrained backend returns the model itself, not a fenced block.
     mockReply('context X {}');
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getGrammar: () => Promise.resolve('root ::= "x"'),
         runCompilerTool: () => Promise.resolve(CLEAN),
@@ -469,7 +363,7 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     // the SAME bounded repair loop the repair mechanism uses.
     mockReply();
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getGrammar: () => Promise.resolve('root ::= "x"'),
         runCompilerTool: () => Promise.resolve(DIRTY), // constrained output still doesn't fully parse
@@ -496,7 +390,7 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     mockReply();
     let n = 0;
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getGrammar: () => Promise.resolve('root ::= "x"'),
         runCompilerTool: () => Promise.resolve(n++ === 0 ? DIRTY : CLEAN),
@@ -516,7 +410,7 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     // parse-and-repair, and the chip never claims "grammar-constrained".
     mockReplyIgnoresGrammar();
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getGrammar: () => Promise.resolve('root ::= "x"'),
         runCompilerTool: () => Promise.resolve(CLEAN),
@@ -534,7 +428,7 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
   test('repair path (Anthropic): never valid → "repair k/N" counter, notice, Apply stays disabled', async () => {
     mockReply();
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getProvider: () => 'anthropic',
         getBaseUrl: () => '',
@@ -560,7 +454,7 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     mockReply();
     let n = 0;
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getProvider: () => 'anthropic',
         getBaseUrl: () => '',
@@ -578,7 +472,7 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
   test('desktop fallback: capable provider but no GBNF accessor → repair path, no grammar attached', async () => {
     mockReply();
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         // getGrammar omitted (desktop host) though provider/baseUrl are grammar-capable.
         runCompilerTool: () => Promise.resolve(CLEAN),
@@ -595,7 +489,7 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     mockReply();
     const container = document.createElement('div');
     // runCompilerTool omitted → no way to parse, so Apply is offered as before, with no chip.
-    createAssistantPanel(opts(container, { getProvider: () => 'anthropic', getBaseUrl: () => '' }));
+    createAssistantChat(opts(container, { getProvider: () => 'anthropic', getBaseUrl: () => '' }));
     fire(container);
 
     await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
@@ -610,7 +504,7 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     mockReply('context X {}');
     const container = document.createElement('div');
     const runCompilerTool = vi.fn(() => Promise.resolve(CLEAN));
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true, // tools ON…
         getConstrainGrammar: () => true, // …and grammar ON, on a grammar-capable backend
@@ -634,7 +528,7 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
     mockReply();
     const container = document.createElement('div');
     const runCompilerTool = vi.fn(() => Promise.resolve(CLEAN));
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getProvider: () => 'anthropic',
         getBaseUrl: () => '',
@@ -653,9 +547,10 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
 });
 
 // --- expandable tool-call cards (Task 4): one native <details> per koine tool the assistant ran ---
-// The panel opens a live "pending" card on each tool-call START (above the reply bubble), then flips it
+// The turn opens a live "pending" card on each tool-call START (above the reply bubble), then flips it
 // to ok/error on END — filling the chip summary, a formatted duration, and an expandable Arguments/Result
-// body. The cards join the turn's rollback list so a failed turn removes them with the user bubble.
+// body. The cards live on the EPHEMERAL chat.turn, so a failed turn's rollback removes them with the
+// user bubble.
 describe('tool-call cards (panel integration)', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -669,6 +564,9 @@ describe('tool-call cards (panel integration)', () => {
   function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
     return {
       container,
+      // A fresh store per constructed panel, so the app-store singleton doesn't leak chat state
+      // across tests (the chat slice, not panel closures, holds the transcript since #984).
+      store: createAppStore(),
       getProvider: () => 'anthropic',
       getBaseUrl: () => '',
       getApiKey: () => 'sk',
@@ -702,7 +600,7 @@ describe('tool-call cards (panel integration)', () => {
       return 'done';
     });
     const container = document.createElement('div');
-    createAssistantPanel(opts(container));
+    createAssistantChat(opts(container));
     fire(container);
 
     await vi.waitFor(() => expect(container.querySelector('.koi-assistant-tool[data-state="pending"]')).not.toBeNull());
@@ -741,7 +639,7 @@ describe('tool-call cards (panel integration)', () => {
       return 'All good.';
     });
     const container = document.createElement('div');
-    createAssistantPanel(opts(container));
+    createAssistantChat(opts(container));
     fire(container);
 
     await vi.waitFor(() => expect(container.querySelector('.koi-assistant-tool[data-state="ok"]')).not.toBeNull());
@@ -773,7 +671,7 @@ describe('tool-call cards (panel integration)', () => {
       return 'That failed.';
     });
     const container = document.createElement('div');
-    createAssistantPanel(opts(container));
+    createAssistantChat(opts(container));
     fire(container);
 
     await vi.waitFor(() => expect(container.querySelector('.koi-assistant-tool[data-state="error"]')).not.toBeNull());
@@ -795,7 +693,7 @@ describe('tool-call cards (panel integration)', () => {
       return 'done';
     });
     const container = document.createElement('div');
-    createAssistantPanel(opts(container));
+    createAssistantChat(opts(container));
     fire(container);
 
     await vi.waitFor(() => expect(container.querySelector('.koi-assistant-tool[data-state="ok"]')).not.toBeNull());
@@ -807,7 +705,7 @@ describe('tool-call cards (panel integration)', () => {
     expect(card.querySelector('.koi-tool-truncated')?.textContent).toContain('(truncated)');
   });
 
-  test('a turn rollback removes the tool cards (they join the rollback list)', async () => {
+  test('a turn rollback removes the tool cards (they live on the rolled-back ephemeral turn)', async () => {
     let failTurn!: (e: unknown) => void;
     const gate = new Promise<string>((_res, rej) => {
       failTurn = rej;
@@ -818,7 +716,7 @@ describe('tool-call cards (panel integration)', () => {
       return gate; // stay in-flight until the test rejects it (a real error, nothing streamed)
     });
     const container = document.createElement('div');
-    createAssistantPanel(opts(container));
+    createAssistantChat(opts(container));
     fire(container);
 
     // The card was created during the turn …
@@ -845,6 +743,9 @@ describe('multi-file change set (agentic edits)', () => {
   function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
     return {
       container,
+      // A fresh store per constructed panel, so the app-store singleton doesn't leak chat state
+      // across tests (the chat slice, not panel closures, holds the transcript since #984).
+      store: createAppStore(),
       getProvider: () => 'anthropic',
       getBaseUrl: () => '',
       getApiKey: () => 'sk',
@@ -879,10 +780,10 @@ describe('multi-file change set (agentic edits)', () => {
       async (_files: { relPath: string; body: string; isNew: boolean }[]) => ({ failed: [] as string[] }),
     );
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'), // stub — the mock stages directly
         onApplyChangeSet,
       }),
@@ -907,7 +808,7 @@ describe('multi-file change set (agentic edits)', () => {
     const eventsCheck = eventsRow.querySelector<HTMLInputElement>('.koi-changeset-accept')!;
     eventsCheck.checked = false;
     eventsCheck.dispatchEvent(new Event('change'));
-    expect(applyBtn.textContent).toContain('1');
+    await vi.waitFor(() => expect(applyBtn.textContent).toContain('1'));
 
     // Apply writes ONLY the still-accepted file (orders.koi).
     applyBtn.click();
@@ -915,6 +816,139 @@ describe('multi-file change set (agentic edits)', () => {
     const accepted = onApplyChangeSet.mock.calls[0][0];
     expect(accepted.length).toBe(1);
     expect(accepted[0].relPath).toBe('orders.koi');
+  });
+
+  // #472 Task 3: the apply payload carries each staged edit's OPAQUE KEY — the snapshot key (buffer
+  // uri) for a revision of an existing file, a `new:<relPath>` key for a brand-new one — so the host's
+  // applyFileEdit resolves unambiguously across a multi-root workspace; the display relPath rides
+  // along for the partial-apply report. (Carrying the key through the review UI itself is Task 4.)
+  test('apply forwards the snapshot key (uri / new-file key) alongside the display relPath', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('file:///wsA/orders.koi', 'context Orders { v2 }'); // revision, by uri key
+      req.editSession?.stage('new:fresh.koi', 'context Fresh {}'); // brand-new file
+      req.onText('Staged.');
+      return 'Staged.';
+    });
+    const onApplyChangeSet = vi.fn(
+      async (_files: { key: string; relPath: string; body: string; isNew: boolean }[]) => ({
+        failed: [] as string[],
+      }),
+    );
+    const container = document.createElement('div');
+    createAssistantChat(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({
+          files: { 'file:///wsA/orders.koi': 'context Orders {}' },
+          displayPath: { 'file:///wsA/orders.koi': 'orders.koi' },
+        }),
+        runEditTool: vi.fn(async () => 'ok'), // stub — the mock stages directly
+        onApplyChangeSet,
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset-apply')).not.toBeNull());
+    container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.click();
+    await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+    expect(onApplyChangeSet.mock.calls[0][0]).toEqual([
+      { key: 'file:///wsA/orders.koi', relPath: 'orders.koi', body: 'context Orders { v2 }', isNew: false },
+      { key: 'new:fresh.koi', relPath: 'fresh.koi', body: 'context Fresh {}', isNew: true },
+    ]);
+  });
+
+  // #472 Task 4: the review rows carry the staged edit's KEY end-to-end, so two roots staging the
+  // SAME relPath review as two disambiguated rows and apply to their OWN buffers — not a first-match
+  // duplicate resolved back from the colliding relPath at payload time.
+  test('colliding relPaths across roots: two disambiguated rows, apply forwards BOTH distinct keys', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('file:///wsA/model.koi', 'context A { v2 }');
+      req.editSession?.stage('file:///wsB/model.koi', 'context B { v2 }');
+      req.onText('Staged.');
+      return 'Staged.';
+    });
+    const onApplyChangeSet = vi.fn(
+      async (_files: { key: string; relPath: string; body: string; isNew: boolean }[]) => ({
+        failed: [] as string[],
+      }),
+    );
+    const container = document.createElement('div');
+    createAssistantChat(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({
+          files: { 'file:///wsA/model.koi': 'context A {}', 'file:///wsB/model.koi': 'context B {}' },
+          displayPath: { 'file:///wsA/model.koi': 'model.koi', 'file:///wsB/model.koi': 'model.koi' },
+        }),
+        runEditTool: vi.fn(async () => 'ok'), // stub — the mock stages directly
+        onApplyChangeSet,
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    // The review rows carry the SAME labels the tool loop listed (buildDisplayIndex over the session,
+    // in session snapshot order: wsA → @1, wsB → @2) — not labels re-derived from row order.
+    expect([...container.querySelectorAll('.koi-changeset-path')].map((el) => el.textContent)).toEqual([
+      'model.koi@1',
+      'model.koi@2',
+    ]);
+
+    container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.click();
+    await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+    // Each row applied under its OWN root's uri, with its own body — no wrong-root clobber. The
+    // payload's failure-report label is the DISAMBIGUATED display path, so a partial-apply report can
+    // name the exact twin that didn't write (a bare `model.koi` could mean either root).
+    expect(onApplyChangeSet.mock.calls[0][0]).toEqual([
+      { key: 'file:///wsA/model.koi', relPath: 'model.koi@1', body: 'context A { v2 }', isNew: false },
+      { key: 'file:///wsB/model.koi', relPath: 'model.koi@2', body: 'context B { v2 }', isNew: false },
+    ]);
+  });
+
+  // The FIX for the swapped-labels bug: the review labels are the tool layer's labels (single source),
+  // even when the model stages the twins in the OPPOSITE order to the session snapshot. A row-order
+  // re-derivation would label the first row `model.koi@1` — but that row is wsB, the file the tool loop
+  // called `model.koi@2` — so the user would uncheck/accept the wrong root's file.
+  test('reverse-staged colliding twins: review labels still equal the tool-visible paths, per KEY', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('file:///wsB/model.koi', 'context B { v2 }'); // wsB staged FIRST
+      req.editSession?.stage('file:///wsA/model.koi', 'context A { v2 }');
+      req.onText('Staged.');
+      return 'Staged.';
+    });
+    const onApplyChangeSet = vi.fn(
+      async (_files: { key: string; relPath: string; body: string; isNew: boolean }[]) => ({
+        failed: [] as string[],
+      }),
+    );
+    const container = document.createElement('div');
+    createAssistantChat(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => ({
+          files: { 'file:///wsA/model.koi': 'context A {}', 'file:///wsB/model.koi': 'context B {}' },
+          displayPath: { 'file:///wsA/model.koi': 'model.koi', 'file:///wsB/model.koi': 'model.koi' },
+        }),
+        runEditTool: vi.fn(async () => 'ok'), // stub — the mock stages directly
+        onApplyChangeSet,
+      }),
+    );
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    // Rows render in STAGE order (wsB first), but each keeps the label the tool loop gave ITS key —
+    // `model.koi@1`/`@2` are assigned in session.list() (snapshot) order: wsA → @1, wsB → @2.
+    expect([...container.querySelectorAll('.koi-changeset-path')].map((el) => el.textContent)).toEqual([
+      'model.koi@2',
+      'model.koi@1',
+    ]);
+
+    container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.click();
+    await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+    expect(onApplyChangeSet.mock.calls[0][0]).toEqual([
+      { key: 'file:///wsB/model.koi', relPath: 'model.koi@2', body: 'context B { v2 }', isNew: false },
+      { key: 'file:///wsA/model.koi', relPath: 'model.koi@1', body: 'context A { v2 }', isNew: false },
+    ]);
   });
 
   test('surfaces the end-of-turn validation diagnostics in the change set, before apply (issue #474)', async () => {
@@ -929,10 +963,10 @@ describe('multi-file change set (agentic edits)', () => {
       return 'Staged one edit.';
     });
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         validateStaged: vi.fn(async () => DIAG),
         onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
@@ -958,10 +992,10 @@ describe('multi-file change set (agentic edits)', () => {
       return 'Staged one edit.';
     });
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         validateStaged: vi.fn(async () => 'ok: true — no diagnostics. The model compiles.'),
         onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
@@ -985,10 +1019,10 @@ describe('multi-file change set (agentic edits)', () => {
       return 'Staged one edit.';
     });
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         validateStaged: vi.fn(async () => NOTE),
         onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
@@ -1002,6 +1036,31 @@ describe('multi-file change set (agentic edits)', () => {
     expect(diag?.textContent).toContain('could not validate');
   });
 
+  // FIX: Clear conversation must retire the pending change set with the transcript it reviewed —
+  // the retired imperative panel's rebuild destroyed the island; the slice is the one owner now.
+  test('Clear conversation retires the pending change set (the review panel is gone after Clear)', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      req.onText('Edit.');
+      return 'Edit.';
+    });
+    const container = document.createElement('div');
+    createAssistantChat(
+      opts(container, {
+        getUseTools: () => true,
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
+        runEditTool: vi.fn(async () => 'ok'),
+        onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
+      }),
+    );
+    fire(container);
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+
+    container.querySelector<HTMLButtonElement>('.koi-assistant-clear')!.click();
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).toBeNull());
+    expect(container.querySelectorAll('.koi-msg').length).toBe(0); // the transcript emptied too
+  });
+
   test('a non-staged generative turn still shows single-file Apply (no change set)', async () => {
     // An ordinary generative reply (a fenced koine block, nothing staged) → the legacy single-file gate.
     vi.mocked(runAssistant).mockImplementation(async (req: any) => {
@@ -1010,10 +1069,10 @@ describe('multi-file change set (agentic edits)', () => {
       return body;
     });
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
       }),
@@ -1036,10 +1095,10 @@ describe('multi-file change set (agentic edits)', () => {
       failed: ['events.koi'] as string[],
     }));
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1075,10 +1134,10 @@ describe('multi-file change set (agentic edits)', () => {
       throw new Error('setDoc blew up');
     });
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1100,9 +1159,9 @@ describe('multi-file change set (agentic edits)', () => {
     expect(container.querySelector('.koi-changeset-discard')).not.toBeNull();
   });
 
-  // The in-flight window: the click handler disables Apply while onApply is pending, but every accept
-  // checkbox's change handler calls refreshApply(), which used to recompute disabled from the accepted
-  // count alone — re-enabling Apply mid-apply and letting a second click run a CONCURRENT apply.
+  // The in-flight window: the slice's `applying` phase keeps Apply disabled while onApply is pending,
+  // even though the accept checkboxes stay togglable — so a mid-apply toggle can't re-enable Apply and
+  // let a second click run a CONCURRENT apply.
   test('toggling an accept checkbox mid-apply keeps Apply disabled (no second concurrent apply)', async () => {
     vi.mocked(runAssistant).mockImplementation(async (req: any) => {
       req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
@@ -1117,10 +1176,10 @@ describe('multi-file change set (agentic edits)', () => {
     });
     const onApplyChangeSet = vi.fn(async () => applyGate);
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1131,13 +1190,14 @@ describe('multi-file change set (agentic edits)', () => {
     const applyBtn = container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
     applyBtn.click();
     await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
-    expect(applyBtn.disabled).toBe(true); // the in-flight guard
+    await vi.waitFor(() => expect(applyBtn.disabled).toBe(true)); // the in-flight guard
 
     // Second thoughts mid-apply: unchecking a file must NOT re-enable Apply while the first apply
     // is still pending…
     const check = container.querySelector<HTMLInputElement>('.koi-changeset-accept')!;
     check.checked = false;
     check.dispatchEvent(new Event('change'));
+    await settle();
     expect(applyBtn.disabled).toBe(true);
 
     // …so a second click can't start a concurrent apply.
@@ -1151,20 +1211,31 @@ describe('multi-file change set (agentic edits)', () => {
     expect(applyBtn.textContent).toContain('2');
   });
 
-  // #473 (Task 1): a stale change-set panel from a prior turn must not stay clickable after a NEW send —
-  // a late Apply on it would write stale full-file bodies wholesale over everything done since.
+  // #473 (Task 1): a stale change set from a prior turn must not stay applyable after a NEW send —
+  // a late Apply on it would write stale full-file bodies wholesale over everything done since. The
+  // review surface renders the slice's ONE current set, so the retired treatment shows the moment the
+  // send begins and the fresh set replaces it once the new turn stages.
   test('a new send supersedes the prior un-applied change set (Apply + checkboxes disabled, superseded notice)', async () => {
-    // Each turn stages a one-file change set.
+    // Each turn stages a one-file change set; turn 2 is HELD in flight so the retired treatment of
+    // turn 1's set is observable before the replacement set stages.
+    let releaseTurn2: (() => void) | null = null;
+    let turn = 0;
     vi.mocked(runAssistant).mockImplementation(async (req: any) => {
-      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      turn++;
+      if (turn === 2) {
+        await new Promise<void>((r) => {
+          releaseTurn2 = r;
+        });
+      }
+      req.editSession?.stage('orders.koi', `context Orders { /* t${turn} */ }`);
       req.onText('Edit.');
       return 'Edit.';
     });
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
       }),
@@ -1173,34 +1244,47 @@ describe('multi-file change set (agentic edits)', () => {
     // First turn stages a change set; capture its (still-live) Apply button + accept checkboxes.
     fire(container);
     await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
-    const firstPanel = container.querySelector('.koi-changeset')!;
-    const firstApply = firstPanel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
-    const firstChecks = firstPanel.querySelectorAll<HTMLInputElement>('.koi-changeset-accept');
-    expect(firstApply.disabled).toBe(false);
-    expect([...firstChecks].some((c) => c.disabled)).toBe(false);
+    const panel = container.querySelector('.koi-changeset')!;
+    const applyBtn = panel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    const checks = panel.querySelectorAll<HTMLInputElement>('.koi-changeset-accept');
+    expect(applyBtn.disabled).toBe(false);
+    expect([...checks].some((c) => c.disabled)).toBe(false);
 
-    // A second send begins → the prior panel is retired: Apply + every accept checkbox disabled and a
+    // A second send begins → the prior set is retired: Apply + every accept checkbox disabled and a
     // "superseded" notice in its status live region, so a late click can't clobber newer work.
     fire(container);
-    await vi.waitFor(() => expect(container.querySelectorAll('.koi-changeset').length).toBe(2));
+    await vi.waitFor(() => expect(panel.classList.contains('koi-changeset-superseded')).toBe(true));
+    expect(applyBtn.disabled).toBe(true);
+    expect([...checks].every((c) => c.disabled)).toBe(true);
+    expect(panel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
 
-    expect(firstApply.disabled).toBe(true);
-    expect([...firstChecks].every((c) => c.disabled)).toBe(true);
-    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+    // Turn 2 settles and stages a fresh set: the review surface shows it live again.
+    await vi.waitFor(() => expect(releaseTurn2).not.toBeNull());
+    releaseTurn2!();
+    await vi.waitFor(() => expect(panel.classList.contains('koi-changeset-superseded')).toBe(false));
+    expect(container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.disabled).toBe(false);
   });
 
-  // Idempotency: invalidation must never overwrite an ALREADY-applied panel's terminal "Applied ✓".
+  // Idempotency: invalidation must never overwrite an ALREADY-applied set's terminal "Applied ✓".
   test('superseding an already-applied change set is a no-op (keeps "Applied ✓", no "superseded")', async () => {
+    let releaseTurn2: (() => void) | null = null;
+    let turn = 0;
     vi.mocked(runAssistant).mockImplementation(async (req: any) => {
-      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      turn++;
+      if (turn === 2) {
+        await new Promise<void>((r) => {
+          releaseTurn2 = r;
+        });
+      }
+      req.editSession?.stage('orders.koi', `context Orders { /* t${turn} */ }`);
       req.onText('Edit.');
       return 'Edit.';
     });
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
       }),
@@ -1208,40 +1292,53 @@ describe('multi-file change set (agentic edits)', () => {
 
     fire(container);
     await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
-    const firstPanel = container.querySelector('.koi-changeset')!;
-    const firstApply = firstPanel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    const panel = container.querySelector('.koi-changeset')!;
+    const applyBtn = panel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
     // Apply the first change set to terminal "Applied ✓".
-    firstApply.click();
-    await vi.waitFor(() => expect(firstApply.textContent).toContain('✓'));
+    applyBtn.click();
+    await vi.waitFor(() => expect(applyBtn.textContent).toContain('✓'));
 
-    // A later send must NOT overwrite the applied panel's terminal status with a "superseded" notice.
+    // A later send must NOT overwrite the applied set's terminal status with a "superseded" notice.
     fire(container);
-    await vi.waitFor(() => expect(container.querySelectorAll('.koi-changeset').length).toBe(2));
-    expect(firstApply.textContent).toContain('✓');
-    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).not.toMatch(/superseded/i);
+    await settle();
+    expect(applyBtn.textContent).toContain('✓');
+    expect(panel.querySelector('.koi-changeset-status')?.textContent).not.toMatch(/superseded/i);
+
+    // The new turn's fresh set then replaces the surface (a live review again, no stale terminal state).
+    await vi.waitFor(() => expect(releaseTurn2).not.toBeNull());
+    releaseTurn2!();
+    await vi.waitFor(() => expect(applyBtn.textContent).not.toContain('✓'));
   });
 
-  // #684: the reverse of the "already-applied" guard above. A panel superseded WHILE its apply is in
+  // #684: the reverse of the "already-applied" guard above. A set superseded WHILE its apply is in
   // flight must stay terminal — a late-settling FAILURE (reject from #633's .catch, or a { failed }
-  // result from the partial-failure branch) must not call refreshApply() (re-enabling Apply on the
-  // retired panel) nor overwrite the "superseded" notice with an "Apply failed" / "couldn't write" one.
+  // result from the partial-failure branch) must not re-enable Apply on the retired set nor overwrite
+  // the "superseded" notice with an "Apply failed" / "couldn't write" one.
   test('superseded mid-apply: a later REJECTED apply does not un-retire the panel (#684)', async () => {
+    let releaseTurn2: (() => void) | null = null;
+    let turn = 0;
     vi.mocked(runAssistant).mockImplementation(async (req: any) => {
-      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      turn++;
+      if (turn === 2) {
+        await new Promise<void>((r) => {
+          releaseTurn2 = r;
+        });
+      }
+      req.editSession?.stage('orders.koi', `context Orders { /* t${turn} */ }`);
       req.onText('Edit.');
       return 'Edit.';
     });
-    // A deferred apply we settle by hand, so the panel can be superseded WHILE the apply is in flight.
+    // A deferred apply we settle by hand, so the set can be superseded WHILE the apply is in flight.
     let rejectApply!: (e: unknown) => void;
     const applyGate = new Promise<{ failed: string[] }>((_res, rej) => {
       rejectApply = rej;
     });
     const onApplyChangeSet = vi.fn(async () => applyGate);
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1250,45 +1347,56 @@ describe('multi-file change set (agentic edits)', () => {
     // Turn 1 stages a change set; click Apply → onApply goes in flight (the deferred above).
     fire(container);
     await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
-    const firstPanel = container.querySelector('.koi-changeset')!;
-    const firstApply = firstPanel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
-    firstApply.click();
+    const panel = container.querySelector('.koi-changeset')!;
+    const applyBtn = panel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    applyBtn.click();
     await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
-    expect(firstApply.disabled).toBe(true); // in-flight guard
+    await vi.waitFor(() => expect(applyBtn.disabled).toBe(true)); // in-flight guard
 
-    // A new send supersedes panel 1 WHILE its apply is still in flight.
+    // A new send supersedes the set WHILE its apply is still in flight (turn 2 held → set 1 stays current).
     fire(container);
-    await vi.waitFor(() => expect(container.querySelectorAll('.koi-changeset').length).toBe(2));
-    expect(firstApply.disabled).toBe(true);
-    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+    await vi.waitFor(() => expect(panel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i));
+    expect(applyBtn.disabled).toBe(true);
 
-    // The in-flight apply now REJECTS. The retired panel must STAY terminal: no "Apply failed"
+    // The in-flight apply now REJECTS. The retired set must STAY terminal: no "Apply failed"
     // overwrite of the "superseded" notice, and Apply must NOT be re-enabled.
     rejectApply(new Error('setDoc blew up'));
-    await new Promise((r) => setTimeout(r, 0)); // flush the rejection's .catch
+    await settle();
 
-    expect(firstApply.disabled).toBe(true);
-    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
-    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).not.toMatch(/Apply failed/i);
+    expect(applyBtn.disabled).toBe(true);
+    expect(panel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+    expect(panel.querySelector('.koi-changeset-status')?.textContent).not.toMatch(/Apply failed/i);
+
+    // Hygiene: let the held turn settle before the test ends.
+    await vi.waitFor(() => expect(releaseTurn2).not.toBeNull());
+    releaseTurn2!();
   });
 
   test('superseded mid-apply: a later { failed } apply does not un-retire the panel (#684)', async () => {
+    let releaseTurn2: (() => void) | null = null;
+    let turn = 0;
     vi.mocked(runAssistant).mockImplementation(async (req: any) => {
-      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      turn++;
+      if (turn === 2) {
+        await new Promise<void>((r) => {
+          releaseTurn2 = r;
+        });
+      }
+      req.editSession?.stage('orders.koi', `context Orders { /* t${turn} */ }`);
       req.onText('Edit.');
       return 'Edit.';
     });
-    // A deferred apply we resolve by hand with a partial failure once the panel is already superseded.
+    // A deferred apply we resolve by hand with a partial failure once the set is already superseded.
     let resolveApply!: (v: { failed: string[] }) => void;
     const applyGate = new Promise<{ failed: string[] }>((res) => {
       resolveApply = res;
     });
     const onApplyChangeSet = vi.fn(async () => applyGate);
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1296,32 +1404,43 @@ describe('multi-file change set (agentic edits)', () => {
 
     fire(container);
     await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
-    const firstPanel = container.querySelector('.koi-changeset')!;
-    const firstApply = firstPanel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
-    firstApply.click();
+    const panel = container.querySelector('.koi-changeset')!;
+    const applyBtn = panel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    applyBtn.click();
     await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
 
-    // Supersede panel 1 while its apply is in flight.
+    // Supersede the set while its apply is in flight.
     fire(container);
-    await vi.waitFor(() => expect(container.querySelectorAll('.koi-changeset').length).toBe(2));
-    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+    await vi.waitFor(() => expect(panel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i));
 
-    // The in-flight apply settles as a partial failure. The retired panel stays terminal: no
+    // The in-flight apply settles as a partial failure. The retired set stays terminal: no
     // "couldn't write …" overwrite, Apply not re-enabled.
     resolveApply({ failed: ['orders.koi'] });
-    await new Promise((r) => setTimeout(r, 0)); // flush the .then
+    await settle();
 
-    expect(firstApply.disabled).toBe(true);
-    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
-    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).not.toMatch(/couldn't write/i);
+    expect(applyBtn.disabled).toBe(true);
+    expect(panel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+    expect(panel.querySelector('.koi-changeset-status')?.textContent).not.toMatch(/couldn't write/i);
+
+    // Hygiene: let the held turn settle before the test ends.
+    await vi.waitFor(() => expect(releaseTurn2).not.toBeNull());
+    releaseTurn2!();
   });
 
   // #684: even a SUCCESSFUL in-flight apply that settles after a supersede must not present the retired
-  // panel as the live applied set — the disk write is unavoidable once in flight, but the panel keeps
+  // set as the live applied one — the disk write is unavoidable once in flight, but the review keeps
   // the "superseded" notice rather than flipping to a misleading "Applied ✓".
   test('superseded mid-apply: a later SUCCESSFUL apply still shows "superseded", not "Applied ✓" (#684)', async () => {
+    let releaseTurn2: (() => void) | null = null;
+    let turn = 0;
     vi.mocked(runAssistant).mockImplementation(async (req: any) => {
-      req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
+      turn++;
+      if (turn === 2) {
+        await new Promise<void>((r) => {
+          releaseTurn2 = r;
+        });
+      }
+      req.editSession?.stage('orders.koi', `context Orders { /* t${turn} */ }`);
       req.onText('Edit.');
       return 'Edit.';
     });
@@ -1331,10 +1450,10 @@ describe('multi-file change set (agentic edits)', () => {
     });
     const onApplyChangeSet = vi.fn(async () => applyGate);
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ({ 'orders.koi': 'context Orders {}' }),
+        getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1342,23 +1461,26 @@ describe('multi-file change set (agentic edits)', () => {
 
     fire(container);
     await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
-    const firstPanel = container.querySelector('.koi-changeset')!;
-    const firstApply = firstPanel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
-    firstApply.click();
+    const panel = container.querySelector('.koi-changeset')!;
+    const applyBtn = panel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    applyBtn.click();
     await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
 
     fire(container);
-    await vi.waitFor(() => expect(container.querySelectorAll('.koi-changeset').length).toBe(2));
-    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+    await vi.waitFor(() => expect(panel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i));
 
-    // The in-flight apply succeeds AFTER the supersede. The retired panel keeps its "superseded"
-    // status and Apply stays disabled — no terminal "Applied ✓" flip on a panel the user retired.
+    // The in-flight apply succeeds AFTER the supersede. The retired set keeps its "superseded"
+    // status and Apply stays disabled — no terminal "Applied ✓" flip on a review the user retired.
     resolveApply({ failed: [] });
-    await new Promise((r) => setTimeout(r, 0)); // flush the .then
+    await settle();
 
-    expect(firstApply.disabled).toBe(true);
-    expect(firstApply.textContent).not.toContain('✓');
-    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+    expect(applyBtn.disabled).toBe(true);
+    expect(applyBtn.textContent).not.toContain('✓');
+    expect(panel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+
+    // Hygiene: let the held turn settle before the test ends.
+    await vi.waitFor(() => expect(releaseTurn2).not.toBeNull());
+    releaseTurn2!();
   });
 
   // #473 (Task 2): a file edited between SEND and Apply (the staged body was computed against the OLD
@@ -1377,10 +1499,10 @@ describe('multi-file change set (agentic edits)', () => {
       async (_files: { relPath: string; body: string; isNew: boolean }[]) => ({ failed: [] as string[] }),
     );
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ws, // a LIVE read — currentText reflects concurrent edits at apply time
+        getWorkspaceFiles: () => wsSnapshot(ws), // a LIVE read — currentText reflects concurrent edits at apply time
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1401,10 +1523,12 @@ describe('multi-file change set (agentic edits)', () => {
     expect(written).toEqual(['events.koi']);
 
     // The drifted row carries a "changed since this was proposed" warning.
-    const ordersRow = [...container.querySelectorAll('.koi-changeset-file')].find((r) =>
-      r.textContent?.includes('orders.koi'),
-    )!;
-    expect(ordersRow.querySelector('.koi-changeset-drift')?.textContent).toMatch(/changed since/i);
+    await vi.waitFor(() => {
+      const ordersRow = [...container.querySelectorAll('.koi-changeset-file')].find((r) =>
+        r.textContent?.includes('orders.koi'),
+      )!;
+      expect(ordersRow.querySelector('.koi-changeset-drift')?.textContent).toMatch(/changed since/i);
+    });
     // …and the status live region announces the skip.
     expect(container.querySelector('.koi-changeset-status')?.textContent).toMatch(/changed since|skipped/i);
   });
@@ -1418,10 +1542,10 @@ describe('multi-file change set (agentic edits)', () => {
     });
     const onApplyChangeSet = vi.fn(async () => ({ failed: [] as string[] }));
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ws,
+        getWorkspaceFiles: () => wsSnapshot(ws),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1453,10 +1577,10 @@ describe('multi-file change set (agentic edits)', () => {
     });
     const onApplyChangeSet = vi.fn(async () => ({ failed: [] as string[] }));
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ws,
+        getWorkspaceFiles: () => wsSnapshot(ws),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1478,17 +1602,21 @@ describe('multi-file change set (agentic edits)', () => {
     expect(eventsRow.querySelector('.koi-changeset-drift')).not.toBeNull();
   });
 
-  // #473 (Task 3): both guards active on the same panel/turn driver. A new send supersedes the prior
-  // panel (across-turn staleness) AND the still-live panel skips a file edited since SEND (within-turn
-  // staleness) — the two guards cover disjoint windows and coexist.
-  test('both guards together: a new send supersedes the first panel; the second skips a drifted file', async () => {
+  // #473 (Task 3): both guards active on the same turn driver. A new send supersedes the prior set
+  // (across-turn staleness) AND the fresh set skips a file edited since SEND (within-turn staleness) —
+  // the two guards cover disjoint windows and coexist.
+  test('both guards together: a new send supersedes the first set; the second skips a drifted file', async () => {
     let ws: Record<string, string> = { 'a.koi': 'context A {}', 'b.koi': 'context B {}' };
+    let releaseTurn2: (() => void) | null = null;
     let turn = 0;
     vi.mocked(runAssistant).mockImplementation(async (req: any) => {
       turn++;
       if (turn === 1) {
         req.editSession?.stage('a.koi', 'context A { /* t1 */ }');
       } else {
+        await new Promise<void>((r) => {
+          releaseTurn2 = r;
+        });
         req.editSession?.stage('a.koi', 'context A { /* t2 */ }');
         req.editSession?.stage('b.koi', 'context B { /* t2 */ }');
       }
@@ -1499,10 +1627,10 @@ describe('multi-file change set (agentic edits)', () => {
       async (_files: { relPath: string; body: string; isNew: boolean }[]) => ({ failed: [] as string[] }),
     );
     const container = document.createElement('div');
-    createAssistantPanel(
+    createAssistantChat(
       opts(container, {
         getUseTools: () => true,
-        getWorkspaceFiles: () => ws,
+        getWorkspaceFiles: () => wsSnapshot(ws),
         runEditTool: vi.fn(async () => 'ok'),
         onApplyChangeSet,
       }),
@@ -1510,40 +1638,43 @@ describe('multi-file change set (agentic edits)', () => {
 
     // Turn 1 stages a change set.
     fire(container);
-    await vi.waitFor(() => expect(container.querySelectorAll('.koi-changeset').length).toBe(1));
-    const firstPanel = container.querySelector('.koi-changeset')!;
-    const firstApply = firstPanel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
+    await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+    const panel = container.querySelector('.koi-changeset')!;
 
-    // Guard A (across-turn): a second send supersedes turn 1's panel.
+    // Guard A (across-turn): a second send retires turn 1's set the moment it begins.
     fire(container);
-    await vi.waitFor(() => expect(container.querySelectorAll('.koi-changeset').length).toBe(2));
-    expect(firstApply.disabled).toBe(true);
-    expect(firstPanel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
+    await vi.waitFor(() => expect(panel.classList.contains('koi-changeset-superseded')).toBe(true));
+    expect(panel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.disabled).toBe(true);
+    expect(panel.querySelector('.koi-changeset-status')?.textContent).toMatch(/superseded/i);
 
-    // Guard B (within-turn): a concurrent edit drifts a.koi before turn 2's panel is applied.
+    // Turn 2 settles and stages the replacement set (a.koi + b.koi).
+    await vi.waitFor(() => expect(releaseTurn2).not.toBeNull());
+    releaseTurn2!();
+    await vi.waitFor(() => expect(container.querySelectorAll('.koi-changeset-file').length).toBe(2));
+
+    // Guard B (within-turn): a concurrent edit drifts a.koi before turn 2's set is applied.
     ws = { ...ws, 'a.koi': 'context A { /* user edit */ }' };
-    const secondPanel = container.querySelectorAll('.koi-changeset')[1];
-    const secondApply = secondPanel.querySelector<HTMLButtonElement>('.koi-changeset-apply')!;
-    secondApply.click();
+    container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.click();
     await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
 
     // The drifted a.koi was skipped; only the clean b.koi was written.
     const written = onApplyChangeSet.mock.calls[0][0].map((f) => f.relPath);
     expect(written).toEqual(['b.koi']);
-    const aRow = [...secondPanel.querySelectorAll('.koi-changeset-file')].find((r) => r.textContent?.includes('a.koi'))!;
-    expect(aRow.querySelector('.koi-changeset-drift')).not.toBeNull();
+    await vi.waitFor(() => {
+      const aRow = [...container.querySelectorAll('.koi-changeset-file')].find((r) => r.textContent?.includes('a.koi'))!;
+      expect(aRow.querySelector('.koi-changeset-drift')).not.toBeNull();
+    });
   });
 });
 
 // --- apply-gate re-validation at the legacy entry points (#444) -------------------------------
 // #423 gates the LIVE generation path: validate the `.koi` before enabling "Apply to editor". Two
-// legacy entry points still reached `maybeOfferApply` WITHOUT re-validating — transcript replay
-// (`replayMessage` trusted the stored `offerApply` flag) and stop-mid-stream (the abort handler
-// committed the partial reply and offered Apply on it) — so a previously-rejected or truncated model
-// could be applied after a reload or a Stop. Both must now re-run the SAME validate adapter the live
-// path uses and offer Apply only when the model parses: fail closed when validation can't run, and
-// keep the legacy unguarded affordance when the constraint toggle is off (the gate only claims the
-// constrained contract).
+// legacy entry points still reached the apply affordance WITHOUT re-validating — transcript replay
+// (trusting the stored `offerApply` flag) and stop-mid-stream (the abort handler committed the partial
+// reply and offered Apply on it) — so a previously-rejected or truncated model could be applied after
+// a reload or a Stop. Both must now re-run the SAME validate adapter the live path uses and offer
+// Apply only when the model parses: fail closed when validation can't run, and keep the legacy
+// unguarded affordance when the constraint toggle is off (the gate only claims the constrained contract).
 describe('apply-gate re-validation at legacy entry points (#444)', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -1559,13 +1690,12 @@ describe('apply-gate re-validation at legacy entry points (#444)', () => {
   // A persisted GENERATIVE turn (a fenced `.koi` block, no apply opt-out).
   const MODEL_TURN = 'Here is your model:\n```koine\ncontext X {}\n```';
 
-  async function settle(): Promise<void> {
-    for (let i = 0; i < 20; i++) await Promise.resolve();
-  }
-
   function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
     return {
       container,
+      // A fresh store per constructed panel, so the app-store singleton doesn't leak chat state
+      // across tests (the chat slice, not panel closures, holds the transcript since #984).
+      store: createAppStore(),
       getProvider: () => 'openai',
       getBaseUrl: () => 'http://localhost:1234/v1',
       getApiKey: () => 'sk',
@@ -1598,7 +1728,7 @@ describe('apply-gate re-validation at legacy entry points (#444)', () => {
     seedModelTurn();
     const runCompilerTool = vi.fn(() => Promise.resolve(DIRTY));
     const container = document.createElement('div');
-    createAssistantPanel(opts(container, { runCompilerTool }));
+    createAssistantChat(opts(container, { runCompilerTool }));
 
     // The persisted turn replayed (its body rendered)…
     expect(container.querySelector('.koi-md')).not.toBeNull();
@@ -1612,7 +1742,7 @@ describe('apply-gate re-validation at legacy entry points (#444)', () => {
   test('replay of a turn whose .koi is VALID still offers Apply', async () => {
     seedModelTurn();
     const container = document.createElement('div');
-    createAssistantPanel(opts(container, { runCompilerTool: () => Promise.resolve(CLEAN) }));
+    createAssistantChat(opts(container, { runCompilerTool: () => Promise.resolve(CLEAN) }));
 
     await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
   });
@@ -1623,7 +1753,7 @@ describe('apply-gate re-validation at legacy entry points (#444)', () => {
     const container = document.createElement('div');
     // Toggle off → the gate makes no promises, so Apply is offered as it always was and the validate
     // adapter is never even consulted.
-    createAssistantPanel(opts(container, { getConstrainGrammar: () => false, runCompilerTool }));
+    createAssistantChat(opts(container, { getConstrainGrammar: () => false, runCompilerTool }));
 
     await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
     expect(runCompilerTool).not.toHaveBeenCalled();
@@ -1633,7 +1763,7 @@ describe('apply-gate re-validation at legacy entry points (#444)', () => {
     seedModelTurn();
     const container = document.createElement('div');
     // runCompilerTool omitted → can't prove the model parses → withhold Apply.
-    createAssistantPanel(opts(container));
+    createAssistantChat(opts(container));
 
     expect(container.querySelector('.koi-md')).not.toBeNull(); // replayed…
     await settle();
@@ -1657,7 +1787,7 @@ describe('apply-gate re-validation at legacy entry points (#444)', () => {
   test('stop mid-stream with a truncated/invalid .koi: re-validates and withholds Apply', async () => {
     const runCompilerTool = vi.fn(() => Promise.resolve(DIRTY));
     const container = document.createElement('div');
-    createAssistantPanel(opts(container, { runCompilerTool }));
+    createAssistantChat(opts(container, { runCompilerTool }));
     // A fenced block whose model is incomplete (unbalanced braces) — the kind a Stop leaves behind.
     streamThenStop(container, 'Working on it…\n```koine\ncontext X {\n```');
     fire(container);
@@ -1673,7 +1803,7 @@ describe('apply-gate re-validation at legacy entry points (#444)', () => {
 
   test('stop mid-stream with a VALID complete .koi still offers Apply', async () => {
     const container = document.createElement('div');
-    createAssistantPanel(opts(container, { runCompilerTool: () => Promise.resolve(CLEAN) }));
+    createAssistantChat(opts(container, { runCompilerTool: () => Promise.resolve(CLEAN) }));
     streamThenStop(container, 'Done early:\n```koine\ncontext X {}\n```');
     fire(container);
 
@@ -1689,9 +1819,9 @@ describe('apply-gate re-validation at legacy entry points (#444)', () => {
 // program. On the grammar-constrained (`gbnf`) path the GBNF root emits a BARE `.koi` program (no
 // ```koine fence), and the live path recovers it with a `mechanism === 'gbnf'` fallback — so a valid
 // bare model is applicable live but silently loses Apply on reload/Stop. This is the UNDER-offering
-// mirror image: when there's no fence and the constraint toggle is on, `maybeOfferApply` must fall back
-// to the trimmed body as the candidate and let the SAME `shouldOfferApply` gate decide (valid → Apply,
-// prose → no Apply), without persisting any mechanism and without reopening the #444 bypass.
+// mirror image: when there's no fence and the constraint toggle is on, the gate must fall back to the
+// trimmed body as the candidate and let the SAME validation decide (valid → Apply, prose → no Apply),
+// without persisting any mechanism and without reopening the #444 bypass.
 describe('bare grammar-constrained candidate recovery at legacy entry points (#561)', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -1708,13 +1838,12 @@ describe('bare grammar-constrained candidate recovery at legacy entry points (#5
   // emit a ```koine fence), so `extractKoine()` returns null for it.
   const BARE_MODEL = 'context Billing {}';
 
-  async function settle(): Promise<void> {
-    for (let i = 0; i < 20; i++) await Promise.resolve();
-  }
-
   function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
     return {
       container,
+      // A fresh store per constructed panel, so the app-store singleton doesn't leak chat state
+      // across tests (the chat slice, not panel closures, holds the transcript since #984).
+      store: createAppStore(),
       getProvider: () => 'openai',
       getBaseUrl: () => 'http://localhost:1234/v1',
       getApiKey: () => 'sk',
@@ -1731,7 +1860,7 @@ describe('bare grammar-constrained candidate recovery at legacy entry points (#5
   }
 
   // Seed a persisted GENERATIVE turn whose assistant content is a BARE program (no fence, no opt-out)
-  // so a fresh mount replays it through `maybeOfferApply`.
+  // so a fresh mount replays it through the apply-gate.
   function seedBareTurn(content: string = BARE_MODEL): void {
     saveChat('ws', [
       { role: 'user', content: 'design a model' },
@@ -1745,7 +1874,7 @@ describe('bare grammar-constrained candidate recovery at legacy entry points (#5
   }
 
   // Mock `runAssistant` to stream `body`, then have the user hit Stop before it finishes — the
-  // stop-mid-stream sequence whose partial is committed and routed through `maybeOfferApply`.
+  // stop-mid-stream sequence whose partial is committed and routed through the apply-gate.
   function streamThenStop(container: HTMLElement, body: string): void {
     vi.mocked(runAssistant).mockImplementation(async (req: { onText: (t: string) => void }) => {
       req.onText(body);
@@ -1758,7 +1887,7 @@ describe('bare grammar-constrained candidate recovery at legacy entry points (#5
     seedBareTurn();
     const container = document.createElement('div');
     // constraint ON + validate CLEAN: the bare program is recovered and passes the gate.
-    createAssistantPanel(opts(container, { runCompilerTool: () => Promise.resolve(CLEAN) }));
+    createAssistantChat(opts(container, { runCompilerTool: () => Promise.resolve(CLEAN) }));
 
     expect(container.querySelector('.koi-md')).not.toBeNull(); // replayed…
     await vi.waitFor(() => expect(container.querySelector('.koi-assistant-apply')).not.toBeNull());
@@ -1768,7 +1897,7 @@ describe('bare grammar-constrained candidate recovery at legacy entry points (#5
     seedBareTurn();
     const runCompilerTool = vi.fn(() => Promise.resolve(DIRTY));
     const container = document.createElement('div');
-    createAssistantPanel(opts(container, { runCompilerTool }));
+    createAssistantChat(opts(container, { runCompilerTool }));
 
     expect(container.querySelector('.koi-md')).not.toBeNull(); // replayed…
     // The recovered candidate is gated: it doesn't parse → Apply withheld (#444 bypass stays closed).
@@ -1783,7 +1912,7 @@ describe('bare grammar-constrained candidate recovery at legacy entry points (#5
     const container = document.createElement('div');
     // Toggle off → the bare-program fallback does NOT engage (today's "off ⇒ fenced-only" behavior),
     // so an unfenced body yields no candidate and the validate adapter is never consulted.
-    createAssistantPanel(opts(container, { getConstrainGrammar: () => false, runCompilerTool }));
+    createAssistantChat(opts(container, { getConstrainGrammar: () => false, runCompilerTool }));
 
     expect(container.querySelector('.koi-md')).not.toBeNull(); // replayed…
     await settle();
@@ -1795,7 +1924,7 @@ describe('bare grammar-constrained candidate recovery at legacy entry points (#5
     seedBareTurn('Sure — a billing context tracks invoices and payments.');
     const runCompilerTool = vi.fn(() => Promise.resolve(DIRTY)); // prose doesn't parse
     const container = document.createElement('div');
-    createAssistantPanel(opts(container, { runCompilerTool }));
+    createAssistantChat(opts(container, { runCompilerTool }));
 
     expect(container.querySelector('.koi-md')).not.toBeNull(); // replayed…
     await settle();
@@ -1804,12 +1933,12 @@ describe('bare grammar-constrained candidate recovery at legacy entry points (#5
   });
 
   // --- stop-mid-stream (the abort partial-commit path) ---------------------------------------
-  // A Stop mid-generation commits the partial reply and offers Apply on it via the SAME
-  // `maybeOfferApply` sink. When the streamed partial is a complete BARE grammar-constrained program
-  // (no fence), the candidate must be recovered there too, so a valid model stays applicable after Stop.
+  // A Stop mid-generation commits the partial reply and offers Apply on it via the SAME apply-gate
+  // sink. When the streamed partial is a complete BARE grammar-constrained program (no fence), the
+  // candidate must be recovered there too, so a valid model stays applicable after Stop.
   test('stop mid-stream with a complete BARE valid .koi (no fence) offers Apply', async () => {
     const container = document.createElement('div');
-    createAssistantPanel(opts(container, { runCompilerTool: () => Promise.resolve(CLEAN) }));
+    createAssistantChat(opts(container, { runCompilerTool: () => Promise.resolve(CLEAN) }));
     // A fully-streamed bare grammar-constrained program, then a Stop on the in-flight request.
     streamThenStop(container, BARE_MODEL);
     fire(container);
@@ -1819,13 +1948,12 @@ describe('bare grammar-constrained candidate recovery at legacy entry points (#5
   });
 });
 
-// --- workspace switching around send: the transcript array and the storage key must travel together --
-// The panel keeps a live `messages` binding that syncWorkspace() reassigns, while send() persists under
-// a key captured at send time. Before the fix the two could diverge in both directions: a folder switch
-// while the AI rail stayed visible (no syncWorkspace call) pushed the new turn onto the OLD folder's
-// array and saved it under the NEW key (wiping that folder's history and leaking the old conversation),
-// and a syncWorkspace() during an in-flight request swapped the array mid-turn so the finished reply was
-// committed into the other workspace's transcript.
+// --- workspace switching around send: the transcript and the storage key must travel together --
+// The chat slice holds the transcript that syncWorkspace() re-points, while send() persists under a
+// key captured at send time. The two must never diverge: a folder switch while the AI rail stayed
+// visible (no syncWorkspace call) must not push the new turn onto the OLD folder's transcript or wipe
+// the new folder's history, and a syncWorkspace() during an in-flight request must be deferred so the
+// finished reply is committed into the send-time workspace's transcript.
 describe('workspace switching around send (per-workspace transcript integrity)', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -1839,6 +1967,9 @@ describe('workspace switching around send (per-workspace transcript integrity)',
   function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
     return {
       container,
+      // A fresh store per constructed panel, so the app-store singleton doesn't leak chat state
+      // across tests (the chat slice, not panel closures, holds the transcript since #984).
+      store: createAppStore(),
       getProvider: () => 'anthropic',
       getBaseUrl: () => '',
       getApiKey: () => 'sk',
@@ -1854,12 +1985,6 @@ describe('workspace switching around send (per-workspace transcript integrity)',
     };
   }
 
-  // Type a prompt and send it via the Send button (the from-input path).
-  function typeSend(container: HTMLElement, text: string): void {
-    container.querySelector<HTMLTextAreaElement>('.koi-assistant-input')!.value = text;
-    container.querySelector<HTMLButtonElement>('.koi-assistant-send')!.click();
-  }
-
   test('a send after an in-place folder switch lands on the NEW workspace transcript (no cross-workspace bleed)', async () => {
     vi.mocked(runAssistant).mockImplementation(async (req: any) => {
       req.onText('reply');
@@ -1872,7 +1997,7 @@ describe('workspace switching around send (per-workspace transcript integrity)',
     ]);
     let key = 'A';
     const container = document.createElement('div');
-    createAssistantPanel(opts(container, { getWorkspaceKey: () => key }));
+    createAssistantChat(opts(container, { getWorkspaceKey: () => key }));
 
     typeSend(container, 'hello from A');
     await vi.waitFor(() => expect(loadChat('A').length).toBe(2));
@@ -1894,6 +2019,45 @@ describe('workspace switching around send (per-workspace transcript integrity)',
     expect(loadChat('A').map((m) => m.content)).toEqual(['hello from A', 'reply']);
   });
 
+  // After a turn settles, focus must RETURN to the composer so the user can type the next prompt.
+  // The trap: finishChatTurn() flips chat.status, but the Composer's `disabled={busy}` re-render is
+  // DEFERRED (the store hook flushes async), so a focus() fired right after it would land on a
+  // still-disabled textarea and silently no-op. The host must flush the render synchronously first.
+  test('after a completed send, focus lands on the ENABLED composer textarea (not a disabled no-op)', async () => {
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.onText('reply');
+      return 'reply';
+    });
+    // Spy on focus() to record the textarea's disabled state AT CALL TIME — asserting the final DOM
+    // alone would be false-green, since the deferred re-render enables the textarea soon afterwards.
+    const disabledAtFocus: boolean[] = [];
+    const origFocus = HTMLElement.prototype.focus;
+    const focusSpy = vi
+      .spyOn(HTMLTextAreaElement.prototype, 'focus')
+      .mockImplementation(function (this: HTMLTextAreaElement) {
+        disabledAtFocus.push(this.disabled);
+        origFocus.call(this);
+      });
+    try {
+      const container = document.createElement('div');
+      document.body.append(container); // focus() only takes on connected elements
+      createAssistantChat(opts(container));
+
+      typeSend(container, 'hello');
+      await vi.waitFor(() => expect(disabledAtFocus.length).toBeGreaterThan(0));
+
+      // The settle-time focus targeted an ENABLED textarea (the re-render was flushed first)…
+      expect(disabledAtFocus[disabledAtFocus.length - 1]).toBe(false);
+      // …and actually took: the composer owns keyboard focus for the next prompt.
+      const input = container.querySelector<HTMLTextAreaElement>('.koi-assistant-input')!;
+      expect(input.disabled).toBe(false);
+      expect(document.activeElement).toBe(input);
+      container.remove();
+    } finally {
+      focusSpy.mockRestore();
+    }
+  });
+
   test('syncWorkspace() mid-stream is deferred: the turn persists under its send-time workspace', async () => {
     saveChat('B', [{ role: 'user', content: 'b history' }]);
     let key = 'A';
@@ -1906,7 +2070,7 @@ describe('workspace switching around send (per-workspace transcript integrity)',
       return 'A reply';
     });
     const container = document.createElement('div');
-    const panel = createAssistantPanel(opts(container, { getWorkspaceKey: () => key }));
+    const panel = createAssistantChat(opts(container, { getWorkspaceKey: () => key }));
 
     typeSend(container, 'question in A');
     await vi.waitFor(() => expect(vi.mocked(runAssistant)).toHaveBeenCalled());

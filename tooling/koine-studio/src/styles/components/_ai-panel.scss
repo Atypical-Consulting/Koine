@@ -235,10 +235,11 @@
   padding: var(--koi-space-2);
 }
 // A superseded change set (a newer turn retired it, issue #473) is dimmed so it reads as inert. The
-// meaning is carried by the disabled Apply/checkboxes and the status notice (not by the dim alone), and
-// the panel is an INACTIVE component — WCAG 2.1 AA 1.4.3 exempts those from the contrast minimum. The
-// 0.6 matches the existing `.koi-changeset-apply:disabled` dim, for a consistent "retired" look.
-.koi-changeset-superseded {
+// disabled Apply/checkboxes are INACTIVE components — WCAG 2.1 AA 1.4.3 exempts those from the contrast
+// minimum — but the status notice is live text that carries the meaning, so it is exempted from the dim
+// and keeps the full ≥4.5:1 muted tone (the Storybook axe run flags it otherwise). The 0.6 matches the
+// existing `.koi-changeset-apply:disabled` dim, for a consistent "retired" look.
+.koi-changeset-superseded > :not(.koi-changeset-status) {
   opacity: 0.6;
 }
 .koi-changeset-file {

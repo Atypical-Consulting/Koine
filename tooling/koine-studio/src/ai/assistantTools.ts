@@ -7,7 +7,7 @@
 // MCP server exposes, but executed by the IDE itself. `reference`/`examples` are intentionally NOT
 // here: their content is already injected into the system prompt (KOINE_PRIMER + live source).
 import type { ChatCompletionFunctionTool } from 'openai/resources/chat/completions';
-import type { EditSession } from '@/ai/editSession';
+import { newFileKey, type EditSession } from '@/ai/editSession';
 import { EMIT_TARGETS, isEmitTarget } from '@/shared/emitTargets';
 
 export type CompileTarget = string;
@@ -46,7 +46,8 @@ const SOURCE_PROP = {
 const REL_PATH_PROP = {
   type: 'string',
   description:
-    'Workspace-relative path of a .koi file (e.g. "ordering/orders.koi"). Must stay inside the workspace — no absolute or ".." paths.',
+    'Workspace-relative path of a .koi file, exactly as shown by koine_list_files (e.g. "ordering/orders.koi"). ' +
+    'Must stay inside the workspace — no absolute or ".." paths.',
 } as const;
 
 /** A provider-neutral tool definition. `inputSchema` is a JSON Schema object; the adapters below
@@ -333,15 +334,100 @@ export function formatWriteFile(relPath: string, isNew: boolean): string {
 }
 
 /**
+ * The bidirectional display-path ⇄ session-key index for one edit-tool dispatch (#472). Session keys
+ * are OPAQUE (buffer uris in a multi-root workspace; relPaths in single-root/legacy sessions), so the
+ * model addresses files by workspace-relative DISPLAY paths: a relPath held by exactly one key
+ * displays as itself, and a relPath shared by several keys (the same path under two roots) is
+ * disambiguated as `relPath@1`, `relPath@2`, … in `session.list()` order — deterministic (list order
+ * is snapshot order then stage order) and reversible through `keyFor`. A suffix candidate that
+ * collides with a REAL relPath (a file literally named `model.koi@1`) is skipped, so every display
+ * names exactly one key. Rebuilt per dispatch so newly-staged files are immediately addressable.
+ */
+export interface DisplayIndex {
+  /** display path → session key. */
+  keyFor: Map<string, string>;
+  /** session key → display path, in `session.list()` order. */
+  displayFor: Map<string, string>;
+  /** relPaths held by MORE than one key (a bare mention is ambiguous) → their disambiguated displays. */
+  ambiguous: Map<string, string[]>;
+}
+
+/** Build the {@link DisplayIndex} over the session's current keys. */
+export function buildDisplayIndex(session: EditSession): DisplayIndex {
+  const keys = session.list();
+  const rels = keys.map((k) => session.relPathOf(k));
+  const counts = new Map<string, number>();
+  for (const rel of rels) counts.set(rel, (counts.get(rel) ?? 0) + 1);
+  const keyFor = new Map<string, string>();
+  const displayFor = new Map<string, string>();
+  const ambiguous = new Map<string, string[]>();
+  keys.forEach((key, i) => {
+    const rel = rels[i];
+    let display = rel;
+    if ((counts.get(rel) ?? 0) > 1) {
+      // Colliding relPath: index-stable `@n` markers, skipping a name already assigned or one that is
+      // itself a real relPath in this workspace.
+      for (let n = 1; ; n++) {
+        display = `${rel}@${n}`;
+        if (!keyFor.has(display) && !counts.has(display)) break;
+      }
+      ambiguous.set(rel, [...(ambiguous.get(rel) ?? []), display]);
+    } else {
+      // A unique relPath displays as itself; the (pathological) case where an earlier suffix already
+      // took the name falls back to the same marker scheme.
+      for (let n = 1; keyFor.has(display); n++) display = `${rel}@${n}`;
+    }
+    keyFor.set(display, key);
+    displayFor.set(key, display);
+  });
+  return { keyFor, displayFor, ambiguous };
+}
+
+/** One staged-workspace validation entry: the disambiguated display path plus the current
+ *  (staged-or-initial) body. See {@link stagedWorkspaceFiles}. */
+export interface StagedWorkspaceFile {
+  display: string;
+  text: string;
+}
+
+/**
+ * Enumerate the session's files for the once-per-turn staged-workspace validation (issue #474),
+ * labelled by the SAME disambiguated display paths the edit tools use ({@link buildDisplayIndex}) —
+ * the ONE derivation both hosts' envelopes consume (#472). Unique by construction: labelling two
+ * roots' same-named files by their bare relPath would send duplicate uris/paths, which the compiler's
+ * DiagnoseWorkspace rejects (its Uri-keyed ToDictionary throws), turning EVERY multi-root staged
+ * validation into a "(validation failed)" diagnostic. Diagnostics also come back named with the same
+ * labels the model and the change-set review use.
+ */
+export function stagedWorkspaceFiles(session: EditSession): StagedWorkspaceFile[] {
+  const { displayFor } = buildDisplayIndex(session);
+  return session.list().map((key) => ({
+    display: displayFor.get(key) ?? session.relPathOf(key),
+    text: session.read(key) ?? '',
+  }));
+}
+
+/** The ambiguity refusal for a BARE colliding relPath, or null when `path` is not ambiguous. */
+function ambiguityError(index: DisplayIndex, path: string): string | null {
+  const candidates = index.ambiguous.get(path);
+  if (!candidates) return null;
+  return `Error: ambiguous path ${path} — several workspace roots hold it. Use one of: ${candidates.join(', ')}.`;
+}
+
+/**
  * Host-independent dispatch for the staged edit tools (`koine_list_files` / `koine_read_file` /
  * `koine_write_file`) against a per-turn {@link EditSession}: parse the args, run a pure list/read, or
- * stage a write and report it. A `koine_write_file` is **stage-only** — it returns just the
- * {@link formatWriteFile} confirmation and does NOT validate, so staging M files over an N-file
- * workspace no longer pays M whole-workspace re-compiles (≈O(M×N)). The whole-staged-workspace
- * validation now runs ONCE per agentic turn, after the loop terminates (see `runToolLoop` in `ai.ts`,
- * issue #474), where the host's turn-scoped validator compiles the final staged set a single time
- * (O(N)). Never throws — bad JSON, an unsafe/non-`.koi` relPath (the session's `stage` guard throws),
- * or an unknown tool all resolve to an error string the model can read and recover from.
+ * stage a write and report it. The model addresses files by the DISPLAY paths of a per-dispatch
+ * {@link buildDisplayIndex} (#472): reads/writes reverse-map the display path to the session key, a
+ * BARE colliding path is refused with the disambiguated candidates, and a path unknown to the index is
+ * a brand-new file — its write mints a {@link newFileKey}. A `koine_write_file` is **stage-only** — it
+ * returns just the {@link formatWriteFile} confirmation and does NOT validate, so staging M files over
+ * an N-file workspace no longer pays M whole-workspace re-compiles (≈O(M×N)). The
+ * whole-staged-workspace validation now runs ONCE per agentic turn, after the loop terminates (see
+ * `runToolLoop` in `ai.ts`, issue #474), where the host's turn-scoped validator compiles the final
+ * staged set a single time (O(N)). Never throws — bad JSON, an unsafe/non-`.koi` relPath (the
+ * session's `stage` guard throws), or an unknown tool all resolve to an error string the model can
+ * read and recover from.
  */
 export async function runEditToolStaging(
   name: string,
@@ -357,17 +443,28 @@ export async function runEditToolStaging(
   try {
     switch (name) {
       case 'koine_list_files':
-        return formatListFiles(session.list());
+        return formatListFiles([...buildDisplayIndex(session).displayFor.values()]);
       case 'koine_read_file': {
-        const relPath = typeof args.relPath === 'string' ? args.relPath : '';
-        return formatReadFile(relPath, session.read(relPath));
+        const path = typeof args.relPath === 'string' ? args.relPath : '';
+        const index = buildDisplayIndex(session);
+        const ambiguous = ambiguityError(index, path);
+        if (ambiguous) return ambiguous;
+        // An unknown display path reads through as-is: `read` resolves a raw key leniently and
+        // returns null for a genuinely unknown path (→ "not found").
+        return formatReadFile(path, session.read(index.keyFor.get(path) ?? path));
       }
       case 'koine_write_file': {
-        const relPath = typeof args.relPath === 'string' ? args.relPath : '';
+        const path = typeof args.relPath === 'string' ? args.relPath : '';
         const contents = typeof args.contents === 'string' ? args.contents : '';
-        session.stage(relPath, contents);
+        const index = buildDisplayIndex(session);
+        const ambiguous = ambiguityError(index, path);
+        if (ambiguous) return ambiguous;
+        // A path the index doesn't know is a brand-new file: mint its own session key (#472). The
+        // session's stage guard validates the RESOLVED relPath (safety + `.koi`-only).
+        const key = index.keyFor.get(path) ?? newFileKey(path);
+        session.stage(key, contents);
         // Stage-only: the staged set is validated once at end of turn, not after every write.
-        return formatWriteFile(relPath, session.isNew(relPath));
+        return formatWriteFile(path, session.isNew(key));
       }
       default:
         return `Error: unknown tool ${name}.`;

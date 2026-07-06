@@ -61,14 +61,14 @@ const { peekLegacyScratch, clearLegacyScratch } = storeSeam;
 
 // #731: capture the `onOpenPrefs` callback ide.ts wires into the (lazily-created) Assistant panel, so a
 // test can invoke it and assert it routes to the Settings overlay. A partial mock: every other aiPanel
-// export is preserved, and createAssistantPanel returns a minimal stub (the panel is created lazily on
+// export is preserved, and createAssistantChat returns a minimal stub (the panel is created lazily on
 // "Show AI Chat", and no test exercises its other methods) instead of the real DOM-heavy panel.
 const assistantSeam = vi.hoisted(() => ({ onOpenPrefs: null as null | (() => void) }));
 vi.mock('@/ai/aiPanel', async () => {
   const actual = await vi.importActual<typeof import('@/ai/aiPanel')>('@/ai/aiPanel');
   return {
     ...actual,
-    createAssistantPanel: (opts: { onOpenPrefs: () => void }) => {
+    createAssistantChat: (opts: { onOpenPrefs: () => void }) => {
       assistantSeam.onOpenPrefs = opts.onOpenPrefs;
       return { syncWorkspace() {}, focusInput() {}, explainSelection() {} };
     },

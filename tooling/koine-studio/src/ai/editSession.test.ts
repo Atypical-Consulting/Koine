@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { createEditSession } from './editSession';
+import { createEditSession, newFileKey } from './editSession';
 
 describe('createEditSession', () => {
   test('list() returns the initial relPaths in insertion order', () => {
@@ -38,8 +38,9 @@ describe('createEditSession', () => {
 
     const staged = session.staged();
     expect(staged).toEqual([
-      { relPath: 'order.koi', body: 'context Order { entity Line }', isNew: false },
-      { relPath: 'billing.koi', body: 'context Billing {}', isNew: true },
+      // Without a display map the key IS the relPath (legacy single-root behavior, #472).
+      { key: 'order.koi', relPath: 'order.koi', body: 'context Order { entity Line }', isNew: false },
+      { key: 'billing.koi', relPath: 'billing.koi', body: 'context Billing {}', isNew: true },
     ]);
   });
 
@@ -47,7 +48,7 @@ describe('createEditSession', () => {
     const session = createEditSession({});
     session.stage('a.koi', 'first');
     session.stage('a.koi', 'second');
-    expect(session.staged()).toEqual([{ relPath: 'a.koi', body: 'second', isNew: true }]);
+    expect(session.staged()).toEqual([{ key: 'a.koi', relPath: 'a.koi', body: 'second', isNew: true }]);
   });
 
   test('stage() rejects absolute and parent-traversal relPaths', () => {
@@ -95,5 +96,69 @@ describe('createEditSession', () => {
     const session = createEditSession({ 'order.koi': 'context Order {}' });
     expect(session.isNew('order.koi')).toBe(false); // an existing file
     expect(session.isNew('billing.koi')).toBe(true); // not in the initial snapshot
+  });
+});
+
+describe('multi-root keying (#472): opaque keys + display relPaths', () => {
+  test('two distinct keys sharing the same display relPath stay independent', () => {
+    const session = createEditSession(
+      { a: 'context A {}', b: 'context B {}' },
+      { a: 'model.koi', b: 'model.koi' },
+    );
+    expect(session.read('a')).toBe('context A {}');
+    expect(session.read('b')).toBe('context B {}');
+
+    session.stage('a', 'context A { entity E }');
+    expect(session.read('a')).toBe('context A { entity E }');
+    expect(session.read('b')).toBe('context B {}'); // the same-relPath sibling is untouched
+  });
+
+  test('staged() entries carry both key and the display-resolved relPath; unknown keys are isNew', () => {
+    const session = createEditSession({ a: 'context A {}' }, { a: 'model.koi' });
+    session.stage('a', 'context A { entity E }');
+    session.stage('new:nested/extra.koi', 'context Extra {}'); // a brand-new file, key minted by the caller
+
+    expect(session.staged()).toEqual([
+      { key: 'a', relPath: 'model.koi', body: 'context A { entity E }', isNew: false },
+      { key: 'new:nested/extra.koi', relPath: 'nested/extra.koi', body: 'context Extra {}', isNew: true },
+    ]);
+    expect(session.isNew('a')).toBe(false);
+    expect(session.isNew('new:nested/extra.koi')).toBe(true);
+    expect(session.list()).toEqual(['a', 'new:nested/extra.koi']);
+  });
+
+  test('without a display entry the relPath falls back to the key itself (legacy single-root)', () => {
+    const session = createEditSession({ 'order.koi': 'context Order {}' });
+    session.stage('order.koi', 'context Order { entity Line }');
+    expect(session.staged()).toEqual([
+      { key: 'order.koi', relPath: 'order.koi', body: 'context Order { entity Line }', isNew: false },
+    ]);
+  });
+
+  test('staging a brand-new file still rejects an unsafe resolved relPath', () => {
+    const session = createEditSession({}, {});
+    expect(() => session.stage('new:/etc/passwd.koi', 'x')).toThrow(); // absolute
+    expect(() => session.stage('new:../escape.koi', 'x')).toThrow(); // parent traversal
+    expect(() => session.stage('new:C:\\evil.koi', 'x')).toThrow(); // Windows drive
+  });
+
+  test('relPathOf() resolves a key through the display map, strips a new-file prefix, else echoes the key', () => {
+    const session = createEditSession(
+      { 'mem://a/model.koi': 'context A {}' },
+      { 'mem://a/model.koi': 'model.koi' },
+    );
+    expect(session.relPathOf('mem://a/model.koi')).toBe('model.koi'); // display entry wins
+    expect(session.relPathOf(newFileKey('shared/events.koi'))).toBe('shared/events.koi'); // prefix stripped
+    expect(session.relPathOf('orders.koi')).toBe('orders.koi'); // legacy key === relPath
+  });
+
+  test('newFileKey() mints the key the session resolves back to the same relPath', () => {
+    expect(newFileKey('nested/extra.koi')).toBe('new:nested/extra.koi');
+
+    const session = createEditSession({});
+    session.stage(newFileKey('nested/extra.koi'), 'context Extra {}');
+    expect(session.staged()).toEqual([
+      { key: 'new:nested/extra.koi', relPath: 'nested/extra.koi', body: 'context Extra {}', isNew: true },
+    ]);
   });
 });

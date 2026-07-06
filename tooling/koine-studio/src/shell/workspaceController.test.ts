@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, test, vi } from 'vitest';
 import { createWorkspaceController, type WorkspaceControllerDeps } from '@/shell/workspaceController';
 import { createAppStore } from '@/store/index';
 import { pathToFileUri } from '@/shell/ideUtils';
+import { newFileKey } from '@/ai/editSession';
 import type { FsEntry, GitLogEntry, GitStatus, KoiFile, McpEndpoint, Platform, SourceDoc } from '@/host/types';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
 
@@ -1151,7 +1152,7 @@ describe('createWorkspaceController — applyFileEdit', () => {
     await ws.openFolderPath(ROOT, { recent: false });
     const aUri = ws.activeUri(); // a.koi (first by relPath)
 
-    const apply = ws.applyFileEdit('a.koi', 'context A { v1 }\n'); // synchronous until the awaited (gated) write
+    const apply = ws.applyFileEdit(aUri, 'context A { v1 }\n'); // synchronous until the awaited (gated) write
     editor.setDoc('context A { v2 }\n');
     ws.syncActiveBuffer('context A { v2 }\n'); // a keystroke lands mid-write
     releaseWrite();
@@ -1182,7 +1183,7 @@ describe('createWorkspaceController — applyFileEdit', () => {
     await ws.openFolderPath(ROOT, { recent: false });
     const aUri = ws.activeUri(); // a.koi (first by relPath)
 
-    const apply = ws.applyFileEdit('a.koi', 'v1\n'); // synchronous until the awaited (gated) write
+    const apply = ws.applyFileEdit(aUri, 'v1\n'); // synchronous until the awaited (gated) write
     editor.setDoc('v2\n');
     ws.syncActiveBuffer('v2\n'); // a keystroke lands mid-write — no buffer switch
     releaseWrite();
@@ -1193,6 +1194,93 @@ describe('createWorkspaceController — applyFileEdit', () => {
     expect(platform.writes[0].contents).toBe('v1\n');
     expect(ws.buffers.get(aUri)!.dirty).toBe(true);
     expect(lsp.didSave).not.toHaveBeenCalled();
+  });
+});
+
+// #472 Task 3: applyFileEdit resolves by the OPAQUE session key — an open buffer's uri (unique across
+// the roots of a multi-root workspace, unlike the display relPath) or a `new:<relPath>` key for a file
+// that doesn't exist yet. Driven across ROOT_A/ROOT_B with a COLLIDING relPath so the by-key resolution
+// is provable, plus the single-root contract: apply by uri works; an unknown key (including the legacy
+// bare relPath) is null, never a guess across roots or a silent create.
+describe('createWorkspaceController — applyFileEdit by key (#472 Task 3)', () => {
+  test('two roots holding the same relPath: applying by root B’s uri writes only B’s buffer + file', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'model.koi', 'context A {}\n');
+    platform.seed(ROOT_B, 'model.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+    await ws.addRoot(ROOT_B);
+    const aUri = uriUnder(ROOT_A, 'model.koi');
+    const bUri = uriUnder(ROOT_B, 'model.koi');
+
+    const result = await ws.applyFileEdit(bUri, 'context B { edited }\n');
+
+    // Root B's buffer + disk file hold the new body, left clean (the write hit disk).
+    expect(result).toBe(bUri);
+    expect(ws.buffers.get(bUri)!.text).toBe('context B { edited }\n');
+    expect(ws.buffers.get(bUri)!.dirty).toBe(false);
+    expect(platform.roots.get(ROOT_B)!.get('model.koi')).toBe('context B { edited }\n');
+    expect(lsp.changeDoc).toHaveBeenCalledWith(bUri, 'context B { edited }\n');
+    // Root A's same-relPath buffer and file are untouched — exactly one write, to B's path.
+    expect(ws.buffers.get(aUri)!.text).toBe('context A {}\n');
+    expect(platform.roots.get(ROOT_A)!.get('model.koi')).toBe('context A {}\n');
+    expect(platform.writes).toEqual([{ path: `${ROOT_B}/model.koi`, contents: 'context B { edited }\n' }]);
+  });
+
+  test('a new-file key creates the file under the PRIMARY root and opens its buffer', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    platform.seed(ROOT_B, 'b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+    await ws.addRoot(ROOT_B);
+
+    const result = await ws.applyFileEdit(newFileKey('flows/fresh.koi'), 'context Fresh {}\n');
+
+    // Created under roots[0] (ROOT_A, the primary root) — not under B — and registered as a real
+    // buffer keyed by its file uri, carrying the proper relPath/rootToken, opened on the LSP.
+    const freshUri = uriUnder(ROOT_A, 'flows/fresh.koi');
+    expect(result).toBe(freshUri);
+    expect(platform.roots.get(ROOT_A)!.get('flows/fresh.koi')).toBe('context Fresh {}\n');
+    expect(platform.roots.get(ROOT_B)!.has('flows/fresh.koi')).toBe(false);
+    const buf = ws.buffers.get(freshUri)!;
+    expect(buf.relPath).toBe('flows/fresh.koi');
+    expect(buf.rootToken).toBe(ROOT_A);
+    expect(buf.dirty).toBe(false);
+    expect(lsp.openDoc).toHaveBeenCalledWith(freshUri, 'context Fresh {}\n');
+  });
+
+  test('single-root: apply by uri updates the buffer; an unknown key is null (no silent create)', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+
+    // Apply to the non-active b.koi by its uri — the single-root path, keyed exactly like multi-root.
+    const bUri = uriOf('b.koi');
+    await expect(ws.applyFileEdit(bUri, 'context B { v2 }\n')).resolves.toBe(bUri);
+    expect(ws.buffers.get(bUri)!.text).toBe('context B { v2 }\n');
+    expect(platform.files.get('b.koi')).toBe('context B { v2 }\n');
+
+    // A bare relPath is NOT a key (and not a new-file key): null, and nothing is written or created.
+    const writesBefore = platform.writes.length;
+    await expect(ws.applyFileEdit('a.koi', 'clobber\n')).resolves.toBeNull();
+    expect(ws.buffers.get(uriOf('a.koi'))!.text).toBe('context A {}\n');
+    expect(platform.files.get('a.koi')).toBe('context A {}\n');
+    expect(platform.writes.length).toBe(writesBefore);
+    // An unknown uri (no such buffer) is null too.
+    await expect(ws.applyFileEdit(uriOf('missing.koi'), 'x\n')).resolves.toBeNull();
+    expect(platform.files.has('missing.koi')).toBe(false);
   });
 });
 
@@ -2097,9 +2185,9 @@ describe('createWorkspaceController — seq seams (#982)', () => {
     await ws.saveAllDirty();
     expect(store.getState().saveSeq).toBe(seq + 1);
 
-    // applyFileEdit: writing a full body to an open file hits disk.
+    // applyFileEdit: writing a full body to an open file (by its uri key, #472) hits disk.
     seq = store.getState().saveSeq;
-    await ws.applyFileEdit('a.koi', 'context A { v3 }\n');
+    await ws.applyFileEdit(uriOf('a.koi'), 'context A { v3 }\n');
     expect(store.getState().saveSeq).toBe(seq + 1);
   });
 });

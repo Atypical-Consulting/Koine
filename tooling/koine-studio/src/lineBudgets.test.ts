@@ -86,7 +86,47 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   { file: 'src/editor/editor.ts', maxLines: 1780 },
   // Frozen 2026-07-02 at 1354 LOC, ceil(1354 × 1.02) = 1382. #990 ratchets this down as it decomposes
   // aiPanel.ts. Freezing prevents further regrowth; it does not mandate the split — #990 owns that.
-  { file: 'src/ai/aiPanel.ts', maxLines: 1382 },
+  // Raised 1382 → 1424: #984 Task 4 rewires the change-set sub-panel onto the chat slice's state
+  // machine — the closure state (accepted Set / applied / invalidated / inFlight booleans) becomes a
+  // state-driven repaint + one panel-level store subscription, with per-dispatch stale-set guards
+  // replacing the old flags. Behavior-preserving but structurally larger (~+50 LOC of consumer wiring,
+  // not feature growth). Measured end-state, no headroom — #990's decomposition (ChangeSetPanel et al.)
+  // ratchets this back down.
+  // Lowered 1424 → 1309: #990 Task 1 extracts the pure prompt builders (formatDomainIndex/buildSystem/
+  // buildExplainPrompt/buildRepairPrompt + WORKSPACE_EDIT_GUIDE + the DomainIndex/AssistantContext
+  // types) to aiPrompts.ts, leaving re-exports. Measured end-state, no headroom — the remaining #990
+  // tasks keep ratcheting down.
+  // Lowered 1309 → 865: #990 Task 6 retires the imperative DOM panel — rendering moved to the
+  // declarative AssistantChat composition (Transcript/ChangeSetPanel/Composer over the chat slice),
+  // leaving only the host factory (the send effect, grammar-constraint/repair loop, apply-gate, and
+  // change-set apply flow). Measured end-state, no headroom.
+  // Raised 865 → 905: #472 Task 2 keys the workspace snapshot by opaque session key — the documented
+  // WorkspaceFilesSnapshot shape ({files, displayPath}), the liveTextFor display-map resolution behind
+  // the drift check, and the relPath-keyed before-map derivation at stageChangeSet, ~40 LOC of
+  // multi-root wiring (not regrowth of the retired DOM panel). Measured end-state, no headroom.
+  // Raised 905 → 919: #472 Task 3 addresses the change-set apply by opaque key — the shared
+  // snapshotKeyFor reverse-lookup (relPath → snapshot key, also backing liveTextFor) and the payload
+  // mint that resolves a revision's buffer uri / mints a brand-new file's `new:<relPath>` key, ~14 LOC
+  // of multi-root wiring. Measured end-state, no headroom.
+  // Lowered 919 → 910: #472 Task 4 rounds the key through the review rows — the apply payload uses
+  // each row's own key, so the snapshotKeyFor/liveTextFor reverse lookups are deleted and drift
+  // resolves per key against one fresh snapshot. Measured end-state, no headroom.
+  // Raised 910 → 926: code-review fixes on the #984/#990/#472 arc — applyChangeSet derives the
+  // accepted list from the store (not the panel's render-time argument), the drift partition becomes
+  // a single pass with a once-per-apply display-path Set, and send()'s finally flushes a synchronous
+  // rerender() before focusComposer() so focus lands on an ENABLED textarea; correctness wiring plus
+  // its comments, not feature growth. Measured end-state, no headroom.
+  // Raised 926 → 939: review-label fix on the same arc — the staging branch now carries the TOOL
+  // layer's display labels onto the staged rows (buildDisplayIndex over the turn's session → the
+  // stageChangeSet display map), so colliding-twin review rows can never swap relative to the paths
+  // the model addressed (#472); ~13 LOC of wiring plus its comments, and ChangeSetPanel.tsx DELETED
+  // its row-order label re-derivation in exchange. Measured end-state, no headroom.
+  // Raised 939 → 953: review perf fix on the same arc — streamed deltas now coalesce into ONE
+  // appendStreamingText per animation frame (the batcher itself lives in textCoalescer.ts; this is
+  // only its wiring: the per-send coalescer + the synchronous flushNow() at each semantic boundary —
+  // tool-call start, commit, abort — with their ordering comments), and the `files(n)` pluralizer
+  // moved to its single home in ChangeSetPanel.tsx. Measured end-state, no headroom.
+  { file: 'src/ai/aiPanel.ts', maxLines: 953 },
   // Frozen 2026-07-02 at 1301 LOC (grown from the audit's 1284 @ fc83bcf5), ceil(1301 × 1.02) = 1328.
   // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
   // not mandate the split — #989 owns that.
@@ -101,7 +141,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 158 → 165: #1081 guards applyFileEdit's post-write lsp.didSave() against a write that went
   // stale before the freshness check (the same stillFresh gate its markSaved call already used) —
   // 161 LOC, ceil(161 × 1.02) = 165.
-  { file: 'src/shell/workspaceBuffers.ts', maxLines: 165 },
+  // Raised 165 → 173: #472 Task 3 re-keys applyFileEdit by the opaque session key — the O(1)
+  // buffers.get resolution, the `new:<relPath>` create-under-primary-root branch, and the
+  // unknown-key → null guard — 169 LOC, ceil(169 × 1.02) = 173.
+  { file: 'src/shell/workspaceBuffers.ts', maxLines: 173 },
   { file: 'src/shell/workspaceMutations.ts', maxLines: 179 },
   // Raised 178 → 195: #1009 guards saveActive/saveAllDirty's post-write lsp.didSave() against a
   // buffer switch during the write/format await AND a mid-write keystroke re-dirtying the saved

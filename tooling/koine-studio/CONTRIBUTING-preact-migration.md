@@ -37,6 +37,12 @@ the store, typed and axe-tested. Coexistence of paradigms *during* the rollout i
   mounts/unmounts them, but we do **not** re-render their internals through Preact. Do not "migrate" them.
 - The **`src/host/` seam** stays imperative.
 
+> The assistant **`aiPanel`** is no longer on this list: #984 moved its state into the store's `chat`
+> slice (`src/store/slices/chat.ts`) and #990 migrated its DOM to Preact components
+> (`src/ai/components/AssistantChat.tsx` + `Transcript`/`ChangeSetPanel`/`Composer`/`MdHtml`).
+> `src/ai/aiPanel.ts` survives only as the deps-binding + send-effect factory (`createAssistantChat`)
+> behind the same `{ focusInput, syncWorkspace, explainSelection }` handle.
+
 ## Per-panel recipe (6 steps)
 
 1. **Find the imperative mount.** Locate the `innerHTML` / `createElement` site in `src/shell/*.ts` (or
@@ -105,9 +111,10 @@ of disable comments (no `require-description` rule is configured). Reviewers hol
   - **Permanent islands** (`src/editor/**`, `src/diagrams/diagrams-maxgraph.ts`, `src/host/**`) — the
     CodeMirror / maxGraph / host-seam non-goals above; imperative by design, off permanently.
   - **Pending-migration islands** — one entry per already-imperative panel (a few related panels may share
-    one entry), **each naming the migration issue that retires it** (explorer → #989, aiPanel → #990, the
+    one entry), **each naming the migration issue that retires it** (explorer → #989, the
     self-contained panels welcome/about/generate-project → #991, the model/docs builders → #992; settings
-    `prefs.ts` and `inspectorController.tsx` span the arc — the config lists their exact issue set). This
+    `prefs.ts` and `inspectorController.tsx` span the arc — the config lists their exact issue set;
+    aiPanel's entry was deleted when #990 landed). This
     is a **file-level** allow-list, not a per-file count budget: it freezes the *set of files* permitted to
     use `innerHTML` — any new file, and all non-island prod, stays fully gated — and shrinks as each panel
     migrates. **Shrinking this allow-list to empty is the definition of done for the migration arc.**
@@ -119,14 +126,16 @@ of disable comments (no `require-description` rule is configured). Reviewers hol
 > with the issue that retires it (#978). The hand-run grep below stays as a quick cross-check, not the
 > source of truth: `grep -rE 'innerHTML|document\.createElement' src/shell | grep -v '\.test\.' | wc -l`.
 > The remaining sites are the intentional imperative islands below (CodeMirror, the file explorer,
-> maxGraph, the assistant `aiPanel`, the `src/host` seam, and inspectorController's direct DOM writes) —
+> maxGraph, the `src/host` seam, and inspectorController's direct DOM writes) —
 > not chrome shells. (The all-files count is higher because the migrated panels' tests now seed their
 > hosts via Preact `render`/`createElement`.)
 
 - **Already Preact (reference patterns — do not redo):** `HistoryControls`, `UnsavedIndicator`,
   `CompilingIndicator`, `MobileZoneBar`, `StoreInspector`, `inspectorSheet`; `src/model/PropertiesPanel`,
   `RelationshipsPanel`, `EventsPanel`, `GlossaryPanel`, `ModelOutlinePanel`, `ContextBreadcrumb`,
-  `SourceControlPanel`; `src/docs/DocsPanelHost`.
+  `SourceControlPanel`; `src/docs/DocsPanelHost`; the assistant chat —
+  `src/ai/components/AssistantChat.tsx` (+ `Transcript`, `ChangeSetPanel`, `Composer`, `MdHtml`) over the
+  `chat` slice (#984/#990).
 - **Migrated in #759:** the **right strip** → `src/shell/RightStrip.tsx`; the **left rail** →
   `src/shell/LeftRail.tsx`; the **AI-Chat host** → `src/shell/AssistantView.tsx` (a thin Preact host
   around the imperative `aiPanel`); the **export menu** → `src/diagrams/ExportMenu.tsx`; the capability
@@ -138,7 +147,7 @@ of disable comments (no `require-description` rule is configured). Reviewers hol
   surface); the **Compatibility** `view-check` paints a real "Check against baseline…" idle state.
 - **Stay imperative (non-goals):** **CodeMirror** (the editor, `editorSession`), the **file explorer**
   (`explorer.ts`, fills `#filetree-body`), **maxGraph** (the domain canvas, fills `#rail-domain-pane`),
-  the assistant **`aiPanel`** (large transcript/changeset DOM + lazy SDK; `AssistantView` only hosts it),
   the **`src/host/` seam**, and the global export-menu **dismissal** seam (`exportMenuDismiss.ts`, a
   document-level listener). These own and mutate their own DOM/lifecycle; do not re-render them through
-  Preact.
+  Preact. (The assistant panel left this list with #990 — the lazy SDK load survives inside its send
+  effect; `AssistantView` now hosts Studio's Preact `AssistantChat`.)

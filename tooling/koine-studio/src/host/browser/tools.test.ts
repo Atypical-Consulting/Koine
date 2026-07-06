@@ -107,6 +107,41 @@ describe('runEditTool', () => {
     expect(out).toContain('ok: true');
   });
 
+  test('validateStagedWorkspace labels the envelope by relPath, not by opaque session key (#472)', async () => {
+    api.DiagnoseWorkspace.mockClear();
+    api.DiagnoseWorkspace.mockReturnValue(JSON.stringify([{ uri: 'file:///model.koi', diagnostics: [] }]));
+    // A uri-keyed session (multi-root, #472) plus a brand-new file staged through the executor (which
+    // mints a `new:`-prefixed key): the envelope must carry each file's RELPATH label, never the key.
+    const session = createEditSession({ 'mem://a/model.koi': 'context A {}' }, { 'mem://a/model.koi': 'model.koi' });
+    await runEditTool('koine_write_file', JSON.stringify({ relPath: 'events.koi', contents: 'context E {}' }), session);
+
+    await validateStagedWorkspace(session);
+    const sentFiles = JSON.parse(api.DiagnoseWorkspace.mock.calls[0][0]);
+    expect(sentFiles).toEqual([
+      { uri: 'file:///model.koi', text: 'context A {}' },
+      { uri: 'file:///events.koi', text: 'context E {}' },
+    ]);
+  });
+
+  test('validateStagedWorkspace disambiguates colliding relPaths — two DISTINCT envelope uris (#472)', async () => {
+    api.DiagnoseWorkspace.mockClear();
+    api.DiagnoseWorkspace.mockReturnValue(JSON.stringify([{ uri: 'file:///model.koi@1', diagnostics: [] }]));
+    // Two roots hold the SAME relPath: labelling both entries `file:///model.koi` would send duplicate
+    // uris, which Koine.Wasm's DiagnoseWorkspace rejects (files.ToDictionary(f => f.Uri) throws) — so
+    // every multi-root staged validation would crash into a "(validation failed)" diagnostic. The
+    // envelope must carry the tool layer's disambiguated display paths instead.
+    const session = createEditSession(
+      { 'file:///wsA/model.koi': 'context A {}', 'file:///wsB/model.koi': 'context B {}' },
+      { 'file:///wsA/model.koi': 'model.koi', 'file:///wsB/model.koi': 'model.koi' },
+    );
+    await validateStagedWorkspace(session);
+    const sentFiles = JSON.parse(api.DiagnoseWorkspace.mock.calls[0][0]);
+    expect(sentFiles).toEqual([
+      { uri: 'file:///model.koi@1', text: 'context A {}' },
+      { uri: 'file:///model.koi@2', text: 'context B {}' },
+    ]);
+  });
+
   test('koine_write_file with a NEW relPath reports it as a new file', async () => {
     api.DiagnoseWorkspace.mockReturnValue(JSON.stringify([{ uri: 'file:///new.koi', diagnostics: [] }]));
     const session = createEditSession({ 'a.koi': 'context A {}' });

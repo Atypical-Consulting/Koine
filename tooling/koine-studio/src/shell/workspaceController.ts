@@ -255,11 +255,13 @@ export interface WorkspaceController {
   /** Apply a rename/code-action WorkspaceEdit across open buffers (active via editor, others patched). */
   applyWorkspaceEdit(edit: WorkspaceEdit): void;
   /**
-   * Write a full-file body to `relPath`: update + persist an existing open buffer, or CREATE a new
-   * file under the primary root and open it. Syncs the open buffer + LSP and clears its dirty flag.
-   * Used by the assistant's multi-file apply. Returns the file uri, or null on failure.
+   * Write a full-file body to the buffer behind `key` — the file's opaque session identity (#472):
+   * an open buffer's uri (O(1) and unambiguous even when two roots of a multi-root workspace hold the
+   * same relPath), or a `new:<relPath>` key which CREATES the file under the primary root and opens
+   * it. Updates + persists the buffer, syncs the LSP, and clears its dirty flag. Used by the
+   * assistant's multi-file apply. Returns the file uri, or null on failure / an unknown key.
    */
-  applyFileEdit(relPath: string, body: string): Promise<string | null>;
+  applyFileEdit(key: string, body: string): Promise<string | null>;
 
   // NOTE (#982): the former onActiveChanged / onBuffersChanged / onEntriesRefreshed / onSaved callback
   // seams are gone — their signals are the workspace slice's activationSeq / workspaceEditSeq /

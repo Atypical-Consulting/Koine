@@ -2,7 +2,13 @@
 // call to the already-resident Koine.Wasm runtime and format the result for the model. This is the
 // browser half of Platform.runCompilerTool — the desktop half proxies to the `koine mcp --http`
 // sidecar instead (src/host/tauri.ts). The tool DEFINITIONS + pure formatters live in assistantTools.
-import { formatCompile, formatValidate, normalizeCompileTarget, runEditToolStaging } from '@/ai/assistantTools';
+import {
+  formatCompile,
+  formatValidate,
+  normalizeCompileTarget,
+  runEditToolStaging,
+  stagedWorkspaceFiles,
+} from '@/ai/assistantTools';
 import type { EditSession } from '@/ai/editSession';
 import { loadWasmApi } from '@/host/browser/wasm';
 
@@ -45,12 +51,13 @@ export async function runWasmTool(name: string, argsJson: string): Promise<strin
   }
 }
 
-/** The `[{uri,text}]` envelope for the WHOLE staged workspace (every relPath the session knows,
- *  reading through to staged-or-initial bodies). relPaths map to `file:///<relPath>` uris. */
+/** The `[{uri,text}]` envelope for the WHOLE staged workspace (every key the session knows, reading
+ *  through to staged-or-initial bodies). Each entry is labelled `file:///<display>` via the shared
+ *  {@link stagedWorkspaceFiles} derivation (#472) — the tool layer's disambiguated display path, never
+ *  the opaque key. Bare relPaths would DUPLICATE when two roots hold the same path, and
+ *  DiagnoseWorkspace throws on a duplicate uri (its Uri-keyed ToDictionary), failing the validation. */
 function workspaceEnvelope(session: EditSession): string {
-  return JSON.stringify(
-    session.list().map((relPath) => ({ uri: `file:///${relPath}`, text: session.read(relPath) ?? '' })),
-  );
+  return JSON.stringify(stagedWorkspaceFiles(session).map((f) => ({ uri: `file:///${f.display}`, text: f.text })));
 }
 
 /**

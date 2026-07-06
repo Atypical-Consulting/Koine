@@ -6,7 +6,7 @@
 // it just moves out of init() and reaches the editor / workspace / host through the injected `deps`.
 import { createElement, render } from 'preact';
 import { createSettingsPage, type SettingsPageHandle } from '@/settings/settingsPage';
-import { createAssistantPanel, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
+import { createAssistantChat, type AssistantPanel, type AssistantContext } from '@/ai/aiPanel';
 import { AssistantView, ASSISTANT_MOUNT_CLASS } from '@atypical/koine-ui';
 import { createScenarioPanel, type ScenarioPanel } from '@/scenarios/scenarioPanel';
 import { createTerminalPanel, type TerminalPanel } from '@/shell/terminal/terminalPanel';
@@ -36,9 +36,11 @@ export interface PanelHostDeps {
   diagnosticsFor(uri: string): Array<{ range: { start: { line: number; character: number } }; severity?: number; message: string }>;
   workspace: {
     activeUri(): string;
+    /** Every open buffer, keyed by its file:// uri (the assistant's opaque session key, #472). */
     buffers: ReadonlyMap<string, { name?: string; relPath: string; text: string }>;
     folderRootToken(): string;
-    applyFileEdit(relPath: string, body: string): Promise<unknown>;
+    /** Keyed write: an open buffer's uri, or a `new:<relPath>` key creating under the primary root. */
+    applyFileEdit(key: string, body: string): Promise<unknown>;
   };
   /** The controller's cached domain index (two LSP recompiles), reused until the next edit clears it. */
   getCachedDomainIndex(): Promise<AssistantContext['domainIndex'] | null>;
@@ -146,14 +148,15 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
   function ensureAssistant(): AssistantPanel {
     if (assistant) return assistant;
     // The #view-assistant host content is owned by the AssistantView Preact island (#759): render it once
-    // (synchronously creating the mount node), then mount the imperative aiPanel into that node. Preact
-    // doesn't flush effects within render(), so we query the node and build the panel synchronously here —
+    // (synchronously creating the mount node), then build the assistant into that node. Preact doesn't
+    // flush effects within render(), so we query the node and build the panel synchronously here —
     // keeping ensureAssistant's synchronous, idempotent contract (the inspector controller + palette use
-    // the returned panel immediately). AssistantView never re-renders, so it never clobbers aiPanel's DOM.
+    // the returned handle immediately). AssistantView never re-renders, so it never contends with the
+    // factory's own AssistantChat render root inside the mount node (#990 Task 6).
     render(createElement(AssistantView, null), assistantView);
     const assistantMount = assistantView.querySelector<HTMLElement>(`.${ASSISTANT_MOUNT_CLASS}`);
     if (!assistantMount) throw new Error('missing assistant mount node');
-    assistant = createAssistantPanel({
+    assistant = createAssistantChat({
       container: assistantMount,
       getProvider: () => loadSettings().aiProvider,
       getBaseUrl: () => loadSettings().aiBaseUrl,
@@ -201,21 +204,35 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
       // The GBNF comes from the host's resident compiler. Browser-host only — the desktop host omits
       // gbnfGrammar(), so the panel falls back to parse-and-repair there.
       getGrammar: deps.platform.gbnfGrammar ? () => deps.platform.gbnfGrammar!() : undefined,
-      // Workspace snapshot for multi-file agentic editing: relPath→current text of every open buffer.
-      getWorkspaceFiles: () => Object.fromEntries([...deps.workspace.buffers.values()].map((b) => [b.relPath, b.text])),
+      // Workspace snapshot for multi-file agentic editing (#472): the REAL uri-keyed map — EVERY open
+      // buffer contributes its own entry (two roots' `model.koi` both survive; no relPath collapse),
+      // with displayPath carrying each uri's workspace-relative label for the review UI.
+      getWorkspaceFiles: () => {
+        const files: Record<string, string> = {};
+        const displayPath: Record<string, string> = {};
+        for (const [uri, buf] of deps.workspace.buffers) {
+          files[uri] = buf.text;
+          displayPath[uri] = buf.relPath;
+        }
+        return { files, displayPath };
+      },
       // Host executor for the staged list/read/write edit tools (browser WASM / desktop MCP).
       runEditTool: deps.platform.runEditTool ? (name, argsJson, session) => deps.platform.runEditTool!(name, argsJson, session) : undefined,
       // Once-per-turn whole-staged-workspace validation (issue #474): the loop calls this a single time
       // at end of turn (browser WASM DiagnoseWorkspace / desktop MCP koine_validate) instead of after
       // each write, and the panel surfaces the diagnostics for pre-apply review.
       validateStaged: deps.platform.validateStagedWorkspace ? (session) => deps.platform.validateStagedWorkspace!(session) : undefined,
-      // Commit an accepted multi-file change set through the controller (new files under the folder root).
-      // applyFileEdit returns null (not throw) on a failed write/create — collect those relPaths so the
-      // panel reports a partial apply instead of a false "Applied ✓".
+      // Commit an accepted multi-file change set through the controller, each write addressed by the
+      // staged edit's OPAQUE key (#472 Task 3): the buffer uri for a revision — unambiguous across the
+      // roots of a multi-root workspace — or a `new:<relPath>` key creating under the primary root.
+      // applyFileEdit returns null (not throw) on a failed write/create/unknown key — collect those
+      // files' DISPLAY labels (the payload's relPath slot carries the tool layer's disambiguated
+      // `relPath@n` for colliding twins, #472) so the panel reports a partial apply naming the exact
+      // file instead of a false "Applied ✓".
       onApplyChangeSet: async (files) => {
         const failed: string[] = [];
         for (const f of files) {
-          if ((await deps.workspace.applyFileEdit(f.relPath, f.body)) === null) failed.push(f.relPath);
+          if ((await deps.workspace.applyFileEdit(f.key, f.body)) === null) failed.push(f.relPath);
         }
         return { failed };
       },

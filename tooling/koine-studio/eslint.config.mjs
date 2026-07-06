@@ -64,10 +64,6 @@ export default tseslint.config(
     rules: { 'no-restricted-syntax': 'off' },
   },
   {
-    files: ['src/ai/aiPanel.ts'], // retired by #990 (AI assistant panel → Preact over the chat slice)
-    rules: { 'no-restricted-syntax': 'off' },
-  },
-  {
     // retired by #991 (self-contained panels → Preact: welcome/home, about, generate-project wizard)
     files: ['src/welcome/welcome.ts', 'src/settings/about.ts', 'src/export/generateProjectWizard.ts'],
     rules: { 'no-restricted-syntax': 'off' },
