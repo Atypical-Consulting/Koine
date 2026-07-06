@@ -84,6 +84,37 @@ public class SharedCodeActionHelpersTests
     }
 
     [Fact]
+    public void MembersOfOrNull_returns_the_fields_for_every_member_bearing_kind()
+    {
+        // value / entity / event / integration event all carry a Members list; each must surface it.
+        var src =
+            "context C {\n" +
+            "  value V { a: String }\n" +
+            "  entity E identified by EId { b: String }\n" +
+            "  event Ev { c: String }\n" +
+            "  integration event Ie { d: String }\n" +
+            "}\n";
+        var types = Parse(src).Contexts[0].Types;
+
+        types.Single(t => t.Name == "V").MembersOfOrNull()!.Select(m => m.Name).ShouldBe(["a"]);
+        types.Single(t => t.Name == "E").MembersOfOrNull()!.Select(m => m.Name).ShouldBe(["b"]);
+        types.Single(t => t.Name == "Ev").MembersOfOrNull()!.Select(m => m.Name).ShouldBe(["c"]);
+        types.Single(t => t.Name == "Ie").MembersOfOrNull()!.Select(m => m.Name).ShouldBe(["d"]);
+    }
+
+    [Fact]
+    public void MembersOfOrNull_returns_null_for_a_kind_that_carries_no_fields()
+    {
+        var src =
+            "context C {\n" +
+            "  enum Color { Red Green }\n" +
+            "}\n";
+        TypeDecl color = Parse(src).Contexts[0].Types.Single(t => t.Name == "Color");
+
+        color.MembersOfOrNull().ShouldBeNull(); // absence, not an empty list — preserves the null-policy contract
+    }
+
+    [Fact]
     public void UniqueName_returns_the_base_name_when_it_is_free()
     {
         var taken = new HashSet<string>(StringComparer.Ordinal) { "Other" };
