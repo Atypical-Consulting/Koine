@@ -81,6 +81,7 @@ surface below is a click away in the [live Studio](https://atypical-consulting.g
 | **Diagram views** | Aggregates and state machines rendered as diagrams straight from the model. |
 | **Ubiquitous-language glossary** | The generated glossary of every term in the domain, kept in lock-step with the model. |
 | **Model outline & panels** | A structural outline of the model plus a bottom **Events & Relationships** panel. |
+| **Syntax tree** | The raw parse tree of the active file in the right rail — every node's kind, name, and source span, with error-recovery markers made visible. Click a node to jump the editor to it; move the caret to highlight the matching node. |
 
 - **[Koine Studio](https://atypical-consulting.github.io/Koine/studio/)** — the full web IDE (every
   view in the tour above), running the real compiler in your browser. *(Also ships as a native
