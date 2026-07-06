@@ -74,9 +74,23 @@ internal sealed class JavaTypeMapper
         ModelIndex.MapTypeName => $"java.util.Map<{MapArg(type.Element)}, {MapArg(type.Value)}>",
         ModelIndex.RangeTypeName => $"koine.runtime.Range<{MapArg(type.Element)}>",
         // value / entity / aggregate / enum / generated-ID / unknown types map to their Java type name,
-        // package-qualified when owned by a different context than the one being emitted.
-        _ => QualifyTypeName(type.Name),
+        // package-qualified when owned by a different context than the one being emitted — honoring any
+        // explicit `Context.T` qualifier the reference carries (#1124).
+        _ => QualifyTypeName(type),
     };
+
+    /// <summary>
+    /// The Java type name for a member's declared type, threading the reference's explicit
+    /// <see cref="TypeRef.Qualifier"/> (a <c>Context.T</c> the modeller wrote) into owner resolution so a
+    /// qualified multi-owner reference qualifies to the named owner rather than the ordinal default (#1124).
+    /// </summary>
+    public string QualifyTypeName(TypeRef type) => QualifyTypeNameCore(type.Name, type.Qualifier);
+
+    /// <summary>
+    /// The Java type name for a declared Koine type named with no explicit qualifier. Delegates to
+    /// <see cref="QualifyTypeNameCore"/> with a <c>null</c> qualifier.
+    /// </summary>
+    public string QualifyTypeName(string koineName) => QualifyTypeNameCore(koineName, qualifier: null);
 
     /// <summary>
     /// The Java type name for a declared Koine type, package-qualified as
@@ -86,11 +100,11 @@ internal sealed class JavaTypeMapper
     /// (local) type, and for branded ID types, which are re-materialized locally by the emitter's unowned-id
     /// pass rather than qualified.
     /// </summary>
-    public string QualifyTypeName(string koineName)
+    private string QualifyTypeNameCore(string koineName, string? qualifier)
     {
         var pascal = JavaNaming.Type(koineName);
         if (_context is null || _packageFor is null || !IsQualifiable(koineName)
-            || OwnerContextOf(koineName) is not { } owner)
+            || OwnerContextOf(koineName, qualifier) is not { } owner)
         {
             return pascal;
         }
@@ -106,11 +120,12 @@ internal sealed class JavaTypeMapper
     /// <see cref="ModelIndex.ResolveOwner(string, string)"/> policy (issue #1091) — so a <b>multi-owner</b> type
     /// referenced from a third context resolves to a canonical owner (<c>&lt;ownerPackage&gt;.T</c>)
     /// rather than degrading to a bare, unresolvable name. Shared-kernel homing, unique-owner
-    /// resolution, and the #437 same-package bind are all handled by that one policy. Null only in the
-    /// legacy context-agnostic mode.
+    /// resolution, and the #437 same-package bind are all handled by that one policy. An explicit
+    /// <paramref name="qualifier"/> (the reference's <c>Context.T</c>) pins the owner when set (#1124).
+    /// Null only in the legacy context-agnostic mode.
     /// </summary>
-    private string? OwnerContextOf(string koineName) =>
-        _context is { } ctx ? _index.ResolveOwner(koineName, ctx).Owner : null;
+    private string? OwnerContextOf(string koineName, string? qualifier = null) =>
+        _context is { } ctx ? _index.ResolveOwner(koineName, qualifier, ctx).Owner : null;
 
     /// <summary>
     /// True for the named declared kinds that emit a Java type into a context package (so a foreign one is

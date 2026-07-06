@@ -122,6 +122,19 @@ public class MultiOwnerCrossContextTests
     }
 
     [Fact]
+    public void Java_qualifies_an_explicit_qualifier_to_the_named_owner_not_the_ordinal_default()
+    {
+        var result = new KoineCompiler().Compile(QualifiedMultiOwnerFixture, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var wallet = result.Files.Single(f => f.RelativePath.EndsWith("gamma/Wallet.java", StringComparison.Ordinal)).Contents;
+
+        // The explicit `Beta.Money` qualifier must win: package-qualify to Beta, NOT Alpha.
+        wallet.ShouldContain("koine.generated.beta.Money");
+        wallet.ShouldNotContain("koine.generated.alpha.Money");
+    }
+
+    [Fact]
     public void Rust_multi_owner_cross_context_crate_compiles()
     {
         var result = new KoineCompiler().Compile(MultiOwnerFixture, new RustEmitter());
