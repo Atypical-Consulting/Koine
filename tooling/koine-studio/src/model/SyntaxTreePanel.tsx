@@ -419,7 +419,9 @@ export function SyntaxTreePanel(props: {
   // `focusRow` focuses synchronously. Shared by keyboard nav and the refetch refocus below.
   useEffect(() => {
     if (pendingKey == null) return;
-    treeRef.current?.querySelector<HTMLElement>(`[data-key="${pendingKey}"]`)?.focus();
+    // `:not([data-band])` so focus lands on the REAL window row, not the sticky-band copy that may share this
+    // `data-key` (#1106).
+    treeRef.current?.querySelector<HTMLElement>(`[data-key="${pendingKey}"]:not([data-band])`)?.focus();
     setPendingKey(null);
   }, [pendingKey]);
 
@@ -438,7 +440,7 @@ export function SyntaxTreePanel(props: {
       scrollIndexIntoView(index);
       setPendingKey(key);
     } else {
-      treeRef.current?.querySelector<HTMLElement>(`[data-key="${key}"]`)?.focus?.();
+      treeRef.current?.querySelector<HTMLElement>(`[data-key="${key}"]:not([data-band])`)?.focus?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once per refocus request (see comment)
   }, [refocusTick]);
@@ -485,7 +487,8 @@ export function SyntaxTreePanel(props: {
     const win = windowRange(navRows.length, scrollTop, viewportH, rowHeight, bandHeight);
     const mounted = navRows.length <= VIRTUALIZE_THRESHOLD || (index >= win.first && index < win.last);
     if (mounted) {
-      treeRef.current?.querySelector<HTMLElement>(`[data-key="${key}"]`)?.focus();
+      // `:not([data-band])` targets the real window row, never a sticky-band copy sharing its key (#1106).
+      treeRef.current?.querySelector<HTMLElement>(`[data-key="${key}"]:not([data-band])`)?.focus();
     } else {
       scrollIndexIntoView(index);
       setPendingKey(key);
@@ -611,6 +614,9 @@ export function SyntaxTreePanel(props: {
         role="treeitem"
         class={cls.join(' ')}
         data-key={key}
+        // Marks the sticky-band copy of an ancestor (#1106) so the focus effects target the REAL window row,
+        // never the band row that shares its `data-key`.
+        data-band={band ? 'true' : undefined}
         aria-level={level}
         aria-setsize={setSize}
         aria-posinset={posInSet}
@@ -618,19 +624,29 @@ export function SyntaxTreePanel(props: {
         aria-current={isCurrent ? 'true' : undefined}
         aria-label={accessibleName(node)}
         tabIndex={tabbable ? 0 : -1}
-        onClick={(e) => {
-          e.stopPropagation();
-          setFocusedKey(key);
-          setActiveKey(key);
-          onNodeClick?.(node);
-        }}
+        onClick={
+          band
+            ? (e) => {
+                // Activating a band ancestor is NAVIGATION, not selection: scroll its real row back into the
+                // window and move the single roving tab stop onto it (reusing the deferred focusRow path) —
+                // never a duplicate tab stop, and it doesn't fire onNodeClick/jump-to-source (#1106).
+                e.stopPropagation();
+                focusRow(rows, rows.findIndex((r) => r.key === key));
+              }
+            : (e) => {
+                e.stopPropagation();
+                setFocusedKey(key);
+                setActiveKey(key);
+                onNodeClick?.(node);
+              }
+        }
       >
         <div class="koi-stree-row" style={{ paddingInlineStart: `${(level - 1) * 0.85 + 0.2}rem` }}>
           <span
             class={`koi-stree-twisty${hasChildren ? '' : ' koi-stree-twisty--leaf'}`}
             aria-hidden="true"
             onClick={
-              hasChildren
+              hasChildren && !band
                 ? (e) => {
                     // The twisty is the expand/collapse affordance: toggle in place WITHOUT selecting the
                     // row (stopPropagation keeps the treeitem's select+navigate handler from also firing).
@@ -638,7 +654,8 @@ export function SyntaxTreePanel(props: {
                     toggle(key);
                     setFocusedKey(key);
                   }
-                : undefined
+                : undefined // a band ancestor's twisty is inert — collapsing it from the frozen band would
+              // rip its own subtree (the window) out from under the user; activate the row to navigate instead
             }
           >
             {hasChildren ? (isExpanded ? '▾' : '▸') : ''}

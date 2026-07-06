@@ -511,6 +511,78 @@ describe('SyntaxTreePanel', () => {
     // No new a11y violations with the band mounted (band rows carry honest aria-level/setsize/posinset).
     expect(await axe(view.container)).toHaveNoViolations();
   });
+
+  test('band ancestor rows are not a second tab stop — the roving tabindex stays one window row (#1106)', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(5000))} />);
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+
+    // End moves the roving tab stop onto the last member (deep in the window) and scrolls there, so the
+    // ancestors band mounts above the window.
+    root.focus();
+    fireEvent.keyDown(root, { key: 'End' });
+    await waitFor(() => {
+      expect((document.activeElement as HTMLElement | null)?.getAttribute('aria-label')).toMatch(/Member m4999/);
+      expect(view.container.querySelectorAll('.koi-stree-item--band').length).toBeGreaterThan(0);
+    });
+
+    // Exactly one tabbable row across BOTH the band and the window — the focused window member; the band
+    // ancestors are context, never tab stops.
+    const tabbables = view.container.querySelectorAll('[role="treeitem"][tabindex="0"]');
+    expect(tabbables.length).toBe(1);
+    expect((tabbables[0] as HTMLElement).getAttribute('aria-label')).toMatch(/Member m4999/);
+    expect(view.container.querySelectorAll('.koi-stree-item--band[tabindex="0"]').length).toBe(0);
+  });
+
+  test('activating a band ancestor scrolls its real row into the window and moves roving focus there (#1106)', async () => {
+    const view = render(<SyntaxTreePanel source={makeSource(wideFixture(5000))} />);
+    const root = await view.findByRole('treeitem', { name: /KoineModel/ });
+
+    // Scroll deep (via End) so the root/context ancestors live ONLY in the band — their real window rows
+    // have scrolled out of the mounted slice.
+    root.focus();
+    fireEvent.keyDown(root, { key: 'End' });
+    await waitFor(() => expect(view.container.querySelectorAll('.koi-stree-item--band').length).toBeGreaterThan(0));
+
+    const bandContext = [...view.container.querySelectorAll('.koi-stree-item--band')].find((el) =>
+      /ContextNode Big/.test(el.getAttribute('aria-label') ?? ''),
+    ) as HTMLElement;
+    expect(bandContext).toBeTruthy();
+
+    // Activating it is NAVIGATION, not selection: scroll its real row back into the window and move the
+    // single roving tab stop onto the REAL (non-band) row — never a duplicate tab stop.
+    fireEvent.click(bandContext);
+    await waitFor(() => {
+      const focused = document.activeElement as HTMLElement | null;
+      expect(focused?.getAttribute('aria-label')).toMatch(/ContextNode Big/);
+      expect(focused?.className.includes('koi-stree-item--band')).toBe(false);
+    });
+    expect(view.container.querySelectorAll('[role="treeitem"][tabindex="0"]').length).toBe(1);
+  });
+
+  test('a refetch recomputes the band — no stale ancestor survives a shrunk tree (#1106/#1097)', async () => {
+    // A huge tree first, then a refetch to a SMALL tree (below the virtualize threshold → no band at all).
+    const syntaxTree = vi.fn().mockResolvedValueOnce(wideFixture(5000)).mockResolvedValueOnce(fixture());
+    const source: SyntaxTreeSource = { syntaxTree };
+    const view = render(<SyntaxTreePanel source={source} revision={0} />);
+    await view.findByRole('treeitem', { name: /KoineModel/ });
+    const scroller = view.container.querySelector('.koi-stree-scroll') as HTMLElement;
+
+    // Scroll deep so the band mounts the big tree's ancestors.
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => 3000 * ROW_HEIGHT });
+    fireEvent.scroll(scroller);
+    await waitFor(() => expect(view.container.querySelectorAll('.koi-stree-item--band').length).toBeGreaterThan(0));
+
+    // Refetch → the small `fixture()` tree resets the scroll to the top and rebuilds the rows; the band must
+    // recompute from the NEW model, leaving no ancestor row from the old (now-gone) big tree behind.
+    view.rerender(<SyntaxTreePanel source={source} revision={1} />);
+    await waitFor(() => expect(syntaxTree).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('.koi-stree-item--band').length).toBe(0);
+      expect(view.getByRole('treeitem', { name: /ContextNode Billing/ })).toBeTruthy();
+    });
+    // And no leftover "Big" context from the discarded tree is anywhere in the DOM.
+    expect(view.queryByRole('treeitem', { name: /ContextNode Big/ })).toBeNull();
+  });
 });
 
 // The core correctness of the editor → tree half: deepest OWN-span containment (the client-side
