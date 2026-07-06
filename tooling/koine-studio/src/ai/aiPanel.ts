@@ -26,6 +26,8 @@ import { KOINE_PRIMER } from '@/ai/assistantTools';
 import { createEditSession, type EditSession, type StagedEdit } from '@/ai/editSession';
 import { renderMarkdown } from '@/editor/editor';
 import { loadChat, saveChat, clearChat } from '@/settings/persistence';
+import { appStore, type AppState } from '@/store/index';
+import type { StoreApi } from 'zustand/vanilla';
 
 /**
  * Most parse-and-repair rounds the assistant will attempt before declaring it could not produce a
@@ -56,6 +58,12 @@ export interface AssistantContext {
 
 export interface AssistantPanelOptions {
   container: HTMLElement;
+  /**
+   * The app store carrying the `chat` slice (transcript + turn lifecycle, #984). Defaults to the
+   * app-wide singleton; tests inject their own `createAppStore()` so panels don't leak conversation
+   * state across tests — the same injection pattern as `useAppStore`'s two-argument overload.
+   */
+  store?: StoreApi<AppState>;
   /** The configured provider ('anthropic' | 'openai'). */
   getProvider: () => AiProvider;
   /** The OpenAI-compatible base URL (used only when the provider is 'openai'). */
@@ -587,10 +595,13 @@ function prettyToolArgs(argsJson: string): string {
 }
 
 export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPanel {
-  // The transcript for the workspace this panel is currently pointed at. Restored from storage on
-  // mount and re-pointed by syncWorkspace() when the folder changes; loadedKey tracks which one.
-  let messages: ChatMessage[] = loadChat(opts.getWorkspaceKey());
-  let loadedKey = opts.getWorkspaceKey();
+  // The transcript + turn lifecycle live in the app store's `chat` slice (#984): chat.messages is
+  // the conversation for the workspace this panel is pointed at, chat.workspaceKey tracks which one,
+  // and chat.status drives busy(). Restored from storage on mount and re-pointed by syncWorkspace()
+  // when the folder changes.
+  const store = opts.store ?? appStore;
+  const chat = () => store.getState().chat;
+  store.getState().hydrateChat(opts.getWorkspaceKey(), loadChat(opts.getWorkspaceKey()));
   let aborter: AbortController | null = null;
   // The most recently rendered, still-un-applied agentic change set (issue #473). A new send supersedes
   // it (its `before` was computed against an older workspace snapshot); cleared once it applies/discards.
@@ -701,14 +712,14 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
   clearBtn.textContent = 'Clear conversation';
   clearBtn.addEventListener('click', () => {
     if (busy()) return;
-    messages = [];
+    store.getState().clearChatTranscript();
     rebuildTranscript();
     clearChat(opts.getWorkspaceKey());
   });
   quick.appendChild(clearBtn);
 
   function busy(): boolean {
-    return aborter !== null;
+    return chat().status === 'streaming';
   }
 
   function setBusy(on: boolean): void {
@@ -871,7 +882,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
               model: opts.getModel(),
               temperature: opts.getTemperature?.(),
               system: buildSystem(ctx),
-              messages: [...messages, { role: 'user', content: buildRepairPrompt(previous, diagnostics) }],
+              messages: [...chat().messages, { role: 'user', content: buildRepairPrompt(previous, diagnostics) }],
               signal: aborter?.signal,
               // Stream nothing into the bubble — we only want the corrected candidate, not a second body.
               onText: () => {},
@@ -925,12 +936,12 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     }
   }
 
-  // Clear the transcript DOM back to the empty state (intro only), then replay the in-memory history.
+  // Clear the transcript DOM back to the empty state (intro only), then replay the slice's history.
   // Used on mount and whenever syncWorkspace swaps to another workspace's conversation.
   function rebuildTranscript(): void {
     transcript.innerHTML = '';
     transcript.appendChild(intro);
-    for (const m of messages) replayMessage(m);
+    for (const m of chat().messages) replayMessage(m);
   }
 
   // Restore the current workspace's conversation on first paint.
@@ -941,8 +952,10 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
 
   // Re-point the panel at the current workspace's conversation when the folder changed. Deferred
   // while a request is in flight: rebuilding the transcript mid-stream would detach the streaming
-  // bubble (addToolCard inserts tool cards before it) and reassign `messages` out from under the
-  // in-flight turn, cross-wiring one workspace's transcript into another's storage key.
+  // bubble (addToolCard inserts tool cards before it) and swap the slice transcript out from under
+  // the in-flight turn, cross-wiring one workspace's transcript into another's storage key. The
+  // slice's hydrateChat is itself a no-op while streaming (belt-and-braces); the pendingSync flag is
+  // the SCHEDULING half — send()'s finally replays the deferred sync once the turn settles.
   function syncWorkspace(): void {
     if (busy()) {
       pendingSync = true;
@@ -950,9 +963,8 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     }
     pendingSync = false;
     const key = opts.getWorkspaceKey();
-    if (key === loadedKey) return;
-    loadedKey = key;
-    messages = loadChat(key);
+    if (key === chat().workspaceKey) return;
+    store.getState().hydrateChat(key, loadChat(key));
     rebuildTranscript();
   }
 
@@ -1006,7 +1018,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
     if (fromInput) input.value = '';
     const userBubble = addBubble('user');
     userBubble.textContent = prompt;
-    messages.push({ role: 'user', content: prompt });
+    store.getState().appendChatMessage({ role: 'user', content: prompt });
 
     const replyBubble = addBubble('assistant');
     replyBubble.textContent = '…';
@@ -1109,20 +1121,21 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
 
     // Acquire the busy lock synchronously — BEFORE the first await — so a second rapid send (Enter
     // twice, or Enter then a quick action) can't slip past the busy() guard while getContext, now
-    // async, is in flight. Capture the workspace key AND the transcript array now, together, so a
-    // folder switch mid-stream can't persist this turn under the wrong workspace or push it onto
-    // another workspace's history (`messages` is the live binding syncWorkspace reassigns).
+    // async, is in flight: startChatTurn flips chat.status to 'streaming', which is what busy()
+    // reads. Capture the workspace key now, so a folder switch mid-stream can't persist this turn
+    // under the wrong workspace; the transcript needs no capture — hydrateChat is a no-op while
+    // streaming, so the slice transcript can't be swapped out from under the in-flight turn.
     aborter = new AbortController();
+    store.getState().startChatTurn();
     setBusy(true);
     const workspaceKey = opts.getWorkspaceKey();
-    const turnMessages = messages;
     // Commit a finished assistant turn to history + storage under the captured key, carrying the apply
     // opt-out so a replay of an explanatory turn stays apply-free.
     const commitAssistantTurn = (content: string): void => {
       const turn: ChatMessage = { role: 'assistant', content };
       if (!offerApply) turn.offerApply = false;
-      turnMessages.push(turn);
-      saveChat(workspaceKey, turnMessages);
+      store.getState().appendChatMessage(turn);
+      saveChat(workspaceKey, [...chat().messages]);
     };
     let full = '';
     try {
@@ -1204,7 +1217,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
         // In workspace mode, steer the model toward the multi-file edit tools (otherwise the primer's
         // "output one ```koine block" instruction wins and the change-set path never fires).
         system: editSession ? `${buildSystem(ctx)}\n\n${WORKSPACE_EDIT_GUIDE}` : buildSystem(ctx),
-        messages,
+        messages: [...chat().messages],
         signal: aborter.signal,
         // Attach the grammar only on the grammar-constrained path; a no-op for providers that ignore it.
         ...(mechanism === 'gbnf' && gbnf ? { grammar: gbnf } : {}),
@@ -1288,7 +1301,7 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       } else {
         // Aborted with nothing, or a real error: roll the whole turn back from BOTH history and
         // transcript (no dangling user turn or orphaned tool lines), and restore the prompt to retry.
-        turnMessages.pop();
+        store.getState().abortChatTurn({ rollbackUserTurn: true });
         userBubble.remove();
         for (const n of toolNodes) n.remove();
         // Restore the prompt for a retry only when it came from the input; a quick action's canned
@@ -1326,6 +1339,10 @@ export function createAssistantPanel(opts: AssistantPanelOptions): AssistantPane
       }
     } finally {
       aborter = null;
+      // Close the turn's busy window exactly where the old `aborter = null` unlock sat: a turn that
+      // completed (or aborted with a usable partial) settles streaming → idle here; the rollback
+      // path already left 'error' via abortChatTurn, which must not be clobbered back to idle.
+      if (chat().status === 'streaming') store.getState().finishChatTurn();
       setBusy(false);
       // Replay a workspace sync that arrived mid-stream, now that the transcript is quiescent.
       if (pendingSync) syncWorkspace();

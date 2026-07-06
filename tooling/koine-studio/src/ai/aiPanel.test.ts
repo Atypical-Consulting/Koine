@@ -13,6 +13,7 @@ import {
 import { runAssistant } from '@/ai/ai';
 import { GRAMMAR_PROBE_GBNF, GRAMMAR_PROBE_SENTINEL, resetGrammarCapabilityCache } from '@/ai/grammarConstraint';
 import { loadChat, saveChat } from '@/settings/persistence';
+import { createAppStore } from '@/store/index';
 
 // Stream a fenced ```koine block as the reply so a generative turn would normally offer "Apply"; the
 // Explain path must suppress that affordance while still rendering the reply bubble.
@@ -160,6 +161,9 @@ describe('explain action (panel integration)', () => {
   function makeOpts(container: HTMLElement, overrides: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
     return {
       container,
+      // A fresh store per constructed panel, so the app-store singleton doesn't leak chat state
+      // across tests (the chat slice, not panel closures, holds the transcript since #984).
+      store: createAppStore(),
       getProvider: () => 'anthropic',
       getBaseUrl: () => '',
       getApiKey: () => 'sk',
@@ -403,6 +407,9 @@ describe('grammar-constraint mechanisms (panel integration)', () => {
   function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
     return {
       container,
+      // A fresh store per constructed panel, so the app-store singleton doesn't leak chat state
+      // across tests (the chat slice, not panel closures, holds the transcript since #984).
+      store: createAppStore(),
       getProvider: () => 'openai',
       getBaseUrl: () => 'http://localhost:1234/v1',
       getApiKey: () => 'sk',
@@ -669,6 +676,9 @@ describe('tool-call cards (panel integration)', () => {
   function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
     return {
       container,
+      // A fresh store per constructed panel, so the app-store singleton doesn't leak chat state
+      // across tests (the chat slice, not panel closures, holds the transcript since #984).
+      store: createAppStore(),
       getProvider: () => 'anthropic',
       getBaseUrl: () => '',
       getApiKey: () => 'sk',
@@ -845,6 +855,9 @@ describe('multi-file change set (agentic edits)', () => {
   function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
     return {
       container,
+      // A fresh store per constructed panel, so the app-store singleton doesn't leak chat state
+      // across tests (the chat slice, not panel closures, holds the transcript since #984).
+      store: createAppStore(),
       getProvider: () => 'anthropic',
       getBaseUrl: () => '',
       getApiKey: () => 'sk',
@@ -1566,6 +1579,9 @@ describe('apply-gate re-validation at legacy entry points (#444)', () => {
   function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
     return {
       container,
+      // A fresh store per constructed panel, so the app-store singleton doesn't leak chat state
+      // across tests (the chat slice, not panel closures, holds the transcript since #984).
+      store: createAppStore(),
       getProvider: () => 'openai',
       getBaseUrl: () => 'http://localhost:1234/v1',
       getApiKey: () => 'sk',
@@ -1715,6 +1731,9 @@ describe('bare grammar-constrained candidate recovery at legacy entry points (#5
   function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
     return {
       container,
+      // A fresh store per constructed panel, so the app-store singleton doesn't leak chat state
+      // across tests (the chat slice, not panel closures, holds the transcript since #984).
+      store: createAppStore(),
       getProvider: () => 'openai',
       getBaseUrl: () => 'http://localhost:1234/v1',
       getApiKey: () => 'sk',
@@ -1839,6 +1858,9 @@ describe('workspace switching around send (per-workspace transcript integrity)',
   function opts(container: HTMLElement, over: Partial<AssistantPanelOptions> = {}): AssistantPanelOptions {
     return {
       container,
+      // A fresh store per constructed panel, so the app-store singleton doesn't leak chat state
+      // across tests (the chat slice, not panel closures, holds the transcript since #984).
+      store: createAppStore(),
       getProvider: () => 'anthropic',
       getBaseUrl: () => '',
       getApiKey: () => 'sk',
