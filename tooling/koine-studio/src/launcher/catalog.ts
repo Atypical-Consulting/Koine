@@ -6,6 +6,7 @@
 // tasks can look a glossary/model-index entry's `kind` straight up without a translation step.
 import type { ConceptSlug } from '@/model/conceptColors.generated';
 import type { Range } from '@/lsp/lsp';
+import type { ModelElement } from '@/model/modelIndex';
 
 /** The seven result categories a catalog entry can belong to. */
 export type Category = 'action' | 'symbol' | 'event' | 'rule' | 'file' | 'glossary' | 'commit';
@@ -49,6 +50,14 @@ export interface CatalogEntry {
   hint?: string;
   /** The declaration's `///` doc text (glossary entries): the live-preview pane's body (Task 5). */
   doc?: string | null;
+  /** The commit's author-date, ISO-8601 (commit entries): the live-preview pane's "When" row (Task 5). */
+  date?: string;
+  /**
+   * The already-joined `ModelElement` (symbol/event/rule entries): carried straight through from
+   * `buildCatalog`'s `ModelIndex.byQn` iteration so the live-preview pane (Task 5) can render a rich
+   * preview without a second `modelIndex()` round-trip.
+   */
+  element?: ModelElement;
 }
 
 /** A prefix-switchable search mode (`>`, `@`, `#`, `/`, `:`, or the no-prefix "all"). */

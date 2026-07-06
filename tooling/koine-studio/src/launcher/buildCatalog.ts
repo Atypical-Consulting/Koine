@@ -41,7 +41,7 @@ const EVENT_KINDS = new Set(['event', 'integration-event']);
  * `KIND[...]` chip. Every other kind (including the still-unrouted service/repository/command/query
  * noted in scratchpad/SEAMS.md) passes through unchanged.
  */
-function normalizeKind(kind: string): string {
+export function normalizeKind(kind: string): string {
   if (kind === 'quantity') return 'value';
   if (kind === 'integration event') return 'integration-event';
   return kind;
@@ -60,7 +60,8 @@ function keywordsOf(...parts: (string | null | undefined)[]): string {
  */
 function symbolAndEventEntries(index: ModelIndex): CatalogEntry[] {
   const out: CatalogEntry[] = [];
-  for (const { entry } of index.byQn.values()) {
+  for (const element of index.byQn.values()) {
+    const { entry } = element;
     const kind = normalizeKind(entry.kind);
     const cat = SYMBOL_KINDS.has(kind) ? 'symbol' : EVENT_KINDS.has(kind) ? 'event' : null;
     if (!cat) continue; // an entry kind this launcher doesn't chip (e.g. the "type" fallback) — skip, don't invent one
@@ -74,6 +75,10 @@ function symbolAndEventEntries(index: ModelIndex): CatalogEntry[] {
       keywords: keywordsOf(entry.name, entry.context, entry.doc),
       qualifiedName: entry.qualifiedName,
       nameRange: entry.nameRange,
+      // The already-joined `ModelElement` (issue #1143, task 5): carried straight through so the live-
+      // preview pane can build a symbol/event preview without a second `modelIndex()` round-trip — this
+      // loop already has it in hand from the `byQn` join.
+      element,
     });
   }
   return out;
@@ -91,7 +96,8 @@ function symbolAndEventEntries(index: ModelIndex): CatalogEntry[] {
  */
 function ruleEntries(index: ModelIndex): CatalogEntry[] {
   const out: CatalogEntry[] = [];
-  for (const { entry, node, modelMembers } of index.byQn.values()) {
+  for (const element of index.byQn.values()) {
+    const { entry, node, modelMembers } = element;
     const kind = normalizeKind(entry.kind);
 
     (node?.invariants ?? []).forEach((invariant, i) => {
@@ -104,6 +110,11 @@ function ruleEntries(index: ModelIndex): CatalogEntry[] {
         sub: `${entry.name} invariant`,
         ctx: entry.context,
         keywords: keywordsOf(invariant, entry.name),
+        // Carries the OWNING element's qualifiedName + the element itself (not a per-invariant
+        // identity — there isn't one) so the live-preview pane (Task 5) can render this invariant's
+        // owner without a second `modelIndex()` round-trip.
+        qualifiedName: entry.qualifiedName,
+        element,
       });
     });
 
@@ -119,6 +130,10 @@ function ruleEntries(index: ModelIndex): CatalogEntry[] {
           sub: `${entry.name} state`,
           ctx: entry.context,
           keywords: keywordsOf(member.name, entry.name),
+          // Same rationale as the invariant push above: the owning enum's qualifiedName + element, for
+          // Task 5's preview-pane rendering.
+          qualifiedName: entry.qualifiedName,
+          element,
         });
       }
     }
@@ -177,7 +192,7 @@ async function commitEntries(sources: LauncherSources): Promise<CatalogEntry[]> 
   const pending = sources.gitLog();
   if (!pending) return [];
   const log = await pending;
-  return log.map(({ sha, author, message }) => ({
+  return log.map(({ sha, author, date, message }) => ({
     id: `commit:${sha}`,
     cat: 'commit',
     title: message,
@@ -185,6 +200,9 @@ async function commitEntries(sources: LauncherSources): Promise<CatalogEntry[]> 
     ctx: author,
     hash: sha,
     keywords: keywordsOf(message, sha),
+    // The ISO-8601 author-date, carried through so the live-preview pane (Task 5) can render a commit's
+    // "When" row straight from the CatalogEntry, without re-fetching (or re-caching) the raw git log.
+    date,
   }));
 }
 

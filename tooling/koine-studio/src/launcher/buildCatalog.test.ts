@@ -195,12 +195,12 @@ describe('buildCatalog — commits', () => {
       {
         id: 'commit:abc1234567890', cat: 'commit', title: 'feat: add shipping event',
         sub: 'abc1234 · Ada Lovelace', ctx: 'Ada Lovelace', hash: 'abc1234567890',
-        keywords: 'feat: add shipping event abc1234567890',
+        keywords: 'feat: add shipping event abc1234567890', date: '2026-07-01T10:00:00Z',
       },
       {
         id: 'commit:def0987654321', cat: 'commit', title: 'fix: rounding bug',
         sub: 'def0987 · Alan Turing', ctx: 'Alan Turing', hash: 'def0987654321',
-        keywords: 'fix: rounding bug def0987654321',
+        keywords: 'fix: rounding bug def0987654321', date: '2026-06-30T09:00:00Z',
       },
     ]);
   });

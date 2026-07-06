@@ -16,10 +16,11 @@ export interface ResultRowProps {
 }
 
 /** The line-icon glyphs a non-chip category renders, ported verbatim (path data unchanged) from the
- * prototype's `I` map in design/design_handoff_git_spotlight_logos/koine-launcher.js. */
-type GlyphKind = 'action' | 'file' | 'gloss' | 'rule' | 'state' | 'commit';
+ * prototype's `I` map in design/design_handoff_git_spotlight_logos/koine-launcher.js. Exported so the
+ * preview pane (Task 5) reuses the same icon paths instead of duplicating them. */
+export type GlyphKind = 'action' | 'file' | 'gloss' | 'rule' | 'state' | 'commit';
 
-function GlyphPaths({ kind }: { kind: GlyphKind }) {
+export function GlyphPaths({ kind }: { kind: GlyphKind }) {
   switch (kind) {
     case 'action':
       return <path d="M4.5 4 8 7.5 4.5 11M8.5 11.5h4" />;

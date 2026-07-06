@@ -1,11 +1,16 @@
 // The Spotlight launcher's overlay shell: scrim + card + input row + prefix-mode pill + footer legend
-// (issue #1143, task 3), extended (task 4) to fill `.lx-results` with grouped, ranked result rows. No
-// preview pane (Task 5), no per-result actions (Task 6), no full keyboard nav beyond Esc (Task 7) —
-// `selected` is always false this task; a later task supplies the selection index.
+// (issue #1143, task 3), extended (task 4) to fill `.lx-results` with grouped, ranked result rows, and
+// (task 5) to resolve + render the live PREVIEW pane for the selected result. Per-result actions (Task
+// 6) and full ↑/↓ keyboard nav (Task 7) still aren't wired — "selected" is always the FIRST visible row
+// (`deriveResults(...).visible[0]`) until Task 7 supplies real keyboard-driven selection state. No extra
+// join is needed for the preview: `buildCatalog` (task 5) already attaches each symbol/event/rule
+// entry's joined `ModelElement`, so `previewFor(selected.entry, {})` reads straight off the catalog.
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { buildCatalog, type LauncherSources } from '@/launcher/buildCatalog';
 import { MODES, PREFIX_CHARS, parseMode, type CatalogEntry } from '@/launcher/catalog';
 import { deriveResults } from '@/launcher/deriveResults';
+import { previewFor } from '@/launcher/preview';
+import { PreviewPane } from '@/launcher/PreviewPane';
 import { ResultRow } from '@/launcher/ResultRow';
 
 export interface LauncherPanelProps {
@@ -22,16 +27,18 @@ export function LauncherPanel(props: LauncherPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const { mode, query } = parseMode(input);
-  // Flips once a selected result exposes a preview() to show (Task 5); always false this task.
-  const hasPreview = false;
   // Grouped/ranked results (Task 4) — see deriveResults.ts for the empty-query default vs. ranked-and-
-  // grouped derivation. `visible` (unused here) is the same flat top-to-bottom row order Task 7's
-  // selection reducer and Task 5's preview need; re-derive it from (catalog, mode, query) rather than
-  // threading it through props, since deriveResults is a pure function those tasks can call directly.
-  const { sections } = deriveResults(catalog, mode, query);
+  // grouped derivation. `visible` is the same flat top-to-bottom row order Task 7's selection reducer
+  // will need; re-derive it from (catalog, mode, query) rather than threading it through props, since
+  // deriveResults is a pure function those tasks can call directly.
+  const { sections, visible: visibleResults } = deriveResults(catalog, mode, query);
+  // "Selected" is always the first visible row until Task 7 lands real ↑/↓ selection state.
+  const selected = visibleResults[0];
+  const previewModel = selected ? previewFor(selected.entry, {}) : null;
+  const hasPreview = previewModel !== null;
 
-  // Load the live catalog once per open so the count reflects real data; guarded against the panel
-  // closing/unmounting before the join resolves (buildCatalog awaits the model index + git log).
+  // Load the live catalog once per open so the count/preview reflect real data; guarded against the
+  // panel closing/unmounting before the join resolves (buildCatalog awaits the model index + git log).
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
@@ -129,11 +136,12 @@ export function LauncherPanel(props: LauncherPanelProps) {
                   <span class="gl-n">{section.rows.length}</span>
                 </div>
                 {section.rows.map((row) => (
-                  <ResultRow key={row.entry.id} result={row} selected={false} />
+                  <ResultRow key={row.entry.id} result={row} selected={row.entry.id === selected?.entry.id} />
                 ))}
               </div>
             ))}
           </div>
+          <div class="lx-preview">{previewModel && <PreviewPane model={previewModel} />}</div>
         </div>
         <div class="lx-footer">
           <span class="lx-hint">

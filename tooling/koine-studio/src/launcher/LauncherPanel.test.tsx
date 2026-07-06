@@ -224,3 +224,35 @@ describe('LauncherPanel — grouped results (issue #1143, task 4)', () => {
     expect(view.container.querySelector('.lx-item')!.textContent).toContain('OrderPlaced');
   });
 });
+
+describe('LauncherPanel — live preview pane (issue #1143, task 5)', () => {
+  test('has no .has-preview class before the live catalog has loaded (no results yet)', () => {
+    const view = mount(makeSources());
+    const card = view.container.querySelector('.lx') as HTMLElement;
+    expect(card.className).not.toContain('has-preview');
+    expect(view.container.querySelector('.lx-preview')!.textContent).toBe('');
+  });
+
+  test('adds .has-preview and renders the first visible result\'s preview + marks its row selected', async () => {
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources);
+
+    // The curated empty-query default's "Top hits" lists symbols in catalog order — Order (the
+    // aggregate) comes before Money — so the FIRST visible row (today's stand-in "selection", Task 7
+    // supplies real ↑/↓ state) is the Order aggregate.
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+
+    const card = view.container.querySelector('.lx') as HTMLElement;
+    expect(card.className).toContain('has-preview');
+
+    const preview = view.container.querySelector('.lx-preview') as HTMLElement;
+    expect(preview.querySelector('.pv-name')!.textContent).toBe('Order');
+    const chip = preview.querySelector('.pv-head .lx-kind') as HTMLElement;
+    expect(chip.textContent).toBe('AR');
+    expect(preview.querySelector('.pv-grid')).toBeTruthy();
+
+    const selectedRow = view.container.querySelector('.lx-item.sel') as HTMLElement;
+    expect(selectedRow.textContent).toContain('Order');
+    expect(view.container.querySelectorAll('.lx-item.sel')).toHaveLength(1);
+  });
+});

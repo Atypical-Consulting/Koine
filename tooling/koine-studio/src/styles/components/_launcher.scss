@@ -337,6 +337,261 @@
   display: block;
 }
 
+/* live preview pane content (task 5): header, file path, code block, meta grid, states/payload/pills,
+   rule/transition/commit-file rows, and the note callout. Ported from the prototype's `.pv-*` <style>
+   (design/design_handoff_git_spotlight_logos/Koine Launcher - Spotlight.html), tokens only. */
+.pv-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 14px;
+}
+
+.pv-head .lx-kind,
+.pv-head .lx-glyph {
+  width: 34px;
+  height: 34px;
+}
+
+.pv-head .lx-kind {
+  font-size: 11px;
+}
+
+.pv-head .lx-glyph .lx-ic {
+  width: 18px;
+  height: 18px;
+}
+
+.pv-title {
+  min-width: 0;
+}
+
+.pv-name {
+  font-family: var(--koi-font-display);
+  font-weight: 660;
+  font-size: 17px;
+  color: var(--koi-fg);
+  letter-spacing: -0.01em;
+}
+
+.pv-sub {
+  font-size: 11.5px;
+  color: var(--koi-muted);
+  margin-top: 2px;
+}
+
+.pv-file {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--koi-font-mono);
+  font-size: 11px;
+  color: var(--koi-muted);
+  margin-bottom: 12px;
+}
+
+.pv-file .lx-ic {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
+.pv-desc {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--koi-ink-soft);
+  margin-bottom: 14px;
+  text-wrap: pretty;
+}
+
+.pv-code-block {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: var(--koi-radius-sm);
+  background: color-mix(in srgb, var(--koi-paper) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--koi-line) 70%, transparent);
+  font-family: var(--koi-font-mono);
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  color: var(--koi-fg);
+}
+
+.pv-code-block .k {
+  color: var(--koi-hl-keyword);
+}
+
+.pv-code-block .s {
+  color: var(--koi-hl-string);
+}
+
+.pv-diff .dl {
+  display: block;
+  margin: 0 -14px;
+  padding: 0 14px;
+}
+
+.pv-diff .dl-add {
+  background: color-mix(in srgb, var(--koi-hl-string) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--koi-hl-string);
+}
+
+.pv-diff .dl-del {
+  background: color-mix(in srgb, var(--koi-error) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--koi-error);
+  opacity: 0.8;
+}
+
+.pv-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 7px 16px;
+  align-items: baseline;
+  margin-bottom: 14px;
+}
+
+.pv-k {
+  font-size: 11px;
+  color: var(--koi-muted);
+  font-family: var(--koi-font-mono);
+}
+
+.pv-v {
+  font-size: 12.5px;
+  color: var(--koi-fg);
+}
+
+.pv-section {
+  font-family: var(--koi-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--koi-muted);
+  margin: 4px 0 8px;
+}
+
+.pv-pill,
+.pv-state {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: var(--koi-radius-pill);
+  font-size: 11.5px;
+  background: color-mix(in srgb, var(--kc, var(--koi-fg)) 15%, transparent);
+  color: var(--kc, var(--koi-ink-soft));
+  border: 1px solid color-mix(in srgb, var(--kc, var(--koi-fg)) 22%, transparent);
+}
+
+.pv-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pv-states {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.pv-states.big {
+  margin: 4px 0 16px;
+}
+
+.pv-state {
+  --kc: var(--koi-ddd-state-machine);
+}
+
+.pv-state.on {
+  height: 28px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+.pv-arrow {
+  color: var(--koi-muted);
+}
+
+.pv-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.pv-field {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 5px 10px;
+  border-radius: var(--koi-radius-xs);
+  background: color-mix(in srgb, var(--koi-paper) 55%, transparent);
+  font-family: var(--koi-font-mono);
+  font-size: 12px;
+}
+
+.pv-field .pf-t {
+  color: var(--koi-hl-type);
+}
+
+.pv-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--koi-radius-sm);
+  background: color-mix(in srgb, var(--koi-accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 20%, transparent);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--koi-ink-soft);
+}
+
+.pv-note .lx-ic {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-top: 1px;
+  color: var(--koi-accent);
+}
+
+.pv-files {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pv-frow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 8px;
+  border-radius: var(--koi-radius-xs);
+  font-family: var(--koi-font-mono);
+  font-size: 11.5px;
+}
+
+.pv-frow:hover {
+  background: color-mix(in srgb, var(--koi-fg) 5%, transparent);
+}
+
+.pv-fpath {
+  flex: 1;
+  min-width: 0;
+  color: var(--koi-ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pv-fn {
+  color: var(--koi-muted);
+}
+
 /* footer: key hints + mode legend */
 .lx-footer {
   flex: none;
