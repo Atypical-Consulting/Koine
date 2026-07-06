@@ -31,13 +31,23 @@ body:
     id: area
     attributes:
       label: Area
+      description: The functional area — mirrors the repo's `area:` labels so issues stay filterable.
       options:
-        - Language / grammar
-        - Semantic model / validation
+        - Studio (IDE)
         - C# emitter
         - TypeScript emitter
-        - New emitter target
+        - Python emitter
+        - PHP emitter
+        - Rust emitter
+        - Kotlin emitter
+        - Java emitter
+        - Docs / spec emitters (AsyncApi, OpenApi, GBNF, Glossary)
+        - Emitter core / cross-target
+        - Semantic model / validation
+        - Language / grammar
         - CLI / LSP / tooling
         - Docs / website
+        - CI / infra / release
+        - Templates / demo
     validations:
       required: true
