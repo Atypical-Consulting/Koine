@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import { act, fireEvent, render, waitFor } from '@testing-library/preact';
-import { SyntaxTreePanel, deepestContaining, type SyntaxTreeSource } from '@/model/SyntaxTreePanel';
+import { SyntaxTreePanel, deepestContaining, ancestorsOf, flattenVisible, type SyntaxTreeSource } from '@/model/SyntaxTreePanel';
 import type { SourceSpan, SyntaxTreeNode } from '@/lsp/protocol';
 import { axe } from 'vitest-axe';
 
@@ -492,5 +492,52 @@ describe('deepestContaining', () => {
     // A caret inside the child resolves to it (jumpable); nothing resolves to the zero-span root.
     expect(deepestContaining(tree, 2, 1)?.node.name).toBe('Billing');
     expect(deepestContaining(tree, 0, 0)).toBeNull(); // the all-zero root is never a match → no jump
+  });
+});
+
+// The ancestor derivation behind the sticky ancestors band (#1106): given the first-visible (window-top)
+// row's index-path key, produce the chain of ancestor Rows (root..parent) that scrolled out above the
+// window — so an AT enumerating the raw DOM sees an unbroken aria-level chain, not a window of orphaned
+// aria-level=N rows.
+describe('ancestorsOf', () => {
+  // A deep tree with SIBLINGS at each level, so the derivation must pick the real parent chain
+  // (root → context → value-object), not merely adjacent rows.
+  function deepFixture(): SyntaxTreeNode {
+    return node('KoineModel', null, [
+      node('ContextNode', 'Billing', [
+        node('ValueObjectDecl', 'Money', [
+          node('Member', 'amount', []), // 0/0/0/0 — the level-4 target
+          node('Member', 'currency', []), // 0/0/0/1 — a sibling member
+        ]),
+        node('ValueObjectDecl', 'Rate', []), // 0/0/1 — a sibling value object
+      ]),
+      node('ContextNode', 'Shipping', []), // 0/1 — a sibling context
+    ]);
+  }
+
+  test('returns root..parent (with real aria-levels + sibling metadata) of a deep row', () => {
+    const root = deepFixture();
+    const expanded = new Set(['0', '0/0', '0/0/0']); // fully expand down to the members
+    const rows = flattenVisible(root, expanded);
+
+    // The first-visible row landing on the level-4 Member `amount` yields its three real ancestors, in
+    // root..parent order, each carrying the aria-level it would have inline.
+    const target = rows.findIndex((r) => r.key === '0/0/0/0');
+    expect(rows[target].level).toBe(4);
+    const path = ancestorsOf(root, rows[target].key, expanded);
+    expect(path.map((r) => r.node.kind)).toEqual(['KoineModel', 'ContextNode', 'ValueObjectDecl']);
+    expect(path.map((r) => r.level)).toEqual([1, 2, 3]);
+    expect(path.map((r) => r.key)).toEqual(['0', '0/0', '0/0/0']);
+    // Honest sibling metadata is carried through: Money is child 1 of Billing's two value objects.
+    expect(path[2].posInSet).toBe(1);
+    expect(path[2].setSize).toBe(2);
+  });
+
+  test('a first-visible row that IS a root has no ancestors — the band collapses to empty', () => {
+    const root = deepFixture();
+    const expanded = new Set(['0', '0/0', '0/0/0']);
+    const rows = flattenVisible(root, expanded);
+    expect(rows[0].level).toBe(1);
+    expect(ancestorsOf(root, rows[0].key, expanded)).toEqual([]);
   });
 });

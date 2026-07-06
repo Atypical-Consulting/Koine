@@ -130,7 +130,7 @@ function accessibleName(node: SyntaxTreeNode): string {
 
 /** One flattened visible row: its index-path key, the node, its 1-based depth, and its position among
  *  siblings — enough to render an honest flat `treeitem` with `aria-level`/`aria-setsize`/`aria-posinset`. */
-interface Row {
+export interface Row {
   key: string;
   node: SyntaxTreeNode;
   level: number;
@@ -152,7 +152,7 @@ const FALLBACK_VIEWPORT_ROWS = 40;
 
 /** Pre-order flatten of the visible (expanded) rows. A collapsed node contributes its own row but none of
  *  its descendants — exactly the set the panel renders and the arrow keys traverse. */
-function flattenVisible(root: SyntaxTreeNode, expanded: Set<string>): Row[] {
+export function flattenVisible(root: SyntaxTreeNode, expanded: Set<string>): Row[] {
   const rows: Row[] = [];
   const walk = (node: SyntaxTreeNode, key: string, level: number, setSize: number, posInSet: number): void => {
     const hasChildren = node.children.length > 0;
@@ -164,6 +164,43 @@ function flattenVisible(root: SyntaxTreeNode, expanded: Set<string>): Row[] {
   };
   walk(root, ROOT_KEY, 1, 1, 1);
   return rows;
+}
+
+/**
+ * The ancestor chain (root..parent) of the row at index-path `key`, as renderable {@link Row}s that carry the
+ * SAME `aria-level`/`aria-setsize`/`aria-posinset` those ancestors have inline. Empty for a root (a `key` with
+ * no `/`). This is the derivation behind the sticky ancestors band (#1106): when a windowed flat tree scrolls
+ * deep, the window-top row's ancestors have scrolled out of the mounted slice, so an AT enumerating the raw
+ * DOM sees `aria-level=N` rows with no level-1..N-1 parents. Re-materialising that chain restores the levels.
+ *
+ * Derived straight from the tree + `key` in O(depth) — deliberately NOT an O(n) scan of the flattened rows —
+ * so the band can recompute on every window-top change without reintroducing the per-scroll O(n) work that
+ * #1098's virtualization exists to avoid (a deep row in a huge flat sibling list is ~n rows past its
+ * ancestors, so a backward scan would be O(n)). `expanded` only fills each band row's `isExpanded` (every
+ * ancestor is expanded, since its descendant is visible); it never changes which rows are returned. A key that
+ * no longer resolves (a shrunk/rebuilt tree after a refetch) yields the ancestors up to the break, never a
+ * stale node.
+ */
+export function ancestorsOf(root: SyntaxTreeNode, key: string, expanded: Set<string>): Row[] {
+  const out: Row[] = [];
+  for (let slash = key.indexOf('/'); slash !== -1; slash = key.indexOf('/', slash + 1)) {
+    const ancKey = key.slice(0, slash);
+    const node = nodeAtKey(root, ancKey);
+    if (!node) break; // a path that no longer resolves contributes no (stale) band row
+    const cut = ancKey.lastIndexOf('/');
+    const parent = cut === -1 ? null : nodeAtKey(root, ancKey.slice(0, cut));
+    const hasChildren = node.children.length > 0;
+    out.push({
+      key: ancKey,
+      node,
+      level: ancKey.split('/').length, // '0' → 1, '0/0' → 2, … matching flattenVisible's 1-based depth
+      setSize: parent ? parent.children.length : 1,
+      posInSet: cut === -1 ? 1 : Number(ancKey.slice(cut + 1)) + 1,
+      hasChildren,
+      isExpanded: hasChildren && expanded.has(ancKey),
+    });
+  }
+  return out;
 }
 
 /** The half-open range `[first, last)` of row indices to mount for a scroll offset + viewport height
