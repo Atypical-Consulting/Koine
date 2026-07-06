@@ -92,7 +92,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // replacing the old flags. Behavior-preserving but structurally larger (~+50 LOC of consumer wiring,
   // not feature growth). Measured end-state, no headroom — #990's decomposition (ChangeSetPanel et al.)
   // ratchets this back down.
-  { file: 'src/ai/aiPanel.ts', maxLines: 1424 },
+  // Lowered 1424 → 1309: #990 Task 1 extracts the pure prompt builders (formatDomainIndex/buildSystem/
+  // buildExplainPrompt/buildRepairPrompt + WORKSPACE_EDIT_GUIDE + the DomainIndex/AssistantContext
+  // types) to aiPrompts.ts, leaving re-exports. Measured end-state, no headroom — the remaining #990
+  // tasks keep ratcheting down.
+  { file: 'src/ai/aiPanel.ts', maxLines: 1309 },
   // Frozen 2026-07-02 at 1301 LOC (grown from the audit's 1284 @ fc83bcf5), ceil(1301 × 1.02) = 1328.
   // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
   // not mandate the split — #989 owns that.
