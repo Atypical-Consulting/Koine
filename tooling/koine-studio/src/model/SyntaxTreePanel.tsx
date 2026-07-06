@@ -703,6 +703,13 @@ export function SyntaxTreePanel(props: {
       <div
         ref={treeRef}
         class="koi-stree-scroll"
+        // When windowed, the single roving tab stop lives on a mounted row — but a deep scroll can move that
+        // row out of the mounted slice (the band copies of its ancestors are deliberately non-tabbable), which
+        // would leave this overflowing viewport with no keyboard-focusable descendant (axe
+        // `scrollable-region-focusable`, and a keyboard-only user genuinely couldn't scroll it). Making the
+        // viewport itself focusable keeps the scroll region keyboard-reachable without adding a second
+        // treeitem tab stop. Small (non-windowed) trees mount every row, so their tab stop can't scroll away.
+        tabIndex={virtualize ? 0 : undefined}
         onScroll={virtualize ? (e) => setScrollTop(e.currentTarget.scrollTop) : undefined}
       >
         <div
