@@ -26,6 +26,7 @@ describe('EMIT_TARGETS', () => {
       { id: 'php', displayName: 'PHP', fileExtension: '.php' },
       { id: 'rust', displayName: 'Rust', fileExtension: '.rs' },
       { id: 'java', displayName: 'Java', fileExtension: '.java' },
+      { id: 'kotlin', displayName: 'Kotlin', fileExtension: '.kt' },
       { id: 'asyncapi', displayName: 'AsyncAPI', fileExtension: '.yaml' },
       { id: 'openapi', displayName: 'OpenAPI', fileExtension: '.yaml' },
     ]);

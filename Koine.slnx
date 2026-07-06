@@ -19,6 +19,7 @@
     <Project Path="src/Koine.Emit.Docs/Koine.Emit.Docs.csproj" />
     <Project Path="src/Koine.Emit.Glossary/Koine.Emit.Glossary.csproj" />
     <Project Path="src/Koine.Emit.Java/Koine.Emit.Java.csproj" />
+    <Project Path="src/Koine.Emit.Kotlin/Koine.Emit.Kotlin.csproj" />
     <Project Path="src/Koine.Emit.OpenApi/Koine.Emit.OpenApi.csproj" />
     <Project Path="src/Koine.Emit.Php/Koine.Emit.Php.csproj" />
     <Project Path="src/Koine.Emit.Python/Koine.Emit.Python.csproj" />

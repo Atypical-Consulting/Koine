@@ -12,7 +12,7 @@ function isEmptyExtension(ext: ReturnType<typeof langExt>): boolean {
 }
 
 describe('langExt', () => {
-  const highlighted: OutputLang[] = ['csharp', 'typescript', 'python', 'php', 'rust'];
+  const highlighted: OutputLang[] = ['csharp', 'typescript', 'python', 'php', 'rust', 'java', 'kotlin'];
 
   it.each(highlighted)('returns a non-empty highlighting extension for %s', (lang) => {
     expect(isEmptyExtension(langExt(lang))).toBe(false);

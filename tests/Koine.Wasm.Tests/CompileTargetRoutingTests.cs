@@ -43,6 +43,7 @@ public class CompileTargetRoutingTests
             ["php"] = ".php",
             ["rust"] = ".rs",
             ["java"] = ".java",
+            ["kotlin"] = ".kt",
             ["glossary"] = ".md",
             ["docs"] = ".md",
             ["asyncapi"] = ".yaml",
