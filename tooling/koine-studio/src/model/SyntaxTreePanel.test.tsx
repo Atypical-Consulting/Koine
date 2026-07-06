@@ -379,6 +379,40 @@ describe('SyntaxTreePanel', () => {
     expect(view.container.querySelectorAll('.koi-stree-item--current').length).toBe(1);
   });
 
+  test('the echo guard is consumed on every caret effect — a stale echo never swallows a later genuine move', async () => {
+    const onNodeClick = vi.fn();
+    const source = makeSource(spannedFixture());
+    const view = render(<SyntaxTreePanel source={source} onNodeClick={onNodeClick} />);
+
+    const money = await view.findByRole('treeitem', { name: /ValueObjectDecl Money/ });
+    fireEvent.click(money); // arms the guard for the predicted echo {line: 4, column: 1}
+
+    // A genuine caret move that is NOT the echo lands inside Member (line 3, col 10) — a MISS, which must
+    // still CONSUME the armed echo rather than leave it stale. Member becomes current.
+    view.rerender(<SyntaxTreePanel source={source} onNodeClick={onNodeClick} caret={{ line: 3, column: 10 }} />);
+    const member = await view.findByRole('treeitem', { name: /Member amount/ });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(member.className).toContain('koi-stree-item--current');
+
+    // A LATER genuine caret move to the coord that WAS the predicted echo {4,1} must re-derive normally to
+    // the enclosing Billing — proving the earlier MISS consumed the ref, not left a stale {4,1} that would
+    // wrongly swallow this move. Locks the "consume on every caret effect, match or miss" invariant; a guard
+    // that cleared the ref only on a match would keep Money highlighted here instead of Billing.
+    view.rerender(<SyntaxTreePanel source={source} onNodeClick={onNodeClick} caret={{ line: 4, column: 1 }} />);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    const billing = view.getByRole('treeitem', { name: /ContextNode Billing/ });
+    expect(billing.className).toContain('koi-stree-item--current');
+    expect(view.getByRole('treeitem', { name: /ValueObjectDecl Money/ }).className).not.toContain(
+      'koi-stree-item--current',
+    );
+    expect(view.container.querySelectorAll('.koi-stree-item--current').length).toBe(1);
+  });
+
   test('has no accessibility violations', async () => {
     const view = render(<SyntaxTreePanel source={makeSource(fixture())} />);
     await view.findByRole('tree', { name: /Syntax tree/i });
