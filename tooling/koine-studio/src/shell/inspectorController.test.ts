@@ -1487,8 +1487,8 @@ describe('createInspectorController — deck center layout', () => {
       const cards = document.querySelectorAll('#center-body .deck-card');
       expect(cards.length).toBe(4);
     });
-    // The DeckBar filmstrip renders into #deck-bar.
-    expect(document.querySelector('#deck-bar .deck-strip')).not.toBeNull();
+    // The DeckSpine tab-strip renders into #deck-bar.
+    expect(document.querySelector('#deck-bar .fx-strip')).not.toBeNull();
     ctl.dispose();
   });
 

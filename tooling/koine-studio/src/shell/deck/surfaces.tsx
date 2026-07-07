@@ -1,5 +1,5 @@
 // Deck surfaces — the single registry of the four center surfaces (Canvas / Code / Output / Docs),
-// their hoisted facets, accent hue, and icon. Shared by the Deck components (DeckBar / DeckCard /
+// their hoisted facets, accent hue, and icon. Shared by the Deck components (DeckSpine / DeckCard /
 // DeckStage) and by inspectorController (which maps facet clicks to setTech/setOutput/setDocs and
 // computes which facet is active). Ported from the Deck v2 POC's SURFACES + ICONS registry, with the
 // POC's `--st-*` accents rewritten to the app's real `--koi-ddd-*` / `--koi-hl-*` tokens.
@@ -66,12 +66,8 @@ export const IconDocs = svg(
     <path d="M9 8h5M9 12h5" />
   </>,
 );
-// IconOverview / IconSplit / IconClose moved to @atypical/koine-ui's deckIcons.tsx (issue #905,
-// Task 4) — DeckBar/DeckCard, their only consumers, now live there.
-export const IconSwap = svg(<path d="M7 4 3 8l4 4M3 8h13M17 20l4-4-4-4M21 16H8" />, {
-  strokeWidth: 1.8,
-  lineCap: true,
-});
+// IconOverview / IconSplit / IconClose / IconSwap moved to @atypical/koine-ui's deckIcons.tsx (issue #905,
+// Task 4 + concept-7) — DeckSpine / DeckCard, their only consumers, now live there.
 
 // --- Registry ----------------------------------------------------------------
 

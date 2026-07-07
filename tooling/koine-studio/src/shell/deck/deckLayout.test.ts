@@ -71,7 +71,7 @@ describe('applyDeckLayout', () => {
     expect(stageEl.classList.contains('is-focus')).toBe(true);
     expect(cards.visual.classList.contains('is-selected')).toBe(true);
     expect(cards.visual.classList.contains('ghost')).toBe(false);
-    expect(cards.visual.style.left).toBe('0.8%');
+    expect(cards.visual.style.left).toBe('0%'); // flush: the focused card fills the stage edge-to-edge
     expect(cards.technical.classList.contains('ghost')).toBe(true);
   });
 

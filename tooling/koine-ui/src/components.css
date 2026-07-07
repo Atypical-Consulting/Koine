@@ -22,167 +22,326 @@
  */
 
 /* ---------------------------------------------------------------------------------------------------
- * Deck — DeckCard + DeckBar (ported from Koine Studio's src/styles/components/_deck.scss). DeckStage's
- * own chrome (.deck-stage / .deck-divider / .deck-swap) is NOT included — DeckStage is store-connected
- * and stays in the consuming app.
+ * Deck — DeckSpine + DeckCard (ported from Koine Studio's src/styles/components/_deck.scss). DeckStage's
+ * own chrome (.deck-stage / .deck-seam, the flush-in-focus modifiers, the output rail) is NOT included —
+ * DeckStage is store-connected and stays in the consuming app.
  * --------------------------------------------------------------------------------------------------- */
 
-.deck-bar,
+.fx-spine,
 .deck-card {
   --ease: cubic-bezier(0.33, 1, 0.68, 1);
 }
 
-/* ---- Bar ---------------------------------------------------------------- */
+/* ---- Spine (concept-7 "Flush") — one 34px row replacing the deck-bar + card-head ------------ */
 
-.deck-bar {
+.fx-spine {
   flex: 0 0 auto;
+  height: 34px;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
+  align-items: stretch;
   background: var(--koi-paper-2);
   border-bottom: 1px solid var(--koi-line);
+  font-size: 12px;
+}
+.fx-spine.split {
+  padding: 0;
 }
 
-.deck-over {
+/* The surface switcher: split-button tabs (focus + hover-revealed ⊞), the only persistent control. */
+.fx-strip {
+  display: flex;
+  align-items: stretch;
+  padding-left: 4px;
+}
+
+.fx-tabwrap {
+  display: inline-flex;
+  align-items: stretch;
+  margin: 4px 1px;
+  border-radius: var(--koi-radius-sm);
+  overflow: hidden;
+  transition: background 0.16s ease;
+}
+.fx-tabwrap:not(.on):hover {
+  background: color-mix(in srgb, var(--koi-fg) 7%, transparent);
+}
+
+.fx-tab {
   all: unset;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 12px;
-  font-weight: 600;
+  padding: 0 9px;
   color: var(--koi-muted);
-  padding: 6px 13px;
-  border-radius: var(--koi-radius-sm);
-  border: 1px solid var(--koi-line);
   transition:
-    color 0.24s var(--ease),
-    background 0.24s var(--ease),
-    border-color 0.24s var(--ease);
+    color 0.16s ease,
+    background 0.16s ease,
+    box-shadow 0.16s ease;
 }
-.deck-over svg {
+.fx-tab svg {
   width: 15px;
   height: 15px;
 }
-.deck-over:hover {
-  color: var(--koi-fg);
-  border-color: var(--koi-accent);
-}
-.deck-over:focus-visible {
-  outline: 2px solid var(--koi-accent);
-  outline-offset: 1px;
-}
-.deck-over.on {
-  color: var(--koi-on-accent);
-  background: var(--koi-accent);
-  border-color: var(--koi-accent);
-}
-
-/* ---- Filmstrip ---------------------------------------------------------- */
-
-.deck-strip {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.deck-chip-wrap {
-  position: relative;
+/* The icon sits in a flex wrapper so its <svg> centres as a block item, not on the text baseline. */
+.fx-tab .ic {
   display: inline-flex;
   align-items: center;
-  color: var(--koi-muted);
-  border-radius: var(--koi-radius-pill);
-  border: 1px solid transparent;
+}
+.fx-tab .lbl {
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-weight: 600;
+  line-height: 1;
+  opacity: 0;
   transition:
-    color 0.24s var(--ease),
-    background 0.24s var(--ease),
-    border-color 0.24s var(--ease);
+    max-width 0.22s ease,
+    opacity 0.18s ease;
 }
-.deck-chip-wrap:hover {
+.fx-tab:hover {
   color: var(--koi-fg);
-  background: color-mix(in srgb, var(--koi-fg) 7%, transparent);
 }
-.deck-chip-wrap.primary {
-  color: var(--koi-on-accent);
-  background: var(--koi-accent);
+/* Active decoration is painted INSIDE the box (tint + inset underline) so every tab icon's vertical
+   centre stays identical across states. */
+.fx-tab.on {
+  color: var(--sc);
+  background: color-mix(in srgb, var(--sc) 13%, transparent);
+  box-shadow: inset 0 -2px 0 var(--sc);
 }
-.deck-chip-wrap.secondary {
-  color: var(--koi-accent);
-  border-color: color-mix(in srgb, var(--koi-accent) 55%, transparent);
-  background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+.fx-tab.on .ic {
+  color: var(--sc);
 }
-
-.deck-chip {
-  all: unset;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  color: inherit;
-  padding: 6px 11px;
-  border-radius: var(--koi-radius-pill);
+.fx-tab.on .lbl {
+  max-width: 120px;
+  opacity: 1;
 }
-.deck-chip svg.ci {
-  width: 14px;
-  height: 14px;
-}
-.deck-chip:focus-visible {
+.fx-tab:focus-visible {
   outline: 2px solid var(--koi-accent);
-  outline-offset: 1px;
+  outline-offset: -2px;
 }
 
-/* "Open beside" — revealed on chip-wrap hover, collapsed otherwise (width + opacity, no layout thrash). */
-.deck-cmp {
+/* The ⊞ "open beside" segment — collapsed until the surface is hovered, then it slides open inside the
+   pill, set off from the icon by a hairline so focus | split read as two targets. */
+.fx-beside {
   all: unset;
   cursor: pointer;
-  width: 0;
-  height: 18px;
-  margin-right: 0;
-  border-radius: 4px;
+  align-self: stretch;
   display: inline-grid;
   place-items: center;
-  overflow: hidden;
-  color: inherit;
+  width: 0;
   opacity: 0;
-  pointer-events: none;
+  overflow: hidden;
+  color: var(--koi-muted);
+  border-left: 1px solid transparent;
   transition:
-    opacity 0.22s var(--ease),
-    width 0.22s var(--ease),
-    margin 0.22s var(--ease),
-    background 0.18s var(--ease);
+    width 0.18s ease,
+    opacity 0.16s ease,
+    background 0.16s ease,
+    color 0.16s ease,
+    border-color 0.16s ease;
 }
-.deck-cmp .cmp-ico {
+.fx-beside svg {
   width: 13px;
   height: 13px;
 }
-.deck-cmp:hover {
-  background: color-mix(in srgb, currentColor 22%, transparent);
+.fx-tabwrap:hover .fx-beside,
+.fx-beside:focus-visible {
+  width: 24px;
+  opacity: 1;
+  border-left-color: color-mix(in srgb, var(--koi-fg) 14%, transparent);
+}
+.fx-beside:hover {
+  color: var(--sc, var(--koi-accent));
+  background: color-mix(in srgb, var(--sc, var(--koi-accent)) 16%, transparent);
+}
+.fx-beside:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: -2px;
+}
+
+.fx-div {
+  width: 1px;
+  background: var(--koi-line);
+  margin: 7px 8px;
+}
+
+/* Inline facets of the focused surface — no second row. */
+.fx-facets {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.fx-facet {
+  all: unset;
+  cursor: pointer;
+  font-size: 11px;
+  /* Lifted a step toward --koi-fg so the inactive facet clears WCAG-AA on paper-2 (matches .deck-sub). */
+  color: color-mix(in srgb, var(--koi-fg) 22%, var(--koi-muted));
+  padding: 3px 9px;
+  border-radius: var(--koi-radius-pill);
+  transition:
+    color 0.16s ease,
+    background 0.16s ease;
+}
+.fx-facet:hover {
+  color: var(--koi-fg);
+}
+.fx-facet.on {
+  color: var(--sc);
+  background: color-mix(in srgb, var(--sc) 14%, transparent);
+}
+.fx-facet:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: -1px;
+}
+
+.fx-grow {
+  flex: 1 1 auto;
+}
+
+/* Right-side spine actions (Overview). `.mini` is the icon-only compact form used at the end of a 2-up. */
+.fx-act {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--koi-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 11px;
+  align-self: center;
+  height: 24px;
+  margin-right: 5px;
+  border-radius: var(--koi-radius-sm);
+  border: 1px solid transparent;
+  transition:
+    color 0.16s ease,
+    border-color 0.16s ease,
+    background 0.16s ease;
+}
+.fx-act svg {
+  width: 15px;
+  height: 15px;
+}
+.fx-act:hover {
+  color: var(--koi-fg);
+  border-color: var(--koi-accent);
+}
+.fx-act:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: -2px;
+}
+.fx-act.on {
+  color: var(--koi-on-accent);
+  background: var(--koi-accent);
+  border-color: var(--koi-accent);
+}
+.fx-act.mini {
+  padding: 0 9px;
+}
+.fx-tag {
+  align-self: center;
+  color: var(--koi-muted);
+  font-size: 10.5px;
+  margin-right: 12px;
+}
+
+/* 2-up: two half-spines meet at the docked ⇄; the selected one carries the accent underline. */
+.fx-half {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+.fx-half .fx-hlabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  padding: 0 10px;
+  color: var(--sc);
+  align-self: center;
+  white-space: nowrap;
+}
+.fx-half .fx-hlabel svg {
+  width: 15px;
+  height: 15px;
+}
+.fx-half.sel {
+  background: color-mix(in srgb, var(--sc) 10%, transparent);
+  box-shadow: inset 0 -2px 0 var(--sc);
+}
+.fx-half:not(.sel) {
+  cursor: pointer;
+}
+.fx-half .fx-facets {
+  padding-left: 2px;
+}
+.fx-hclose {
+  all: unset;
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  align-self: center;
+  color: var(--koi-muted);
+  border-radius: 5px;
+  opacity: 0;
+  transition:
+    opacity 0.16s ease,
+    color 0.16s ease,
+    background 0.16s ease;
+}
+.fx-hclose svg {
+  width: 13px;
+  height: 13px;
+}
+.fx-half:hover .fx-hclose {
   opacity: 1;
 }
-
-.deck-chip-wrap:hover .deck-cmp,
-.deck-cmp:focus-visible {
-  width: 18px;
-  opacity: 0.9;
-  margin-right: 5px;
-  pointer-events: auto;
+.fx-hclose:hover {
+  color: var(--koi-fg);
+  background: var(--koi-line);
+}
+.fx-hclose:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--koi-accent);
+  outline-offset: -2px;
 }
 
-.deck-hint {
-  margin-left: auto;
-  font-size: 11px;
+/* The ⇄ swap — docked where the two half-spines meet (flush chrome, not floating). */
+.fx-swap {
+  all: unset;
+  cursor: pointer;
+  flex: 0 0 auto;
+  width: 30px;
+  display: grid;
+  place-items: center;
+  align-self: stretch;
   color: var(--koi-muted);
+  border-left: 1px solid var(--koi-line);
+  border-right: 1px solid var(--koi-line);
+  background: var(--koi-paper-2);
+  transition:
+    color 0.18s ease,
+    background 0.18s ease;
 }
-.deck-hint kbd {
-  font-family: var(--koi-font-mono);
-  font-size: 10px;
-  background: var(--koi-paper);
-  border: 1px solid var(--koi-line);
-  border-bottom-width: 2px;
-  border-radius: 4px;
-  padding: 1px 5px;
+.fx-swap svg {
+  width: 15px;
+  height: 15px;
+  transition: transform 0.3s cubic-bezier(0.33, 1, 0.68, 1);
+}
+.fx-swap:hover {
+  color: var(--koi-accent);
+  background: color-mix(in srgb, var(--koi-accent) 10%, transparent);
+}
+.fx-swap:active svg {
+  transform: rotate(180deg);
+}
+.fx-swap:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: -2px;
 }
 
 /* ---- Card --------------------------------------------------------------- */
@@ -361,9 +520,59 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .deck-card {
+  .deck-card,
+  .fx-spine *,
+  .fx-spine *::before,
+  .fx-spine *::after,
+  .koi-tip {
     transition: none !important;
   }
+}
+
+/* ---------------------------------------------------------------------------------------------------
+ * Instant tooltip (concept-7 "Flush") — the floating element driven by tooltip.ts. Replaces native
+ * `title`: shows on hover with a ~90ms fade, positioned by JS, carries an optional `kbd` shortcut chip.
+ * --------------------------------------------------------------------------------------------------- */
+
+.koi-tip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: var(--koi-z-tooltip);
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--koi-font-body);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--koi-fg);
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: 5px 8px;
+  white-space: nowrap;
+  box-shadow: 0 6px 20px rgba(3, 7, 14, 0.45);
+  opacity: 0;
+  transform: translateY(-3px);
+  transition:
+    opacity 0.09s ease,
+    transform 0.09s ease;
+}
+.koi-tip.on {
+  opacity: 1;
+  transform: none;
+}
+.koi-tip kbd {
+  font-family: var(--koi-font-mono);
+  font-size: 10px;
+  color: var(--koi-muted);
+  background: var(--koi-paper);
+  border: 1px solid var(--koi-line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 1px 5px;
 }
 
 /* ---------------------------------------------------------------------------------------------------

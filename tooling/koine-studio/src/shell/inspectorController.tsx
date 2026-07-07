@@ -23,7 +23,7 @@
 // from the palette, the toolbar buttons, and the boot ladder.
 import { render, type VNode } from 'preact';
 import { renderMarkdown } from '@/editor/editor';
-import type { KoineEditor, OutputLang, OutputView } from '@/editor/editor';
+import type { KoineEditor, OutputView } from '@/editor/editor';
 import type {
   CheckResult,
   ContextMapResult,
@@ -90,8 +90,15 @@ import { DEFAULT_CENTER, DEFAULT_DECK_STATE, isValidCenter, type DeckState, type
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
 import { escapeHtml, fileUriToPath, formatAclMapping, renderCheckMarkdown, renderContextMapHtml } from '@/shell/ideUtils';
-import { DeckBarConnected } from '@/shell/deck/DeckBar';
+import { DeckSpineConnected } from '@/shell/deck/DeckSpine';
 import { DeckStage } from '@/shell/deck/DeckStage';
+import {
+  ensureOutputScaffold,
+  renderOutputCrumb,
+  renderOutputRail,
+  type OutputRailFile,
+  type OutputScaffold,
+} from '@/shell/outputRail';
 
 // LSP SymbolKind for a namespace — the kind the language service tags each top-level `context`
 // document symbol with. Used by followActiveFileContext to read a file's bounded context(s).
@@ -329,15 +336,21 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   let disposed = false;
 
   // --- DOM hosts (looked up once; the same id surface init() builds, so a drift throws via domById()) ---
-  // A copy affordance overlaid on the emitted-preview pane (auto-hidden with the pane). Tracks the
-  // most recent generated output; disabled until there is some.
+  // The Generated preview is a per-file rail beside a single-file viewer (concept-7 "Flush"): the rail
+  // groups files by bounded context and tints them by DDD stereotype; the crumb carries a Copy button for
+  // the SELECTED file. The scaffold is built inside #view-preview (idempotent — ide.tsx built the same one
+  // to mount the CodeMirror OutputView into `.out-code`).
+  const outputScaffold: OutputScaffold = ensureOutputScaffold(domById('view-preview'));
+  // The rail files (with contents) + the selected path; `lastPreview` mirrors the selected file for Copy.
+  let outputFiles: (OutputRailFile & { contents: string })[] = [];
+  let selectedOutputPath: string | null = null;
   let lastPreview = '';
   let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
   const copyBtn = document.createElement('button');
   copyBtn.type = 'button';
-  copyBtn.className = 'koi-copy';
+  copyBtn.className = 'out-copy';
   copyBtn.textContent = 'Copy';
-  copyBtn.title = 'Copy generated code';
+  copyBtn.dataset.tip = 'Copy this file';
   copyBtn.disabled = true;
   copyBtn.addEventListener('click', () => {
     if (!lastPreview) return;
@@ -350,7 +363,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         copyResetTimer = setTimeout(() => (copyBtn.textContent = 'Copy'), 1600);
       });
   });
-  domById('view-preview').appendChild(copyBtn);
+  outputScaffold.crumb.appendChild(copyBtn);
 
   // Left-rail host: the Domain axis's strategic/tactical navigator (#453). mountDomainNavigator owns this
   // node — it self-fetches its strategic data and reads the store for altitude + scope — so loadModel
@@ -1587,7 +1600,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     }, 350);
   }
 
-  // The center surface switcher + facet sub-strips are now the DeckBar / DeckCard Preact components
+  // The center surface switcher + facet sub-strips are now the DeckSpine / DeckCard Preact components
   // (mounted in init()); they call focusPrimary / openBeside / setTech|Output|Docs on the store directly,
   // and the deck/facet subscription applies the chrome — so there are no imperative tab click handlers
   // to wire here anymore.
@@ -1759,7 +1772,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (appStore.getState().isStale('diagrams')) void loadDiagrams();
   }
 
-  // Subscribe to deck + facet changes so any mutation — from the DeckBar / DeckCard, a palette command,
+  // Subscribe to deck + facet changes so any mutation — from the DeckSpine / DeckCard, a palette command,
   // or a keyboard shortcut — re-applies the center chrome, lazy-loads the now-visible surfaces, and
   // persists the deck. Disposed in dispose() so a deferred callback can't fire into a torn-down DOM.
   const unsubscribeDeck = appStore.subscribe(
@@ -1869,39 +1882,68 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // switch re-emits WITHOUT bumping the slice token: the seq drops a stale emit a newer call (edit or
   // target switch) superseded. The prior output stays on screen across a refresh (only the very first
   // load shows a placeholder) so live typing never flashes the pane empty.
+  // A friendly language chip for the crumb / rail head (the emit target drives the highlighter as-is).
+  const TARGET_LABEL: Record<string, string> = {
+    csharp: 'C#',
+    typescript: 'TypeScript',
+    python: 'Python',
+    php: 'PHP',
+    rust: 'Rust',
+  };
+  const targetLabel = (t: string): string => TARGET_LABEL[t] ?? t.toUpperCase();
+
+  // Show one generated file in the viewer and reflect it in the rail + crumb + Copy button.
+  function showOutputFile(path: string): void {
+    const f = outputFiles.find((x) => x.path === path);
+    if (!f) return;
+    selectedOutputPath = path;
+    output.setContent(f.contents, currentTarget);
+    lastPreview = f.contents;
+    copyBtn.disabled = false;
+    renderOutputCrumb(outputScaffold, path, targetLabel(currentTarget));
+    renderOutputRail(outputScaffold, outputFiles, selectedOutputPath, targetLabel(currentTarget), showOutputFile);
+  }
+
+  // Clear the rail/crumb/viewer to a message (error / empty / failure states).
+  function clearOutput(message: string): void {
+    outputFiles = [];
+    selectedOutputPath = null;
+    lastPreview = '';
+    copyBtn.disabled = true;
+    renderOutputRail(outputScaffold, [], null, targetLabel(currentTarget), showOutputFile);
+    renderOutputCrumb(outputScaffold, null, '');
+    output.setContent(message, 'plain');
+  }
+
   let previewSeq = 0;
   async function loadPreview(): Promise<void> {
     const seq = ++previewSeq;
     const token = appStore.getState().currentToken('preview');
-    if (!lastPreview) output.setContent('// generating preview…', 'plain');
+    if (!outputFiles.length) output.setContent('// generating preview…', 'plain');
     try {
       const res = await lsp.emitPreview(currentTarget);
       if (disposed) return; // torn down mid-fetch (#1002) — no repaint on behalf of a dead controller
       if (seq !== previewSeq) return;
-      let content: string;
-      let lang: OutputLang;
-      let copyable = false;
       if (res.error) {
-        content = '// emit error\n' + res.error;
-        lang = 'plain';
+        clearOutput('// emit error\n' + res.error);
       } else if (!res.files.length) {
-        content = '// no files emitted (fix diagnostics first)';
-        lang = 'plain';
+        clearOutput('// no files emitted (fix diagnostics first)');
       } else {
-        content = res.files.map((f) => `// ==== ${f.path} ====\n${f.contents}`).join('\n\n');
-        lang = currentTarget;
-        copyable = true;
+        outputFiles = res.files.map((f) => ({
+          path: f.path,
+          contents: f.contents,
+          kind: f.kind ?? null,
+          loc: f.contents.length ? f.contents.split('\n').length : 0,
+        }));
+        // Keep the current selection if that file survived the re-emit; else fall back to the first.
+        const keep = selectedOutputPath && outputFiles.some((f) => f.path === selectedOutputPath);
+        showOutputFile(keep ? selectedOutputPath! : outputFiles[0].path);
       }
-      output.setContent(content, lang);
-      lastPreview = content;
-      copyBtn.disabled = !copyable;
       appStore.getState().markLoaded('preview', token);
     } catch (e) {
       if (disposed) return;
       if (seq !== previewSeq) return;
-      output.setContent('// preview request failed\n' + String(e), 'plain');
-      lastPreview = '';
-      copyBtn.disabled = true;
+      clearOutput('// preview request failed\n' + String(e));
     }
   }
 
@@ -2291,7 +2333,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // The rail axis is hydrated + painted at construction now (#983 — via the uiChrome slice).
     // Mount the Deck: detach the four center-host sections first so rendering the stage into #center-body
     // doesn't destroy them, then let the DeckStage re-parent each into its card body (via a ref). The
-    // DeckBar (Overview + filmstrip) renders into #deck-bar. Both are store-bound — the deck/facet
+    // DeckSpine (the surface switcher / pane chrome) renders into #deck-bar. Both are store-bound — the deck/facet
     // subscription above applies the chrome thereafter.
     for (const h of Object.values(centerHosts)) h.remove();
     render(
@@ -2305,7 +2347,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       />,
       centerBodyEl,
     );
-    render(<DeckBarConnected store={appStore} />, deckBarEl);
+    render(<DeckSpineConnected store={appStore} />, deckBarEl);
     // Paint the initial chrome from the restored deck (no fetch at boot — ide.ts's boot ladder runs
     // refreshActiveSurfaces once the workspace document is open; the deck/facet subscription lazy-loads on
     // every subsequent change).

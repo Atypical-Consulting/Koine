@@ -557,7 +557,7 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append("}\n");
 
         var contents = Assemble(emit, ns, sb.ToString(), usesLinq: true, @enum.Span, out var sourceMap);
-        return new EmittedFile(PathFor(emit, ns, KindFolder.Enums, $"{name}.cs"), contents, sourceMap);
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Enums, $"{name}.cs"), contents, sourceMap, KindForFolder(KindFolder.Enums));
     }
 
     // ----------------------------------------------------------------------
@@ -679,7 +679,7 @@ public sealed partial class CSharpEmitter : IEmitter
 
         sb.Append("}\n");
         var contents = Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>()), ev.Span, out var sourceMap);
-        return new EmittedFile(PathFor(emit, ns, KindFolder.Events, $"{ev.Name}.cs"), contents, sourceMap);
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Events, $"{ev.Name}.cs"), contents, sourceMap, KindForFolder(KindFolder.Events));
     }
 
     /// <summary>
@@ -744,7 +744,7 @@ public sealed partial class CSharpEmitter : IEmitter
 
         sb.Append("}\n");
         var contents = Assemble(emit, ns, sb.ToString(), UsesLinq(ev.Members, Array.Empty<Invariant>()), ev.Span, out var sourceMap);
-        return new EmittedFile(PathFor(emit, ns, KindFolder.IntegrationEvents, $"{ev.Name}.cs"), contents, sourceMap);
+        return new EmittedFile(PathFor(emit, ns, KindFolder.IntegrationEvents, $"{ev.Name}.cs"), contents, sourceMap, KindForFolder(KindFolder.IntegrationEvents));
     }
 
     /// <summary>
@@ -2299,6 +2299,30 @@ public sealed partial class CSharpEmitter : IEmitter
         /// <summary>The opt-in ASP.NET Minimal-API endpoint layer (W2).</summary>
         public const string Endpoints = "Endpoints";
     }
+
+    /// <summary>
+    /// Maps a <see cref="KindFolder"/> subfolder to the DDD-stereotype slug surfaced via
+    /// <see cref="Koine.Compiler.Emit.EmittedFile.Kind"/>, so a UI (e.g. Koine Studio) can
+    /// tint generated files by building block. Folders with no DDD stereotype of their
+    /// own — pure abstractions and the opt-in Application/Infrastructure/Endpoints
+    /// layers — map to <c>null</c>.
+    /// </summary>
+    private static string? KindForFolder(string kindFolder) => kindFolder switch
+    {
+        KindFolder.Root => "aggregate",
+        KindFolder.Entities => "entity",
+        KindFolder.ValueObjects => "value",
+        KindFolder.Enums => "enum",
+        KindFolder.Events => "event",
+        KindFolder.IntegrationEvents => "integration-event",
+        KindFolder.ReadModels => "read-model",
+        KindFolder.Queries => "query",
+        KindFolder.Services => "service",
+        KindFolder.Specifications => "spec",
+        KindFolder.Policies => "policy",
+        KindFolder.Repositories => "repository",
+        _ => null,
+    };
 
     /// <summary>The bounded context owning a namespace (its first segment); the resolution scope for R13.2.</summary>
     private static string ContextOf(string ns)

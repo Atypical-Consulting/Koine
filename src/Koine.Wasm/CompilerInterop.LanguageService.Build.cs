@@ -90,7 +90,7 @@ public static partial class CompilerInterop
             // output to the cold Compile(sources, emitter) path (same content-addressed key).
             var result = Compiler.Compile(GetWarmCompilation(files), emitter);
             var emittedFiles = result.Files
-                .Select(f => new WEmitFile(f.RelativePath, f.Contents))
+                .Select(f => new WEmitFile(f.RelativePath, f.Contents, f.Kind))
                 .ToArray();
             var diagnostics = result.Diagnostics
                 .Select(d => ToLspDiagnostic(

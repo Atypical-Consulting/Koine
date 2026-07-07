@@ -202,7 +202,7 @@ public sealed partial class CSharpEmitter
         var contents = Assemble(emit, ns, sb.ToString(),
             UsesLinq(vo.Members, vo.Invariants) || SpecBodiesUseLinq(vo.Name, index),
             vo.Span, out var sourceMap);
-        return new EmittedFile(PathFor(emit, ns, KindFolder.ValueObjects, $"{vo.Name}.cs"), contents, sourceMap);
+        return new EmittedFile(PathFor(emit, ns, KindFolder.ValueObjects, $"{vo.Name}.cs"), contents, sourceMap, KindForFolder(KindFolder.ValueObjects));
     }
 
     /// <summary>

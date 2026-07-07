@@ -7,11 +7,15 @@ namespace Koine.Compiler.Emit;
 /// optional <paramref name="SourceMap"/> tying runs of generated lines back to
 /// the originating Koine source. The map is <c>null</c> by default so back-ends
 /// that do not emit one (and all existing call sites) keep working unchanged.
+/// <paramref name="Kind"/> is an optional DDD-stereotype slug (e.g. <c>"aggregate"</c>,
+/// <c>"value"</c>, <c>"event"</c>) used by UIs to tint generated files by building
+/// block; <c>null</c> for files with no stereotype (or emitters that don't set one).
 /// </summary>
 public sealed record EmittedFile(
     string RelativePath,
     string Contents,
-    IReadOnlyList<SourceMapSegment>? SourceMap = null);
+    IReadOnlyList<SourceMapSegment>? SourceMap = null,
+    string? Kind = null);
 
 /// <summary>
 /// Target-agnostic emitter seam. A backend turns a validated

@@ -232,7 +232,8 @@ public sealed partial class CSharpEmitter
 
         var contents = Assemble(emit, ns, sb.ToString(),
             EntityUsesLinq(entity) || SpecBodiesUseLinq(entity.Name, index), entity.Span, out var sourceMap);
-        return new EmittedFile(PathFor(emit, ns, isRoot ? KindFolder.Root : KindFolder.Entities, $"{entity.Name}.cs"), contents, sourceMap);
+        var kindFolder = isRoot ? KindFolder.Root : KindFolder.Entities;
+        return new EmittedFile(PathFor(emit, ns, kindFolder, $"{entity.Name}.cs"), contents, sourceMap, KindForFolder(kindFolder));
     }
 
     /// <summary>
@@ -283,7 +284,7 @@ public sealed partial class CSharpEmitter
             sb.Append(Indent).Append("{\n");
             WriteRefStubBlockBody(sb);
             sb.Append("}\n");
-            return new EmittedFile(PathFor(emit, ns, KindFolder.ValueObjects, $"{idName}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
+            return new EmittedFile(PathFor(emit, ns, KindFolder.ValueObjects, $"{idName}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false), Kind: KindForFolder(KindFolder.ValueObjects));
         }
 
         if (validates)
@@ -321,6 +322,6 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append("}\n");
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(emit, ns, KindFolder.ValueObjects, $"{idName}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.ValueObjects, $"{idName}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false), Kind: KindForFolder(KindFolder.ValueObjects));
     }
 }

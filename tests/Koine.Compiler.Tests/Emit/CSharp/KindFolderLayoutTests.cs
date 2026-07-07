@@ -33,6 +33,13 @@ public class KindFolderLayoutTests
         return result.Files.Select(f => f.RelativePath).ToList();
     }
 
+    private static string? KindOf(string relativePath)
+    {
+        var result = new KoineCompiler().Compile(Fixture, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        return result.Files.Single(f => f.RelativePath == relativePath).Kind;
+    }
+
     [Fact]
     public void Aggregate_root_sits_at_the_context_root()
     {
@@ -84,5 +91,49 @@ public class KindFolderLayoutTests
         var result = new KoineCompiler().Compile(Fixture, new CSharpEmitter());
         var sku = result.Files.Single(f => f.RelativePath == "Catalog/ValueObjects/Sku.cs").Contents;
         sku.ShouldContain("namespace Catalog;");
+    }
+
+    // ---- EmittedFile.Kind: the DDD-stereotype slug a UI tints generated files by ----
+
+    [Fact]
+    public void Aggregate_root_is_stamped_with_the_aggregate_kind()
+    {
+        KindOf("Catalog/Product.cs").ShouldBe("aggregate");
+    }
+
+    [Fact]
+    public void Non_root_entity_is_stamped_with_the_entity_kind()
+    {
+        KindOf("Catalog/Entities/ProductReview.cs").ShouldBe("entity");
+    }
+
+    [Fact]
+    public void Value_object_is_stamped_with_the_value_kind()
+    {
+        KindOf("Catalog/ValueObjects/Sku.cs").ShouldBe("value");
+    }
+
+    [Fact]
+    public void Enum_is_stamped_with_the_enum_kind()
+    {
+        KindOf("Catalog/Enums/Availability.cs").ShouldBe("enum");
+    }
+
+    [Fact]
+    public void Domain_event_is_stamped_with_the_event_kind()
+    {
+        KindOf("Catalog/Events/ProductListed.cs").ShouldBe("event");
+    }
+
+    [Fact]
+    public void Repository_interface_is_stamped_with_the_repository_kind()
+    {
+        KindOf("Catalog/Repositories/IProductRepository.cs").ShouldBe("repository");
+    }
+
+    [Fact]
+    public void Unit_of_work_has_no_kind_since_it_is_a_pure_abstraction()
+    {
+        KindOf("Catalog/Abstractions/IUnitOfWork.cs").ShouldBeNull();
     }
 }

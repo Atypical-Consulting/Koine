@@ -159,9 +159,10 @@
              or editor, so it serves both Visual and Code (and is hidden on Documentation); Properties and
              the left sidebar therefore span full height. -->
         <section id="center" class="pane" aria-label="Editor">
-          <!-- Deck v2 bar (Overview toggle + Canvas·Code·Output·Docs filmstrip + keyboard hint). The
-               DeckBar Preact component renders here; the DeckStage renders into #center-body and hosts
-               each center surface in its card body. -->
+          <!-- The Deck spine (concept-7 "Flush"): one 34px row that is the surface switcher AND the pane
+               title / facets / close, morphing between overview / 1-up / 2-up. The DeckSpine Preact
+               component renders here; the DeckStage renders into #center-body and hosts each center
+               surface in its card body (flush in focus; floating cards only in overview). -->
           <div id="deck-bar"></div>
           <div id="center-body">
             <!-- The four center surfaces. The DeckStage re-parents each into its deck card at boot; the

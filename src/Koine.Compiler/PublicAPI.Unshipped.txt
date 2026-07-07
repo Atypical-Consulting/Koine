@@ -52,6 +52,8 @@ Koine.Compiler.Emit.EmitTargetInfo.FileExtension.get -> string!
 Koine.Compiler.Emit.EmitTargetInfo.FileExtension.init -> void
 Koine.Compiler.Emit.EmitTargetInfo.Id.get -> string!
 Koine.Compiler.Emit.EmitTargetInfo.Id.init -> void
+Koine.Compiler.Emit.EmittedFile.Kind.get -> string?
+Koine.Compiler.Emit.EmittedFile.Kind.init -> void
 Koine.Compiler.Emit.EmittedFile.SourceMap.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.SourceMapSegment!>?
 Koine.Compiler.Emit.EmittedFile.SourceMap.init -> void
 Koine.Compiler.Emit.EmitterOptions.ApplicationHandlerResult.get -> string?

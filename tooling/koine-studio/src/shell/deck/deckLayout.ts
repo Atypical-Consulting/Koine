@@ -16,10 +16,12 @@ interface Rect {
   ghost: boolean;
 }
 
-// Geometry in stage-percent units (ported 1:1 from the POC; canvas→visual, code→technical).
-const FULL = { l: 0.8, t: 1, w: 98.4, h: 98 };
-const U = { x: 0.8, w: 98.4 }; // usable strip for the 2-up split
-const GAP = 1.4;
+// Geometry in stage-percent units. Concept-7 "Flush": in focus the surface fills the stage edge-to-edge
+// (no inset) — FULL/U span the whole stage — and only a thin seam channel (GAP) separates a 2-up pair.
+// The floating-card inset lives only in overview (QUAD, below).
+const FULL = { l: 0, t: 0, w: 100, h: 100 };
+const U = { x: 0, w: 100 }; // usable strip for the 2-up split (full-bleed)
+const GAP = 0.6; // the 2-up seam channel (a thin gutter the hairline divider sits in)
 const QUAD: Record<CenterView, { l: number; t: number; w: number; h: number }> = {
   visual: { l: 1.6, t: 2, w: 47.6, h: 46 },
   technical: { l: 50.8, t: 2, w: 47.6, h: 46 },
@@ -33,9 +35,9 @@ export function rectFor(id: CenterView, state: DeckState): Rect {
   if (mode === 'overview') return { ...QUAD[id], ghost: false };
   if (!secondary) return id === primary ? { ...FULL, ghost: false } : { ...QUAD[id], ghost: true };
   // 2-up: left/right are POSITIONS; `flipped` decides which surface sits where.
-  const leftRect: Rect = { l: U.x, t: 1, w: ratio * U.w - GAP / 2, h: 98, ghost: false };
+  const leftRect: Rect = { l: U.x, t: 0, w: ratio * U.w - GAP / 2, h: 100, ghost: false };
   const seam = U.x + ratio * U.w;
-  const rightRect: Rect = { l: seam + GAP / 2, t: 1, w: (1 - ratio) * U.w - GAP / 2, h: 98, ghost: false };
+  const rightRect: Rect = { l: seam + GAP / 2, t: 0, w: (1 - ratio) * U.w - GAP / 2, h: 100, ghost: false };
   const primaryLeft = !flipped;
   if (id === primary) return primaryLeft ? leftRect : rightRect;
   if (id === secondary) return primaryLeft ? rightRect : leftRect;

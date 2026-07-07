@@ -8,7 +8,7 @@ import type { StoreApi } from 'zustand/vanilla';
 import { useStore } from 'zustand';
 import type { AppState } from '@/store/index';
 import type { CenterView, DeckState, DocsView, OutputTab, TechView } from '@/store/slices/uiChrome';
-import { DECK_SURFACE_LIST, DECK_SURFACE_ORDER, IconSwap } from '@/shell/deck/surfaces';
+import { DECK_SURFACE_LIST, DECK_SURFACE_ORDER } from '@/shell/deck/surfaces';
 import { DeckCard } from '@atypical/koine-ui';
 import { applyDeckLayout } from '@/shell/deck/deckLayout';
 
@@ -108,11 +108,14 @@ export function DeckStage({ store, surfaces, mockBody, enableKeyboard = true, on
   }, [enableKeyboard, store]);
 
   // Seam drag — apply geometry directly during the drag (smooth, no per-move store churn), commit on up.
+  // The swap ⇄ now lives in the spine (DeckSpine), so the seam is a pure resize hairline; `.drag` thickens
+  // it to the accent line for the duration of the drag.
   const onDividerPointerDown = (e: PointerEvent) => {
-    if ((e.target as HTMLElement).closest('.deck-swap')) return; // the swap button isn't a drag handle
     const stageEl = stageRef.current;
     if (!stageEl) return;
     e.preventDefault();
+    const seamEl = dividerRef.current;
+    seamEl?.classList.add('drag');
     const rect = stageEl.getBoundingClientRect();
     const move = (ev: PointerEvent) => {
       const r = Math.min(0.8, Math.max(0.2, (ev.clientX - rect.left) / rect.width));
@@ -122,12 +125,13 @@ export function DeckStage({ store, surfaces, mockBody, enableKeyboard = true, on
         cards: cardRefs.current,
         state: { ...store.getState().deck, ratio: r },
         animate: false,
-        dividerEl: dividerRef.current,
+        dividerEl: seamEl,
       });
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      seamEl?.classList.remove('drag');
       store.getState().setRatio(dragRatio.current);
     };
     window.addEventListener('pointermove', move);
@@ -152,18 +156,8 @@ export function DeckStage({ store, surfaces, mockBody, enableKeyboard = true, on
 
   return (
     <div class="deck-stage" ref={stageRef}>
-      <div class="deck-divider" ref={dividerRef} onPointerDown={onDividerPointerDown}>
-        <div class="bar" />
-        <button
-          type="button"
-          class="deck-swap"
-          aria-label="Swap sides"
-          title="Swap sides"
-          onClick={() => store.getState().swapSides()}
-        >
-          <IconSwap />
-        </button>
-      </div>
+      {/* The 2-up resize seam — a hairline that thickens on hover/drag. The swap ⇄ is docked in the spine. */}
+      <div class="deck-seam" ref={dividerRef} onPointerDown={onDividerPointerDown} />
       {DECK_SURFACE_LIST.map((s) => {
         const inPair = deck.mode === 'focus' && !!deck.secondary && (s.id === deck.primary || s.id === deck.secondary);
         return (

@@ -21,6 +21,10 @@ export interface LspDiagnostic {
 export interface EmitFile {
   path: string;
   contents: string;
+  /** The file's DDD stereotype slug (matches a `--koi-ddd-*` token), or null for infra/runtime files.
+   *  Populated by the C# emitter (the primary target); other targets currently omit it. Drives the
+   *  Output file-rail's per-file tint (concept-7 "Flush"). */
+  kind?: string | null;
 }
 export interface EmitPreviewResult {
   target: string;

@@ -84,14 +84,14 @@ host coupling):
 | Component | What it does |
 | --- | --- |
 | `DeckCard` | One surface card on a "deck" stage: a header (icon + label + facet sub-strip + tag + close) over a host-agnostic body slot (a re-parented `HTMLElement` via ref, or `children` for stories/tests). |
-| `DeckBar` | The slim bar above a deck stage: an Overview toggle, a generic surface filmstrip (surfaces passed in as a prop, not hardcoded), and a keyboard hint. |
+| `DeckSpine` | The single 34px chrome row above a deck stage (concept-7 "Flush"): the surface switcher AND the pane title/facets/close, morphing between overview / 1-up (split-button tabs + inline facets) / 2-up (two pane-headers + a docked ⇄ swap). Surfaces are passed in as a prop, not hardcoded. |
 | `ExportMenu` | The diagram "Export ▾" floating menu — a native `<details>` disclosure offering SVG / PNG / PlantUML export plus "copy Mermaid source". |
 | `AssistantView` (+ `ASSISTANT_MOUNT_CLASS`) | A thin Preact host that renders a single mount node once and never re-renders it, so a host can attach an imperative AI-chat panel into it without Preact and the panel fighting over reconciliation. |
 | `LeftRail` | A left sidebar's markup as a Preact component: a labelled Domain·Files axis switch over one navigator host, rendered once so imperative children mounted into it are never reconciled away. |
 
 Each component's own doc comment (at the top of its `.tsx` file) has the full design rationale,
 including what was deliberately generalized when it was extracted from Koine Studio (e.g.
-`DeckBar`'s `surfaces` prop replaces a hardcoded app-specific surface registry).
+`DeckSpine`'s `surfaces` prop replaces a hardcoded app-specific surface registry).
 
 ## What stays out of this package
 

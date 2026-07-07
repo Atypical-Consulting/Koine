@@ -16,7 +16,8 @@ import {
 } from '@/shell/ideUtils';
 import { createEditorSession } from '@/shell/editorSession';
 import { createInspectorController } from '@/shell/inspectorController';
-import { LEFT_RAIL_IDS, LeftRail, RightStrip } from '@atypical/koine-ui';
+import { initInstantTooltip, LEFT_RAIL_IDS, LeftRail, RightStrip } from '@atypical/koine-ui';
+import { ensureOutputScaffold } from '@/shell/outputRail';
 import { createCanvasWrite } from '@/shell/canvasWrite';
 import { getPlatform } from '@/host';
 import { createExplorer } from '@/shell/explorer';
@@ -199,6 +200,8 @@ export function init(hooks: IdeHooks = {}): () => void {
   // Apply the persisted theme + appearance (accent, reduced motion, editor metrics) before
   // CodeMirror is created so the editor picks up the right tokens / size on first paint.
   initTheme();
+  // Install the instant tooltip once (replaces native `title` — shows immediately + carries a kbd chip).
+  initInstantTooltip();
   let settings: Settings = loadSettings();
   applyAppearance(settings);
 
@@ -219,7 +222,11 @@ export function init(hooks: IdeHooks = {}): () => void {
   // The read-only emitted-code viewer in #view-preview. Owned here (boot-error + Settings soft-wrap
   // also write to it) and injected into the inspector controller, which owns the Generated-preview
   // load path + the overlaid copy button.
-  const output = createOutputView(domById('view-preview'), settings.wordWrap);
+  // The Generated preview is a per-file rail beside a single-file viewer (concept-7 "Flush"). Build the
+  // scaffold once inside #view-preview and mount the read-only CodeMirror OutputView into its `.out-code`
+  // slot; the inspector controller renders the rail + crumb into the same (idempotently-built) scaffold.
+  const outputCodeEl = ensureOutputScaffold(domById('view-preview')).code;
+  const output = createOutputView(outputCodeEl, settings.wordWrap);
 
   const statusEl = domById('status');
   const diagBodyEl = domById('diag-body');

@@ -1,4 +1,4 @@
-// Sample DeckCardSurface data for DeckCard/DeckBar stories and tests ONLY — never imported by
+// Sample DeckCardSurface data for DeckCard/DeckSpine stories and tests ONLY — never imported by
 // src/index.ts, so it never reaches the published `dist/index.js` (tree-shaken out of the library
 // build, same as every other `.stories.tsx`/`.test.tsx`). Mirrors the shape (and, for visual fidelity in
 // Storybook, the icons/labels/accents) of Koine Studio's real `DECK_SURFACE_LIST` (issue #905, Task 4) —
