@@ -649,6 +649,37 @@
   }
 }
 
+// Scope emphasis (ADR 0009 — the Output rail obeys the active bounded-context scope by EMPHASIS, never
+// hiding): the active context's group is marked `.on`, the others `.dim`med. The whole-model overview
+// survives; a de-emphasised row restores on hover so it stays usable.
+.out-ctx.on {
+  color: var(--koi-fg);
+
+  &::before {
+    background: var(--koi-accent);
+  }
+}
+
+// The active marker: a non-colour signal (its text) so the active scope reads without relying on hue.
+.out-ctx-active {
+  margin-left: auto;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--koi-accent);
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
+  border-radius: var(--koi-radius-pill);
+  padding: 1px 6px;
+}
+
+.out-ctx.dim,
+.out-file.dim {
+  opacity: 0.5;
+}
+
+.out-file.dim:hover {
+  opacity: 1;
+}
+
 .out-view {
   position: relative;
   min-width: 0;
