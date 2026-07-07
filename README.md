@@ -16,6 +16,7 @@
 
 [![Try it in your browser](https://img.shields.io/badge/try-in%20your%20browser-3245b8)](https://atypical-consulting.github.io/Koine/studio/)
 [![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
+[![NuGet](https://img.shields.io/nuget/v/Koine.Cli?logo=nuget&label=NuGet&color=3245b8)](https://www.nuget.org/packages/Koine.Cli)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![Tests](https://img.shields.io/badge/tests-1900%2B%20passing-2ea44f)](tests/)
 ![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20Java%20%C2%B7%20Kotlin%20%C2%B7%20docs%20%C2%B7%20AsyncAPI%20%C2%B7%20OpenAPI-178600)
@@ -225,6 +226,16 @@ needed for `subtotal` — nothing for you to write, and nothing external to refe
 ## Quick start (CLI)
 
 Requires **.NET 10**.
+
+Install the CLI as a .NET global tool from NuGet, then invoke it as `koine`:
+
+```bash
+dotnet tool install --global Koine.Cli
+koine --version
+koine build templates/starters/billing/billing.koi --target csharp --out ./generated
+```
+
+Or run it straight from a clone of this repo with `dotnet run --project src/Koine.Cli -- …`:
 
 ```bash
 # Build everything and run the tests
