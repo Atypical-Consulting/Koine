@@ -143,9 +143,13 @@ public sealed partial class PhpEmitter
 
         sb.Append("}\n");
 
+        // The aggregate root lives under Entities/ like any entity in PHP, so root-ness is looked up
+        // (not read off the folder) to give it the aggregate stereotype rather than a plain entity.
+        var kind = emit.RootEntities.Contains((contextName, entity.Name)) ? DddKind.Aggregate : DddKind.Entity;
         return new EmittedFile(
             PathFor(contextName, KindFolder.Entities, entity.Name),
-            Assemble(contextName, KindFolder.Entities, sb.ToString(), name));
+            Assemble(contextName, KindFolder.Entities, sb.ToString(), name),
+            Kind: kind);
     }
 
     // -------------------------------------------------------------------------
@@ -323,6 +327,7 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(contextName, KindFolder.ValueObjects, idRaw),
-            Assemble(contextName, KindFolder.ValueObjects, sb.ToString(), idName));
+            Assemble(contextName, KindFolder.ValueObjects, sb.ToString(), idName),
+            Kind: KindForFolder(KindFolder.ValueObjects));
     }
 }

@@ -502,7 +502,8 @@ public sealed partial class PhpEmitter
         string? doc,
         IReadOnlyList<Member> members,
         string contextName,
-        PhpTypeMapper typeMapper)
+        PhpTypeMapper typeMapper,
+        string kind)
     {
         var name = PhpNaming.ClassName(rawName);
         var memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
@@ -568,6 +569,7 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(contextName, KindFolder.Events, rawName),
-            Assemble(contextName, KindFolder.Events, sb.ToString(), name));
+            Assemble(contextName, KindFolder.Events, sb.ToString(), name),
+            Kind: kind);
     }
 }

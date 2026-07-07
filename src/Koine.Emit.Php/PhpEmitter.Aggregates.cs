@@ -118,6 +118,7 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(contextName, KindFolder.Repositories, interfaceName),
-            Assemble(contextName, KindFolder.Repositories, sb.ToString(), interfaceName));
+            Assemble(contextName, KindFolder.Repositories, sb.ToString(), interfaceName),
+            Kind: KindForFolder(KindFolder.Repositories));
     }
 }

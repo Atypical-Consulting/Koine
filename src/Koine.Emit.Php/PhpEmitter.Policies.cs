@@ -65,6 +65,7 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(contextName, KindFolder.Policies, policy.Name + "Policy"),
-            Assemble(contextName, KindFolder.Policies, sb.ToString(), policyType));
+            Assemble(contextName, KindFolder.Policies, sb.ToString(), policyType),
+            Kind: KindForFolder(KindFolder.Policies));
     }
 }

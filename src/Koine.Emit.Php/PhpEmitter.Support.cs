@@ -19,7 +19,8 @@ public sealed partial class PhpEmitter
     internal sealed record PhpEmitContext(
         ModelIndex Index,
         IReadOnlyDictionary<string, string> EnumMemberToType,
-        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> OperatorNeeds);
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> OperatorNeeds,
+        IReadOnlySet<(string Context, string Name)> RootEntities);
 
     /// <summary>
     /// Short class name → every <c>(FQN, declaring context)</c> that name resolves to — e.g.
@@ -56,6 +57,48 @@ public sealed partial class PhpEmitter
         public const string Specifications = "Specifications";
         public const string Policies = "Policies";
         public const string Abstractions = "Abstractions";
+    }
+
+    /// <summary>
+    /// The DDD-stereotype slug (<see cref="DddKind"/>) stamped on a per-type file's
+    /// <see cref="EmittedFile.Kind"/>, so a UI (Koine Studio's Output rail) can tint generated files
+    /// by building block. Mirrors the C# emitter over this backend's own folder names; pure
+    /// abstractions map to <c>null</c>. The aggregate-root and integration-event stereotypes are
+    /// stamped at their call sites (PHP keeps the root in <see cref="KindFolder.Entities"/> and
+    /// co-locates integration events under <see cref="KindFolder.Events"/>), not routed through here.
+    /// </summary>
+    private static string? KindForFolder(string kindFolder) => kindFolder switch
+    {
+        KindFolder.Entities => DddKind.Entity,
+        KindFolder.ValueObjects => DddKind.Value,
+        KindFolder.Enums => DddKind.Enum,
+        KindFolder.Events => DddKind.Event,
+        KindFolder.ReadModels => DddKind.ReadModel,
+        KindFolder.Queries => DddKind.Query,
+        KindFolder.Services => DddKind.Service,
+        KindFolder.Specifications => DddKind.Spec,
+        KindFolder.Policies => DddKind.Policy,
+        KindFolder.Repositories => DddKind.Repository,
+        _ => null,
+    };
+
+    /// <summary>
+    /// The <c>(context, entity-name)</c> pairs that are aggregate roots. PHP emits the root entity
+    /// under <see cref="KindFolder.Entities"/> like any other entity, so root-ness is looked up here
+    /// (rather than read off the folder) to stamp it with the <see cref="DddKind.Aggregate"/> kind.
+    /// </summary>
+    private static IReadOnlySet<(string Context, string Name)> BuildRootEntityNames(KoineModel model)
+    {
+        var roots = new HashSet<(string, string)>();
+        foreach (ContextNode ctx in model.Contexts)
+        {
+            foreach (AggregateDecl agg in ctx.AllTypeDecls().OfType<AggregateDecl>())
+            {
+                roots.Add((ctx.Name, agg.RootName));
+            }
+        }
+
+        return roots;
     }
 
     /// <summary>
@@ -471,7 +514,8 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(contextName, KindFolder.ValueObjects, idRaw),
-            Assemble(contextName, KindFolder.ValueObjects, sb.ToString(), idName));
+            Assemble(contextName, KindFolder.ValueObjects, sb.ToString(), idName),
+            Kind: KindForFolder(KindFolder.ValueObjects));
     }
 
     // -------------------------------------------------------------------------
