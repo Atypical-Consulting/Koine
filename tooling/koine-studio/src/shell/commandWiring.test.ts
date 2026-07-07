@@ -21,6 +21,7 @@ vi.mock('@/launcher/createLauncher', () => ({ createLauncher: vi.fn() }));
 let launcherToggle: ReturnType<typeof vi.fn>;
 let launcherToast: ReturnType<typeof vi.fn>;
 let launcherPeek: ReturnType<typeof vi.fn>;
+let launcherClose: ReturnType<typeof vi.fn>;
 let launcherOpen = false;
 let capturedSources: LauncherSources;
 let capturedActionDeps: LauncherActionDeps;
@@ -99,6 +100,7 @@ function makeDeps(over: Partial<CommandWiringDeps> = {}): CommandWiringDeps {
     gitLog: vi.fn(() => null),
     revealLocation: vi.fn(),
     findReferences: vi.fn(),
+    renameSymbol: vi.fn(),
     ...over,
   };
 }
@@ -120,15 +122,15 @@ describe('commandWiring', () => {
     launcherToggle = vi.fn();
     launcherToast = vi.fn();
     launcherPeek = vi.fn();
+    launcherClose = vi.fn();
     const open = vi.fn();
-    const close = vi.fn();
     vi.mocked(createLauncher).mockReset();
     vi.mocked(createLauncher).mockImplementation((sources, actionDeps) => {
       capturedSources = sources;
       capturedActionDeps = actionDeps;
       return {
         open,
-        close,
+        close: launcherClose,
         toggle: launcherToggle,
         toast: launcherToast,
         peek: launcherPeek,
@@ -507,22 +509,49 @@ describe('commandWiring', () => {
       vi.unstubAllGlobals();
     });
 
-    it('rename / revert honestly toast "not available" instead of a misleading jump / panel swap (#1145)', () => {
+    it('revert honestly toasts "not available" instead of a misleading panel swap (#1145)', () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
 
-      const symbol = { id: 'sym:Ordering.Order', cat: 'symbol', title: 'Order' } as unknown as CatalogEntry;
-      capturedActionDeps.rename(symbol);
-      expect(launcherToast).toHaveBeenLastCalledWith(expect.stringContaining('isn’t available'));
-      // ...and it does NOT do the old misleading thing (jump to the definition).
-      expect(deps.revealLocation).not.toHaveBeenCalled();
-
       const commit = { id: 'commit:abc', cat: 'commit', title: 'fix: bug', hash: 'abc1234' } as unknown as CatalogEntry;
       capturedActionDeps.revertCommit(commit);
-      expect(launcherToast).toHaveBeenCalledTimes(2);
+      expect(launcherToast).toHaveBeenLastCalledWith(expect.stringContaining('isn’t available'));
       // ...and it does NOT silently open the Source Control panel as if a revert happened.
       expect(deps.controller.selectRight).not.toHaveBeenCalled();
+    });
+
+    it('rename opens the inline rename at the entry\'s declaration and closes the launcher (#1165)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const range = { start: { line: 3, character: 2 }, end: { line: 3, character: 7 } };
+      const entry = {
+        id: 'sym:Ordering.Order',
+        cat: 'symbol',
+        title: 'Order',
+        file: 'file:///order.koi',
+        nameRange: range,
+      } as unknown as CatalogEntry;
+      capturedActionDeps.rename(entry);
+      // Routes to the editor's inline rename (lsp.rename) at the entry's file + declaration range…
+      expect(deps.renameSymbol).toHaveBeenCalledWith('file:///order.koi', range);
+      // …closes the launcher so the inline field isn't trapped behind the scrim…
+      expect(launcherClose).toHaveBeenCalledOnce();
+      // …and drops the old "isn’t available yet" toast.
+      expect(launcherToast).not.toHaveBeenCalled();
+    });
+
+    it('rename toasts (no rename) for an entry with no source location', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const entry = { id: 'sym:X', cat: 'symbol', title: 'X' } as unknown as CatalogEntry;
+      capturedActionDeps.rename(entry);
+      expect(deps.renameSymbol).not.toHaveBeenCalled();
+      expect(launcherToast).toHaveBeenCalledOnce();
     });
 
     it('findInModel seeds the workspace search with the entry\'s term, not just focus (#1165)', () => {

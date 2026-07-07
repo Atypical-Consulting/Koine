@@ -921,6 +921,9 @@ export interface KoineEditor {
   /** Move the cursor to a 0-based LSP position and open the references picker there — the same Shift-F12
    * surface, driven from outside the editor (the launcher's find-usages action, issue #1165). */
   showReferences(line: number, character: number): void;
+  /** Move the cursor to a 0-based LSP position and open the inline rename field there — the same F2
+   * surface, driven from outside the editor (the launcher's rename action, issue #1165). */
+  showRename(line: number, character: number): void;
   /** Apply LSP TextEdits to the document in one transaction (edits sorted internally). */
   applyEdits(edits: TextEdit[]): void;
   /** Turn editor soft-wrap on/off (reconfigures a compartment; no state loss). */
@@ -1406,6 +1409,14 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
       view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
       view.focus();
       void findReferences(pos);
+    },
+    showRename(line: number, character: number) {
+      // Move the caret to the position, then reuse the internal F2 handler so the inline rename field
+      // anchors there — identical surface, driven from the launcher instead of the keymap.
+      const pos = lspPosToOffset(view.state.doc, line, character);
+      view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
+      view.focus();
+      void startRename(pos);
     },
     applyEdits(edits: TextEdit[]) {
       if (!edits.length) return;

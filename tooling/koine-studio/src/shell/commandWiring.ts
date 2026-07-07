@@ -82,6 +82,9 @@ export interface CommandWiringDeps {
   /** Activate a workspace file and surface the LSP references picker at a 0-based range — the launcher's
    * find-usages effect (reuses the editor's Shift-F12 surface at the entry's declaration). */
   findReferences(uri: string, range: Range): void;
+  /** Activate a workspace file and open the inline rename field at a 0-based range — the launcher's
+   * rename effect (reuses the editor's F2 rename surface → lsp.rename → applyWorkspaceEdit). */
+  renameSymbol(uri: string, range: Range): void;
 }
 
 export interface CommandWiring {
@@ -250,7 +253,20 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     // preview pane instead of jumping to it (gotoEntry navigates — that's what ↵ is for). Leaves the
     // editor selection / active document untouched.
     peek: (entry) => launcher.peek(entry),
-    rename: () => launcher.toast('Renaming a symbol isn’t available from the launcher yet.'),
+    // Inline rename from the launcher (#1165): open the editor's F2 rename field at the entry's
+    // declaration (which collects the new name and applies lsp.rename → applyWorkspaceEdit). Close the
+    // launcher first so the inline field isn't trapped behind the `.lx-scrim`. An entry with no source
+    // location (an undrawn element) can't be renamed — say so honestly instead of a silent no-op.
+    rename: (entry) => {
+      const file = entry.element?.node?.sourceSpan?.file ?? entry.file ?? null;
+      const range = entry.nameRange ?? entry.element?.entry.nameRange ?? null;
+      if (file && range) {
+        launcher.close();
+        deps.renameSymbol(file, range);
+      } else {
+        launcher.toast('This symbol has no source location to rename.');
+      }
+    },
     copy: (text) => void navigator.clipboard?.writeText?.(text),
     openFile: (entry) => {
       if (entry.file) deps.openUri(entry.file);
