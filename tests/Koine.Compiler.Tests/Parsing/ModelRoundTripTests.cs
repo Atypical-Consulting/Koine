@@ -129,6 +129,69 @@ public class ModelRoundTripTests
         ModelRoundTripService.MembersOf(Compile(Sample), "Nope").ShouldBeEmpty();
     }
 
+    // ---- #1163: transition/command correlation + per-edge fan-out ---------
+
+    /// <summary>
+    /// A state machine exercising the four projection cases: a guarded edge a command drives
+    /// (<c>Draft → Submitted</c>), an edge no command drives (<c>Submitted → Placed</c>), a single
+    /// rule with two targets (<c>Placed → Shipped, Cancelled</c>), and a terminal state (<c>Paid</c>).
+    /// </summary>
+    private const string StateMachineSample = """
+        context Sales {
+          enum OrderStatus { Draft, Submitted, Placed, Shipped, Cancelled, Paid }
+          entity Order identified by OrderId {
+            status:          OrderStatus = Draft
+            totalIsPositive: Bool
+
+            states status {
+              Draft     -> Submitted when totalIsPositive
+              Submitted -> Placed
+              Placed    -> Shipped, Cancelled
+              Paid
+            }
+
+            command Submit { status -> Submitted }
+          }
+        }
+        """;
+
+    [Fact]
+    public void MembersOf_correlates_the_triggering_command_with_a_transition()
+    {
+        var transitions = ModelRoundTripService.MembersOf(Compile(StateMachineSample), "Sales.Order.states.status");
+
+        ModelMember draftToSubmitted = transitions.Single(t => t.Name == "Draft" && t.Value == "Submitted");
+        draftToSubmitted.Via.ShouldBe("Submit");
+        draftToSubmitted.Name.ShouldBe("Draft");
+        draftToSubmitted.Value.ShouldBe("Submitted");
+        draftToSubmitted.Type.ShouldBe("totalIsPositive");   // the guard, described target-agnostically
+    }
+
+    [Fact]
+    public void MembersOf_omits_the_trigger_when_no_command_drives_the_edge_but_keeps_the_edge()
+    {
+        var transitions = ModelRoundTripService.MembersOf(Compile(StateMachineSample), "Sales.Order.states.status");
+
+        ModelMember submittedToPlaced = transitions.Single(t => t.Name == "Submitted" && t.Value == "Placed");
+        submittedToPlaced.Via.ShouldBeNull();
+    }
+
+    [Fact]
+    public void MembersOf_fans_a_multi_target_rule_out_to_one_member_per_edge()
+    {
+        var transitions = ModelRoundTripService.MembersOf(Compile(StateMachineSample), "Sales.Order.states.status");
+
+        transitions.Where(t => t.Name == "Placed").Select(t => t.Value).ShouldBe(new[] { "Shipped", "Cancelled" });
+    }
+
+    [Fact]
+    public void MembersOf_omits_a_terminal_state_with_no_outgoing_edge()
+    {
+        var transitions = ModelRoundTripService.MembersOf(Compile(StateMachineSample), "Sales.Order.states.status");
+
+        transitions.ShouldNotContain(t => t.Name == "Paid");
+    }
+
     [Fact]
     public Task ModelToJson_serialises_the_ordering_starter_to_a_stable_contract()
     {

@@ -25,25 +25,29 @@
                   "kind": "enumMember",
                   "name": "Draft",
                   "type": null,
-                  "value": null
+                  "value": null,
+                  "via": null
                 },
                 {
                   "kind": "enumMember",
                   "name": "Placed",
                   "type": null,
-                  "value": null
+                  "value": null,
+                  "via": null
                 },
                 {
                   "kind": "enumMember",
                   "name": "Shipped",
                   "type": null,
-                  "value": null
+                  "value": null,
+                  "via": null
                 },
                 {
                   "kind": "enumMember",
                   "name": "Cancelled",
                   "type": null,
-                  "value": null
+                  "value": null,
+                  "via": null
                 }
               ],
               "children": []
@@ -57,25 +61,29 @@
                   "kind": "field",
                   "name": "product",
                   "type": "ProductId",
-                  "value": null
+                  "value": null,
+                  "via": null
                 },
                 {
                   "kind": "field",
                   "name": "quantity",
                   "type": "Int",
-                  "value": null
+                  "value": null,
+                  "via": null
                 },
                 {
                   "kind": "field",
                   "name": "unitPrice",
                   "type": "Decimal",
-                  "value": null
+                  "value": null,
+                  "via": null
                 },
                 {
                   "kind": "field",
                   "name": "subtotal",
                   "type": "Decimal",
-                  "value": "unitPrice * quantity"
+                  "value": "unitPrice * quantity",
+                  "via": null
                 }
               ],
               "children": []
@@ -89,13 +97,15 @@
                   "kind": "field",
                   "name": "lines",
                   "type": "List\u003COrderLine\u003E",
-                  "value": null
+                  "value": null,
+                  "via": null
                 },
                 {
                   "kind": "field",
                   "name": "status",
                   "type": "OrderStatus",
-                  "value": "Draft"
+                  "value": "Draft",
+                  "via": null
                 }
               ],
               "children": [
@@ -108,19 +118,22 @@
                       "kind": "transition",
                       "name": "Draft",
                       "type": null,
-                      "value": "Placed"
+                      "value": "Placed",
+                      "via": null
                     },
                     {
                       "kind": "transition",
                       "name": "Placed",
                       "type": null,
-                      "value": "Shipped"
+                      "value": "Shipped",
+                      "via": null
                     },
                     {
                       "kind": "transition",
                       "name": "Placed",
                       "type": null,
-                      "value": "Cancelled"
+                      "value": "Cancelled",
+                      "via": null
                     }
                   ],
                   "children": []

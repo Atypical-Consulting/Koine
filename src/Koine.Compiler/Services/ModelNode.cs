@@ -47,9 +47,14 @@ public sealed record ModelNode(
 /// <c>List&lt;OrderLine&gt;</c>, <c>Decimal?</c>) for a field; a relation's role; an optional guard for
 /// a transition; <c>null</c> when not applicable.</param>
 /// <param name="Value">The current value: a field's initializer/derivation, an enum member's
-/// associated data, a transition's <c>to</c> states, or relation detail; <c>null</c> when none.</param>
+/// associated data, a transition's single <c>to</c> state, or relation detail; <c>null</c> when none.</param>
+/// <param name="Via">For a <c>transition</c> member, the name of the command/event that triggers
+/// reaching this edge's <c>to</c> state — a best-effort correlation against the owning entity's declared
+/// commands; <c>null</c> when no declared command drives it, and <c>null</c> for every non-transition
+/// member kind. Additive-only, like every field on this contract (see <see cref="ModelNode"/>).</param>
 public sealed record ModelMember(
     string Kind,
     string Name,
     string? Type,
-    string? Value);
+    string? Value,
+    string? Via = null);

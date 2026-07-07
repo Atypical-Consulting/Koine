@@ -107,7 +107,7 @@ public static partial class ModelRoundTripService
             EntityDecl entity => new ModelNode(
                 "entity", qualified, entity.Name,
                 entity.Members.Select(FieldMember).ToList(),
-                entity.States.Select(s => BuildStates(s, qualified)).ToList()),
+                entity.States.Select(s => BuildStates(entity, s, qualified)).ToList()),
 
             ValueObjectDecl vo => new ModelNode(
                 vo.IsQuantity ? "quantity" : "value", qualified, vo.Name,
@@ -129,17 +129,47 @@ public static partial class ModelRoundTripService
         };
     }
 
-    private static ModelNode BuildStates(StatesDecl states, string entityQualified)
+    private static ModelNode BuildStates(EntityDecl owner, StatesDecl states, string entityQualified)
     {
         var qualified = entityQualified + ".states." + states.Field;
-        var transitions = states.Rules
-            .Select(r => new ModelMember(
-                "transition",
-                r.From,
-                r.Guard is null ? null : ExprDescriber.Describe(r.Guard),
-                string.Join(", ", r.To)))
-            .ToList();
+
+        // One member per declared edge (per `From → single To` pair): a rule with N targets fans out
+        // to N members, and a terminal rule (empty `To`, e.g. a bare `Paid`) contributes none.
+        var transitions = new List<ModelMember>();
+        foreach (StateRule r in states.Rules)
+        {
+            var guard = r.Guard is null ? null : ExprDescriber.Describe(r.Guard);
+            foreach (var to in r.To)
+            {
+                transitions.Add(new ModelMember(
+                    "transition", r.From, guard, to, TriggeringCommand(owner, states.Field, to)));
+            }
+        }
+
         return new ModelNode("states", qualified, states.Field, transitions, []);
+    }
+
+    /// <summary>
+    /// Best-effort correlation of a declared state edge with the command that drives it: the name of the
+    /// <b>first</b> command on <paramref name="owner"/> whose body assigns <paramref name="toState"/> to
+    /// <paramref name="field"/> (a <see cref="Transition"/> <c>field -&gt; toState</c>). Mirrors the
+    /// reachability check in <see cref="Semantics.EntityBehaviorValidator"/>. Only literal-state targets
+    /// (<see cref="IdentifierExpr"/>) correlate; returns <c>null</c> when no declared command matches.
+    /// </summary>
+    private static string? TriggeringCommand(EntityDecl owner, string field, string toState)
+    {
+        foreach (CommandDecl cmd in owner.Commands)
+        {
+            foreach (Transition tr in cmd.Body.OfType<Transition>())
+            {
+                if (tr.Field == field && tr.Value is IdentifierExpr id && id.Name == toState)
+                {
+                    return cmd.Name;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static ModelNode BuildContextMap(ContextMapNode map)
