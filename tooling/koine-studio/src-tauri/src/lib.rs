@@ -901,6 +901,23 @@ struct GitLogEntry {
     message: String,
 }
 
+/// Per-(file, area) line churn from `git diff --numstat`, keyed like [`GitFile`] by (relPath, staged).
+/// `added`/`removed` are `None` for a binary file (git prints `-`), serializing to TS `null` so the
+/// panel shows the neutral placeholder instead of a bogus number.
+#[derive(serde::Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GitNumstatEntry {
+    /// Path relative to the repo, forward-slashed (git already reports it that way); for a rename this
+    /// is the NEW path, so it joins the entry `git_status` reports.
+    rel_path: String,
+    /// True for a staged (`--cached`, index vs HEAD) count; false for a worktree (vs index) count.
+    staged: bool,
+    /// Added line count, or `None` for a binary file.
+    added: Option<u64>,
+    /// Removed line count, or `None` for a binary file.
+    removed: Option<u64>,
+}
+
 /// Run `git -C <dir> <args…>` and return its stdout, or an `Err` shaped like `git_log_for_range`:
 /// a spawn failure (git not installed) → `git-unavailable: …`; a non-zero exit → the trimmed
 /// stderr. The thin core every source-control command shares.
@@ -1015,6 +1032,61 @@ fn git_diff(dir: String, rel_path: String, staged: bool) -> Result<String, Strin
     args.push("--");
     args.push(&rel_path);
     run_git(&dir, &args)
+}
+
+/// Resolve a `--numstat` path column to the changed file's path. A rename is printed as
+/// `old => new` — or the brace form `pre{old => new}post` when the paths share a prefix/suffix —
+/// so map it to the NEW path (what `git_status` reports); a plain path passes through unchanged.
+fn numstat_new_path(raw: &str) -> String {
+    // Brace rename form: `pre{old => new}post` → `pre` + `new` + `post`. Only when the braces actually
+    // wrap a ` => ` rename — a filename that merely CONTAINS braces must pass through untouched.
+    if let Some(open) = raw.find('{') {
+        if let Some(close) = raw[open..].find('}').map(|i| open + i) {
+            if let Some((_, new)) = raw[open + 1..close].split_once(" => ") {
+                let pre = &raw[..open];
+                let post = &raw[close + 1..];
+                // An empty new segment can leave a doubled slash (e.g. `dir/{old => }file`); collapse it.
+                return format!("{pre}{new}{post}").replace("//", "/");
+            }
+        }
+    }
+    // Simple form: `old => new` → `new`; a plain path passes through unchanged.
+    match raw.split_once(" => ") {
+        Some((_, new)) => new.to_string(),
+        None => raw.to_string(),
+    }
+}
+
+/// Parse one area's `git diff --numstat` output (`<added>\t<removed>\t<path>` per line; `-`/`-` for a
+/// binary file) into [`GitNumstatEntry`]s tagged with `staged`, appending to `entries`.
+fn parse_numstat(out: &str, staged: bool, entries: &mut Vec<GitNumstatEntry>) {
+    for line in out.lines() {
+        // splitn(3) keeps a path with embedded tabs intact in the third field.
+        let mut fields = line.splitn(3, '\t');
+        let (Some(added), Some(removed), Some(path)) = (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        entries.push(GitNumstatEntry {
+            rel_path: numstat_new_path(path),
+            staged,
+            // A non-numeric field is git's binary `-`, which parses to `None`.
+            added: added.parse::<u64>().ok(),
+            removed: removed.parse::<u64>().ok(),
+        });
+    }
+}
+
+/// Per-file `+n/−n` line counts for the whole working tree: the worktree area (`git diff --numstat`)
+/// plus the staged area (`git diff --cached --numstat`) in ONE bounded pair of runs — independent of
+/// file count. One entry per (path, area); binary files carry `None` counts. `Err` when `dir` is not
+/// a work tree (same as the other read commands).
+#[tauri::command]
+fn git_numstat(dir: String) -> Result<Vec<GitNumstatEntry>, String> {
+    let mut entries: Vec<GitNumstatEntry> = Vec::new();
+    parse_numstat(&run_git(&dir, &["diff", "--numstat"])?, false, &mut entries);
+    parse_numstat(&run_git(&dir, &["diff", "--cached", "--numstat"])?, true, &mut entries);
+    Ok(entries)
 }
 
 /// Stage paths (`git add -- <paths…>`): move worktree/untracked changes into the index.
@@ -2094,6 +2166,7 @@ pub fn run() {
             move_entry,
             git_status,
             git_diff,
+            git_numstat,
             git_stage,
             git_unstage,
             git_commit,
@@ -3287,6 +3360,74 @@ mod tests {
     }
 
     #[test]
+    fn git_numstat_reports_worktree_and_staged_counts_with_null_for_binary() {
+        let repo = init_repo();
+        // Base: a text file and a binary blob (a NUL byte makes git treat it as binary).
+        repo.write("text.txt", "l1\nl2\n");
+        std::fs::write(repo.dir.join("blob.bin"), [0u8, 1, 2, 3, 0, 9]).unwrap();
+        repo.git(&["add", "text.txt", "blob.bin"]);
+        repo.git(&["commit", "-m", "base"]);
+
+        // An UNSTAGED text edit (+2/−0), an UNSTAGED binary edit (numstat prints `-`/`-`), and a
+        // STAGED new file (+3/−0) — one entry per (path, area).
+        repo.write("text.txt", "l1\nl2\nl3\nl4\n");
+        std::fs::write(repo.dir.join("blob.bin"), [0u8, 1, 2, 3, 0, 9, 42, 7]).unwrap();
+        repo.write("staged.txt", "a\nb\nc\n");
+        repo.git(&["add", "staged.txt"]);
+
+        let entries = git_numstat(repo.path()).unwrap();
+
+        // Worktree text change → non-null counts, staged=false.
+        let text = entries
+            .iter()
+            .find(|e| e.rel_path == "text.txt" && !e.staged)
+            .unwrap_or_else(|| panic!("expected a text.txt worktree entry: {entries:?}"));
+        assert_eq!(text.added, Some(2));
+        assert_eq!(text.removed, Some(0));
+
+        // Worktree binary change → null counts (never a bogus number), staged=false.
+        let blob = entries
+            .iter()
+            .find(|e| e.rel_path == "blob.bin" && !e.staged)
+            .unwrap_or_else(|| panic!("expected a blob.bin worktree entry: {entries:?}"));
+        assert_eq!(blob.added, None);
+        assert_eq!(blob.removed, None);
+
+        // Staged addition → real counts, staged=true.
+        let staged = entries
+            .iter()
+            .find(|e| e.rel_path == "staged.txt" && e.staged)
+            .unwrap_or_else(|| panic!("expected a staged.txt staged entry: {entries:?}"));
+        assert_eq!(staged.added, Some(3));
+        assert_eq!(staged.removed, Some(0));
+    }
+
+    #[test]
+    fn git_numstat_maps_a_staged_rename_to_the_new_path() {
+        let repo = init_repo();
+        repo.write("old-name.txt", "one\ntwo\nthree\n");
+        repo.git(&["add", "old-name.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+
+        // A pure staged rename: `git diff --cached --numstat` reports the path as `old => new`
+        // (or the `{old => new}` brace form) — the entry must be keyed by the NEW path so it joins
+        // git_status, which reports the new path.
+        repo.git(&["mv", "old-name.txt", "new-name.txt"]);
+
+        let entries = git_numstat(repo.path()).unwrap();
+
+        let renamed = entries
+            .iter()
+            .find(|e| e.rel_path == "new-name.txt" && e.staged)
+            .unwrap_or_else(|| panic!("expected a new-name.txt staged entry: {entries:?}"));
+        // A content-preserving rename is 0/0 churn.
+        assert_eq!(renamed.added, Some(0));
+        assert_eq!(renamed.removed, Some(0));
+        // The raw `old => new` arrow must never leak into a key.
+        assert!(!entries.iter().any(|e| e.rel_path.contains("=>")), "{entries:?}");
+    }
+
+    #[test]
     fn git_commands_error_on_a_non_git_dir() {
         // A directory that was never `git init`-ed yields Err from every read command.
         let plain = TempRepo::new();
@@ -3294,6 +3435,7 @@ mod tests {
         assert!(git_log(plain.path(), None).is_err());
         assert!(git_branches(plain.path()).is_err());
         assert!(git_diff(plain.path(), "anything.txt".to_string(), false).is_err());
+        assert!(git_numstat(plain.path()).is_err());
     }
 
     #[test]
