@@ -98,7 +98,7 @@ public sealed partial class CSharpEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile(PathFor(emit, ns, KindFolder.Specifications, $"{ns}Specifications.cs"), Assemble(emit, ns, sb.ToString(), usesLinq));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Specifications, $"{ns}Specifications.cs"), Assemble(emit, ns, sb.ToString(), usesLinq), Kind: KindForFolder(KindFolder.Specifications));
     }
 
     /// <summary>
@@ -170,7 +170,7 @@ public sealed partial class CSharpEmitter
 
         sb.Append("}\n");
         var usesLinq = svc.Operations.Any(o => o.Body is not null && ExprUsesLinq(o.Body));
-        return new EmittedFile(PathFor(emit, ns, KindFolder.Services, $"{svc.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Services, $"{svc.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq), Kind: KindForFolder(KindFolder.Services));
     }
 
     /// <summary>
@@ -219,6 +219,6 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append("public abstract Task Handle(").Append(policy.EventName).Append(" e, CancellationToken ct = default);\n");
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(emit, ns, KindFolder.Policies, $"{policyType}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Policies, $"{policyType}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false), Kind: KindForFolder(KindFolder.Policies));
     }
 }

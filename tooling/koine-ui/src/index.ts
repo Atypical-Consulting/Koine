@@ -30,14 +30,19 @@ export { createCommandPalette, type PaletteHandle } from './primitives/palette';
 
 // --- Store-free presentational components (issue #905, Task 4) ------------------------------
 // Moved from koine-studio's src/shell/**; each still takes plain props/callbacks, no store or Tauri
-// coupling. DeckBar's app-specific surface REGISTRY (Koine Studio's Canvas/Code/Output/Docs data) stays
-// in the app — DeckBar takes a generic `surfaces` prop instead (see DeckBar.tsx's header note).
+// coupling. The deck's app-specific surface REGISTRY (Koine Studio's Canvas/Code/Output/Docs data) stays
+// in the app — the deck components take a generic `surfaces` prop instead (see DeckCard.tsx's header note).
 export { DeckCard, type DeckCardProps, type DeckCardSurface, type DeckCardFacet } from './components/DeckCard';
-export { DeckBar, type DeckBarProps, type DeckBarMode } from './components/DeckBar';
+// DeckSpine is the concept-7 "Flush" single-row chrome that replaces Deck v2's two-row deck-bar + card-head.
+export { DeckSpine, type DeckSpineProps, type DeckSpineMode } from './components/DeckSpine';
 export { ExportMenu, type ExportFormat } from './components/ExportMenu';
 export { AssistantView, ASSISTANT_MOUNT_CLASS } from './components/AssistantView';
 export { LeftRail } from './components/LeftRail';
 export { RightStrip } from './components/RightStrip';
+
+// --- Framework-free instant tooltip (concept-7 "Flush") -------------------------------------
+// A singleton `data-tip`/`data-key` tooltip that replaces native `title`; init once at app boot.
+export { initInstantTooltip, type TooltipController } from './tooltip';
 
 // --- DOM contract shared with koine-studio (issue #979) -------------------------------------
 // The single source of truth for the ids/data-attributes/classes LeftRail.tsx & RightStrip.tsx render

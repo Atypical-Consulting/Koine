@@ -1,0 +1,760 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Koine Studio — Concept 7: Flush</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* =========================================================================
+     Concept 7 — "Flush". A refinement of Deck v2 (concept-6), not a new model.
+     Four targeted moves, all sharing one thesis: the floating-card workbench
+     texture is earned only in Overview; in focus mode the surface goes flush
+     and the chrome collapses to ONE spine.
+       1. Flush focus surfaces  — no inset / radius / shadow / dot-grid
+       2. One spine             — merges deck-bar + deck-head (was 2–3 rows)
+       3. Clean seam            — pure resize line; swap ⇄ docked into the spine
+       4. Output file-rail      — {path,contents}[] as a tree, not a blob
+     All --koi-* tokens are the real product tokens (tokens.css).
+     ========================================================================= */
+
+  body { overflow: hidden; }
+
+  .app-shell { grid-template-columns: 52px 1fr 300px; }
+
+  /* the center is a plain column: spine on top, flush stage below. No padding. */
+  .app-center { overflow: hidden; }
+
+  /* ---- surfaces palette (per-surface accent, reused by spine + rail) -------- */
+  [data-s="visual"]    { --sc: var(--st-aggregate); }
+  [data-s="technical"] { --sc: var(--koi-hl-keyword); }
+  [data-s="output"]    { --sc: var(--st-event); }
+  [data-s="docs"]      { --sc: var(--st-entity); }
+
+  /* =========================================================================
+     1 + 2 — THE SPINE  (one 34px row; replaces deck-bar + deck-head + palette)
+     ========================================================================= */
+  .fx-spine {
+    flex: 0 0 auto;
+    height: 34px;
+    display: flex;
+    align-items: stretch;
+    background: var(--koi-paper-2);
+    border-bottom: 1px solid var(--koi-line);
+    font-size: 12px;
+  }
+
+  /* the surface switcher: 4 icon tabs, active one grows a label. This is the
+     ONLY persistent global control — it is both the picker and the pane title. */
+  .fx-strip { display: flex; align-items: stretch; padding-left: 4px; }
+
+  /* Each surface is a SPLIT-BUTTON: the wrap is the pill, and inside it sit the tab (focus) and —
+     on hover — a ⊞ "open beside" segment divided by a hairline. Because the ⊞ lives inside the tab's
+     own pill (not in the gap between tabs), the split action reads as part of THIS surface. */
+  .fx-tabwrap {
+    display: inline-flex; align-items: stretch;
+    margin: 4px 1px; border-radius: var(--koi-radius-sm); overflow: hidden;
+    transition: background .16s ease;
+  }
+  .fx-tabwrap:not(.on):hover { background: color-mix(in srgb, var(--koi-fg) 7%, transparent); }
+
+  .fx-tab {
+    all: unset; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 0 9px; color: var(--koi-muted);
+    transition: color .16s ease, background .16s ease, box-shadow .16s ease;
+  }
+  .fx-tab svg { width: 15px; height: 15px; }
+  /* The icon lives in a wrapper span; make that span a flex box so its <svg> is a centred flex
+     item (block-level) rather than an inline element sitting on the text baseline — otherwise the
+     baseline's descent space pushes the glyph ~1.6px above the tab's centre. */
+  .fx-tab .ic { display: inline-flex; align-items: center; }
+  .fx-tab .lbl {
+    max-width: 0; overflow: hidden; white-space: nowrap; font-weight: 600;
+    line-height: 1; /* match the icon's box so text and glyph share a vertical centre */
+    opacity: 0; transition: max-width .22s ease, opacity .18s ease;
+  }
+  .fx-tab:hover { color: var(--koi-fg); }
+  /* Active decoration is painted INSIDE the box (tint + inset underline) so every tab icon's
+     vertical centre stays identical across states. */
+  .fx-tab.on {
+    color: var(--sc);
+    background: color-mix(in srgb, var(--sc) 13%, transparent);
+    box-shadow: inset 0 -2px 0 var(--sc);
+  }
+  .fx-tab.on .ic { color: var(--sc); }
+  .fx-tab.on .lbl { max-width: 120px; opacity: 1; }
+  .fx-tab:focus-visible { outline: 2px solid var(--koi-accent); outline-offset: -2px; }
+
+  /* the ⊞ segment — collapsed until the surface is hovered, then it slides open inside the pill,
+     set off from the icon by a hairline so the two targets (focus | split) are legible. */
+  .fx-beside {
+    all: unset; cursor: pointer; align-self: stretch;
+    display: inline-grid; place-items: center;
+    width: 0; opacity: 0; overflow: hidden; color: var(--koi-muted);
+    border-left: 1px solid transparent;
+    transition: width .18s ease, opacity .16s ease, background .16s ease, color .16s ease, border-color .16s ease;
+  }
+  .fx-beside svg { width: 13px; height: 13px; }
+  .fx-tabwrap:hover .fx-beside, .fx-beside:focus-visible {
+    width: 24px; opacity: 1; border-left-color: color-mix(in srgb, var(--koi-fg) 14%, transparent);
+  }
+  .fx-beside:hover { color: var(--sc, var(--koi-accent)); background: color-mix(in srgb, var(--sc, var(--koi-accent)) 16%, transparent); }
+  .fx-beside:focus-visible { outline: 2px solid var(--koi-accent); outline-offset: -2px; }
+
+  .fx-div { width: 1px; background: var(--koi-line); margin: 7px 8px; }
+
+  /* facets of the focused surface — inline, no second row */
+  .fx-facets { display: flex; align-items: center; gap: 2px; }
+  .fx-facet {
+    all: unset; cursor: pointer;
+    font-size: 11px;
+    /* lifted a step toward --koi-fg so the inactive facet clears WCAG-AA on paper-2 — matches the
+       shipped .deck-sub, whose comment notes plain --koi-muted drops below 4.5:1 on the header. */
+    color: color-mix(in srgb, var(--koi-fg) 22%, var(--koi-muted));
+    padding: 3px 9px; border-radius: var(--koi-radius-pill);
+    transition: color .16s ease, background .16s ease;
+  }
+  .fx-facet:hover { color: var(--koi-fg); }
+  .fx-facet.on { color: var(--sc); background: color-mix(in srgb, var(--sc) 14%, transparent); }
+  .fx-facet:focus-visible { outline: 2px solid var(--koi-accent); outline-offset: -1px; }
+
+  .fx-grow { flex: 1 1 auto; }
+
+  /* right-side spine actions */
+  .fx-act {
+    all: unset; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--koi-muted); font-size: 11px; font-weight: 600;
+    padding: 0 11px; align-self: center; height: 24px; margin-right: 5px;
+    border-radius: var(--koi-radius-sm); border: 1px solid transparent;
+    transition: color .16s ease, border-color .16s ease, background .16s ease;
+  }
+  .fx-act svg { width: 15px; height: 15px; }
+  .fx-act:hover { color: var(--koi-fg); border-color: var(--koi-accent); }
+  .fx-tag { align-self: center; color: var(--koi-muted); font-size: 10.5px; margin-right: 12px; }
+
+  /* --- split spine (2-up): two half-spines meet at the seam, ⇄ docked between - */
+  .fx-spine.split { padding: 0; }
+  .fx-half { display: flex; align-items: stretch; min-width: 0; }
+  .fx-half .fx-hlabel {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-weight: 600; padding: 0 10px; color: var(--sc); align-self: center;
+  }
+  .fx-half .fx-hlabel svg { width: 15px; height: 15px; }
+  .fx-half.sel { background: color-mix(in srgb, var(--sc) 10%, transparent); box-shadow: inset 0 -2px 0 var(--sc); }
+  .fx-half .fx-facets { padding-left: 2px; }
+  .fx-hclose {
+    all: unset; cursor: pointer; display: inline-grid; place-items: center;
+    width: 22px; align-self: center; color: var(--koi-muted); border-radius: 5px;
+    opacity: 0; transition: opacity .16s ease, color .16s ease, background .16s ease;
+  }
+  .fx-hclose svg { width: 13px; height: 13px; }
+  .fx-half:hover .fx-hclose { opacity: 1; }
+  .fx-hclose:hover { color: var(--koi-fg); background: var(--koi-line); }
+
+  /* the ⇄ swap — DOCKED where the two half-spines meet (flush chrome, not floating) */
+  .fx-swap {
+    all: unset; cursor: pointer; flex: 0 0 auto;
+    width: 30px; display: grid; place-items: center; align-self: stretch;
+    color: var(--koi-muted);
+    border-left: 1px solid var(--koi-line); border-right: 1px solid var(--koi-line);
+    background: var(--koi-paper-2);
+    transition: color .18s ease, background .18s ease;
+  }
+  .fx-swap svg { width: 15px; height: 15px; transition: transform .3s var(--koi-ease, cubic-bezier(.33,1,.68,1)); }
+  .fx-swap:hover { color: var(--koi-accent); background: color-mix(in srgb, var(--koi-accent) 10%, transparent); }
+  .fx-swap:active svg { transform: rotate(180deg); }
+
+  /* =========================================================================
+     THE STAGE  — flush in focus; the workbench returns only in overview
+     ========================================================================= */
+  .fx-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; }
+
+  /* focus panes: edge-to-edge, hairline gutter between a 2-up pair. No radius/shadow. */
+  .fx-pane { position: relative; min-width: 0; height: 100%; overflow: hidden; }
+  .fx-pane.solo { flex: 1 1 100%; }
+
+  /* ---- 3 — CLEAN SEAM: one affordance, not two. A hairline that thickens to a full-height accent
+     line on hover/drag. (The grip pill was dropped — the ⇄ docked at the seam's top already anchors
+     it, and col-resize signals draggability; a second accent element was one accessory too many.) */
+  .fx-seam {
+    flex: 0 0 6px; align-self: stretch; position: relative;
+    cursor: col-resize; background: transparent;
+  }
+  .fx-seam::before {
+    content: ''; position: absolute; inset: 0 auto 0 50%; width: 1px;
+    transform: translateX(-50%); background: var(--koi-line);
+    transition: width .14s ease, background .14s ease;
+  }
+  .fx-seam:hover::before, .fx-seam.drag::before { width: 3px; background: var(--koi-accent); }
+
+  /* ---- workbench (overview only): the floating dot-grid + 2×2 cards --------- */
+  .fx-stage.over { display: block; padding: 16px; overflow: auto;
+    background: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--koi-muted) 15%, transparent) 1px, transparent 0);
+    background-size: 26px 26px; }
+  .fx-grid { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: 16px; height: 100%; }
+  .fx-card {
+    position: relative; display: flex; flex-direction: column; overflow: hidden;
+    background: var(--koi-paper); border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius-lg); box-shadow: 0 10px 30px rgba(3,7,14,.26);
+    cursor: zoom-in; transition: box-shadow .18s ease, border-color .18s ease, transform .18s ease;
+  }
+  .fx-card:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--sc) 60%, var(--koi-line)); box-shadow: 0 20px 44px rgba(3,7,14,.42); }
+  .fx-chead {
+    flex: 0 0 auto; height: 30px; display: flex; align-items: center; gap: 8px;
+    padding: 0 12px; font-weight: 600; font-size: 12px;
+    border-bottom: 1px solid var(--koi-line); background: var(--koi-paper-2); color: var(--sc);
+  }
+  .fx-chead svg { width: 15px; height: 15px; }
+  .fx-chead .ctag { margin-left: auto; color: var(--koi-muted); font-weight: 400; font-size: 10.5px; }
+  .fx-cbody { position: relative; flex: 1 1 auto; min-height: 0; }
+  .fx-cbody .surface { transform: scale(.86); transform-origin: top left; width: 116%; height: 116%; }
+
+  /* =========================================================================
+     4 — OUTPUT FILE-RAIL  (replaces the concatenated CodeMirror blob)
+     ========================================================================= */
+  .out2 { position: absolute; inset: 0; display: grid; grid-template-columns: 232px 1fr; }
+  .out-rail { border-right: 1px solid var(--koi-line); background: var(--koi-paper-2); overflow: auto; padding: 8px 0; }
+  .out-railhead {
+    display: flex; align-items: center; gap: 7px; padding: 4px 12px 9px;
+    font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--koi-muted);
+  }
+  .out-railhead b { color: var(--koi-fg); font-weight: 700; letter-spacing: 0; text-transform: none; font-size: 11.5px; }
+  .out-ctx { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--koi-muted);
+    padding: 9px 12px 4px; display: flex; align-items: center; gap: 6px; }
+  .out-ctx::before { content: ''; width: 6px; height: 6px; border-radius: 2px; background: var(--cc, var(--koi-accent)); }
+  .out-file {
+    all: unset; cursor: pointer; display: flex; align-items: center; gap: 8px;
+    padding: 5px 12px 5px 24px; font-size: 12px; color: var(--koi-ink-soft);
+    border-left: 2px solid transparent;
+  }
+  .out-file .fdot { width: 7px; height: 7px; border-radius: 2px; background: var(--fc, var(--koi-muted)); flex: 0 0 auto; }
+  .out-file .fx-name { font-family: var(--koi-font-mono); font-size: 11.5px; }
+  .out-file .fx-loc { margin-left: auto; font-size: 10px; color: var(--koi-muted); opacity: .7; }
+  .out-file:hover { background: color-mix(in srgb, var(--koi-fg) 6%, transparent); color: var(--koi-fg); }
+  .out-file.on { background: color-mix(in srgb, var(--st-event) 14%, transparent); color: var(--koi-fg);
+    border-left-color: var(--st-event); }
+
+  .out-view { position: relative; min-width: 0; display: flex; flex-direction: column; }
+  .out-crumb {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 6px;
+    padding: 8px 14px; font-family: var(--koi-font-mono); font-size: 11px; color: var(--koi-muted);
+    border-bottom: 1px solid var(--koi-line);
+  }
+  .out-crumb .seg { color: var(--koi-muted); }
+  .out-crumb .seg.leaf { color: var(--koi-fg); }
+  .out-crumb .sl { opacity: .4; }
+  .out-crumb .lang { margin-left: auto; font-size: 10px; color: #a179dc;
+    border: 1px solid color-mix(in srgb, #a179dc 45%, var(--koi-line)); border-radius: var(--koi-radius-pill); padding: 1px 9px; }
+  .out-crumb .copy1 { all: unset; cursor: pointer; margin-left: 8px; color: var(--koi-muted);
+    display: inline-grid; place-items: center; width: 24px; height: 20px; border-radius: 5px; }
+  .out-crumb .copy1:hover { color: var(--koi-fg); background: var(--koi-line); }
+  .out-crumb .copy1 svg { width: 13px; height: 13px; }
+  .out-code { flex: 1 1 auto; min-height: 0; overflow: auto; font-family: var(--koi-font-mono);
+    font-size: 12px; line-height: 1.65; padding: 12px 0; background: var(--koi-paper); }
+  .out-code .ln { display: grid; grid-template-columns: 44px 1fr; }
+  .out-code .ln > .gut { color: var(--koi-muted); opacity: .5; text-align: right; padding-right: 14px; user-select: none; }
+  .out-code .ln:hover { background: color-mix(in srgb, var(--koi-muted) 8%, transparent); }
+
+  /* =========================================================================
+     BEFORE/AFTER caption + toggle chrome (mockup-only affordances)
+     ========================================================================= */
+  .cap {
+    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+    z-index: 50; display: flex; align-items: center; gap: 4px;
+    background: color-mix(in srgb, var(--koi-paper-2) 92%, transparent);
+    border: 1px solid var(--koi-line); border-radius: var(--koi-radius-pill);
+    padding: 4px; box-shadow: var(--koi-shadow); backdrop-filter: blur(8px);
+  }
+  .cap button {
+    all: unset; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--koi-muted);
+    padding: 6px 14px; border-radius: var(--koi-radius-pill); transition: color .16s ease, background .16s ease;
+  }
+  .cap button.on { color: var(--koi-on-accent); background: var(--koi-accent); }
+  .cap .lab { font-size: 10.5px; color: var(--koi-muted); padding: 0 8px 0 6px; letter-spacing: .04em; text-transform: uppercase; }
+  .badge-old { position: absolute; left: 12px; bottom: 12px; z-index: 8; font-size: 9.5px; font-weight: 700;
+    letter-spacing: .06em; text-transform: uppercase; color: var(--koi-warn); pointer-events: none;
+    background: color-mix(in srgb, var(--koi-warn) 18%, var(--koi-paper)); border: 1px solid color-mix(in srgb, var(--koi-warn) 40%, transparent);
+    border-radius: var(--koi-radius-pill); padding: 3px 11px; }
+
+  /* =========================================================================
+     "BEFORE" — a faithful reconstruction of today's Deck v2 chrome, for contrast
+     ========================================================================= */
+  .ob-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+    background: var(--koi-paper-2); border-bottom: 1px solid var(--koi-line); }
+  .ob-over { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600;
+    color: var(--koi-muted); padding: 6px 13px; border-radius: var(--koi-radius-sm); border: 1px solid var(--koi-line); cursor: pointer; }
+  .ob-over svg { width: 15px; height: 15px; }
+  .ob-strip { display: flex; align-items: center; gap: 4px; }
+  .ob-chip { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--koi-muted);
+    padding: 6px 11px; border-radius: var(--koi-radius-pill); border: 1px solid transparent; cursor: pointer; }
+  .ob-chip svg { width: 14px; height: 14px; }
+  .ob-chip.on { color: var(--koi-on-accent); background: var(--koi-accent); }
+  .ob-hint { margin-left: auto; font-size: 11px; color: var(--koi-muted); }
+  .ob-work { padding: 12px; display: flex; gap: 0;
+    background: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--koi-muted) 15%, transparent) 1px, transparent 0);
+    background-size: 26px 26px; }
+  .ob-card { position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+    background: var(--koi-paper); border: 1px solid var(--koi-line); border-radius: var(--koi-radius-lg);
+    box-shadow: 0 10px 30px rgba(3,7,14,.26); }
+  .ob-head { flex: 0 0 auto; height: 31px; display: flex; align-items: center; gap: 7px; padding: 0 11px;
+    font-size: 12px; font-weight: 600; border-bottom: 1px solid var(--koi-line); background: var(--koi-paper-2); }
+  .ob-head svg { width: 15px; height: 15px; color: var(--sc, var(--koi-accent)); }
+  .ob-head .grow { flex: 1; }
+  .ob-head .ob-tag { color: var(--koi-muted); font-weight: 400; font-size: 10.5px; }
+  .ob-pal { flex: 0 0 auto; height: 38px; display: flex; align-items: center; gap: 6px; padding: 0 12px;
+    border-bottom: 1px solid var(--koi-line); background: var(--koi-paper); }
+  .ob-pal span { font-size: 11px; color: var(--koi-muted); border: 1px solid var(--koi-line); border-radius: 6px; padding: 3px 9px; }
+  .ob-pal .grow { flex: 1; border: 0; padding: 0; }
+  .ob-cbody { position: relative; flex: 1 1 auto; min-height: 0; }
+  .ob-divider { flex: 0 0 16px; align-self: stretch; position: relative; cursor: col-resize; }
+  .ob-divider .obar { position: absolute; top: 8%; bottom: 8%; left: 50%; width: 2px; transform: translateX(-50%);
+    background: var(--koi-line); border-radius: 2px; }
+  .ob-swap { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 2;
+    width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+    background: var(--koi-paper-2); border: 1px solid var(--koi-line); color: var(--koi-muted); box-shadow: 0 4px 12px rgba(3,7,14,.3); }
+  .ob-swap svg { width: 14px; height: 14px; }
+
+  /* =========================================================================
+     Quality floor — keyboard focus on every interactive control + reduced motion.
+     (The shipped _deck.scss has a reduced-motion rule; it was missing here after the port.)
+     ========================================================================= */
+  .fx-act:focus-visible, .fx-swap:focus-visible, .fx-hclose:focus-visible,
+  .out-file:focus-visible, .out-crumb .copy1:focus-visible, .ob-swap:focus-visible {
+    outline: 2px solid var(--koi-accent); outline-offset: -2px;
+  }
+  .cap button:focus-visible, .theme-toggle:focus-visible {
+    outline: 2px solid var(--koi-accent); outline-offset: 2px;
+  }
+
+  /* Instant custom tooltip — replaces native `title` (which waits ~1s, can't be themed, and can't
+     carry a shortcut). Shows on hover with a ~90ms fade, positioned by JS, auto-flipping above when
+     there's no room below. Carries an optional keyboard hint via data-key. */
+  .fx-tip {
+    position: fixed; left: 0; top: 0; z-index: 200; pointer-events: none;
+    display: inline-flex; align-items: center; gap: 7px;
+    font-family: var(--koi-font-body); font-size: 11px; font-weight: 500; line-height: 1;
+    color: var(--koi-fg); background: var(--koi-paper-2);
+    border: 1px solid var(--koi-line); border-radius: var(--koi-radius-sm);
+    padding: 5px 8px; white-space: nowrap; box-shadow: 0 6px 20px rgba(3, 7, 14, .45);
+    opacity: 0; transform: translateY(-3px);
+    transition: opacity .09s ease, transform .09s ease;
+  }
+  .fx-tip.on { opacity: 1; transform: none; }
+  .fx-tip kbd {
+    font-family: var(--koi-font-mono); font-size: 10px; color: var(--koi-muted);
+    background: var(--koi-paper); border: 1px solid var(--koi-line); border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 5px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .app-shell *, .app-shell *::before, .app-shell *::after, .fx-tip { transition-duration: .01ms !important; }
+  }
+</style>
+</head>
+<body data-theme="dark">
+<div class="app-shell">
+  <!-- toolbar -->
+  <header class="app-toolbar">
+    <div class="app-brand">Koine<span>·</span>Studio</div>
+    <span class="pill">pizzeria · Ordering</span>
+    <div class="spacer"></div>
+    <button class="theme-toggle" id="theme">◑ Theme</button>
+  </header>
+
+  <!-- left rail -->
+  <nav class="app-rail">
+    <div class="ric on" title="Explorer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 6h16M4 12h16M4 18h10"/></svg></div>
+    <div class="ric" title="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="6"/><path d="m20 20-3.5-3.5"/></svg></div>
+    <div class="ric" title="Source control"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="9" r="2.2"/><path d="M6 8.2v7.6M8.2 6h5.6a2 2 0 0 1 2 2v.8"/></svg></div>
+  </nav>
+
+  <!-- CENTER — the concept -->
+  <main class="app-center" id="center"></main>
+
+  <!-- right inspector -->
+  <aside class="app-right">
+    <div class="rhead">Inspector</div>
+    <div class="rbody">
+      <div class="rrow"><span>Stereotype</span><b>Aggregate</b></div>
+      <div class="rrow"><span>Invariants</span><b>3</b></div>
+      <div class="rrow"><span>Emits</span><b>OrderPlaced</b></div>
+      <div class="rrow" style="border:0"><span>Context</span><b>Ordering</b></div>
+    </div>
+  </aside>
+
+  <!-- status -->
+  <footer class="app-status">
+    <span class="ok">● compiled</span>
+    <span>18 files · C#</span>
+    <span>Ordering · 4 aggregates</span>
+    <div style="flex:1"></div>
+    <span>Emit: C#</span>
+  </footer>
+</div>
+
+<!-- before/after switch (mockup-only) -->
+<div class="cap">
+  <span class="lab">Center</span>
+  <button data-mode="focus1" class="on">1-up</button>
+  <button data-mode="focus2">2-up</button>
+  <button data-mode="output">Output</button>
+  <button data-mode="over">Overview</button>
+  <span class="fx-div" style="height:20px"></span>
+  <button data-view="after" class="on" id="v-after" style="color:var(--koi-on-accent);background:var(--koi-accent)">After</button>
+  <button data-view="before" id="v-before">Before</button>
+</div>
+
+<script type="module">
+/* ---- icons (1:1 with src/shell/deck/surfaces.tsx) ------------------------- */
+const I = {
+  visual: '<circle cx="6" cy="6" r="2.4"/><circle cx="18" cy="8" r="2.4"/><circle cx="9" cy="18" r="2.4"/><path d="M8 6.6 15.6 7.5M7.6 15.9 8.4 8.4M11.2 17 16 9.8"/>',
+  technical: '<path d="M8 7 3 12l5 5M16 7l5 5-5 5M14 4l-4 16" stroke-linecap="round" stroke-linejoin="round"/>',
+  output: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13.5 15H17" stroke-linecap="round" stroke-linejoin="round"/>',
+  docs: '<path d="M5 4h10a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2z"/><path d="M9 8h5M9 12h5"/>',
+  swap: '<path d="M7 4 3 8l4 4M3 8h13M17 20l4-4-4-4M21 16H8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
+  beside: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M13 4v16"/>',
+  over: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  close: '<path d="M6 6l12 12M18 6 6 18" stroke-linecap="round"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
+};
+const svg = (d, w = 1.7) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" aria-hidden="true">${d}</svg>`;
+
+const SURF = {
+  visual:    { label: 'Canvas', tag: 'Domain diagram',     facets: [] },
+  technical: { label: 'Code',   tag: 'ubiquitous.koi',     facets: ['Editor', 'Scenarios'] },
+  output:    { label: 'Output', tag: 'Compiler artifacts', facets: ['Generated', 'Compatibility', 'Context Map'] },
+  docs:      { label: 'Docs',   tag: 'Glossary & ADRs',    facets: ['Glossary', 'Decisions', 'Notes'] },
+};
+const ORDER = ['visual', 'technical', 'output', 'docs'];
+
+/* ---- surface bodies (static mock content, reusing tokens.css classes) ------ */
+function canvasBody() {
+  return `<div class="surface"><div class="k-canvas">
+    <svg class="kc-edges"><line x1="118" y1="70" x2="250" y2="120"/><line x1="118" y1="90" x2="250" y2="230"/><line x1="330" y1="150" x2="250" y2="255"/></svg>
+    <div class="kc-node" data-stereo="aggregate" style="left:20px;top:40px"><div class="kc-stereo">«aggregate»</div><div class="kc-name">Order</div><div class="kc-members">+ lines: OrderLine[]<br>+ total(): Money</div></div>
+    <div class="kc-node" data-stereo="value" style="left:250px;top:96px"><div class="kc-stereo">«value»</div><div class="kc-name">Money</div><div class="kc-members">+ amount: decimal<br>+ currency: Ccy</div></div>
+    <div class="kc-node" data-stereo="entity" style="left:250px;top:210px"><div class="kc-stereo">«entity»</div><div class="kc-name">OrderLine</div><div class="kc-members">+ qty: int<br>+ price: Money</div></div>
+    <div class="kc-node" data-stereo="event" style="left:20px;top:250px"><div class="kc-stereo">«event»</div><div class="kc-name">OrderPlaced</div><div class="kc-members">+ orderId: Id</div></div>
+  </div></div>`;
+}
+function codeBody() {
+  const L = (n, h) => `<div class="ln"><span class="gut">${n}</span><span>${h}</span></div>`;
+  return `<div class="surface"><div class="k-code koi-scroll">${[
+    L(1, '<span class="tk-kw">context</span> <span class="tk-ty">Ordering</span> <span class="tk-pn">{</span>'),
+    L(2, '&nbsp;&nbsp;<span class="tk-kw">aggregate</span> <span class="tk-ty">Order</span> <span class="tk-pn">{</span>'),
+    L(3, '&nbsp;&nbsp;&nbsp;&nbsp;<span class="tk-kw">has</span> lines <span class="tk-pn">:</span> <span class="tk-ty">OrderLine</span><span class="tk-pn">[]</span>'),
+    L(4, '&nbsp;&nbsp;&nbsp;&nbsp;<span class="tk-kw">invariant</span> <span class="tk-str">"at least one line"</span> <span class="tk-pn">:</span> lines.count <span class="tk-pn">></span> <span class="tk-num">0</span>'),
+    L(5, '&nbsp;&nbsp;&nbsp;&nbsp;<span class="tk-kw">emits</span> <span class="tk-ty">OrderPlaced</span>'),
+    L(6, '&nbsp;&nbsp;<span class="tk-pn">}</span>'),
+    L(7, '<span class="tk-pn">}</span>'),
+  ].join('')}</div></div>`;
+}
+function docsBody() {
+  return `<div class="surface"><div class="k-docs koi-scroll">
+    <h2>Ubiquitous language</h2><div class="sub">Ordering · bounded context</div>
+    <dl>
+      <dt>Order</dt><dd>The customer's basket, sealed at checkout. Owns its lines and total.</dd>
+      <dt>Money</dt><dd>An amount paired with a currency; arithmetic stays within one currency.</dd>
+      <dt>OrderPlaced</dt><dd>Raised the moment an order is confirmed and handed to the kitchen.</dd>
+    </dl></div></div>`;
+}
+
+/* ---- output file model — mirrors res.files[] { path, contents } ------------ */
+const CTX = [
+  { name: 'Ordering', color: 'var(--st-aggregate)', files: [
+    { path: 'Ordering/Order.cs', kind: 'aggregate', c: 'var(--st-aggregate)', loc: 74 },
+    { path: 'Ordering/OrderLine.cs', kind: 'entity', c: 'var(--st-entity)', loc: 38 },
+    { path: 'Ordering/Money.cs', kind: 'value', c: 'var(--st-value)', loc: 46 },
+    { path: 'Ordering/OrderPlaced.cs', kind: 'event', c: 'var(--st-event)', loc: 19 },
+  ]},
+  { name: 'Kitchen', color: 'var(--st-entity)', files: [
+    { path: 'Kitchen/Ticket.cs', kind: 'aggregate', c: 'var(--st-aggregate)', loc: 61 },
+    { path: 'Kitchen/Station.cs', kind: 'value', c: 'var(--st-value)', loc: 22 },
+  ]},
+  { name: 'Shared', color: 'var(--koi-ddd-repository, #94a3b8)', files: [
+    { path: 'runtime/KoineRuntime.cs', kind: 'runtime', c: 'var(--koi-muted)', loc: 112 },
+  ]},
+];
+const CODE = { // a real-ish emitted C# for the selected file
+  'Ordering/Money.cs': [
+    ['using System;', 'tk-kw'],
+    ['', ''],
+    ['namespace Ordering;', 'tk-kw'],
+    ['', ''],
+    ['/// <summary>A value object: amount + currency.</summary>', 'tk-cm'],
+    ['public readonly record struct Money', ''],
+    ['{', ''],
+    ['    public decimal Amount { get; }', ''],
+    ['    public Currency Currency { get; }', ''],
+    ['', ''],
+    ['    public Money(decimal amount, Currency currency)', ''],
+    ['    {', ''],
+    ['        if (amount < 0) throw new ArgumentException(nameof(amount));', ''],
+    ['        Amount = amount; Currency = currency;', ''],
+    ['    }', ''],
+    ['}', ''],
+  ],
+};
+let selFile = 'Ordering/Money.cs';
+
+function outputBody() {
+  const rail = CTX.map(cx => `
+    <div class="out-ctx" style="--cc:${cx.color}">${cx.name}</div>
+    ${cx.files.map(f => {
+      const name = f.path.split('/').pop();
+      return `<button class="out-file ${f.path === selFile ? 'on' : ''}" data-file="${f.path}" data-tip="${f.path}" data-key="${f.loc} lines" style="--fc:${f.c}">
+        <span class="fdot"></span><span class="fx-name">${name}</span><span class="fx-loc">${f.loc}</span></button>`;
+    }).join('')}`).join('');
+
+  const lines = CODE[selFile] || [['// ' + selFile, 'tk-cm']];
+  const codeHtml = lines.map((row, i) => {
+    const [txt, cls] = row;
+    const safe = txt.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const body = cls ? `<span class="${cls}">${safe || '&nbsp;'}</span>` : (safe || '&nbsp;');
+    return `<div class="ln"><span class="gut">${i + 1}</span><span>${body}</span></div>`;
+  }).join('');
+  const parts = selFile.split('/');
+  const crumb = parts.map((p, i) =>
+    `${i ? '<span class="sl">/</span>' : ''}<span class="seg ${i === parts.length - 1 ? 'leaf' : ''}">${p}</span>`).join('');
+
+  return `<div class="surface"><div class="out2">
+    <div class="out-rail koi-scroll">
+      <div class="out-railhead"><b>18 files</b> · C#</div>
+      ${rail}
+    </div>
+    <div class="out-view">
+      <div class="out-crumb">${crumb}<span class="lang">C#</span><button class="copy1" data-tip="Copy this file" aria-label="Copy this file">${svg(I.copy)}</button></div>
+      <div class="out-code koi-scroll">${codeHtml}</div>
+    </div>
+  </div></div>`;
+}
+
+const BODY = { visual: canvasBody, technical: codeBody, output: outputBody, docs: docsBody };
+
+/* ---- state + render ------------------------------------------------------- */
+let state = { mode: 'focus1', view: 'after', primary: 'visual', secondary: 'technical', selPane: 'visual', ratio: 0.5, facet: { technical: 'Editor', output: 'Generated', docs: 'Glossary' } };
+const center = document.getElementById('center');
+
+function spineTab(id) {
+  const s = SURF[id];
+  const primary = state.primary === id;
+  const n = ORDER.indexOf(id) + 1;
+  // The primary can't be "opened beside itself", so its ⊞ is omitted.
+  const beside = primary ? '' :
+    `<button class="fx-beside" data-beside="${id}" data-tip="Open ${s.label} beside" data-key="⇧${n}" aria-label="Open ${s.label} beside">${svg(I.beside)}</button>`;
+  return `<span class="fx-tabwrap ${primary ? 'on' : ''}" data-s="${id}">
+    <button class="fx-tab ${primary ? 'on' : ''}" data-tab="${id}" data-tip="${s.label}" data-key="${n}" aria-label="${s.label}">
+      <span class="ic">${svg(I[id])}</span><span class="lbl">${s.label}</span></button>${beside}</span>`;
+}
+function facetStrip(id) {
+  const s = SURF[id]; if (!s.facets.length) return '';
+  return `<div class="fx-facets" data-s="${id}">${s.facets.map(f =>
+    `<button class="fx-facet ${state.facet[id] === f ? 'on' : ''}" data-facet="${id}|${f}">${f}</button>`).join('')}</div>`;
+}
+function hlabel(id) { return `<span class="fx-hlabel">${svg(I[id])}${SURF[id].label}</span>`; }
+
+/* ---- "before" chrome builders (today's Deck v2) --------------------------- */
+function oldBar(active) {
+  const chips = ORDER.map(id => `<span class="ob-chip ${id === active ? 'on' : ''}" data-s="${id}" data-tab="${id}">${svg(I[id])}${SURF[id].label}</span>`).join('');
+  return `<div class="ob-bar"><span class="ob-over" data-tomode="over">${svg(I.over)} Overview</span>
+    <div class="ob-strip">${chips}</div><span class="ob-hint">Esc overview · 1–4 focus · ⇧+1–4 beside</span></div>`;
+}
+function oldHead(id) {
+  return `<div class="ob-head" data-s="${id}">${svg(I[id])}<b>${SURF[id].label}</b><span class="grow"></span><span class="ob-tag">${SURF[id].tag}</span></div>`;
+}
+function oldPalette() {
+  return `<div class="ob-pal">${['Entity', 'Value', 'Aggregate', 'Service', 'Event', 'Enum'].map(x => `<span>${x}</span>`).join('')}<span class="grow"></span><span>Export ▾</span></div>`;
+}
+function renderBefore() {
+  const m = state.mode;
+  const bar = oldBar(m === 'output' ? 'output' : state.primary);
+  let stage;
+  if (m === 'focus2') {
+    const a = state.primary, b = state.secondary;
+    stage = `<div class="fx-stage ob-work">
+      <div class="ob-card" style="flex:0 0 calc(${state.ratio * 100}% - 20px)">${oldHead(a)}${a === 'visual' ? oldPalette() : ''}<div class="ob-cbody">${BODY[a]()}</div></div>
+      <div class="ob-divider" id="seam"><div class="obar"></div><button class="ob-swap" title="Swap sides" data-swap>${svg(I.swap)}</button></div>
+      <div class="ob-card" style="flex:1 1 auto">${oldHead(b)}${b === 'visual' ? oldPalette() : ''}<div class="ob-cbody">${BODY[b]()}</div></div>
+    </div>`;
+  } else {
+    const id = m === 'output' ? 'output' : state.primary;
+    stage = `<div class="fx-stage ob-work">
+      <div class="ob-card" style="flex:1 1 100%">${oldHead(id)}${id === 'visual' ? oldPalette() : ''}<div class="ob-cbody">${BODY[id]()}</div></div>
+    </div>`;
+  }
+  center.innerHTML = `<div class="badge-old">before · today's chrome</div>` + bar + stage;
+  wire();
+}
+
+function render() {
+  const m = state.mode;
+  if (state.view === 'before' && m !== 'over') { renderBefore(); return; }
+  let spine, stage;
+
+  if (m === 'over') {
+    spine = `<div class="fx-spine">
+      <div class="fx-strip">${ORDER.map(spineTab).join('')}</div>
+      <div class="fx-grow"></div>
+      <button class="fx-act" style="color:var(--koi-on-accent);background:var(--koi-accent);border-color:var(--koi-accent)" data-focus>${svg(I.over)} Overview</button></div>`;
+    stage = `<div class="fx-stage over"><div class="fx-grid">${ORDER.map(id => {
+      const s = SURF[id];
+      return `<div class="fx-card" data-s="${id}" data-tab="${id}"><div class="fx-chead">${svg(I[id])} ${s.label}<span class="ctag">${s.tag}</span></div>
+        <div class="fx-cbody">${BODY[id]()}</div></div>`;
+    }).join('')}</div></div>`;
+  } else if (m === 'focus2') {
+    const a = state.primary, b = state.secondary;
+    const selA = state.selPane === a;
+    // Left half-spine mirrors the left pane's width so the ⇄ (30px) caps the seam exactly:
+    // its centre lands on the split ratio, directly above the stage seam's centre.
+    spine = `<div class="fx-spine split">
+      <div class="fx-half ${selA ? 'sel' : ''}" data-s="${a}" data-pane="${a}" style="flex:0 0 calc(${state.ratio * 100}% - 15px)">${hlabel(a)}${facetStrip(a)}<span class="fx-grow"></span><button class="fx-hclose" data-close="${a}" data-tip="Close ${SURF[a].label}" aria-label="Close ${SURF[a].label}">${svg(I.close)}</button></div>
+      <button class="fx-swap" data-swap data-tip="Swap sides" aria-label="Swap sides">${svg(I.swap)}</button>
+      <div class="fx-half ${!selA ? 'sel' : ''}" data-s="${b}" data-pane="${b}" style="flex:1 1 auto">${hlabel(b)}${facetStrip(b)}<span class="fx-grow"></span><button class="fx-hclose" data-close="${b}" data-tip="Close ${SURF[b].label}" aria-label="Close ${SURF[b].label}">${svg(I.close)}</button></div>
+    </div>`;
+    stage = `<div class="fx-stage">
+      <div class="fx-pane" data-pane="${a}" style="flex:0 0 calc(${state.ratio * 100}% - 3px)">${BODY[a]()}</div>
+      <div class="fx-seam" id="seam"></div>
+      <div class="fx-pane" data-pane="${b}" style="flex:1 1 auto">${BODY[b]()}</div>
+    </div>`;
+  } else {
+    // focus1 (or the dedicated "output" demo, which is focus1 with output primary)
+    const id = m === 'output' ? 'output' : state.primary;
+    spine = `<div class="fx-spine">
+      <div class="fx-strip">${ORDER.map(spineTab).join('')}</div>
+      ${SURF[id].facets.length ? '<div class="fx-div"></div>' + facetStrip(id) : ''}
+      <div class="fx-grow"></div>
+      <span class="fx-tag">${SURF[id].tag}</span>
+      <button class="fx-act" data-tomode="over" data-tip="Bird’s-eye of all four surfaces" data-key="Esc">${svg(I.over)} Overview</button></div>`;
+    stage = `<div class="fx-stage"><div class="fx-pane solo" data-s="${id}">${BODY[id]()}</div></div>`;
+  }
+
+  center.innerHTML = spine + stage;
+  wire();
+}
+
+/* ---- interactions --------------------------------------------------------- */
+function wire() {
+  center.querySelectorAll('[data-tab]').forEach(el => el.onclick = (e) => {
+    const id = el.dataset.tab;
+    if (e.shiftKey && id !== state.primary) { openBeside(id); return; } // ⇧-click = open beside
+    state.primary = id;
+    setMode('focus1');
+  });
+  center.querySelectorAll('[data-beside]').forEach(el => el.onclick = (e) => {
+    e.stopPropagation();
+    openBeside(el.dataset.beside);
+  });
+  center.querySelectorAll('[data-facet]').forEach(el => el.onclick = (e) => {
+    e.stopPropagation();
+    const [id, f] = el.dataset.facet.split('|'); state.facet[id] = f; render();
+  });
+  center.querySelectorAll('[data-file]').forEach(el => el.onclick = () => { selFile = el.dataset.file; render(); });
+  center.querySelectorAll('[data-tomode]').forEach(el => el.onclick = () => { setMode(el.dataset.tomode); });
+  center.querySelectorAll('[data-focus]').forEach(el => el.onclick = () => { setMode('focus1'); });
+  center.querySelectorAll('[data-pane]').forEach(el => el.onclick = () => { if (el.dataset.pane) { state.selPane = el.dataset.pane; render(); } });
+  center.querySelectorAll('[data-swap]').forEach(el => el.onclick = () => {
+    [state.primary, state.secondary] = [state.secondary, state.primary];
+    state.selPane = state.primary; render();
+  });
+  center.querySelectorAll('[data-close]').forEach(el => el.onclick = (e) => {
+    e.stopPropagation();
+    const keep = el.dataset.close === state.primary ? state.secondary : state.primary;
+    state.primary = keep; setMode('focus1');
+  });
+  const seam = center.querySelector('#seam');
+  if (seam) seam.onpointerdown = (e) => {
+    e.preventDefault(); seam.classList.add('drag');
+    const stage = seam.parentElement, rect = stage.getBoundingClientRect();
+    const move = (ev) => { state.ratio = Math.min(.8, Math.max(.2, (ev.clientX - rect.left) / rect.width));
+      const p = stage.querySelector('.fx-pane'); if (p) p.style.flexBasis = `calc(${state.ratio * 100}% - 3px)`; };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); render(); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
+}
+
+function setMode(m) {
+  state.mode = m;
+  if (m === 'output') { state.primary = 'output'; }
+  document.querySelectorAll('.cap [data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === m || (m === 'output' && b.dataset.mode === 'output')));
+  render();
+}
+
+// Open `id` beside the current primary as a 2-up (the primary stays; the new surface becomes secondary).
+function openBeside(id) {
+  if (id === state.primary) return;
+  state.secondary = id;
+  state.selPane = state.primary;
+  setMode('focus2');
+}
+
+// Keyboard: 1–4 focus a surface (1-up), ⇧+1–4 open it beside, Esc toggles overview — the Deck v2 model.
+window.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === 'Escape') { setMode(state.mode === 'over' ? 'focus1' : 'over'); return; }
+  const n = parseInt(e.key, 10);
+  if (!(n >= 1 && n <= 4)) return;
+  const id = ORDER[n - 1];
+  if (e.shiftKey) openBeside(id);
+  else { state.primary = id; setMode('focus1'); }
+});
+
+document.querySelectorAll('.cap [data-mode]').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+document.querySelectorAll('.cap [data-view]').forEach(b => b.onclick = () => {
+  state.view = b.dataset.view;
+  document.querySelectorAll('.cap [data-view]').forEach(x => {
+    const on = x.dataset.view === state.view;
+    x.classList.toggle('on', on);
+    x.style.color = on ? 'var(--koi-on-accent)' : ''; x.style.background = on ? 'var(--koi-accent)' : '';
+  });
+  render();
+});
+document.getElementById('theme').onclick = () => {
+  const h = document.documentElement;
+  h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark';
+};
+
+// Instant custom tooltip. Delegated on the document so it needs no rewiring across re-renders.
+// Reads data-tip (text) + optional data-key (a keyboard/shortcut chip). Auto-flips above when there's
+// no room below; follows the cursor between adjacent tips with no flicker (no hide-then-show gap).
+const tip = document.createElement('div');
+tip.className = 'fx-tip';
+document.body.appendChild(tip);
+let tipEl = null;
+function placeTip(el) {
+  const r = el.getBoundingClientRect();
+  const tr = tip.getBoundingClientRect();
+  const flip = r.bottom + 8 + tr.height > window.innerHeight - 4;
+  let left = Math.max(6, Math.min(r.left + r.width / 2 - tr.width / 2, window.innerWidth - tr.width - 6));
+  tip.style.left = `${left}px`;
+  tip.style.top = `${flip ? r.top - tr.height - 8 : r.bottom + 8}px`;
+}
+function showTip(el) {
+  const key = el.getAttribute('data-key');
+  tip.innerHTML = el.getAttribute('data-tip') + (key ? ` <kbd>${key}</kbd>` : '');
+  tip.classList.add('on');
+  tipEl = el;
+  placeTip(el);
+}
+function hideTip() { tip.classList.remove('on'); tipEl = null; }
+document.addEventListener('mouseover', (e) => {
+  const el = e.target.closest ? e.target.closest('[data-tip]') : null;
+  if (el) { if (el !== tipEl) showTip(el); }
+  else if (tipEl) hideTip();
+});
+document.addEventListener('click', hideTip, true);   // a click acted — don't strand a tooltip
+window.addEventListener('scroll', hideTip, true);
+window.addEventListener('blur', hideTip);
+
+// gallery integration: honour the launcher's #theme= hash + live postMessage toggles.
+const hashTheme = /theme=(\w+)/.exec(location.hash);
+if (hashTheme) document.documentElement.dataset.theme = hashTheme[1];
+window.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'koi-theme') document.documentElement.dataset.theme = e.data.theme;
+});
+
+render();
+</script>
+</body>
+</html>

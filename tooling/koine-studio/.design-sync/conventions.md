@@ -9,8 +9,9 @@ The Studio's panels are authored in Preact; each is wrapped in a thin adapter so
 
 ```jsx
 // plain-props panel
-<KoineStudio.DeckBar mode="focus" primary="visual" secondary={null}
-  onOverview={() => {}} onFocus={() => {}} onOpenBeside={() => {}} />
+<KoineStudio.DeckSpine mode="focus" primary="visual" secondary={null} flipped={false} ratio={0.5}
+  surfaces={surfaces} activeFacet={() => null} onOverview={() => {}} onFocus={() => {}}
+  onOpenBeside={() => {}} onSelectFacet={() => {}} onClose={() => {}} onSwap={() => {}} onSelectPane={() => {}} />
 
 // store-bound panel: pass a Studio store + its data model
 const store = KoineStudio.createStore();          // an empty Studio store (zustand)
@@ -18,7 +19,7 @@ const store = KoineStudio.createStore();          // an empty Studio store (zust
 ```
 
 Two shapes, told apart by each component's `*.prompt.md`:
-- **Plain-props** — pass data/callbacks directly: `DeckBar`, `DeckCard`, `ExportMenu`, `RightStrip`,
+- **Plain-props** — pass data/callbacks directly: `DeckSpine`, `DeckCard`, `ExportMenu`, `RightStrip`,
   `AssistantView`, `SourceControlPanel`, plus zero-config scenes `DeckStage`, `LeftRail`.
 - **Store-bound** — pass `store={KoineStudio.createStore()}` **and** the panel's data prop(s) (`model`,
   `index`, …): `GlossaryPanel`, `ModelOutlinePanel`, `PropertiesPanel`, `RelationshipsPanel`,

@@ -1,43 +1,221 @@
-// Deck v2 center chrome — the bar (Overview toggle + surface filmstrip + hint) and the stage (four
-// surface cards morphing between 1-up / 2-up / overview via the FLIP engine in deckLayout.ts). Ported
-// from the design POC (design/center-concepts/concept-6-deck-v2.html), with the POC's `--st-*` accents
-// rewritten to the app's real `--koi-ddd-*` / `--koi-hl-*` tokens and the filmstrip's "open beside"
-// affordance restructured into a sibling button (no nested interactive). Mock content styles from the
-// POC are intentionally NOT ported — the real surfaces bring their own.
+// Deck center chrome, tightened to concept-7 "Flush". The two-row Deck v2 chrome (deck-bar + per-card
+// deck-head) collapses into ONE 34px spine (the DeckSpine component, in @atypical/koine-ui — the spine +
+// card + tooltip CSS is mirrored in that package's components.css for Storybook). In focus the stage goes
+// flush: the card loses its inset / radius / shadow / dot-grid and fills edge-to-edge, and its header lives
+// in the spine. The floating-card workbench returns only in overview. The 2-up divider is a hairline seam;
+// the swap ⇄ is docked in the spine. Ported from design/center-concepts/concept-7-flush.html.
 
-.deck-bar,
+.fx-spine,
 .deck-stage {
   --ease: cubic-bezier(0.33, 1, 0.68, 1);
 }
 
-/* ---- Bar ---------------------------------------------------------------- */
+/* ---- Spine (one row; the surface switcher AND the pane title/facets/close) ------------------- */
 
-.deck-bar {
+.fx-spine {
   flex: 0 0 auto;
+  height: 34px;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
+  align-items: stretch;
   background: var(--koi-paper-2);
   border-bottom: 1px solid var(--koi-line);
+  font-size: 12px;
+
+  &.split {
+    padding: 0;
+  }
 }
 
-.deck-over {
+.fx-strip {
+  display: flex;
+  align-items: stretch;
+  padding-left: 4px;
+}
+
+/* Each surface is a split-button: the focus tab + a hover-revealed ⊞ "open beside", divided by a hairline
+   so the two targets read as part of THIS surface. */
+.fx-tabwrap {
+  display: inline-flex;
+  align-items: stretch;
+  margin: 4px 1px;
+  border-radius: var(--koi-radius-sm);
+  overflow: hidden;
+  transition: background 0.16s ease;
+
+  &:not(.on):hover {
+    background: color-mix(in srgb, var(--koi-fg) 7%, transparent);
+  }
+}
+
+.fx-tab {
   all: unset;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 12px;
-  font-weight: 600;
+  padding: 0 9px;
   color: var(--koi-muted);
-  padding: 6px 13px;
-  border-radius: var(--koi-radius-sm);
-  border: 1px solid var(--koi-line);
   transition:
-    color 0.24s var(--ease),
-    background 0.24s var(--ease),
-    border-color 0.24s var(--ease);
+    color 0.16s ease,
+    background 0.16s ease,
+    box-shadow 0.16s ease;
+
+  svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  // The icon sits in a flex wrapper so its <svg> centres as a block item, not on the text baseline
+  // (otherwise the baseline's descent pushes the glyph ~1.6px above the tab's centre).
+  .ic {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .lbl {
+    max-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    font-weight: 600;
+    line-height: 1;
+    opacity: 0;
+    transition:
+      max-width 0.22s ease,
+      opacity 0.18s ease;
+  }
+
+  &:hover {
+    color: var(--koi-fg);
+  }
+
+  // Active decoration is painted INSIDE the box (tint + inset underline) so every icon's vertical centre
+  // stays identical across states.
+  &.on {
+    color: var(--sc);
+    background: color-mix(in srgb, var(--sc) 13%, transparent);
+    box-shadow: inset 0 -2px 0 var(--sc);
+
+    .ic {
+      color: var(--sc);
+    }
+
+    .lbl {
+      max-width: 120px;
+      opacity: 1;
+    }
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: -2px;
+  }
+}
+
+.fx-beside {
+  all: unset;
+  cursor: pointer;
+  align-self: stretch;
+  display: inline-grid;
+  place-items: center;
+  width: 0;
+  opacity: 0;
+  overflow: hidden;
+  color: var(--koi-muted);
+  border-left: 1px solid transparent;
+  transition:
+    width 0.18s ease,
+    opacity 0.16s ease,
+    background 0.16s ease,
+    color 0.16s ease,
+    border-color 0.16s ease;
+
+  svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  &:hover {
+    color: var(--sc, var(--koi-accent));
+    background: color-mix(in srgb, var(--sc, var(--koi-accent)) 16%, transparent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: -2px;
+  }
+}
+
+.fx-tabwrap:hover .fx-beside,
+.fx-beside:focus-visible {
+  width: 24px;
+  opacity: 1;
+  border-left-color: color-mix(in srgb, var(--koi-fg) 14%, transparent);
+}
+
+.fx-div {
+  width: 1px;
+  background: var(--koi-line);
+  margin: 7px 8px;
+}
+
+/* Inline facets of the focused surface — no second row. */
+.fx-facets {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.fx-facet {
+  all: unset;
+  cursor: pointer;
+  font-size: 11px;
+  // Lifted a step toward --koi-fg so the inactive facet clears WCAG-AA on paper-2 (matches .deck-sub).
+  color: color-mix(in srgb, var(--koi-fg) 22%, var(--koi-muted));
+  padding: 3px 9px;
+  border-radius: var(--koi-radius-pill);
+  transition:
+    color 0.16s ease,
+    background 0.16s ease;
+
+  &:hover {
+    color: var(--koi-fg);
+  }
+
+  &.on {
+    color: var(--sc);
+    background: color-mix(in srgb, var(--sc) 14%, transparent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: -1px;
+  }
+}
+
+.fx-grow {
+  flex: 1 1 auto;
+}
+
+/* Right-side spine actions (Overview). `.mini` is the icon-only compact form used at the end of a 2-up. */
+.fx-act {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--koi-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 11px;
+  align-self: center;
+  height: 24px;
+  margin-right: 5px;
+  border-radius: var(--koi-radius-sm);
+  border: 1px solid transparent;
+  transition:
+    color 0.16s ease,
+    border-color 0.16s ease,
+    background 0.16s ease;
 
   svg {
     width: 15px;
@@ -51,7 +229,7 @@
 
   &:focus-visible {
     outline: 2px solid var(--koi-accent);
-    outline-offset: 1px;
+    outline-offset: -2px;
   }
 
   &.on {
@@ -59,119 +237,127 @@
     background: var(--koi-accent);
     border-color: var(--koi-accent);
   }
+
+  &.mini {
+    padding: 0 9px;
+  }
 }
 
-/* ---- Filmstrip ---------------------------------------------------------- */
-
-.deck-strip {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.deck-chip-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
+.fx-tag {
+  align-self: center;
   color: var(--koi-muted);
-  border-radius: var(--koi-radius-pill);
-  border: 1px solid transparent;
-  transition:
-    color 0.24s var(--ease),
-    background 0.24s var(--ease),
-    border-color 0.24s var(--ease);
+  font-size: 10.5px;
+  margin-right: 12px;
+}
 
-  &:hover {
-    color: var(--koi-fg);
-    background: color-mix(in srgb, var(--koi-fg) 7%, transparent);
+/* 2-up: two half-spines meet at the docked ⇄; the selected one carries the accent underline. */
+.fx-half {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+
+  .fx-hlabel {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-weight: 600;
+    padding: 0 10px;
+    color: var(--sc);
+    align-self: center;
+    white-space: nowrap;
+
+    svg {
+      width: 15px;
+      height: 15px;
+    }
   }
 
-  &.primary {
-    color: var(--koi-on-accent);
-    background: var(--koi-accent);
+  &.sel {
+    background: color-mix(in srgb, var(--sc) 10%, transparent);
+    box-shadow: inset 0 -2px 0 var(--sc);
   }
 
-  &.secondary {
-    color: var(--koi-accent);
-    border-color: color-mix(in srgb, var(--koi-accent) 55%, transparent);
-    background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+  &:not(.sel) {
+    cursor: pointer;
+  }
+
+  .fx-facets {
+    padding-left: 2px;
   }
 }
 
-.deck-chip {
+.fx-hclose {
   all: unset;
   cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  color: inherit;
-  padding: 6px 11px;
-  border-radius: var(--koi-radius-pill);
-
-  svg.ci {
-    width: 14px;
-    height: 14px;
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--koi-accent);
-    outline-offset: 1px;
-  }
-}
-
-/* "Open beside" — revealed on chip-wrap hover, collapsed otherwise (width + opacity, no layout thrash). */
-.deck-cmp {
-  all: unset;
-  cursor: pointer;
-  width: 0;
-  height: 18px;
-  margin-right: 0;
-  border-radius: 4px;
   display: inline-grid;
   place-items: center;
-  overflow: hidden;
-  color: inherit;
+  width: 22px;
+  align-self: center;
+  color: var(--koi-muted);
+  border-radius: 5px;
   opacity: 0;
-  pointer-events: none;
   transition:
-    opacity 0.22s var(--ease),
-    width 0.22s var(--ease),
-    margin 0.22s var(--ease),
-    background 0.18s var(--ease);
+    opacity 0.16s ease,
+    color 0.16s ease,
+    background 0.16s ease;
 
-  .cmp-ico {
+  svg {
     width: 13px;
     height: 13px;
   }
 
   &:hover {
-    background: color-mix(in srgb, currentColor 22%, transparent);
+    color: var(--koi-fg);
+    background: var(--koi-line);
+  }
+
+  &:focus-visible {
     opacity: 1;
+    outline: 2px solid var(--koi-accent);
+    outline-offset: -2px;
   }
 }
 
-.deck-chip-wrap:hover .deck-cmp,
-.deck-cmp:focus-visible {
-  width: 18px;
-  opacity: 0.9;
-  margin-right: 5px;
-  pointer-events: auto;
+.fx-half:hover .fx-hclose {
+  opacity: 1;
 }
 
-.deck-hint {
-  margin-left: auto;
-  font-size: 11px;
+/* The ⇄ swap — docked where the two half-spines meet (flush chrome, not floating). Its left half-spine is
+   sized to `ratio` in the DeckSpine markup, so this centres exactly over the stage seam below. */
+.fx-swap {
+  all: unset;
+  cursor: pointer;
+  flex: 0 0 auto;
+  width: 30px;
+  display: grid;
+  place-items: center;
+  align-self: stretch;
   color: var(--koi-muted);
+  border-left: 1px solid var(--koi-line);
+  border-right: 1px solid var(--koi-line);
+  background: var(--koi-paper-2);
+  transition:
+    color 0.18s ease,
+    background 0.18s ease;
 
-  kbd {
-    font-family: var(--koi-font-mono);
-    font-size: 10px;
-    background: var(--koi-paper);
-    border: 1px solid var(--koi-line);
-    border-bottom-width: 2px;
-    border-radius: 4px;
-    padding: 1px 5px;
+  svg {
+    width: 15px;
+    height: 15px;
+    transition: transform 0.3s var(--ease);
+  }
+
+  &:hover {
+    color: var(--koi-accent);
+    background: color-mix(in srgb, var(--koi-accent) 10%, transparent);
+  }
+
+  &:active svg {
+    transform: rotate(180deg);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: -2px;
   }
 }
 
@@ -182,29 +368,15 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
-  // Contain the cards' z-indexes (cards z-2, divider z-6, focus ring z-4) inside the stage's OWN
-  // stacking context. Without this, no ancestor up to <html> forms a stacking context, so a card's
-  // positive z-index leaks into the ROOT layer and paints OVER the routed Home overlay (#home-root is
-  // position:fixed; z-index:auto). The old .center-host had no z-index, so Home covered it for free;
-  // isolating the stage restores that — it now sits at the auto level and #home-root (later in the DOM)
-  // paints above it.
+  // Contain the cards' z-indexes (cards z-2, seam z-6) inside the stage's OWN stacking context. Without
+  // this, no ancestor up to <html> forms a stacking context, so a card's positive z-index leaks into the
+  // ROOT layer and paints OVER the routed Home overlay (#home-root is position:fixed; z-index:auto).
   isolation: isolate;
-  background: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--koi-muted) 15%, transparent) 1px, transparent 0);
-  background-size: 26px 26px;
 
-  &::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    box-shadow: inset 0 0 120px rgba(3, 7, 14, 0.18);
-    opacity: 0;
-    transition: opacity 0.4s ease;
-    z-index: 1;
-  }
-
-  &.is-focus::after {
-    opacity: 1;
+  // The floating-card workbench texture (dot-grid) is earned only in overview; focus is flush.
+  &.overview {
+    background: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--koi-muted) 15%, transparent) 1px, transparent 0);
+    background-size: 26px 26px;
   }
 }
 
@@ -215,10 +387,7 @@
   display: flex;
   flex-direction: column;
   background: var(--koi-paper);
-  border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius-lg);
   overflow: hidden;
-  box-shadow: 0 10px 30px rgba(3, 7, 14, 0.26);
   transform-origin: top left;
   will-change: transform;
   z-index: 2;
@@ -228,6 +397,25 @@
     pointer-events: none;
     z-index: 1;
   }
+}
+
+// Focus = flush: no border / radius / shadow, and the header collapses into the spine.
+.deck-stage:not(.overview) .deck-card {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.deck-stage:not(.overview) .deck-head {
+  display: none;
+}
+
+// Overview = the floating-card look returns (border + radius + shadow + zoom cursor).
+.deck-stage.overview .deck-card {
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-lg);
+  box-shadow: 0 10px 30px rgba(3, 7, 14, 0.26);
+  cursor: zoom-in;
 
   &.is-primary {
     box-shadow:
@@ -240,16 +428,14 @@
       0 12px 32px rgba(3, 7, 14, 0.32),
       0 0 0 2px color-mix(in srgb, var(--koi-accent) 55%, transparent);
   }
-}
-
-.deck-stage.overview .deck-card {
-  cursor: zoom-in;
 
   &:hover {
     border-color: color-mix(in srgb, var(--card-c, var(--koi-accent)) 60%, var(--koi-line));
     box-shadow: 0 20px 44px rgba(3, 7, 14, 0.42);
   }
 }
+
+/* ---- Card header (shown in overview; hidden in focus, where the spine is the header) --------- */
 
 .deck-head {
   flex: 0 0 auto;
@@ -262,9 +448,6 @@
   font-weight: 600;
   border-bottom: 1px solid var(--koi-line);
   background: var(--koi-paper-2);
-  transition:
-    background 0.2s var(--ease),
-    box-shadow 0.2s var(--ease);
 
   .ci {
     color: var(--card-c, var(--koi-accent));
@@ -292,104 +475,18 @@
     white-space: nowrap;
   }
 
+  // The close button never reveals in overview (a card is zoomed by clicking it); it stays collapsed.
   .hbtn {
     all: unset;
-    cursor: pointer;
     width: 0;
-    height: 22px;
-    border-radius: 5px;
-    display: inline-grid;
-    place-items: center;
-    overflow: hidden;
-    color: var(--koi-muted);
     opacity: 0;
     pointer-events: none;
-    margin-left: 0;
-    transition:
-      opacity 0.2s var(--ease),
-      width 0.2s var(--ease),
-      margin 0.2s var(--ease),
-      background 0.18s var(--ease),
-      color 0.18s var(--ease);
-
-    svg {
-      width: 13px;
-      height: 13px;
-    }
-
-    &:hover {
-      color: var(--koi-fg);
-      background: var(--koi-line);
-    }
+    overflow: hidden;
   }
 }
 
-/* Selected pane in a 2-up: accent-tinted header + a 2px accent cap. */
-.deck-card.in-pair.is-selected .deck-head {
-  background: color-mix(in srgb, var(--koi-accent) 11%, var(--koi-paper-2));
-  box-shadow: inset 0 2px 0 var(--koi-accent);
-}
-
-.deck-card.in-pair:not(.is-selected) {
-  cursor: pointer;
-
-  .deck-head:hover {
-    background: color-mix(in srgb, var(--koi-fg) 6%, var(--koi-paper-2));
-  }
-}
-
-/* The tag hides in a pair (the close button takes its place); the close button reveals in a pair. */
-.deck-card.in-pair .deck-head .tag {
-  display: none;
-}
-
-.deck-card.in-pair .deck-head .hbtn.close {
-  width: 22px;
-  opacity: 1;
-  pointer-events: auto;
-  margin-left: 4px;
-}
-
-/* ---- Facet sub-strip ---------------------------------------------------- */
-
-.deck-subs {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: 6px;
-  overflow: hidden;
-}
-
-.deck-sub {
-  all: unset;
-  cursor: pointer;
-  font-size: 10.5px;
-  // Blended a step toward --koi-fg from --koi-muted: plain --koi-muted clears 4.5:1 on the flat header
-  // but drops to ~3.9:1 on the accent-tinted SELECTED-pane header — this lift keeps the inactive facet
-  // WCAG-AA legible in both header states while staying clearly quieter than the active (.on) accent.
-  color: color-mix(in srgb, var(--koi-fg) 22%, var(--koi-muted));
-  padding: 3px 8px;
-  border-radius: var(--koi-radius-pill);
-  white-space: nowrap;
-  transition:
-    color 0.22s var(--ease),
-    background 0.22s var(--ease);
-
-  &:hover {
-    color: var(--koi-fg);
-  }
-
-  &.on {
-    color: var(--koi-accent);
-    background: color-mix(in srgb, var(--koi-accent) 13%, transparent);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--koi-accent);
-    outline-offset: 1px;
-  }
-}
-
+/* The facet sub-strip is hidden in overview (cards show label + tag only); in focus the whole head is
+   hidden and the facets live in the spine — so this sub-strip is effectively overview-only chrome. */
 .deck-stage.overview .deck-subs {
   display: none;
 }
@@ -402,83 +499,243 @@
   min-height: 0;
 }
 
-/* ---- Divider + swap ----------------------------------------------------- */
+/* ---- Seam (2-up resize hairline; the swap ⇄ is docked in the spine) ------------------------- */
 
-.deck-divider {
+.deck-seam {
   position: absolute;
   top: 0;
   bottom: 0;
   z-index: 6;
-  width: 16px;
+  width: 12px;
   transform: translateX(-50%);
   cursor: col-resize;
   display: none;
-  align-items: center;
-  justify-content: center;
   touch-action: none;
 
   &.show {
-    display: flex;
+    display: block;
   }
 
-  .bar {
+  // A hairline that thickens to a full-height accent line on hover / drag.
+  &::before {
+    content: '';
     position: absolute;
-    top: 8%;
-    bottom: 8%;
-    width: 2px;
+    top: 0;
+    bottom: 0;
     left: 50%;
+    width: 1px;
     transform: translateX(-50%);
     background: var(--koi-line);
-    border-radius: 2px;
-    transition: background 0.14s ease;
+    transition:
+      width 0.14s ease,
+      background 0.14s ease;
   }
 
-  &:hover .bar {
+  &:hover::before,
+  &.drag::before {
+    width: 3px;
     background: var(--koi-accent);
   }
 }
 
-.deck-swap {
-  all: unset;
-  cursor: pointer;
-  position: relative;
-  z-index: 1;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: var(--koi-paper-2);
-  border: 1px solid var(--koi-line);
-  color: var(--koi-muted);
-  box-shadow: 0 4px 12px rgba(3, 7, 14, 0.3);
-  transition:
-    color 0.22s var(--ease),
-    border-color 0.22s var(--ease),
-    transform 0.22s var(--ease);
+/* ---- Output file-rail (Generated preview): a per-file rail beside a single-file viewer ------- */
 
-  svg {
-    width: 14px;
-    height: 14px;
+.out2 {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+}
+
+.out-rail {
+  border-right: 1px solid var(--koi-line);
+  background: var(--koi-paper-2);
+  overflow: auto;
+  padding: 8px 0;
+}
+
+.out-railhead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 12px 9px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--koi-muted);
+
+  b {
+    color: var(--koi-fg);
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+    font-size: 11.5px;
+  }
+}
+
+.out-ctx {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--koi-muted);
+  padding: 9px 12px 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  &::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 2px;
+    background: var(--koi-line);
+  }
+}
+
+.out-file {
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 24px;
+  font-size: 12px;
+  color: var(--koi-ink-soft);
+  border-left: 2px solid transparent;
+
+  .fdot {
+    width: 7px;
+    height: 7px;
+    border-radius: 2px;
+    background: var(--fc, var(--koi-muted));
+    flex: 0 0 auto;
   }
 
-  &:active {
-    transform: scale(0.9) rotate(180deg);
+  .fname {
+    font-family: var(--koi-font-mono);
+    font-size: 11.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .floc {
+    margin-left: auto;
+    font-size: 10px;
+    color: var(--koi-muted);
+    opacity: 0.7;
+  }
+
+  &:hover {
+    background: color-mix(in srgb, var(--koi-fg) 6%, transparent);
+    color: var(--koi-fg);
+  }
+
+  &.on {
+    background: color-mix(in srgb, var(--koi-ddd-event) 14%, transparent);
+    color: var(--koi-fg);
+    border-left-color: var(--koi-ddd-event);
   }
 
   &:focus-visible {
     outline: 2px solid var(--koi-accent);
-    outline-offset: 1px;
+    outline-offset: -2px;
   }
 }
 
-.deck-divider:hover .deck-swap {
-  color: var(--koi-accent);
-  border-color: var(--koi-accent);
+.out-view {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.out-crumb {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-family: var(--koi-font-mono);
+  font-size: 11px;
+  color: var(--koi-muted);
+  border-bottom: 1px solid var(--koi-line);
+}
+
+.out-crumb-path {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+
+  .seg {
+    white-space: nowrap;
+  }
+
+  .seg.leaf {
+    color: var(--koi-fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sl {
+    opacity: 0.4;
+  }
+}
+
+.out-lang {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--koi-hl-keyword);
+  border: 1px solid color-mix(in srgb, var(--koi-hl-keyword) 45%, var(--koi-line));
+  border-radius: var(--koi-radius-pill);
+  padding: 1px 9px;
+  white-space: nowrap;
+}
+
+.out-copy {
+  all: unset;
+  cursor: pointer;
+  color: var(--koi-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 5px;
+
+  &:hover {
+    color: var(--koi-fg);
+    background: var(--koi-line);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--koi-accent);
+    outline-offset: -1px;
+  }
+}
+
+.out-code {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden; // the CodeMirror OutputView scrolls internally
 }
 
 @media (prefers-reduced-motion: reduce) {
   .deck-card {
     transition: none !important;
+  }
+
+  .fx-spine *,
+  .fx-spine *::before,
+  .fx-spine *::after {
+    transition-duration: 0.01ms !important;
   }
 }

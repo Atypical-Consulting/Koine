@@ -66,7 +66,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // revealLocation) plus the `revealLocation` open-file-and-reveal nav helper (a sibling of
   // navigateToDefinition that opens an unopened file first), ~24 LOC of composition-root wiring for the
   // launcher's go-to actions. Measured end-state.
-  { file: 'src/shell/ide.tsx', maxLines: 1401 },
+  // Raised 1401 → 1408: concept-7 "Flush" builds the Output file-rail scaffold inside #view-preview and
+  // mounts the CodeMirror OutputView into its `.out-code` slot (ensureOutputScaffold + the import), plus a
+  // one-line initInstantTooltip() boot call, ~7 LOC of composition-root wiring. Measured end-state.
+  { file: 'src/shell/ide.tsx', maxLines: 1408 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.
@@ -82,7 +85,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // re-homes railAxis + diagCollapsed onto the uiChrome slice — the setAxis/applyDiagCollapsed paths here
   // become thin slice writers + seed-then-subscribe wiring (guarded readRaw/writeRaw helpers), net +9 LOC
   // of legitimate composition-root glue. Measured end-state (2402), no headroom; #985 owns the split.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2402 },
+  // Raised 2402 → 2444: concept-7 "Flush" turns the Generated preview from one concatenated blob into a
+  // per-file rail — loadPreview keeps res.files as a list and drives a single-file viewer via the new
+  // showOutputFile/clearOutput/targetLabel helpers + the outputRail import (the rail/crumb DOM rendering
+  // itself lives in the extracted src/shell/outputRail.ts, not here), ~42 LOC. Measured end-state; #985
+  // owns the split.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2444 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   { file: 'src/settings/prefs.ts', maxLines: 2250 },

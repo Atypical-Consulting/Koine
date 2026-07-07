@@ -76,7 +76,7 @@ public sealed partial class CSharpEmitter
         }
 
         sb.Append("}\n");
-        return new EmittedFile(PathFor(emit, ns, KindFolder.Services, $"{iface}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Services, $"{iface}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false), Kind: KindForFolder(KindFolder.Services));
     }
 
     /// <summary>
@@ -141,7 +141,7 @@ public sealed partial class CSharpEmitter
             EmitMapperlyProjection(sb, rm, fields);
             var usesLinqMapperly = rm.Fields.Any(f => f.Projection is not null && ExprUsesLinq(f.Projection));
             return new EmittedFile(PathFor(emit, ns, KindFolder.ReadModels, $"{rm.Name}.cs"),
-                Assemble(emit, ns, sb.ToString(), usesLinqMapperly, MapperlyUsing));
+                Assemble(emit, ns, sb.ToString(), usesLinqMapperly, MapperlyUsing), Kind: KindForFolder(KindFolder.ReadModels));
         }
 
         WriteXmlDoc(sb, $"Projects {rm.SourceType} to {rm.Name}.", "");
@@ -153,7 +153,7 @@ public sealed partial class CSharpEmitter
             // The projection body is stubbed, so no LINQ is referenced (the record itself never uses it).
             WriteRefStubExpressionBody(sb);
             sb.Append("}\n");
-            return new EmittedFile(PathFor(emit, ns, KindFolder.ReadModels, $"{rm.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
+            return new EmittedFile(PathFor(emit, ns, KindFolder.ReadModels, $"{rm.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false), Kind: KindForFolder(KindFolder.ReadModels));
         }
 
         sb.Append(Indent).Append(Indent).Append("=> new ").Append(rm.Name).Append('(');
@@ -171,7 +171,7 @@ public sealed partial class CSharpEmitter
         sb.Append("}\n");
 
         var usesLinq = rm.Fields.Any(f => f.Projection is not null && ExprUsesLinq(f.Projection));
-        return new EmittedFile(PathFor(emit, ns, KindFolder.ReadModels, $"{rm.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.ReadModels, $"{rm.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq), Kind: KindForFolder(KindFolder.ReadModels));
     }
 
     /// <summary>
@@ -258,7 +258,7 @@ public sealed partial class CSharpEmitter
             $"{typeMapper.Map(p.Type)} {CSharpNaming.ToPascalCase(p.Name)}"));
         sb.Append("public sealed record ").Append(q.Name).Append('(').Append(criteria).Append(");\n");
 
-        return new EmittedFile(PathFor(emit, ns, KindFolder.Queries, $"{q.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));
+        return new EmittedFile(PathFor(emit, ns, KindFolder.Queries, $"{q.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false), Kind: KindForFolder(KindFolder.Queries));
     }
 
     /// <summary>True when the model declares any query object (gates the query-handler runtime type).</summary>

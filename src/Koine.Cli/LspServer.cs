@@ -1781,6 +1781,7 @@ internal sealed class LspServer
             {
                 ["path"] = f.RelativePath,
                 ["contents"] = f.Contents,
+                ["kind"] = f.Kind,
             })
             .ToArray();
 

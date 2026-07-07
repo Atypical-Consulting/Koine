@@ -16,8 +16,10 @@ public sealed record WDiagnostic(WRange Range, int Severity, string? Code, strin
 /// <summary>Per-file diagnostics, ready to publish as <c>textDocument/publishDiagnostics</c>.</summary>
 public sealed record WFileDiagnostics(string Uri, WDiagnostic[] Diagnostics);
 
-/// <summary>One emitted source file.</summary>
-public sealed record WEmitFile(string Path, string Contents);
+/// <summary>One emitted source file. <see cref="Kind"/> is the optional DDD-stereotype slug
+/// (e.g. <c>"aggregate"</c>, <c>"value"</c>, <c>"event"</c>) used to tint generated files by
+/// building block; <c>null</c> for files with no stereotype. Mirrors <c>EmittedFile.Kind</c>.</summary>
+public sealed record WEmitFile(string Path, string Contents, string? Kind = null);
 
 /// <summary>Emit-preview result for the merged workspace.</summary>
 public sealed record WEmitPreviewResult(string Target, WEmitFile[] Files, WDiagnostic[] Diagnostics, string? Error);

@@ -3,7 +3,7 @@ import type { JSX } from 'preact';
 import type { CenterView } from '@/store/slices/uiChrome';
 import { createAppStore } from '@/store/index';
 import { DECK_SURFACES } from '@/shell/deck/surfaces';
-import { DeckBarConnected } from '@/shell/deck/DeckBar';
+import { DeckSpineConnected } from '@/shell/deck/DeckSpine';
 import { DeckStage } from '@/shell/deck/DeckStage';
 
 // The full deck shell — bar + stage — driven by a real store. The stage runs the FLIP layout, so these
@@ -27,7 +27,7 @@ function mockBody(view: CenterView): JSX.Element {
 function shell(store: ReturnType<typeof createAppStore>): JSX.Element {
   return (
     <div style="display:flex;flex-direction:column;height:560px;border:1px solid var(--koi-line);border-radius:8px;overflow:hidden">
-      <DeckBarConnected store={store} />
+      <DeckSpineConnected store={store} />
       <DeckStage store={store} mockBody={mockBody} enableKeyboard={false} />
     </div>
   );
