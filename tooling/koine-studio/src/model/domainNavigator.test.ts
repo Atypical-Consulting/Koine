@@ -214,7 +214,7 @@ describe('mountDomainNavigator', () => {
     expect(host.querySelector('[data-ctx="Ordering"]')).toBeTruthy(); // the strategic context list is shown
   });
 
-  it('delegates the Context Map / Ubiquitous Language doorways to the caller', async () => {
+  it('delegates the Context Map / Glossary doorways to the caller', async () => {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const onOpenContextMap = vi.fn();
@@ -226,6 +226,20 @@ describe('mountDomainNavigator', () => {
     (host.querySelector('[data-door="glossary"]') as HTMLButtonElement).click();
     expect(onOpenContextMap).toHaveBeenCalledTimes(1);
     expect(onOpenGlossary).toHaveBeenCalledTimes(1);
+  });
+
+  it('labels the glossary doorway "Glossary" but keeps "the ubiquitous language" in its accessible name', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    mountDomainNavigator(host, makeTestStore(), fakeLsp());
+    await flush();
+
+    const door = host.querySelector('[data-door="glossary"]') as HTMLButtonElement;
+    // The visible label matches the destination the Docs facet calls "Glossary" (#146)…
+    expect(door.querySelector('.koi-domain-door-label')?.textContent).toBe('Glossary');
+    // …while the DDD vocabulary survives in the tooltip + accessible name.
+    expect(door.title).toBe('the ubiquitous language');
+    expect(door.getAttribute('aria-label')).toBe('Glossary — the ubiquitous language');
   });
 
   it('unmount drops the store subscription so later changes stop re-rendering', async () => {
