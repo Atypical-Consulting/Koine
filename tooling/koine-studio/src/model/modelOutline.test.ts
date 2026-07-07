@@ -1,11 +1,5 @@
-import { afterEach, describe, expect, test, vi } from 'vitest';
-import {
-  countsByContext,
-  groupByConstruct,
-  renderModelOutline,
-  renderOverviewCounts,
-  type ModelOutlineHandlers,
-} from '@/model/modelOutline';
+import { afterEach, describe, expect, test } from 'vitest';
+import { countsByContext, groupByConstruct, renderOverviewCounts } from '@/model/modelOutline';
 import type { GlossaryEntry, GlossaryModel, Range } from '@/lsp/lsp';
 
 afterEach(() => {
@@ -99,89 +93,5 @@ describe('renderOverviewCounts', () => {
     expect(badges).toContain('Aggregates 1');
     expect(badges).toContain('Value Objects 2');
     expect(badges).toContain('Integration Events 1');
-  });
-});
-
-describe('renderModelOutline', () => {
-  const noop: ModelOutlineHandlers = { onSelect: () => {}, goto: () => {} };
-
-  test('renders a section per context with construct headers and leaf nodes', () => {
-    const el = renderModelOutline(model, noop);
-    const ctxNames = Array.from(el.querySelectorAll('.koi-model-ctx-name')).map((n) => n.textContent);
-    expect(ctxNames).toEqual(['Sales', 'Inventory']);
-
-    const constructHeaders = Array.from(el.querySelectorAll('.koi-model-construct-name')).map((n) =>
-      n.textContent?.replace(/\s+/g, ' ').trim(),
-    );
-    expect(constructHeaders).toContain('Aggregates 1');
-    expect(constructHeaders).toContain('Value Objects 2');
-
-    const leaves = Array.from(el.querySelectorAll('.koi-model-leaf')).map((n) => n.textContent);
-    expect(leaves).toContain('Order');
-    expect(leaves).toContain('Money');
-    expect(leaves).not.toContain('Sales'); // context header is not a leaf
-  });
-
-  test('each leaf and construct header carries a DDD-concept icon keyed by construct', () => {
-    const el = renderModelOutline(model, noop);
-    const orderLeaf = el.querySelector<HTMLElement>('.koi-model-leaf[data-qname="Sales.Order"]')!;
-    expect(orderLeaf.querySelector('.koi-model-icon')!.getAttribute('data-construct')).toBe('aggregate');
-    const moneyLeaf = el.querySelector<HTMLElement>('.koi-model-leaf[data-qname="Sales.Money"]')!;
-    expect(moneyLeaf.querySelector('.koi-model-icon')!.getAttribute('data-construct')).toBe('value');
-    // The icon is decorative — it must not change the leaf's text.
-    expect(orderLeaf.textContent).toBe('Order');
-  });
-
-  test('each leaf carries its qualified name for cross-highlight', () => {
-    const el = renderModelOutline(model, noop);
-    const order = el.querySelector<HTMLElement>('.koi-model-leaf[data-qname="Sales.Order"]');
-    expect(order).not.toBeNull();
-    expect(order!.textContent).toBe('Order');
-  });
-
-  test('clicking a leaf selects the element and jumps to its declaration', () => {
-    const onSelect = vi.fn();
-    const goto = vi.fn();
-    const el = renderModelOutline(model, { onSelect, goto });
-    document.body.appendChild(el);
-    el.querySelector<HTMLButtonElement>('.koi-model-leaf[data-qname="Sales.Order"]')!.click();
-    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ qualifiedName: 'Sales.Order' }));
-    expect(goto).toHaveBeenCalledWith(4, 3); // range(3) is 0-based line 3, char 2 → 1-based 4:3
-  });
-
-  test('renders the per-context counts strip', () => {
-    const el = renderModelOutline(model, noop);
-    const badges = Array.from(el.querySelectorAll('.koi-model-count')).map((n) =>
-      n.textContent?.replace(/\s+/g, ' ').trim(),
-    );
-    expect(badges).toContain('Aggregates 1');
-    expect(badges).toContain('Value Objects 2');
-  });
-
-  test('counts:false suppresses the inline strip (left-rail Explorateur)', () => {
-    const el = renderModelOutline(model, noop, { counts: false });
-    expect(el.querySelectorAll('.koi-model-count').length).toBe(0);
-    // The tree itself still renders.
-    expect(el.querySelectorAll('.koi-model-leaf').length).toBeGreaterThan(0);
-  });
-
-  test('nav:false drops the Context Map / Ubiquitous Language buttons', () => {
-    const el = renderModelOutline(model, noop, { nav: false });
-    expect(el.querySelectorAll('.koi-model-nav').length).toBe(0);
-  });
-
-  test('includes top-level Context Map and Ubiquitous Language entries', () => {
-    const onOpenContextMap = vi.fn();
-    const onOpenGlossary = vi.fn();
-    const el = renderModelOutline(model, { ...noop, onOpenContextMap, onOpenGlossary });
-    document.body.appendChild(el);
-    const contextMap = el.querySelector<HTMLButtonElement>('.koi-model-nav[data-nav="contextmap"]')!;
-    const glossary = el.querySelector<HTMLButtonElement>('.koi-model-nav[data-nav="glossary"]')!;
-    expect(contextMap.textContent).toBe('Context Map');
-    expect(glossary.textContent).toBe('Ubiquitous Language');
-    contextMap.click();
-    glossary.click();
-    expect(onOpenContextMap).toHaveBeenCalledOnce();
-    expect(onOpenGlossary).toHaveBeenCalledOnce();
   });
 });

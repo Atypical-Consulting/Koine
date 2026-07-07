@@ -127,44 +127,6 @@ function countBadge(className: string, label: string, count: number): HTMLElemen
   return badge;
 }
 
-/** The 1-based start line/column of an entry's name range (the editor's `goto` contract is 1-based). */
-function gotoTarget(entry: GlossaryEntry): [line: number, col: number] {
-  return [entry.nameRange.start.line + 1, entry.nameRange.start.character + 1];
-}
-
-/** Presentation options for {@link renderModelOutline}. Defaults preserve the original single-pane look. */
-export interface ModelOutlineOptions {
-  /** Render the compact per-context counts strip inside each context (default `true`). The left-rail
-   * "Explorateur" passes `false` because the dedicated "Vue d'ensemble" section ({@link renderOverviewCounts})
-   * owns the tallies there — so the two sections don't double up. */
-  counts?: boolean;
-  /** Append the bottom Context Map / Ubiquitous Language nav buttons (default `true`). */
-  nav?: boolean;
-}
-
-/**
- * Build the model-outline navigator: a per-context counts strip, then construct-grouped leaves, then
- * the top-level Context Map + Ubiquitous Language entries. Clicking a leaf selects the element and
- * jumps to its declaration.
- */
-export function renderModelOutline(
-  model: GlossaryModel,
-  handlers: ModelOutlineHandlers,
-  opts: ModelOutlineOptions = {},
-): HTMLElement {
-  const showCounts = opts.counts ?? true;
-  const showNav = opts.nav ?? true;
-  const root = document.createElement('div');
-  root.className = 'koi-model';
-
-  for (const group of groupByConstruct(model)) {
-    root.appendChild(renderContext(group, handlers, showCounts));
-  }
-
-  if (showNav) root.appendChild(renderNav(handlers));
-  return root;
-}
-
 /**
  * The model-wide "Vue d'ensemble" overview: each bounded context with its construct tallies. Shares the
  * one tally source ({@link countsByContext} → {@link countsForGroup}) with the navigator's inline strip,
@@ -187,40 +149,6 @@ export function renderOverviewCounts(model: GlossaryModel): HTMLElement {
     root.appendChild(section);
   }
   return root;
-}
-
-function renderContext(group: ContextGroup, handlers: ModelOutlineHandlers, showCounts: boolean): HTMLElement {
-  const section = document.createElement('section');
-  section.className = 'koi-model-ctx';
-
-  const header = document.createElement('button');
-  header.type = 'button';
-  header.className = 'koi-model-ctx-name';
-  header.textContent = group.context;
-  if (group.contextEntry) {
-    const ctx = group.contextEntry;
-    header.title = 'Go to context declaration';
-    header.addEventListener('click', () => handlers.goto(...gotoTarget(ctx)));
-  } else {
-    header.disabled = true;
-  }
-  section.appendChild(header);
-
-  // Compact per-context counts strip (shares countsForGroup with countsByContext — one tally source).
-  // Suppressed in the left rail, where the dedicated "Vue d'ensemble" section owns the tallies.
-  if (showCounts) {
-    const counts = document.createElement('div');
-    counts.className = 'koi-model-counts';
-    for (const c of countsForGroup(group)) {
-      counts.appendChild(countBadge('koi-model-count', c.label, c.count));
-    }
-    section.appendChild(counts);
-  }
-
-  for (const construct of group.constructs) {
-    section.appendChild(renderConstruct(construct, handlers));
-  }
-  return section;
 }
 
 /** The icon slug for a construct label — a stable key for the shape/colour each DDD concept gets in the
@@ -294,61 +222,4 @@ export function constructIcon(slug: string): HTMLElement {
   icon.dataset.construct = slug;
   icon.setAttribute('aria-hidden', 'true');
   return icon;
-}
-
-function renderConstruct(construct: ConstructGroup, handlers: ModelOutlineHandlers): HTMLElement {
-  const wrap = document.createElement('div');
-  wrap.className = 'koi-model-construct';
-  const slug = constructSlug(construct.label);
-
-  const head = document.createElement('h4');
-  head.className = 'koi-model-construct-name';
-  head.append(constructIcon(slug), construct.label, ' ', countSuffix(construct.entries.length));
-  wrap.appendChild(head);
-
-  const list = document.createElement('ul');
-  list.className = 'koi-model-list';
-  for (const entry of construct.entries) {
-    const li = document.createElement('li');
-    const leaf = document.createElement('button');
-    leaf.type = 'button';
-    leaf.className = 'koi-model-leaf';
-    leaf.dataset.qname = entry.qualifiedName;
-    // Icon first, then the name as a text node — keeps leaf.textContent === entry.name.
-    leaf.append(constructIcon(slug), entry.name);
-    leaf.addEventListener('click', () => {
-      handlers.onSelect(entry);
-      handlers.goto(...gotoTarget(entry));
-    });
-    li.appendChild(leaf);
-    list.appendChild(li);
-  }
-  wrap.appendChild(list);
-  return wrap;
-}
-
-function countSuffix(count: number): HTMLElement {
-  const num = document.createElement('span');
-  num.className = 'koi-model-construct-num';
-  num.textContent = String(count);
-  return num;
-}
-
-function renderNav(handlers: ModelOutlineHandlers): HTMLElement {
-  const nav = document.createElement('div');
-  nav.className = 'koi-model-navs';
-  nav.appendChild(navButton('contextmap', 'Context Map', handlers.onOpenContextMap));
-  nav.appendChild(navButton('glossary', 'Ubiquitous Language', handlers.onOpenGlossary));
-  return nav;
-}
-
-function navButton(nav: string, label: string, onClick?: () => void): HTMLElement {
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'koi-model-nav';
-  btn.dataset.nav = nav;
-  btn.textContent = label;
-  if (onClick) btn.addEventListener('click', onClick);
-  else btn.disabled = true;
-  return btn;
 }
