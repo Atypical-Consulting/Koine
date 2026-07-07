@@ -1,5 +1,5 @@
-import type { JSX } from 'preact';
-import { DATA_RVIEW, RSTRIP_BTN_CLASS, type RightStripView } from '../domIds';
+import { Fragment, type JSX } from 'preact';
+import { DATA_RVIEW, RSTRIP_BTN_CLASS, RSTRIP_SEP_CLASS, type RightStripView } from '../domIds';
 
 // RightStrip: the right-edge tool-window stripe's buttons as a Preact component (#759, finishing the #193
 // migration — replaces the imperative `rightStripMarkup()` string builder injected via innerHTML at boot).
@@ -83,25 +83,32 @@ const STRIPE_BUTTONS: readonly StripeButton[] = [
 /** The stripe's buttons: one icon toggle per RightView. Each carries a `data-tooltip` CSS reveals as a
  *  left-pointing label on hover/focus (the stripe hugs the viewport's right edge, so the tooltip opens
  *  inward), and `aria-controls="right"` tying it to the panel it opens. The controller flips each
- *  button's aria-pressed as the panel opens, closes, or switches view. Rendered once into #right-strip. */
+ *  button's aria-pressed as the panel opens, closes, or switches view. Rendered once into #right-strip.
+ *
+ *  A decorative `.rstrip-sep` hairline is emitted immediately before the Source Control button (#1154) to
+ *  group the git tool-window apart from Properties/AI Chat, matching the PR #1140 handoff. It is purely
+ *  visual: `aria-hidden` and non-interactive, so it never enters the AT reading order or the tab sequence
+ *  and does not touch the toggle/aria-pressed contract. Its CSS lives Studio-side in _inspector.scss. */
 export function RightStrip(): JSX.Element {
   return (
     <>
       {STRIPE_BUTTONS.map(({ view, label, icon }) => (
-        <button
-          type="button"
-          class={RSTRIP_BTN_CLASS}
-          {...{ [DATA_RVIEW]: view }}
-          data-tooltip={label}
-          aria-label={label}
-          aria-controls="right"
-          aria-pressed="false"
-          key={view}
-        >
-          <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true">
-            {icon}
-          </svg>
-        </button>
+        <Fragment key={view}>
+          {view === 'source-control' && <div class={RSTRIP_SEP_CLASS} aria-hidden="true" />}
+          <button
+            type="button"
+            class={RSTRIP_BTN_CLASS}
+            {...{ [DATA_RVIEW]: view }}
+            data-tooltip={label}
+            aria-label={label}
+            aria-controls="right"
+            aria-pressed="false"
+          >
+            <svg class="tb-ico" viewBox="0 0 16 16" aria-hidden="true">
+              {icon}
+            </svg>
+          </button>
+        </Fragment>
       ))}
     </>
   );

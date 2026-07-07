@@ -30,5 +30,10 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** The stripe with all three tool-window toggles (Properties · AI Chat · Source Control). */
+/** The stripe with all four tool-window toggles (Properties · AI Chat · Source Control · Syntax Tree). A
+ *  decorative `.rstrip-sep` hairline (aria-hidden, non-interactive) groups the git tool-window — Source
+ *  Control — apart from Properties/AI Chat, per the PR #1140 handoff (#1154). Its width/position styling
+ *  and the 42px stripe track live Studio-side (`_inspector.scss` / `_split.scss`, koine-ui ships no SCSS),
+ *  so this story renders the separator node without that hairline paint — the pixel-faithful look is in
+ *  the running Studio. This story remains the structural + `@storybook/addon-a11y` gate for the stripe. */
 export const Default: Story = {};

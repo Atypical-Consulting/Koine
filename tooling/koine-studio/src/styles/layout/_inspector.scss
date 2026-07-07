@@ -148,6 +148,18 @@
   }
 }
 
+/* Decorative hairline that groups the git tool-window (Source Control) apart from Properties/AI Chat on
+   the stripe (#1154, PR #1140 handoff parity). RightStrip emits it aria-hidden and non-interactive, so
+   it is purely visual — it inherits the flex-column centring from #right-strip and uses the same
+   --koi-line ink as the stripe's border-left, so it reads as one hairline family in light and dark. */
+.rstrip-sep {
+  align-self: center;
+  width: 1rem;
+  height: 1px;
+  margin-block: var(--koi-space-1);
+  background: var(--koi-line);
+}
+
 /* Attention cue on the Properties stripe button when a selection arrives while the right rail is
    collapsed (#648, approach b). The `rstrip-notify` class is toggled by `notifyRstripProps()` in
    inspectorController for one animation cycle, then removed so the cue resets for the next

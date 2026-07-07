@@ -6,6 +6,11 @@
    resizer, the right inspector (--koi-inspector-w), and the always-on right-edge tool-window stripe
    (--koi-rstrip-w, #500). */
 #split {
+  /* Single source for the always-on tool-window stripe track (#1154, PR #1140 handoff parity): 42px =
+     2.625rem. Every grid-template-columns below reads `var(--koi-rstrip-w, 2.25rem)` fallback-only and
+     the stripe is never resized, so defining the token once here sets all nine references to 42px (was
+     the 2.25rem/36px fallback). `.rstrip-btn`'s own 1.75rem is unrelated and stays put. */
+  --koi-rstrip-w: 2.625rem;
   flex: 1 1 auto;
   display: grid;
   grid-template-columns:
