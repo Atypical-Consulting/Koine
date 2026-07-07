@@ -113,7 +113,8 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.Repositories, protocol),
-            Assemble(emit, ns, sb.ToString(), protocol));
+            Assemble(emit, ns, sb.ToString(), protocol),
+            Kind: KindForFolder(KindFolder.Repositories));
     }
 
     // ----------------------------------------------------------------------
@@ -204,9 +205,11 @@ public sealed partial class PythonEmitter
             }
         }
 
+        // KindFolder.Root is shared by aggregate roots and services, so tag the stereotype directly.
         return new EmittedFile(
             PathFor(context, KindFolder.Root, svc.Name),
-            Assemble(emit, context, sb.ToString(), name));
+            Assemble(emit, context, sb.ToString(), name),
+            Kind: DddKind.Service);
     }
 
     /// <summary>
@@ -243,8 +246,10 @@ public sealed partial class PythonEmitter
               .Append(") -> ").Append(ret).Append(": ...\n");
         }
 
+        // KindFolder.Root is shared by aggregate roots and services, so tag the stereotype directly.
         return new EmittedFile(
             PathFor(context, KindFolder.Root, svc.Name),
-            Assemble(emit, context, sb.ToString(), name));
+            Assemble(emit, context, sb.ToString(), name),
+            Kind: DddKind.Service);
     }
 }

@@ -210,10 +210,10 @@ public sealed partial class PythonEmitter : IEmitter
                 break;
             // A domain `event` and an `integration event` both emit as frozen-dataclass DTOs (Task 8).
             case EventDecl ev:
-                files.Add(EmitEvent(emit, ev.Name, ev.Doc, ev.Members, ns, typeMapper));
+                files.Add(EmitEvent(emit, ev.Name, ev.Doc, ev.Members, ns, typeMapper, DddKind.Event));
                 break;
             case IntegrationEventDecl iev:
-                files.Add(EmitEvent(emit, iev.Name, iev.Doc, iev.Members, ns, typeMapper));
+                files.Add(EmitEvent(emit, iev.Name, iev.Doc, iev.Members, ns, typeMapper, DddKind.IntegrationEvent));
                 break;
             // A read model emits a flat frozen-dataclass DTO + a pure `to_<name>(src)` projection
             // (R12.3); a query emits a DTO + a `QueryHandler` Protocol seam (R12.4). Both are

@@ -155,7 +155,8 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.ValueObjects, vo.Name),
-            Assemble(emit, ns, sb.ToString(), name));
+            Assemble(emit, ns, sb.ToString(), name),
+            Kind: KindForFolder(KindFolder.ValueObjects));
     }
 
     /// <summary>
