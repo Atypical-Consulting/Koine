@@ -918,6 +918,9 @@ export interface KoineEditor {
   gotoRange(start: { line: number; character: number }, end: { line: number; character: number }): void;
   /** Resolve the definition for the symbol at a CodeMirror offset (delegates navigation to onNavigate). */
   gotoDefinition(pos: number): Promise<void>;
+  /** Move the cursor to a 0-based LSP position and open the references picker there — the same Shift-F12
+   * surface, driven from outside the editor (the launcher's find-usages action, issue #1165). */
+  showReferences(line: number, character: number): void;
   /** Apply LSP TextEdits to the document in one transaction (edits sorted internally). */
   applyEdits(edits: TextEdit[]): void;
   /** Turn editor soft-wrap on/off (reconfigures a compartment; no state loss). */
@@ -1396,6 +1399,14 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
       jumpToRange(view, start, end);
     },
     gotoDefinition,
+    showReferences(line: number, character: number) {
+      // Move the caret to the position, then reuse the internal Shift-F12 handler so the references
+      // picker anchors there — identical surface, driven from the launcher instead of the keymap.
+      const pos = lspPosToOffset(view.state.doc, line, character);
+      view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
+      view.focus();
+      void findReferences(pos);
+    },
     applyEdits(edits: TextEdit[]) {
       if (!edits.length) return;
       // Offset conversion + the descending `from` sort (so earlier edits don't shift later offsets)

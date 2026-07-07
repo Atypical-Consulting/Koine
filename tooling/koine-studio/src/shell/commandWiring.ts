@@ -32,7 +32,7 @@ export interface CommandWiringDeps {
   format(): void;
   goHome(): void;
   openFolder(): void;
-  search: { focus(): void; toggle(): void };
+  search: { focus(): void; toggle(): void; seed(term: string): void };
   requestNewModel(): void;
   // `buffers` is a THUNK, not a value: the workspace slice REPLACES its buffer Map on every mutation
   // (#982), so a value captured once at construction would freeze at the initial empty Map. Read live.
@@ -79,6 +79,9 @@ export interface CommandWiringDeps {
   gitLog(): Promise<GitLogEntry[]> | null;
   /** Open a workspace file and reveal a 0-based range — the launcher's go-to-symbol/rule effect. */
   revealLocation(uri: string, range: Range): void;
+  /** Activate a workspace file and surface the LSP references picker at a 0-based range — the launcher's
+   * find-usages effect (reuses the editor's Shift-F12 surface at the entry's declaration). */
+  findReferences(uri: string, range: Range): void;
 }
 
 export interface CommandWiring {
@@ -234,7 +237,15 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
   // `.lx-toast` (#1145 review). `toast` here stays a no-op — LauncherPanel renders its own confirmation.
   const actionDeps: LauncherActionDeps = {
     gotoDefinition: (entry) => gotoEntry(entry),
-    findUsages: () => deps.search.focus(),
+    // Surface the references picker at the entry's declaration (#1165): open + activate its file and
+    // show the editor's Shift-F12 references list at the name position. Falls back to focusing the
+    // text-search box only when the entry carries no source location (an undrawn element).
+    findUsages: (entry) => {
+      const file = entry.element?.node?.sourceSpan?.file ?? entry.file ?? null;
+      const range = entry.nameRange ?? entry.element?.entry.nameRange ?? null;
+      if (file && range) deps.findReferences(file, range);
+      else deps.search.focus();
+    },
     // A non-navigating quick-look (#1165): pin the entry's read-only preview into the launcher's own
     // preview pane instead of jumping to it (gotoEntry navigates — that's what ↵ is for). Leaves the
     // editor selection / active document untouched.
@@ -249,7 +260,9 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
       if (entry.file) deps.openUri(entry.file);
     },
     openGlossary: () => deps.controller.selectDocsTab('glossary'),
-    findInModel: () => deps.search.focus(),
+    // Seed the workspace search with the term's bare name (#1165) — the identifier that appears
+    // throughout the model source, not the dotted qualified name — instead of the old empty focus().
+    findInModel: (entry) => deps.search.seed(entry.title),
     gotoRule: (entry) => gotoEntry(entry),
     viewCommit: () => deps.controller.selectRight('source-control'),
     revertCommit: () => launcher.toast('Reverting a commit isn’t available from the launcher yet.'),

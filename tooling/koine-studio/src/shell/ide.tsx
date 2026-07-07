@@ -527,6 +527,26 @@ export function init(hooks: IdeHooks = {}): () => void {
     }
   }
 
+  // The Spotlight launcher's find-usages (#1165): activate the declaring file (from disk if it isn't a
+  // buffer yet), then open the editor's references picker AT the declaration — the same Shift-F12 surface,
+  // driven from the launcher. Guarded so a null token / failed open can't fire references on the wrong doc.
+  async function findReferencesAt(uri: string, range: Range): Promise<void> {
+    try {
+      if (uri !== workspace.activeUri()) {
+        if (workspace.buffers.has(uri)) workspace.activateFile(uri);
+        else {
+          const token = fileUriToPath(uri);
+          if (token) await workspace.openFileToken(token);
+        }
+      }
+      // Aim one char INTO the name (like renameElement): the token locator's match window is `(start, end]`,
+      // so the bare start offset resolves to the preceding token and finds nothing.
+      if (uri === workspace.activeUri()) editor.showReferences(range.start.line, range.start.character + 1);
+    } catch {
+      /* best-effort launcher find-usages */
+    }
+  }
+
   // Open a file from a USER-INITIATED affordance (a file-tree click, a Go-to-File palette pick). Takes an
   // fs token (what the explorer hands us) and routes it through the single editor's activate path. (The
   // former two-group "focused group" routing went away with the editor A/B split — the center split-pane
@@ -1351,6 +1371,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     canUseGit: platform.canUseGit,
     gitLog: () => (platform.canUseGit ? platform.gitLog(workspace.folderRootToken()) : null),
     revealLocation: (uri, range) => void revealLocation(uri, range),
+    findReferences: (uri, range) => void findReferencesAt(uri, range),
   });
 
   // The boot sequence (the lsp.start ladder + emit-target seed + the shared/single/restored/default

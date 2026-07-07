@@ -58,7 +58,7 @@ function makeDeps(over: Partial<CommandWiringDeps> = {}): CommandWiringDeps {
     format: vi.fn(),
     goHome: vi.fn(),
     openFolder: vi.fn(),
-    search: { focus: vi.fn(), toggle: vi.fn() },
+    search: { focus: vi.fn(), toggle: vi.fn(), seed: vi.fn() },
     requestNewModel: vi.fn(),
     workspace: { saveAllDirty: vi.fn(), buffers: () => new Map() },
     copyShareLink: vi.fn(),
@@ -98,6 +98,7 @@ function makeDeps(over: Partial<CommandWiringDeps> = {}): CommandWiringDeps {
     canUseGit: false,
     gitLog: vi.fn(() => null),
     revealLocation: vi.fn(),
+    findReferences: vi.fn(),
     ...over,
   };
 }
@@ -522,6 +523,56 @@ describe('commandWiring', () => {
       expect(launcherToast).toHaveBeenCalledTimes(2);
       // ...and it does NOT silently open the Source Control panel as if a revert happened.
       expect(deps.controller.selectRight).not.toHaveBeenCalled();
+    });
+
+    it('findInModel seeds the workspace search with the entry\'s term, not just focus (#1165)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const entry = {
+        id: 'g:Ordering.Order',
+        cat: 'glossary',
+        title: 'Order',
+        qualifiedName: 'Ordering.Order',
+      } as unknown as CatalogEntry;
+      capturedActionDeps.findInModel(entry);
+      // Seeds the search box with the term (the bare name that appears in the model source)…
+      expect(deps.search.seed).toHaveBeenCalledWith('Order');
+      // …instead of the old bare focus() that left the box empty.
+      expect(deps.search.focus).not.toHaveBeenCalled();
+    });
+
+    it('findUsages surfaces references at the entry\'s declaring position, not just search.focus (#1165)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const range = { start: { line: 3, character: 2 }, end: { line: 3, character: 7 } };
+      const entry = {
+        id: 'sym:Ordering.Order',
+        cat: 'symbol',
+        title: 'Order',
+        file: 'file:///order.koi',
+        nameRange: range,
+      } as unknown as CatalogEntry;
+      capturedActionDeps.findUsages(entry);
+      // Routes to the editor's references surface at the entry's file + declaration range…
+      expect(deps.findReferences).toHaveBeenCalledWith('file:///order.koi', range);
+      // …instead of the old bare focus() on the text-search box.
+      expect(deps.search.focus).not.toHaveBeenCalled();
+    });
+
+    it('findUsages degrades to search.focus for an entry with no source location', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      // An undrawn element carries no file/nameRange — nothing to resolve references from.
+      const entry = { id: 'sym:X', cat: 'symbol', title: 'X' } as unknown as CatalogEntry;
+      capturedActionDeps.findUsages(entry);
+      expect(deps.findReferences).not.toHaveBeenCalled();
+      expect(deps.search.focus).toHaveBeenCalledOnce();
     });
 
     it('peek surfaces a non-navigating quick-look — the launcher preview, never revealLocation/openUri (#1165)', () => {
