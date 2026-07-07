@@ -235,7 +235,10 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
   const actionDeps: LauncherActionDeps = {
     gotoDefinition: (entry) => gotoEntry(entry),
     findUsages: () => deps.search.focus(),
-    peek: (entry) => gotoEntry(entry),
+    // A non-navigating quick-look (#1165): pin the entry's read-only preview into the launcher's own
+    // preview pane instead of jumping to it (gotoEntry navigates — that's what ↵ is for). Leaves the
+    // editor selection / active document untouched.
+    peek: (entry) => launcher.peek(entry),
     rename: () => launcher.toast('Renaming a symbol isn’t available from the launcher yet.'),
     copy: (text) => void navigator.clipboard?.writeText?.(text),
     openFile: (entry) => {

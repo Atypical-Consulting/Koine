@@ -20,6 +20,7 @@ vi.mock('@/launcher/createLauncher', () => ({ createLauncher: vi.fn() }));
 
 let launcherToggle: ReturnType<typeof vi.fn>;
 let launcherToast: ReturnType<typeof vi.fn>;
+let launcherPeek: ReturnType<typeof vi.fn>;
 let launcherOpen = false;
 let capturedSources: LauncherSources;
 let capturedActionDeps: LauncherActionDeps;
@@ -117,6 +118,7 @@ describe('commandWiring', () => {
     launcherOpen = false;
     launcherToggle = vi.fn();
     launcherToast = vi.fn();
+    launcherPeek = vi.fn();
     const open = vi.fn();
     const close = vi.fn();
     vi.mocked(createLauncher).mockReset();
@@ -128,6 +130,7 @@ describe('commandWiring', () => {
         close,
         toggle: launcherToggle,
         toast: launcherToast,
+        peek: launcherPeek,
         get isOpen() {
           return launcherOpen;
         },
@@ -519,6 +522,27 @@ describe('commandWiring', () => {
       expect(launcherToast).toHaveBeenCalledTimes(2);
       // ...and it does NOT silently open the Source Control panel as if a revert happened.
       expect(deps.controller.selectRight).not.toHaveBeenCalled();
+    });
+
+    it('peek surfaces a non-navigating quick-look — the launcher preview, never revealLocation/openUri (#1165)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const range = { start: { line: 3, character: 2 }, end: { line: 3, character: 7 } };
+      const entry = {
+        id: 'sym:Ordering.Order',
+        cat: 'symbol',
+        title: 'Order',
+        file: 'file:///order.koi',
+        nameRange: range,
+      } as unknown as CatalogEntry;
+      capturedActionDeps.peek(entry);
+      // Surfaces the read-only preview through the launcher's own preview surface...
+      expect(launcherPeek).toHaveBeenCalledWith(entry);
+      // ...and does NOT navigate: no editor jump (revealLocation) and no file open (openUri).
+      expect(deps.revealLocation).not.toHaveBeenCalled();
+      expect(deps.openUri).not.toHaveBeenCalled();
     });
 
     it('binds gotoDefinition to revealLocation using the entry\'s declaring file + nameRange', () => {
