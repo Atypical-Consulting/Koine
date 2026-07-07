@@ -545,6 +545,10 @@
   inset: 0;
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
+  // Cap the single row at the container height (minmax `0` floor, not the default `auto` which grows to
+  // the generated-code content). Without this the row stretches to the whole emitted file, so the inner
+  // CodeMirror `.cm-scroller` and the `.out-rail` are never height-constrained and the pane can't scroll.
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .out-rail {
