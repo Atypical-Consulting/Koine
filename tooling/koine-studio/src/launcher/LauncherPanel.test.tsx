@@ -8,6 +8,7 @@ import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preac
 import { LauncherPanel } from '@/launcher/LauncherPanel';
 import type { LauncherActionDeps } from '@/launcher/actions';
 import type { LauncherSources } from '@/launcher/buildCatalog';
+import { registerOverlay } from '@atypical/koine-ui';
 import type { Command } from '@atypical/koine-ui';
 import type { ModelIndex } from '@/model/modelIndex';
 import type { GlossaryEntry } from '@/lsp/lsp';
@@ -627,6 +628,37 @@ describe('LauncherPanel — shared Esc-stack (issue #1164)', () => {
       expect(onClose).toHaveBeenCalledTimes(1);
     } finally {
       document.removeEventListener('keydown', docEsc);
+    }
+  });
+
+  test('hiding the launcher while the menu is open pops BOTH layers — no stale close-fn leaks onto the stack', async () => {
+    const onClose = vi.fn();
+    const sources = makeKnownCatalogSources();
+
+    // Simulate an unrelated overlay already open BENEATH the launcher: it must be the one a later Escape
+    // dismisses, proving no leaked launcher/menu layer sits above it after the launcher hides.
+    const unrelated = vi.fn();
+    const unregisterUnrelated = registerOverlay(unrelated);
+    try {
+      const view = render(<LauncherPanel sources={sources} visible={true} onClose={onClose} actionDeps={makeActionDeps()} />);
+      await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+      const input = view.getByLabelText('Search commands, symbols, files…') as HTMLInputElement;
+
+      // Open the action menu (pushes launcher + menu layers above `unrelated`), then hide the launcher
+      // WITHOUT pressing Escape — mirrors createLauncher.close() flipping `visible` false.
+      fireEvent.keyDown(input, { key: 'k', metaKey: true });
+      expect(view.container.querySelector('.lx-actmenu')).toBeTruthy();
+      view.rerender(<LauncherPanel sources={sources} visible={false} onClose={onClose} actionDeps={makeActionDeps()} />);
+      // Both effect cleanups must run: the menu layer pops once `visible`'s reset flips `menuOpen` false.
+      await waitFor(() => expect(view.container.querySelector('.lx-actmenu')).toBeNull());
+
+      // One document Escape: with both launcher layers popped, `unrelated` is topmost and handles it.
+      // A leaked launcher/menu layer would sit above `unrelated` and swallow this Escape instead.
+      documentEscape();
+      expect(unrelated).toHaveBeenCalledTimes(1);
+      expect(onClose).not.toHaveBeenCalled();
+    } finally {
+      unregisterUnrelated();
     }
   });
 });
