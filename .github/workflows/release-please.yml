@@ -159,6 +159,37 @@ jobs:
       - name: Pack CLI
         run: dotnet pack src/Koine.Cli/Koine.Cli.csproj -c Release -o ./artifacts
 
+      # The library + MCP tool + emitter packages the README advertises (#1185): the embeddable
+      # compiler (Koine.Compiler), the MCP-server tool (Koine.Mcp), and the emitter meta-package
+      # (Koine.Emit.All) plus the per-target/shared emitters it aggregates — so a consumer who
+      # installs Koine.Compiler can also resolve a built-in emitter. Packing is unconditional (safe
+      # even on a workflow_dispatch dry-run); the gated Upload/Push steps below fan out over every
+      # .nupkg in ./artifacts through their existing `./artifacts/*.nupkg` glob, so no per-package
+      # push wiring is needed. All packages share the one Directory.Build.props version, so the
+      # inter-package dependencies (Koine.Emit.* -> Koine.Emit.Common -> Koine.Compiler) resolve in
+      # lockstep. Koine.Mcp packs as a self-contained tool (its Koine.* references are bundled, not
+      # package deps). The Trusted Publishing policy is org-scoped and already authorizes these ids.
+      - name: Pack library, MCP tool, and emitter packages
+        run: |
+          for proj in \
+            src/Koine.Mcp/Koine.Mcp.csproj \
+            src/Koine.Compiler/Koine.Compiler.csproj \
+            src/Koine.Emit.Common/Koine.Emit.Common.csproj \
+            src/Koine.Emit.CSharp/Koine.Emit.CSharp.csproj \
+            src/Koine.Emit.TypeScript/Koine.Emit.TypeScript.csproj \
+            src/Koine.Emit.Python/Koine.Emit.Python.csproj \
+            src/Koine.Emit.Php/Koine.Emit.Php.csproj \
+            src/Koine.Emit.Rust/Koine.Emit.Rust.csproj \
+            src/Koine.Emit.Java/Koine.Emit.Java.csproj \
+            src/Koine.Emit.Kotlin/Koine.Emit.Kotlin.csproj \
+            src/Koine.Emit.Glossary/Koine.Emit.Glossary.csproj \
+            src/Koine.Emit.Docs/Koine.Emit.Docs.csproj \
+            src/Koine.Emit.AsyncApi/Koine.Emit.AsyncApi.csproj \
+            src/Koine.Emit.OpenApi/Koine.Emit.OpenApi.csproj \
+            src/Koine.Emit.All/Koine.Emit.All.csproj; do
+            dotnet pack "$proj" -c Release -o ./artifacts
+          done
+
       - name: Upload nupkg to release
         if: ${{ needs.release-please.outputs.release_created == 'true' }}
         env:

@@ -522,17 +522,21 @@ metadata is retained either way). Full rationale: the comment block in `src/Koin
 `Microsoft.CodeAnalysis.PublicApiAnalyzers`, so unintended public surface can never ship silently).
 You can embed the compiler, write your own analyzers, and ship your own emitters.
 
-**Embed the compiler.** Reference the package and compile a model in process:
+**Embed the compiler.** `Koine.Compiler` carries the parser, semantic model, and emit **contracts**; the
+built-in emitters ship in `Koine.Emit.All` (the `BuiltInEmitterProviders.All` aggregator). Add both to
+resolve a target like `csharp`, then compile a model in process:
 
 ```bash
 dotnet add package Koine.Compiler
+dotnet add package Koine.Emit.All
 ```
 
 ```csharp
-using Koine.Compiler.Emit;
-using Koine.Compiler.Services;
+using Koine.Compiler;          // BuiltInEmitterProviders (from Koine.Emit.All)
+using Koine.Compiler.Emit;     // EmitterRegistry, EmitterOptions, EmittedFile
+using Koine.Compiler.Services; // KoineCompiler
 
-var registry = new EmitterRegistry();                       // built-in providers (csharp, typescript, …)
+var registry = new EmitterRegistry(BuiltInEmitterProviders.All);   // built-in providers (csharp, typescript, …)
 registry.TryCreate("csharp", EmitterOptions.Empty, out var emitter);
 
 var result = new KoineCompiler().Compile(source, emitter);  // string source or IReadOnlyList<SourceFile>
