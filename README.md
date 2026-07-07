@@ -16,6 +16,7 @@
 
 [![Try it in your browser](https://img.shields.io/badge/try-in%20your%20browser-3245b8)](https://atypical-consulting.github.io/Koine/studio/)
 [![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
+[![NuGet](https://img.shields.io/nuget/v/Koine.Cli?logo=nuget&label=NuGet&color=3245b8)](https://www.nuget.org/packages/Koine.Cli)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![Tests](https://img.shields.io/badge/tests-1900%2B%20passing-2ea44f)](tests/)
 ![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20Java%20%C2%B7%20Kotlin%20%C2%B7%20docs%20%C2%B7%20AsyncAPI%20%C2%B7%20OpenAPI-178600)
@@ -225,6 +226,23 @@ needed for `subtotal` — nothing for you to write, and nothing external to refe
 ## Quick start (CLI)
 
 Requires **.NET 10**.
+
+Install the CLI as a .NET global tool from NuGet, then invoke it as `koine`:
+
+```bash
+dotnet tool install --global Koine.Cli
+koine --version
+koine build templates/starters/billing/billing.koi --target csharp --out ./generated
+```
+
+Or run it **without installing** via [`dnx`](https://learn.microsoft.com/dotnet/core/tools/dotnet-dnx)
+(bundled with the .NET 10 SDK — it fetches the tool from NuGet and runs it in one shot, like `npx`):
+
+```bash
+dnx Koine.Cli build templates/starters/billing/billing.koi --target csharp --out ./generated
+```
+
+Or run it straight from a clone of this repo with `dotnet run --project src/Koine.Cli -- …`:
 
 ```bash
 # Build everything and run the tests
@@ -649,23 +667,20 @@ as a CI gate). See the
 
 ## Status & roadmap
 
-Koine is at **v0.17.x** and ships the full tactical *and*
-strategic DDD toolkit, four more emitter targets (**TypeScript**, **Python**, **PHP 8.1**, and
-**Rust**) alongside C# — **PHP** now covering the tactical core *and* the strategic/CQRS layer,
-**Rust** now covering multi-context references and the CQRS read side — a **docs** target that emits living
-documentation (Markdown + Mermaid diagrams), the editor tooling (TextMate grammar,
-`koine lsp` language server, and the `fmt` / `init` / `watch` commands), and **model-as-spec
-coverage** (`koine coverage` proves declared == emitted and doubles as a CI gate, also exposed as the
-`koine_coverage` MCP tool). The
+Koine ships the full tactical *and* strategic DDD toolkit and **nine emitter targets alongside C#** —
+six languages (**TypeScript**, **Python**, **PHP 8.1**, **Rust**, **Java 17**, **Kotlin 2.x**) plus three
+spec/doc targets (**docs** — Markdown + Mermaid, **AsyncAPI 3.0**, and **OpenAPI 3.1**) — the editor
+tooling (TextMate grammar, `koine lsp` language server, and the `fmt` / `init` / `watch` commands), and
+**model-as-spec coverage** (`koine coverage` proves declared == emitted and doubles as a CI gate, also
+exposed as the `koine_coverage` MCP tool). The
 [feature catalogue](https://atypical-consulting.github.io/Koine/guides/feature-catalogue/) maps every
-construct to the C# it emits.
+construct to the C# it emits. The current version is shown by the NuGet badge above.
 
-**Recently landed:** **Rust Phase 2**
-([#173](https://github.com/Atypical-Consulting/Koine/issues/173)) takes the Rust emitter beyond the
-tactical core to cross-context references (`crate::<module>` qualification), command returns, raised
-domain events, aggregate factories with identity generation, the `Match`/`Switch`/`Try*` smart-enum
-forms, and the CQRS read side (query DTOs + read-model projections) — so the six-context `pizzeria`
-template now compiles to Rust end-to-end. The full roadmap lives in
+**Recently landed:** **Java 17** and **Kotlin 2.x** emitters (dependency-free, compile-verified via
+`javac`/`kotlinc`); **DDD-kind metadata** surfaced across the TypeScript/Python/PHP emitters
+([#1170](https://github.com/Atypical-Consulting/Koine/issues/1170)); and the CLI is now published to
+**NuGet.org** via Trusted Publishing — `dotnet tool install --global Koine.Cli`
+([#1179](https://github.com/Atypical-Consulting/Koine/pull/1179)). The full roadmap lives in
 [`USER-STORIES.md`](USER-STORIES.md).
 
 ## Templates
