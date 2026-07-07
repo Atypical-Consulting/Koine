@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent, render, waitFor, within } from '@testing-library/preact';
 import { SourceControlPanel, type GitSurface } from '@/model/SourceControlPanel';
-import type { GitFile, GitLogEntry, GitStatus } from '@/host/types';
+import type { GitFile, GitLogEntry, GitNumstatEntry, GitStatus } from '@/host/types';
 import { koiConfirm } from '@atypical/koine-ui';
 import { axe } from 'vitest-axe';
 
@@ -29,6 +29,8 @@ function makeGit(initial: GitFile[]) {
     canUseGit: true,
     gitStatus: vi.fn(async () => snapshot()),
     gitDiff: vi.fn(async () => 'diff --git a/x b/x\n+added line'),
+    // No eager counts by default — rows fall back to the neutral `·`; a test overrides this per case.
+    gitNumstat: vi.fn(async () => [] as GitNumstatEntry[]),
     gitStage: vi.fn(async (_token: string, paths: string[]) => {
       files = files.map((f): GitFile =>
         paths.includes(f.relPath) ? { ...f, staged: true, status: f.status === 'untracked' ? 'added' : f.status } : f,
@@ -99,6 +101,49 @@ describe('SourceControlPanel', () => {
     // Splitting the filename into name/dir must NOT change the file-open button's accessible name.
     expect(view.getByRole('button', { name: 'b.koi modified' })).toBeTruthy();
     expect(view.getByRole('button', { name: 'a.koi modified' })).toBeTruthy();
+  });
+
+  test('shows eager +n/−n numstat counts on a row WITHOUT opening its diff, and falls back to · when absent or binary', async () => {
+    const git = makeGit([
+      { relPath: 'b.koi', staged: false, status: 'modified' }, // has real counts
+      { relPath: 'c.koi', staged: false, status: 'modified' }, // no numstat entry → ·
+      { relPath: 'logo.png', staged: false, status: 'modified' }, // binary (null counts) → ·
+    ]);
+    // One bounded numstat fetch feeds every row its (path, area) counts; binary carries null.
+    git.gitNumstat.mockResolvedValue([
+      { relPath: 'b.koi', staged: false, added: 5, removed: 2 },
+      { relPath: 'logo.png', staged: false, added: null, removed: null },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    const statOf = async (relPath: string) =>
+      (
+        await waitFor(() => {
+          const el = view.container.querySelector<HTMLElement>(`[data-relpath="${relPath}"] .koi-sc-stat`);
+          expect(el).not.toBeNull();
+          return el!;
+        })
+      );
+
+    // b.koi shows its real churn at rest — the numbers come from numstat, so its diff is never opened.
+    await waitFor(() => {
+      const stat = view.container.querySelector<HTMLElement>('[data-relpath="b.koi"] .koi-sc-stat');
+      expect(stat?.querySelector('.add')?.textContent).toBe('+5');
+      expect(stat?.querySelector('.del')?.textContent).toContain('2');
+      expect(stat?.querySelector('.none')).toBeNull();
+    });
+    expect(git.gitNumstat).toHaveBeenCalledWith(TOKEN);
+    expect(git.gitDiff).not.toHaveBeenCalled();
+
+    // c.koi has no numstat entry → the neutral placeholder, not a fake +0.
+    const cStat = await statOf('c.koi');
+    expect(cStat.querySelector('.none')?.textContent).toBe('·');
+    expect(cStat.querySelector('.add')).toBeNull();
+
+    // logo.png is binary (null counts) → also the neutral placeholder, never a bogus number.
+    const pngStat = await statOf('logo.png');
+    expect(pngStat.querySelector('.none')?.textContent).toBe('·');
+    expect(pngStat.querySelector('.add')).toBeNull();
   });
 
   test('renders the branch switcher, the ahead/behind sync readout, and the Refresh control', async () => {
@@ -281,6 +326,7 @@ describe('SourceControlPanel', () => {
         return { branch: 'main', files: [] } satisfies GitStatus;
       }),
       gitDiff: vi.fn(),
+      gitNumstat: vi.fn(async () => [] as GitNumstatEntry[]),
       gitStage: vi.fn(),
       gitUnstage: vi.fn(),
       gitCommit: vi.fn(),

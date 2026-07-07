@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
 import { expect, waitFor } from 'storybook/test';
 import { SourceControlPanel, type GitSurface } from '@/model/SourceControlPanel';
-import type { GitFile, GitLogEntry, GitStatus } from '@/host/types';
+import type { GitFile, GitLogEntry, GitNumstatEntry, GitStatus } from '@/host/types';
 
 // The right-rail Source Control panel (#272), converged to the PR #1140 handoff design (#1142): the
 // header actions + branch/sync bar, the bordered commit composer with its split ⌘⏎ button, the
@@ -17,14 +17,16 @@ import type { GitFile, GitLogEntry, GitStatus } from '@/host/types';
 
 const TOKEN = 'file:///work';
 
-/** A static in-memory git surface: gitStatus returns the given snapshot; mutations are inert no-ops
- *  (stories don't drive interactions). `satisfies GitSurface` keeps it structurally exact. */
-function makeGit(files: GitFile[], log: GitLogEntry[] = []): GitSurface {
+/** A static in-memory git surface: gitStatus returns the given snapshot; gitNumstat feeds the eager
+ *  per-row `+n/−n` counts (#1152); mutations are inert no-ops (stories don't drive interactions).
+ *  `satisfies GitSurface` keeps it structurally exact. */
+function makeGit(files: GitFile[], log: GitLogEntry[] = [], numstat: GitNumstatEntry[] = []): GitSurface {
   const snapshot = (): GitStatus => ({ branch: 'main', files: files.map((f) => ({ ...f })) });
   return {
     canUseGit: true,
     gitStatus: async () => snapshot(),
     gitDiff: async () => 'diff --git a/x b/x\n@@ -1 +1 @@\n-old line\n+new line',
+    gitNumstat: async () => numstat.map((e) => ({ ...e })),
     gitStage: async () => {},
     gitUnstage: async () => {},
     gitCommit: async () => {},
@@ -66,12 +68,21 @@ const changedFiles: GitFile[] = [
   { relPath: 'billing/invoice.koi', staged: false, status: 'untracked' },
 ];
 
+// Eager `+n/−n` counts (#1152) keyed by (relPath, staged) for each TRACKED changed file — the untracked
+// `billing/invoice.koi` is intentionally absent (git numstat doesn't cover untracked), so that row keeps
+// the neutral `·` and the story exercises both the real-count and fallback rendering.
+const changedNumstat: GitNumstatEntry[] = [
+  { relPath: 'ordering/order.koi', staged: true, added: 12, removed: 3 },
+  { relPath: 'ordering/line-item.koi', staged: false, added: 4, removed: 1 },
+  { relPath: 'README.md', staged: false, added: 1, removed: 0 },
+];
+
 const meta = {
   title: 'Panels/SourceControlPanel',
   component: SourceControlPanel,
   parameters: { layout: 'padded' },
   args: {
-    git: makeGit(changedFiles, seededLog),
+    git: makeGit(changedFiles, seededLog, changedNumstat),
     folderToken: TOKEN,
   },
 } satisfies Meta<typeof SourceControlPanel>;
@@ -121,7 +132,7 @@ export const CommitOptionsMenuOpen: Story = {
  *  covers the expanded state. */
 export const FullHistoryExpanded: Story = {
   name: 'Full history (expanded)',
-  args: { git: makeGit(changedFiles, longLog) },
+  args: { git: makeGit(changedFiles, longLog, changedNumstat) },
   play: async ({ canvasElement }) => {
     // Wait for the log to load capped at 10, then expand it via "View all".
     const region = await waitFor(() => {
