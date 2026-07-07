@@ -303,8 +303,11 @@
           <span class="sb-err" id="sb-problems-errors">✕ 0</span>
           <span class="sb-warn" id="sb-problems-warnings">⚠ 0</span>
         </button>
-        <!-- Active bounded context (single home; the top-bar breadcrumb strip was removed in #923). -->
-        <span class="sb-seg sb-ctx" id="sb-context">Context: —</span>
+        <!-- Active bounded context (single home; the top-bar breadcrumb strip was removed in #923). The
+             CANONICAL scope control after #1180 removed the top-bar breadcrumb <select>: a real menu
+             button that opens the scope picker (the inspector controller wires the click + the
+             createFloatingMenu list; the engine toggles aria-expanded). -->
+        <button type="button" class="sb-seg sb-ctx" id="sb-context" title="Change the active bounded context" aria-haspopup="menu" aria-expanded="false">Context: —</button>
         <!-- Docs coverage ring (glossary documentation, #923): a transparent host (display:contents) — the
              <DocsCoverageRing> panel renders its own .sb-ring segment inside it, like the other panel hosts. -->
         <span id="sb-docs-ring"></span>

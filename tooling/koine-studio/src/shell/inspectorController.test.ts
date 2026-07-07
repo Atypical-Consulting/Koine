@@ -19,6 +19,7 @@ import { LeftRail, RightStrip } from '@atypical/koine-ui';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
 import { createAppStore } from '@/store/index';
 import { createCountingStore } from '@/store/testing';
+import { ALL_CONTEXTS } from '@/model/activeContext';
 import { domById } from '@/shared/domById';
 import * as maxgraphRenderer from '@/diagrams/diagrams-maxgraph';
 import type { ContextMapGraphHooks } from '@/diagrams/diagrams-maxgraph';
@@ -107,7 +108,7 @@ const APP_HTML = `
       </aside>
       <div id="right-strip" class="pane" role="toolbar" aria-label="Tool windows" aria-orientation="vertical"></div>
     </main>
-    <footer id="statusbar"><span class="sb-item" id="sb-context">Context: —</span></footer>
+    <footer id="statusbar"><button type="button" class="sb-seg sb-ctx" id="sb-context" aria-haspopup="menu" aria-expanded="false">Context: —</button></footer>
   </div>`;
 
 function seedDom(): void {
@@ -980,6 +981,125 @@ describe('createInspectorController — Domain-navigator drill syncs the status 
     expect(domById('sb-context').textContent).toBe('Context: Billing');
     // (b) …and the scoped-surface re-filter ran — the Visual canvas re-fetched its (now-scoped) diagrams.
     expect(lsp.livingDocs.mock.calls.length).toBeGreaterThan(diagramsBefore);
+  });
+});
+
+describe('createInspectorController — the status-bar Context segment is a scope picker (#146)', () => {
+  // The #sb-context segment is the CANONICAL scope control (PR #1180 removed the top-bar breadcrumb
+  // <select>; #923 left only this readout). Clicking it opens a createFloatingMenu (mounted on
+  // document.body) listing the model's contexts + "All contexts"; picking one routes through the SAME
+  // persist=true choke point (setActiveContext) the Domain-navigator drill uses, so an explicit pick
+  // scopes every surface AND survives a reload.
+  const scopeMenu = () => document.querySelector<HTMLElement>('.koi-scope-menu');
+  const menuItems = () =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.koi-scope-menu [role="menuitem"]'));
+  const clickContextSegment = () =>
+    domById('sb-context').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+  // A two-context glossary model (Billing + Shipping), so the picker lists more than one real context.
+  function twoContextGlossary(): GlossaryModel {
+    return {
+      entries: [
+        glossaryFixture().entries[0], // the Billing context header
+        {
+          id: 'Shipping',
+          name: 'Shipping',
+          kind: 'context',
+          context: 'Shipping',
+          qualifiedName: 'Shipping',
+          doc: null,
+          nameRange: { start: { line: 0, character: 8 }, end: { line: 0, character: 16 } },
+        },
+      ],
+    };
+  }
+
+  test('clicking the segment opens a menu listing the contexts + "All contexts", marking the active one', async () => {
+    const lsp = makeLsp();
+    lsp.glossaryModel.mockResolvedValue(twoContextGlossary());
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+    await ctl.refreshContextList(); // learn the model's contexts (Billing, Shipping)
+    await flush();
+
+    expect(scopeMenu()).toBeNull(); // closed until clicked
+    clickContextSegment();
+
+    expect(scopeMenu()).not.toBeNull();
+    // "All contexts" heads the list (the boot default scope, so it carries the ✓ marker), then each
+    // model context in order.
+    expect(menuItems().map((i) => i.textContent)).toEqual(['✓ All contexts', 'Billing', 'Shipping']);
+    // The engine flips the trigger's aria-expanded while the menu is open.
+    expect(domById('sb-context').getAttribute('aria-expanded')).toBe('true');
+    ctl.dispose();
+  });
+
+  test('the ✓ marker follows the active scope (a drilled context, not "All contexts")', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    await ctl.refreshContextList(); // contexts = [Billing]
+    deps.store.getState().setActiveContext('Billing'); // drill into Billing (the navigator's write)
+    await flush();
+
+    clickContextSegment();
+    expect(menuItems().map((i) => i.textContent)).toEqual(['All contexts', '✓ Billing']);
+    ctl.dispose();
+  });
+
+  test('selecting a context sets the scope through the persist=true choke point, updates the readout, and dismisses', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    await ctl.refreshContextList();
+    await flush();
+
+    clickContextSegment();
+    menuItems().find((i) => i.textContent === 'Billing')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flush();
+
+    // The store slice now scopes to Billing…
+    expect(deps.store.getState().activeContext).toBe('Billing');
+    // …and the pick PERSISTED (an explicit user choice), keyed by the workspace ('scratch' with no folder).
+    expect(deps.saveActiveContext).toHaveBeenCalledWith('scratch', 'Billing');
+    // The status-bar readout mirrors it (via the activeContext subscription) and the menu dismissed.
+    expect(domById('sb-context').textContent).toBe('Context: Billing');
+    expect(scopeMenu()).toBeNull();
+    ctl.dispose();
+  });
+
+  test('selecting "All contexts" resets the scope to the unscoped sentinel', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    await ctl.refreshContextList();
+    deps.store.getState().setActiveContext('Billing');
+    await flush();
+
+    clickContextSegment();
+    menuItems().find((i) => i.textContent === 'All contexts')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flush();
+
+    expect(deps.store.getState().activeContext).toBe(ALL_CONTEXTS);
+    expect(deps.saveActiveContext).toHaveBeenCalledWith('scratch', ALL_CONTEXTS);
+    ctl.dispose();
+  });
+
+  test('dispose() closes an open scope menu so no orphan survives teardown', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+    await ctl.refreshContextList();
+    await flush();
+
+    clickContextSegment();
+    expect(scopeMenu()).not.toBeNull();
+
+    ctl.dispose();
+    expect(scopeMenu()).toBeNull();
   });
 });
 
