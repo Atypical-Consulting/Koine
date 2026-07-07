@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
+import { expect, waitFor } from 'storybook/test';
 import { SourceControlPanel, type GitSurface } from '@/model/SourceControlPanel';
 import type { GitFile, GitLogEntry, GitStatus } from '@/host/types';
 
@@ -72,6 +73,24 @@ type Story = StoryObj<typeof meta>;
 /** Desktop host with a dirty working tree: files grouped into Staged / Changes / Untracked, a branch
  *  switcher, and the recent-commit log. */
 export const Desktop: Story = {};
+
+/** The ⋮ header overflow menu opened (#1153): the live createFloatingMenu surface — Refresh / Stage all /
+ *  Unstage all / Collapse-all / View all commits live, and Discard-all / Pull / Push / Fetch disabled
+ *  (their git ops are sibling follow-ups). The `play` waits for the async git fetch to settle, then opens
+ *  the menu so the Chromium @storybook/addon-a11y axe/contrast pass covers the open state. */
+export const OverflowMenuOpen: Story = {
+  name: 'Overflow menu (open)',
+  play: async ({ canvasElement }) => {
+    // The composer only mounts once `gitStatus` resolves — wait for it so the menu's Stage/Unstage/View-all
+    // items compute against real data (enabled) rather than the transient empty snapshot.
+    await waitFor(() => expect(canvasElement.querySelector('.koi-sc-composer')).toBeTruthy());
+    const trigger = canvasElement.querySelector<HTMLElement>('button[aria-label="Views and more actions"]');
+    expect(trigger).toBeTruthy();
+    trigger!.click();
+    // createFloatingMenu mounts on document.body (outside canvasElement) — assert against the document.
+    await waitFor(() => expect(document.querySelector('.koi-sc-menu')).toBeTruthy());
+  },
+};
 
 /** Desktop host with a clean working tree — no changes, but the branch header and "working tree is
  *  clean" message still render. */

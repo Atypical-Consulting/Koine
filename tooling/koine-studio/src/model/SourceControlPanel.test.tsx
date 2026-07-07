@@ -6,8 +6,14 @@ import { koiConfirm } from '@atypical/koine-ui';
 import { axe } from 'vitest-axe';
 
 // The save-all-before-commit prompt (#470) uses the shared Koine confirm dialog. Mock it so the
-// commit path resolves deterministically (true/false) without opening a real modal overlay.
-vi.mock('@atypical/koine-ui', () => ({ koiConfirm: vi.fn() }));
+// commit path resolves deterministically (true/false) without opening a real modal overlay. A PARTIAL
+// mock: `createFloatingMenu` (which the ⋮ / caret menus bridge, #1153) stays REAL so the menus exercise
+// the actual engine — role="menu"/menuitem, disabled skipping, document.body mounting — under happy-dom,
+// exactly as toolbarOverflow.test.ts / domainNavigator.test.ts do.
+vi.mock('@atypical/koine-ui', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@atypical/koine-ui')>();
+  return { ...actual, koiConfirm: vi.fn() };
+});
 
 const TOKEN = 'file:///work';
 
@@ -322,6 +328,68 @@ describe('SourceControlPanel', () => {
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
     await view.findByRole('region', { name: 'Staged Changes' });
     expect(await axe(view.container)).toHaveNoViolations();
+  });
+});
+
+describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
+  // Open the ⋮ menu (a REAL createFloatingMenu, mounted on document.body) and return its role="menu".
+  async function openOverflow(view: ReturnType<typeof render>) {
+    const trigger = await view.findByRole('button', { name: 'Views and more actions' });
+    fireEvent.click(trigger);
+    return waitFor(() => {
+      const menu = document.querySelector<HTMLElement>('[role="menu"]');
+      expect(menu).not.toBeNull();
+      return menu!;
+    });
+  }
+
+  test('the ⋮ trigger is a live, ARIA-correct menu button (enabled, aria-haspopup="menu")', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const trigger = (await view.findByRole('button', { name: 'Views and more actions' })) as HTMLButtonElement;
+    // No longer a "coming soon" disabled placeholder — a real, openable menu trigger.
+    expect(trigger.disabled).toBe(false);
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+    expect(trigger.getAttribute('aria-label')).not.toMatch(/coming soon/i);
+  });
+
+  test('clicking ⋮ opens a role="menu" of already-backed live actions plus the deferred disabled ones', async () => {
+    const git = makeGit([
+      { relPath: 'a.koi', staged: true, status: 'modified' },
+      { relPath: 'b.koi', staged: false, status: 'modified' },
+      { relPath: 'c.koi', staged: false, status: 'untracked' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openOverflow(view);
+    const item = (name: string | RegExp) => within(menu).getByRole('menuitem', { name }) as HTMLButtonElement;
+
+    // Live items — already backed by the panel's existing handlers/data.
+    expect(item('Refresh').disabled).toBe(false);
+    expect(item('Stage all changes').disabled).toBe(false);
+    expect(item('Unstage all changes').disabled).toBe(false);
+    expect(item('Collapse all groups').disabled).toBe(false);
+    expect(item('View all commits').disabled).toBe(false);
+
+    // Deferred items — no backing Platform git op yet (sibling follow-ups): rendered disabled, never inert-live.
+    expect(item('Discard all changes').disabled).toBe(true);
+    expect(item('Pull').disabled).toBe(true);
+    expect(item('Push').disabled).toBe(true);
+    expect(item('Fetch').disabled).toBe(true);
+  });
+
+  test('the ⋮ menu "Stage all changes" stages every unstaged + untracked path', async () => {
+    const git = makeGit([
+      { relPath: 'a.koi', staged: true, status: 'modified' }, // already staged — excluded from "stage all"
+      { relPath: 'b.koi', staged: false, status: 'modified' },
+      { relPath: 'c.koi', staged: false, status: 'untracked' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openOverflow(view);
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Stage all changes' }));
+    await waitFor(() => expect(git.gitStage).toHaveBeenCalledWith(TOKEN, ['b.koi', 'c.koi']));
   });
 });
 

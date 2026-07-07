@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { GitFile, GitLogEntry, GitStatus, Platform } from '@/host/types';
-import { koiConfirm } from '@atypical/koine-ui';
+import { koiConfirm, createFloatingMenu, type FloatingMenu, type FloatingMenuItem } from '@atypical/koine-ui';
 
 // The Source Control panel (issue #272): the right-rail git surface — a branch header + switcher, the
 // changed files grouped into Staged / Changes / Untracked with per-row Stage/Unstage + inline diff, a
@@ -169,6 +169,20 @@ export function SourceControlPanel(props: {
       return next;
     });
 
+  // The header ⋮ / split-commit caret menus (#1153) reuse the design-synced createFloatingMenu engine
+  // (role="menu"/menuitem, roving Arrow/Home/End focus, Escape via the overlay Esc-stack, aria-expanded on
+  // the trigger) — the same primitive the toolbar/explorer/domain-navigator menus consume. It is imperative
+  // DOM, so these refs bridge it into the Preact panel: each instance is created once, then torn down on
+  // unmount so a closed panel never leaves an orphaned menu on document.body. Items are built lazily at open
+  // time (inside the click handler) so they always read the panel's current state.
+  const overflowMenuRef = useRef<FloatingMenu | null>(null);
+  overflowMenuRef.current ??= createFloatingMenu({
+    menuClass: 'koi-sc-menu',
+    itemClass: 'koi-sc-menu-item',
+    ariaLabel: 'Source control actions',
+  });
+  useEffect(() => () => overflowMenuRef.current?.close(false), []);
+
   // The single fetch path: pull status (+ log + branches) for the workspace folder whenever the host,
   // folder, an explicit refresh, or the nonce changes. Browser hosts (no git) never fetch. A rejected
   // status (non-repo folder) drops into the not-a-repo empty state rather than throwing.
@@ -330,6 +344,64 @@ export function SourceControlPanel(props: {
   // The recent-commit log is collapsible through the same `collapsedGroups`/`toggleGroup` infra the file
   // groups use — its section carries `collapsed` when its label is in the set (the CSS hides the list).
   const logCollapsed = collapsedGroups.has(RECENT_COMMITS_LABEL);
+
+  // Reveal the commit history in place (#1153): un-collapse the Recent-commits section if it's collapsed so
+  // the log is visible. Shared by the "View all" button and the ⋮ menu's "View all commits" item so both
+  // routes land on the same surface. Task 3 extends this to also lift the 10-row display cap.
+  const revealAllCommits = () => {
+    setCollapsedGroups((prev) => {
+      if (!prev.has(RECENT_COMMITS_LABEL)) return prev;
+      const next = new Set(prev);
+      next.delete(RECENT_COMMITS_LABEL);
+      return next;
+    });
+  };
+
+  // Build + toggle the ⋮ overflow menu (#1153). The LIVE items are already backed by the panel's existing
+  // handlers/data (Refresh, Stage/Unstage all over the grouped paths, collapse/expand, reveal-all-commits);
+  // the DEFERRED items render disabled because their Platform git op doesn't exist yet — each is a tracked
+  // sibling follow-up of #1146/#1142: Discard-all/revert, and the pull/push/fetch sync ops the ahead/behind
+  // readout also awaits. Disabled (never a live-but-inert no-op) matches the panel's placeholder convention.
+  const openOverflowMenu = (e: MouseEvent) => {
+    const trigger = e.currentTarget as HTMLElement;
+    const unstagedPaths = [...unstaged, ...untracked].map((f) => f.relPath);
+    const stagedPaths = staged.map((f) => f.relPath);
+    // Every present, collapsible section label — the non-empty file groups plus the Recent-commits log.
+    const groupLabels = [
+      ...(staged.length ? ['Staged Changes'] : []),
+      ...(unstaged.length ? ['Changes'] : []),
+      ...(untracked.length ? ['Untracked'] : []),
+      ...(log.length ? [RECENT_COMMITS_LABEL] : []),
+    ];
+    const allCollapsed = groupLabels.length > 0 && groupLabels.every((l) => collapsedGroups.has(l));
+    const items: FloatingMenuItem[] = [
+      { id: 'refresh', label: 'Refresh', disabled: busy, run: () => { setSpin((s) => !s); reload(); } },
+      {
+        id: 'stage-all',
+        label: 'Stage all changes',
+        disabled: busy || unstagedPaths.length === 0,
+        run: () => void mutate(() => git.gitStage(folderToken, unstagedPaths)),
+      },
+      {
+        id: 'unstage-all',
+        label: 'Unstage all changes',
+        disabled: busy || stagedPaths.length === 0,
+        run: () => void mutate(() => git.gitUnstage(folderToken, stagedPaths)),
+      },
+      {
+        id: 'collapse-all',
+        label: allCollapsed ? 'Expand all groups' : 'Collapse all groups',
+        disabled: groupLabels.length === 0,
+        run: () => setCollapsedGroups(allCollapsed ? new Set() : new Set(groupLabels)),
+      },
+      { id: 'view-all-commits', label: 'View all commits', disabled: log.length === 0, run: revealAllCommits },
+      { id: 'discard-all', label: 'Discard all changes', disabled: true, run: () => {} },
+      { id: 'pull', label: 'Pull', disabled: true, run: () => {} },
+      { id: 'push', label: 'Push', disabled: true, run: () => {} },
+      { id: 'fetch', label: 'Fetch', disabled: true, run: () => {} },
+    ];
+    overflowMenuRef.current!.toggle({ trigger, items, align: 'right' });
+  };
 
   // One file row: a status glyph, a path button that toggles the inline diff, a best-effort +/− stat
   // (swapped for the hover/focus action cluster), then the inline diff below when open. The path button's
@@ -538,13 +610,16 @@ export function SourceControlPanel(props: {
             <path d="M13 2.5V5h-2.5" />
           </svg>
         </button>
-        {/* Overflow menu is a follow-up; disabled (not a live-but-inert control) so it doesn't mislead. */}
+        {/* Overflow menu (#1153): a live createFloatingMenu trigger. aria-expanded is owned by the engine
+            (it sets it on open/close), so it's intentionally NOT declared here — declaring it would let a
+            Preact re-render clobber the engine's value while the menu is open. */}
         <button
           type="button"
           class="koi-sc-hdr-ico"
-          title="Views and more actions (coming soon)"
-          aria-label="Views and more actions (coming soon)"
-          disabled
+          title="Views and more actions"
+          aria-label="Views and more actions"
+          aria-haspopup="menu"
+          onClick={openOverflowMenu}
         >
           <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
             <circle cx="8" cy="3.5" r="1.1" fill="currentColor" stroke="none" />
