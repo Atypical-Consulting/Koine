@@ -192,6 +192,42 @@ public class ModelRoundTripTests
         transitions.ShouldNotContain(t => t.Name == "Paid");
     }
 
+    // ---- #1163 (Task 2): per-edge transitions surfaced on the owning entity node ------------------
+
+    [Fact]
+    public void ModelToJson_exposes_transitions_directly_on_the_owning_entity_node()
+    {
+        ModelNode order = ModelRoundTripService.ModelToJson(Compile(StateMachineSample), "Sales.Order");
+
+        // The owner node itself lists the flattened per-edge transitions (not only the nested `states`
+        // child): Draft→Submitted, Submitted→Placed, Placed→Shipped, Placed→Cancelled = 4 edges;
+        // the terminal `Paid` contributes none.
+        order.Kind.ShouldBe("entity");
+        order.Transitions.Count.ShouldBe(4);
+        order.Transitions.ShouldAllBe(t => t.Kind == "transition");
+    }
+
+    [Fact]
+    public void ModelToJson_owner_transitions_carry_the_guard_and_triggering_command()
+    {
+        ModelNode order = ModelRoundTripService.ModelToJson(Compile(StateMachineSample), "Sales.Order");
+
+        ModelMember draftToSubmitted = order.Transitions.Single(t => t.Name == "Draft" && t.Value == "Submitted");
+        draftToSubmitted.Via.ShouldBe("Submit");
+        draftToSubmitted.Type.ShouldBe("totalIsPositive");   // the guard, described target-agnostically
+    }
+
+    [Fact]
+    public void ModelToJson_a_node_with_no_state_machine_has_an_empty_transitions_list()
+    {
+        ModelNode enumNode = ModelRoundTripService.ModelToJson(Compile(StateMachineSample), "Sales.OrderStatus");
+        ModelNode context = ModelRoundTripService.ModelToJson(Compile(StateMachineSample), "Sales");
+
+        enumNode.Transitions.ShouldNotBeNull();
+        enumNode.Transitions.ShouldBeEmpty();
+        context.Transitions.ShouldBeEmpty();
+    }
+
     [Fact]
     public Task ModelToJson_serialises_the_ordering_starter_to_a_stable_contract()
     {

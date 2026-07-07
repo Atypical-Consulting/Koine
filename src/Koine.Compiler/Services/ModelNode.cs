@@ -27,12 +27,18 @@ namespace Koine.Compiler.Services;
 /// members, a state machine's transitions, the context map's relations — in declaration order.</param>
 /// <param name="Children">The node's nested declarations — a context's types, an aggregate's nested
 /// types, an entity's state machines — in declaration order. Empty for a leaf declaration.</param>
+/// <param name="Transitions">For an entity/aggregate owner node, the flattened per-edge state
+/// transitions (each a <c>transition</c> <see cref="ModelMember"/> carrying from/guard/to/via) — the
+/// same edges the nested <c>states</c> child lists, surfaced on the owner so a consumer needn't
+/// reconstruct ownership from the <c>.states.&lt;field&gt;</c> qualifiedName. Empty for every node with
+/// no state machine. Additive-only (see the stability-contract note above).</param>
 public sealed record ModelNode(
     string Kind,
     string QualifiedName,
     string Title,
     IReadOnlyList<ModelMember> Members,
-    IReadOnlyList<ModelNode> Children);
+    IReadOnlyList<ModelNode> Children,
+    IReadOnlyList<ModelMember> Transitions);
 
 /// <summary>
 /// One editable leaf of a <see cref="ModelNode"/> (#91): a field, an enum member, a state-machine

@@ -50,7 +50,8 @@
                   "via": null
                 }
               ],
-              "children": []
+              "children": [],
+              "transitions": []
             },
             {
               "kind": "value",
@@ -86,7 +87,8 @@
                   "via": null
                 }
               ],
-              "children": []
+              "children": [],
+              "transitions": []
             },
             {
               "kind": "entity",
@@ -136,13 +138,40 @@
                       "via": null
                     }
                   ],
-                  "children": []
+                  "children": [],
+                  "transitions": []
+                }
+              ],
+              "transitions": [
+                {
+                  "kind": "transition",
+                  "name": "Draft",
+                  "type": null,
+                  "value": "Placed",
+                  "via": null
+                },
+                {
+                  "kind": "transition",
+                  "name": "Placed",
+                  "type": null,
+                  "value": "Shipped",
+                  "via": null
+                },
+                {
+                  "kind": "transition",
+                  "name": "Placed",
+                  "type": null,
+                  "value": "Cancelled",
+                  "via": null
                 }
               ]
             }
-          ]
+          ],
+          "transitions": []
         }
-      ]
+      ],
+      "transitions": []
     }
-  ]
+  ],
+  "transitions": []
 }

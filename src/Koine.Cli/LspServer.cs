@@ -2005,7 +2005,7 @@ internal sealed class LspServer
         var (model, _) = ParseUsable(sources);
         if (model is null)
         {
-            return ModelNodeJson(new ModelNode("model", "", "", [], []));
+            return ModelNodeJson(new ModelNode("model", "", "", [], [], []));
         }
 
         return ModelNodeJson(ModelRoundTripService.ModelToJson(model, TryGetStringParam(root, "qualifiedName")));
