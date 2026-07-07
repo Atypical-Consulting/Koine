@@ -8,9 +8,12 @@
 //
 // The prototype captures ↑/↓/↵/Esc at the document level and branches on whether its action menu
 // (`actOpen`) is open, letting every other key (plain typing) fall through unhandled so the input still
-// receives it. This reducer mirrors that: `menuOpen` gates a separate switch, and any key neither
-// switch recognizes returns `{ kind: 'none', preventDefault: false }` — including while the menu is
-// open, so typing a query underneath an open action menu is never swallowed.
+// receives it. This reducer mirrors that for ↑/↓/↵/Tab/⌘K: `menuOpen` gates a separate switch, and any
+// key neither switch recognizes returns `{ kind: 'none', preventDefault: false }` — including while the
+// menu is open, so typing a query underneath an open action menu is never swallowed. Escape is the one
+// key the reducer deliberately DOESN'T own (issue #1164): the launcher joins koine-ui's shared
+// Esc-stack, so Escape falls through to `none` here and bubbles to that stack's document-level handler,
+// which dismisses the topmost layer (menu → clear-query → close).
 
 /** The slice of launcher state `handleKey` needs to decide the next intent — everything the reducer
  * reads, and nothing it doesn't (no catalog, no entries, just the shape of "where things stand"). */

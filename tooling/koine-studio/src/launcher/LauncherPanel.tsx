@@ -203,8 +203,10 @@ export function LauncherPanel(props: LauncherPanelProps) {
   // The full keyboard model (issue #1143, task 7): `keys.ts`'s pure `handleKey` reducer decides the
   // intent from the current state; this handler just applies it (and calls `preventDefault()` when the
   // reducer says to) — no key-specific branching lives here anymore. Attached (below) to the
-  // `.lx-scrim` overlay so arrows/↵/Tab/Esc/⌘K work while the query input keeps DOM focus (focus stays
-  // trapped in the input; the container-level listener catches the bubbled keydown).
+  // `.lx-scrim` overlay so arrows/↵/Tab/⌘K work while the query input keeps DOM focus (focus stays
+  // trapped in the input; the container-level listener catches the bubbled keydown). Escape is the
+  // exception (issue #1164): the reducer returns `none` for it and this handler lets it bubble to
+  // koine-ui's shared Esc-stack, which owns launcher/menu dismissal (see the register effects above).
   function onKeyDown(e: KeyboardEvent): void {
     if (!visible) return;
     // While open the launcher OWNS its chords: stop them bubbling to the shell's GLOBAL window keydown
