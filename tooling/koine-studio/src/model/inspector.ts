@@ -203,39 +203,6 @@ export function renderInspector(
 }
 
 /**
- * The right-rail "Rules" tab: the selected element's business rules (its invariants), or an empty
- * state. Read-only — invariants are authored in the `.koi` source and flagged live in the Problems
- * panel; this view just surfaces them per element. Reuses the same flat {@link InspectorElement}
- * projection as the Properties inspector so it tracks selection identically.
- */
-export function renderRules(element: InspectorElement | null): HTMLElement {
-  if (!element) {
-    return renderRailEmpty(
-      'Business rules',
-      railHint(
-        'Select an element in the model outline or a diagram to see its invariants. Rules are authored in the .koi source and flagged live in the Problems panel.',
-      ),
-    );
-  }
-
-  const rules = element.invariants ?? [];
-  const title = `${element.name} — business rules`;
-  if (rules.length === 0) {
-    return renderRailEmpty(title, railHint('No invariants declared on this element.'));
-  }
-
-  const ul = document.createElement('ul');
-  ul.className = 'koi-inspector-list';
-  for (const rule of rules) {
-    const li = document.createElement('li');
-    li.className = 'koi-inspector-item';
-    li.textContent = rule;
-    ul.appendChild(li);
-  }
-  return renderRailEmpty(title, ul);
-}
-
-/**
  * The inspector's "Change history" compartment (issue #150): the git commits that touched the selected
  * element's source span, newest first, each rendered as `author · date` over the commit message. Returns
  * `null` — so the caller appends nothing and the section stays hidden — when history is unavailable

@@ -1,5 +1,5 @@
 // Active bounded-context scoping (issue #146): the presentation-layer state + pure helpers that let
-// Koine Studio narrow its model-derived surfaces (outline, diagram, counts, inspector, the bottom
+// Koine Studio narrow its model-derived surfaces (the diagram, the glossary, and the bottom
 // Events/Relationships tables) to ONE bounded context, with an "All contexts" option. Scope is a
 // filter, never a mutation — every helper here derives a narrowed projection from existing data
 // (`DiagramGraph` / `GlossaryModel` / `contextMap()`) and the compiler/LSP/`Ast/` stay untouched.

@@ -3,7 +3,6 @@ import {
   buildInspectorElement,
   renameStatusMessage,
   renderInspector,
-  renderRules,
   renderChangeHistory,
   type InspectorElement,
   type InspectorHandlers,
@@ -373,27 +372,6 @@ describe('property editing (authoring)', () => {
     expect(el.querySelector('.koi-inspector-row-editable')).toBeNull();
     expect(el.querySelector('.koi-inspector-prop-input')).toBeNull();
     expect(el.querySelector('.koi-inspector-add-prop')).toBeNull();
-  });
-});
-
-describe('renderRules', () => {
-  test('prompts to select when nothing is selected', () => {
-    const el = renderRules(null);
-    expect(el.querySelector('.koi-rview-empty-title')?.textContent).toBe('Business rules');
-    expect(el.textContent).toContain('Select an element');
-  });
-
-  test('lists the selected element’s invariants as business rules', () => {
-    const el = renderRules({ ...fullElement, invariants: ['total >= 0', 'lines not empty'] });
-    expect(el.querySelector('.koi-rview-empty-title')?.textContent).toBe('Order — business rules');
-    const items = Array.from(el.querySelectorAll('.koi-inspector-item')).map((n) => n.textContent);
-    expect(items).toEqual(['total >= 0', 'lines not empty']);
-  });
-
-  test('shows a no-invariants state for an element without rules', () => {
-    const el = renderRules({ ...fullElement, invariants: undefined });
-    expect(el.textContent).toContain('No invariants declared');
-    expect(el.querySelector('.koi-inspector-item')).toBeNull();
   });
 });
 
