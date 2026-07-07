@@ -44,7 +44,7 @@ $nodeModules = Join-Path $studio "node_modules"
 $stamp = Join-Path $nodeModules ".package-lock.json"
 $lockFile = Join-Path $studio "package-lock.json"
 $needsInstall = (-not (Test-Path $nodeModules)) -or (-not (Test-Path $stamp)) -or `
-    ((Get-Item $lockFile).LastWriteTime -gt (Get-Item $stamp).LastWriteTime)
+    ((Test-Path $lockFile) -and (Get-Item $lockFile).LastWriteTime -gt (Get-Item $stamp).LastWriteTime)
 if ($needsInstall) {
     Push-Location $studio
     npm install
