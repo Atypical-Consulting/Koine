@@ -61,6 +61,13 @@ const STATUS_LABEL: Record<GitFile['status'], string> = {
  *  its `aria-label` landmark, so it lives in one place to keep the three uses in lockstep. */
 const RECENT_COMMITS_LABEL = 'Recent commits';
 
+/** The changed-file group labels. Each is a section `aria-label` landmark AND its collapse key in
+ *  `collapsedGroups` AND the key the ⋮ "Collapse all groups" action toggles — so the render, the per-group
+ *  chevron, and the menu action stay in lockstep off one constant apiece (mirrors {@link RECENT_COMMITS_LABEL}). */
+const STAGED_CHANGES_LABEL = 'Staged Changes';
+const CHANGES_LABEL = 'Changes';
+const UNTRACKED_LABEL = 'Untracked';
+
 /** The `YYYY-MM-DD` calendar day of an ISO-8601 commit date (timezone-stable, locale-free), else the raw
  *  value — the same deterministic formatting the inspector's change-history rows use. */
 function formatDate(date: string): string {
@@ -389,9 +396,9 @@ export function SourceControlPanel(props: {
     const stagedPaths = staged.map((f) => f.relPath);
     // Every present, collapsible section label — the non-empty file groups plus the Recent-commits log.
     const groupLabels = [
-      ...(staged.length ? ['Staged Changes'] : []),
-      ...(unstaged.length ? ['Changes'] : []),
-      ...(untracked.length ? ['Untracked'] : []),
+      ...(staged.length ? [STAGED_CHANGES_LABEL] : []),
+      ...(unstaged.length ? [CHANGES_LABEL] : []),
+      ...(untracked.length ? [UNTRACKED_LABEL] : []),
       ...(log.length ? [RECENT_COMMITS_LABEL] : []),
     ];
     const allCollapsed = groupLabels.length > 0 && groupLabels.every((l) => collapsedGroups.has(l));
@@ -415,7 +422,9 @@ export function SourceControlPanel(props: {
         disabled: groupLabels.length === 0,
         run: () => setCollapsedGroups(allCollapsed ? new Set() : new Set(groupLabels)),
       },
-      { id: 'view-all-commits', label: 'View all commits', disabled: log.length === 0, run: revealAllCommits },
+      // Enabled only when the 10-row cap actually hides commits (matches the "View all" button's gate), so
+      // the item is never a live-but-inert no-op when everything already shows.
+      { id: 'view-all-commits', label: 'View all commits', disabled: !hasMoreCommits, run: revealAllCommits },
       { id: 'discard-all', label: 'Discard all changes', disabled: true, run: () => {} },
       { id: 'pull', label: 'Pull', disabled: true, run: () => {} },
       { id: 'push', label: 'Push', disabled: true, run: () => {} },
@@ -645,15 +654,17 @@ export function SourceControlPanel(props: {
             <path d="M13 2.5V5h-2.5" />
           </svg>
         </button>
-        {/* Overflow menu (#1153): a live createFloatingMenu trigger. aria-expanded is owned by the engine
-            (it sets it on open/close), so it's intentionally NOT declared here — declaring it would let a
-            Preact re-render clobber the engine's value while the menu is open. */}
+        {/* Overflow menu (#1153): a live createFloatingMenu trigger. The initial aria-expanded="false"
+            matches the WAI-ARIA menu-button pattern and the engine's other consumers (toolbarOverflow,
+            domainNavigator); the engine flips it on open/close via setAttribute, and Preact never clobbers
+            that runtime value because this static `false` prop is unchanged across re-renders. */}
         <button
           type="button"
           class="koi-sc-hdr-ico"
           title="Views and more actions"
           aria-label="Views and more actions"
           aria-haspopup="menu"
+          aria-expanded={false}
           onClick={openOverflowMenu}
         >
           <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
@@ -750,14 +761,15 @@ export function SourceControlPanel(props: {
                 </button>
                 {/* Split caret (#1153): opens the commit-options menu (Amend / Commit & Push). Those two
                     items are disabled placeholders — their git ops are sibling follow-ups — but the menu
-                    surface is live. Disabled only while the composer is busy; aria-expanded is owned by the
-                    createFloatingMenu engine (declaring it here would let a Preact re-render clobber it). */}
+                    surface is live. Disabled only while the composer is busy; the initial aria-expanded is
+                    "false" (the engine flips it on open/close, and the static prop never clobbers it). */}
                 <button
                   type="button"
                   class="koi-sc-commit-caret"
                   title="Commit options"
                   aria-label="Commit options"
                   aria-haspopup="menu"
+                  aria-expanded={false}
                   disabled={busy}
                   onClick={openCaretMenu}
                 >
@@ -769,9 +781,9 @@ export function SourceControlPanel(props: {
             </div>
           </div>
 
-          {fileGroup('Staged Changes', staged)}
-          {fileGroup('Changes', unstaged)}
-          {fileGroup('Untracked', untracked)}
+          {fileGroup(STAGED_CHANGES_LABEL, staged)}
+          {fileGroup(CHANGES_LABEL, unstaged)}
+          {fileGroup(UNTRACKED_LABEL, untracked)}
 
           {files.length === 0 && <p class="koi-docs-empty">No changes — the working tree is clean.</p>}
 
@@ -805,7 +817,9 @@ export function SourceControlPanel(props: {
                   aria-label={showAllCommits ? 'Show fewer commits' : 'View all commits'}
                   title={hasMoreCommits ? undefined : 'All commits are shown'}
                   disabled={!hasMoreCommits}
-                  onClick={() => setShowAllCommits((v) => !v)}
+                  // Expand via revealAllCommits so it ALSO un-collapses the section (the collapse class hides
+                  // the list) — matching the ⋮ "View all commits" item; collapsing back just re-caps to 10.
+                  onClick={() => (showAllCommits ? setShowAllCommits(false) : revealAllCommits())}
                 >
                   {showAllCommits ? 'Show less' : 'View all'}
                 </button>

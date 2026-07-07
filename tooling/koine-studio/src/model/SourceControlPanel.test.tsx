@@ -354,11 +354,23 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
   });
 
   test('clicking ⋮ opens a role="menu" of already-backed live actions plus the deferred disabled ones', async () => {
-    const git = makeGit([
-      { relPath: 'a.koi', staged: true, status: 'modified' },
-      { relPath: 'b.koi', staged: false, status: 'modified' },
-      { relPath: 'c.koi', staged: false, status: 'untracked' },
-    ]);
+    // Seed > 10 commits so "View all commits" has something to reveal (it disables when the log fits in 10).
+    const git = {
+      ...makeGit([
+        { relPath: 'a.koi', staged: true, status: 'modified' },
+        { relPath: 'b.koi', staged: false, status: 'modified' },
+        { relPath: 'c.koi', staged: false, status: 'untracked' },
+      ]),
+      gitLog: vi.fn(
+        async (): Promise<GitLogEntry[]> =>
+          Array.from({ length: 12 }, (_, i) => ({
+            sha: `commit${i}abcdef`,
+            author: 'Ada',
+            date: '2026-06-01T10:00:00Z',
+            message: `c${i}`,
+          })),
+      ),
+    } satisfies GitSurface;
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
     await view.findByDisplayValue('main');
     const menu = await openOverflow(view);
@@ -479,6 +491,23 @@ describe('SourceControlPanel — full commit history (#1153)', () => {
 
     // The Recent-commits landmark is preserved (the region/axe tests depend on its accessible name).
     expect(view.getByRole('region', { name: 'Recent commits' })).toBe(recent);
+  });
+
+  test('"View all" un-collapses the Recent-commits section when it is collapsed (never a dead click)', async () => {
+    const git = gitWithLog(manyCommits(12));
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const recent = await view.findByRole('region', { name: 'Recent commits' });
+    await waitFor(() => expect(recent.querySelectorAll('.koi-sc-log-item').length).toBe(10));
+
+    // Collapse the Recent-commits section via its chevron toggle — the list is now hidden by CSS.
+    fireEvent.click(within(recent).getByRole('button', { name: /Recent commits/ }));
+    expect(recent.classList.contains('collapsed')).toBe(true);
+
+    // "View all" must ALSO un-collapse (not just flip the cap), or it'd be a live-but-inert click while
+    // the section stays collapsed and hides the list.
+    fireEvent.click(view.getByRole('button', { name: /View all/i }));
+    expect(recent.classList.contains('collapsed')).toBe(false);
+    await waitFor(() => expect(recent.querySelectorAll('.koi-sc-log-item').length).toBe(12));
   });
 
   test('a short history (≤ 10) shows every commit and disables "View all" (nothing more to reveal)', async () => {

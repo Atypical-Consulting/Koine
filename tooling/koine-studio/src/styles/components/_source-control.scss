@@ -82,9 +82,18 @@
 .koi-sc-menu-item {
   @include a.menu-item;
 
+  /* This panel is the first floating menu to render disabled items (deferred amend/push/pull/fetch/discard).
+     The shared `menu-item` mixin applies its accent hover/focus wash unconditionally, so a disabled item
+     would still light up on hover and read as actionable — override it back to inert here. */
   &:disabled {
     opacity: 0.5;
     cursor: default;
+
+    &:hover,
+    &:focus-visible {
+      background: transparent;
+      border-color: transparent;
+    }
   }
 }
 
