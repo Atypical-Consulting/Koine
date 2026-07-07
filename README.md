@@ -235,6 +235,13 @@ koine --version
 koine build templates/starters/billing/billing.koi --target csharp --out ./generated
 ```
 
+Or run it **without installing** via [`dnx`](https://learn.microsoft.com/dotnet/core/tools/dotnet-dnx)
+(bundled with the .NET 10 SDK — it fetches the tool from NuGet and runs it in one shot, like `npx`):
+
+```bash
+dnx Koine.Cli build templates/starters/billing/billing.koi --target csharp --out ./generated
+```
+
 Or run it straight from a clone of this repo with `dotnet run --project src/Koine.Cli -- …`:
 
 ```bash
