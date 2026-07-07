@@ -150,7 +150,8 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(contextName, KindFolder.ReadModels, rm.Name),
-            Assemble(contextName, KindFolder.ReadModels, sb.ToString(), name));
+            Assemble(contextName, KindFolder.ReadModels, sb.ToString(), name),
+            Kind: KindForFolder(KindFolder.ReadModels));
     }
 
     // ----------------------------------------------------------------------
@@ -229,7 +230,8 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(contextName, KindFolder.Queries, q.Name),
-            Assemble(contextName, KindFolder.Queries, sb.ToString(), name));
+            Assemble(contextName, KindFolder.Queries, sb.ToString(), name),
+            Kind: KindForFolder(KindFolder.Queries));
     }
 
     /// <summary>

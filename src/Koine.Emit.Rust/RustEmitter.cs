@@ -104,6 +104,10 @@ public sealed partial class RustEmitter : IEmitter
             EmitUnownedIdType(body, idName);
         }
 
+        // Unlike the other code emitters, Rust emits ONE module file per bounded context (value
+        // objects, entities, enums, events, … all flat in `src/<context>.rs`), not one file per type.
+        // A context module is therefore a mix of DDD building blocks with no single stereotype, so
+        // EmittedFile.Kind stays null here — there is nothing additive to populate for the #1170 rail.
         var moduleDoc = $"//! The `{ctx.Name}` bounded context.";
         return new EmittedFile($"src/{ModuleNameFor(ctx.Name)}.rs", Assemble(body.ToString(), moduleDoc));
     }

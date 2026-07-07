@@ -154,7 +154,8 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(contextName, KindFolder.Enums, @enum.Name),
-            Assemble(contextName, KindFolder.Enums, sb.ToString(), name));
+            Assemble(contextName, KindFolder.Enums, sb.ToString(), name),
+            Kind: KindForFolder(KindFolder.Enums));
     }
 
     /// <summary>

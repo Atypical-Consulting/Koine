@@ -48,6 +48,28 @@ public sealed partial class PythonEmitter
     }
 
     /// <summary>
+    /// The DDD-stereotype slug (<see cref="DddKind"/>) stamped on a per-type module's
+    /// <see cref="EmittedFile.Kind"/>, so a UI (Koine Studio's Output rail) can tint generated files
+    /// by building block. Mirrors the C# emitter over this backend's own folder names. Pure
+    /// abstractions and the infrastructure layer map to <c>null</c>. Note that <see cref="KindFolder.Root"/>
+    /// is overloaded — aggregate roots AND application/domain services land at the package root — so the
+    /// service call sites pass <see cref="DddKind.Service"/> explicitly rather than routing through here.
+    /// </summary>
+    private static string? KindForFolder(string kindFolder) => kindFolder switch
+    {
+        KindFolder.Root => DddKind.Aggregate,
+        KindFolder.Entities => DddKind.Entity,
+        KindFolder.ValueObjects => DddKind.Value,
+        KindFolder.Enums => DddKind.Enum,
+        KindFolder.Events => DddKind.Event,
+        KindFolder.ReadModels => DddKind.ReadModel,
+        KindFolder.Queries => DddKind.Query,
+        KindFolder.Policies => DddKind.Policy,
+        KindFolder.Repositories => DddKind.Repository,
+        _ => null,
+    };
+
+    /// <summary>
     /// The snake_case package path for a namespace (its dot-separated segments lowered to
     /// <c>snake_case</c>, each remapped via <see cref="PythonEmitterOptions.RemapPackage"/>), as
     /// <c>/</c>-joined folder segments. <c>Sales</c> → <c>sales</c>; <c>Catalog.Pricing</c> →

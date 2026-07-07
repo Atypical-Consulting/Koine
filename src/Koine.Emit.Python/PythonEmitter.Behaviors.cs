@@ -513,7 +513,7 @@ public sealed partial class PythonEmitter
     /// rule), exactly as a value object's fields are. Integration-event field types are already
     /// validated to be primitives/enums/ids/other integration events; the emitter just renders them.
     /// </summary>
-    private EmittedFile EmitEvent(PyEmitContext emit, string rawName, string? doc, IReadOnlyList<Member> members, string ns, PythonTypeMapper typeMapper)
+    private EmittedFile EmitEvent(PyEmitContext emit, string rawName, string? doc, IReadOnlyList<Member> members, string ns, PythonTypeMapper typeMapper, string kind)
     {
         var name = PythonNaming.ToPascalCase(rawName);
         var memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
@@ -565,6 +565,7 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.Events, rawName),
-            Assemble(emit, ns, sb.ToString(), name));
+            Assemble(emit, ns, sb.ToString(), name),
+            Kind: kind);
     }
 }

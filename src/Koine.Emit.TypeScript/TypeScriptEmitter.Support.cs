@@ -57,6 +57,29 @@ public sealed partial class TypeScriptEmitter
         public const string Queries = "queries";
     }
 
+    /// <summary>
+    /// The DDD-stereotype slug (<see cref="DddKind"/>) stamped on a per-type file's
+    /// <see cref="EmittedFile.Kind"/>, so a UI (Koine Studio's Output rail) can tint generated files
+    /// by building block. Mirrors the C# emitter's mapping over this backend's own folder names; pure
+    /// abstractions and the infrastructure layer have no stereotype of their own and map to <c>null</c>.
+    /// </summary>
+    private static string? KindForFolder(string kindFolder) => kindFolder switch
+    {
+        KindFolder.Root => DddKind.Aggregate,
+        KindFolder.Entities => DddKind.Entity,
+        KindFolder.ValueObjects => DddKind.Value,
+        KindFolder.Enums => DddKind.Enum,
+        KindFolder.Events => DddKind.Event,
+        KindFolder.IntegrationEvents => DddKind.IntegrationEvent,
+        KindFolder.ReadModels => DddKind.ReadModel,
+        KindFolder.Queries => DddKind.Query,
+        KindFolder.Services => DddKind.Service,
+        KindFolder.Specifications => DddKind.Spec,
+        KindFolder.Policies => DddKind.Policy,
+        KindFolder.Repositories => DddKind.Repository,
+        _ => null,
+    };
+
     private static string FolderFor(string ns) => ns.Replace('.', '/');
 
     /// <summary>The output path for a type's file: namespace folder, optional kind subfolder, <c>Name.ts</c>.</summary>

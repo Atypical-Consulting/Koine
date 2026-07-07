@@ -66,7 +66,8 @@ public sealed partial class PhpEmitter : IEmitter
         var emit = new PhpEmitContext(
             index,
             BuildEnumMemberMap(model),
-            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index));
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index),
+            BuildRootEntityNames(model));
 
         // Build the cross-namespace type catalog (short class name → FQN) so each emitted file can
         // import the sibling-namespace types it references via `use`. Includes the runtime types
@@ -164,10 +165,10 @@ public sealed partial class PhpEmitter : IEmitter
                 EmitEntity(emit, files, entity, contextName, typeMapper);
                 break;
             case EventDecl ev:
-                files.Add(EmitEvent(emit, ev.Name, ev.Doc, ev.Members, contextName, typeMapper));
+                files.Add(EmitEvent(emit, ev.Name, ev.Doc, ev.Members, contextName, typeMapper, DddKind.Event));
                 break;
             case IntegrationEventDecl iev:
-                files.Add(EmitEvent(emit, iev.Name, iev.Doc, iev.Members, contextName, typeMapper));
+                files.Add(EmitEvent(emit, iev.Name, iev.Doc, iev.Members, contextName, typeMapper, DddKind.IntegrationEvent));
                 break;
             case AggregateDecl agg:
                 // Recurse into aggregate-nested types (entities, events).

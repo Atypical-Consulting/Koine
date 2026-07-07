@@ -69,7 +69,8 @@ public sealed partial class TypeScriptEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.IntegrationEvents, name),
-            Assemble(emit, ns, KindFolder.IntegrationEvents, sb.ToString(), name, ev.Span));
+            Assemble(emit, ns, KindFolder.IntegrationEvents, sb.ToString(), name, ev.Span),
+            Kind: KindForFolder(KindFolder.IntegrationEvents));
     }
 
     /// <summary>

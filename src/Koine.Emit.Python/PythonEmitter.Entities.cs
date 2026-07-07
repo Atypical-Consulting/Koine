@@ -161,7 +161,8 @@ public sealed partial class PythonEmitter
         var folder = isRoot ? KindFolder.Root : KindFolder.Entities;
         return new EmittedFile(
             PathFor(ns, folder, entity.Name),
-            Assemble(emit, ns, sb.ToString(), name));
+            Assemble(emit, ns, sb.ToString(), name),
+            Kind: KindForFolder(folder));
     }
 
     // ----------------------------------------------------------------------
@@ -210,7 +211,8 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.ValueObjects, idName),
-            Assemble(emit, ns, sb.ToString(), idName));
+            Assemble(emit, ns, sb.ToString(), idName),
+            Kind: KindForFolder(KindFolder.ValueObjects));
     }
 
     // ----------------------------------------------------------------------

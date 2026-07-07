@@ -110,6 +110,7 @@ public sealed partial class TypeScriptEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.Policies, policyType),
-            Assemble(emit, ns, KindFolder.Policies, sb.ToString(), policyType, policy.Span));
+            Assemble(emit, ns, KindFolder.Policies, sb.ToString(), policyType, policy.Span),
+            Kind: KindForFolder(KindFolder.Policies));
     }
 }

@@ -389,7 +389,8 @@ public sealed partial class TypeScriptEmitter : IEmitter
         sb.Append("}\n");
         return new EmittedFile(
             PathFor(ns, KindFolder.Repositories, iface),
-            Assemble(emit, ns, KindFolder.Repositories, sb.ToString(), iface, agg.Span));
+            Assemble(emit, ns, KindFolder.Repositories, sb.ToString(), iface, agg.Span),
+            Kind: KindForFolder(KindFolder.Repositories));
     }
 
     // ----------------------------------------------------------------------
@@ -511,6 +512,6 @@ public sealed partial class TypeScriptEmitter : IEmitter
         sb.Append(Indent).Append(name).Append("Match(self, cases);\n");
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(ns, KindFolder.Enums, name), Assemble(emit, ns, KindFolder.Enums, sb.ToString(), name, @enum.Span));
+        return new EmittedFile(PathFor(ns, KindFolder.Enums, name), Assemble(emit, ns, KindFolder.Enums, sb.ToString(), name, @enum.Span), Kind: KindForFolder(KindFolder.Enums));
     }
 }

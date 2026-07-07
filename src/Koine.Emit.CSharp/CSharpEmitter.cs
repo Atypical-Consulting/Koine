@@ -2309,18 +2309,18 @@ public sealed partial class CSharpEmitter : IEmitter
     /// </summary>
     private static string? KindForFolder(string kindFolder) => kindFolder switch
     {
-        KindFolder.Root => "aggregate",
-        KindFolder.Entities => "entity",
-        KindFolder.ValueObjects => "value",
-        KindFolder.Enums => "enum",
-        KindFolder.Events => "event",
-        KindFolder.IntegrationEvents => "integration-event",
-        KindFolder.ReadModels => "read-model",
-        KindFolder.Queries => "query",
-        KindFolder.Services => "service",
-        KindFolder.Specifications => "spec",
-        KindFolder.Policies => "policy",
-        KindFolder.Repositories => "repository",
+        KindFolder.Root => DddKind.Aggregate,
+        KindFolder.Entities => DddKind.Entity,
+        KindFolder.ValueObjects => DddKind.Value,
+        KindFolder.Enums => DddKind.Enum,
+        KindFolder.Events => DddKind.Event,
+        KindFolder.IntegrationEvents => DddKind.IntegrationEvent,
+        KindFolder.ReadModels => DddKind.ReadModel,
+        KindFolder.Queries => DddKind.Query,
+        KindFolder.Services => DddKind.Service,
+        KindFolder.Specifications => DddKind.Spec,
+        KindFolder.Policies => DddKind.Policy,
+        KindFolder.Repositories => DddKind.Repository,
         _ => null,
     };
 

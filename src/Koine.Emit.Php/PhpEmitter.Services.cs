@@ -139,7 +139,8 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(ctxName, KindFolder.Services, svc.Name),
-            Assemble(ctxName, KindFolder.Services, sb.ToString(), name));
+            Assemble(ctxName, KindFolder.Services, sb.ToString(), name),
+            Kind: KindForFolder(KindFolder.Services));
     }
 
     // -----------------------------------------------------------------------
@@ -189,7 +190,8 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(ctxName, KindFolder.Services, svc.Name),
-            Assemble(ctxName, KindFolder.Services, sb.ToString(), name));
+            Assemble(ctxName, KindFolder.Services, sb.ToString(), name),
+            Kind: KindForFolder(KindFolder.Services));
     }
 
     // -----------------------------------------------------------------------
@@ -254,7 +256,8 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(ctxName, KindFolder.Specifications, name),
-            Assemble(ctxName, KindFolder.Specifications, sb.ToString(), name));
+            Assemble(ctxName, KindFolder.Specifications, sb.ToString(), name),
+            Kind: KindForFolder(KindFolder.Specifications));
     }
 
     /// <summary>
