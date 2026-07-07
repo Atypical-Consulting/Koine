@@ -59,7 +59,8 @@ public sealed partial class TypeScriptEmitter
         sb.Append("}\n");
         return new EmittedFile(
             PathFor(ns, KindFolder.Services, iface),
-            Assemble(emit, ns, KindFolder.Services, sb.ToString(), iface, svc.Span));
+            Assemble(emit, ns, KindFolder.Services, sb.ToString(), iface, svc.Span),
+            Kind: KindForFolder(KindFolder.Services));
     }
 
     // ----------------------------------------------------------------------
@@ -138,7 +139,8 @@ public sealed partial class TypeScriptEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.ReadModels, name),
-            Assemble(emit, ns, KindFolder.ReadModels, sb.ToString(), name, rm.Span));
+            Assemble(emit, ns, KindFolder.ReadModels, sb.ToString(), name, rm.Span),
+            Kind: KindForFolder(KindFolder.ReadModels));
     }
 
     /// <summary>
@@ -189,6 +191,7 @@ public sealed partial class TypeScriptEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.Queries, name),
-            Assemble(emit, ns, KindFolder.Queries, sb.ToString(), name, q.Span));
+            Assemble(emit, ns, KindFolder.Queries, sb.ToString(), name, q.Span),
+            Kind: KindForFolder(KindFolder.Queries));
     }
 }

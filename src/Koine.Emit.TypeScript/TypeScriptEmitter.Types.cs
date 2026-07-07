@@ -109,7 +109,7 @@ public sealed partial class TypeScriptEmitter
         WriteEqualityComponents(sb, ctorMembers);
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(ns, KindFolder.ValueObjects, name), Assemble(emit, ns, KindFolder.ValueObjects, sb.ToString(), name, vo.Span));
+        return new EmittedFile(PathFor(ns, KindFolder.ValueObjects, name), Assemble(emit, ns, KindFolder.ValueObjects, sb.ToString(), name, vo.Span), Kind: KindForFolder(KindFolder.ValueObjects));
     }
 
     private void WriteConstructor(
@@ -494,7 +494,8 @@ public sealed partial class TypeScriptEmitter
         sb.Append("}\n");
 
         return new EmittedFile(PathFor(ns, isRoot ? KindFolder.Root : KindFolder.Entities, name),
-            Assemble(emit, ns, isRoot ? KindFolder.Root : KindFolder.Entities, sb.ToString(), name, entity.Span));
+            Assemble(emit, ns, isRoot ? KindFolder.Root : KindFolder.Entities, sb.ToString(), name, entity.Span),
+            Kind: KindForFolder(isRoot ? KindFolder.Root : KindFolder.Entities));
     }
 
     private void WriteCommand(StringBuilder sb, EntityDecl entity, CommandDecl cmd, TypeScriptExpressionTranslator translator, TypeScriptTypeMapper typeMapper, ModelIndex index)
@@ -733,7 +734,7 @@ public sealed partial class TypeScriptEmitter
                 sb.Append("}\n");
             }
 
-            return new EmittedFile(PathFor(ns, KindFolder.ValueObjects, idName), Assemble(emit, ns, KindFolder.ValueObjects, sb.ToString()));
+            return new EmittedFile(PathFor(ns, KindFolder.ValueObjects, idName), Assemble(emit, ns, KindFolder.ValueObjects, sb.ToString()), Kind: KindForFolder(KindFolder.ValueObjects));
         }
 
         sb.Append(Indent).Append("constructor(value: ").Append(backingType).Append(") {\n");
@@ -762,7 +763,7 @@ public sealed partial class TypeScriptEmitter
             sb.Append("}\n");
         }
 
-        return new EmittedFile(PathFor(ns, KindFolder.ValueObjects, idName), Assemble(emit, ns, KindFolder.ValueObjects, sb.ToString()));
+        return new EmittedFile(PathFor(ns, KindFolder.ValueObjects, idName), Assemble(emit, ns, KindFolder.ValueObjects, sb.ToString()), Kind: KindForFolder(KindFolder.ValueObjects));
     }
 
     // ----------------------------------------------------------------------
@@ -807,7 +808,7 @@ public sealed partial class TypeScriptEmitter
         sb.Append(Indent).Append("}\n");
         sb.Append("}\n");
 
-        return new EmittedFile(PathFor(ns, KindFolder.Events, name), Assemble(emit, ns, KindFolder.Events, sb.ToString(), name, ev.Span));
+        return new EmittedFile(PathFor(ns, KindFolder.Events, name), Assemble(emit, ns, KindFolder.Events, sb.ToString(), name, ev.Span), Kind: KindForFolder(KindFolder.Events));
     }
 
     // ----------------------------------------------------------------------

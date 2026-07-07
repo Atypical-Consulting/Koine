@@ -76,7 +76,8 @@ public sealed partial class TypeScriptEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.Specifications, name),
-            Assemble(emit, ns, KindFolder.Specifications, sb.ToString(), name, specs[0].Span));
+            Assemble(emit, ns, KindFolder.Specifications, sb.ToString(), name, specs[0].Span),
+            Kind: KindForFolder(KindFolder.Specifications));
     }
 
     /// <summary>
@@ -188,6 +189,7 @@ public sealed partial class TypeScriptEmitter
         sb.Append("}\n");
         return new EmittedFile(
             PathFor(ns, KindFolder.Services, name),
-            Assemble(emit, ns, KindFolder.Services, sb.ToString(), name, svc.Span));
+            Assemble(emit, ns, KindFolder.Services, sb.ToString(), name, svc.Span),
+            Kind: KindForFolder(KindFolder.Services));
     }
 }
