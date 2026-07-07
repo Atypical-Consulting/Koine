@@ -661,4 +661,26 @@ describe('LauncherPanel — shared Esc-stack (issue #1164)', () => {
       unregisterUnrelated();
     }
   });
+
+  test('layered above another overlay, the launcher dismisses first — the overlay beneath is untouched', async () => {
+    const onClose = vi.fn();
+    const sources = makeKnownCatalogSources();
+
+    // An unrelated overlay is already open BENEATH the launcher (the whole point of #1164: correct
+    // depth ordering when the launcher coexists with another overlay).
+    const beneath = vi.fn();
+    const unregisterBeneath = registerOverlay(beneath);
+    try {
+      const view = mount(sources, onClose);
+      await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+
+      // The launcher registered ON TOP of `beneath`, so an Escape (empty query) dismisses the launcher
+      // layer — the topmost — while the overlay beneath keeps its place on the stack, unfired.
+      documentEscape();
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(beneath).not.toHaveBeenCalled();
+    } finally {
+      unregisterBeneath();
+    }
+  });
 });
