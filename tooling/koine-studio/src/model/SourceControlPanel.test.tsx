@@ -393,6 +393,54 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
   });
 });
 
+describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
+  // Open the caret menu (a REAL createFloatingMenu on document.body) and return its role="menu".
+  async function openCaret(view: ReturnType<typeof render>) {
+    const trigger = await view.findByRole('button', { name: 'Commit options' });
+    fireEvent.click(trigger);
+    return waitFor(() => {
+      const menu = document.querySelector<HTMLElement>('[role="menu"]');
+      expect(menu).not.toBeNull();
+      return menu!;
+    });
+  }
+
+  test('the split-commit caret is a live, ARIA-correct menu trigger (enabled, aria-haspopup="menu")', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const trigger = (await view.findByRole('button', { name: 'Commit options' })) as HTMLButtonElement;
+    // No longer a "coming soon" disabled placeholder — an openable menu trigger.
+    expect(trigger.disabled).toBe(false);
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+    expect(trigger.getAttribute('aria-label')).not.toMatch(/coming soon/i);
+  });
+
+  test('opening the caret shows Amend last commit + Commit & Push, both disabled (deferred ops)', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openCaret(view);
+    const amend = within(menu).getByRole('menuitem', { name: 'Amend last commit' }) as HTMLButtonElement;
+    const commitPush = within(menu).getByRole('menuitem', { name: 'Commit & Push' }) as HTMLButtonElement;
+    expect(amend.disabled).toBe(true);
+    expect(commitPush.disabled).toBe(true);
+  });
+
+  test('the caret items are inert placeholders — activating them fires no git.* op', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openCaret(view);
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Amend last commit' }));
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Commit & Push' }));
+    await new Promise((r) => setTimeout(r, 20)); // let any (erroneous) op microtask flush
+    expect(git.gitCommit).not.toHaveBeenCalled();
+    expect(git.gitStage).not.toHaveBeenCalled();
+    expect(git.gitUnstage).not.toHaveBeenCalled();
+  });
+});
+
 describe('SourceControlPanel — save-all-before-commit prompt (#470)', () => {
   beforeEach(() => {
     vi.mocked(koiConfirm).mockReset();

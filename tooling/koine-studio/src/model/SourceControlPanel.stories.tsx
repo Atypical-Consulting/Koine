@@ -92,6 +92,20 @@ export const OverflowMenuOpen: Story = {
   },
 };
 
+/** The split-commit caret menu opened (#1153): its two items — Amend last commit and Commit & Push — are
+ *  disabled placeholders (their git ops are sibling follow-ups), but the menu surface is live. The `play`
+ *  opens it so the Chromium axe/contrast pass covers the disabled-menuitem chrome. */
+export const CommitOptionsMenuOpen: Story = {
+  name: 'Commit options menu (open)',
+  play: async ({ canvasElement }) => {
+    await waitFor(() => expect(canvasElement.querySelector('.koi-sc-composer')).toBeTruthy());
+    const trigger = canvasElement.querySelector<HTMLElement>('button[aria-label="Commit options"]');
+    expect(trigger).toBeTruthy();
+    trigger!.click();
+    await waitFor(() => expect(document.querySelector('.koi-sc-menu')).toBeTruthy());
+  },
+};
+
 /** Desktop host with a clean working tree — no changes, but the branch header and "working tree is
  *  clean" message still render. */
 export const CleanTree: Story = {

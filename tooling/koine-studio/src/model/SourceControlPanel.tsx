@@ -181,7 +181,19 @@ export function SourceControlPanel(props: {
     itemClass: 'koi-sc-menu-item',
     ariaLabel: 'Source control actions',
   });
-  useEffect(() => () => overflowMenuRef.current?.close(false), []);
+  const caretMenuRef = useRef<FloatingMenu | null>(null);
+  caretMenuRef.current ??= createFloatingMenu({
+    menuClass: 'koi-sc-menu',
+    itemClass: 'koi-sc-menu-item',
+    ariaLabel: 'Commit options',
+  });
+  useEffect(
+    () => () => {
+      overflowMenuRef.current?.close(false);
+      caretMenuRef.current?.close(false);
+    },
+    [],
+  );
 
   // The single fetch path: pull status (+ log + branches) for the workspace folder whenever the host,
   // folder, an explicit refresh, or the nonce changes. Browser hosts (no git) never fetch. A rejected
@@ -401,6 +413,20 @@ export function SourceControlPanel(props: {
       { id: 'fetch', label: 'Fetch', disabled: true, run: () => {} },
     ];
     overflowMenuRef.current!.toggle({ trigger, items, align: 'right' });
+  };
+
+  // Build + toggle the split-commit caret menu (#1153). Both items are DEFERRED placeholders: Amend needs a
+  // new `git commit --amend` Platform op, and Commit & Push depends on the same push op the ahead/behind
+  // sync readout is waiting on — each a tracked sibling follow-up. They render disabled (never a live-but-
+  // inert no-op); the plain Commit action stays the split button itself. The caret is openable so the menu
+  // is discoverable, disabled only while the composer is busy (the same gate the message box uses).
+  const openCaretMenu = (e: MouseEvent) => {
+    const trigger = e.currentTarget as HTMLElement;
+    const items: FloatingMenuItem[] = [
+      { id: 'amend', label: 'Amend last commit', disabled: true, run: () => {} },
+      { id: 'commit-push', label: 'Commit & Push', disabled: true, run: () => {} },
+    ];
+    caretMenuRef.current!.toggle({ trigger, items, align: 'right' });
   };
 
   // One file row: a status glyph, a path button that toggles the inline diff, a best-effort +/− stat
@@ -713,14 +739,18 @@ export function SourceControlPanel(props: {
                     </kbd>
                   </span>
                 </button>
-                {/* Split caret — the commit-options menu (amend / commit & push) is a follow-up, so it's
-                    always disabled: a labelled placeholder, never a live-but-inert control. */}
+                {/* Split caret (#1153): opens the commit-options menu (Amend / Commit & Push). Those two
+                    items are disabled placeholders — their git ops are sibling follow-ups — but the menu
+                    surface is live. Disabled only while the composer is busy; aria-expanded is owned by the
+                    createFloatingMenu engine (declaring it here would let a Preact re-render clobber it). */}
                 <button
                   type="button"
                   class="koi-sc-commit-caret"
-                  title="Commit options (coming soon)"
-                  aria-label="Commit options (coming soon)"
-                  disabled
+                  title="Commit options"
+                  aria-label="Commit options"
+                  aria-haspopup="menu"
+                  disabled={busy}
+                  onClick={openCaretMenu}
                 >
                   <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
                     <path d="M4 6.5 8 10 12 6.5" />
