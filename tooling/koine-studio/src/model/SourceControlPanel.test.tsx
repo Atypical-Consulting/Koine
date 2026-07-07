@@ -6,8 +6,14 @@ import { koiConfirm } from '@atypical/koine-ui';
 import { axe } from 'vitest-axe';
 
 // The save-all-before-commit prompt (#470) uses the shared Koine confirm dialog. Mock it so the
-// commit path resolves deterministically (true/false) without opening a real modal overlay.
-vi.mock('@atypical/koine-ui', () => ({ koiConfirm: vi.fn() }));
+// commit path resolves deterministically (true/false) without opening a real modal overlay. A PARTIAL
+// mock: `createFloatingMenu` (which the ⋮ / caret menus bridge, #1153) stays REAL so the menus exercise
+// the actual engine — role="menu"/menuitem, disabled skipping, document.body mounting — under happy-dom,
+// exactly as toolbarOverflow.test.ts / domainNavigator.test.ts do.
+vi.mock('@atypical/koine-ui', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@atypical/koine-ui')>();
+  return { ...actual, koiConfirm: vi.fn() };
+});
 
 const TOKEN = 'file:///work';
 
@@ -322,6 +328,218 @@ describe('SourceControlPanel', () => {
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
     await view.findByRole('region', { name: 'Staged Changes' });
     expect(await axe(view.container)).toHaveNoViolations();
+  });
+});
+
+describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
+  // Open the ⋮ menu (a REAL createFloatingMenu, mounted on document.body) and return its role="menu".
+  async function openOverflow(view: ReturnType<typeof render>) {
+    const trigger = await view.findByRole('button', { name: 'Views and more actions' });
+    fireEvent.click(trigger);
+    return waitFor(() => {
+      const menu = document.querySelector<HTMLElement>('[role="menu"]');
+      expect(menu).not.toBeNull();
+      return menu!;
+    });
+  }
+
+  test('the ⋮ trigger is a live, ARIA-correct menu button (enabled, aria-haspopup="menu")', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const trigger = (await view.findByRole('button', { name: 'Views and more actions' })) as HTMLButtonElement;
+    // No longer a "coming soon" disabled placeholder — a real, openable menu trigger.
+    expect(trigger.disabled).toBe(false);
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+    expect(trigger.getAttribute('aria-label')).not.toMatch(/coming soon/i);
+  });
+
+  test('clicking ⋮ opens a role="menu" of already-backed live actions plus the deferred disabled ones', async () => {
+    // Seed > 10 commits so "View all commits" has something to reveal (it disables when the log fits in 10).
+    const git = {
+      ...makeGit([
+        { relPath: 'a.koi', staged: true, status: 'modified' },
+        { relPath: 'b.koi', staged: false, status: 'modified' },
+        { relPath: 'c.koi', staged: false, status: 'untracked' },
+      ]),
+      gitLog: vi.fn(
+        async (): Promise<GitLogEntry[]> =>
+          Array.from({ length: 12 }, (_, i) => ({
+            sha: `commit${i}abcdef`,
+            author: 'Ada',
+            date: '2026-06-01T10:00:00Z',
+            message: `c${i}`,
+          })),
+      ),
+    } satisfies GitSurface;
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openOverflow(view);
+    const item = (name: string | RegExp) => within(menu).getByRole('menuitem', { name }) as HTMLButtonElement;
+
+    // Live items — already backed by the panel's existing handlers/data.
+    expect(item('Refresh').disabled).toBe(false);
+    expect(item('Stage all changes').disabled).toBe(false);
+    expect(item('Unstage all changes').disabled).toBe(false);
+    expect(item('Collapse all groups').disabled).toBe(false);
+    expect(item('View all commits').disabled).toBe(false);
+
+    // Deferred items — no backing Platform git op yet (sibling follow-ups): rendered disabled, never inert-live.
+    expect(item('Discard all changes').disabled).toBe(true);
+    expect(item('Pull').disabled).toBe(true);
+    expect(item('Push').disabled).toBe(true);
+    expect(item('Fetch').disabled).toBe(true);
+  });
+
+  test('the ⋮ menu "Stage all changes" stages every unstaged + untracked path', async () => {
+    const git = makeGit([
+      { relPath: 'a.koi', staged: true, status: 'modified' }, // already staged — excluded from "stage all"
+      { relPath: 'b.koi', staged: false, status: 'modified' },
+      { relPath: 'c.koi', staged: false, status: 'untracked' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openOverflow(view);
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Stage all changes' }));
+    await waitFor(() => expect(git.gitStage).toHaveBeenCalledWith(TOKEN, ['b.koi', 'c.koi']));
+  });
+});
+
+describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
+  // Open the caret menu (a REAL createFloatingMenu on document.body) and return its role="menu".
+  async function openCaret(view: ReturnType<typeof render>) {
+    const trigger = await view.findByRole('button', { name: 'Commit options' });
+    fireEvent.click(trigger);
+    return waitFor(() => {
+      const menu = document.querySelector<HTMLElement>('[role="menu"]');
+      expect(menu).not.toBeNull();
+      return menu!;
+    });
+  }
+
+  test('the split-commit caret is a live, ARIA-correct menu trigger (enabled, aria-haspopup="menu")', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const trigger = (await view.findByRole('button', { name: 'Commit options' })) as HTMLButtonElement;
+    // No longer a "coming soon" disabled placeholder — an openable menu trigger.
+    expect(trigger.disabled).toBe(false);
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+    expect(trigger.getAttribute('aria-label')).not.toMatch(/coming soon/i);
+  });
+
+  test('opening the caret shows Amend last commit + Commit & Push, both disabled (deferred ops)', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openCaret(view);
+    const amend = within(menu).getByRole('menuitem', { name: 'Amend last commit' }) as HTMLButtonElement;
+    const commitPush = within(menu).getByRole('menuitem', { name: 'Commit & Push' }) as HTMLButtonElement;
+    expect(amend.disabled).toBe(true);
+    expect(commitPush.disabled).toBe(true);
+  });
+
+  test('the caret items are inert placeholders — activating them fires no git.* op', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openCaret(view);
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Amend last commit' }));
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Commit & Push' }));
+    await new Promise((r) => setTimeout(r, 20)); // let any (erroneous) op microtask flush
+    expect(git.gitCommit).not.toHaveBeenCalled();
+    expect(git.gitStage).not.toHaveBeenCalled();
+    expect(git.gitUnstage).not.toHaveBeenCalled();
+  });
+});
+
+describe('SourceControlPanel — full commit history (#1153)', () => {
+  // N synthetic commits, newest-first, with unique 7-char SHA prefixes ("sha0000" … "sha00NN") so a test
+  // can assert on an exact row that is (or isn't) rendered without substring collisions.
+  function manyCommits(n: number): GitLogEntry[] {
+    return Array.from({ length: n }, (_, i) => ({
+      sha: `sha${String(i).padStart(4, '0')}deadbeef`,
+      author: i % 2 === 0 ? 'Ada' : 'Grace Hopper',
+      date: '2026-06-01T10:00:00Z',
+      message: `Commit ${i}`,
+    }));
+  }
+
+  function gitWithLog(log: GitLogEntry[]): GitSurface {
+    return {
+      ...makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]),
+      gitLog: vi.fn(async () => log),
+    } satisfies GitSurface;
+  }
+
+  test('caps the recent log at 10 and reveals the whole history on "View all"', async () => {
+    const git = gitWithLog(manyCommits(12));
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const recent = await view.findByRole('region', { name: 'Recent commits' });
+
+    // Only the 10 newest render initially; the 11th/12th (sha0010/sha0011) are held back.
+    await waitFor(() => expect(recent.querySelectorAll('.koi-sc-log-item').length).toBe(10));
+    expect(recent.textContent).not.toContain('sha0011');
+
+    const viewAll = view.getByRole('button', { name: /View all/i }) as HTMLButtonElement;
+    expect(viewAll.disabled).toBe(false);
+    fireEvent.click(viewAll);
+
+    // The full log now renders — all 12 rows, including the previously-capped tail.
+    await waitFor(() => expect(recent.querySelectorAll('.koi-sc-log-item').length).toBe(12));
+    expect(recent.textContent).toContain('sha0011');
+
+    // The Recent-commits landmark is preserved (the region/axe tests depend on its accessible name).
+    expect(view.getByRole('region', { name: 'Recent commits' })).toBe(recent);
+  });
+
+  test('"View all" un-collapses the Recent-commits section when it is collapsed (never a dead click)', async () => {
+    const git = gitWithLog(manyCommits(12));
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const recent = await view.findByRole('region', { name: 'Recent commits' });
+    await waitFor(() => expect(recent.querySelectorAll('.koi-sc-log-item').length).toBe(10));
+
+    // Collapse the Recent-commits section via its chevron toggle — the list is now hidden by CSS.
+    fireEvent.click(within(recent).getByRole('button', { name: /Recent commits/ }));
+    expect(recent.classList.contains('collapsed')).toBe(true);
+
+    // "View all" must ALSO un-collapse (not just flip the cap), or it'd be a live-but-inert click while
+    // the section stays collapsed and hides the list.
+    fireEvent.click(view.getByRole('button', { name: /View all/i }));
+    expect(recent.classList.contains('collapsed')).toBe(false);
+    await waitFor(() => expect(recent.querySelectorAll('.koi-sc-log-item').length).toBe(12));
+  });
+
+  test('a short history (≤ 10) shows every commit and disables "View all" (nothing more to reveal)', async () => {
+    const git = gitWithLog(manyCommits(3));
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const recent = await view.findByRole('region', { name: 'Recent commits' });
+    await waitFor(() => expect(recent.querySelectorAll('.koi-sc-log-item').length).toBe(3));
+    expect((view.getByRole('button', { name: /View all/i }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  test('empty history: "View all" is absent (nothing to show)', async () => {
+    const git = gitWithLog([]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByRole('region', { name: 'Recent commits' });
+    await view.findByText(/No commits yet/i);
+    expect(view.queryByRole('button', { name: /View all/i })).toBeNull();
+  });
+
+  test('the ⋮ menu "View all commits" item reveals the full history too', async () => {
+    const git = gitWithLog(manyCommits(12));
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const recent = await view.findByRole('region', { name: 'Recent commits' });
+    await waitFor(() => expect(recent.querySelectorAll('.koi-sc-log-item').length).toBe(10));
+
+    fireEvent.click(view.getByRole('button', { name: 'Views and more actions' }));
+    const menu = await waitFor(() => {
+      const m = document.querySelector<HTMLElement>('[role="menu"]');
+      expect(m).not.toBeNull();
+      return m!;
+    });
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'View all commits' }));
+    await waitFor(() => expect(recent.querySelectorAll('.koi-sc-log-item').length).toBe(12));
   });
 });
 

@@ -1,3 +1,5 @@
+@use '../abstracts' as a;
+
 /* --- Source Control right-rail panel (#272) ---------------------------------------------------
    The git surface in the Properties rail: a branch header + switcher, the changed files grouped into
    Staged / Changes / Untracked with per-row Stage/Unstage + inline diff, a commit box, and the recent
@@ -66,6 +68,33 @@
 
 .koi-sc-hdr-ico.is-spinning .koi-sc-ico {
   transform: rotate(360deg);
+}
+
+/* The ⋮ header overflow menu and the split-commit caret menu (#1153) share the blessed floating-menu
+   chrome (the same popover surface + item recipe the toolbar/explorer/domain-navigator menus use, so the
+   Chromium axe/contrast pass already covers it). createFloatingMenu mounts these on document.body. */
+.koi-sc-menu {
+  @include a.popover-surface;
+  z-index: var(--koi-z-popover);
+  min-width: a.$menu-min-width;
+}
+
+.koi-sc-menu-item {
+  @include a.menu-item;
+
+  /* This panel is the first floating menu to render disabled items (deferred amend/push/pull/fetch/discard).
+     The shared `menu-item` mixin applies its accent hover/focus wash unconditionally, so a disabled item
+     would still light up on hover and read as actionable — override it back to inert here. */
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+
+    &:hover,
+    &:focus-visible {
+      background: transparent;
+      border-color: transparent;
+    }
+  }
 }
 
 /* Branch + sync bar: the branch switcher (a native <select> styled as a pill) beside a best-effort

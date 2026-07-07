@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { GitFile, GitLogEntry, GitStatus, Platform } from '@/host/types';
-import { koiConfirm } from '@atypical/koine-ui';
+import { koiConfirm, createFloatingMenu, type FloatingMenu, type FloatingMenuItem } from '@atypical/koine-ui';
 
 // The Source Control panel (issue #272): the right-rail git surface — a branch header + switcher, the
 // changed files grouped into Staged / Changes / Untracked with per-row Stage/Unstage + inline diff, a
@@ -60,6 +60,13 @@ const STATUS_LABEL: Record<GitFile['status'], string> = {
 /** The Recent-commits section's label — also its collapse key in the shared `collapsedGroups` set and
  *  its `aria-label` landmark, so it lives in one place to keep the three uses in lockstep. */
 const RECENT_COMMITS_LABEL = 'Recent commits';
+
+/** The changed-file group labels. Each is a section `aria-label` landmark AND its collapse key in
+ *  `collapsedGroups` AND the key the ⋮ "Collapse all groups" action toggles — so the render, the per-group
+ *  chevron, and the menu action stay in lockstep off one constant apiece (mirrors {@link RECENT_COMMITS_LABEL}). */
+const STAGED_CHANGES_LABEL = 'Staged Changes';
+const CHANGES_LABEL = 'Changes';
+const UNTRACKED_LABEL = 'Untracked';
 
 /** The `YYYY-MM-DD` calendar day of an ISO-8601 commit date (timezone-stable, locale-free), else the raw
  *  value — the same deterministic formatting the inspector's change-history rows use. */
@@ -158,6 +165,9 @@ export function SourceControlPanel(props: {
   // Purely presentational: the Refresh glyph flips this on each click so a toggled class spins it 360°
   // (a CSS transition). It carries no git state — the actual refresh is `reload()`.
   const [spin, setSpin] = useState(false);
+  // Whether the Recent-commits log shows its full history rather than the capped 10 newest (#1153). Flipped
+  // by the "View all" button and the ⋮ menu's "View all commits" item; resets to capped on remount.
+  const [showAllCommits, setShowAllCommits] = useState(false);
   // Which file groups are collapsed, keyed by label. Purely presentational + local — groups default to
   // expanded (empty set); the toggle just hides that group's file list via a CSS `collapsed` class.
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(() => new Set());
@@ -168,6 +178,32 @@ export function SourceControlPanel(props: {
       else next.add(label);
       return next;
     });
+
+  // The header ⋮ / split-commit caret menus (#1153) reuse the design-synced createFloatingMenu engine
+  // (role="menu"/menuitem, roving Arrow/Home/End focus, Escape via the overlay Esc-stack, aria-expanded on
+  // the trigger) — the same primitive the toolbar/explorer/domain-navigator menus consume. It is imperative
+  // DOM, so these refs bridge it into the Preact panel: each instance is created once, then torn down on
+  // unmount so a closed panel never leaves an orphaned menu on document.body. Items are built lazily at open
+  // time (inside the click handler) so they always read the panel's current state.
+  const overflowMenuRef = useRef<FloatingMenu | null>(null);
+  overflowMenuRef.current ??= createFloatingMenu({
+    menuClass: 'koi-sc-menu',
+    itemClass: 'koi-sc-menu-item',
+    ariaLabel: 'Source control actions',
+  });
+  const caretMenuRef = useRef<FloatingMenu | null>(null);
+  caretMenuRef.current ??= createFloatingMenu({
+    menuClass: 'koi-sc-menu',
+    itemClass: 'koi-sc-menu-item',
+    ariaLabel: 'Commit options',
+  });
+  useEffect(
+    () => () => {
+      overflowMenuRef.current?.close(false);
+      caretMenuRef.current?.close(false);
+    },
+    [],
+  );
 
   // The single fetch path: pull status (+ log + branches) for the workspace folder whenever the host,
   // folder, an explicit refresh, or the nonce changes. Browser hosts (no git) never fetch. A rejected
@@ -330,6 +366,86 @@ export function SourceControlPanel(props: {
   // The recent-commit log is collapsible through the same `collapsedGroups`/`toggleGroup` infra the file
   // groups use — its section carries `collapsed` when its label is in the set (the CSS hides the list).
   const logCollapsed = collapsedGroups.has(RECENT_COMMITS_LABEL);
+  // The recent log shows the 10 newest by default; "View all" lifts that cap to the whole fetched `log`.
+  // The cap only bites past 10 commits, so with ≤ 10 there's nothing more to reveal (the toggle disables).
+  const RECENT_COMMITS_CAP = 10;
+  const hasMoreCommits = log.length > RECENT_COMMITS_CAP;
+  const shownLog = showAllCommits ? log : log.slice(0, RECENT_COMMITS_CAP);
+
+  // Reveal the full commit history in place (#1153): un-collapse the Recent-commits section if it's collapsed
+  // AND lift the 10-row display cap, so the whole already-fetched `log` shows — no new git op. Shared by the
+  // ⋮ menu's "View all commits" item and (as the "expand" direction) the "View all" button.
+  const revealAllCommits = () => {
+    setCollapsedGroups((prev) => {
+      if (!prev.has(RECENT_COMMITS_LABEL)) return prev;
+      const next = new Set(prev);
+      next.delete(RECENT_COMMITS_LABEL);
+      return next;
+    });
+    setShowAllCommits(true);
+  };
+
+  // Build + toggle the ⋮ overflow menu (#1153). The LIVE items are already backed by the panel's existing
+  // handlers/data (Refresh, Stage/Unstage all over the grouped paths, collapse/expand, reveal-all-commits);
+  // the DEFERRED items render disabled because their Platform git op doesn't exist yet — each is a tracked
+  // sibling follow-up of #1146/#1142: Discard-all/revert, and the pull/push/fetch sync ops the ahead/behind
+  // readout also awaits. Disabled (never a live-but-inert no-op) matches the panel's placeholder convention.
+  const openOverflowMenu = (e: MouseEvent) => {
+    const trigger = e.currentTarget as HTMLElement;
+    const unstagedPaths = [...unstaged, ...untracked].map((f) => f.relPath);
+    const stagedPaths = staged.map((f) => f.relPath);
+    // Every present, collapsible section label — the non-empty file groups plus the Recent-commits log.
+    const groupLabels = [
+      ...(staged.length ? [STAGED_CHANGES_LABEL] : []),
+      ...(unstaged.length ? [CHANGES_LABEL] : []),
+      ...(untracked.length ? [UNTRACKED_LABEL] : []),
+      ...(log.length ? [RECENT_COMMITS_LABEL] : []),
+    ];
+    const allCollapsed = groupLabels.length > 0 && groupLabels.every((l) => collapsedGroups.has(l));
+    const items: FloatingMenuItem[] = [
+      { id: 'refresh', label: 'Refresh', disabled: busy, run: () => { setSpin((s) => !s); reload(); } },
+      {
+        id: 'stage-all',
+        label: 'Stage all changes',
+        disabled: busy || unstagedPaths.length === 0,
+        run: () => void mutate(() => git.gitStage(folderToken, unstagedPaths)),
+      },
+      {
+        id: 'unstage-all',
+        label: 'Unstage all changes',
+        disabled: busy || stagedPaths.length === 0,
+        run: () => void mutate(() => git.gitUnstage(folderToken, stagedPaths)),
+      },
+      {
+        id: 'collapse-all',
+        label: allCollapsed ? 'Expand all groups' : 'Collapse all groups',
+        disabled: groupLabels.length === 0,
+        run: () => setCollapsedGroups(allCollapsed ? new Set() : new Set(groupLabels)),
+      },
+      // Enabled only when the 10-row cap actually hides commits (matches the "View all" button's gate), so
+      // the item is never a live-but-inert no-op when everything already shows.
+      { id: 'view-all-commits', label: 'View all commits', disabled: !hasMoreCommits, run: revealAllCommits },
+      { id: 'discard-all', label: 'Discard all changes', disabled: true, run: () => {} },
+      { id: 'pull', label: 'Pull', disabled: true, run: () => {} },
+      { id: 'push', label: 'Push', disabled: true, run: () => {} },
+      { id: 'fetch', label: 'Fetch', disabled: true, run: () => {} },
+    ];
+    overflowMenuRef.current!.toggle({ trigger, items, align: 'right' });
+  };
+
+  // Build + toggle the split-commit caret menu (#1153). Both items are DEFERRED placeholders: Amend needs a
+  // new `git commit --amend` Platform op, and Commit & Push depends on the same push op the ahead/behind
+  // sync readout is waiting on — each a tracked sibling follow-up. They render disabled (never a live-but-
+  // inert no-op); the plain Commit action stays the split button itself. The caret is openable so the menu
+  // is discoverable, disabled only while the composer is busy (the same gate the message box uses).
+  const openCaretMenu = (e: MouseEvent) => {
+    const trigger = e.currentTarget as HTMLElement;
+    const items: FloatingMenuItem[] = [
+      { id: 'amend', label: 'Amend last commit', disabled: true, run: () => {} },
+      { id: 'commit-push', label: 'Commit & Push', disabled: true, run: () => {} },
+    ];
+    caretMenuRef.current!.toggle({ trigger, items, align: 'right' });
+  };
 
   // One file row: a status glyph, a path button that toggles the inline diff, a best-effort +/− stat
   // (swapped for the hover/focus action cluster), then the inline diff below when open. The path button's
@@ -538,13 +654,18 @@ export function SourceControlPanel(props: {
             <path d="M13 2.5V5h-2.5" />
           </svg>
         </button>
-        {/* Overflow menu is a follow-up; disabled (not a live-but-inert control) so it doesn't mislead. */}
+        {/* Overflow menu (#1153): a live createFloatingMenu trigger. The initial aria-expanded="false"
+            matches the WAI-ARIA menu-button pattern and the engine's other consumers (toolbarOverflow,
+            domainNavigator); the engine flips it on open/close via setAttribute, and Preact never clobbers
+            that runtime value because this static `false` prop is unchanged across re-renders. */}
         <button
           type="button"
           class="koi-sc-hdr-ico"
-          title="Views and more actions (coming soon)"
-          aria-label="Views and more actions (coming soon)"
-          disabled
+          title="Views and more actions"
+          aria-label="Views and more actions"
+          aria-haspopup="menu"
+          aria-expanded={false}
+          onClick={openOverflowMenu}
         >
           <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
             <circle cx="8" cy="3.5" r="1.1" fill="currentColor" stroke="none" />
@@ -638,14 +759,19 @@ export function SourceControlPanel(props: {
                     </kbd>
                   </span>
                 </button>
-                {/* Split caret — the commit-options menu (amend / commit & push) is a follow-up, so it's
-                    always disabled: a labelled placeholder, never a live-but-inert control. */}
+                {/* Split caret (#1153): opens the commit-options menu (Amend / Commit & Push). Those two
+                    items are disabled placeholders — their git ops are sibling follow-ups — but the menu
+                    surface is live. Disabled only while the composer is busy; the initial aria-expanded is
+                    "false" (the engine flips it on open/close, and the static prop never clobbers it). */}
                 <button
                   type="button"
                   class="koi-sc-commit-caret"
-                  title="Commit options (coming soon)"
-                  aria-label="Commit options (coming soon)"
-                  disabled
+                  title="Commit options"
+                  aria-label="Commit options"
+                  aria-haspopup="menu"
+                  aria-expanded={false}
+                  disabled={busy}
+                  onClick={openCaretMenu}
                 >
                   <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
                     <path d="M4 6.5 8 10 12 6.5" />
@@ -655,9 +781,9 @@ export function SourceControlPanel(props: {
             </div>
           </div>
 
-          {fileGroup('Staged Changes', staged)}
-          {fileGroup('Changes', unstaged)}
-          {fileGroup('Untracked', untracked)}
+          {fileGroup(STAGED_CHANGES_LABEL, staged)}
+          {fileGroup(CHANGES_LABEL, unstaged)}
+          {fileGroup(UNTRACKED_LABEL, untracked)}
 
           {files.length === 0 && <p class="koi-docs-empty">No changes — the working tree is clean.</p>}
 
@@ -680,16 +806,30 @@ export function SourceControlPanel(props: {
                 </svg>
                 {RECENT_COMMITS_LABEL}
               </button>
-              {/* Full commit-history surface is a follow-up; disabled placeholder, not a live-but-inert link. */}
-              <button type="button" class="koi-sc-viewall" aria-label="View all commits (coming soon)" disabled>
-                View all
-              </button>
+              {/* Full commit-history surface (#1153): an in-panel expansion over the already-fetched `log`
+                  (no new git op). Rendered only when there are commits, and openable only when the 10-row
+                  cap actually hides some — with ≤ 10 everything already shows, so the toggle is disabled
+                  rather than a live-but-inert control. */}
+              {log.length > 0 && (
+                <button
+                  type="button"
+                  class="koi-sc-viewall"
+                  aria-label={showAllCommits ? 'Show fewer commits' : 'View all commits'}
+                  title={hasMoreCommits ? undefined : 'All commits are shown'}
+                  disabled={!hasMoreCommits}
+                  // Expand via revealAllCommits so it ALSO un-collapses the section (the collapse class hides
+                  // the list) — matching the ⋮ "View all commits" item; collapsing back just re-caps to 10.
+                  onClick={() => (showAllCommits ? setShowAllCommits(false) : revealAllCommits())}
+                >
+                  {showAllCommits ? 'Show less' : 'View all'}
+                </button>
+              )}
             </div>
             {log.length === 0 ? (
               <p class="koi-docs-empty">No commits yet.</p>
             ) : (
               <ul class="koi-sc-log">
-                {log.slice(0, 10).map((c) => (
+                {shownLog.map((c) => (
                   <li key={c.sha} class="koi-sc-log-item">
                     {/* Decorative accent-tinted initials avatar; aria-hidden — the author is in the meta. */}
                     <span class="koi-sc-avatar" aria-hidden="true">
