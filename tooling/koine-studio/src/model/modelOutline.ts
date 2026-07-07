@@ -113,44 +113,6 @@ export function countsByContext(model: GlossaryModel): { context: string; counts
   return groupByConstruct(model).map((g) => ({ context: g.context, counts: countsForGroup(g) }));
 }
 
-/** A small count badge, e.g. `Aggregates 1`, used in both the counts strip and construct headers. */
-function countBadge(className: string, label: string, count: number): HTMLElement {
-  const badge = document.createElement('span');
-  badge.className = className;
-  const name = document.createElement('span');
-  name.className = 'koi-model-count-label';
-  name.textContent = label;
-  const num = document.createElement('span');
-  num.className = 'koi-model-count-num';
-  num.textContent = String(count);
-  badge.append(name, ' ', num);
-  return badge;
-}
-
-/**
- * The model-wide "Vue d'ensemble" overview: each bounded context with its construct tallies. Shares the
- * one tally source ({@link countsByContext} → {@link countsForGroup}) with the navigator's inline strip,
- * so the left rail's Explorateur and Vue d'ensemble can never disagree on a count.
- */
-export function renderOverviewCounts(model: GlossaryModel): HTMLElement {
-  const root = document.createElement('div');
-  root.className = 'koi-overview';
-  for (const { context, counts } of countsByContext(model)) {
-    const section = document.createElement('section');
-    section.className = 'koi-overview-ctx';
-    const head = document.createElement('h4');
-    head.className = 'koi-overview-ctx-name';
-    head.textContent = context;
-    section.appendChild(head);
-    const strip = document.createElement('div');
-    strip.className = 'koi-overview-counts';
-    for (const c of counts) strip.appendChild(countBadge('koi-overview-count', c.label, c.count));
-    section.appendChild(strip);
-    root.appendChild(section);
-  }
-  return root;
-}
-
 /** The icon slug for a construct label — a stable key for the shape/colour each DDD concept gets in the
  * Explorer (e.g. Entities → a green square, Value Objects → a blue lozenge). See `_model.scss`. */
 const CONSTRUCT_SLUG: Record<string, string> = {

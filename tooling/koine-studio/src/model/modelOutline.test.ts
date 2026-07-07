@@ -1,10 +1,6 @@
-import { afterEach, describe, expect, test } from 'vitest';
-import { countsByContext, groupByConstruct, renderOverviewCounts } from '@/model/modelOutline';
+import { describe, expect, test } from 'vitest';
+import { countsByContext, groupByConstruct } from '@/model/modelOutline';
 import type { GlossaryEntry, GlossaryModel, Range } from '@/lsp/lsp';
-
-afterEach(() => {
-  document.body.innerHTML = '';
-});
 
 const range = (line: number): Range => ({ start: { line, character: 2 }, end: { line, character: 8 } });
 
@@ -78,20 +74,5 @@ describe('countsByContext', () => {
       { label: 'Aggregates', count: 1 },
       { label: 'Integration Events', count: 1 },
     ]);
-  });
-});
-
-describe('renderOverviewCounts', () => {
-  test('renders a section per context with its construct tallies', () => {
-    const el = renderOverviewCounts(model);
-    const ctxNames = Array.from(el.querySelectorAll('.koi-overview-ctx-name')).map((n) => n.textContent);
-    expect(ctxNames).toEqual(['Sales', 'Inventory']);
-
-    const badges = Array.from(el.querySelectorAll('.koi-overview-count')).map((n) =>
-      n.textContent?.replace(/\s+/g, ' ').trim(),
-    );
-    expect(badges).toContain('Aggregates 1');
-    expect(badges).toContain('Value Objects 2');
-    expect(badges).toContain('Integration Events 1');
   });
 });
