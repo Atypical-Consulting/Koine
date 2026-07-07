@@ -2,7 +2,7 @@
 // move through the model the way DDD itself is layered — STRATEGIC first (the bounded contexts and the
 // relationships between them) and drill into TACTICAL (a context's aggregates and their internals) on
 // demand. This file owns the *strategic* altitude: the list of bounded contexts plus two "doorway" rows
-// into the cross-context views (Context Map, Ubiquitous Language).
+// into the cross-context views (Context Map, Glossary — the ubiquitous language).
 //
 // Pure DOM builders decoupled from the LSP/editor via a `handlers` object, so they unit-test cleanly
 // under happy-dom — mirroring `modelOutline.ts` / `glossary.ts`. The counts shown here are NOT computed
@@ -23,7 +23,7 @@ export interface StrategicHandlers {
   onOpenContext(ctx: string): void;
   /** Open the Context Map view (the cross-context relationship graph). */
   onOpenContextMap(): void;
-  /** Open the Ubiquitous Language glossary view. */
+  /** Open the Glossary (the ubiquitous language) view. */
   onOpenGlossary(): void;
 }
 
@@ -67,12 +67,15 @@ function contextRow(context: string, total: number, h: StrategicHandlers): HTMLE
   return row;
 }
 
-/** A "doorway" row into a cross-context view (Context Map, Ubiquitous Language): a glyph, a label, and
- * an optional trailing count badge (e.g. the number of context-map relationships). */
+/** A "doorway" row into a cross-context view (Context Map, Glossary): a glyph, a label, and an optional
+ * trailing count badge (e.g. the number of context-map relationships). An optional `hint` names the DDD
+ * concept behind a renamed door (e.g. "the ubiquitous language" for the Glossary): it becomes the row's
+ * tooltip and is woven into its accessible name, so renaming the visible label never drops the vocabulary. */
 function doorwayRow(opts: {
   door: string;
   symbol: string;
   label: string;
+  hint?: string;
   count?: number;
   onOpen: () => void;
 }): HTMLElement {
@@ -86,6 +89,13 @@ function doorwayRow(opts: {
   label.className = 'koi-domain-door-label';
   label.textContent = opts.label;
   row.append(glyph(opts.symbol), label);
+
+  if (opts.hint) {
+    // Tooltip + accessible name keep the DDD term ("the ubiquitous language") even though the visible
+    // door now reads "Glossary" — the door and its destination match, the vocabulary is preserved.
+    row.title = opts.hint;
+    row.setAttribute('aria-label', `${opts.label} — ${opts.hint}`);
+  }
 
   if (opts.count != null) {
     const count = document.createElement('span');
@@ -197,8 +207,10 @@ function wireTreeNav(tree: HTMLElement): void {
 
 /**
  * Build the strategic-level Domain navigator: one `◈` row per bounded context (with its total-construct
- * count badge), then the `⤳ Context Map` and `▤ Ubiquitous Language` doorway rows. `relLinks` is the
- * number of context-map relationships (the caller passes it in — this renderer never fetches it).
+ * count badge), then the `⤳ Context Map` and `▤ Glossary` doorway rows. The Glossary door routes to the
+ * same destination the Docs facet calls "Glossary" (#146) — so it carries that label, keeping "the
+ * ubiquitous language" as its tooltip / accessible name. `relLinks` is the number of context-map
+ * relationships (the caller passes it in — this renderer never fetches it).
  */
 export function renderStrategic(model: GlossaryModel, relLinks: number, h: StrategicHandlers): HTMLElement {
   const root = document.createElement('div');
@@ -218,7 +230,13 @@ export function renderStrategic(model: GlossaryModel, relLinks: number, h: Strat
     doorwayRow({ door: 'contextmap', symbol: '⤳', label: 'Context Map', count: relLinks, onOpen: h.onOpenContextMap }),
   );
   doors.appendChild(
-    doorwayRow({ door: 'glossary', symbol: '▤', label: 'Ubiquitous Language', onOpen: h.onOpenGlossary }),
+    doorwayRow({
+      door: 'glossary',
+      symbol: '▤',
+      label: 'Glossary',
+      hint: 'the ubiquitous language',
+      onOpen: h.onOpenGlossary,
+    }),
   );
   root.appendChild(doors);
 

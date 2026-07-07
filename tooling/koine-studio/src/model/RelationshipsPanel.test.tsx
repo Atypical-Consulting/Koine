@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { act, render } from '@testing-library/preact';
 import { createAppStore } from '@/store/index';
 import { RelationshipsPanel } from '@/model/RelationshipsPanel';
-import type { ContextMapResult, DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp/lsp';
+import type { DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp/lsp';
 import { axe } from 'vitest-axe';
 
 const span = (line: number): SourceSpan => ({
@@ -25,8 +25,9 @@ const node = (
 
 const edge = (from: string, to: string, label: string | null = null): DiagramEdge => ({ from, to, label });
 
-// A merged graph with a structural relation in Sales and one in Inv, plus a strategic Sales→Shipping
-// relation. Scoping to "Sales" keeps the Sales structural row + the strategic row, drops the Inv row.
+// A merged graph with a structural relation in Sales and one in Inv. Scoping to "Sales" keeps the Sales
+// structural row and drops the Inv row. The panel renders STRUCTURAL edges only — strategic context→
+// context relations live in the Output → Context Map facet, so none are passed or expected here (#146).
 const graph: DiagramGraph = {
   nodes: [
     node('Order', 'Order', 'aggregate-root', 'Sales.Order', span(3)),
@@ -37,36 +38,27 @@ const graph: DiagramGraph = {
   edges: [edge('Order', 'OrderItem'), edge('Stock', 'StockLevel')],
 };
 
-const contextMap: ContextMapResult = {
-  contexts: ['Sales', 'Shipping', 'Inv'],
-  relations: [
-    { upstream: 'Sales', downstream: 'Shipping', kind: 'Customer/Supplier', bidirectional: false, sharedTypes: [], acl: [] },
-  ],
-};
-
 describe('RelationshipsPanel', () => {
-  test('lists every relation when unscoped, narrows structural + strategic rows on scope change', () => {
+  test('lists every structural relation when unscoped, narrows to the active context on scope change', () => {
     const store = createAppStore();
     const { container } = render(
-      <RelationshipsPanel store={store} graph={graph} contextMap={contextMap} handlers={{ goto: () => {} }} />,
+      <RelationshipsPanel store={store} graph={graph} handlers={{ goto: () => {} }} />,
     );
 
-    // Unscoped → both structural relations and the strategic relation are present.
+    // Unscoped → both contexts' structural relations are present.
     expect(container.textContent).toContain('OrderItem');
     expect(container.textContent).toContain('StockLevel');
-    expect(container.textContent).toContain('Customer/Supplier');
 
-    // Narrowing to Sales keeps Sales' structural row + the Sales→Shipping strategic row; drops Inv's row.
+    // Narrowing to Sales keeps Sales' structural row; drops Inv's row.
     act(() => store.getState().setActiveContext('Sales'));
     expect(container.textContent).toContain('OrderItem');
-    expect(container.textContent).toContain('Customer/Supplier');
     expect(container.textContent).not.toContain('StockLevel');
   });
 
   test('has no accessibility violations', async () => {
     const store = createAppStore();
     const { container } = render(
-      <RelationshipsPanel store={store} graph={graph} contextMap={contextMap} handlers={{ goto: () => {} }} />,
+      <RelationshipsPanel store={store} graph={graph} handlers={{ goto: () => {} }} />,
     );
     expect(await axe(container)).toHaveNoViolations();
   });

@@ -1,12 +1,13 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
 import { RelationshipsPanel } from '@/model/RelationshipsPanel';
-import type { ContextMapResult, DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp/lsp';
+import type { DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp/lsp';
 import { createAppStore } from '@/store/index';
 
-// The bottom-panel Relationships table. It narrows BOTH the structural edges (the diagram graph) and the
-// strategic context-map relations to the active bounded context. Graph + context map are passed in (the
-// controller owns the LSP fetch). The fixtures mirror RelationshipsPanel.test.tsx (proven a11y-clean); a
-// fresh createAppStore() per story keeps the `Scoped` seed isolated.
+// The bottom-panel Relationships table: the tabular view of the model's STRUCTURAL edges (the diagram
+// graph), narrowed to the active bounded context. Strategic context→context relations are NOT shown here
+// — their home is the Output → Context Map facet (#146) — so only the graph is passed in (the controller
+// owns the LSP fetch). The fixtures mirror RelationshipsPanel.test.tsx (proven a11y-clean); a fresh
+// createAppStore() per story keeps the `Scoped` seed isolated.
 
 const span = (line: number): SourceSpan => ({
   file: 'file:///m.koi',
@@ -30,8 +31,9 @@ const node = (id: string, kind: string, qualifiedName: string, line: number): Di
 
 const edge = (from: string, to: string): DiagramEdge => ({ from, to, label: null });
 
-// A structural relation in Sales and one in Inv, plus a strategic Sales→Shipping relation. Scoping to
-// "Sales" keeps the Sales structural row + the strategic row and drops the Inv row.
+// A structural relation in Sales and one in Inv. Scoping to "Sales" keeps the Sales structural row and
+// drops the Inv row. (Strategic context→context relations are the Context Map facet's concern, not this
+// table's — so the fixture has none.)
 const graph: DiagramGraph = {
   nodes: [
     node('Order', 'aggregate-root', 'Sales.Order', 3),
@@ -42,13 +44,6 @@ const graph: DiagramGraph = {
   edges: [edge('Order', 'OrderItem'), edge('Stock', 'StockLevel')],
 };
 
-const contextMap: ContextMapResult = {
-  contexts: ['Sales', 'Shipping', 'Inv'],
-  relations: [
-    { upstream: 'Sales', downstream: 'Shipping', kind: 'Customer/Supplier', bidirectional: false, sharedTypes: [], acl: [] },
-  ],
-};
-
 const meta = {
   title: 'Panels/RelationshipsPanel',
   component: RelationshipsPanel,
@@ -56,7 +51,6 @@ const meta = {
   args: {
     store: createAppStore(),
     graph,
-    contextMap,
     handlers: { goto: () => {} },
   },
 } satisfies Meta<typeof RelationshipsPanel>;
@@ -64,10 +58,10 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Unscoped ("All contexts"): every structural and strategic relation is listed. */
+/** Unscoped ("All contexts"): every structural relation is listed. */
 export const AllContexts: Story = {};
 
-/** Narrowed to Sales — Sales' structural row + the Sales→Shipping strategic row; Inv's row is dropped. */
+/** Narrowed to Sales — Sales' structural row is kept; Inv's row is dropped. */
 export const Scoped: Story = {
   render: (args) => {
     const store = createAppStore();

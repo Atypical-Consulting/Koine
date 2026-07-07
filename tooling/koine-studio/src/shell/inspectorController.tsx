@@ -1255,7 +1255,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Mount the navigator once (it paints a loading placeholder + its own empty state, and surfaces a
     // fetch failure in the pane itself); a reload re-fetches its strategic data. Kicking this off before
     // the await runs its fetch in parallel with the model index build, so the rail paints promptly. Its
-    // Context Map / Ubiquitous Language doorways route to the same focuses the docs footer used.
+    // Context Map / Glossary doorways route to the same focuses the docs footer used.
     if (!domainNavigator) {
       domainNavigator = mountDomainNavigator(domainPane, appStore, lsp, modelOutlineHandlers, tacticalHandlers);
     } else if (!hadIndex) {
@@ -1576,8 +1576,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     else if (output === 'contextmap' && appStore.getState().isStale('contextmap')) void loadContextMapPanel();
   }
 
-  // Surface the Documentation center tab (the "Docs" mode focus and the rail's "Ubiquitous Language"
-  // shortcut both route here).
+  // Surface the Documentation center tab (the "Docs" mode focus and the rail's "Glossary" doorway both
+  // route here — the doorway label now matches this destination's "Glossary" tab, #146).
   function focusDocs(): void {
     selectDocsTab('glossary');
   }
@@ -2299,12 +2299,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
 
   // Events + Relationships are Preact panels mounted into their hosts; each subscribes to the store's
-  // `activeContext` slice and scopes itself, so the loaders pass the UNSCOPED merged graph / context map
-  // and a scope change re-renders the table without a refetch. The fetch rides the docViews slice's own
-  // per-tab token ('events' / 'relationships'): captured before the await, compared after (so an edit
-  // mid-fetch discards the superseded result), and the panel is marked loaded only for the token it
-  // fetched. The loading/error states write the host imperatively via docMessage, which unmounts the
-  // prior Preact tree first — so the reconciler and the imperative write never fight over the node.
+  // `activeContext` slice and scopes itself, so the loaders pass the UNSCOPED merged graph and a scope
+  // change re-renders the table without a refetch. Both are tabular views of the same model the Canvas
+  // draws; the Relationships table shows structural edges only (the strategic context map has its own
+  // home, the Output → Context Map facet), so neither loader fetches the context map. The fetch rides the
+  // docViews slice's own per-tab token ('events' / 'relationships'): captured before the await, compared
+  // after (so an edit mid-fetch discards the superseded result), and the panel is marked loaded only for
+  // the token it fetched. The loading/error states write the host imperatively via docMessage, which
+  // unmounts the prior Preact tree first — so the reconciler and the imperative write never fight over it.
   async function loadEventsPanel(): Promise<void> {
     await guardedLoad({
       store: appStore,
@@ -2324,15 +2326,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       key: 'relationships',
       isDisposed: () => disposed,
       loading: () => docMessage(relationshipsPanel, 'Loading relationships…'),
-      fetch: () =>
-        Promise.all([
-          bottomGraph(),
-          lsp.contextMap().catch(() => ({ contexts: [], relations: [] }) as ContextMapResult),
-        ]),
-      render: ([graph, ctxMap]) =>
+      fetch: () => bottomGraph(),
+      render: (graph) =>
         renderPanel(
           relationshipsPanel,
-          <RelationshipsPanel store={appStore} graph={graph} contextMap={ctxMap} handlers={bottomTableHandlers} />,
+          <RelationshipsPanel store={appStore} graph={graph} handlers={bottomTableHandlers} />,
         ),
       onError: (e) => docMessage(relationshipsPanel, 'Relationships request failed: ' + String(e), 'error'),
     });

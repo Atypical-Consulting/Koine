@@ -10,7 +10,7 @@ import {
   type EventRow,
   type RelationRow,
 } from '@/model/modelTables';
-import type { ContextMapResult, DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp/lsp';
+import type { DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp/lsp';
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -54,13 +54,6 @@ const combined: DiagramGraph = {
     edge('Order', 'OrderPlaced'), // composition (contains a domain event)
     edge('Sales', 'evt_Sales_OrderShipped', 'publishes'),
     edge('evt_Sales_OrderShipped', 'Shipping', 'consumed by'),
-  ],
-};
-
-const contextMap: ContextMapResult = {
-  contexts: ['Sales', 'Shipping'],
-  relations: [
-    { upstream: 'Sales', downstream: 'Shipping', kind: 'Customer/Supplier', bidirectional: false, sharedTypes: [], acl: [] },
   ],
 };
 
@@ -268,7 +261,7 @@ describe('extractEventFlow command → event → policy → command chain (#439)
 
 describe('extractRelationships', () => {
   test('maps composition edges to source/relation/target', () => {
-    const rows = extractRelationships(combined, { contexts: [], relations: [] });
+    const rows = extractRelationships(combined);
     const contains = rows.filter((r) => r.relation === 'contains');
     expect(contains).toEqual([
       expect.objectContaining({ source: 'Order', relation: 'contains', target: 'OrderItem', contexts: ['Sales'] }),
@@ -276,30 +269,31 @@ describe('extractRelationships', () => {
     ]);
   });
 
-  test('includes strategic relations from the context map', () => {
-    const rows = extractRelationships(combined, contextMap);
-    const strategic = rows.find((r) => r.source === 'Sales' && r.target === 'Shipping');
-    expect(strategic).toMatchObject({ relation: 'Customer/Supplier', contexts: ['Sales', 'Shipping'] });
+  test('emits STRUCTURAL edges only — no strategic context→context rows (those are the Context Map facet)', () => {
+    const rows = extractRelationships(combined);
+    // A context→context relation (Sales → Shipping) must NOT appear here; its canonical home is the
+    // Output → Context Map facet (#146). Every structural row spans exactly one bounded context.
+    expect(rows.some((r) => r.source === 'Sales' && r.target === 'Shipping')).toBe(false);
+    expect(rows.some((r) => r.relation === 'Customer/Supplier')).toBe(false);
+    expect(rows.every((r) => r.contexts.length === 1)).toBe(true);
   });
 
-  test('excludes event-flow and state edges (only structural + strategic relations)', () => {
-    const rows = extractRelationships(combined, contextMap);
+  test('excludes event-flow and state edges (only structural relations)', () => {
+    const rows = extractRelationships(combined);
     expect(rows.some((r) => r.relation === 'publishes')).toBe(false);
     expect(rows.some((r) => r.relation === 'consumed by')).toBe(false);
   });
 
-  test('carries the source span for structural rows; strategic rows have none', () => {
-    const rows = extractRelationships(combined, contextMap);
+  test('carries the source span for structural rows', () => {
+    const rows = extractRelationships(combined);
     const contains = rows.find((r) => r.relation === 'contains')!;
     expect(contains.span).not.toBeNull();
     expect(contains.span!.line).toBe(3); // the source (Order) declaration
-    const strategic = rows.find((r) => r.relation === 'Customer/Supplier')!;
-    expect(strategic.span).toBeNull();
   });
 
-  test('returns [] when there are no edges and no context map', () => {
+  test('returns [] when there are no structural edges', () => {
     const empty: DiagramGraph = { nodes: [], edges: [] };
-    expect(extractRelationships(empty, { contexts: [], relations: [] })).toEqual([]);
+    expect(extractRelationships(empty)).toEqual([]);
   });
 });
 
@@ -490,9 +484,11 @@ describe('renderEventsTable', () => {
 });
 
 describe('renderRelationshipsTable', () => {
+  // Both rows are STRUCTURAL (the only kind the table renders now); the second lacks a span (both
+  // endpoints undocumented) so it renders plain, exercising the spanless-row path.
   const rows: RelationRow[] = [
     { source: 'Order', relation: 'contains', target: 'OrderItem', contexts: ['Sales'], span: span(8) },
-    { source: 'Sales', relation: 'Customer/Supplier', target: 'Shipping', contexts: ['Sales', 'Shipping'], span: null },
+    { source: 'Order', relation: 'references', target: 'Customer', contexts: ['Sales'], span: null },
   ];
 
   test('renders a header row and one body row per relation, with the spec’s columns', () => {
@@ -500,13 +496,13 @@ describe('renderRelationshipsTable', () => {
     const headers = Array.from(el.querySelectorAll('thead th')).map((th) => th.textContent);
     expect(headers).toEqual(['Source', 'Relation', 'Target', 'Contexts']);
     expect(el.querySelectorAll('tbody tr')).toHaveLength(2);
-    const structural = Array.from(el.querySelectorAll('tbody tr')[0].querySelectorAll('td')).map((td) => td.textContent);
-    expect(structural).toEqual(['Order', 'contains', 'OrderItem', 'Sales']);
-    const strategic = Array.from(el.querySelectorAll('tbody tr')[1].querySelectorAll('td')).map((td) => td.textContent);
-    expect(strategic).toEqual(['Sales', 'Customer/Supplier', 'Shipping', 'Sales → Shipping']);
+    const withSpan = Array.from(el.querySelectorAll('tbody tr')[0].querySelectorAll('td')).map((td) => td.textContent);
+    expect(withSpan).toEqual(['Order', 'contains', 'OrderItem', 'Sales']);
+    const spanless = Array.from(el.querySelectorAll('tbody tr')[1].querySelectorAll('td')).map((td) => td.textContent);
+    expect(spanless).toEqual(['Order', 'references', 'Customer', 'Sales']);
   });
 
-  test('a structural row (with a span) is click-to-source', () => {
+  test('a row with a span is click-to-source', () => {
     const goto = vi.fn();
     const el = renderRelationshipsTable(rows, { goto });
     document.body.appendChild(el);
@@ -514,7 +510,7 @@ describe('renderRelationshipsTable', () => {
     expect(goto).toHaveBeenCalledWith(rows[0].span);
   });
 
-  test('a strategic row (no span) is not clickable', () => {
+  test('a spanless row is not clickable', () => {
     const goto = vi.fn();
     const el = renderRelationshipsTable(rows, { goto });
     document.body.appendChild(el);
