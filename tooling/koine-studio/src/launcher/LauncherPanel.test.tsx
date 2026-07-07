@@ -4,7 +4,7 @@
 // wiring); full keyboard nav (Task 7) is still not exercised here. Mirrors
 // src/shell/searchController.test.tsx: mount the real component with fake seams.
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preact';
 import { LauncherPanel } from '@/launcher/LauncherPanel';
 import type { LauncherActionDeps } from '@/launcher/actions';
 import type { LauncherSources } from '@/launcher/buildCatalog';
@@ -554,5 +554,49 @@ describe('LauncherPanel — keyboard model (issue #1143, task 7)', () => {
     fireEvent.keyDown(scrim, { key: 'ArrowDown' });
 
     expect((view.container.querySelector('.lx-actmenu') as HTMLElement).getAttribute('aria-activedescendant')).toBe('lx-act-1');
+  });
+});
+
+describe('LauncherPanel — shared Esc-stack (issue #1164)', () => {
+  /** Dispatch an Escape straight at `document` — the path koine-ui's single shared Esc handler
+   * (`overlay.ts`, registered at import) listens on. It never traverses the `.lx-scrim`, so the
+   * panel's own `onKeyDown` can't intercept it: only a launcher layer that registered on the shared
+   * stack via `registerOverlay` can act on it. That's what makes this a clean probe of the
+   * registration itself, independent of the scrim's keydown trap. */
+  function documentEscape(): void {
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+  }
+
+  test('registers a launcher-level dismiss on the shared stack: a document Escape clears a non-empty query, else closes', async () => {
+    const onClose = vi.fn();
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources, onClose);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+    const input = view.getByLabelText('Search commands, symbols, files…') as HTMLInputElement;
+    fireEvent.input(input, { target: { value: 'Order' } });
+
+    // First document Escape peels the launcher layer's dismiss: a non-empty query clears first.
+    documentEscape();
+    expect(input.value).toBe('');
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Second document Escape, query now empty → the same dismiss closes the launcher.
+    documentEscape();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test('unregisters from the shared stack on hide, so a later document Escape is inert', async () => {
+    const onClose = vi.fn();
+    const sources = makeKnownCatalogSources();
+    const view = render(<LauncherPanel sources={sources} visible={true} onClose={onClose} actionDeps={makeActionDeps()} />);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+
+    // Hide the launcher (visible → false): its cleanup must leave the shared stack.
+    view.rerender(<LauncherPanel sources={sources} visible={false} onClose={onClose} actionDeps={makeActionDeps()} />);
+
+    documentEscape();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

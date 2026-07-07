@@ -9,6 +9,7 @@
 // symbol/event/rule entry's joined `ModelElement`, so `previewFor(selected.entry, {})` reads straight
 // off the catalog.
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { registerOverlay } from '@atypical/koine-ui';
 import { actionsFor, type LauncherActionDeps } from '@/launcher/actions';
 import { ActionMenu } from '@/launcher/ActionMenu';
 import { buildCatalog, type LauncherSources } from '@/launcher/buildCatalog';
@@ -47,8 +48,15 @@ export function LauncherPanel(props: LauncherPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Live-state mirrors read by the shared Esc-stack dismiss (registered once per open, so it can't
+  // close over `query`/`onClose` directly — it reads whatever these hold at Escape time). Assigned on
+  // every render below, so the dismiss always sees the current query and the current onClose.
+  const queryRef = useRef('');
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   const { mode, query } = parseMode(input);
+  queryRef.current = query;
   // Grouped/ranked results (Task 4) — see deriveResults.ts for the empty-query default vs. ranked-and-
   // grouped derivation. `visible` is the same flat top-to-bottom row order the keyboard reducer's ↑/↓
   // indexes into; re-derive it from (catalog, mode, query) rather than threading it through props, since
@@ -152,6 +160,22 @@ export function LauncherPanel(props: LauncherPanelProps) {
       setMenuOpen(false);
       setToastMessage(null);
     }
+  }, [visible]);
+
+  // Join koine-ui's shared Esc-stack while open (issue #1164), the same register-on-open /
+  // unregister-on-close lifecycle inspectorSheet.tsx and welcome.ts use. `registerOverlay` centralizes
+  // Escape ONLY: its single document-level handler routes each Esc to the topmost overlay, so the
+  // launcher dismisses in the right order when it coexists with another overlay. The launcher-level
+  // dismiss mirrors the old reducer's Escape branch — clear a non-empty query first, else close —
+  // reading the live query/onClose off refs since it's registered once per open. The non-Esc chord
+  // traps (⌘K stopPropagation, the `.lx-scrim` clause, `|| launcher.isOpen`) are NOT subsumed and stay.
+  useEffect(() => {
+    if (!visible) return;
+    const unregister = registerOverlay(() => {
+      if (queryRef.current !== '') setInput('');
+      else onCloseRef.current();
+    });
+    return unregister;
   }, [visible]);
 
   function clearMode(): void {
