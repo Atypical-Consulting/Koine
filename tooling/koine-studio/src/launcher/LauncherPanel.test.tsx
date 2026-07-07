@@ -599,4 +599,34 @@ describe('LauncherPanel — shared Esc-stack (issue #1164)', () => {
     documentEscape();
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  test('nests the action menu above the launcher: a bubbling Escape peels menu → launcher via the shared stack', async () => {
+    const onClose = vi.fn();
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources, onClose);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+    const input = view.getByLabelText('Search commands, symbols, files…') as HTMLInputElement;
+
+    // Open the action menu (⌘K) — this pushes a menu layer ON TOP of the launcher layer.
+    fireEvent.keyDown(input, { key: 'k', metaKey: true });
+    expect(view.container.querySelector('.lx-actmenu')).toBeTruthy();
+
+    // A document listener proves the Escape now BUBBLES past the scrim to the shared handler, rather
+    // than being trapped by the panel's stopPropagation and dismissed by the reducer.
+    const docEsc = vi.fn();
+    document.addEventListener('keydown', docEsc);
+    try {
+      // First bubbling Escape from the focused input: the topmost layer (the menu) closes, launcher stays.
+      fireEvent.keyDown(input, { key: 'Escape' });
+      expect(docEsc).toHaveBeenCalledTimes(1); // reached the shared document handler (stopPropagation narrowed)
+      expect(view.container.querySelector('.lx-actmenu')).toBeNull();
+      expect(onClose).not.toHaveBeenCalled();
+
+      // Second bubbling Escape: the menu layer is gone, so the launcher layer is topmost → it closes.
+      fireEvent.keyDown(input, { key: 'Escape' });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener('keydown', docEsc);
+    }
+  });
 });

@@ -178,6 +178,18 @@ export function LauncherPanel(props: LauncherPanelProps) {
     return unregister;
   }, [visible]);
 
+  // Nest the action menu as a second Esc-stack layer ABOVE the launcher (issue #1164): while it's open
+  // the menu is the topmost overlay, so one shared Esc closes just the menu (peeling back to the
+  // launcher layer), and the next Esc dismisses the launcher — the same menu → clear-query → close
+  // order the reducer used to own, now expressed as stack depth. Popped on close/hide/unmount so no
+  // stale close-fn lingers (mirrors inspectorSheet's destroy()). setMenuOpen is a stable setter, so the
+  // dismiss needs no dep beyond `menuOpen`.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const unregister = registerOverlay(() => setMenuOpen(false));
+    return unregister;
+  }, [menuOpen]);
+
   function clearMode(): void {
     // Drop the mode-prefix char, and a single following space if there was one ("@ Order" → "Order"),
     // mirroring parseMode's own leading-space trim so the cleared query is the bare term (#1145 review).
@@ -195,12 +207,15 @@ export function LauncherPanel(props: LauncherPanelProps) {
   // trapped in the input; the container-level listener catches the bubbled keydown).
   function onKeyDown(e: KeyboardEvent): void {
     if (!visible) return;
-    // The launcher is a modal overlay: while it's open it OWNS every keystroke, so stop the event from
-    // bubbling to the shell's GLOBAL window keydown listeners (commandWiring's ⌘K palette-toggle, ide.tsx's
-    // ⌘S save + ⌘Z/⌘Y undo/redo). Those gate on overlayOpen(), which historically didn't see `.lx-scrim`,
-    // so without this they'd fire on the editor beneath the open launcher (issue #1145 review). Typing
-    // still works — the input already received the keystroke; stopPropagation only stops the bubble.
-    e.stopPropagation();
+    // While open the launcher OWNS its chords: stop them bubbling to the shell's GLOBAL window keydown
+    // listeners (commandWiring's ⌘K palette-toggle, ide.tsx's ⌘S save + ⌘Z/⌘Y undo/redo). Those gate on
+    // overlayOpen(), which doesn't see `.lx-scrim`, so without this they'd fire on the editor beneath the
+    // open launcher (issue #1145). Escape is the ONE exception (issue #1164): it must bubble to koine-ui's
+    // shared document-level Esc handler, which now owns overlay dismissal (the launcher + action-menu
+    // layers register on the shared stack above). commandWiring deliberately never handles Escape, so
+    // letting it through can't double-fire a global chord. Typing still works either way — the input
+    // already received the keystroke; stopPropagation only stops the bubble.
+    if (e.key !== 'Escape') e.stopPropagation();
     const keyState: LauncherKeyState = {
       query,
       selectedIndex,
@@ -225,12 +240,6 @@ export function LauncherPanel(props: LauncherPanelProps) {
         setInput(result.query);
         inputRef.current?.focus();
         break;
-      case 'clearQuery':
-        setInput('');
-        break;
-      case 'close':
-        onClose();
-        break;
       case 'toggleMenu':
         if (menuOpen) closeMenu();
         else openMenu();
@@ -240,9 +249,6 @@ export function LauncherPanel(props: LauncherPanelProps) {
         break;
       case 'runMenu':
         runMenuAction(menuIndex);
-        break;
-      case 'closeMenu':
-        closeMenu();
         break;
       case 'none':
         break;
