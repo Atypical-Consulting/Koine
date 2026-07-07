@@ -130,6 +130,15 @@ export interface GitStatus {
   files: GitFile[];
 }
 
+/** Per-(file, area) line churn from `git diff --numstat`, keyed like {@link GitFile} by (relPath, staged).
+ *  `added`/`removed` are null for a binary file (git prints `-`), so the row shows the neutral placeholder. */
+export interface GitNumstatEntry {
+  relPath: string;
+  staged: boolean; // true = staged area (index vs HEAD); false = worktree (working tree vs index)
+  added: number | null;
+  removed: number | null;
+}
+
 /**
  * One commit in `git log` — the SAME field shape as {@link ChangeEntry} from `gitHistory.ts`, so the
  * commit-history UI can render either source uniformly. {@link Platform.gitLog} returns these newest
@@ -364,6 +373,14 @@ export interface Platform {
    * {@link canUseGit} first.
    */
   gitDiff(folderToken: string, relPath: string, staged: boolean): Promise<string>;
+
+  /**
+   * Per-file added/removed line counts for the workspace folder — the staged area (`--cached`) and the
+   * worktree in ONE bounded pair of `git diff --numstat` runs, so the panel shows churn without opening each
+   * diff. One {@link GitNumstatEntry} per (relPath, staged), with null counts for a binary file. Desktop
+   * only; the browser stub rejects. Callers must check {@link canUseGit} first.
+   */
+  gitNumstat(folderToken: string): Promise<GitNumstatEntry[]>;
 
   /**
    * Stage (`git add`) the given paths under the workspace folder, moving each worktree/untracked change

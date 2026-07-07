@@ -16,7 +16,7 @@ import { createWorkspaceController, type WorkspaceControllerDeps } from '@/shell
 import { createAppStore } from '@/store/index';
 import { pathToFileUri } from '@/shell/ideUtils';
 import { newFileKey } from '@/ai/editSession';
-import type { FsEntry, GitLogEntry, GitStatus, KoiFile, McpEndpoint, Platform, SourceDoc } from '@/host/types';
+import type { FsEntry, GitLogEntry, GitNumstatEntry, GitStatus, KoiFile, McpEndpoint, Platform, SourceDoc } from '@/host/types';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
 
 // --- in-memory Platform ------------------------------------------------------
@@ -162,6 +162,9 @@ class FakePlatform implements Platform {
     return this.gitUnavailable();
   }
   gitDiff(): Promise<string> {
+    return this.gitUnavailable();
+  }
+  gitNumstat(): Promise<GitNumstatEntry[]> {
     return this.gitUnavailable();
   }
   gitStage(): Promise<void> {
