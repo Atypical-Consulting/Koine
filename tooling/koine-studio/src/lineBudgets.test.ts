@@ -90,7 +90,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // showOutputFile/clearOutput/targetLabel helpers + the outputRail import (the rail/crumb DOM rendering
   // itself lives in the extracted src/shell/outputRail.ts, not here), ~42 LOC. Measured end-state; #985
   // owns the split.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2444 },
+  // Raised 2444 → 2482: #146 makes the status-bar Context segment a clickable scope picker — the
+  // canonical scope control after #1180 removed the top-bar breadcrumb <select>. The controller gains a
+  // createFloatingMenu instance + the scopeMenuItems/toggleScopeMenu pair + the #sb-context click wiring
+  // and its dispose cleanup, ~38 LOC of composition-root glue reusing the existing applyScope/
+  // setActiveContext/`contexts` machinery. Measured end-state (2482), no headroom; #985 owns the split.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2482 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   { file: 'src/settings/prefs.ts', maxLines: 2250 },

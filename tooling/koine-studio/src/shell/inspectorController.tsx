@@ -43,7 +43,7 @@ import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/settings/persistence';
 import { renderDiagrams } from '@/diagrams/diagrams';
 import { domById, domQueryAll } from '@/shared/domById';
-import { DATA_AXIS, DATA_LAXIS, DATA_RVIEW, LEFT_RAIL_IDS, RSTRIP_BTN_CLASS, axisButtonsSelector, lstripAxisButtonsSelector } from '@atypical/koine-ui';
+import { DATA_AXIS, DATA_LAXIS, DATA_RVIEW, LEFT_RAIL_IDS, RSTRIP_BTN_CLASS, axisButtonsSelector, createFloatingMenu, lstripAxisButtonsSelector, type FloatingMenuItem } from '@atypical/koine-ui';
 import { renderContextMapGraph, type ContextMapGraphHandle } from '@/diagrams/diagrams-maxgraph';
 import { buildContextMapGraph, type ContextMapEdge } from '@/diagrams/contextMapGraph';
 import { NODE_NAVIGATE_EVENT, setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
@@ -550,6 +550,40 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function setActiveContext(scope: ContextScope): void {
     applyScope(scope, true);
   }
+
+  // --- status-bar scope picker (#146) ----------------------------------------
+  // The status-bar "Context" segment is the CANONICAL scope control: PR #1180 removed the dead top-bar
+  // breadcrumb <select> and #923 left only this readout, so clicking the segment is now how you change the
+  // global bounded-context scope without drilling the left Domain navigator. Clicking it opens a small menu
+  // of the model's contexts (read from the store's `contexts` list refreshContextList keeps current) plus
+  // an "All contexts" option, and routes a pick through setActiveContext — the SAME persist=true choke
+  // point the navigator drill uses — so an explicit pick behaves identically and survives a reload. Built
+  // on the shared createFloatingMenu engine (#547): it inherits the keyboard nav, outside-click/Escape
+  // dismissal, focus-return, and aria-expanded toggling every other Studio popup menu has.
+  const scopeMenu = createFloatingMenu({
+    menuClass: 'koi-scope-menu',
+    itemClass: 'koi-scope-menu-item',
+    ariaLabel: 'Bounded context scope',
+  });
+  /** The menu rows: "All contexts" then one per model context (store order), the ACTIVE scope marked with
+   *  a leading ✓ — a non-colour indicator, so the current scope reads without relying on hue (WCAG AA). */
+  function scopeMenuItems(): FloatingMenuItem[] {
+    const active = activeContext.get();
+    const scopes: ContextScope[] = [ALL_CONTEXTS, ...appStore.getState().contexts];
+    return scopes.map((scope) => ({
+      id: `scope:${scope}`,
+      label: `${scope === active ? '✓ ' : ''}${scopeLabel(scope)}`,
+      run: () => setActiveContext(scope),
+    }));
+  }
+  /** Toggle the scope menu under the Context segment. The segment lives in the BOTTOM status bar, so the
+   *  menu is anchored to open UPWARD: we hand the engine the segment's TOP-left as the anchor point and the
+   *  `.koi-scope-menu` CSS lifts it by its own height (a downward menu would fall off-screen). */
+  function toggleScopeMenu(): void {
+    const rect = sbContextEl.getBoundingClientRect();
+    scopeMenu.toggle({ items: scopeMenuItems(), trigger: sbContextEl, at: { x: rect.left, y: rect.top } });
+  }
+  sbContextEl.addEventListener('click', toggleScopeMenu);
 
   // Adopt the current model's contexts as the scope options (the Domain navigator + construct palette
   // read them from the store). "All contexts" is the unscoped sentinel.
@@ -2403,6 +2437,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // still sheet-gated.
     window.removeEventListener('resize', onViewportResize);
     inspectorSheet?.destroy();
+    // Close the status-bar scope menu (#146) and drop its trigger listener, so a torn-down controller
+    // leaves no orphaned menu on document.body and no dangling click handler on the persistent
+    // #sb-context node (which outlives the controller across a workspace switch).
+    scopeMenu.close(false);
+    sbContextEl.removeEventListener('click', toggleScopeMenu);
   }
 
   // Construction has fully succeeded (every required host resolved) — only now register the global

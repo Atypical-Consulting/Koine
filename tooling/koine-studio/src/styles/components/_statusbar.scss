@@ -1,3 +1,5 @@
+@use '../abstracts' as a;
+
 /* --- bottom status bar (chrome v2, #923) ---
    A paper-toned, monospaced bar carrying the full IDE information set: branch · problems (split ✕/⚠) ·
    context · docs-coverage ring · rollup · compiling · emit echo · cursor · encoding · Ready · version.
@@ -61,6 +63,20 @@
     background: transparent;
     color: var(--koi-muted);
   }
+}
+
+/* The Context segment is a menu button (the #146 scope picker): a small up-caret hints the menu opens
+   upward, out of the bottom bar. Drawn as an empty-content border-triangle so it never enters the
+   button's accessible name — the visible "Context: X" text is the name, and aria-haspopup marks the
+   popup. Rides as a flex item, spaced from the label by the segment's own `gap`. */
+.sb-ctx::after {
+  content: '';
+  width: 0;
+  height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-bottom: 4px solid currentColor;
+  opacity: 0.6;
 }
 
 /* The 1.5px-stroke status glyphs (git branch) pick up the segment's text colour. */
@@ -268,4 +284,22 @@
 .unsaved-indicator:focus-visible {
   outline: 2px solid var(--koi-accent);
   outline-offset: 2px;
+}
+
+/* --- status-bar bounded-context scope picker (#146) ------------------------------------------------
+   The floating menu opened by the #sb-context "Context" segment — the canonical scope control after
+   #1180 removed the top-bar breadcrumb <select>. Shares the popover-surface chrome with the toolbar
+   overflow / domain-navigator menus (createFloatingMenu, #547). Because the segment sits in the bottom
+   status bar, the menu opens UPWARD: the controller anchors it at the segment's TOP (`at:{y:rect.top}`),
+   and lifting it by its own full height (translateY(-100%)) drops its bottom edge onto the segment — a
+   downward menu would fall off the viewport. */
+.koi-scope-menu {
+  @include a.popover-surface;
+  z-index: var(--koi-z-popover);
+  min-width: a.$menu-min-width;
+  transform: translateY(calc(-100% - var(--koi-space-1)));
+}
+
+.koi-scope-menu-item {
+  @include a.menu-item;
 }
