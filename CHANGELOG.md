@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Koine is pre-1.0, so minor versions
 may include breaking changes.
 
+## [0.248.0](https://github.com/Atypical-Consulting/Koine/compare/v0.247.0...v0.248.0) (2026-07-07)
+
+
+### Features
+
+* **emit-cs:** finish W1 handler options — --app-not-found result & --app-handler-result readModel ([#1041](https://github.com/Atypical-Consulting/Koine/issues/1041)) ([#1139](https://github.com/Atypical-Consulting/Koine/issues/1139)) ([f249b14](https://github.com/Atypical-Consulting/Koine/commit/f249b14838ad9e7234d17b129d34311d7f4222d6))
+* **emit:** populate DDD kind metadata in the TS/Python/PHP emitters ([#1170](https://github.com/Atypical-Consulting/Koine/issues/1170)) ([#1172](https://github.com/Atypical-Consulting/Koine/issues/1172)) ([5a31a7a](https://github.com/Atypical-Consulting/Koine/commit/5a31a7abdb0f7ec4d5addec72ef6ad40671776f8))
+* **studio:** add ⌘K Spotlight command launcher, retire command palette ([#1143](https://github.com/Atypical-Consulting/Koine/issues/1143)) ([#1145](https://github.com/Atypical-Consulting/Koine/issues/1145)) ([0cd1534](https://github.com/Atypical-Consulting/Koine/commit/0cd1534cf1440ca000666c9aba84e7e2891e28c8))
+* **studio:** add rstrip hairline separator and widen the tool-window spine to 42px ([#1154](https://github.com/Atypical-Consulting/Koine/issues/1154)) ([#1166](https://github.com/Atypical-Consulting/Koine/issues/1166)) ([2c66a47](https://github.com/Atypical-Consulting/Koine/commit/2c66a47575fe71e4a7af94c59376181e02cd0b4d))
+* **studio:** adopt the hexagon-κ logo across app, README, and website ([#1141](https://github.com/Atypical-Consulting/Koine/issues/1141)) ([#1144](https://github.com/Atypical-Consulting/Koine/issues/1144)) ([92119a1](https://github.com/Atypical-Consulting/Koine/commit/92119a11f9e10f4e8bb62ebac5b4fc953341376f))
+* **studio:** flush center — one spine, flush focus, per-file output rail ([#1169](https://github.com/Atypical-Consulting/Koine/issues/1169)) ([e21736b](https://github.com/Atypical-Consulting/Koine/commit/e21736b533b2839cd399aeda528d9a8347aa335a))
+* **studio:** rebuild the Source Control panel to the handoff design ([#1142](https://github.com/Atypical-Consulting/Koine/issues/1142)) ([#1146](https://github.com/Atypical-Consulting/Koine/issues/1146)) ([61ae0b8](https://github.com/Atypical-Consulting/Koine/commit/61ae0b885e7137b0a3ae833e8659861a466ec969))
+* **studio:** wire the Source Control panel's overflow, caret, and history affordances ([#1153](https://github.com/Atypical-Consulting/Koine/issues/1153)) ([#1173](https://github.com/Atypical-Consulting/Koine/issues/1173)) ([4265353](https://github.com/Atypical-Consulting/Koine/commit/4265353e11d3d6c059322ea42cb3dbbb4e4f7f45))
+
+
+### Bug Fixes
+
+* **studio:** drop the koi-space-4 rail inset from the non-Properties right panels ([#1155](https://github.com/Atypical-Consulting/Koine/issues/1155)) ([9075677](https://github.com/Atypical-Consulting/Koine/commit/90756774ad61f62439e69b57b7a2f8d56e90729d))
+* **studio:** make the Output preview pane scroll again ([#1177](https://github.com/Atypical-Consulting/Koine/issues/1177)) ([81cf976](https://github.com/Atypical-Consulting/Koine/commit/81cf97637d9c20be7cb09e382b74a1a6ff9948b0))
+* **studio:** open the domain diagram at its default zoom, keep the % readout truthful ([#1159](https://github.com/Atypical-Consulting/Koine/issues/1159)) ([30fe0f2](https://github.com/Atypical-Consulting/Koine/commit/30fe0f2c76e3480ce3ea8651183010e851908180))
+* **studio:** stop the toolbar accent bleeding into the emit menu and mark the selected target ([#1157](https://github.com/Atypical-Consulting/Koine/issues/1157)) ([33c60d4](https://github.com/Atypical-Consulting/Koine/commit/33c60d4a96e9c11be96999a99fd2c81f3d1e23f0))
+* **tooling:** guard run-ide.ps1 against missing package-lock.json ([#1168](https://github.com/Atypical-Consulting/Koine/issues/1168)) ([2c65ddb](https://github.com/Atypical-Consulting/Koine/commit/2c65ddbf2e7e21226eda228f526dcb39af8ca479))
+
 ## [0.247.0](https://github.com/Atypical-Consulting/Koine/compare/v0.246.0...v0.247.0) (2026-07-06)
 
 
