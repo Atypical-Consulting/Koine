@@ -48,6 +48,15 @@ const seededLog: GitLogEntry[] = [
   { sha: '89abcde01234f', author: 'Ada', date: '2026-05-27T08:15:00Z', message: 'Seed the model' },
 ];
 
+// A long history (> 10) so the Recent-commits log caps at 10 and the "View all" toggle is live (#1153):
+// distinct authors exercise the initials avatar, and the tail past index 9 is what "View all" reveals.
+const longLog: GitLogEntry[] = Array.from({ length: 14 }, (_, i) => ({
+  sha: `${String(i).padStart(4, '0')}c0ffee1234`,
+  author: ['Ada', 'Grace Hopper', 'Philippe Matray'][i % 3],
+  date: `2026-06-${String(28 - i).padStart(2, '0')}T09:00:00Z`,
+  message: `Refine the ordering context — change ${i + 1}`,
+}));
+
 // A staged file (so the composer enables), plus unstaged + untracked entries with a directory prefix
 // (to show the name/dir split) and a top-level file (no dir).
 const changedFiles: GitFile[] = [
@@ -103,6 +112,27 @@ export const CommitOptionsMenuOpen: Story = {
     expect(trigger).toBeTruthy();
     trigger!.click();
     await waitFor(() => expect(document.querySelector('.koi-sc-menu')).toBeTruthy());
+  },
+};
+
+/** The full commit history expanded (#1153): a > 10-commit log caps at the 10 newest, then "View all"
+ *  lifts the cap to reveal the whole already-fetched log in place (no new git op). The `play` waits for the
+ *  capped log, clicks "View all", and asserts the expansion so the Chromium axe/contrast + visual pass
+ *  covers the expanded state. */
+export const FullHistoryExpanded: Story = {
+  name: 'Full history (expanded)',
+  args: { git: makeGit(changedFiles, longLog) },
+  play: async ({ canvasElement }) => {
+    // Wait for the log to load capped at 10, then expand it via "View all".
+    const region = await waitFor(() => {
+      const el = canvasElement.querySelector<HTMLElement>('[aria-label="Recent commits"]');
+      expect(el?.querySelectorAll('.koi-sc-log-item').length).toBe(10);
+      return el!;
+    });
+    const viewAll = canvasElement.querySelector<HTMLElement>('.koi-sc-viewall');
+    expect(viewAll).toBeTruthy();
+    viewAll!.click();
+    await waitFor(() => expect(region.querySelectorAll('.koi-sc-log-item').length).toBe(14));
   },
 };
 

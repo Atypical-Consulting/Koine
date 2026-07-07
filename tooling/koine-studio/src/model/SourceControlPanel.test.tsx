@@ -441,6 +441,79 @@ describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
   });
 });
 
+describe('SourceControlPanel — full commit history (#1153)', () => {
+  // N synthetic commits, newest-first, with unique 7-char SHA prefixes ("sha0000" … "sha00NN") so a test
+  // can assert on an exact row that is (or isn't) rendered without substring collisions.
+  function manyCommits(n: number): GitLogEntry[] {
+    return Array.from({ length: n }, (_, i) => ({
+      sha: `sha${String(i).padStart(4, '0')}deadbeef`,
+      author: i % 2 === 0 ? 'Ada' : 'Grace Hopper',
+      date: '2026-06-01T10:00:00Z',
+      message: `Commit ${i}`,
+    }));
+  }
+
+  function gitWithLog(log: GitLogEntry[]): GitSurface {
+    return {
+      ...makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]),
+      gitLog: vi.fn(async () => log),
+    } satisfies GitSurface;
+  }
+
+  test('caps the recent log at 10 and reveals the whole history on "View all"', async () => {
+    const git = gitWithLog(manyCommits(12));
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const recent = await view.findByRole('region', { name: 'Recent commits' });
+
+    // Only the 10 newest render initially; the 11th/12th (sha0010/sha0011) are held back.
+    await waitFor(() => expect(recent.querySelectorAll('.koi-sc-log-item').length).toBe(10));
+    expect(recent.textContent).not.toContain('sha0011');
+
+    const viewAll = view.getByRole('button', { name: /View all/i }) as HTMLButtonElement;
+    expect(viewAll.disabled).toBe(false);
+    fireEvent.click(viewAll);
+
+    // The full log now renders — all 12 rows, including the previously-capped tail.
+    await waitFor(() => expect(recent.querySelectorAll('.koi-sc-log-item').length).toBe(12));
+    expect(recent.textContent).toContain('sha0011');
+
+    // The Recent-commits landmark is preserved (the region/axe tests depend on its accessible name).
+    expect(view.getByRole('region', { name: 'Recent commits' })).toBe(recent);
+  });
+
+  test('a short history (≤ 10) shows every commit and disables "View all" (nothing more to reveal)', async () => {
+    const git = gitWithLog(manyCommits(3));
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const recent = await view.findByRole('region', { name: 'Recent commits' });
+    await waitFor(() => expect(recent.querySelectorAll('.koi-sc-log-item').length).toBe(3));
+    expect((view.getByRole('button', { name: /View all/i }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  test('empty history: "View all" is absent (nothing to show)', async () => {
+    const git = gitWithLog([]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByRole('region', { name: 'Recent commits' });
+    await view.findByText(/No commits yet/i);
+    expect(view.queryByRole('button', { name: /View all/i })).toBeNull();
+  });
+
+  test('the ⋮ menu "View all commits" item reveals the full history too', async () => {
+    const git = gitWithLog(manyCommits(12));
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const recent = await view.findByRole('region', { name: 'Recent commits' });
+    await waitFor(() => expect(recent.querySelectorAll('.koi-sc-log-item').length).toBe(10));
+
+    fireEvent.click(view.getByRole('button', { name: 'Views and more actions' }));
+    const menu = await waitFor(() => {
+      const m = document.querySelector<HTMLElement>('[role="menu"]');
+      expect(m).not.toBeNull();
+      return m!;
+    });
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'View all commits' }));
+    await waitFor(() => expect(recent.querySelectorAll('.koi-sc-log-item').length).toBe(12));
+  });
+});
+
 describe('SourceControlPanel — save-all-before-commit prompt (#470)', () => {
   beforeEach(() => {
     vi.mocked(koiConfirm).mockReset();

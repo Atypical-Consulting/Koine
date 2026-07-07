@@ -158,6 +158,9 @@ export function SourceControlPanel(props: {
   // Purely presentational: the Refresh glyph flips this on each click so a toggled class spins it 360°
   // (a CSS transition). It carries no git state — the actual refresh is `reload()`.
   const [spin, setSpin] = useState(false);
+  // Whether the Recent-commits log shows its full history rather than the capped 10 newest (#1153). Flipped
+  // by the "View all" button and the ⋮ menu's "View all commits" item; resets to capped on remount.
+  const [showAllCommits, setShowAllCommits] = useState(false);
   // Which file groups are collapsed, keyed by label. Purely presentational + local — groups default to
   // expanded (empty set); the toggle just hides that group's file list via a CSS `collapsed` class.
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(() => new Set());
@@ -356,10 +359,15 @@ export function SourceControlPanel(props: {
   // The recent-commit log is collapsible through the same `collapsedGroups`/`toggleGroup` infra the file
   // groups use — its section carries `collapsed` when its label is in the set (the CSS hides the list).
   const logCollapsed = collapsedGroups.has(RECENT_COMMITS_LABEL);
+  // The recent log shows the 10 newest by default; "View all" lifts that cap to the whole fetched `log`.
+  // The cap only bites past 10 commits, so with ≤ 10 there's nothing more to reveal (the toggle disables).
+  const RECENT_COMMITS_CAP = 10;
+  const hasMoreCommits = log.length > RECENT_COMMITS_CAP;
+  const shownLog = showAllCommits ? log : log.slice(0, RECENT_COMMITS_CAP);
 
-  // Reveal the commit history in place (#1153): un-collapse the Recent-commits section if it's collapsed so
-  // the log is visible. Shared by the "View all" button and the ⋮ menu's "View all commits" item so both
-  // routes land on the same surface. Task 3 extends this to also lift the 10-row display cap.
+  // Reveal the full commit history in place (#1153): un-collapse the Recent-commits section if it's collapsed
+  // AND lift the 10-row display cap, so the whole already-fetched `log` shows — no new git op. Shared by the
+  // ⋮ menu's "View all commits" item and (as the "expand" direction) the "View all" button.
   const revealAllCommits = () => {
     setCollapsedGroups((prev) => {
       if (!prev.has(RECENT_COMMITS_LABEL)) return prev;
@@ -367,6 +375,7 @@ export function SourceControlPanel(props: {
       next.delete(RECENT_COMMITS_LABEL);
       return next;
     });
+    setShowAllCommits(true);
   };
 
   // Build + toggle the ⋮ overflow menu (#1153). The LIVE items are already backed by the panel's existing
@@ -785,16 +794,28 @@ export function SourceControlPanel(props: {
                 </svg>
                 {RECENT_COMMITS_LABEL}
               </button>
-              {/* Full commit-history surface is a follow-up; disabled placeholder, not a live-but-inert link. */}
-              <button type="button" class="koi-sc-viewall" aria-label="View all commits (coming soon)" disabled>
-                View all
-              </button>
+              {/* Full commit-history surface (#1153): an in-panel expansion over the already-fetched `log`
+                  (no new git op). Rendered only when there are commits, and openable only when the 10-row
+                  cap actually hides some — with ≤ 10 everything already shows, so the toggle is disabled
+                  rather than a live-but-inert control. */}
+              {log.length > 0 && (
+                <button
+                  type="button"
+                  class="koi-sc-viewall"
+                  aria-label={showAllCommits ? 'Show fewer commits' : 'View all commits'}
+                  title={hasMoreCommits ? undefined : 'All commits are shown'}
+                  disabled={!hasMoreCommits}
+                  onClick={() => setShowAllCommits((v) => !v)}
+                >
+                  {showAllCommits ? 'Show less' : 'View all'}
+                </button>
+              )}
             </div>
             {log.length === 0 ? (
               <p class="koi-docs-empty">No commits yet.</p>
             ) : (
               <ul class="koi-sc-log">
-                {log.slice(0, 10).map((c) => (
+                {shownLog.map((c) => (
                   <li key={c.sha} class="koi-sc-log-item">
                     {/* Decorative accent-tinted initials avatar; aria-hidden — the author is in the meta. */}
                     <span class="koi-sc-avatar" aria-hidden="true">
