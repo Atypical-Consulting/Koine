@@ -21,3 +21,10 @@ static Koine.Compiler.MarkdownDoc.Tag(int? since, string? deprecated) -> string!
 static Koine.Compiler.MarkdownDoc.Tag(Koine.Compiler.Ast.TypeDecl! t) -> string!
 static Koine.Compiler.MarkdownDoc.WriteFields(System.Text.StringBuilder! sb, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>! members) -> void
 static Koine.Compiler.MarkdownDoc.WriteRules(System.Text.StringBuilder! sb, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Invariant!>! invariants) -> void
+Koine.Compiler.FactoryIdBinding.Deconstruct(out Koine.Compiler.FactoryIdSource Source, out string? AliasFrom) -> void
+Koine.Compiler.FactoryIdBinding.Equals(Koine.Compiler.FactoryIdBinding other) -> bool
+override Koine.Compiler.FactoryIdBinding.GetHashCode() -> int
+static Koine.Compiler.FactoryIdBinding.operator !=(Koine.Compiler.FactoryIdBinding left, Koine.Compiler.FactoryIdBinding right) -> bool
+static Koine.Compiler.FactoryIdBinding.operator ==(Koine.Compiler.FactoryIdBinding left, Koine.Compiler.FactoryIdBinding right) -> bool
+~override Koine.Compiler.FactoryIdBinding.Equals(object obj) -> bool
+~override Koine.Compiler.FactoryIdBinding.ToString() -> string

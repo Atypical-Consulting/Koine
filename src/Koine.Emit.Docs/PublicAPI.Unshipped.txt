@@ -67,3 +67,43 @@ Koine.Compiler.DocsEmitterProvider.Create(Koine.Compiler.Emit.EmitterOptions! op
 Koine.Compiler.DocsEmitterProvider.DocsEmitterProvider() -> void
 Koine.Compiler.DocsEmitterProvider.IsEmitTarget.get -> bool
 Koine.Compiler.DocsEmitterProvider.Target.get -> string!
+Koine.Compiler.DiagramDescriptor.<Clone>$() -> Koine.Compiler.DiagramDescriptor!
+Koine.Compiler.DiagramDescriptor.Deconstruct(out string! Caption, out string! Kind, out string! Mermaid, out Koine.Compiler.DiagramGraph! Graph) -> void
+Koine.Compiler.DiagramDescriptor.Equals(Koine.Compiler.DiagramDescriptor? other) -> bool
+Koine.Compiler.DiagramEdge.<Clone>$() -> Koine.Compiler.DiagramEdge!
+Koine.Compiler.DiagramEdge.Deconstruct(out string! From, out string! To, out string? Label, out string? Cardinality, out string? SourceCardinality, out string? ArrowKind, out string? BackingMember) -> void
+Koine.Compiler.DiagramEdge.Equals(Koine.Compiler.DiagramEdge? other) -> bool
+Koine.Compiler.DiagramGraph.<Clone>$() -> Koine.Compiler.DiagramGraph!
+Koine.Compiler.DiagramGraph.Deconstruct(out System.Collections.Generic.IReadOnlyList<Koine.Compiler.DiagramNode!>! Nodes, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.DiagramEdge!>! Edges) -> void
+Koine.Compiler.DiagramGraph.Equals(Koine.Compiler.DiagramGraph? other) -> bool
+Koine.Compiler.DiagramMember.<Clone>$() -> Koine.Compiler.DiagramMember!
+Koine.Compiler.DiagramMember.Deconstruct(out string! Text, out string! Kind) -> void
+Koine.Compiler.DiagramMember.Equals(Koine.Compiler.DiagramMember? other) -> bool
+Koine.Compiler.DiagramNode.<Clone>$() -> Koine.Compiler.DiagramNode!
+Koine.Compiler.DiagramNode.Deconstruct(out string! Id, out string! Label, out string! Kind, out string! QualifiedName, out Koine.Compiler.Ast.SourceSpan? Span, out string? Stereotype, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.DiagramMember!>? Members, out System.Collections.Generic.IReadOnlyList<string!>? Invariants, out string? Doc) -> void
+Koine.Compiler.DiagramNode.Equals(Koine.Compiler.DiagramNode? other) -> bool
+override Koine.Compiler.DiagramDescriptor.Equals(object? obj) -> bool
+override Koine.Compiler.DiagramDescriptor.GetHashCode() -> int
+override Koine.Compiler.DiagramDescriptor.ToString() -> string!
+override Koine.Compiler.DiagramEdge.Equals(object? obj) -> bool
+override Koine.Compiler.DiagramEdge.GetHashCode() -> int
+override Koine.Compiler.DiagramEdge.ToString() -> string!
+override Koine.Compiler.DiagramGraph.Equals(object? obj) -> bool
+override Koine.Compiler.DiagramGraph.GetHashCode() -> int
+override Koine.Compiler.DiagramGraph.ToString() -> string!
+override Koine.Compiler.DiagramMember.Equals(object? obj) -> bool
+override Koine.Compiler.DiagramMember.GetHashCode() -> int
+override Koine.Compiler.DiagramMember.ToString() -> string!
+override Koine.Compiler.DiagramNode.Equals(object? obj) -> bool
+override Koine.Compiler.DiagramNode.GetHashCode() -> int
+override Koine.Compiler.DiagramNode.ToString() -> string!
+static Koine.Compiler.DiagramDescriptor.operator !=(Koine.Compiler.DiagramDescriptor? left, Koine.Compiler.DiagramDescriptor? right) -> bool
+static Koine.Compiler.DiagramDescriptor.operator ==(Koine.Compiler.DiagramDescriptor? left, Koine.Compiler.DiagramDescriptor? right) -> bool
+static Koine.Compiler.DiagramEdge.operator !=(Koine.Compiler.DiagramEdge? left, Koine.Compiler.DiagramEdge? right) -> bool
+static Koine.Compiler.DiagramEdge.operator ==(Koine.Compiler.DiagramEdge? left, Koine.Compiler.DiagramEdge? right) -> bool
+static Koine.Compiler.DiagramGraph.operator !=(Koine.Compiler.DiagramGraph? left, Koine.Compiler.DiagramGraph? right) -> bool
+static Koine.Compiler.DiagramGraph.operator ==(Koine.Compiler.DiagramGraph? left, Koine.Compiler.DiagramGraph? right) -> bool
+static Koine.Compiler.DiagramMember.operator !=(Koine.Compiler.DiagramMember? left, Koine.Compiler.DiagramMember? right) -> bool
+static Koine.Compiler.DiagramMember.operator ==(Koine.Compiler.DiagramMember? left, Koine.Compiler.DiagramMember? right) -> bool
+static Koine.Compiler.DiagramNode.operator !=(Koine.Compiler.DiagramNode? left, Koine.Compiler.DiagramNode? right) -> bool
+static Koine.Compiler.DiagramNode.operator ==(Koine.Compiler.DiagramNode? left, Koine.Compiler.DiagramNode? right) -> bool

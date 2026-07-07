@@ -339,3 +339,1156 @@ Koine.Compiler.Ast.ModelIndex.OwnerResolution.WasAmbiguous.get -> bool
 Koine.Compiler.Ast.ModelIndex.OwnerResolution.WasAmbiguous.init -> void
 Koine.Compiler.Ast.ModelIndex.ResolveOwner(string! koineName, string! referencingContext) -> Koine.Compiler.Ast.ModelIndex.OwnerResolution
 Koine.Compiler.Ast.ModelIndex.ResolveOwner(string! koineName, string? qualifier, string! referencingContext) -> Koine.Compiler.Ast.ModelIndex.OwnerResolution
+Koine.Compiler.Ast.AclMapping.Deconstruct(out string! UpstreamContext, out string! UpstreamType, out string! LocalContext, out string! LocalType) -> void
+Koine.Compiler.Ast.AclMapping.Equals(Koine.Compiler.Ast.AclMapping? other) -> bool
+Koine.Compiler.Ast.AggregateDecl.Deconstruct(out string! Name, out string! RootName, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.TypeDecl!>! Types, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.SpecDecl!>! Specs, out bool IsVersioned, out Koine.Compiler.Ast.RepositoryDecl? Repository) -> void
+Koine.Compiler.Ast.AggregateDecl.Equals(Koine.Compiler.Ast.AggregateDecl? other) -> bool
+Koine.Compiler.Ast.BinaryExpr.Deconstruct(out Koine.Compiler.Ast.BinaryOp Op, out Koine.Compiler.Ast.Expr! Left, out Koine.Compiler.Ast.Expr! Right) -> void
+Koine.Compiler.Ast.BinaryExpr.Equals(Koine.Compiler.Ast.BinaryExpr? other) -> bool
+Koine.Compiler.Ast.Bound.BoundBinary.Deconstruct(out Koine.Compiler.Ast.BinaryOp Op, out Koine.Compiler.Ast.Bound.BoundExpression! Left, out Koine.Compiler.Ast.Bound.BoundExpression! Right) -> void
+Koine.Compiler.Ast.Bound.BoundBinary.Equals(Koine.Compiler.Ast.Bound.BoundBinary? other) -> bool
+Koine.Compiler.Ast.Bound.BoundCall.Deconstruct(out Koine.Compiler.Ast.Bound.BoundExpression! Receiver, out string! Method, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Bound.BoundExpression!>! Args) -> void
+Koine.Compiler.Ast.Bound.BoundCall.Equals(Koine.Compiler.Ast.Bound.BoundCall? other) -> bool
+Koine.Compiler.Ast.Bound.BoundCoalesce.Deconstruct(out Koine.Compiler.Ast.Bound.BoundExpression! Left, out Koine.Compiler.Ast.Bound.BoundExpression! Right) -> void
+Koine.Compiler.Ast.Bound.BoundCoalesce.Equals(Koine.Compiler.Ast.Bound.BoundCoalesce? other) -> bool
+Koine.Compiler.Ast.Bound.BoundConditional.Deconstruct(out Koine.Compiler.Ast.Bound.BoundExpression! Condition, out Koine.Compiler.Ast.Bound.BoundExpression! Then, out Koine.Compiler.Ast.Bound.BoundExpression! Else) -> void
+Koine.Compiler.Ast.Bound.BoundConditional.Equals(Koine.Compiler.Ast.Bound.BoundConditional? other) -> bool
+Koine.Compiler.Ast.Bound.BoundExpression.BoundExpression() -> void
+Koine.Compiler.Ast.Bound.BoundExpression.BoundExpression(Koine.Compiler.Ast.Bound.BoundExpression! original) -> void
+Koine.Compiler.Ast.Bound.BoundField.Deconstruct(out string! Name, out Koine.Compiler.Ast.Bound.FieldKind Kind, out Koine.Compiler.Ast.Bound.DefaultKind DefaultKind, out Koine.Compiler.Ast.Bound.CollectionShape CollectionShape, out Koine.Compiler.Ast.Bound.BoundExpression? DerivedInitializer) -> void
+Koine.Compiler.Ast.Bound.BoundField.Equals(Koine.Compiler.Ast.Bound.BoundField? other) -> bool
+Koine.Compiler.Ast.Bound.BoundGuard.Deconstruct(out Koine.Compiler.Ast.Bound.BoundExpression! Body, out Koine.Compiler.Ast.Bound.BoundExpression! Condition) -> void
+Koine.Compiler.Ast.Bound.BoundGuard.Equals(Koine.Compiler.Ast.Bound.BoundGuard? other) -> bool
+Koine.Compiler.Ast.Bound.BoundInvariant.Deconstruct(out Koine.Compiler.Ast.Bound.BoundExpression! Condition, out string! Message) -> void
+Koine.Compiler.Ast.Bound.BoundInvariant.Equals(Koine.Compiler.Ast.Bound.BoundInvariant? other) -> bool
+Koine.Compiler.Ast.Bound.BoundLambda.Deconstruct(out string! Parameter, out Koine.Compiler.Ast.Bound.BoundExpression! Body) -> void
+Koine.Compiler.Ast.Bound.BoundLambda.Equals(Koine.Compiler.Ast.Bound.BoundLambda? other) -> bool
+Koine.Compiler.Ast.Bound.BoundLet.Deconstruct(out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Bound.BoundLetBinding!>! Bindings, out Koine.Compiler.Ast.Bound.BoundExpression! Body) -> void
+Koine.Compiler.Ast.Bound.BoundLet.Equals(Koine.Compiler.Ast.Bound.BoundLet? other) -> bool
+Koine.Compiler.Ast.Bound.BoundLetBinding.Deconstruct(out string! Name, out Koine.Compiler.Ast.Bound.BoundExpression! Value) -> void
+Koine.Compiler.Ast.Bound.BoundLetBinding.Equals(Koine.Compiler.Ast.Bound.BoundLetBinding? other) -> bool
+Koine.Compiler.Ast.Bound.BoundLiteral.Deconstruct(out Koine.Compiler.Ast.LiteralKind Kind, out string! Text) -> void
+Koine.Compiler.Ast.Bound.BoundLiteral.Equals(Koine.Compiler.Ast.Bound.BoundLiteral? other) -> bool
+Koine.Compiler.Ast.Bound.BoundMatch.Deconstruct(out Koine.Compiler.Ast.Bound.BoundExpression! Target, out string! Pattern) -> void
+Koine.Compiler.Ast.Bound.BoundMatch.Equals(Koine.Compiler.Ast.Bound.BoundMatch? other) -> bool
+Koine.Compiler.Ast.Bound.BoundMemberAccess.Deconstruct(out Koine.Compiler.Ast.Bound.BoundExpression! Receiver, out string! MemberName, out Koine.Compiler.Ast.Symbol! Member) -> void
+Koine.Compiler.Ast.Bound.BoundMemberAccess.Equals(Koine.Compiler.Ast.Bound.BoundMemberAccess? other) -> bool
+Koine.Compiler.Ast.Bound.BoundNode.BoundNode() -> void
+Koine.Compiler.Ast.Bound.BoundNode.BoundNode(Koine.Compiler.Ast.Bound.BoundNode! original) -> void
+Koine.Compiler.Ast.Bound.BoundReference.Deconstruct(out Koine.Compiler.Ast.Symbol! Symbol) -> void
+Koine.Compiler.Ast.Bound.BoundReference.Equals(Koine.Compiler.Ast.Bound.BoundReference? other) -> bool
+Koine.Compiler.Ast.Bound.BoundUnary.Deconstruct(out Koine.Compiler.Ast.UnaryOp Op, out Koine.Compiler.Ast.Bound.BoundExpression! Operand) -> void
+Koine.Compiler.Ast.Bound.BoundUnary.Equals(Koine.Compiler.Ast.Bound.BoundUnary? other) -> bool
+Koine.Compiler.Ast.Bound.BoundValueObject.Deconstruct(out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Bound.BoundField!>! Fields, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Bound.BoundInvariant!>! Invariants) -> void
+Koine.Compiler.Ast.Bound.BoundValueObject.Equals(Koine.Compiler.Ast.Bound.BoundValueObject? other) -> bool
+Koine.Compiler.Ast.CallExpr.Deconstruct(out Koine.Compiler.Ast.Expr! Target, out string! Method, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Expr!>! Args) -> void
+Koine.Compiler.Ast.CallExpr.Equals(Koine.Compiler.Ast.CallExpr? other) -> bool
+Koine.Compiler.Ast.CoalesceExpr.Deconstruct(out Koine.Compiler.Ast.Expr! Left, out Koine.Compiler.Ast.Expr! Right) -> void
+Koine.Compiler.Ast.CoalesceExpr.Equals(Koine.Compiler.Ast.CoalesceExpr? other) -> bool
+Koine.Compiler.Ast.CommandDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandStmt!>! Body, out Koine.Compiler.Ast.TypeRef? ReturnType) -> void
+Koine.Compiler.Ast.CommandDecl.Equals(Koine.Compiler.Ast.CommandDecl? other) -> bool
+Koine.Compiler.Ast.CommandStmt.CommandStmt() -> void
+Koine.Compiler.Ast.CommandStmt.CommandStmt(Koine.Compiler.Ast.CommandStmt! original) -> void
+Koine.Compiler.Ast.ConditionalExpr.Deconstruct(out Koine.Compiler.Ast.Expr! Condition, out Koine.Compiler.Ast.Expr! Then, out Koine.Compiler.Ast.Expr! Else) -> void
+Koine.Compiler.Ast.ConditionalExpr.Equals(Koine.Compiler.Ast.ConditionalExpr? other) -> bool
+Koine.Compiler.Ast.ContextMapNode.Deconstruct(out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ContextRelation!>! Relations) -> void
+Koine.Compiler.Ast.ContextMapNode.Equals(Koine.Compiler.Ast.ContextMapNode? other) -> bool
+Koine.Compiler.Ast.ContextNode.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.TypeDecl!>! Types, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.SpecDecl!>! Specs, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ServiceDecl!>! Services, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.PolicyDecl!>! Policies, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ImportDecl!>! Imports, out System.Collections.Generic.IReadOnlyList<string!>! ModuleNames, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.PublishDecl!>! Publishes, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.SubscribeDecl!>! Subscribes) -> void
+Koine.Compiler.Ast.ContextNode.Equals(Koine.Compiler.Ast.ContextNode? other) -> bool
+Koine.Compiler.Ast.ContextRelation.Deconstruct(out string! Upstream, out string! Downstream, out Koine.Compiler.Ast.ContextRelationKind Kind, out bool IsBidirectional, out System.Collections.Generic.IReadOnlyList<string!>! SharedTypes, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.AclMapping!>! AclMappings) -> void
+Koine.Compiler.Ast.ContextRelation.Equals(Koine.Compiler.Ast.ContextRelation? other) -> bool
+Koine.Compiler.Ast.CoverageItem.<Clone>$() -> Koine.Compiler.Ast.CoverageItem!
+Koine.Compiler.Ast.CoverageItem.Deconstruct(out string! Kind, out string! Name, out string! Context, out Koine.Compiler.Ast.CoverageState State) -> void
+Koine.Compiler.Ast.CoverageItem.Equals(Koine.Compiler.Ast.CoverageItem? other) -> bool
+Koine.Compiler.Ast.CoverageReport.<Clone>$() -> Koine.Compiler.Ast.CoverageReport!
+Koine.Compiler.Ast.CoverageReport.Deconstruct(out string! Target, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CoverageItem!>! Items) -> void
+Koine.Compiler.Ast.CoverageReport.Equals(Koine.Compiler.Ast.CoverageReport? other) -> bool
+Koine.Compiler.Ast.EmitArg.Deconstruct(out string! Field, out Koine.Compiler.Ast.Expr! Value) -> void
+Koine.Compiler.Ast.EmitArg.Equals(Koine.Compiler.Ast.EmitArg? other) -> bool
+Koine.Compiler.Ast.EmitClause.Deconstruct(out string! EventName, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.EmitArg!>! Args) -> void
+Koine.Compiler.Ast.EmitClause.Equals(Koine.Compiler.Ast.EmitClause? other) -> bool
+Koine.Compiler.Ast.EntityDecl.Deconstruct(out string! Name, out string! IdentityName, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>! Members, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Invariant!>! Invariants, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandDecl!>! Commands, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.StatesDecl!>! States, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.FactoryDecl!>! Factories, out Koine.Compiler.Ast.IdentityStrategy IdStrategy, out string? IdBackingType) -> void
+Koine.Compiler.Ast.EntityDecl.Equals(Koine.Compiler.Ast.EntityDecl? other) -> bool
+Koine.Compiler.Ast.EnumDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.EnumMember!>! Members, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Signature) -> void
+Koine.Compiler.Ast.EnumDecl.Equals(Koine.Compiler.Ast.EnumDecl? other) -> bool
+Koine.Compiler.Ast.EnumMember.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Expr!>! Args) -> void
+Koine.Compiler.Ast.EnumMember.Equals(Koine.Compiler.Ast.EnumMember? other) -> bool
+Koine.Compiler.Ast.ErrorNode.Deconstruct(out string! Text) -> void
+Koine.Compiler.Ast.ErrorNode.Equals(Koine.Compiler.Ast.ErrorNode? other) -> bool
+Koine.Compiler.Ast.EventDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>! Members) -> void
+Koine.Compiler.Ast.EventDecl.Equals(Koine.Compiler.Ast.EventDecl? other) -> bool
+Koine.Compiler.Ast.Expr.Expr() -> void
+Koine.Compiler.Ast.Expr.Expr(Koine.Compiler.Ast.Expr! original) -> void
+Koine.Compiler.Ast.FactoryDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandStmt!>! Body) -> void
+Koine.Compiler.Ast.FactoryDecl.Equals(Koine.Compiler.Ast.FactoryDecl? other) -> bool
+Koine.Compiler.Ast.FinderDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, out Koine.Compiler.Ast.TypeRef! ResultType) -> void
+Koine.Compiler.Ast.FinderDecl.Equals(Koine.Compiler.Ast.FinderDecl? other) -> bool
+Koine.Compiler.Ast.GuardExpr.Deconstruct(out Koine.Compiler.Ast.Expr! Body, out Koine.Compiler.Ast.Expr! Condition) -> void
+Koine.Compiler.Ast.GuardExpr.Equals(Koine.Compiler.Ast.GuardExpr? other) -> bool
+Koine.Compiler.Ast.IdentifierExpr.Deconstruct(out string! Name) -> void
+Koine.Compiler.Ast.IdentifierExpr.Equals(Koine.Compiler.Ast.IdentifierExpr? other) -> bool
+Koine.Compiler.Ast.ImportDecl.Deconstruct(out string! Context, out System.Collections.Generic.IReadOnlyList<string!>! Names, out bool IsWildcard) -> void
+Koine.Compiler.Ast.ImportDecl.Equals(Koine.Compiler.Ast.ImportDecl? other) -> bool
+Koine.Compiler.Ast.Initialization.Deconstruct(out string! Field, out Koine.Compiler.Ast.Expr! Value) -> void
+Koine.Compiler.Ast.Initialization.Equals(Koine.Compiler.Ast.Initialization? other) -> bool
+Koine.Compiler.Ast.IntegrationEventDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>! Members) -> void
+Koine.Compiler.Ast.IntegrationEventDecl.Equals(Koine.Compiler.Ast.IntegrationEventDecl? other) -> bool
+Koine.Compiler.Ast.Invariant.Deconstruct(out Koine.Compiler.Ast.Expr! Condition, out string? Message) -> void
+Koine.Compiler.Ast.Invariant.Equals(Koine.Compiler.Ast.Invariant? other) -> bool
+Koine.Compiler.Ast.KoineModel.Deconstruct(out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ContextNode!>! Contexts, out Koine.Compiler.Ast.ContextMapNode? ContextMap) -> void
+Koine.Compiler.Ast.KoineModel.Equals(Koine.Compiler.Ast.KoineModel? other) -> bool
+Koine.Compiler.Ast.KoineNode.KoineNode() -> void
+Koine.Compiler.Ast.KoineNode.KoineNode(Koine.Compiler.Ast.KoineNode! original) -> void
+Koine.Compiler.Ast.LambdaExpr.Deconstruct(out string! Parameter, out Koine.Compiler.Ast.Expr! Body) -> void
+Koine.Compiler.Ast.LambdaExpr.Equals(Koine.Compiler.Ast.LambdaExpr? other) -> bool
+Koine.Compiler.Ast.LetBinding.Deconstruct(out string! Name, out Koine.Compiler.Ast.Expr! Value) -> void
+Koine.Compiler.Ast.LetBinding.Equals(Koine.Compiler.Ast.LetBinding? other) -> bool
+Koine.Compiler.Ast.LetExpr.Deconstruct(out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.LetBinding!>! Bindings, out Koine.Compiler.Ast.Expr! Body) -> void
+Koine.Compiler.Ast.LetExpr.Equals(Koine.Compiler.Ast.LetExpr? other) -> bool
+Koine.Compiler.Ast.LiteralExpr.Deconstruct(out Koine.Compiler.Ast.LiteralKind Kind, out string! Text) -> void
+Koine.Compiler.Ast.LiteralExpr.Equals(Koine.Compiler.Ast.LiteralExpr? other) -> bool
+Koine.Compiler.Ast.MatchExpr.Deconstruct(out Koine.Compiler.Ast.Expr! Target, out string! Pattern) -> void
+Koine.Compiler.Ast.MatchExpr.Equals(Koine.Compiler.Ast.MatchExpr? other) -> bool
+Koine.Compiler.Ast.Member.Deconstruct(out string! Name, out Koine.Compiler.Ast.TypeRef! Type, out Koine.Compiler.Ast.Expr? Initializer) -> void
+Koine.Compiler.Ast.Member.Equals(Koine.Compiler.Ast.Member? other) -> bool
+Koine.Compiler.Ast.MemberAccessExpr.Deconstruct(out Koine.Compiler.Ast.Expr! Target, out string! MemberName) -> void
+Koine.Compiler.Ast.MemberAccessExpr.Equals(Koine.Compiler.Ast.MemberAccessExpr? other) -> bool
+Koine.Compiler.Ast.ModelIndex.OwnerResolution.Deconstruct(out string? Owner, out bool WasAmbiguous) -> void
+Koine.Compiler.Ast.ModelIndex.OwnerResolution.Equals(Koine.Compiler.Ast.ModelIndex.OwnerResolution other) -> bool
+Koine.Compiler.Ast.ModelIndex.RefResolution.Deconstruct(out Koine.Compiler.Ast.ModelIndex.RefKind Kind, out System.Collections.Generic.IReadOnlyList<string!>! Candidates) -> void
+Koine.Compiler.Ast.ModelIndex.RefResolution.Equals(Koine.Compiler.Ast.ModelIndex.RefResolution other) -> bool
+Koine.Compiler.Ast.OperationDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, out Koine.Compiler.Ast.TypeRef! ReturnType, out Koine.Compiler.Ast.Expr? Body) -> void
+Koine.Compiler.Ast.OperationDecl.Equals(Koine.Compiler.Ast.OperationDecl? other) -> bool
+Koine.Compiler.Ast.Param.Deconstruct(out string! Name, out Koine.Compiler.Ast.TypeRef! Type) -> void
+Koine.Compiler.Ast.Param.Equals(Koine.Compiler.Ast.Param? other) -> bool
+Koine.Compiler.Ast.PolicyArg.Deconstruct(out string! Parameter, out Koine.Compiler.Ast.Expr! Value) -> void
+Koine.Compiler.Ast.PolicyArg.Equals(Koine.Compiler.Ast.PolicyArg? other) -> bool
+Koine.Compiler.Ast.PolicyDecl.Deconstruct(out string! Name, out string! EventName, out Koine.Compiler.Ast.PolicyReaction! Reaction) -> void
+Koine.Compiler.Ast.PolicyDecl.Equals(Koine.Compiler.Ast.PolicyDecl? other) -> bool
+Koine.Compiler.Ast.PolicyReaction.Deconstruct(out string! TargetType, out string! CommandName, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.PolicyArg!>! Args) -> void
+Koine.Compiler.Ast.PolicyReaction.Equals(Koine.Compiler.Ast.PolicyReaction? other) -> bool
+Koine.Compiler.Ast.PublishDecl.Deconstruct(out string! EventName) -> void
+Koine.Compiler.Ast.PublishDecl.Equals(Koine.Compiler.Ast.PublishDecl? other) -> bool
+Koine.Compiler.Ast.QueryDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Criteria, out Koine.Compiler.Ast.TypeRef! ResultType) -> void
+Koine.Compiler.Ast.QueryDecl.Equals(Koine.Compiler.Ast.QueryDecl? other) -> bool
+Koine.Compiler.Ast.ReadModelDecl.Deconstruct(out string! Name, out string! SourceType, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ReadModelField!>! Fields) -> void
+Koine.Compiler.Ast.ReadModelDecl.Equals(Koine.Compiler.Ast.ReadModelDecl? other) -> bool
+Koine.Compiler.Ast.ReadModelField.Deconstruct(out string! Name, out Koine.Compiler.Ast.TypeRef? Type, out Koine.Compiler.Ast.Expr? Projection) -> void
+Koine.Compiler.Ast.ReadModelField.Equals(Koine.Compiler.Ast.ReadModelField? other) -> bool
+Koine.Compiler.Ast.RepositoryDecl.Deconstruct(out System.Collections.Generic.IReadOnlyList<string!>? Operations, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.FinderDecl!>! Finders) -> void
+Koine.Compiler.Ast.RepositoryDecl.Equals(Koine.Compiler.Ast.RepositoryDecl? other) -> bool
+Koine.Compiler.Ast.RequiresClause.Deconstruct(out Koine.Compiler.Ast.Expr! Condition, out string? Message) -> void
+Koine.Compiler.Ast.RequiresClause.Equals(Koine.Compiler.Ast.RequiresClause? other) -> bool
+Koine.Compiler.Ast.ResultClause.Deconstruct(out Koine.Compiler.Ast.Expr! Value) -> void
+Koine.Compiler.Ast.ResultClause.Equals(Koine.Compiler.Ast.ResultClause? other) -> bool
+Koine.Compiler.Ast.ServiceDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.OperationDecl!>! Operations, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.UseCaseDecl!>! UseCases) -> void
+Koine.Compiler.Ast.ServiceDecl.Equals(Koine.Compiler.Ast.ServiceDecl? other) -> bool
+Koine.Compiler.Ast.SourceSpan.Deconstruct(out int Line, out int Column, out int EndLine, out int EndColumn, out int Offset, out int Length, out string? File) -> void
+Koine.Compiler.Ast.SourceSpan.Equals(Koine.Compiler.Ast.SourceSpan other) -> bool
+Koine.Compiler.Ast.SpecDecl.Deconstruct(out string! Name, out string! TargetType, out Koine.Compiler.Ast.Expr! Condition) -> void
+Koine.Compiler.Ast.SpecDecl.Equals(Koine.Compiler.Ast.SpecDecl? other) -> bool
+Koine.Compiler.Ast.StateRule.Deconstruct(out string! From, out System.Collections.Generic.IReadOnlyList<string!>! To, out Koine.Compiler.Ast.Expr? Guard) -> void
+Koine.Compiler.Ast.StateRule.Equals(Koine.Compiler.Ast.StateRule? other) -> bool
+Koine.Compiler.Ast.StatesDecl.Deconstruct(out string! Field, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.StateRule!>! Rules) -> void
+Koine.Compiler.Ast.StatesDecl.Equals(Koine.Compiler.Ast.StatesDecl? other) -> bool
+Koine.Compiler.Ast.SubscribeDecl.Deconstruct(out string! Context, out string! EventName) -> void
+Koine.Compiler.Ast.SubscribeDecl.Equals(Koine.Compiler.Ast.SubscribeDecl? other) -> bool
+Koine.Compiler.Ast.SyntaxTrivia.Deconstruct(out Koine.Compiler.Ast.SyntaxTriviaKind Kind, out string! Text, out Koine.Compiler.Ast.SourceSpan Span) -> void
+Koine.Compiler.Ast.SyntaxTrivia.Equals(Koine.Compiler.Ast.SyntaxTrivia other) -> bool
+Koine.Compiler.Ast.Transition.Deconstruct(out string! Field, out Koine.Compiler.Ast.Expr! Value) -> void
+Koine.Compiler.Ast.Transition.Equals(Koine.Compiler.Ast.Transition? other) -> bool
+Koine.Compiler.Ast.TypeDecl.Deconstruct(out string! Name) -> void
+Koine.Compiler.Ast.TypeDecl.TypeDecl(Koine.Compiler.Ast.TypeDecl! original) -> void
+Koine.Compiler.Ast.TypeRef.Deconstruct(out string! Name, out Koine.Compiler.Ast.TypeRef? Element, out Koine.Compiler.Ast.TypeRef? Value, out bool IsOptional, out string? Qualifier) -> void
+Koine.Compiler.Ast.TypeRef.Equals(Koine.Compiler.Ast.TypeRef? other) -> bool
+Koine.Compiler.Ast.UnaryExpr.Deconstruct(out Koine.Compiler.Ast.UnaryOp Op, out Koine.Compiler.Ast.Expr! Operand) -> void
+Koine.Compiler.Ast.UnaryExpr.Equals(Koine.Compiler.Ast.UnaryExpr? other) -> bool
+Koine.Compiler.Ast.UseCaseDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, out Koine.Compiler.Ast.TypeRef? ReturnType) -> void
+Koine.Compiler.Ast.UseCaseDecl.Equals(Koine.Compiler.Ast.UseCaseDecl? other) -> bool
+Koine.Compiler.Ast.ValueObjectDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>! Members, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Invariant!>! Invariants, out bool IsQuantity) -> void
+Koine.Compiler.Ast.ValueObjectDecl.Equals(Koine.Compiler.Ast.ValueObjectDecl? other) -> bool
+Koine.Compiler.CodeFixes.CodeFix.<Clone>$() -> Koine.Compiler.CodeFixes.CodeFix!
+Koine.Compiler.CodeFixes.CodeFix.Deconstruct(out string! Title, out string! Kind, out string? EquivalenceKey, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.CodeFixes.CodeFixEdit!>! Edits) -> void
+Koine.Compiler.CodeFixes.CodeFix.Equals(Koine.Compiler.CodeFixes.CodeFix? other) -> bool
+Koine.Compiler.CodeFixes.CodeFixEdit.<Clone>$() -> Koine.Compiler.CodeFixes.CodeFixEdit!
+Koine.Compiler.CodeFixes.CodeFixEdit.Deconstruct(out Koine.Compiler.Ast.SourceSpan Range, out string! NewText) -> void
+Koine.Compiler.CodeFixes.CodeFixEdit.Equals(Koine.Compiler.CodeFixes.CodeFixEdit? other) -> bool
+Koine.Compiler.CodeFixes.SelectionRange.<Clone>$() -> Koine.Compiler.CodeFixes.SelectionRange!
+Koine.Compiler.CodeFixes.SelectionRange.Deconstruct(out int StartOffset, out int EndOffset) -> void
+Koine.Compiler.CodeFixes.SelectionRange.Equals(Koine.Compiler.CodeFixes.SelectionRange? other) -> bool
+Koine.Compiler.Diagnostics.Diagnostic.<Clone>$() -> Koine.Compiler.Diagnostics.Diagnostic!
+Koine.Compiler.Diagnostics.Diagnostic.Deconstruct(out Koine.Compiler.Diagnostics.DiagnosticSeverity Severity, out string! Code, out string! Message, out Koine.Compiler.Ast.SourceSpan Span) -> void
+Koine.Compiler.Diagnostics.Diagnostic.Equals(Koine.Compiler.Diagnostics.Diagnostic? other) -> bool
+Koine.Compiler.Diagnostics.DiagnosticDescriptor.<Clone>$() -> Koine.Compiler.Diagnostics.DiagnosticDescriptor!
+Koine.Compiler.Diagnostics.DiagnosticDescriptor.Deconstruct(out string! Id, out string! Title, out string! MessageFormat, out Koine.Compiler.Diagnostics.DiagnosticCategory Category, out Koine.Compiler.Diagnostics.DiagnosticSeverity DefaultSeverity) -> void
+Koine.Compiler.Diagnostics.DiagnosticDescriptor.Equals(Koine.Compiler.Diagnostics.DiagnosticDescriptor? other) -> bool
+Koine.Compiler.Diagnostics.DiagnosticFilterOptions.<Clone>$() -> Koine.Compiler.Diagnostics.DiagnosticFilterOptions!
+Koine.Compiler.Diagnostics.DiagnosticFilterOptions.Deconstruct(out System.Collections.Generic.IReadOnlyDictionary<string!, string!>? SeverityOverrides, out bool WarningsAsErrors) -> void
+Koine.Compiler.Diagnostics.DiagnosticFilterOptions.Equals(Koine.Compiler.Diagnostics.DiagnosticFilterOptions? other) -> bool
+Koine.Compiler.Emit.EmitTargetInfo.Deconstruct(out string! Id, out string! DisplayName, out string! FileExtension) -> void
+Koine.Compiler.Emit.EmitTargetInfo.EmitTargetInfo(Koine.Compiler.Emit.EmitTargetInfo! original) -> void
+Koine.Compiler.Emit.EmittedFile.<Clone>$() -> Koine.Compiler.Emit.EmittedFile!
+Koine.Compiler.Emit.EmittedFile.Deconstruct(out string! RelativePath, out string! Contents, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.SourceMapSegment!>? SourceMap, out string? Kind) -> void
+Koine.Compiler.Emit.EmittedFile.Equals(Koine.Compiler.Emit.EmittedFile? other) -> bool
+Koine.Compiler.Emit.EmitterOptions.<Clone>$() -> Koine.Compiler.Emit.EmitterOptions!
+Koine.Compiler.Emit.EmitterOptions.Deconstruct(out System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, out string? InstantMode, out string? Layout, out bool EmitSourceMaps, out bool ReferenceOnly, out string? Layers, out bool ApplicationMediatr, out string? ApplicationMapping, out int? RegexMatchTimeoutMs, out string? RegexMode, out string? ApplicationHandlerResult, out string? ApplicationNotFound) -> void
+Koine.Compiler.Emit.EmitterOptions.Equals(Koine.Compiler.Emit.EmitterOptions? other) -> bool
+Koine.Compiler.Emit.Glossary.GlossaryEntry.<Clone>$() -> Koine.Compiler.Emit.Glossary.GlossaryEntry!
+Koine.Compiler.Emit.Glossary.GlossaryEntry.Deconstruct(out string! Id, out string! Name, out string! Kind, out string! Context, out string! QualifiedName, out string? Doc, out Koine.Compiler.Ast.SourceSpan NameSpan) -> void
+Koine.Compiler.Emit.Glossary.GlossaryEntry.Equals(Koine.Compiler.Emit.Glossary.GlossaryEntry? other) -> bool
+Koine.Compiler.Emit.Glossary.GlossaryModel.<Clone>$() -> Koine.Compiler.Emit.Glossary.GlossaryModel!
+Koine.Compiler.Emit.Glossary.GlossaryModel.Deconstruct(out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.Glossary.GlossaryEntry!>! Entries) -> void
+Koine.Compiler.Emit.Glossary.GlossaryModel.Equals(Koine.Compiler.Emit.Glossary.GlossaryModel? other) -> bool
+Koine.Compiler.Emit.SourceMapSegment.<Clone>$() -> Koine.Compiler.Emit.SourceMapSegment!
+Koine.Compiler.Emit.SourceMapSegment.Deconstruct(out int GeneratedStartLine, out int GeneratedEndLine, out string! SourceFile, out Koine.Compiler.Ast.SourceSpan Source) -> void
+Koine.Compiler.Emit.SourceMapSegment.Equals(Koine.Compiler.Emit.SourceMapSegment? other) -> bool
+Koine.Compiler.Formatting.FormatRangeEdit.<Clone>$() -> Koine.Compiler.Formatting.FormatRangeEdit!
+Koine.Compiler.Formatting.FormatRangeEdit.Deconstruct(out int StartLine, out int StartCharacter, out int EndLine, out int EndCharacter, out string! NewText) -> void
+Koine.Compiler.Formatting.FormatRangeEdit.Equals(Koine.Compiler.Formatting.FormatRangeEdit? other) -> bool
+Koine.Compiler.Formatting.FormatResult.<Clone>$() -> Koine.Compiler.Formatting.FormatResult!
+Koine.Compiler.Formatting.FormatResult.Deconstruct(out string! Text, out bool Changed) -> void
+Koine.Compiler.Formatting.FormatResult.Equals(Koine.Compiler.Formatting.FormatResult? other) -> bool
+Koine.Compiler.Services.CallHierarchyIncomingCall.<Clone>$() -> Koine.Compiler.Services.CallHierarchyIncomingCall!
+Koine.Compiler.Services.CallHierarchyIncomingCall.Deconstruct(out Koine.Compiler.Services.CallHierarchyItem! From) -> void
+Koine.Compiler.Services.CallHierarchyIncomingCall.Equals(Koine.Compiler.Services.CallHierarchyIncomingCall? other) -> bool
+Koine.Compiler.Services.CallHierarchyItem.<Clone>$() -> Koine.Compiler.Services.CallHierarchyItem!
+Koine.Compiler.Services.CallHierarchyItem.Deconstruct(out string! Name, out Koine.Compiler.Services.CallHierarchyItemKind Kind, out string? OwningType, out string! Uri, out Koine.Compiler.Ast.SourceSpan Span) -> void
+Koine.Compiler.Services.CallHierarchyItem.Equals(Koine.Compiler.Services.CallHierarchyItem? other) -> bool
+Koine.Compiler.Services.CallHierarchyOutgoingCall.<Clone>$() -> Koine.Compiler.Services.CallHierarchyOutgoingCall!
+Koine.Compiler.Services.CallHierarchyOutgoingCall.Deconstruct(out Koine.Compiler.Services.CallHierarchyItem! To) -> void
+Koine.Compiler.Services.CallHierarchyOutgoingCall.Equals(Koine.Compiler.Services.CallHierarchyOutgoingCall? other) -> bool
+Koine.Compiler.Services.CodeActionEdit.<Clone>$() -> Koine.Compiler.Services.CodeActionEdit!
+Koine.Compiler.Services.CodeActionEdit.Deconstruct(out string! Title, out string! Kind, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TextEditModel!>! Edits) -> void
+Koine.Compiler.Services.CodeActionEdit.Equals(Koine.Compiler.Services.CodeActionEdit? other) -> bool
+Koine.Compiler.Services.CodeLens.<Clone>$() -> Koine.Compiler.Services.CodeLens!
+Koine.Compiler.Services.CodeLens.Deconstruct(out string! Name, out string! Uri, out Koine.Compiler.Ast.SourceSpan Range, out string? Title) -> void
+Koine.Compiler.Services.CodeLens.Equals(Koine.Compiler.Services.CodeLens? other) -> bool
+Koine.Compiler.Services.CompatibilityChange.<Clone>$() -> Koine.Compiler.Services.CompatibilityChange!
+Koine.Compiler.Services.CompatibilityChange.Deconstruct(out Koine.Compiler.Services.CompatibilityImpact Impact, out string! Code, out string! Message) -> void
+Koine.Compiler.Services.CompatibilityChange.Equals(Koine.Compiler.Services.CompatibilityChange? other) -> bool
+Koine.Compiler.Services.CompatibilityReport.<Clone>$() -> Koine.Compiler.Services.CompatibilityReport!
+Koine.Compiler.Services.CompatibilityReport.Deconstruct(out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CompatibilityChange!>! Changes) -> void
+Koine.Compiler.Services.CompatibilityReport.Equals(Koine.Compiler.Services.CompatibilityReport? other) -> bool
+Koine.Compiler.Services.CompileResult.<Clone>$() -> Koine.Compiler.Services.CompileResult!
+Koine.Compiler.Services.CompileResult.Deconstruct(out Koine.Compiler.Ast.KoineModel? Model, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! Diagnostics, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>! Files) -> void
+Koine.Compiler.Services.CompileResult.Equals(Koine.Compiler.Services.CompileResult? other) -> bool
+Koine.Compiler.Services.CompletionItem.<Clone>$() -> Koine.Compiler.Services.CompletionItem!
+Koine.Compiler.Services.CompletionItem.Deconstruct(out string! Label, out Koine.Compiler.Services.CompletionItemKind Kind, out string? Detail, out string? Documentation, out string? InsertText, out int? InsertTextFormat, out System.Collections.Generic.IReadOnlyList<string!>? CommitCharacters, out string? SortText, out string? Data) -> void
+Koine.Compiler.Services.CompletionItem.Equals(Koine.Compiler.Services.CompletionItem? other) -> bool
+Koine.Compiler.Services.DeclLocation.<Clone>$() -> Koine.Compiler.Services.DeclLocation!
+Koine.Compiler.Services.DeclLocation.Deconstruct(out string! Uri, out Koine.Compiler.Ast.SourceSpan Span) -> void
+Koine.Compiler.Services.DeclLocation.Equals(Koine.Compiler.Services.DeclLocation? other) -> bool
+Koine.Compiler.Services.DefinitionResult.<Clone>$() -> Koine.Compiler.Services.DefinitionResult!
+Koine.Compiler.Services.DefinitionResult.Deconstruct(out string! Uri, out Koine.Compiler.Ast.SourceSpan Target) -> void
+Koine.Compiler.Services.DefinitionResult.Equals(Koine.Compiler.Services.DefinitionResult? other) -> bool
+Koine.Compiler.Services.DocEditResult.<Clone>$() -> Koine.Compiler.Services.DocEditResult!
+Koine.Compiler.Services.DocEditResult.Deconstruct(out string? Uri, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.DocTextEdit!>! Edits) -> void
+Koine.Compiler.Services.DocEditResult.Equals(Koine.Compiler.Services.DocEditResult? other) -> bool
+Koine.Compiler.Services.DocTextEdit.<Clone>$() -> Koine.Compiler.Services.DocTextEdit!
+Koine.Compiler.Services.DocTextEdit.Deconstruct(out Koine.Compiler.Ast.SourceSpan Range, out string! NewText) -> void
+Koine.Compiler.Services.DocTextEdit.Equals(Koine.Compiler.Services.DocTextEdit? other) -> bool
+Koine.Compiler.Services.DocumentSymbol.<Clone>$() -> Koine.Compiler.Services.DocumentSymbol!
+Koine.Compiler.Services.DocumentSymbol.Deconstruct(out string! Name, out Koine.Compiler.Services.SymbolKind Kind, out Koine.Compiler.Ast.SourceSpan Range, out Koine.Compiler.Ast.SourceSpan SelectionRange, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.DocumentSymbol!>! Children) -> void
+Koine.Compiler.Services.DocumentSymbol.Equals(Koine.Compiler.Services.DocumentSymbol? other) -> bool
+Koine.Compiler.Services.EmitResult.<Clone>$() -> Koine.Compiler.Services.EmitResult!
+Koine.Compiler.Services.EmitResult.Deconstruct(out string? Koine, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! Diagnostics) -> void
+Koine.Compiler.Services.EmitResult.Equals(Koine.Compiler.Services.EmitResult? other) -> bool
+Koine.Compiler.Services.FoldingRange.<Clone>$() -> Koine.Compiler.Services.FoldingRange!
+Koine.Compiler.Services.FoldingRange.Deconstruct(out Koine.Compiler.Ast.SourceSpan Range) -> void
+Koine.Compiler.Services.FoldingRange.Equals(Koine.Compiler.Services.FoldingRange? other) -> bool
+Koine.Compiler.Services.HoverResult.<Clone>$() -> Koine.Compiler.Services.HoverResult!
+Koine.Compiler.Services.HoverResult.Deconstruct(out string! Markdown) -> void
+Koine.Compiler.Services.HoverResult.Equals(Koine.Compiler.Services.HoverResult? other) -> bool
+Koine.Compiler.Services.InlayHint.<Clone>$() -> Koine.Compiler.Services.InlayHint!
+Koine.Compiler.Services.InlayHint.Deconstruct(out int Line, out int Character, out string! Label, out Koine.Compiler.Services.InlayHintKind Kind) -> void
+Koine.Compiler.Services.InlayHint.Equals(Koine.Compiler.Services.InlayHint? other) -> bool
+Koine.Compiler.Services.ModelEditResult.<Clone>$() -> Koine.Compiler.Services.ModelEditResult!
+Koine.Compiler.Services.ModelEditResult.Deconstruct(out string? Uri, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TextEditModel!>! Edits, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! Diagnostics) -> void
+Koine.Compiler.Services.ModelEditResult.Equals(Koine.Compiler.Services.ModelEditResult? other) -> bool
+Koine.Compiler.Services.ModelMember.<Clone>$() -> Koine.Compiler.Services.ModelMember!
+Koine.Compiler.Services.ModelMember.Deconstruct(out string! Kind, out string! Name, out string? Type, out string? Value) -> void
+Koine.Compiler.Services.ModelMember.Equals(Koine.Compiler.Services.ModelMember? other) -> bool
+Koine.Compiler.Services.ModelNode.<Clone>$() -> Koine.Compiler.Services.ModelNode!
+Koine.Compiler.Services.ModelNode.Deconstruct(out string! Kind, out string! QualifiedName, out string! Title, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelMember!>! Members, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ModelNode!>! Children) -> void
+Koine.Compiler.Services.ModelNode.Equals(Koine.Compiler.Services.ModelNode? other) -> bool
+Koine.Compiler.Services.ParameterInfo.<Clone>$() -> Koine.Compiler.Services.ParameterInfo!
+Koine.Compiler.Services.ParameterInfo.Deconstruct(out string! Label) -> void
+Koine.Compiler.Services.ParameterInfo.Equals(Koine.Compiler.Services.ParameterInfo? other) -> bool
+Koine.Compiler.Services.Reference.<Clone>$() -> Koine.Compiler.Services.Reference!
+Koine.Compiler.Services.Reference.Deconstruct(out string! Uri, out int Line, out int StartColumn, out int EndColumn) -> void
+Koine.Compiler.Services.Reference.Equals(Koine.Compiler.Services.Reference? other) -> bool
+Koine.Compiler.Services.RenameEdit.<Clone>$() -> Koine.Compiler.Services.RenameEdit!
+Koine.Compiler.Services.RenameEdit.Deconstruct(out Koine.Compiler.Services.Reference! Occurrence, out string! NewText) -> void
+Koine.Compiler.Services.RenameEdit.Equals(Koine.Compiler.Services.RenameEdit? other) -> bool
+Koine.Compiler.Services.RenameFileChanges.<Clone>$() -> Koine.Compiler.Services.RenameFileChanges!
+Koine.Compiler.Services.RenameFileChanges.Deconstruct(out string! Uri, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>! Occurrences) -> void
+Koine.Compiler.Services.RenameFileChanges.Equals(Koine.Compiler.Services.RenameFileChanges? other) -> bool
+Koine.Compiler.Services.RenamePreview.<Clone>$() -> Koine.Compiler.Services.RenamePreview!
+Koine.Compiler.Services.RenamePreview.Deconstruct(out string! NewName, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameFileChanges!>! Files) -> void
+Koine.Compiler.Services.RenamePreview.Equals(Koine.Compiler.Services.RenamePreview? other) -> bool
+Koine.Compiler.Services.SelectionRange.<Clone>$() -> Koine.Compiler.Services.SelectionRange!
+Koine.Compiler.Services.SelectionRange.Deconstruct(out Koine.Compiler.Ast.SourceSpan Range, out Koine.Compiler.Services.SelectionRange? Parent) -> void
+Koine.Compiler.Services.SelectionRange.Equals(Koine.Compiler.Services.SelectionRange? other) -> bool
+Koine.Compiler.Services.SemanticToken.Deconstruct(out int Line, out int StartChar, out int Length, out Koine.Compiler.Services.SemanticTokenType Type, out int Modifiers) -> void
+Koine.Compiler.Services.SemanticToken.Equals(Koine.Compiler.Services.SemanticToken other) -> bool
+Koine.Compiler.Services.SignatureHelp.<Clone>$() -> Koine.Compiler.Services.SignatureHelp!
+Koine.Compiler.Services.SignatureHelp.Deconstruct(out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SignatureInfo!>! Signatures, out int ActiveSignature, out int ActiveParameter) -> void
+Koine.Compiler.Services.SignatureHelp.Equals(Koine.Compiler.Services.SignatureHelp? other) -> bool
+Koine.Compiler.Services.SignatureInfo.<Clone>$() -> Koine.Compiler.Services.SignatureInfo!
+Koine.Compiler.Services.SignatureInfo.Deconstruct(out string! Label, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.ParameterInfo!>! Parameters) -> void
+Koine.Compiler.Services.SignatureInfo.Equals(Koine.Compiler.Services.SignatureInfo? other) -> bool
+Koine.Compiler.Services.SourceFile.Deconstruct(out string! Path, out string! Source) -> void
+Koine.Compiler.Services.SourceFile.Equals(Koine.Compiler.Services.SourceFile other) -> bool
+Koine.Compiler.Services.StructuredEdit.<Clone>$() -> Koine.Compiler.Services.StructuredEdit!
+Koine.Compiler.Services.StructuredEdit.Deconstruct(out string! Kind, out string! Target, out string? Name, out string? Type, out string? Value) -> void
+Koine.Compiler.Services.StructuredEdit.Equals(Koine.Compiler.Services.StructuredEdit? other) -> bool
+Koine.Compiler.Services.SyntaxTreeNode.<Clone>$() -> Koine.Compiler.Services.SyntaxTreeNode!
+Koine.Compiler.Services.SyntaxTreeNode.Deconstruct(out string! Kind, out string? Name, out Koine.Compiler.Ast.SourceSpan Span, out bool IsMissing, out bool IsError, out string? Leaf, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SyntaxTreeNode!>! Children) -> void
+Koine.Compiler.Services.SyntaxTreeNode.Equals(Koine.Compiler.Services.SyntaxTreeNode? other) -> bool
+Koine.Compiler.Services.TextEditModel.<Clone>$() -> Koine.Compiler.Services.TextEditModel!
+Koine.Compiler.Services.TextEditModel.Deconstruct(out Koine.Compiler.Ast.SourceSpan Range, out string! NewText) -> void
+Koine.Compiler.Services.TextEditModel.Equals(Koine.Compiler.Services.TextEditModel? other) -> bool
+Koine.Compiler.Services.TypeHierarchyItem.<Clone>$() -> Koine.Compiler.Services.TypeHierarchyItem!
+Koine.Compiler.Services.TypeHierarchyItem.Deconstruct(out string! Name, out Koine.Compiler.Services.TypeHierarchyItemKind Kind, out string! Uri, out Koine.Compiler.Ast.SourceSpan Span) -> void
+Koine.Compiler.Services.TypeHierarchyItem.Equals(Koine.Compiler.Services.TypeHierarchyItem? other) -> bool
+Koine.Compiler.Services.WorkspaceSymbol.<Clone>$() -> Koine.Compiler.Services.WorkspaceSymbol!
+Koine.Compiler.Services.WorkspaceSymbol.Deconstruct(out string! Name, out Koine.Compiler.Services.SymbolKind Kind, out string! Uri, out Koine.Compiler.Ast.SourceSpan Range, out string? ContainerName) -> void
+Koine.Compiler.Services.WorkspaceSymbol.Equals(Koine.Compiler.Services.WorkspaceSymbol? other) -> bool
+abstract Koine.Compiler.Ast.Bound.BoundNode.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundNode!
+abstract Koine.Compiler.Ast.KoineNode.<Clone>$() -> Koine.Compiler.Ast.KoineNode!
+override Koine.Compiler.Ast.AclMapping.<Clone>$() -> Koine.Compiler.Ast.AclMapping!
+override Koine.Compiler.Ast.AclMapping.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.AclMapping.GetHashCode() -> int
+override Koine.Compiler.Ast.AclMapping.ToString() -> string!
+override Koine.Compiler.Ast.AggregateDecl.<Clone>$() -> Koine.Compiler.Ast.AggregateDecl!
+override Koine.Compiler.Ast.AggregateDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.AggregateDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.AggregateDecl.ToString() -> string!
+override Koine.Compiler.Ast.BinaryExpr.<Clone>$() -> Koine.Compiler.Ast.BinaryExpr!
+override Koine.Compiler.Ast.BinaryExpr.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.BinaryExpr.GetHashCode() -> int
+override Koine.Compiler.Ast.BinaryExpr.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundBinary.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundBinary!
+override Koine.Compiler.Ast.Bound.BoundBinary.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundBinary.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundBinary.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundCall.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundCall!
+override Koine.Compiler.Ast.Bound.BoundCall.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundCall.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundCall.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundCoalesce.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundCoalesce!
+override Koine.Compiler.Ast.Bound.BoundCoalesce.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundCoalesce.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundCoalesce.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundConditional.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundConditional!
+override Koine.Compiler.Ast.Bound.BoundConditional.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundConditional.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundConditional.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundExpression.EqualityContract.get -> System.Type!
+override Koine.Compiler.Ast.Bound.BoundExpression.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundExpression.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundExpression.PrintMembers(System.Text.StringBuilder! builder) -> bool
+override Koine.Compiler.Ast.Bound.BoundExpression.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundField.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundField!
+override Koine.Compiler.Ast.Bound.BoundField.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundField.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundField.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundGuard.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundGuard!
+override Koine.Compiler.Ast.Bound.BoundGuard.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundGuard.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundGuard.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundInvariant.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundInvariant!
+override Koine.Compiler.Ast.Bound.BoundInvariant.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundInvariant.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundInvariant.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundLambda.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundLambda!
+override Koine.Compiler.Ast.Bound.BoundLambda.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundLambda.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundLambda.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundLet.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundLet!
+override Koine.Compiler.Ast.Bound.BoundLet.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundLet.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundLet.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundLetBinding.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundLetBinding!
+override Koine.Compiler.Ast.Bound.BoundLetBinding.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundLetBinding.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundLetBinding.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundLiteral.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundLiteral!
+override Koine.Compiler.Ast.Bound.BoundLiteral.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundLiteral.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundLiteral.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundMatch.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundMatch!
+override Koine.Compiler.Ast.Bound.BoundMatch.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundMatch.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundMatch.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundMemberAccess.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundMemberAccess!
+override Koine.Compiler.Ast.Bound.BoundMemberAccess.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundMemberAccess.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundMemberAccess.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundNode.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundNode.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundNode.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundReference.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundReference!
+override Koine.Compiler.Ast.Bound.BoundReference.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundReference.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundReference.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundUnary.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundUnary!
+override Koine.Compiler.Ast.Bound.BoundUnary.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundUnary.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundUnary.ToString() -> string!
+override Koine.Compiler.Ast.Bound.BoundValueObject.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundValueObject!
+override Koine.Compiler.Ast.Bound.BoundValueObject.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Bound.BoundValueObject.GetHashCode() -> int
+override Koine.Compiler.Ast.Bound.BoundValueObject.ToString() -> string!
+override Koine.Compiler.Ast.CallExpr.<Clone>$() -> Koine.Compiler.Ast.CallExpr!
+override Koine.Compiler.Ast.CallExpr.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.CallExpr.GetHashCode() -> int
+override Koine.Compiler.Ast.CallExpr.ToString() -> string!
+override Koine.Compiler.Ast.CoalesceExpr.<Clone>$() -> Koine.Compiler.Ast.CoalesceExpr!
+override Koine.Compiler.Ast.CoalesceExpr.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.CoalesceExpr.GetHashCode() -> int
+override Koine.Compiler.Ast.CoalesceExpr.ToString() -> string!
+override Koine.Compiler.Ast.CommandDecl.<Clone>$() -> Koine.Compiler.Ast.CommandDecl!
+override Koine.Compiler.Ast.CommandDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.CommandDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.CommandDecl.ToString() -> string!
+override Koine.Compiler.Ast.CommandStmt.EqualityContract.get -> System.Type!
+override Koine.Compiler.Ast.CommandStmt.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.CommandStmt.GetHashCode() -> int
+override Koine.Compiler.Ast.CommandStmt.PrintMembers(System.Text.StringBuilder! builder) -> bool
+override Koine.Compiler.Ast.CommandStmt.ToString() -> string!
+override Koine.Compiler.Ast.ConditionalExpr.<Clone>$() -> Koine.Compiler.Ast.ConditionalExpr!
+override Koine.Compiler.Ast.ConditionalExpr.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.ConditionalExpr.GetHashCode() -> int
+override Koine.Compiler.Ast.ConditionalExpr.ToString() -> string!
+override Koine.Compiler.Ast.ContextMapNode.<Clone>$() -> Koine.Compiler.Ast.ContextMapNode!
+override Koine.Compiler.Ast.ContextMapNode.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.ContextMapNode.GetHashCode() -> int
+override Koine.Compiler.Ast.ContextMapNode.ToString() -> string!
+override Koine.Compiler.Ast.ContextNode.<Clone>$() -> Koine.Compiler.Ast.ContextNode!
+override Koine.Compiler.Ast.ContextNode.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.ContextNode.GetHashCode() -> int
+override Koine.Compiler.Ast.ContextNode.ToString() -> string!
+override Koine.Compiler.Ast.ContextRelation.<Clone>$() -> Koine.Compiler.Ast.ContextRelation!
+override Koine.Compiler.Ast.ContextRelation.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.ContextRelation.GetHashCode() -> int
+override Koine.Compiler.Ast.ContextRelation.ToString() -> string!
+override Koine.Compiler.Ast.CoverageItem.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.CoverageItem.GetHashCode() -> int
+override Koine.Compiler.Ast.CoverageItem.ToString() -> string!
+override Koine.Compiler.Ast.CoverageReport.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.CoverageReport.GetHashCode() -> int
+override Koine.Compiler.Ast.CoverageReport.ToString() -> string!
+override Koine.Compiler.Ast.EmitArg.<Clone>$() -> Koine.Compiler.Ast.EmitArg!
+override Koine.Compiler.Ast.EmitArg.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.EmitArg.GetHashCode() -> int
+override Koine.Compiler.Ast.EmitArg.ToString() -> string!
+override Koine.Compiler.Ast.EmitClause.<Clone>$() -> Koine.Compiler.Ast.EmitClause!
+override Koine.Compiler.Ast.EmitClause.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.EmitClause.GetHashCode() -> int
+override Koine.Compiler.Ast.EmitClause.ToString() -> string!
+override Koine.Compiler.Ast.EntityDecl.<Clone>$() -> Koine.Compiler.Ast.EntityDecl!
+override Koine.Compiler.Ast.EntityDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.EntityDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.EntityDecl.ToString() -> string!
+override Koine.Compiler.Ast.EnumDecl.<Clone>$() -> Koine.Compiler.Ast.EnumDecl!
+override Koine.Compiler.Ast.EnumDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.EnumDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.EnumDecl.ToString() -> string!
+override Koine.Compiler.Ast.EnumMember.<Clone>$() -> Koine.Compiler.Ast.EnumMember!
+override Koine.Compiler.Ast.EnumMember.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.EnumMember.GetHashCode() -> int
+override Koine.Compiler.Ast.EnumMember.ToString() -> string!
+override Koine.Compiler.Ast.ErrorNode.<Clone>$() -> Koine.Compiler.Ast.ErrorNode!
+override Koine.Compiler.Ast.ErrorNode.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.ErrorNode.GetHashCode() -> int
+override Koine.Compiler.Ast.ErrorNode.ToString() -> string!
+override Koine.Compiler.Ast.EventDecl.<Clone>$() -> Koine.Compiler.Ast.EventDecl!
+override Koine.Compiler.Ast.EventDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.EventDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.EventDecl.ToString() -> string!
+override Koine.Compiler.Ast.Expr.EqualityContract.get -> System.Type!
+override Koine.Compiler.Ast.Expr.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Expr.GetHashCode() -> int
+override Koine.Compiler.Ast.Expr.PrintMembers(System.Text.StringBuilder! builder) -> bool
+override Koine.Compiler.Ast.Expr.ToString() -> string!
+override Koine.Compiler.Ast.FactoryDecl.<Clone>$() -> Koine.Compiler.Ast.FactoryDecl!
+override Koine.Compiler.Ast.FactoryDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.FactoryDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.FactoryDecl.ToString() -> string!
+override Koine.Compiler.Ast.FinderDecl.<Clone>$() -> Koine.Compiler.Ast.FinderDecl!
+override Koine.Compiler.Ast.FinderDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.FinderDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.FinderDecl.ToString() -> string!
+override Koine.Compiler.Ast.GuardExpr.<Clone>$() -> Koine.Compiler.Ast.GuardExpr!
+override Koine.Compiler.Ast.GuardExpr.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.GuardExpr.GetHashCode() -> int
+override Koine.Compiler.Ast.GuardExpr.ToString() -> string!
+override Koine.Compiler.Ast.IdentifierExpr.<Clone>$() -> Koine.Compiler.Ast.IdentifierExpr!
+override Koine.Compiler.Ast.IdentifierExpr.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.IdentifierExpr.GetHashCode() -> int
+override Koine.Compiler.Ast.IdentifierExpr.ToString() -> string!
+override Koine.Compiler.Ast.ImportDecl.<Clone>$() -> Koine.Compiler.Ast.ImportDecl!
+override Koine.Compiler.Ast.ImportDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.ImportDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.ImportDecl.ToString() -> string!
+override Koine.Compiler.Ast.Initialization.<Clone>$() -> Koine.Compiler.Ast.Initialization!
+override Koine.Compiler.Ast.Initialization.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Initialization.GetHashCode() -> int
+override Koine.Compiler.Ast.Initialization.ToString() -> string!
+override Koine.Compiler.Ast.IntegrationEventDecl.<Clone>$() -> Koine.Compiler.Ast.IntegrationEventDecl!
+override Koine.Compiler.Ast.IntegrationEventDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.IntegrationEventDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.IntegrationEventDecl.ToString() -> string!
+override Koine.Compiler.Ast.Invariant.<Clone>$() -> Koine.Compiler.Ast.Invariant!
+override Koine.Compiler.Ast.Invariant.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Invariant.GetHashCode() -> int
+override Koine.Compiler.Ast.Invariant.ToString() -> string!
+override Koine.Compiler.Ast.KoineModel.<Clone>$() -> Koine.Compiler.Ast.KoineModel!
+override Koine.Compiler.Ast.KoineModel.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.KoineModel.GetHashCode() -> int
+override Koine.Compiler.Ast.KoineModel.ToString() -> string!
+override Koine.Compiler.Ast.KoineNode.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.KoineNode.GetHashCode() -> int
+override Koine.Compiler.Ast.KoineNode.ToString() -> string!
+override Koine.Compiler.Ast.LambdaExpr.<Clone>$() -> Koine.Compiler.Ast.LambdaExpr!
+override Koine.Compiler.Ast.LambdaExpr.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.LambdaExpr.GetHashCode() -> int
+override Koine.Compiler.Ast.LambdaExpr.ToString() -> string!
+override Koine.Compiler.Ast.LetBinding.<Clone>$() -> Koine.Compiler.Ast.LetBinding!
+override Koine.Compiler.Ast.LetBinding.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.LetBinding.GetHashCode() -> int
+override Koine.Compiler.Ast.LetBinding.ToString() -> string!
+override Koine.Compiler.Ast.LetExpr.<Clone>$() -> Koine.Compiler.Ast.LetExpr!
+override Koine.Compiler.Ast.LetExpr.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.LetExpr.GetHashCode() -> int
+override Koine.Compiler.Ast.LetExpr.ToString() -> string!
+override Koine.Compiler.Ast.LiteralExpr.<Clone>$() -> Koine.Compiler.Ast.LiteralExpr!
+override Koine.Compiler.Ast.LiteralExpr.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.LiteralExpr.GetHashCode() -> int
+override Koine.Compiler.Ast.LiteralExpr.ToString() -> string!
+override Koine.Compiler.Ast.MatchExpr.<Clone>$() -> Koine.Compiler.Ast.MatchExpr!
+override Koine.Compiler.Ast.MatchExpr.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.MatchExpr.GetHashCode() -> int
+override Koine.Compiler.Ast.MatchExpr.ToString() -> string!
+override Koine.Compiler.Ast.Member.<Clone>$() -> Koine.Compiler.Ast.Member!
+override Koine.Compiler.Ast.Member.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Member.GetHashCode() -> int
+override Koine.Compiler.Ast.Member.ToString() -> string!
+override Koine.Compiler.Ast.MemberAccessExpr.<Clone>$() -> Koine.Compiler.Ast.MemberAccessExpr!
+override Koine.Compiler.Ast.MemberAccessExpr.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.MemberAccessExpr.GetHashCode() -> int
+override Koine.Compiler.Ast.MemberAccessExpr.ToString() -> string!
+override Koine.Compiler.Ast.ModelIndex.OwnerResolution.GetHashCode() -> int
+override Koine.Compiler.Ast.ModelIndex.RefResolution.GetHashCode() -> int
+override Koine.Compiler.Ast.OperationDecl.<Clone>$() -> Koine.Compiler.Ast.OperationDecl!
+override Koine.Compiler.Ast.OperationDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.OperationDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.OperationDecl.ToString() -> string!
+override Koine.Compiler.Ast.Param.<Clone>$() -> Koine.Compiler.Ast.Param!
+override Koine.Compiler.Ast.Param.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Param.GetHashCode() -> int
+override Koine.Compiler.Ast.Param.ToString() -> string!
+override Koine.Compiler.Ast.PolicyArg.<Clone>$() -> Koine.Compiler.Ast.PolicyArg!
+override Koine.Compiler.Ast.PolicyArg.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.PolicyArg.GetHashCode() -> int
+override Koine.Compiler.Ast.PolicyArg.ToString() -> string!
+override Koine.Compiler.Ast.PolicyDecl.<Clone>$() -> Koine.Compiler.Ast.PolicyDecl!
+override Koine.Compiler.Ast.PolicyDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.PolicyDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.PolicyDecl.ToString() -> string!
+override Koine.Compiler.Ast.PolicyReaction.<Clone>$() -> Koine.Compiler.Ast.PolicyReaction!
+override Koine.Compiler.Ast.PolicyReaction.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.PolicyReaction.GetHashCode() -> int
+override Koine.Compiler.Ast.PolicyReaction.ToString() -> string!
+override Koine.Compiler.Ast.PublishDecl.<Clone>$() -> Koine.Compiler.Ast.PublishDecl!
+override Koine.Compiler.Ast.PublishDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.PublishDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.PublishDecl.ToString() -> string!
+override Koine.Compiler.Ast.QueryDecl.<Clone>$() -> Koine.Compiler.Ast.QueryDecl!
+override Koine.Compiler.Ast.QueryDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.QueryDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.QueryDecl.ToString() -> string!
+override Koine.Compiler.Ast.ReadModelDecl.<Clone>$() -> Koine.Compiler.Ast.ReadModelDecl!
+override Koine.Compiler.Ast.ReadModelDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.ReadModelDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.ReadModelDecl.ToString() -> string!
+override Koine.Compiler.Ast.ReadModelField.<Clone>$() -> Koine.Compiler.Ast.ReadModelField!
+override Koine.Compiler.Ast.ReadModelField.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.ReadModelField.GetHashCode() -> int
+override Koine.Compiler.Ast.ReadModelField.ToString() -> string!
+override Koine.Compiler.Ast.RepositoryDecl.<Clone>$() -> Koine.Compiler.Ast.RepositoryDecl!
+override Koine.Compiler.Ast.RepositoryDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.RepositoryDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.RepositoryDecl.ToString() -> string!
+override Koine.Compiler.Ast.RequiresClause.<Clone>$() -> Koine.Compiler.Ast.RequiresClause!
+override Koine.Compiler.Ast.RequiresClause.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.RequiresClause.GetHashCode() -> int
+override Koine.Compiler.Ast.RequiresClause.ToString() -> string!
+override Koine.Compiler.Ast.ResultClause.<Clone>$() -> Koine.Compiler.Ast.ResultClause!
+override Koine.Compiler.Ast.ResultClause.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.ResultClause.GetHashCode() -> int
+override Koine.Compiler.Ast.ResultClause.ToString() -> string!
+override Koine.Compiler.Ast.ServiceDecl.<Clone>$() -> Koine.Compiler.Ast.ServiceDecl!
+override Koine.Compiler.Ast.ServiceDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.ServiceDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.ServiceDecl.ToString() -> string!
+override Koine.Compiler.Ast.SourceSpan.GetHashCode() -> int
+override Koine.Compiler.Ast.SpecDecl.<Clone>$() -> Koine.Compiler.Ast.SpecDecl!
+override Koine.Compiler.Ast.SpecDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.SpecDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.SpecDecl.ToString() -> string!
+override Koine.Compiler.Ast.StateRule.<Clone>$() -> Koine.Compiler.Ast.StateRule!
+override Koine.Compiler.Ast.StateRule.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.StateRule.GetHashCode() -> int
+override Koine.Compiler.Ast.StateRule.ToString() -> string!
+override Koine.Compiler.Ast.StatesDecl.<Clone>$() -> Koine.Compiler.Ast.StatesDecl!
+override Koine.Compiler.Ast.StatesDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.StatesDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.StatesDecl.ToString() -> string!
+override Koine.Compiler.Ast.SubscribeDecl.<Clone>$() -> Koine.Compiler.Ast.SubscribeDecl!
+override Koine.Compiler.Ast.SubscribeDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.SubscribeDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.SubscribeDecl.ToString() -> string!
+override Koine.Compiler.Ast.SyntaxTrivia.GetHashCode() -> int
+override Koine.Compiler.Ast.Transition.<Clone>$() -> Koine.Compiler.Ast.Transition!
+override Koine.Compiler.Ast.Transition.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.Transition.GetHashCode() -> int
+override Koine.Compiler.Ast.Transition.ToString() -> string!
+override Koine.Compiler.Ast.TypeDecl.EqualityContract.get -> System.Type!
+override Koine.Compiler.Ast.TypeDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.TypeDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.TypeDecl.PrintMembers(System.Text.StringBuilder! builder) -> bool
+override Koine.Compiler.Ast.TypeDecl.ToString() -> string!
+override Koine.Compiler.Ast.TypeRef.<Clone>$() -> Koine.Compiler.Ast.TypeRef!
+override Koine.Compiler.Ast.TypeRef.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.TypeRef.GetHashCode() -> int
+override Koine.Compiler.Ast.TypeRef.ToString() -> string!
+override Koine.Compiler.Ast.UnaryExpr.<Clone>$() -> Koine.Compiler.Ast.UnaryExpr!
+override Koine.Compiler.Ast.UnaryExpr.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.UnaryExpr.GetHashCode() -> int
+override Koine.Compiler.Ast.UnaryExpr.ToString() -> string!
+override Koine.Compiler.Ast.UseCaseDecl.<Clone>$() -> Koine.Compiler.Ast.UseCaseDecl!
+override Koine.Compiler.Ast.UseCaseDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.UseCaseDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.UseCaseDecl.ToString() -> string!
+override Koine.Compiler.Ast.ValueObjectDecl.<Clone>$() -> Koine.Compiler.Ast.ValueObjectDecl!
+override Koine.Compiler.Ast.ValueObjectDecl.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.ValueObjectDecl.GetHashCode() -> int
+override Koine.Compiler.Ast.ValueObjectDecl.ToString() -> string!
+override Koine.Compiler.CodeFixes.CodeFix.Equals(object? obj) -> bool
+override Koine.Compiler.CodeFixes.CodeFix.GetHashCode() -> int
+override Koine.Compiler.CodeFixes.CodeFix.ToString() -> string!
+override Koine.Compiler.CodeFixes.CodeFixEdit.Equals(object? obj) -> bool
+override Koine.Compiler.CodeFixes.CodeFixEdit.GetHashCode() -> int
+override Koine.Compiler.CodeFixes.CodeFixEdit.ToString() -> string!
+override Koine.Compiler.CodeFixes.SelectionRange.Equals(object? obj) -> bool
+override Koine.Compiler.CodeFixes.SelectionRange.GetHashCode() -> int
+override Koine.Compiler.CodeFixes.SelectionRange.ToString() -> string!
+override Koine.Compiler.Diagnostics.Diagnostic.Equals(object? obj) -> bool
+override Koine.Compiler.Diagnostics.Diagnostic.GetHashCode() -> int
+override Koine.Compiler.Diagnostics.DiagnosticDescriptor.Equals(object? obj) -> bool
+override Koine.Compiler.Diagnostics.DiagnosticDescriptor.GetHashCode() -> int
+override Koine.Compiler.Diagnostics.DiagnosticDescriptor.ToString() -> string!
+override Koine.Compiler.Diagnostics.DiagnosticFilterOptions.Equals(object? obj) -> bool
+override Koine.Compiler.Diagnostics.DiagnosticFilterOptions.GetHashCode() -> int
+override Koine.Compiler.Diagnostics.DiagnosticFilterOptions.ToString() -> string!
+override Koine.Compiler.Emit.EmitTargetInfo.Equals(object? obj) -> bool
+override Koine.Compiler.Emit.EmitTargetInfo.GetHashCode() -> int
+override Koine.Compiler.Emit.EmitTargetInfo.ToString() -> string!
+override Koine.Compiler.Emit.EmittedFile.Equals(object? obj) -> bool
+override Koine.Compiler.Emit.EmittedFile.GetHashCode() -> int
+override Koine.Compiler.Emit.EmittedFile.ToString() -> string!
+override Koine.Compiler.Emit.EmitterOptions.Equals(object? obj) -> bool
+override Koine.Compiler.Emit.EmitterOptions.GetHashCode() -> int
+override Koine.Compiler.Emit.EmitterOptions.ToString() -> string!
+override Koine.Compiler.Emit.Glossary.GlossaryEntry.Equals(object? obj) -> bool
+override Koine.Compiler.Emit.Glossary.GlossaryEntry.GetHashCode() -> int
+override Koine.Compiler.Emit.Glossary.GlossaryEntry.ToString() -> string!
+override Koine.Compiler.Emit.Glossary.GlossaryModel.Equals(object? obj) -> bool
+override Koine.Compiler.Emit.Glossary.GlossaryModel.GetHashCode() -> int
+override Koine.Compiler.Emit.Glossary.GlossaryModel.ToString() -> string!
+override Koine.Compiler.Emit.SourceMapSegment.Equals(object? obj) -> bool
+override Koine.Compiler.Emit.SourceMapSegment.GetHashCode() -> int
+override Koine.Compiler.Emit.SourceMapSegment.ToString() -> string!
+override Koine.Compiler.Formatting.FormatRangeEdit.Equals(object? obj) -> bool
+override Koine.Compiler.Formatting.FormatRangeEdit.GetHashCode() -> int
+override Koine.Compiler.Formatting.FormatRangeEdit.ToString() -> string!
+override Koine.Compiler.Formatting.FormatResult.Equals(object? obj) -> bool
+override Koine.Compiler.Formatting.FormatResult.GetHashCode() -> int
+override Koine.Compiler.Formatting.FormatResult.ToString() -> string!
+override Koine.Compiler.Services.CallHierarchyIncomingCall.Equals(object? obj) -> bool
+override Koine.Compiler.Services.CallHierarchyIncomingCall.GetHashCode() -> int
+override Koine.Compiler.Services.CallHierarchyIncomingCall.ToString() -> string!
+override Koine.Compiler.Services.CallHierarchyItem.Equals(object? obj) -> bool
+override Koine.Compiler.Services.CallHierarchyItem.GetHashCode() -> int
+override Koine.Compiler.Services.CallHierarchyItem.ToString() -> string!
+override Koine.Compiler.Services.CallHierarchyOutgoingCall.Equals(object? obj) -> bool
+override Koine.Compiler.Services.CallHierarchyOutgoingCall.GetHashCode() -> int
+override Koine.Compiler.Services.CallHierarchyOutgoingCall.ToString() -> string!
+override Koine.Compiler.Services.CodeActionEdit.Equals(object? obj) -> bool
+override Koine.Compiler.Services.CodeActionEdit.GetHashCode() -> int
+override Koine.Compiler.Services.CodeActionEdit.ToString() -> string!
+override Koine.Compiler.Services.CodeLens.Equals(object? obj) -> bool
+override Koine.Compiler.Services.CodeLens.GetHashCode() -> int
+override Koine.Compiler.Services.CodeLens.ToString() -> string!
+override Koine.Compiler.Services.CompatibilityChange.Equals(object? obj) -> bool
+override Koine.Compiler.Services.CompatibilityChange.GetHashCode() -> int
+override Koine.Compiler.Services.CompatibilityChange.ToString() -> string!
+override Koine.Compiler.Services.CompatibilityReport.Equals(object? obj) -> bool
+override Koine.Compiler.Services.CompatibilityReport.GetHashCode() -> int
+override Koine.Compiler.Services.CompatibilityReport.ToString() -> string!
+override Koine.Compiler.Services.CompileResult.Equals(object? obj) -> bool
+override Koine.Compiler.Services.CompileResult.GetHashCode() -> int
+override Koine.Compiler.Services.CompileResult.ToString() -> string!
+override Koine.Compiler.Services.CompletionItem.Equals(object? obj) -> bool
+override Koine.Compiler.Services.CompletionItem.GetHashCode() -> int
+override Koine.Compiler.Services.CompletionItem.ToString() -> string!
+override Koine.Compiler.Services.DeclLocation.Equals(object? obj) -> bool
+override Koine.Compiler.Services.DeclLocation.GetHashCode() -> int
+override Koine.Compiler.Services.DeclLocation.ToString() -> string!
+override Koine.Compiler.Services.DefinitionResult.Equals(object? obj) -> bool
+override Koine.Compiler.Services.DefinitionResult.GetHashCode() -> int
+override Koine.Compiler.Services.DefinitionResult.ToString() -> string!
+override Koine.Compiler.Services.DocEditResult.Equals(object? obj) -> bool
+override Koine.Compiler.Services.DocEditResult.GetHashCode() -> int
+override Koine.Compiler.Services.DocEditResult.ToString() -> string!
+override Koine.Compiler.Services.DocTextEdit.Equals(object? obj) -> bool
+override Koine.Compiler.Services.DocTextEdit.GetHashCode() -> int
+override Koine.Compiler.Services.DocTextEdit.ToString() -> string!
+override Koine.Compiler.Services.DocumentSymbol.Equals(object? obj) -> bool
+override Koine.Compiler.Services.DocumentSymbol.GetHashCode() -> int
+override Koine.Compiler.Services.DocumentSymbol.ToString() -> string!
+override Koine.Compiler.Services.EmitResult.Equals(object? obj) -> bool
+override Koine.Compiler.Services.EmitResult.GetHashCode() -> int
+override Koine.Compiler.Services.EmitResult.ToString() -> string!
+override Koine.Compiler.Services.FoldingRange.Equals(object? obj) -> bool
+override Koine.Compiler.Services.FoldingRange.GetHashCode() -> int
+override Koine.Compiler.Services.FoldingRange.ToString() -> string!
+override Koine.Compiler.Services.HoverResult.Equals(object? obj) -> bool
+override Koine.Compiler.Services.HoverResult.GetHashCode() -> int
+override Koine.Compiler.Services.HoverResult.ToString() -> string!
+override Koine.Compiler.Services.InlayHint.Equals(object? obj) -> bool
+override Koine.Compiler.Services.InlayHint.GetHashCode() -> int
+override Koine.Compiler.Services.InlayHint.ToString() -> string!
+override Koine.Compiler.Services.ModelEditResult.Equals(object? obj) -> bool
+override Koine.Compiler.Services.ModelEditResult.GetHashCode() -> int
+override Koine.Compiler.Services.ModelEditResult.ToString() -> string!
+override Koine.Compiler.Services.ModelMember.Equals(object? obj) -> bool
+override Koine.Compiler.Services.ModelMember.GetHashCode() -> int
+override Koine.Compiler.Services.ModelMember.ToString() -> string!
+override Koine.Compiler.Services.ModelNode.Equals(object? obj) -> bool
+override Koine.Compiler.Services.ModelNode.GetHashCode() -> int
+override Koine.Compiler.Services.ModelNode.ToString() -> string!
+override Koine.Compiler.Services.ParameterInfo.Equals(object? obj) -> bool
+override Koine.Compiler.Services.ParameterInfo.GetHashCode() -> int
+override Koine.Compiler.Services.ParameterInfo.ToString() -> string!
+override Koine.Compiler.Services.Reference.Equals(object? obj) -> bool
+override Koine.Compiler.Services.Reference.GetHashCode() -> int
+override Koine.Compiler.Services.Reference.ToString() -> string!
+override Koine.Compiler.Services.RenameEdit.Equals(object? obj) -> bool
+override Koine.Compiler.Services.RenameEdit.GetHashCode() -> int
+override Koine.Compiler.Services.RenameEdit.ToString() -> string!
+override Koine.Compiler.Services.RenameFileChanges.Equals(object? obj) -> bool
+override Koine.Compiler.Services.RenameFileChanges.GetHashCode() -> int
+override Koine.Compiler.Services.RenameFileChanges.ToString() -> string!
+override Koine.Compiler.Services.RenamePreview.Equals(object? obj) -> bool
+override Koine.Compiler.Services.RenamePreview.GetHashCode() -> int
+override Koine.Compiler.Services.RenamePreview.ToString() -> string!
+override Koine.Compiler.Services.SelectionRange.Equals(object? obj) -> bool
+override Koine.Compiler.Services.SelectionRange.GetHashCode() -> int
+override Koine.Compiler.Services.SelectionRange.ToString() -> string!
+override Koine.Compiler.Services.SemanticToken.GetHashCode() -> int
+override Koine.Compiler.Services.SignatureHelp.Equals(object? obj) -> bool
+override Koine.Compiler.Services.SignatureHelp.GetHashCode() -> int
+override Koine.Compiler.Services.SignatureHelp.ToString() -> string!
+override Koine.Compiler.Services.SignatureInfo.Equals(object? obj) -> bool
+override Koine.Compiler.Services.SignatureInfo.GetHashCode() -> int
+override Koine.Compiler.Services.SignatureInfo.ToString() -> string!
+override Koine.Compiler.Services.SourceFile.GetHashCode() -> int
+override Koine.Compiler.Services.StructuredEdit.Equals(object? obj) -> bool
+override Koine.Compiler.Services.StructuredEdit.GetHashCode() -> int
+override Koine.Compiler.Services.StructuredEdit.ToString() -> string!
+override Koine.Compiler.Services.SyntaxTreeNode.Equals(object? obj) -> bool
+override Koine.Compiler.Services.SyntaxTreeNode.GetHashCode() -> int
+override Koine.Compiler.Services.SyntaxTreeNode.ToString() -> string!
+override Koine.Compiler.Services.TextEditModel.Equals(object? obj) -> bool
+override Koine.Compiler.Services.TextEditModel.GetHashCode() -> int
+override Koine.Compiler.Services.TextEditModel.ToString() -> string!
+override Koine.Compiler.Services.TypeHierarchyItem.Equals(object? obj) -> bool
+override Koine.Compiler.Services.TypeHierarchyItem.GetHashCode() -> int
+override Koine.Compiler.Services.TypeHierarchyItem.ToString() -> string!
+override Koine.Compiler.Services.WorkspaceSymbol.Equals(object? obj) -> bool
+override Koine.Compiler.Services.WorkspaceSymbol.GetHashCode() -> int
+override Koine.Compiler.Services.WorkspaceSymbol.ToString() -> string!
+override abstract Koine.Compiler.Ast.Bound.BoundExpression.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundExpression!
+override abstract Koine.Compiler.Ast.CommandStmt.<Clone>$() -> Koine.Compiler.Ast.CommandStmt!
+override abstract Koine.Compiler.Ast.Expr.<Clone>$() -> Koine.Compiler.Ast.Expr!
+override abstract Koine.Compiler.Ast.TypeDecl.<Clone>$() -> Koine.Compiler.Ast.TypeDecl!
+override sealed Koine.Compiler.Ast.AclMapping.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.AggregateDecl.Equals(Koine.Compiler.Ast.TypeDecl? other) -> bool
+override sealed Koine.Compiler.Ast.BinaryExpr.Equals(Koine.Compiler.Ast.Expr? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundBinary.Equals(Koine.Compiler.Ast.Bound.BoundExpression? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundCall.Equals(Koine.Compiler.Ast.Bound.BoundExpression? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundCoalesce.Equals(Koine.Compiler.Ast.Bound.BoundExpression? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundConditional.Equals(Koine.Compiler.Ast.Bound.BoundExpression? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundExpression.Equals(Koine.Compiler.Ast.Bound.BoundNode? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundField.Equals(Koine.Compiler.Ast.Bound.BoundNode? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundGuard.Equals(Koine.Compiler.Ast.Bound.BoundExpression? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundInvariant.Equals(Koine.Compiler.Ast.Bound.BoundNode? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundLambda.Equals(Koine.Compiler.Ast.Bound.BoundExpression? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundLet.Equals(Koine.Compiler.Ast.Bound.BoundExpression? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundLetBinding.Equals(Koine.Compiler.Ast.Bound.BoundNode? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundLiteral.Equals(Koine.Compiler.Ast.Bound.BoundExpression? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundMatch.Equals(Koine.Compiler.Ast.Bound.BoundExpression? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundMemberAccess.Equals(Koine.Compiler.Ast.Bound.BoundExpression? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundReference.Equals(Koine.Compiler.Ast.Bound.BoundExpression? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundUnary.Equals(Koine.Compiler.Ast.Bound.BoundExpression? other) -> bool
+override sealed Koine.Compiler.Ast.Bound.BoundValueObject.Equals(Koine.Compiler.Ast.Bound.BoundNode? other) -> bool
+override sealed Koine.Compiler.Ast.CallExpr.Equals(Koine.Compiler.Ast.Expr? other) -> bool
+override sealed Koine.Compiler.Ast.CoalesceExpr.Equals(Koine.Compiler.Ast.Expr? other) -> bool
+override sealed Koine.Compiler.Ast.CommandDecl.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.CommandStmt.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.ConditionalExpr.Equals(Koine.Compiler.Ast.Expr? other) -> bool
+override sealed Koine.Compiler.Ast.ContextMapNode.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.ContextNode.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.ContextRelation.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.EmitArg.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.EmitClause.Equals(Koine.Compiler.Ast.CommandStmt? other) -> bool
+override sealed Koine.Compiler.Ast.EntityDecl.Equals(Koine.Compiler.Ast.TypeDecl? other) -> bool
+override sealed Koine.Compiler.Ast.EnumDecl.Equals(Koine.Compiler.Ast.TypeDecl? other) -> bool
+override sealed Koine.Compiler.Ast.EnumMember.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.ErrorNode.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.EventDecl.Equals(Koine.Compiler.Ast.TypeDecl? other) -> bool
+override sealed Koine.Compiler.Ast.Expr.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.FactoryDecl.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.FinderDecl.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.GuardExpr.Equals(Koine.Compiler.Ast.Expr? other) -> bool
+override sealed Koine.Compiler.Ast.IdentifierExpr.Equals(Koine.Compiler.Ast.Expr? other) -> bool
+override sealed Koine.Compiler.Ast.ImportDecl.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.Initialization.Equals(Koine.Compiler.Ast.CommandStmt? other) -> bool
+override sealed Koine.Compiler.Ast.IntegrationEventDecl.Equals(Koine.Compiler.Ast.TypeDecl? other) -> bool
+override sealed Koine.Compiler.Ast.Invariant.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.KoineModel.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.LambdaExpr.Equals(Koine.Compiler.Ast.Expr? other) -> bool
+override sealed Koine.Compiler.Ast.LetBinding.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.LetExpr.Equals(Koine.Compiler.Ast.Expr? other) -> bool
+override sealed Koine.Compiler.Ast.LiteralExpr.Equals(Koine.Compiler.Ast.Expr? other) -> bool
+override sealed Koine.Compiler.Ast.MatchExpr.Equals(Koine.Compiler.Ast.Expr? other) -> bool
+override sealed Koine.Compiler.Ast.Member.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.MemberAccessExpr.Equals(Koine.Compiler.Ast.Expr? other) -> bool
+override sealed Koine.Compiler.Ast.OperationDecl.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.Param.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.PolicyArg.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.PolicyDecl.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.PolicyReaction.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.PublishDecl.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.QueryDecl.Equals(Koine.Compiler.Ast.TypeDecl? other) -> bool
+override sealed Koine.Compiler.Ast.ReadModelDecl.Equals(Koine.Compiler.Ast.TypeDecl? other) -> bool
+override sealed Koine.Compiler.Ast.ReadModelField.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.RepositoryDecl.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.RequiresClause.Equals(Koine.Compiler.Ast.CommandStmt? other) -> bool
+override sealed Koine.Compiler.Ast.ResultClause.Equals(Koine.Compiler.Ast.CommandStmt? other) -> bool
+override sealed Koine.Compiler.Ast.ServiceDecl.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.SpecDecl.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.StateRule.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.StatesDecl.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.SubscribeDecl.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.Transition.Equals(Koine.Compiler.Ast.CommandStmt? other) -> bool
+override sealed Koine.Compiler.Ast.TypeDecl.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.TypeRef.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.UnaryExpr.Equals(Koine.Compiler.Ast.Expr? other) -> bool
+override sealed Koine.Compiler.Ast.UseCaseDecl.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.ValueObjectDecl.Equals(Koine.Compiler.Ast.TypeDecl? other) -> bool
+static Koine.Compiler.Ast.AclMapping.operator !=(Koine.Compiler.Ast.AclMapping? left, Koine.Compiler.Ast.AclMapping? right) -> bool
+static Koine.Compiler.Ast.AclMapping.operator ==(Koine.Compiler.Ast.AclMapping? left, Koine.Compiler.Ast.AclMapping? right) -> bool
+static Koine.Compiler.Ast.AggregateDecl.operator !=(Koine.Compiler.Ast.AggregateDecl? left, Koine.Compiler.Ast.AggregateDecl? right) -> bool
+static Koine.Compiler.Ast.AggregateDecl.operator ==(Koine.Compiler.Ast.AggregateDecl? left, Koine.Compiler.Ast.AggregateDecl? right) -> bool
+static Koine.Compiler.Ast.BinaryExpr.operator !=(Koine.Compiler.Ast.BinaryExpr? left, Koine.Compiler.Ast.BinaryExpr? right) -> bool
+static Koine.Compiler.Ast.BinaryExpr.operator ==(Koine.Compiler.Ast.BinaryExpr? left, Koine.Compiler.Ast.BinaryExpr? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundBinary.operator !=(Koine.Compiler.Ast.Bound.BoundBinary? left, Koine.Compiler.Ast.Bound.BoundBinary? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundBinary.operator ==(Koine.Compiler.Ast.Bound.BoundBinary? left, Koine.Compiler.Ast.Bound.BoundBinary? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundCall.operator !=(Koine.Compiler.Ast.Bound.BoundCall? left, Koine.Compiler.Ast.Bound.BoundCall? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundCall.operator ==(Koine.Compiler.Ast.Bound.BoundCall? left, Koine.Compiler.Ast.Bound.BoundCall? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundCoalesce.operator !=(Koine.Compiler.Ast.Bound.BoundCoalesce? left, Koine.Compiler.Ast.Bound.BoundCoalesce? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundCoalesce.operator ==(Koine.Compiler.Ast.Bound.BoundCoalesce? left, Koine.Compiler.Ast.Bound.BoundCoalesce? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundConditional.operator !=(Koine.Compiler.Ast.Bound.BoundConditional? left, Koine.Compiler.Ast.Bound.BoundConditional? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundConditional.operator ==(Koine.Compiler.Ast.Bound.BoundConditional? left, Koine.Compiler.Ast.Bound.BoundConditional? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundExpression.operator !=(Koine.Compiler.Ast.Bound.BoundExpression? left, Koine.Compiler.Ast.Bound.BoundExpression? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundExpression.operator ==(Koine.Compiler.Ast.Bound.BoundExpression? left, Koine.Compiler.Ast.Bound.BoundExpression? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundField.operator !=(Koine.Compiler.Ast.Bound.BoundField? left, Koine.Compiler.Ast.Bound.BoundField? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundField.operator ==(Koine.Compiler.Ast.Bound.BoundField? left, Koine.Compiler.Ast.Bound.BoundField? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundGuard.operator !=(Koine.Compiler.Ast.Bound.BoundGuard? left, Koine.Compiler.Ast.Bound.BoundGuard? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundGuard.operator ==(Koine.Compiler.Ast.Bound.BoundGuard? left, Koine.Compiler.Ast.Bound.BoundGuard? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundInvariant.operator !=(Koine.Compiler.Ast.Bound.BoundInvariant? left, Koine.Compiler.Ast.Bound.BoundInvariant? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundInvariant.operator ==(Koine.Compiler.Ast.Bound.BoundInvariant? left, Koine.Compiler.Ast.Bound.BoundInvariant? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundLambda.operator !=(Koine.Compiler.Ast.Bound.BoundLambda? left, Koine.Compiler.Ast.Bound.BoundLambda? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundLambda.operator ==(Koine.Compiler.Ast.Bound.BoundLambda? left, Koine.Compiler.Ast.Bound.BoundLambda? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundLet.operator !=(Koine.Compiler.Ast.Bound.BoundLet? left, Koine.Compiler.Ast.Bound.BoundLet? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundLet.operator ==(Koine.Compiler.Ast.Bound.BoundLet? left, Koine.Compiler.Ast.Bound.BoundLet? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundLetBinding.operator !=(Koine.Compiler.Ast.Bound.BoundLetBinding? left, Koine.Compiler.Ast.Bound.BoundLetBinding? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundLetBinding.operator ==(Koine.Compiler.Ast.Bound.BoundLetBinding? left, Koine.Compiler.Ast.Bound.BoundLetBinding? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundLiteral.operator !=(Koine.Compiler.Ast.Bound.BoundLiteral? left, Koine.Compiler.Ast.Bound.BoundLiteral? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundLiteral.operator ==(Koine.Compiler.Ast.Bound.BoundLiteral? left, Koine.Compiler.Ast.Bound.BoundLiteral? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundMatch.operator !=(Koine.Compiler.Ast.Bound.BoundMatch? left, Koine.Compiler.Ast.Bound.BoundMatch? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundMatch.operator ==(Koine.Compiler.Ast.Bound.BoundMatch? left, Koine.Compiler.Ast.Bound.BoundMatch? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundMemberAccess.operator !=(Koine.Compiler.Ast.Bound.BoundMemberAccess? left, Koine.Compiler.Ast.Bound.BoundMemberAccess? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundMemberAccess.operator ==(Koine.Compiler.Ast.Bound.BoundMemberAccess? left, Koine.Compiler.Ast.Bound.BoundMemberAccess? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundNode.operator !=(Koine.Compiler.Ast.Bound.BoundNode? left, Koine.Compiler.Ast.Bound.BoundNode? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundNode.operator ==(Koine.Compiler.Ast.Bound.BoundNode? left, Koine.Compiler.Ast.Bound.BoundNode? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundReference.operator !=(Koine.Compiler.Ast.Bound.BoundReference? left, Koine.Compiler.Ast.Bound.BoundReference? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundReference.operator ==(Koine.Compiler.Ast.Bound.BoundReference? left, Koine.Compiler.Ast.Bound.BoundReference? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundUnary.operator !=(Koine.Compiler.Ast.Bound.BoundUnary? left, Koine.Compiler.Ast.Bound.BoundUnary? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundUnary.operator ==(Koine.Compiler.Ast.Bound.BoundUnary? left, Koine.Compiler.Ast.Bound.BoundUnary? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundValueObject.operator !=(Koine.Compiler.Ast.Bound.BoundValueObject? left, Koine.Compiler.Ast.Bound.BoundValueObject? right) -> bool
+static Koine.Compiler.Ast.Bound.BoundValueObject.operator ==(Koine.Compiler.Ast.Bound.BoundValueObject? left, Koine.Compiler.Ast.Bound.BoundValueObject? right) -> bool
+static Koine.Compiler.Ast.CallExpr.operator !=(Koine.Compiler.Ast.CallExpr? left, Koine.Compiler.Ast.CallExpr? right) -> bool
+static Koine.Compiler.Ast.CallExpr.operator ==(Koine.Compiler.Ast.CallExpr? left, Koine.Compiler.Ast.CallExpr? right) -> bool
+static Koine.Compiler.Ast.CoalesceExpr.operator !=(Koine.Compiler.Ast.CoalesceExpr? left, Koine.Compiler.Ast.CoalesceExpr? right) -> bool
+static Koine.Compiler.Ast.CoalesceExpr.operator ==(Koine.Compiler.Ast.CoalesceExpr? left, Koine.Compiler.Ast.CoalesceExpr? right) -> bool
+static Koine.Compiler.Ast.CommandDecl.operator !=(Koine.Compiler.Ast.CommandDecl? left, Koine.Compiler.Ast.CommandDecl? right) -> bool
+static Koine.Compiler.Ast.CommandDecl.operator ==(Koine.Compiler.Ast.CommandDecl? left, Koine.Compiler.Ast.CommandDecl? right) -> bool
+static Koine.Compiler.Ast.CommandStmt.operator !=(Koine.Compiler.Ast.CommandStmt? left, Koine.Compiler.Ast.CommandStmt? right) -> bool
+static Koine.Compiler.Ast.CommandStmt.operator ==(Koine.Compiler.Ast.CommandStmt? left, Koine.Compiler.Ast.CommandStmt? right) -> bool
+static Koine.Compiler.Ast.ConditionalExpr.operator !=(Koine.Compiler.Ast.ConditionalExpr? left, Koine.Compiler.Ast.ConditionalExpr? right) -> bool
+static Koine.Compiler.Ast.ConditionalExpr.operator ==(Koine.Compiler.Ast.ConditionalExpr? left, Koine.Compiler.Ast.ConditionalExpr? right) -> bool
+static Koine.Compiler.Ast.ContextMapNode.operator !=(Koine.Compiler.Ast.ContextMapNode? left, Koine.Compiler.Ast.ContextMapNode? right) -> bool
+static Koine.Compiler.Ast.ContextMapNode.operator ==(Koine.Compiler.Ast.ContextMapNode? left, Koine.Compiler.Ast.ContextMapNode? right) -> bool
+static Koine.Compiler.Ast.ContextNode.operator !=(Koine.Compiler.Ast.ContextNode? left, Koine.Compiler.Ast.ContextNode? right) -> bool
+static Koine.Compiler.Ast.ContextNode.operator ==(Koine.Compiler.Ast.ContextNode? left, Koine.Compiler.Ast.ContextNode? right) -> bool
+static Koine.Compiler.Ast.ContextRelation.operator !=(Koine.Compiler.Ast.ContextRelation? left, Koine.Compiler.Ast.ContextRelation? right) -> bool
+static Koine.Compiler.Ast.ContextRelation.operator ==(Koine.Compiler.Ast.ContextRelation? left, Koine.Compiler.Ast.ContextRelation? right) -> bool
+static Koine.Compiler.Ast.CoverageItem.operator !=(Koine.Compiler.Ast.CoverageItem? left, Koine.Compiler.Ast.CoverageItem? right) -> bool
+static Koine.Compiler.Ast.CoverageItem.operator ==(Koine.Compiler.Ast.CoverageItem? left, Koine.Compiler.Ast.CoverageItem? right) -> bool
+static Koine.Compiler.Ast.CoverageReport.operator !=(Koine.Compiler.Ast.CoverageReport? left, Koine.Compiler.Ast.CoverageReport? right) -> bool
+static Koine.Compiler.Ast.CoverageReport.operator ==(Koine.Compiler.Ast.CoverageReport? left, Koine.Compiler.Ast.CoverageReport? right) -> bool
+static Koine.Compiler.Ast.EmitArg.operator !=(Koine.Compiler.Ast.EmitArg? left, Koine.Compiler.Ast.EmitArg? right) -> bool
+static Koine.Compiler.Ast.EmitArg.operator ==(Koine.Compiler.Ast.EmitArg? left, Koine.Compiler.Ast.EmitArg? right) -> bool
+static Koine.Compiler.Ast.EmitClause.operator !=(Koine.Compiler.Ast.EmitClause? left, Koine.Compiler.Ast.EmitClause? right) -> bool
+static Koine.Compiler.Ast.EmitClause.operator ==(Koine.Compiler.Ast.EmitClause? left, Koine.Compiler.Ast.EmitClause? right) -> bool
+static Koine.Compiler.Ast.EntityDecl.operator !=(Koine.Compiler.Ast.EntityDecl? left, Koine.Compiler.Ast.EntityDecl? right) -> bool
+static Koine.Compiler.Ast.EntityDecl.operator ==(Koine.Compiler.Ast.EntityDecl? left, Koine.Compiler.Ast.EntityDecl? right) -> bool
+static Koine.Compiler.Ast.EnumDecl.operator !=(Koine.Compiler.Ast.EnumDecl? left, Koine.Compiler.Ast.EnumDecl? right) -> bool
+static Koine.Compiler.Ast.EnumDecl.operator ==(Koine.Compiler.Ast.EnumDecl? left, Koine.Compiler.Ast.EnumDecl? right) -> bool
+static Koine.Compiler.Ast.EnumMember.operator !=(Koine.Compiler.Ast.EnumMember? left, Koine.Compiler.Ast.EnumMember? right) -> bool
+static Koine.Compiler.Ast.EnumMember.operator ==(Koine.Compiler.Ast.EnumMember? left, Koine.Compiler.Ast.EnumMember? right) -> bool
+static Koine.Compiler.Ast.ErrorNode.operator !=(Koine.Compiler.Ast.ErrorNode? left, Koine.Compiler.Ast.ErrorNode? right) -> bool
+static Koine.Compiler.Ast.ErrorNode.operator ==(Koine.Compiler.Ast.ErrorNode? left, Koine.Compiler.Ast.ErrorNode? right) -> bool
+static Koine.Compiler.Ast.EventDecl.operator !=(Koine.Compiler.Ast.EventDecl? left, Koine.Compiler.Ast.EventDecl? right) -> bool
+static Koine.Compiler.Ast.EventDecl.operator ==(Koine.Compiler.Ast.EventDecl? left, Koine.Compiler.Ast.EventDecl? right) -> bool
+static Koine.Compiler.Ast.Expr.operator !=(Koine.Compiler.Ast.Expr? left, Koine.Compiler.Ast.Expr? right) -> bool
+static Koine.Compiler.Ast.Expr.operator ==(Koine.Compiler.Ast.Expr? left, Koine.Compiler.Ast.Expr? right) -> bool
+static Koine.Compiler.Ast.FactoryDecl.operator !=(Koine.Compiler.Ast.FactoryDecl? left, Koine.Compiler.Ast.FactoryDecl? right) -> bool
+static Koine.Compiler.Ast.FactoryDecl.operator ==(Koine.Compiler.Ast.FactoryDecl? left, Koine.Compiler.Ast.FactoryDecl? right) -> bool
+static Koine.Compiler.Ast.FinderDecl.operator !=(Koine.Compiler.Ast.FinderDecl? left, Koine.Compiler.Ast.FinderDecl? right) -> bool
+static Koine.Compiler.Ast.FinderDecl.operator ==(Koine.Compiler.Ast.FinderDecl? left, Koine.Compiler.Ast.FinderDecl? right) -> bool
+static Koine.Compiler.Ast.GuardExpr.operator !=(Koine.Compiler.Ast.GuardExpr? left, Koine.Compiler.Ast.GuardExpr? right) -> bool
+static Koine.Compiler.Ast.GuardExpr.operator ==(Koine.Compiler.Ast.GuardExpr? left, Koine.Compiler.Ast.GuardExpr? right) -> bool
+static Koine.Compiler.Ast.IdentifierExpr.operator !=(Koine.Compiler.Ast.IdentifierExpr? left, Koine.Compiler.Ast.IdentifierExpr? right) -> bool
+static Koine.Compiler.Ast.IdentifierExpr.operator ==(Koine.Compiler.Ast.IdentifierExpr? left, Koine.Compiler.Ast.IdentifierExpr? right) -> bool
+static Koine.Compiler.Ast.ImportDecl.operator !=(Koine.Compiler.Ast.ImportDecl? left, Koine.Compiler.Ast.ImportDecl? right) -> bool
+static Koine.Compiler.Ast.ImportDecl.operator ==(Koine.Compiler.Ast.ImportDecl? left, Koine.Compiler.Ast.ImportDecl? right) -> bool
+static Koine.Compiler.Ast.Initialization.operator !=(Koine.Compiler.Ast.Initialization? left, Koine.Compiler.Ast.Initialization? right) -> bool
+static Koine.Compiler.Ast.Initialization.operator ==(Koine.Compiler.Ast.Initialization? left, Koine.Compiler.Ast.Initialization? right) -> bool
+static Koine.Compiler.Ast.IntegrationEventDecl.operator !=(Koine.Compiler.Ast.IntegrationEventDecl? left, Koine.Compiler.Ast.IntegrationEventDecl? right) -> bool
+static Koine.Compiler.Ast.IntegrationEventDecl.operator ==(Koine.Compiler.Ast.IntegrationEventDecl? left, Koine.Compiler.Ast.IntegrationEventDecl? right) -> bool
+static Koine.Compiler.Ast.Invariant.operator !=(Koine.Compiler.Ast.Invariant? left, Koine.Compiler.Ast.Invariant? right) -> bool
+static Koine.Compiler.Ast.Invariant.operator ==(Koine.Compiler.Ast.Invariant? left, Koine.Compiler.Ast.Invariant? right) -> bool
+static Koine.Compiler.Ast.KoineModel.operator !=(Koine.Compiler.Ast.KoineModel? left, Koine.Compiler.Ast.KoineModel? right) -> bool
+static Koine.Compiler.Ast.KoineModel.operator ==(Koine.Compiler.Ast.KoineModel? left, Koine.Compiler.Ast.KoineModel? right) -> bool
+static Koine.Compiler.Ast.KoineNode.operator !=(Koine.Compiler.Ast.KoineNode? left, Koine.Compiler.Ast.KoineNode? right) -> bool
+static Koine.Compiler.Ast.KoineNode.operator ==(Koine.Compiler.Ast.KoineNode? left, Koine.Compiler.Ast.KoineNode? right) -> bool
+static Koine.Compiler.Ast.LambdaExpr.operator !=(Koine.Compiler.Ast.LambdaExpr? left, Koine.Compiler.Ast.LambdaExpr? right) -> bool
+static Koine.Compiler.Ast.LambdaExpr.operator ==(Koine.Compiler.Ast.LambdaExpr? left, Koine.Compiler.Ast.LambdaExpr? right) -> bool
+static Koine.Compiler.Ast.LetBinding.operator !=(Koine.Compiler.Ast.LetBinding? left, Koine.Compiler.Ast.LetBinding? right) -> bool
+static Koine.Compiler.Ast.LetBinding.operator ==(Koine.Compiler.Ast.LetBinding? left, Koine.Compiler.Ast.LetBinding? right) -> bool
+static Koine.Compiler.Ast.LetExpr.operator !=(Koine.Compiler.Ast.LetExpr? left, Koine.Compiler.Ast.LetExpr? right) -> bool
+static Koine.Compiler.Ast.LetExpr.operator ==(Koine.Compiler.Ast.LetExpr? left, Koine.Compiler.Ast.LetExpr? right) -> bool
+static Koine.Compiler.Ast.LiteralExpr.operator !=(Koine.Compiler.Ast.LiteralExpr? left, Koine.Compiler.Ast.LiteralExpr? right) -> bool
+static Koine.Compiler.Ast.LiteralExpr.operator ==(Koine.Compiler.Ast.LiteralExpr? left, Koine.Compiler.Ast.LiteralExpr? right) -> bool
+static Koine.Compiler.Ast.MatchExpr.operator !=(Koine.Compiler.Ast.MatchExpr? left, Koine.Compiler.Ast.MatchExpr? right) -> bool
+static Koine.Compiler.Ast.MatchExpr.operator ==(Koine.Compiler.Ast.MatchExpr? left, Koine.Compiler.Ast.MatchExpr? right) -> bool
+static Koine.Compiler.Ast.Member.operator !=(Koine.Compiler.Ast.Member? left, Koine.Compiler.Ast.Member? right) -> bool
+static Koine.Compiler.Ast.Member.operator ==(Koine.Compiler.Ast.Member? left, Koine.Compiler.Ast.Member? right) -> bool
+static Koine.Compiler.Ast.MemberAccessExpr.operator !=(Koine.Compiler.Ast.MemberAccessExpr? left, Koine.Compiler.Ast.MemberAccessExpr? right) -> bool
+static Koine.Compiler.Ast.MemberAccessExpr.operator ==(Koine.Compiler.Ast.MemberAccessExpr? left, Koine.Compiler.Ast.MemberAccessExpr? right) -> bool
+static Koine.Compiler.Ast.ModelIndex.OwnerResolution.operator !=(Koine.Compiler.Ast.ModelIndex.OwnerResolution left, Koine.Compiler.Ast.ModelIndex.OwnerResolution right) -> bool
+static Koine.Compiler.Ast.ModelIndex.OwnerResolution.operator ==(Koine.Compiler.Ast.ModelIndex.OwnerResolution left, Koine.Compiler.Ast.ModelIndex.OwnerResolution right) -> bool
+static Koine.Compiler.Ast.ModelIndex.RefResolution.operator !=(Koine.Compiler.Ast.ModelIndex.RefResolution left, Koine.Compiler.Ast.ModelIndex.RefResolution right) -> bool
+static Koine.Compiler.Ast.ModelIndex.RefResolution.operator ==(Koine.Compiler.Ast.ModelIndex.RefResolution left, Koine.Compiler.Ast.ModelIndex.RefResolution right) -> bool
+static Koine.Compiler.Ast.OperationDecl.operator !=(Koine.Compiler.Ast.OperationDecl? left, Koine.Compiler.Ast.OperationDecl? right) -> bool
+static Koine.Compiler.Ast.OperationDecl.operator ==(Koine.Compiler.Ast.OperationDecl? left, Koine.Compiler.Ast.OperationDecl? right) -> bool
+static Koine.Compiler.Ast.Param.operator !=(Koine.Compiler.Ast.Param? left, Koine.Compiler.Ast.Param? right) -> bool
+static Koine.Compiler.Ast.Param.operator ==(Koine.Compiler.Ast.Param? left, Koine.Compiler.Ast.Param? right) -> bool
+static Koine.Compiler.Ast.PolicyArg.operator !=(Koine.Compiler.Ast.PolicyArg? left, Koine.Compiler.Ast.PolicyArg? right) -> bool
+static Koine.Compiler.Ast.PolicyArg.operator ==(Koine.Compiler.Ast.PolicyArg? left, Koine.Compiler.Ast.PolicyArg? right) -> bool
+static Koine.Compiler.Ast.PolicyDecl.operator !=(Koine.Compiler.Ast.PolicyDecl? left, Koine.Compiler.Ast.PolicyDecl? right) -> bool
+static Koine.Compiler.Ast.PolicyDecl.operator ==(Koine.Compiler.Ast.PolicyDecl? left, Koine.Compiler.Ast.PolicyDecl? right) -> bool
+static Koine.Compiler.Ast.PolicyReaction.operator !=(Koine.Compiler.Ast.PolicyReaction? left, Koine.Compiler.Ast.PolicyReaction? right) -> bool
+static Koine.Compiler.Ast.PolicyReaction.operator ==(Koine.Compiler.Ast.PolicyReaction? left, Koine.Compiler.Ast.PolicyReaction? right) -> bool
+static Koine.Compiler.Ast.PublishDecl.operator !=(Koine.Compiler.Ast.PublishDecl? left, Koine.Compiler.Ast.PublishDecl? right) -> bool
+static Koine.Compiler.Ast.PublishDecl.operator ==(Koine.Compiler.Ast.PublishDecl? left, Koine.Compiler.Ast.PublishDecl? right) -> bool
+static Koine.Compiler.Ast.QueryDecl.operator !=(Koine.Compiler.Ast.QueryDecl? left, Koine.Compiler.Ast.QueryDecl? right) -> bool
+static Koine.Compiler.Ast.QueryDecl.operator ==(Koine.Compiler.Ast.QueryDecl? left, Koine.Compiler.Ast.QueryDecl? right) -> bool
+static Koine.Compiler.Ast.ReadModelDecl.operator !=(Koine.Compiler.Ast.ReadModelDecl? left, Koine.Compiler.Ast.ReadModelDecl? right) -> bool
+static Koine.Compiler.Ast.ReadModelDecl.operator ==(Koine.Compiler.Ast.ReadModelDecl? left, Koine.Compiler.Ast.ReadModelDecl? right) -> bool
+static Koine.Compiler.Ast.ReadModelField.operator !=(Koine.Compiler.Ast.ReadModelField? left, Koine.Compiler.Ast.ReadModelField? right) -> bool
+static Koine.Compiler.Ast.ReadModelField.operator ==(Koine.Compiler.Ast.ReadModelField? left, Koine.Compiler.Ast.ReadModelField? right) -> bool
+static Koine.Compiler.Ast.RepositoryDecl.operator !=(Koine.Compiler.Ast.RepositoryDecl? left, Koine.Compiler.Ast.RepositoryDecl? right) -> bool
+static Koine.Compiler.Ast.RepositoryDecl.operator ==(Koine.Compiler.Ast.RepositoryDecl? left, Koine.Compiler.Ast.RepositoryDecl? right) -> bool
+static Koine.Compiler.Ast.RequiresClause.operator !=(Koine.Compiler.Ast.RequiresClause? left, Koine.Compiler.Ast.RequiresClause? right) -> bool
+static Koine.Compiler.Ast.RequiresClause.operator ==(Koine.Compiler.Ast.RequiresClause? left, Koine.Compiler.Ast.RequiresClause? right) -> bool
+static Koine.Compiler.Ast.ResultClause.operator !=(Koine.Compiler.Ast.ResultClause? left, Koine.Compiler.Ast.ResultClause? right) -> bool
+static Koine.Compiler.Ast.ResultClause.operator ==(Koine.Compiler.Ast.ResultClause? left, Koine.Compiler.Ast.ResultClause? right) -> bool
+static Koine.Compiler.Ast.ServiceDecl.operator !=(Koine.Compiler.Ast.ServiceDecl? left, Koine.Compiler.Ast.ServiceDecl? right) -> bool
+static Koine.Compiler.Ast.ServiceDecl.operator ==(Koine.Compiler.Ast.ServiceDecl? left, Koine.Compiler.Ast.ServiceDecl? right) -> bool
+static Koine.Compiler.Ast.SourceSpan.operator !=(Koine.Compiler.Ast.SourceSpan left, Koine.Compiler.Ast.SourceSpan right) -> bool
+static Koine.Compiler.Ast.SourceSpan.operator ==(Koine.Compiler.Ast.SourceSpan left, Koine.Compiler.Ast.SourceSpan right) -> bool
+static Koine.Compiler.Ast.SpecDecl.operator !=(Koine.Compiler.Ast.SpecDecl? left, Koine.Compiler.Ast.SpecDecl? right) -> bool
+static Koine.Compiler.Ast.SpecDecl.operator ==(Koine.Compiler.Ast.SpecDecl? left, Koine.Compiler.Ast.SpecDecl? right) -> bool
+static Koine.Compiler.Ast.StateRule.operator !=(Koine.Compiler.Ast.StateRule? left, Koine.Compiler.Ast.StateRule? right) -> bool
+static Koine.Compiler.Ast.StateRule.operator ==(Koine.Compiler.Ast.StateRule? left, Koine.Compiler.Ast.StateRule? right) -> bool
+static Koine.Compiler.Ast.StatesDecl.operator !=(Koine.Compiler.Ast.StatesDecl? left, Koine.Compiler.Ast.StatesDecl? right) -> bool
+static Koine.Compiler.Ast.StatesDecl.operator ==(Koine.Compiler.Ast.StatesDecl? left, Koine.Compiler.Ast.StatesDecl? right) -> bool
+static Koine.Compiler.Ast.SubscribeDecl.operator !=(Koine.Compiler.Ast.SubscribeDecl? left, Koine.Compiler.Ast.SubscribeDecl? right) -> bool
+static Koine.Compiler.Ast.SubscribeDecl.operator ==(Koine.Compiler.Ast.SubscribeDecl? left, Koine.Compiler.Ast.SubscribeDecl? right) -> bool
+static Koine.Compiler.Ast.SyntaxTrivia.operator !=(Koine.Compiler.Ast.SyntaxTrivia left, Koine.Compiler.Ast.SyntaxTrivia right) -> bool
+static Koine.Compiler.Ast.SyntaxTrivia.operator ==(Koine.Compiler.Ast.SyntaxTrivia left, Koine.Compiler.Ast.SyntaxTrivia right) -> bool
+static Koine.Compiler.Ast.Transition.operator !=(Koine.Compiler.Ast.Transition? left, Koine.Compiler.Ast.Transition? right) -> bool
+static Koine.Compiler.Ast.Transition.operator ==(Koine.Compiler.Ast.Transition? left, Koine.Compiler.Ast.Transition? right) -> bool
+static Koine.Compiler.Ast.TypeDecl.operator !=(Koine.Compiler.Ast.TypeDecl? left, Koine.Compiler.Ast.TypeDecl? right) -> bool
+static Koine.Compiler.Ast.TypeDecl.operator ==(Koine.Compiler.Ast.TypeDecl? left, Koine.Compiler.Ast.TypeDecl? right) -> bool
+static Koine.Compiler.Ast.TypeRef.operator !=(Koine.Compiler.Ast.TypeRef? left, Koine.Compiler.Ast.TypeRef? right) -> bool
+static Koine.Compiler.Ast.TypeRef.operator ==(Koine.Compiler.Ast.TypeRef? left, Koine.Compiler.Ast.TypeRef? right) -> bool
+static Koine.Compiler.Ast.UnaryExpr.operator !=(Koine.Compiler.Ast.UnaryExpr? left, Koine.Compiler.Ast.UnaryExpr? right) -> bool
+static Koine.Compiler.Ast.UnaryExpr.operator ==(Koine.Compiler.Ast.UnaryExpr? left, Koine.Compiler.Ast.UnaryExpr? right) -> bool
+static Koine.Compiler.Ast.UseCaseDecl.operator !=(Koine.Compiler.Ast.UseCaseDecl? left, Koine.Compiler.Ast.UseCaseDecl? right) -> bool
+static Koine.Compiler.Ast.UseCaseDecl.operator ==(Koine.Compiler.Ast.UseCaseDecl? left, Koine.Compiler.Ast.UseCaseDecl? right) -> bool
+static Koine.Compiler.Ast.ValueObjectDecl.operator !=(Koine.Compiler.Ast.ValueObjectDecl? left, Koine.Compiler.Ast.ValueObjectDecl? right) -> bool
+static Koine.Compiler.Ast.ValueObjectDecl.operator ==(Koine.Compiler.Ast.ValueObjectDecl? left, Koine.Compiler.Ast.ValueObjectDecl? right) -> bool
+static Koine.Compiler.CodeFixes.CodeFix.operator !=(Koine.Compiler.CodeFixes.CodeFix? left, Koine.Compiler.CodeFixes.CodeFix? right) -> bool
+static Koine.Compiler.CodeFixes.CodeFix.operator ==(Koine.Compiler.CodeFixes.CodeFix? left, Koine.Compiler.CodeFixes.CodeFix? right) -> bool
+static Koine.Compiler.CodeFixes.CodeFixEdit.operator !=(Koine.Compiler.CodeFixes.CodeFixEdit? left, Koine.Compiler.CodeFixes.CodeFixEdit? right) -> bool
+static Koine.Compiler.CodeFixes.CodeFixEdit.operator ==(Koine.Compiler.CodeFixes.CodeFixEdit? left, Koine.Compiler.CodeFixes.CodeFixEdit? right) -> bool
+static Koine.Compiler.CodeFixes.SelectionRange.operator !=(Koine.Compiler.CodeFixes.SelectionRange? left, Koine.Compiler.CodeFixes.SelectionRange? right) -> bool
+static Koine.Compiler.CodeFixes.SelectionRange.operator ==(Koine.Compiler.CodeFixes.SelectionRange? left, Koine.Compiler.CodeFixes.SelectionRange? right) -> bool
+static Koine.Compiler.Diagnostics.Diagnostic.operator !=(Koine.Compiler.Diagnostics.Diagnostic? left, Koine.Compiler.Diagnostics.Diagnostic? right) -> bool
+static Koine.Compiler.Diagnostics.Diagnostic.operator ==(Koine.Compiler.Diagnostics.Diagnostic? left, Koine.Compiler.Diagnostics.Diagnostic? right) -> bool
+static Koine.Compiler.Diagnostics.DiagnosticDescriptor.operator !=(Koine.Compiler.Diagnostics.DiagnosticDescriptor? left, Koine.Compiler.Diagnostics.DiagnosticDescriptor? right) -> bool
+static Koine.Compiler.Diagnostics.DiagnosticDescriptor.operator ==(Koine.Compiler.Diagnostics.DiagnosticDescriptor? left, Koine.Compiler.Diagnostics.DiagnosticDescriptor? right) -> bool
+static Koine.Compiler.Diagnostics.DiagnosticFilterOptions.operator !=(Koine.Compiler.Diagnostics.DiagnosticFilterOptions? left, Koine.Compiler.Diagnostics.DiagnosticFilterOptions? right) -> bool
+static Koine.Compiler.Diagnostics.DiagnosticFilterOptions.operator ==(Koine.Compiler.Diagnostics.DiagnosticFilterOptions? left, Koine.Compiler.Diagnostics.DiagnosticFilterOptions? right) -> bool
+static Koine.Compiler.Emit.EmitTargetInfo.operator !=(Koine.Compiler.Emit.EmitTargetInfo? left, Koine.Compiler.Emit.EmitTargetInfo? right) -> bool
+static Koine.Compiler.Emit.EmitTargetInfo.operator ==(Koine.Compiler.Emit.EmitTargetInfo? left, Koine.Compiler.Emit.EmitTargetInfo? right) -> bool
+static Koine.Compiler.Emit.EmittedFile.operator !=(Koine.Compiler.Emit.EmittedFile? left, Koine.Compiler.Emit.EmittedFile? right) -> bool
+static Koine.Compiler.Emit.EmittedFile.operator ==(Koine.Compiler.Emit.EmittedFile? left, Koine.Compiler.Emit.EmittedFile? right) -> bool
+static Koine.Compiler.Emit.EmitterOptions.operator !=(Koine.Compiler.Emit.EmitterOptions? left, Koine.Compiler.Emit.EmitterOptions? right) -> bool
+static Koine.Compiler.Emit.EmitterOptions.operator ==(Koine.Compiler.Emit.EmitterOptions? left, Koine.Compiler.Emit.EmitterOptions? right) -> bool
+static Koine.Compiler.Emit.Glossary.GlossaryEntry.operator !=(Koine.Compiler.Emit.Glossary.GlossaryEntry? left, Koine.Compiler.Emit.Glossary.GlossaryEntry? right) -> bool
+static Koine.Compiler.Emit.Glossary.GlossaryEntry.operator ==(Koine.Compiler.Emit.Glossary.GlossaryEntry? left, Koine.Compiler.Emit.Glossary.GlossaryEntry? right) -> bool
+static Koine.Compiler.Emit.Glossary.GlossaryModel.operator !=(Koine.Compiler.Emit.Glossary.GlossaryModel? left, Koine.Compiler.Emit.Glossary.GlossaryModel? right) -> bool
+static Koine.Compiler.Emit.Glossary.GlossaryModel.operator ==(Koine.Compiler.Emit.Glossary.GlossaryModel? left, Koine.Compiler.Emit.Glossary.GlossaryModel? right) -> bool
+static Koine.Compiler.Emit.SourceMapSegment.operator !=(Koine.Compiler.Emit.SourceMapSegment? left, Koine.Compiler.Emit.SourceMapSegment? right) -> bool
+static Koine.Compiler.Emit.SourceMapSegment.operator ==(Koine.Compiler.Emit.SourceMapSegment? left, Koine.Compiler.Emit.SourceMapSegment? right) -> bool
+static Koine.Compiler.Formatting.FormatRangeEdit.operator !=(Koine.Compiler.Formatting.FormatRangeEdit? left, Koine.Compiler.Formatting.FormatRangeEdit? right) -> bool
+static Koine.Compiler.Formatting.FormatRangeEdit.operator ==(Koine.Compiler.Formatting.FormatRangeEdit? left, Koine.Compiler.Formatting.FormatRangeEdit? right) -> bool
+static Koine.Compiler.Formatting.FormatResult.operator !=(Koine.Compiler.Formatting.FormatResult? left, Koine.Compiler.Formatting.FormatResult? right) -> bool
+static Koine.Compiler.Formatting.FormatResult.operator ==(Koine.Compiler.Formatting.FormatResult? left, Koine.Compiler.Formatting.FormatResult? right) -> bool
+static Koine.Compiler.Services.CallHierarchyIncomingCall.operator !=(Koine.Compiler.Services.CallHierarchyIncomingCall? left, Koine.Compiler.Services.CallHierarchyIncomingCall? right) -> bool
+static Koine.Compiler.Services.CallHierarchyIncomingCall.operator ==(Koine.Compiler.Services.CallHierarchyIncomingCall? left, Koine.Compiler.Services.CallHierarchyIncomingCall? right) -> bool
+static Koine.Compiler.Services.CallHierarchyItem.operator !=(Koine.Compiler.Services.CallHierarchyItem? left, Koine.Compiler.Services.CallHierarchyItem? right) -> bool
+static Koine.Compiler.Services.CallHierarchyItem.operator ==(Koine.Compiler.Services.CallHierarchyItem? left, Koine.Compiler.Services.CallHierarchyItem? right) -> bool
+static Koine.Compiler.Services.CallHierarchyOutgoingCall.operator !=(Koine.Compiler.Services.CallHierarchyOutgoingCall? left, Koine.Compiler.Services.CallHierarchyOutgoingCall? right) -> bool
+static Koine.Compiler.Services.CallHierarchyOutgoingCall.operator ==(Koine.Compiler.Services.CallHierarchyOutgoingCall? left, Koine.Compiler.Services.CallHierarchyOutgoingCall? right) -> bool
+static Koine.Compiler.Services.CodeActionEdit.operator !=(Koine.Compiler.Services.CodeActionEdit? left, Koine.Compiler.Services.CodeActionEdit? right) -> bool
+static Koine.Compiler.Services.CodeActionEdit.operator ==(Koine.Compiler.Services.CodeActionEdit? left, Koine.Compiler.Services.CodeActionEdit? right) -> bool
+static Koine.Compiler.Services.CodeLens.operator !=(Koine.Compiler.Services.CodeLens? left, Koine.Compiler.Services.CodeLens? right) -> bool
+static Koine.Compiler.Services.CodeLens.operator ==(Koine.Compiler.Services.CodeLens? left, Koine.Compiler.Services.CodeLens? right) -> bool
+static Koine.Compiler.Services.CompatibilityChange.operator !=(Koine.Compiler.Services.CompatibilityChange? left, Koine.Compiler.Services.CompatibilityChange? right) -> bool
+static Koine.Compiler.Services.CompatibilityChange.operator ==(Koine.Compiler.Services.CompatibilityChange? left, Koine.Compiler.Services.CompatibilityChange? right) -> bool
+static Koine.Compiler.Services.CompatibilityReport.operator !=(Koine.Compiler.Services.CompatibilityReport? left, Koine.Compiler.Services.CompatibilityReport? right) -> bool
+static Koine.Compiler.Services.CompatibilityReport.operator ==(Koine.Compiler.Services.CompatibilityReport? left, Koine.Compiler.Services.CompatibilityReport? right) -> bool
+static Koine.Compiler.Services.CompileResult.operator !=(Koine.Compiler.Services.CompileResult? left, Koine.Compiler.Services.CompileResult? right) -> bool
+static Koine.Compiler.Services.CompileResult.operator ==(Koine.Compiler.Services.CompileResult? left, Koine.Compiler.Services.CompileResult? right) -> bool
+static Koine.Compiler.Services.CompletionItem.operator !=(Koine.Compiler.Services.CompletionItem? left, Koine.Compiler.Services.CompletionItem? right) -> bool
+static Koine.Compiler.Services.CompletionItem.operator ==(Koine.Compiler.Services.CompletionItem? left, Koine.Compiler.Services.CompletionItem? right) -> bool
+static Koine.Compiler.Services.DeclLocation.operator !=(Koine.Compiler.Services.DeclLocation? left, Koine.Compiler.Services.DeclLocation? right) -> bool
+static Koine.Compiler.Services.DeclLocation.operator ==(Koine.Compiler.Services.DeclLocation? left, Koine.Compiler.Services.DeclLocation? right) -> bool
+static Koine.Compiler.Services.DefinitionResult.operator !=(Koine.Compiler.Services.DefinitionResult? left, Koine.Compiler.Services.DefinitionResult? right) -> bool
+static Koine.Compiler.Services.DefinitionResult.operator ==(Koine.Compiler.Services.DefinitionResult? left, Koine.Compiler.Services.DefinitionResult? right) -> bool
+static Koine.Compiler.Services.DocEditResult.operator !=(Koine.Compiler.Services.DocEditResult? left, Koine.Compiler.Services.DocEditResult? right) -> bool
+static Koine.Compiler.Services.DocEditResult.operator ==(Koine.Compiler.Services.DocEditResult? left, Koine.Compiler.Services.DocEditResult? right) -> bool
+static Koine.Compiler.Services.DocTextEdit.operator !=(Koine.Compiler.Services.DocTextEdit? left, Koine.Compiler.Services.DocTextEdit? right) -> bool
+static Koine.Compiler.Services.DocTextEdit.operator ==(Koine.Compiler.Services.DocTextEdit? left, Koine.Compiler.Services.DocTextEdit? right) -> bool
+static Koine.Compiler.Services.DocumentSymbol.operator !=(Koine.Compiler.Services.DocumentSymbol? left, Koine.Compiler.Services.DocumentSymbol? right) -> bool
+static Koine.Compiler.Services.DocumentSymbol.operator ==(Koine.Compiler.Services.DocumentSymbol? left, Koine.Compiler.Services.DocumentSymbol? right) -> bool
+static Koine.Compiler.Services.EmitResult.operator !=(Koine.Compiler.Services.EmitResult? left, Koine.Compiler.Services.EmitResult? right) -> bool
+static Koine.Compiler.Services.EmitResult.operator ==(Koine.Compiler.Services.EmitResult? left, Koine.Compiler.Services.EmitResult? right) -> bool
+static Koine.Compiler.Services.FoldingRange.operator !=(Koine.Compiler.Services.FoldingRange? left, Koine.Compiler.Services.FoldingRange? right) -> bool
+static Koine.Compiler.Services.FoldingRange.operator ==(Koine.Compiler.Services.FoldingRange? left, Koine.Compiler.Services.FoldingRange? right) -> bool
+static Koine.Compiler.Services.HoverResult.operator !=(Koine.Compiler.Services.HoverResult? left, Koine.Compiler.Services.HoverResult? right) -> bool
+static Koine.Compiler.Services.HoverResult.operator ==(Koine.Compiler.Services.HoverResult? left, Koine.Compiler.Services.HoverResult? right) -> bool
+static Koine.Compiler.Services.InlayHint.operator !=(Koine.Compiler.Services.InlayHint? left, Koine.Compiler.Services.InlayHint? right) -> bool
+static Koine.Compiler.Services.InlayHint.operator ==(Koine.Compiler.Services.InlayHint? left, Koine.Compiler.Services.InlayHint? right) -> bool
+static Koine.Compiler.Services.ModelEditResult.operator !=(Koine.Compiler.Services.ModelEditResult? left, Koine.Compiler.Services.ModelEditResult? right) -> bool
+static Koine.Compiler.Services.ModelEditResult.operator ==(Koine.Compiler.Services.ModelEditResult? left, Koine.Compiler.Services.ModelEditResult? right) -> bool
+static Koine.Compiler.Services.ModelMember.operator !=(Koine.Compiler.Services.ModelMember? left, Koine.Compiler.Services.ModelMember? right) -> bool
+static Koine.Compiler.Services.ModelMember.operator ==(Koine.Compiler.Services.ModelMember? left, Koine.Compiler.Services.ModelMember? right) -> bool
+static Koine.Compiler.Services.ModelNode.operator !=(Koine.Compiler.Services.ModelNode? left, Koine.Compiler.Services.ModelNode? right) -> bool
+static Koine.Compiler.Services.ModelNode.operator ==(Koine.Compiler.Services.ModelNode? left, Koine.Compiler.Services.ModelNode? right) -> bool
+static Koine.Compiler.Services.ParameterInfo.operator !=(Koine.Compiler.Services.ParameterInfo? left, Koine.Compiler.Services.ParameterInfo? right) -> bool
+static Koine.Compiler.Services.ParameterInfo.operator ==(Koine.Compiler.Services.ParameterInfo? left, Koine.Compiler.Services.ParameterInfo? right) -> bool
+static Koine.Compiler.Services.Reference.operator !=(Koine.Compiler.Services.Reference? left, Koine.Compiler.Services.Reference? right) -> bool
+static Koine.Compiler.Services.Reference.operator ==(Koine.Compiler.Services.Reference? left, Koine.Compiler.Services.Reference? right) -> bool
+static Koine.Compiler.Services.RenameEdit.operator !=(Koine.Compiler.Services.RenameEdit? left, Koine.Compiler.Services.RenameEdit? right) -> bool
+static Koine.Compiler.Services.RenameEdit.operator ==(Koine.Compiler.Services.RenameEdit? left, Koine.Compiler.Services.RenameEdit? right) -> bool
+static Koine.Compiler.Services.RenameFileChanges.operator !=(Koine.Compiler.Services.RenameFileChanges? left, Koine.Compiler.Services.RenameFileChanges? right) -> bool
+static Koine.Compiler.Services.RenameFileChanges.operator ==(Koine.Compiler.Services.RenameFileChanges? left, Koine.Compiler.Services.RenameFileChanges? right) -> bool
+static Koine.Compiler.Services.RenamePreview.operator !=(Koine.Compiler.Services.RenamePreview? left, Koine.Compiler.Services.RenamePreview? right) -> bool
+static Koine.Compiler.Services.RenamePreview.operator ==(Koine.Compiler.Services.RenamePreview? left, Koine.Compiler.Services.RenamePreview? right) -> bool
+static Koine.Compiler.Services.SelectionRange.operator !=(Koine.Compiler.Services.SelectionRange? left, Koine.Compiler.Services.SelectionRange? right) -> bool
+static Koine.Compiler.Services.SelectionRange.operator ==(Koine.Compiler.Services.SelectionRange? left, Koine.Compiler.Services.SelectionRange? right) -> bool
+static Koine.Compiler.Services.SemanticToken.operator !=(Koine.Compiler.Services.SemanticToken left, Koine.Compiler.Services.SemanticToken right) -> bool
+static Koine.Compiler.Services.SemanticToken.operator ==(Koine.Compiler.Services.SemanticToken left, Koine.Compiler.Services.SemanticToken right) -> bool
+static Koine.Compiler.Services.SignatureHelp.operator !=(Koine.Compiler.Services.SignatureHelp? left, Koine.Compiler.Services.SignatureHelp? right) -> bool
+static Koine.Compiler.Services.SignatureHelp.operator ==(Koine.Compiler.Services.SignatureHelp? left, Koine.Compiler.Services.SignatureHelp? right) -> bool
+static Koine.Compiler.Services.SignatureInfo.operator !=(Koine.Compiler.Services.SignatureInfo? left, Koine.Compiler.Services.SignatureInfo? right) -> bool
+static Koine.Compiler.Services.SignatureInfo.operator ==(Koine.Compiler.Services.SignatureInfo? left, Koine.Compiler.Services.SignatureInfo? right) -> bool
+static Koine.Compiler.Services.SourceFile.operator !=(Koine.Compiler.Services.SourceFile left, Koine.Compiler.Services.SourceFile right) -> bool
+static Koine.Compiler.Services.SourceFile.operator ==(Koine.Compiler.Services.SourceFile left, Koine.Compiler.Services.SourceFile right) -> bool
+static Koine.Compiler.Services.StructuredEdit.operator !=(Koine.Compiler.Services.StructuredEdit? left, Koine.Compiler.Services.StructuredEdit? right) -> bool
+static Koine.Compiler.Services.StructuredEdit.operator ==(Koine.Compiler.Services.StructuredEdit? left, Koine.Compiler.Services.StructuredEdit? right) -> bool
+static Koine.Compiler.Services.SyntaxTreeNode.operator !=(Koine.Compiler.Services.SyntaxTreeNode? left, Koine.Compiler.Services.SyntaxTreeNode? right) -> bool
+static Koine.Compiler.Services.SyntaxTreeNode.operator ==(Koine.Compiler.Services.SyntaxTreeNode? left, Koine.Compiler.Services.SyntaxTreeNode? right) -> bool
+static Koine.Compiler.Services.TextEditModel.operator !=(Koine.Compiler.Services.TextEditModel? left, Koine.Compiler.Services.TextEditModel? right) -> bool
+static Koine.Compiler.Services.TextEditModel.operator ==(Koine.Compiler.Services.TextEditModel? left, Koine.Compiler.Services.TextEditModel? right) -> bool
+static Koine.Compiler.Services.TypeHierarchyItem.operator !=(Koine.Compiler.Services.TypeHierarchyItem? left, Koine.Compiler.Services.TypeHierarchyItem? right) -> bool
+static Koine.Compiler.Services.TypeHierarchyItem.operator ==(Koine.Compiler.Services.TypeHierarchyItem? left, Koine.Compiler.Services.TypeHierarchyItem? right) -> bool
+static Koine.Compiler.Services.WorkspaceSymbol.operator !=(Koine.Compiler.Services.WorkspaceSymbol? left, Koine.Compiler.Services.WorkspaceSymbol? right) -> bool
+static Koine.Compiler.Services.WorkspaceSymbol.operator ==(Koine.Compiler.Services.WorkspaceSymbol? left, Koine.Compiler.Services.WorkspaceSymbol? right) -> bool
+virtual Koine.Compiler.Ast.Bound.BoundExpression.Equals(Koine.Compiler.Ast.Bound.BoundExpression? other) -> bool
+virtual Koine.Compiler.Ast.Bound.BoundNode.EqualityContract.get -> System.Type!
+virtual Koine.Compiler.Ast.Bound.BoundNode.Equals(Koine.Compiler.Ast.Bound.BoundNode? other) -> bool
+virtual Koine.Compiler.Ast.Bound.BoundNode.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual Koine.Compiler.Ast.CommandStmt.Equals(Koine.Compiler.Ast.CommandStmt? other) -> bool
+virtual Koine.Compiler.Ast.Expr.Equals(Koine.Compiler.Ast.Expr? other) -> bool
+virtual Koine.Compiler.Ast.KoineNode.EqualityContract.get -> System.Type!
+virtual Koine.Compiler.Ast.KoineNode.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+virtual Koine.Compiler.Ast.KoineNode.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual Koine.Compiler.Ast.TypeDecl.Equals(Koine.Compiler.Ast.TypeDecl? other) -> bool
+virtual Koine.Compiler.Emit.EmitTargetInfo.<Clone>$() -> Koine.Compiler.Emit.EmitTargetInfo!
+virtual Koine.Compiler.Emit.EmitTargetInfo.EqualityContract.get -> System.Type!
+virtual Koine.Compiler.Emit.EmitTargetInfo.Equals(Koine.Compiler.Emit.EmitTargetInfo? other) -> bool
+virtual Koine.Compiler.Emit.EmitTargetInfo.PrintMembers(System.Text.StringBuilder! builder) -> bool
+~override Koine.Compiler.Ast.ModelIndex.OwnerResolution.Equals(object obj) -> bool
+~override Koine.Compiler.Ast.ModelIndex.OwnerResolution.ToString() -> string
+~override Koine.Compiler.Ast.ModelIndex.RefResolution.Equals(object obj) -> bool
+~override Koine.Compiler.Ast.ModelIndex.RefResolution.ToString() -> string
+~override Koine.Compiler.Ast.SourceSpan.Equals(object obj) -> bool
+~override Koine.Compiler.Ast.SourceSpan.ToString() -> string
+~override Koine.Compiler.Ast.SyntaxTrivia.Equals(object obj) -> bool
+~override Koine.Compiler.Ast.SyntaxTrivia.ToString() -> string
+~override Koine.Compiler.Services.SemanticToken.Equals(object obj) -> bool
+~override Koine.Compiler.Services.SemanticToken.ToString() -> string
+~override Koine.Compiler.Services.SourceFile.Equals(object obj) -> bool
+~override Koine.Compiler.Services.SourceFile.ToString() -> string

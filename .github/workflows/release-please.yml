@@ -159,9 +159,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ needs.release-please.outputs.tag_name }}" ./artifacts/*.nupkg --clobber
 
-      # TODO: publish to NuGet once a NUGET_API_KEY secret is configured:
-      # dotnet nuget push ./artifacts/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} \
-      #   --source https://api.nuget.org/v3/index.json --skip-duplicate
+      # Publish to NuGet.org so `dotnet tool install --global koine` works. No-op until a maintainer
+      # configures the NUGET_API_KEY secret (the env-indirection lets the `if` skip cleanly when it's
+      # unset); never runs on a workflow_dispatch dry-run (release_created is false there).
+      # --skip-duplicate makes re-runs of the same release idempotent.
+      - name: Push to NuGet
+        if: ${{ needs.release-please.outputs.release_created == 'true' && env.NUGET_API_KEY != '' }}
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: dotnet nuget push ./artifacts/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
   # Studio desktop installers (.dmg/.msi or NSIS .exe/.AppImage/.deb), UNSIGNED, attached to the
   # release. Reuses the same build as CI via the reusable workflow; publish only on a real release.
