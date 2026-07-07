@@ -1,5 +1,5 @@
-// The canonical empty / informational state for a side-rail tab — the Properties inspector, the Rules
-// tab and the Notes tab all render through it, so the three read identically: same heading face
+// The canonical empty / informational state for a side-rail tab — the Properties inspector renders
+// through it, so its empty and populated states read identically: same heading face
 // (`.koi-rview-empty-title`), same muted body, same margin. The margin comes from the panel container
 // (the shared `rail-panel-pad` mixin on `.doc-view` / `.koi-inspector`), so this block only owns its
 // own light inner spacing. Pure DOM builders, decoupled from the editor, so they unit-test under

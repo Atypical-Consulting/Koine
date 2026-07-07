@@ -1,15 +1,14 @@
 // inspectorController: the mode / center-tab / view subsystem lifted out of ide.ts's init()
 // (Task 4 of the ide.ts decomposition, issue #180). It owns:
-//   • the workspace MODE switcher (Domain / Code / Docs) and its chrome (#143),
-//   • the CENTER view machinery — Visual (the diagram canvas), Code (editor / Generated preview /
-//     Compatibility check / Assistant sub-tabs) and Documentation (Glossary / ADR-&-Notes sub-tabs) —
-//     plus the right-rail Properties/Rules/Notes tab chrome,
-//   • the BOTTOM strip (Problems / Events / Relationships / Context Map) with its lazy loaders,
-//     collapse toggle and resizer,
+//   • the CENTER "Deck" surfaces — Canvas (the diagram), Code (editor / Scenarios), Output
+//     (Generated / Compatibility / Context Map) and Docs (Glossary / ADRs / Notes) — plus the
+//     right-rail Properties / AI Chat / Source Control / Syntax Tree view chrome,
+//   • the BOTTOM strip (Problems / Events / Relationships, and Terminal / Review) with its lazy
+//     loaders, collapse toggle and resizer,
 //   • the per-view LAZY LOADERS and their stale-token / debounce lifecycle (the Generated preview,
 //     the diagrams, the left-rail Domain navigator, the glossary, the ADR docs, and the bottom tables),
-//   • the bounded-context SCOPE switcher (#146) and the selection-driven Properties inspector +
-//     cross-highlight cluster (#142), and the joined model index it reads.
+//   • the bounded-context SCOPE (#146, driven by the Domain navigator) and the selection-driven
+//     Properties inspector + cross-highlight cluster (#142), and the joined model index it reads.
 //
 // Everything model-derived is invalidated together on an edit (onDocEdited / invalidateDocViews) and
 // the live surfaces repaint debounced, so the preview + diagram + tables track the model without a
@@ -503,8 +502,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
 
   // --- bounded-context switcher (#146) ---------------------------------------
   // A thin handle over the app store's `activeContext` slice — the store is the single source of truth,
-  // so the switcher writes it here and every scoped surface (and the ModelOutlinePanel, which subscribes
-  // to the slice) reads the same value.
+  // so writers set it here and every scoped surface (the diagram, the glossary, and the bottom
+  // Events/Relationships tables) reads the same value back.
   const activeContext: ActiveContextHandle = {
     get: () => appStore.getState().activeContext,
     set: (scope) => appStore.getState().setActiveContext(scope),
@@ -534,8 +533,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // selection, or falling back off a vanished context) are view-only so they never overwrite the
   // user's last explicit choice in storage.
   function applyScope(scope: ContextScope, persist: boolean): void {
-    // Write the app store's `activeContext` slice (the single source of truth): the ModelOutlinePanel
-    // subscribes to it and re-renders the scoped tree, and every other scoped render path reads it back.
+    // Write the app store's `activeContext` slice (the single source of truth): every scoped render
+    // path reads it back — the diagram, the glossary, and the bottom Events/Relationships tables.
     // The status-bar readout + the scoped-surface re-filter are NOT driven here — the `activeContext`
     // subscription below (in createInspectorController) owns them, firing on the slice write this performs.
     // That's what keeps EVERY writer of the slice in lockstep: this dropdown path AND the Domain
@@ -597,7 +596,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function restoreActiveContext(): void {
     const stored = deps.loadActiveContext(contextWorkspaceKey());
     const scope = stored && stored.length > 0 ? stored : ALL_CONTEXTS;
-    // Set the store's scope so the ModelOutlinePanel's first paint is already scoped.
+    // Set the store's scope so every scoped surface's first paint is already scoped.
     activeContext.set(scope);
     syncContextStatusBar();
   }
@@ -1173,7 +1172,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function applySelectionHighlight(): void {
     const sel = selection.get();
     const hit = sel && modelIndex ? lookupElement(modelIndex, sel.qualifiedName) : null;
-    // The outline leaves' `is-selected` cross-highlight is now owned by the Preact ModelOutlinePanel
+    // The outline leaves' `is-selected` cross-highlight is owned by the left-rail Domain navigator
     // (it subscribes to the store's `selection` slice); this function only drives the SVG-node side.
     const ctxName = hit ? `${hit.element.entry.context}.${hit.element.entry.name}` : null;
     // Scope to the primary diagram SVG — the minimap (#145) clones the node layer as a decorative
