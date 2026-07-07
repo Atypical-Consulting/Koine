@@ -133,14 +133,20 @@ jobs:
         run: gh release upload "${{ needs.release-please.outputs.tag_name }}" "$ASSET" --clobber
 
   # CLI packed as a .NET global tool, attached to the release. Folds in the (never-triggered)
-  # release.yml pack. NuGet.org publish stays a TODO until a NUGET_API_KEY secret exists.
+  # release.yml pack. NuGet.org publish uses Trusted Publishing (OIDC) — no long-lived key — and stays
+  # a no-op until a maintainer registers the trusted-publishing policy and sets the NUGET_USER secret.
   nupkg:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write
+      contents: write # upload the .nupkg as a release asset
+      id-token: write # request the GitHub OIDC token for NuGet Trusted Publishing
+    # Job-level so the publish steps' `if` can read it — a STEP-level env is NOT visible to that
+    # same step's own `if` conditional. Empty until the maintainer sets the secret → steps no-op.
+    env:
+      NUGET_USER: ${{ secrets.NUGET_USER }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -159,15 +165,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ needs.release-please.outputs.tag_name }}" ./artifacts/*.nupkg --clobber
 
-      # Publish to NuGet.org so `dotnet tool install --global koine` works. No-op until a maintainer
-      # configures the NUGET_API_KEY secret (the env-indirection lets the `if` skip cleanly when it's
-      # unset); never runs on a workflow_dispatch dry-run (release_created is false there).
+      # Publish to NuGet.org so `dotnet tool install --global koine` works, via Trusted Publishing:
+      # the login step exchanges the GitHub OIDC token (needs `id-token: write` above) for a short-lived
+      # NuGet API key valid ~1h — no long-lived secret is stored. Both steps stay a clean no-op until a
+      # maintainer registers the trusted-publishing policy on NuGet.org and sets the NUGET_USER secret
+      # (the nuget.org profile name); the job-level env-indirection lets each `if` skip cleanly when it's
+      # unset. Never runs on a workflow_dispatch dry-run (release_created is false there). Keep login
+      # adjacent to the push so the ~1h key doesn't expire before it's used.
+      - name: NuGet login (OIDC -> short-lived key)
+        id: login
+        if: ${{ needs.release-please.outputs.release_created == 'true' && env.NUGET_USER != '' }}
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ env.NUGET_USER }}
+
       # --skip-duplicate makes re-runs of the same release idempotent.
       - name: Push to NuGet
-        if: ${{ needs.release-please.outputs.release_created == 'true' && env.NUGET_API_KEY != '' }}
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: dotnet nuget push ./artifacts/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        if: ${{ needs.release-please.outputs.release_created == 'true' && env.NUGET_USER != '' }}
+        run: dotnet nuget push ./artifacts/*.nupkg --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
 
   # Studio desktop installers (.dmg/.msi or NSIS .exe/.AppImage/.deb), UNSIGNED, attached to the
   # release. Reuses the same build as CI via the reusable workflow; publish only on a real release.
