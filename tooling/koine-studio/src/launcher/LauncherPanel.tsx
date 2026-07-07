@@ -9,6 +9,7 @@
 // symbol/event/rule entry's joined `ModelElement`, so `previewFor(selected.entry, {})` reads straight
 // off the catalog.
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { registerOverlay } from '@atypical/koine-ui';
 import { actionsFor, type LauncherActionDeps } from '@/launcher/actions';
 import { ActionMenu } from '@/launcher/ActionMenu';
 import { buildCatalog, type LauncherSources } from '@/launcher/buildCatalog';
@@ -47,8 +48,15 @@ export function LauncherPanel(props: LauncherPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Live-state mirrors read by the shared Esc-stack dismiss (registered once per open, so it can't
+  // close over `query`/`onClose` directly — it reads whatever these hold at Escape time). Assigned on
+  // every render below, so the dismiss always sees the current query and the current onClose.
+  const queryRef = useRef('');
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   const { mode, query } = parseMode(input);
+  queryRef.current = query;
   // Grouped/ranked results (Task 4) — see deriveResults.ts for the empty-query default vs. ranked-and-
   // grouped derivation. `visible` is the same flat top-to-bottom row order the keyboard reducer's ↑/↓
   // indexes into; re-derive it from (catalog, mode, query) rather than threading it through props, since
@@ -154,6 +162,34 @@ export function LauncherPanel(props: LauncherPanelProps) {
     }
   }, [visible]);
 
+  // Join koine-ui's shared Esc-stack while open (issue #1164), the same register-on-open /
+  // unregister-on-close lifecycle inspectorSheet.tsx and welcome.ts use. `registerOverlay` centralizes
+  // Escape ONLY: its single document-level handler routes each Esc to the topmost overlay, so the
+  // launcher dismisses in the right order when it coexists with another overlay. The launcher-level
+  // dismiss mirrors the old reducer's Escape branch — clear a non-empty query first, else close —
+  // reading the live query/onClose off refs since it's registered once per open. The non-Esc chord
+  // traps (⌘K stopPropagation, the `.lx-scrim` clause, `|| launcher.isOpen`) are NOT subsumed and stay.
+  useEffect(() => {
+    if (!visible) return;
+    const unregister = registerOverlay(() => {
+      if (queryRef.current !== '') setInput('');
+      else onCloseRef.current();
+    });
+    return unregister;
+  }, [visible]);
+
+  // Nest the action menu as a second Esc-stack layer ABOVE the launcher (issue #1164): while it's open
+  // the menu is the topmost overlay, so one shared Esc closes just the menu (peeling back to the
+  // launcher layer), and the next Esc dismisses the launcher — the same menu → clear-query → close
+  // order the reducer used to own, now expressed as stack depth. Popped on close/hide/unmount so no
+  // stale close-fn lingers (mirrors inspectorSheet's destroy()). setMenuOpen is a stable setter, so the
+  // dismiss needs no dep beyond `menuOpen`.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const unregister = registerOverlay(() => setMenuOpen(false));
+    return unregister;
+  }, [menuOpen]);
+
   function clearMode(): void {
     // Drop the mode-prefix char, and a single following space if there was one ("@ Order" → "Order"),
     // mirroring parseMode's own leading-space trim so the cleared query is the bare term (#1145 review).
@@ -167,16 +203,21 @@ export function LauncherPanel(props: LauncherPanelProps) {
   // The full keyboard model (issue #1143, task 7): `keys.ts`'s pure `handleKey` reducer decides the
   // intent from the current state; this handler just applies it (and calls `preventDefault()` when the
   // reducer says to) — no key-specific branching lives here anymore. Attached (below) to the
-  // `.lx-scrim` overlay so arrows/↵/Tab/Esc/⌘K work while the query input keeps DOM focus (focus stays
-  // trapped in the input; the container-level listener catches the bubbled keydown).
+  // `.lx-scrim` overlay so arrows/↵/Tab/⌘K work while the query input keeps DOM focus (focus stays
+  // trapped in the input; the container-level listener catches the bubbled keydown). Escape is the
+  // exception (issue #1164): the reducer returns `none` for it and this handler lets it bubble to
+  // koine-ui's shared Esc-stack, which owns launcher/menu dismissal (see the register effects above).
   function onKeyDown(e: KeyboardEvent): void {
     if (!visible) return;
-    // The launcher is a modal overlay: while it's open it OWNS every keystroke, so stop the event from
-    // bubbling to the shell's GLOBAL window keydown listeners (commandWiring's ⌘K palette-toggle, ide.tsx's
-    // ⌘S save + ⌘Z/⌘Y undo/redo). Those gate on overlayOpen(), which historically didn't see `.lx-scrim`,
-    // so without this they'd fire on the editor beneath the open launcher (issue #1145 review). Typing
-    // still works — the input already received the keystroke; stopPropagation only stops the bubble.
-    e.stopPropagation();
+    // While open the launcher OWNS its chords: stop them bubbling to the shell's GLOBAL window keydown
+    // listeners (commandWiring's ⌘K palette-toggle, ide.tsx's ⌘S save + ⌘Z/⌘Y undo/redo). Those gate on
+    // overlayOpen(), which doesn't see `.lx-scrim`, so without this they'd fire on the editor beneath the
+    // open launcher (issue #1145). Escape is the ONE exception (issue #1164): it must bubble to koine-ui's
+    // shared document-level Esc handler, which now owns overlay dismissal (the launcher + action-menu
+    // layers register on the shared stack above). commandWiring deliberately never handles Escape, so
+    // letting it through can't double-fire a global chord. Typing still works either way — the input
+    // already received the keystroke; stopPropagation only stops the bubble.
+    if (e.key !== 'Escape') e.stopPropagation();
     const keyState: LauncherKeyState = {
       query,
       selectedIndex,
@@ -201,12 +242,6 @@ export function LauncherPanel(props: LauncherPanelProps) {
         setInput(result.query);
         inputRef.current?.focus();
         break;
-      case 'clearQuery':
-        setInput('');
-        break;
-      case 'close':
-        onClose();
-        break;
       case 'toggleMenu':
         if (menuOpen) closeMenu();
         else openMenu();
@@ -216,9 +251,6 @@ export function LauncherPanel(props: LauncherPanelProps) {
         break;
       case 'runMenu':
         runMenuAction(menuIndex);
-        break;
-      case 'closeMenu':
-        closeMenu();
         break;
       case 'none':
         break;

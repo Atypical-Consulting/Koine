@@ -81,14 +81,12 @@ describe('handleKey — menu closed', () => {
     expect(result).toEqual({ kind: 'none', preventDefault: true });
   });
 
-  test('Escape clears a non-empty query', () => {
-    const result = handleKey(press('Escape'), makeState({ query: 'Or' }));
-    expect(result).toEqual({ kind: 'clearQuery', preventDefault: true });
-  });
-
-  test('Escape closes the launcher when the query is already empty', () => {
-    const result = handleKey(press('Escape'), makeState({ query: '' }));
-    expect(result).toEqual({ kind: 'close', preventDefault: true });
+  test('Escape is no longer the reducer\'s concern — the shared Esc-stack owns it (#1164)', () => {
+    // The launcher joins koine-ui's shared Esc-stack, whose launcher layer clears a non-empty query
+    // else closes. So the reducer returns `none` (preventDefault false) and lets Escape bubble to the
+    // shared document handler — regardless of whether the query is empty or not.
+    expect(handleKey(press('Escape'), makeState({ query: 'Or' }))).toEqual({ kind: 'none', preventDefault: false });
+    expect(handleKey(press('Escape'), makeState({ query: '' }))).toEqual({ kind: 'none', preventDefault: false });
   });
 
   test('Cmd+K toggles the action menu', () => {
@@ -129,9 +127,11 @@ describe('handleKey — menu open', () => {
     expect(result).toEqual({ kind: 'runMenu', preventDefault: true });
   });
 
-  test('Escape closes just the menu', () => {
+  test('Escape while the menu is open is a reducer no-op — the shared stack\'s menu layer closes it (#1164)', () => {
+    // The action menu registers its own layer on koine-ui's shared Esc-stack (topmost while open), so
+    // Escape is dismissed there; the reducer returns `none` and lets Escape bubble to the shared handler.
     const result = handleKey(press('Escape'), makeState({ menuOpen: true, query: 'Or' }));
-    expect(result).toEqual({ kind: 'closeMenu', preventDefault: true });
+    expect(result).toEqual({ kind: 'none', preventDefault: false });
   });
 
   test('Cmd+K toggles (closes) the menu', () => {

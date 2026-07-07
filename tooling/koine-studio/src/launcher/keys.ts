@@ -8,14 +8,18 @@
 //
 // The prototype captures ↑/↓/↵/Esc at the document level and branches on whether its action menu
 // (`actOpen`) is open, letting every other key (plain typing) fall through unhandled so the input still
-// receives it. This reducer mirrors that: `menuOpen` gates a separate switch, and any key neither
-// switch recognizes returns `{ kind: 'none', preventDefault: false }` — including while the menu is
-// open, so typing a query underneath an open action menu is never swallowed.
+// receives it. This reducer mirrors that for ↑/↓/↵/Tab/⌘K: `menuOpen` gates a separate switch, and any
+// key neither switch recognizes returns `{ kind: 'none', preventDefault: false }` — including while the
+// menu is open, so typing a query underneath an open action menu is never swallowed. Escape is the one
+// key the reducer deliberately DOESN'T own (issue #1164): the launcher joins koine-ui's shared
+// Esc-stack, so Escape falls through to `none` here and bubbles to that stack's document-level handler,
+// which dismisses the topmost layer (menu → clear-query → close).
 
 /** The slice of launcher state `handleKey` needs to decide the next intent — everything the reducer
  * reads, and nothing it doesn't (no catalog, no entries, just the shape of "where things stand"). */
 export interface LauncherKeyState {
-  /** The current (mode-prefix-stripped) query text; Esc clears it before it closes the launcher. */
+  /** The current (mode-prefix-stripped) query text. (Escape's clear-then-close is owned by the shared
+   * Esc-stack's launcher layer now, not this reducer — issue #1164.) */
   query: string;
   /** 0-based index into the flat `visible` results list (`deriveResults`'s `visible[]`). */
   selectedIndex: number;
@@ -45,12 +49,9 @@ export type LauncherKeyResult =
   | { kind: 'move'; selectedIndex: number; preventDefault: true }
   | { kind: 'runDefault'; preventDefault: true }
   | { kind: 'fill'; query: string; preventDefault: true }
-  | { kind: 'clearQuery'; preventDefault: true }
-  | { kind: 'close'; preventDefault: true }
   | { kind: 'toggleMenu'; preventDefault: true }
   | { kind: 'menuMove'; menuIndex: number; preventDefault: true }
-  | { kind: 'runMenu'; preventDefault: true }
-  | { kind: 'closeMenu'; preventDefault: true };
+  | { kind: 'runMenu'; preventDefault: true };
 
 const NONE: LauncherKeyResult = { kind: 'none', preventDefault: false };
 
@@ -81,10 +82,11 @@ export function handleKey(
         return { kind: 'menuMove', menuIndex: wrap(state.menuIndex, -1, state.menuCount), preventDefault: true };
       case 'Enter':
         return { kind: 'runMenu', preventDefault: true };
-      case 'Escape':
-        return { kind: 'closeMenu', preventDefault: true };
       default:
-        // Any other key (plain typing) is left alone so the query keeps editing underneath the menu.
+        // Escape is intentionally NOT handled here (issue #1164): the launcher joins koine-ui's shared
+        // Esc-stack, whose action-menu layer closes the menu, so the reducer lets Escape fall through
+        // (and bubble). Any other key (plain typing) is likewise left alone so the query keeps editing
+        // underneath the menu.
         return NONE;
     }
   }
@@ -103,11 +105,10 @@ export function handleKey(
       // move focus OUT of the modal overlay (issue #1145 review). Prevent default without an action.
       if (state.selectedTitle === null) return { kind: 'none', preventDefault: true };
       return { kind: 'fill', query: state.modePrefix + state.selectedTitle, preventDefault: true };
-    case 'Escape':
-      return state.query !== ''
-        ? { kind: 'clearQuery', preventDefault: true }
-        : { kind: 'close', preventDefault: true };
     default:
+      // Escape falls through here (issue #1164): koine-ui's shared Esc-stack owns the launcher's
+      // Escape now (its launcher layer clears a non-empty query, else closes), so the reducer no
+      // longer decides clear-vs-close — it lets Escape bubble to the shared document handler.
       return NONE;
   }
 }

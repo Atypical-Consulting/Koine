@@ -4,10 +4,11 @@
 // wiring); full keyboard nav (Task 7) is still not exercised here. Mirrors
 // src/shell/searchController.test.tsx: mount the real component with fake seams.
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preact';
 import { LauncherPanel } from '@/launcher/LauncherPanel';
 import type { LauncherActionDeps } from '@/launcher/actions';
 import type { LauncherSources } from '@/launcher/buildCatalog';
+import { registerOverlay } from '@atypical/koine-ui';
 import type { Command } from '@atypical/koine-ui';
 import type { ModelIndex } from '@/model/modelIndex';
 import type { GlossaryEntry } from '@/lsp/lsp';
@@ -554,5 +555,132 @@ describe('LauncherPanel — keyboard model (issue #1143, task 7)', () => {
     fireEvent.keyDown(scrim, { key: 'ArrowDown' });
 
     expect((view.container.querySelector('.lx-actmenu') as HTMLElement).getAttribute('aria-activedescendant')).toBe('lx-act-1');
+  });
+});
+
+describe('LauncherPanel — shared Esc-stack (issue #1164)', () => {
+  /** Dispatch an Escape straight at `document` — the path koine-ui's single shared Esc handler
+   * (`overlay.ts`, registered at import) listens on. It never traverses the `.lx-scrim`, so the
+   * panel's own `onKeyDown` can't intercept it: only a launcher layer that registered on the shared
+   * stack via `registerOverlay` can act on it. That's what makes this a clean probe of the
+   * registration itself, independent of the scrim's keydown trap. */
+  function documentEscape(): void {
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+  }
+
+  test('registers a launcher-level dismiss on the shared stack: a document Escape clears a non-empty query, else closes', async () => {
+    const onClose = vi.fn();
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources, onClose);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+    const input = view.getByLabelText('Search commands, symbols, files…') as HTMLInputElement;
+    fireEvent.input(input, { target: { value: 'Order' } });
+
+    // First document Escape peels the launcher layer's dismiss: a non-empty query clears first.
+    documentEscape();
+    expect(input.value).toBe('');
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Second document Escape, query now empty → the same dismiss closes the launcher.
+    documentEscape();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test('unregisters from the shared stack on hide, so a later document Escape is inert', async () => {
+    const onClose = vi.fn();
+    const sources = makeKnownCatalogSources();
+    const view = render(<LauncherPanel sources={sources} visible={true} onClose={onClose} actionDeps={makeActionDeps()} />);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+
+    // Hide the launcher (visible → false): its cleanup must leave the shared stack.
+    view.rerender(<LauncherPanel sources={sources} visible={false} onClose={onClose} actionDeps={makeActionDeps()} />);
+
+    documentEscape();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  test('nests the action menu above the launcher: a bubbling Escape peels menu → launcher via the shared stack', async () => {
+    const onClose = vi.fn();
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources, onClose);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+    const input = view.getByLabelText('Search commands, symbols, files…') as HTMLInputElement;
+
+    // Open the action menu (⌘K) — this pushes a menu layer ON TOP of the launcher layer.
+    fireEvent.keyDown(input, { key: 'k', metaKey: true });
+    expect(view.container.querySelector('.lx-actmenu')).toBeTruthy();
+
+    // A document listener proves the Escape now BUBBLES past the scrim to the shared handler, rather
+    // than being trapped by the panel's stopPropagation and dismissed by the reducer.
+    const docEsc = vi.fn();
+    document.addEventListener('keydown', docEsc);
+    try {
+      // First bubbling Escape from the focused input: the topmost layer (the menu) closes, launcher stays.
+      fireEvent.keyDown(input, { key: 'Escape' });
+      expect(docEsc).toHaveBeenCalledTimes(1); // reached the shared document handler (stopPropagation narrowed)
+      expect(view.container.querySelector('.lx-actmenu')).toBeNull();
+      expect(onClose).not.toHaveBeenCalled();
+
+      // Second bubbling Escape: the menu layer is gone, so the launcher layer is topmost → it closes.
+      fireEvent.keyDown(input, { key: 'Escape' });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener('keydown', docEsc);
+    }
+  });
+
+  test('hiding the launcher while the menu is open pops BOTH layers — no stale close-fn leaks onto the stack', async () => {
+    const onClose = vi.fn();
+    const sources = makeKnownCatalogSources();
+
+    // Simulate an unrelated overlay already open BENEATH the launcher: it must be the one a later Escape
+    // dismisses, proving no leaked launcher/menu layer sits above it after the launcher hides.
+    const unrelated = vi.fn();
+    const unregisterUnrelated = registerOverlay(unrelated);
+    try {
+      const view = render(<LauncherPanel sources={sources} visible={true} onClose={onClose} actionDeps={makeActionDeps()} />);
+      await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+      const input = view.getByLabelText('Search commands, symbols, files…') as HTMLInputElement;
+
+      // Open the action menu (pushes launcher + menu layers above `unrelated`), then hide the launcher
+      // WITHOUT pressing Escape — mirrors createLauncher.close() flipping `visible` false.
+      fireEvent.keyDown(input, { key: 'k', metaKey: true });
+      expect(view.container.querySelector('.lx-actmenu')).toBeTruthy();
+      view.rerender(<LauncherPanel sources={sources} visible={false} onClose={onClose} actionDeps={makeActionDeps()} />);
+      // Both effect cleanups must run: the menu layer pops once `visible`'s reset flips `menuOpen` false.
+      await waitFor(() => expect(view.container.querySelector('.lx-actmenu')).toBeNull());
+
+      // One document Escape: with both launcher layers popped, `unrelated` is topmost and handles it.
+      // A leaked launcher/menu layer would sit above `unrelated` and swallow this Escape instead.
+      documentEscape();
+      expect(unrelated).toHaveBeenCalledTimes(1);
+      expect(onClose).not.toHaveBeenCalled();
+    } finally {
+      unregisterUnrelated();
+    }
+  });
+
+  test('layered above another overlay, the launcher dismisses first — the overlay beneath is untouched', async () => {
+    const onClose = vi.fn();
+    const sources = makeKnownCatalogSources();
+
+    // An unrelated overlay is already open BENEATH the launcher (the whole point of #1164: correct
+    // depth ordering when the launcher coexists with another overlay).
+    const beneath = vi.fn();
+    const unregisterBeneath = registerOverlay(beneath);
+    try {
+      const view = mount(sources, onClose);
+      await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+
+      // The launcher registered ON TOP of `beneath`, so an Escape (empty query) dismisses the launcher
+      // layer — the topmost — while the overlay beneath keeps its place on the stack, unfired.
+      documentEscape();
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(beneath).not.toHaveBeenCalled();
+    } finally {
+      unregisterBeneath();
+    }
   });
 });
