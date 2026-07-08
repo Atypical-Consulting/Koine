@@ -98,11 +98,14 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // createFloatingMenu instance + the scopeMenuItems/toggleScopeMenu pair + the #sb-context click wiring
   // and its dispose cleanup, ~38 LOC of composition-root glue reusing the existing applyScope/
   // setActiveContext/`contexts` machinery. Measured end-state (2482), no headroom; #985 owns the split.
-  // Raised 2482 → 2492: #1188 (ADR 0009) extends the scope fan-out to the source side — the new
-  // `scopeFiles` dep (interface + JSDoc) and its call inside rerenderScopedSurfaces that points the
-  // Files tree at the active context, ~10 LOC of composition-root glue reusing the existing
-  // activeContext/`isAllContexts` machinery. Measured end-state (2492), no headroom; #985 owns the split.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2492 },
+  // Raised 2482 → 2491: ADR 0009 makes the Output rail obey the active scope by EMPHASIS — a paintOutputRail
+  // helper reads the scope and the `activeContext` fan-out repaints the rail's emphasis without a re-emit
+  // (#1188). ~9 LOC of glue over the extracted outputRail renderer. Measured end-state (2491); #985 owns the split.
+  // Raised 2491 → 2503: #1188 (ADR 0009) also extends the same scope fan-out to the SOURCE side — the new
+  // `scopeFiles` dep (interface + JSDoc) and its call inside rerenderScopedSurfaces that points the Files
+  // tree at the active context, ~10 LOC of glue reusing the existing activeContext/`isAllContexts`
+  // machinery (measured after merging the Output-rail slice in). Measured end-state (2503); #985 owns the split.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2503 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   { file: 'src/settings/prefs.ts', maxLines: 2250 },
