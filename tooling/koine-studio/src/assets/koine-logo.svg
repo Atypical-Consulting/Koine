@@ -1,18 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 84 28" fill="none" role="img" aria-label="Koine">
-  <!-- Accent glyph: a stylised 'K' mark in the koi-accent token. Vertical stem + two diagonals forming the K. -->
-  <g fill="var(--koi-accent)">
-    <rect x="2" y="3" width="4.4" height="22" rx="1.4"/>
-    <path d="M8.2 13.6 18 3h5.6l-9.5 10.3L24 25h-5.9l-7.8-9.3-2.1 2.2z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112.255 32" fill="none" role="img" aria-label="Koine">
+  <!-- Horizontal Koine lockup: hexagon-κ mark + "Koine" wordmark. Assembled from in-repo primitives -
+       the exact mark geometry from brand/koine-mark.svg and the bundled Archivo (SemiBold) display font,
+       "Koine" pre-outlined so it renders identically without the font loaded. Theme-aware: the mark reads
+       the --koi-accent token (brand blue #5aa9ff as a bare-context fallback) and the wordmark inherits
+       chrome text colour via currentColor, so it works on both light and dark surfaces. -->
+  <!-- Mark: hexagon-κ, verbatim geometry from brand/koine-mark.svg, recoloured to the accent token. -->
+  <g transform="translate(-0.338 -2.207) scale(0.303455)" stroke="var(--koi-accent, #5aa9ff)" stroke-linejoin="round" stroke-linecap="round">
+    <polygon points="106,60 83,99.84 37,99.84 14,60 37,20.16 83,20.16" stroke-width="6"/>
+    <g stroke-width="7.5">
+      <path d="M48 36 V84"/>
+      <path d="M48 60 L78 36"/>
+      <path d="M48 60 L78 84"/>
+    </g>
   </g>
-  <!-- Wordmark "oine" in currentColor so it inherits header text colour (dark + light). Paths, no <text>. -->
-  <g fill="currentColor">
-    <!-- o -->
-    <path d="M38.4 10.1c4 0 6.9 3 6.9 7.5s-2.9 7.6-6.9 7.6-6.9-3.1-6.9-7.6 2.9-7.5 6.9-7.5zm0 3.9c-1.6 0-2.7 1.4-2.7 3.6s1.1 3.7 2.7 3.7 2.7-1.5 2.7-3.7-1.1-3.6-2.7-3.6z"/>
-    <!-- i -->
-    <path d="M49.2 4.3c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.4-2.5 2.4-2.4-1-2.4-2.4 1.1-2.5 2.4-2.5zm-2.1 6.2h4.2V25h-4.2z"/>
-    <!-- n -->
-    <path d="M54.1 10.5h4.2v2c.9-1.5 2.4-2.4 4.3-2.4 3.2 0 5.2 2.2 5.2 5.8V25h-4.2v-8.1c0-1.8-.9-2.8-2.5-2.8s-2.6 1.1-2.6 2.9V25h-4.4z"/>
-    <!-- e -->
-    <path d="M77.9 20.4l3.5 1.6c-1.2 2.2-3.5 3.5-6.4 3.5-4.2 0-7.1-3.1-7.1-7.6s2.9-7.6 6.9-7.6 6.7 3 6.7 7.4c0 .5 0 1-.1 1.4h-9.4c.3 1.8 1.5 2.9 3.2 2.9 1.2 0 2.2-.5 2.8-1.6zm-5.4-4.1h5.3c-.3-1.6-1.3-2.6-2.6-2.6s-2.4 1-2.7 2.6z"/>
+  <!-- Wordmark: "Koine" outlined from Archivo SemiBold, currentColor so it matches header text on light + dark. -->
+  <g transform="translate(40.744 25) scale(0.026239)" fill="currentColor">
+    <path d="M206 0L76 0L76-686L206-686L206-368L510-686L669-686L403-408L674 0L520 0L315-317L206-221L206 0M954 12Q868 12 810-17.5Q752-47 723-108Q694-169 694-263Q694-358 723-418.5Q752-479 810-508.5Q868-538 954-538Q1041-538 1098.5-508.5Q1156-479 1185-418.5Q1214-358 1214-263Q1214-169 1185-108Q1156-47 1098.5-17.5Q1041 12 954 12M954-88Q1002-88 1031.5-106.5Q1061-125 1074.5-162.5Q1088-200 1088-256L1088-270Q1088-326 1074.5-363.5Q1061-401 1031.5-419.5Q1002-438 954-438Q906-438 876.5-419.5Q847-401 833.5-363.5Q820-326 820-270L820-256Q820-200 833.5-162.5Q847-125 876.5-106.5Q906-88 954-88M1440-607L1318-607L1318-723L1440-723L1440-607M1440 0L1318 0L1318-526L1440-526L1440 0M1692 0L1570 0L1570-526L1672-526L1682-456L1689-456Q1707-480 1731.5-498.5Q1756-517 1787.5-527.5Q1819-538 1857-538Q1907-538 1945.5-520Q1984-502 2006-462Q2028-422 2028-355L2028 0L1905 0L1905-333Q1905-361 1898.5-379.5Q1892-398 1879.5-409.5Q1867-421 1849-426Q1831-431 1809-431Q1776-431 1749.5-415Q1723-399 1707.5-371Q1692-343 1692-306L1692 0M2380 12Q2296 12 2240-17.5Q2184-47 2156-108Q2128-169 2128-263Q2128-358 2156-418.5Q2184-479 2240-508.5Q2296-538 2380-538Q2456-538 2507.5-509.5Q2559-481 2585-422Q2611-363 2611-269L2611-233L2253-233Q2255-184 2268-150.5Q2281-117 2308.5-100.5Q2336-84 2381-84Q2404-84 2424-90Q2444-96 2459-108.5Q2474-121 2482.5-140Q2491-159 2491-184L2611-184Q2611-134 2593.5-97Q2576-60 2544.5-36Q2513-12 2471 0Q2429 12 2380 12M2255-319L2484-319Q2484-352 2476.5-375Q2469-398 2455.5-413Q2442-428 2423-434.5Q2404-441 2380-441Q2341-441 2314.5-428Q2288-415 2274-388Q2260-361 2255-319"/>
   </g>
 </svg>
