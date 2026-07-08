@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112.255 32" fill="none" role="img" aria-label="Koine">
-  <!-- Horizontal Koine lockup: hexagon-κ mark + "Koine" wordmark. Assembled from in-repo primitives -
+  <!-- Horizontal Koine lockup: hexagon-κ mark + "Koine" wordmark. Assembled from in-repo primitives —
        the exact mark geometry from brand/koine-mark.svg and the bundled Archivo (SemiBold) display font,
        "Koine" pre-outlined so it renders identically without the font loaded. Theme-aware: the mark reads
-       the --koi-accent token (brand blue #5aa9ff as a bare-context fallback) and the wordmark inherits
+       the koi-accent token (brand blue #5aa9ff as a bare-context fallback) and the wordmark inherits
        chrome text colour via currentColor, so it works on both light and dark surfaces. -->
   <!-- Mark: hexagon-κ, verbatim geometry from brand/koine-mark.svg, recoloured to the accent token. -->
   <g transform="translate(-0.338 -2.207) scale(0.303455)" stroke="var(--koi-accent, #5aa9ff)" stroke-linejoin="round" stroke-linecap="round">
