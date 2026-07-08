@@ -184,7 +184,7 @@ function makeLsp() {
   return {
     glossaryModel: vi.fn(async (): Promise<GlossaryModel> => glossaryFixture()),
     livingDocs: vi.fn(async (): Promise<DocsResult> => ({ files: [] })),
-    model: vi.fn(async (): Promise<ModelNode> => ({ kind: 'model', qualifiedName: '', title: '', members: [], children: [] })),
+    model: vi.fn(async (): Promise<ModelNode> => ({ kind: 'model', qualifiedName: '', title: '', members: [], children: [], transitions: [] })),
     contextMap: vi.fn(async (): Promise<ContextMapResult> => ({ contexts: ['Billing'], relations: [] })),
     emitPreview: vi.fn(
       async (target: string): Promise<EmitPreviewResult> => ({
@@ -739,19 +739,24 @@ describe('createInspectorController — Domain navigator doorways + cross-axis g
       qualifiedName: '',
       title: '',
       members: [],
+      transitions: [],
       children: [
         {
           kind: 'context',
           qualifiedName: 'Billing',
           title: 'Billing',
           members: [],
+          transitions: [],
           children: [
             {
               kind: 'aggregate',
               qualifiedName: 'Billing.Invoice',
               title: 'Invoice',
               members: [],
-              children: [{ kind: 'value', qualifiedName: 'Billing.Money', title: 'Money', members: [], children: [] }],
+              transitions: [],
+              children: [
+                { kind: 'value', qualifiedName: 'Billing.Money', title: 'Money', members: [], children: [], transitions: [] },
+              ],
             },
           ],
         },

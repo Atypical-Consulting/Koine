@@ -79,12 +79,17 @@ export interface GlossaryModel {
 // from. The contract is additive-only — new fields are appended, existing ones never repurposed.
 // A `ModelNode` is one declaration (the `model` root, a `context`, an aggregate/entity/value/enum/
 // event, a state machine, or the context map); a `ModelMember` is one editable leaf (a field, enum
-// member, transition, or relation).
+// member, transition, or relation). A `transition` member reuses the generic leaf fields:
+// name=from-state, value=to-state, type=guard, and `via`=the correlated triggering command (#1163).
 export interface ModelMember {
   kind: string;
   name: string;
   type: string | null;
   value: string | null;
+  // Additive (#1163): a `transition` member's correlated triggering command (the command whose body
+  // drives the edge's `to` state); null for an uncorrelated edge and for every non-transition kind.
+  // Optional so older `koine/model*` payloads (without it) still conform.
+  via?: string | null;
 }
 export interface ModelNode {
   kind: string;
@@ -92,6 +97,10 @@ export interface ModelNode {
   title: string;
   members: ModelMember[];
   children: ModelNode[];
+  // Additive (#1163): for an entity/aggregate owner node, the flattened per-edge state transitions —
+  // the same edges the nested `states` child lists, surfaced here so a consumer needn't reconstruct
+  // ownership from the `.states.<field>` qualifiedName. [] for every node with no state machine.
+  transitions: ModelMember[];
 }
 export interface ModelMembersResult {
   members: ModelMember[];

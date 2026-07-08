@@ -59,6 +59,7 @@ const node = (kind: string, title: string, children: ModelNode[] = []): ModelNod
   title,
   members: [],
   children,
+  transitions: [],
 });
 
 // The Ordering bounded context as a model graph: one aggregate owning three constructs, plus a

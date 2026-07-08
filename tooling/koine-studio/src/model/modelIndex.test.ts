@@ -68,12 +68,14 @@ describe('buildModelIndex', () => {
       qualifiedName: '',
       title: '',
       members: [],
+      transitions: [],
       children: [
         {
           kind: 'context',
           qualifiedName: 'Sales',
           title: 'Sales',
           members: [],
+          transitions: [],
           children: [
             {
               kind: 'value',
@@ -83,6 +85,7 @@ describe('buildModelIndex', () => {
                 { kind: 'field', name: 'amount', type: 'Decimal', value: null },
                 { kind: 'field', name: 'currency', type: 'Currency', value: null },
               ],
+              transitions: [],
               children: [],
             },
           ],

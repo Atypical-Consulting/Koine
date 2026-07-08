@@ -60,12 +60,17 @@ public sealed record WGlossaryEntry(
 /// <summary>Structured ubiquitous-language glossary: entries in declaration order.</summary>
 public sealed record WGlossaryModel(WGlossaryEntry[] Entries);
 
-/// <summary>One editable leaf of a model node (#91; mirrors lsp.ts <c>ModelMember</c>).</summary>
-public sealed record WModelMember(string Kind, string Name, string? Type, string? Value);
+/// <summary>One editable leaf of a model node (#91; mirrors lsp.ts <c>ModelMember</c>). <c>Via</c> is
+/// additive (#1163): a <c>transition</c> member's correlated triggering command (<c>null</c> for every
+/// other member kind, and for an uncorrelated edge). Source-gen serializes it to the wire key <c>via</c>.</summary>
+public sealed record WModelMember(string Kind, string Name, string? Type, string? Value, string? Via);
 
-/// <summary>One node of the structured model graph (#91; recursive; mirrors lsp.ts <c>ModelNode</c>).</summary>
+/// <summary>One node of the structured model graph (#91; recursive; mirrors lsp.ts <c>ModelNode</c>).
+/// <c>Transitions</c> is additive (#1163): an entity/aggregate owner node's flattened per-edge state
+/// transitions (empty for every node with no state machine). Source-gen serializes it to <c>transitions</c>.</summary>
 public sealed record WModelNode(
-    string Kind, string QualifiedName, string Title, WModelMember[] Members, WModelNode[] Children);
+    string Kind, string QualifiedName, string Title, WModelMember[] Members, WModelNode[] Children,
+    WModelMember[] Transitions);
 
 /// <summary>The editable children of a model node (#91).</summary>
 public sealed record WModelMembersResult(WModelMember[] Members);

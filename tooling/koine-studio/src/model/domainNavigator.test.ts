@@ -55,7 +55,7 @@ describe('renderStrategic', () => {
 // Synthetic `ModelNode`s mirroring `koine/model`'s shape (the production graph is verified separately);
 // `data-name` on a leaf is the node's `title`, and an aggregate is named `<Ctx>.<Agg>` like the graph.
 function modelNode(kind: string, title: string, children: ModelNode[] = []): ModelNode {
-  return { kind, qualifiedName: title, title, members: [], children };
+  return { kind, qualifiedName: title, title, members: [], children, transitions: [] };
 }
 const entity = (title: string) => modelNode('entity', title);
 const value = (title: string) => modelNode('value', title);
@@ -66,7 +66,7 @@ function ctxNode(name: string, children: ModelNode[]): ModelNode {
   const stamped = children.map((c) =>
     c.kind === 'aggregate' ? { ...c, qualifiedName: `${name}.${c.title}` } : c,
   );
-  return { kind: 'context', qualifiedName: name, title: name, members: [], children: stamped };
+  return { kind: 'context', qualifiedName: name, title: name, members: [], children: stamped, transitions: [] };
 }
 const noopTacticalHandlers = (): TacticalHandlers => ({
   onSelect: () => {},
@@ -166,7 +166,7 @@ function fakeLsp() {
   return {
     glossaryModel: vi.fn(async (): Promise<GlossaryModel> => fakeGlossary(['Ordering', 'Billing'])),
     contextMap: vi.fn(async (): Promise<ContextMapResult> => ({ contexts: ['Ordering', 'Billing'], relations: [] })),
-    model: vi.fn(async () => ({ kind: 'model', qualifiedName: '', title: '', members: [], children: [] })),
+    model: vi.fn(async () => ({ kind: 'model', qualifiedName: '', title: '', members: [], children: [], transitions: [] })),
   };
 }
 
