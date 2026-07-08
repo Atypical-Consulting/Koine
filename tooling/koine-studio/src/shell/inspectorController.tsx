@@ -72,7 +72,7 @@ import { mountDomainNavigator, type DomainNavigatorHandle, type TacticalHandlers
 import { type InspectorElement, type InspectorHandlers } from '@/model/inspector';
 import { buildModelIndex, lookupElement, resolveInspectableQn, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
-import { SourceControlPanel } from '@/model/SourceControlPanel';
+import { SourceControlPanel, type SourceControlFocus } from '@/model/SourceControlPanel';
 import { SyntaxTreePanel } from '@/model/SyntaxTreePanel';
 import { EventsPanel } from '@/model/EventsPanel';
 import { RelationshipsPanel } from '@/model/RelationshipsPanel';
@@ -275,8 +275,9 @@ export interface InspectorController {
   selectDocsTab(view: DocsView): void;
   selectBottomTab(tab: BottomTab): void;
   /** Reveal a right-rail view (Properties / AI Chat / Rules / Notes / Source Control), expanding the rail
-   *  if collapsed. Palette commands (Show AI Chat, Explain this construct) route through here. */
-  selectRight(view: RightView): void;
+   *  if collapsed. Palette commands (Show AI Chat, Explain this construct) route through here. A
+   *  `focus` (issue #1165) reveals a specific target inside Source Control (a file's diff / a commit). */
+  selectRight(view: RightView, focus?: SourceControlFocus): void;
   /** Apply the blessed Code ⟷ Canvas split preset (the .koi text and the live diagram side by side). */
   splitCodeCanvas(): void;
 
@@ -853,6 +854,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const sourceControlRightView = domById('rview-source-control');
   let sourceControlLoaded = false;
   let sourceControlRefresh = 0;
+  // A pending launcher focus (#1165): the specific file diff / commit to reveal on the next Source-Control
+  // open. `sourceControlFocusNonce` bumps only when a NEW focus is requested, so the panel applies it once.
+  let sourceControlFocus: SourceControlFocus | undefined;
+  let sourceControlFocusNonce = 0;
   // Paint the panel with the live commit-guard inputs (#470): the current unsaved-buffer count and a
   // Save-all action, both read fresh at paint time. Splitting this out lets a dirty-count change re-paint
   // the panel WITHOUT bumping the refresh nonce (just the prop update — no git re-fetch), while
@@ -865,6 +870,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         refreshNonce={sourceControlRefresh}
         dirtyCount={appStore.getState().dirtyCount()}
         onSaveAll={() => deps.saveAllDirty()}
+        focus={sourceControlFocus}
+        focusNonce={sourceControlFocusNonce}
       />,
       sourceControlRightView,
     );
@@ -1676,7 +1683,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   }
   // Reveal a right-rail view, expanding the rail first if it was collapsed — the entry point palette
   // commands (Show AI Chat, Explain this construct) route through so the panel is always actually visible.
-  function selectRight(view: RightView): void {
+  // A `focus` (#1165) stashes a Source-Control target (a file diff / a commit) so the panel reveals it on
+  // this open; the nonce bumps only for a real focus, so a plain re-open never re-applies a stale one.
+  function selectRight(view: RightView, focus?: SourceControlFocus): void {
+    if (view === 'source-control' && focus) {
+      sourceControlFocus = focus;
+      sourceControlFocusNonce += 1;
+    }
     if (appStore.getState().rightCollapsed) appStore.getState().setRightCollapsed(false);
     selectRightView(view);
   }

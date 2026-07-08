@@ -122,6 +122,39 @@ describe('SourceControlPanel', () => {
     expect(view.getByRole('button', { name: /Refresh/i })).toBeTruthy();
   });
 
+  test('a file focus opens the targeted file\'s diff, not just the panel (#1165)', async () => {
+    const git = makeGit([
+      { relPath: 'a.koi', staged: false, status: 'modified' },
+      { relPath: 'b.koi', staged: false, status: 'modified' },
+    ]);
+    const view = render(
+      <SourceControlPanel git={git} folderToken={TOKEN} focus={{ file: 'b.koi' }} focusNonce={1} />,
+    );
+
+    // The launcher's "Open changes" opens the targeted file's inline diff (fetches it + expands the row)…
+    await waitFor(() => expect(git.gitDiff).toHaveBeenCalledWith(TOKEN, 'b.koi', false));
+    const open = view.container.querySelector('[data-relpath="b.koi"] .koi-sc-file-open');
+    expect(open?.getAttribute('aria-expanded')).toBe('true');
+    // …and only that file's diff — the other row stays collapsed.
+    const otherOpen = view.container.querySelector('[data-relpath="a.koi"] .koi-sc-file-open');
+    expect(otherOpen?.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  test('a commit focus marks the targeted commit row (#1165)', async () => {
+    const git = makeGit([]);
+    const view = render(
+      <SourceControlPanel git={git} folderToken={TOKEN} focus={{ commit: 'abcdef1234567' }} focusNonce={1} />,
+    );
+
+    // The launcher's "View commit" marks the specific commit so the panel highlights + scrolls to it.
+    // The mark is applied by an effect once the log resolves, so wait for the attribute (not just the row).
+    await waitFor(() =>
+      expect(
+        view.container.querySelector('[data-sha="abcdef1234567"]')?.getAttribute('data-focused'),
+      ).toBe('true'),
+    );
+  });
+
   test('clicking Stage stages the file and re-fetches so it moves to the staged group', async () => {
     const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }]);
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);

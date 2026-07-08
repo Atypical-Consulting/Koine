@@ -571,6 +571,38 @@ describe('commandWiring', () => {
       expect(launcherToast).toHaveBeenCalledOnce();
     });
 
+    it('openFileChanges opens the specific file\'s diff in Source Control, not just the panel (#1165)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const entry = {
+        id: 'file:x',
+        cat: 'file',
+        title: 'a.koi',
+        sub: 'src',
+        file: 'file:///ws/src/a.koi',
+      } as unknown as CatalogEntry;
+      capturedActionDeps.openFileChanges(entry);
+      // Selects Source Control AND carries the file's workspace-relative path as the focus target…
+      expect(deps.controller.selectRight).toHaveBeenCalledWith('source-control', { file: 'src/a.koi' });
+    });
+
+    it('viewCommit focuses the specific commit in Source Control, not just the panel (#1165)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const entry = {
+        id: 'commit:abc',
+        cat: 'commit',
+        title: 'fix: bug',
+        hash: 'abcdef1234567',
+      } as unknown as CatalogEntry;
+      capturedActionDeps.viewCommit(entry);
+      expect(deps.controller.selectRight).toHaveBeenCalledWith('source-control', { commit: 'abcdef1234567' });
+    });
+
     it('findInModel seeds the workspace search with the entry\'s term, not just focus (#1165)', () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);

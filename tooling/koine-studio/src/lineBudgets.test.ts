@@ -69,7 +69,13 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1401 → 1408: concept-7 "Flush" builds the Output file-rail scaffold inside #view-preview and
   // mounts the CodeMirror OutputView into its `.out-code` slot (ensureOutputScaffold + the import), plus a
   // one-line initInstantTooltip() boot call, ~7 LOC of composition-root wiring. Measured end-state.
-  { file: 'src/shell/ide.tsx', maxLines: 1408 },
+  // Raised 1408 → 1478: #1165 wires the Spotlight launcher's degraded quick actions into the composition
+  // root — three open-file-then-act nav helpers (findReferencesAt / renameFromLauncher /
+  // revertCommitFromLauncher, siblings of the existing revealLocation that reuse the editor's Shift-F12 /
+  // F2 surfaces + the host gitRevert) plus their three CommandWiringDeps seam registrations, ~62 LOC of
+  // launcher-seam wiring. Measured end-state (1474) + a few lines headroom for the remaining host-
+  // capability wiring in the same arc.
+  { file: 'src/shell/ide.tsx', maxLines: 1478 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.
@@ -95,7 +101,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // createFloatingMenu instance + the scopeMenuItems/toggleScopeMenu pair + the #sb-context click wiring
   // and its dispose cleanup, ~38 LOC of composition-root glue reusing the existing applyScope/
   // setActiveContext/`contexts` machinery. Measured end-state (2482), no headroom; #985 owns the split.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2482 },
+  // Raised 2482 → 2500: #1165 threads a launcher focus target into the Source Control right-view — the
+  // sourceControlFocus/nonce pair, the two extra <SourceControlPanel> focus props, and the selectRight
+  // focus argument that stashes + bumps them, ~13 LOC of composition-root wiring reusing the existing
+  // load/render machinery. Measured end-state (2493) + headroom for the glossary selectDocsTab term-arg
+  // threading in the same arc; #985 still owns the split.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2500 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   { file: 'src/settings/prefs.ts', maxLines: 2250 },

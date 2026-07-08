@@ -20,6 +20,7 @@ import { createLauncher } from '@/launcher/createLauncher';
 import type { LauncherSources } from '@/launcher/buildCatalog';
 import type { LauncherActionDeps } from '@/launcher/actions';
 import type { CatalogEntry } from '@/launcher/catalog';
+import type { SourceControlFocus } from '@/model/SourceControlPanel';
 import type { ModelIndex } from '@/model/modelIndex';
 import type { GlossaryEntry, Range } from '@/lsp/lsp';
 import type { GitLogEntry } from '@/host/types';
@@ -45,7 +46,7 @@ export interface CommandWiringDeps {
     selectCenter(view: 'visual'): void;
     splitCodeCanvas(): void;
     selectTech(view: 'scenarios'): void;
-    selectRight(view: 'assistant' | 'source-control'): void;
+    selectRight(view: 'assistant' | 'source-control', focus?: SourceControlFocus): void;
     selectBottomTab(tab: 'review'): void;
   };
   generateProject: { open(): void };
@@ -274,7 +275,11 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     openFile: (entry) => {
       if (entry.file) deps.openUri(entry.file);
     },
-    openFileChanges: () => deps.controller.selectRight('source-control'),
+    // Open the SPECIFIC file's diff in Source Control (#1165), not just the panel. The workspace-relative
+    // path is reconstructed from the entry's dir (`sub`) + basename (`title`) — the same path the panel's
+    // file rows key on — since the catalog only carries the file uri.
+    openFileChanges: (entry) =>
+      deps.controller.selectRight('source-control', { file: entry.sub ? `${entry.sub}/${entry.title}` : entry.title }),
     revealFile: (entry) => {
       if (entry.file) deps.openUri(entry.file);
     },
@@ -283,7 +288,12 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     // throughout the model source, not the dotted qualified name — instead of the old empty focus().
     findInModel: (entry) => deps.search.seed(entry.title),
     gotoRule: (entry) => gotoEntry(entry),
-    viewCommit: () => deps.controller.selectRight('source-control'),
+    // Focus the SPECIFIC commit in Source Control (#1165), not just the panel. A commit entry always
+    // carries its full sha; a missing hash degrades to opening the panel.
+    viewCommit: (entry) =>
+      entry.hash
+        ? deps.controller.selectRight('source-control', { commit: entry.hash })
+        : deps.controller.selectRight('source-control'),
     // Real git revert from the launcher (#1165): capability-gated on the host's git (browser has none),
     // then hand the sha to the shell's confirm-and-revert flow. Close the launcher first so the confirm
     // dialog owns the foreground. A host without git degrades honestly instead of a misleading no-op.
