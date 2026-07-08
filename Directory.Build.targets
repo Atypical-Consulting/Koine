@@ -1,0 +1,35 @@
+<Project>
+
+  <!-- Shared NuGet package README (issue #1190). One file, wired once, so every publishable package
+       (the CLI, the MCP tool, the compiler, and all the Koine.Emit.* emitters) ships a rich listing
+       instead of a bare one-liner — and `dotnet pack` no longer warns "missing a readme". Each
+       package's own <Description> still shows above this on the NuGet.org listing, so the packages
+       remain distinguishable; per-package bespoke READMEs can follow later for the headline packages.
+
+       Wired here rather than in Directory.Build.props because the guard reads $(IsPackable) /
+       $(PackAsTool): projects set those in their own csproj body, which is evaluated AFTER the early
+       props import but BEFORE this bottom targets import, so they're resolved here. The guard scopes
+       the README to exactly the publishable ids: the 14 compiler/emitter packages set
+       IsPackable=true in their body, and the two tool packages (Koine.Cli, Koine.Mcp) set
+       PackAsTool=true (their IsPackable comes from the SDK *default*, applied after this import — so
+       PackAsTool is what catches them here). Non-published projects (tests, benchmarks, wasm,
+       SourceGen, the demo) set IsPackable=false in their body, so they stay untouched.
+
+       INVARIANT the guard relies on: every project must state its packability IN ITS CSPROJ BODY —
+       publishable projects set <IsPackable>true</IsPackable> (or <PackAsTool>true</PackAsTool>),
+       non-published ones set <IsPackable>false</IsPackable>. A project that instead rode the SDK's
+       default IsPackable=true (setting neither) would trip an evaluation-phase asymmetry: this
+       PropertyGroup evaluates during the property pass (at this import position, where its IsPackable
+       is still empty → PackageReadmeFile skipped), but the ItemGroup below evaluates in the later
+       item pass (where the SDK default has resolved IsPackable=true → the README file gets bundled) —
+       so it would pack the README file WITHOUT registering it and still warn "missing a readme".
+       Keep the invariant and both guards stay consistent. PackagePath="README.md" is the name NuGet
+       expects. -->
+  <PropertyGroup Condition="'$(IsPackable)' == 'true' or '$(PackAsTool)' == 'true'">
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(IsPackable)' == 'true' or '$(PackAsTool)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)nuget-readme.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+
+</Project>

@@ -34,4 +34,9 @@
     <Copyright>Copyright (c) 2026 Atypical Consulting / Philippe Matray</Copyright>
   </PropertyGroup>
 
+  <!-- The shared NuGet package README (issue #1190) is wired in Directory.Build.targets, not here:
+       it must be guarded on $(IsPackable), and most projects set IsPackable in their own csproj body
+       (evaluated AFTER this early props import), so an IsPackable condition here would see an empty
+       value. Directory.Build.targets imports at the bottom, where IsPackable is fully resolved. -->
+
 </Project>

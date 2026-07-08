@@ -7,6 +7,12 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- This is an end-to-end build check, not a published package: it must never pack (it would
+         otherwise ride the SDK-default IsPackable=true and emit a stray Pizzeria.Domain.nupkg with a
+         "missing a readme" warning on a solution-wide `dotnet pack`). Declaring it here also keeps the
+         shared package-README guard in Directory.Build.targets symmetric — every project now states
+         its packability in-body, so IsPackable is resolved before both MSBuild evaluation passes. -->
+    <IsPackable>false</IsPackable>
     <KoineCliProject>$(MSBuildProjectDirectory)/../../src/Koine.Cli/Koine.Cli.csproj</KoineCliProject>
     <KoineCliDll>$(MSBuildProjectDirectory)/../../src/Koine.Cli/bin/$(Configuration)/net10.0/Koine.Cli.dll</KoineCliDll>
     <!-- The demo compiles FROM the pizzeria TEMPLATE in place (templates/pizzeria),
