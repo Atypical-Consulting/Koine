@@ -821,6 +821,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         scrollNonce={glossaryScrollNonce}
       />,
     );
+    // One-shot: renderPanel REMOUNTS GlossaryPanel (its per-instance nonce guard resets), so a term left
+    // set here would re-scroll on EVERY later reload (a model edit, a scope change). Clear it now that this
+    // render has consumed it — only a fresh selectDocsTab(term) sets it again.
+    glossaryScrollTerm = undefined;
   }
   async function loadGlossary(): Promise<void> {
     await guardedLoad({

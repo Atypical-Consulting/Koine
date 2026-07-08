@@ -231,15 +231,22 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     glossary: () => cachedGlossary,
   };
 
-  // Resolve a symbol / event / rule entry to its declaring file + 0-based range and reveal it. Prefers the
-  // joined diagram node's sourceSpan (the file the declaration lives in) with the entry's nameRange; falls
-  // back to a plain open when only a file uri is known, and is a safe no-op when neither is present (an
-  // undrawn element carries no source location — see the task report's degrade list).
-  function gotoEntry(entry: CatalogEntry): void {
+  // Resolve a symbol / event / rule entry to its declaring file + 0-based range. Prefers the joined diagram
+  // node's sourceSpan (the file the declaration lives in) with the entry's nameRange; returns null when
+  // neither resolves (an undrawn element carries no source location). One resolver so go-to / find-usages /
+  // rename can never disagree about where a symbol lives.
+  function entryLocation(entry: CatalogEntry): { file: string; range: Range } | null {
     const file = entry.element?.node?.sourceSpan?.file ?? entry.file ?? null;
     const range = entry.nameRange ?? entry.element?.entry.nameRange ?? null;
-    if (file && range) deps.revealLocation(file, range);
-    else if (file) deps.openUri(file);
+    return file && range ? { file, range } : null;
+  }
+
+  // Reveal an entry's declaration; falls back to a plain open when only a file uri is known, and is a safe
+  // no-op when neither is present (see the task report's degrade list).
+  function gotoEntry(entry: CatalogEntry): void {
+    const loc = entryLocation(entry);
+    if (loc) deps.revealLocation(loc.file, loc.range);
+    else if (entry.file) deps.openUri(entry.file);
   }
 
   // Bind each high-level launcher action to the nearest real shell seam. Actions without a dedicated seam
@@ -254,9 +261,8 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     // show the editor's Shift-F12 references list at the name position. Falls back to focusing the
     // text-search box only when the entry carries no source location (an undrawn element).
     findUsages: (entry) => {
-      const file = entry.element?.node?.sourceSpan?.file ?? entry.file ?? null;
-      const range = entry.nameRange ?? entry.element?.entry.nameRange ?? null;
-      if (file && range) deps.findReferences(file, range);
+      const loc = entryLocation(entry);
+      if (loc) deps.findReferences(loc.file, loc.range);
       else deps.search.focus();
     },
     // A non-navigating quick-look (#1165): pin the entry's read-only preview into the launcher's own
@@ -268,11 +274,10 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     // launcher first so the inline field isn't trapped behind the `.lx-scrim`. An entry with no source
     // location (an undrawn element) can't be renamed — say so honestly instead of a silent no-op.
     rename: (entry) => {
-      const file = entry.element?.node?.sourceSpan?.file ?? entry.file ?? null;
-      const range = entry.nameRange ?? entry.element?.entry.nameRange ?? null;
-      if (file && range) {
+      const loc = entryLocation(entry);
+      if (loc) {
         launcher.close();
-        deps.renameSymbol(file, range);
+        deps.renameSymbol(loc.file, loc.range);
       } else {
         launcher.toast('This symbol has no source location to rename.');
       }

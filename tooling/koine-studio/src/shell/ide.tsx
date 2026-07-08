@@ -510,9 +510,13 @@ export function init(hooks: IdeHooks = {}): () => void {
     editor.gotoRange(loc.range.start, loc.range.end);
   }
 
-  // The Spotlight launcher's go-to (#1143): activate the declaring file (from disk if it isn't a buffer yet),
-  // then reveal the range ONLY once that file is actually active so a null token / failed open can't scroll the wrong doc (#1145 review).
-  async function revealLocation(uri: string, range: Range): Promise<void> {
+  // The Spotlight launcher's open-then-act core (#1143/#1165): activate the declaring file (from disk if
+  // it isn't a buffer yet), then run `onActive` ONLY once that file is actually active, so a null token /
+  // failed open can never act on the wrong doc (#1145 review). Shared by go-to, find-usages, and rename —
+  // they differ only in the final editor call. `range.start.character + 1` aims one char INTO the name for
+  // the LSP-backed callers (the token locator's match window is `(start, end]`, so the bare start offset
+  // resolves to the preceding token and finds nothing).
+  async function activateFileThen(uri: string, onActive: () => void): Promise<void> {
     try {
       if (uri !== workspace.activeUri()) {
         if (workspace.buffers.has(uri)) workspace.activateFile(uri);
@@ -521,50 +525,14 @@ export function init(hooks: IdeHooks = {}): () => void {
           if (token) await workspace.openFileToken(token);
         }
       }
-      if (uri === workspace.activeUri()) editor.gotoRange(range.start, range.end);
+      if (uri === workspace.activeUri()) onActive();
     } catch {
       /* best-effort launcher navigation */
     }
   }
 
-  // The Spotlight launcher's find-usages (#1165): activate the declaring file (from disk if it isn't a
-  // buffer yet), then open the editor's references picker AT the declaration — the same Shift-F12 surface,
-  // driven from the launcher. Guarded so a null token / failed open can't fire references on the wrong doc.
-  async function findReferencesAt(uri: string, range: Range): Promise<void> {
-    try {
-      if (uri !== workspace.activeUri()) {
-        if (workspace.buffers.has(uri)) workspace.activateFile(uri);
-        else {
-          const token = fileUriToPath(uri);
-          if (token) await workspace.openFileToken(token);
-        }
-      }
-      // Aim one char INTO the name (like renameElement): the token locator's match window is `(start, end]`,
-      // so the bare start offset resolves to the preceding token and finds nothing.
-      if (uri === workspace.activeUri()) editor.showReferences(range.start.line, range.start.character + 1);
-    } catch {
-      /* best-effort launcher find-usages */
-    }
-  }
-
-  // The Spotlight launcher's rename (#1165): activate the declaring file (from disk if it isn't a buffer
-  // yet), then open the editor's inline F2 rename field AT the declaration — the same surface F2 uses, so
-  // the new name is collected in-editor and applied via lsp.rename → applyWorkspaceEdit. Guarded like
-  // revealLocation so a null token / failed open can't start a rename on the wrong doc.
-  async function renameFromLauncher(uri: string, range: Range): Promise<void> {
-    try {
-      if (uri !== workspace.activeUri()) {
-        if (workspace.buffers.has(uri)) workspace.activateFile(uri);
-        else {
-          const token = fileUriToPath(uri);
-          if (token) await workspace.openFileToken(token);
-        }
-      }
-      // Aim one char INTO the name (like renameElement): the token locator's match window is `(start, end]`.
-      if (uri === workspace.activeUri()) editor.showRename(range.start.line, range.start.character + 1);
-    } catch {
-      /* best-effort launcher rename */
-    }
+  function revealLocation(uri: string, range: Range): Promise<void> {
+    return activateFileThen(uri, () => editor.gotoRange(range.start, range.end));
   }
 
   // The Spotlight launcher's revert (#1165): confirm, then `git revert` the commit and refresh the Source
@@ -582,11 +550,14 @@ export function init(hooks: IdeHooks = {}): () => void {
     if (!ok) return;
     try {
       await platform.gitRevert(token, sha);
-      // Success shows in the refreshed Source Control panel (the new revert commit appears in the log);
-      // there is no info-level status channel — setStatus is error-only.
-      controller.refreshSourceControl();
     } catch (e) {
+      // A conflicted/aborted revert leaves the working tree changed (conflict markers, REVERT_HEAD), so the
+      // panel must still refresh below to show that state — hence the finally, not just the try.
       setStatus('Revert failed: ' + String(e), 'error');
+    } finally {
+      // Success shows the new revert commit in the log; a failure shows the conflicted tree. Either way the
+      // panel must reflect reality (there is no info-level status channel — setStatus is error-only).
+      controller.refreshSourceControl();
     }
   }
 
@@ -1414,8 +1385,10 @@ export function init(hooks: IdeHooks = {}): () => void {
     canUseGit: platform.canUseGit,
     gitLog: () => (platform.canUseGit ? platform.gitLog(workspace.folderRootToken()) : null),
     revealLocation: (uri, range) => void revealLocation(uri, range),
-    findReferences: (uri, range) => void findReferencesAt(uri, range),
-    renameSymbol: (uri, range) => void renameFromLauncher(uri, range),
+    findReferences: (uri, range) =>
+      void activateFileThen(uri, () => editor.showReferences(range.start.line, range.start.character + 1)),
+    renameSymbol: (uri, range) =>
+      void activateFileThen(uri, () => editor.showRename(range.start.line, range.start.character + 1)),
     gitRevert: (sha) => void revertCommitFromLauncher(sha),
     canRevealInFileManager: platform.canRevealInFileManager,
     // Convert the workspace file uri to an on-disk path for the OS file manager; a uri with no path

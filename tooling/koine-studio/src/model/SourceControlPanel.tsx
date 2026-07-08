@@ -337,10 +337,11 @@ export function SourceControlPanel(props: {
     if (diffReq.current === req) setDiffText(text);
   }
 
-  // Apply a launcher focus request (#1165) once its data has arrived: open the targeted file's inline
-  // diff, or highlight + scroll to the targeted commit. Re-runs when the nonce bumps AND when status/log
-  // resolve (the target rows don't exist until the async fetch lands); `appliedFocusNonce` makes each
-  // request fire exactly once, so a later re-fetch / dirty-count repaint can't re-trigger it.
+  // Apply a launcher focus request (#1165) once its target is actually present: open the targeted file's
+  // inline diff, or highlight + scroll to the targeted commit. Re-runs when the nonce bumps AND when
+  // status/log resolve — the target rows don't exist until the async fetch lands, and on a re-open the
+  // re-fetch replaces a STALE snapshot, so the nonce is marked applied only once the target is FOUND
+  // (not on a not-found pass against stale data); `appliedFocusNonce` then makes each request fire once.
   useEffect(() => {
     const focus = props.focus;
     const nonce = props.focusNonce ?? 0;
@@ -348,9 +349,9 @@ export function SourceControlPanel(props: {
 
     if ('file' in focus) {
       if (!status) return; // status still loading — a later status update re-runs this effect
-      appliedFocusNonce.current = nonce; // handled (found or not) — never retry this request
       const target = status.files.find((f) => f.relPath === focus.file);
-      if (!target) return; // not a changed file: nothing to diff (the panel is open — an honest degrade)
+      if (!target) return; // not (yet) a changed file — retry when a fresher status arrives, else no-op
+      appliedFocusNonce.current = nonce; // found → apply exactly once
       if (!(openDiff && openDiff.relPath === target.relPath && openDiff.staged === target.staged)) {
         void onToggleDiff(target);
       }
@@ -359,8 +360,8 @@ export function SourceControlPanel(props: {
       );
     } else {
       if (!log.length) return; // log still loading
-      appliedFocusNonce.current = nonce;
-      if (!log.some((c) => c.sha === focus.commit)) return; // unknown commit — nothing to focus
+      if (!log.some((c) => c.sha === focus.commit)) return; // not in the log yet — retry on a fresher log
+      appliedFocusNonce.current = nonce; // found → apply exactly once
       setShowAllCommits(true); // lift the capped list so the target is rendered even if it's older
       setFocusedCommit(focus.commit);
       requestAnimationFrame(() =>
@@ -370,6 +371,15 @@ export function SourceControlPanel(props: {
     // props.focus is stable per nonce; status/log gate the apply until the target rows exist.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.focusNonce, status, log]);
+
+  // The commit highlight is a transient "you landed here" flash (#1165), not a persistent selection: the
+  // panel stays mounted across re-opens, so without this the ring would linger and reappear on a later
+  // focus-less open. Clear it after a beat (cleared on unmount / re-focus so no timer leaks past teardown).
+  useEffect(() => {
+    if (!focusedCommit) return;
+    const id = setTimeout(() => setFocusedCommit(null), 2600);
+    return () => clearTimeout(id);
+  }, [focusedCommit]);
 
   // --- empty states (after the hooks, so the hook order is stable) ----------
   if (!git.canUseGit) {
@@ -890,6 +900,9 @@ export function SourceControlPanel(props: {
                     class="koi-sc-log-item"
                     data-sha={c.sha}
                     data-focused={focusedCommit === c.sha ? 'true' : undefined}
+                    // Programmatic cue so AT users know which commit the launcher's "View commit" landed on,
+                    // not just the visual accent ring (WCAG 2.1 AA).
+                    aria-current={focusedCommit === c.sha ? 'true' : undefined}
                   >
                     {/* Decorative accent-tinted initials avatar; aria-hidden — the author is in the meta. */}
                     <span class="koi-sc-avatar" aria-hidden="true">

@@ -69,13 +69,13 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1401 → 1408: concept-7 "Flush" builds the Output file-rail scaffold inside #view-preview and
   // mounts the CodeMirror OutputView into its `.out-code` slot (ensureOutputScaffold + the import), plus a
   // one-line initInstantTooltip() boot call, ~7 LOC of composition-root wiring. Measured end-state.
-  // Raised 1408 → 1483: #1165 wires the Spotlight launcher's degraded quick actions into the composition
-  // root — three open-file-then-act nav helpers (findReferencesAt / renameFromLauncher /
-  // revertCommitFromLauncher, siblings of the existing revealLocation that reuse the editor's Shift-F12 /
-  // F2 surfaces + the host gitRevert) plus the reveal-in-file-manager thunk and the five CommandWiringDeps
-  // seam registrations (findReferences / renameSymbol / gitRevert / canRevealInFileManager / revealPath),
-  // ~69 LOC of launcher-seam wiring. Measured end-state (1481) + a couple lines headroom.
-  { file: 'src/shell/ide.tsx', maxLines: 1483 },
+  // Raised 1408 → 1456: #1165 wires the Spotlight launcher's degraded quick actions into the composition
+  // root — the shared open-file-then-act helper `activateFileThen` (which go-to / find-usages / rename
+  // reuse), `revertCommitFromLauncher`, the reveal-in-file-manager thunk, and the five CommandWiringDeps
+  // seam registrations (findReferences / renameSymbol / gitRevert / canRevealInFileManager / revealPath).
+  // The code-review DRY pass collapsed three near-identical activate helpers into one, so this landed at
+  // 1454 rather than the ~1481 of the first cut. Measured end-state (1454) + 2.
+  { file: 'src/shell/ide.tsx', maxLines: 1456 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.
@@ -104,9 +104,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 2482 → 2524: #1165 threads two launcher focus targets into the right-rail. Source Control gets
   // the sourceControlFocus/nonce pair + two <SourceControlPanel> focus props + the selectRight focus arg
   // (~13 LOC); the glossary gets a cached-model + renderGlossaryPanel helper + the selectDocsTab term arg
-  // that re-renders GlossaryPanel with a scroll target (~27 LOC) — both reuse the existing load/render
-  // machinery, ~40 LOC total of composition-root wiring. Measured end-state (2522) + 2; #985 owns the split.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2524 },
+  // that re-renders GlossaryPanel with a scroll target (~31 LOC, incl. the code-review one-shot-clear so a
+  // remount can't re-scroll to a stale term) — both reuse the existing load/render machinery, ~44 LOC
+  // total of composition-root wiring. Measured end-state (2526) + 2; #985 owns the split.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2528 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   { file: 'src/settings/prefs.ts', maxLines: 2250 },
