@@ -567,6 +567,29 @@ export function init(hooks: IdeHooks = {}): () => void {
     }
   }
 
+  // The Spotlight launcher's revert (#1165): confirm, then `git revert` the commit and refresh the Source
+  // Control panel. Capability + workspace guarded (commandWiring already checks canUseGit; the token guard
+  // covers a no-folder workspace). A git failure (dirty tree / conflict) is surfaced to the status bar,
+  // not swallowed, so the user knows why nothing changed.
+  async function revertCommitFromLauncher(sha: string): Promise<void> {
+    const token = workspace.folderRootToken();
+    if (!platform.canUseGit || !token) return;
+    const ok = await overlays.confirm.ask({
+      title: 'Revert this commit?',
+      message: `This records a new commit that undoes ${sha.slice(0, 7)}. History is not rewritten.`,
+      confirmLabel: 'Revert commit',
+    });
+    if (!ok) return;
+    try {
+      await platform.gitRevert(token, sha);
+      // Success shows in the refreshed Source Control panel (the new revert commit appears in the log);
+      // there is no info-level status channel — setStatus is error-only.
+      controller.refreshSourceControl();
+    } catch (e) {
+      setStatus('Revert failed: ' + String(e), 'error');
+    }
+  }
+
   // Open a file from a USER-INITIATED affordance (a file-tree click, a Go-to-File palette pick). Takes an
   // fs token (what the explorer hands us) and routes it through the single editor's activate path. (The
   // former two-group "focused group" routing went away with the editor A/B split — the center split-pane
@@ -1393,6 +1416,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     revealLocation: (uri, range) => void revealLocation(uri, range),
     findReferences: (uri, range) => void findReferencesAt(uri, range),
     renameSymbol: (uri, range) => void renameFromLauncher(uri, range),
+    gitRevert: (sha) => void revertCommitFromLauncher(sha),
   });
 
   // The boot sequence (the lsp.start ladder + emit-target seed + the shared/single/restored/default

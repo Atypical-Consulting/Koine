@@ -472,6 +472,11 @@ export class TauriPlatform implements Platform {
     return invoke('git_commit', { dir: folderToken, message }) as Promise<void>;
   }
 
+  /** Revert the commit `sha`, recording a new commit that undoes it (`git revert --no-edit <sha>`). */
+  gitRevert(folderToken: string, sha: string): Promise<void> {
+    return invoke('git_revert', { dir: folderToken, sha }) as Promise<void>;
+  }
+
   /** The local branch names of the workspace folder (the current one is reported by {@link gitStatus}). */
   gitBranches(folderToken: string): Promise<string[]> {
     return invoke<string[]>('git_branches', { dir: folderToken });

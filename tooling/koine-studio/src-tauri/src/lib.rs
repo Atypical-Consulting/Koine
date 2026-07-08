@@ -1041,6 +1041,16 @@ fn git_commit(dir: String, message: String) -> Result<(), String> {
     run_git(&dir, &["commit", "-m", &message]).map(|_| ())
 }
 
+/// Revert the commit `sha` (`git revert --no-edit <sha>`), recording a new commit that undoes it.
+/// A revert is a FORWARD commit — it never rewrites history — so it is safe on a shared branch.
+/// `--no-edit` keeps it non-interactive (git's default `Revert "<subject>"` message). `Err` (git's
+/// stderr) on a dirty working tree, a revert conflict, or a merge commit that needs an explicit `-m`
+/// parent — surfaced to the caller (the launcher shows the message), never swallowed.
+#[tauri::command]
+fn git_revert(dir: String, sha: String) -> Result<(), String> {
+    run_git(&dir, &["revert", "--no-edit", &sha]).map(|_| ())
+}
+
 /// Initialize a new git repository in `dir` (`git init`). Resolves once `dir` is a work tree;
 /// idempotent — re-running on an existing repo still succeeds (git's own behavior). `Err` (git's
 /// stderr) when git is missing or the path can't be initialized.
@@ -2097,6 +2107,7 @@ pub fn run() {
             git_stage,
             git_unstage,
             git_commit,
+            git_revert,
             git_init,
             git_branches,
             git_checkout,
@@ -3218,6 +3229,37 @@ mod tests {
         assert_eq!(log[0].message, "add c");
         // Nothing left to commit afterwards.
         assert!(git_status(repo.path()).unwrap().files.is_empty());
+    }
+
+    #[test]
+    fn git_revert_records_a_forward_commit_that_undoes_the_target() {
+        let repo = init_repo();
+        // Base commit, then a commit that adds a line we will revert.
+        repo.write("f.txt", "base\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+        repo.write("f.txt", "base\nadded\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "add a line"]);
+
+        let head = git_log(repo.path(), None).unwrap()[0].sha.clone();
+        git_revert(repo.path(), head).unwrap();
+
+        // A revert is a FORWARD commit (not a history rewrite): a third commit lands on top…
+        let log = git_log(repo.path(), None).unwrap();
+        assert_eq!(log.len(), 3);
+        assert!(log[0].message.starts_with("Revert"), "revert message: {}", log[0].message);
+        // …the working file is back to the base content…
+        let content = std::fs::read_to_string(repo.dir.join("f.txt")).unwrap();
+        assert_eq!(content, "base\n");
+        // …and the tree is clean afterwards (the revert committed, nothing left pending).
+        assert!(git_status(repo.path()).unwrap().files.is_empty());
+    }
+
+    #[test]
+    fn git_revert_errors_on_a_non_git_dir() {
+        let plain = TempRepo::new();
+        assert!(git_revert(plain.path(), "deadbeef".to_string()).is_err());
     }
 
     #[test]

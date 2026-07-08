@@ -173,6 +173,9 @@ class FakePlatform implements Platform {
   gitCommit(): Promise<void> {
     return this.gitUnavailable();
   }
+  gitRevert(): Promise<void> {
+    return this.gitUnavailable();
+  }
   gitBranches(): Promise<string[]> {
     return this.gitUnavailable();
   }

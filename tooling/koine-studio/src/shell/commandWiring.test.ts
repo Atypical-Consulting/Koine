@@ -101,6 +101,7 @@ function makeDeps(over: Partial<CommandWiringDeps> = {}): CommandWiringDeps {
     revealLocation: vi.fn(),
     findReferences: vi.fn(),
     renameSymbol: vi.fn(),
+    gitRevert: vi.fn(),
     ...over,
   };
 }
@@ -509,15 +510,31 @@ describe('commandWiring', () => {
       vi.unstubAllGlobals();
     });
 
-    it('revert honestly toasts "not available" instead of a misleading panel swap (#1145)', () => {
-      const deps = makeDeps();
+    it('revertCommit reverts the entry\'s commit through the git seam when the host has git (#1165)', () => {
+      const deps = makeDeps({ canUseGit: true });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const commit = { id: 'commit:abc', cat: 'commit', title: 'fix: bug', hash: 'abc1234567' } as unknown as CatalogEntry;
+      capturedActionDeps.revertCommit(commit);
+      // Routes to the real git revert with the full sha, and closes the launcher…
+      expect(deps.gitRevert).toHaveBeenCalledWith('abc1234567');
+      expect(launcherClose).toHaveBeenCalledOnce();
+      // …instead of the old misleading Source Control panel swap or "not available" toast.
+      expect(deps.controller.selectRight).not.toHaveBeenCalled();
+      expect(launcherToast).not.toHaveBeenCalled();
+    });
+
+    it('revertCommit degrades honestly (no revert) on a host without git', () => {
+      const deps = makeDeps({ canUseGit: false });
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
 
       const commit = { id: 'commit:abc', cat: 'commit', title: 'fix: bug', hash: 'abc1234' } as unknown as CatalogEntry;
       capturedActionDeps.revertCommit(commit);
-      expect(launcherToast).toHaveBeenLastCalledWith(expect.stringContaining('isn’t available'));
-      // ...and it does NOT silently open the Source Control panel as if a revert happened.
+      expect(deps.gitRevert).not.toHaveBeenCalled();
+      // Honest toast, and still no misleading panel swap.
+      expect(launcherToast).toHaveBeenCalledOnce();
       expect(deps.controller.selectRight).not.toHaveBeenCalled();
     });
 

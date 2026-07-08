@@ -386,6 +386,15 @@ export interface Platform {
   gitCommit(folderToken: string, message: string): Promise<void>;
 
   /**
+   * Revert the commit `sha` of the workspace folder (`git revert --no-edit <sha>`), recording a new
+   * commit that undoes it — a forward commit, never a history rewrite. Rejects (with git's stderr) on a
+   * dirty working tree, a revert conflict, or a merge commit needing an explicit parent; the caller
+   * surfaces that message rather than swallowing it. Desktop only; the browser stub rejects. Callers
+   * must check {@link canUseGit} first.
+   */
+  gitRevert(folderToken: string, sha: string): Promise<void>;
+
+  /**
    * The local branch names of the workspace folder. The currently checked-out branch is reported by
    * {@link gitStatus} (its `branch` field), so the picker can mark it without a second shape. Desktop
    * only; the browser stub rejects. Callers must check {@link canUseGit} first.

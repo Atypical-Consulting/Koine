@@ -1201,6 +1201,7 @@ describe('createInspectorController — Source Control live refresh-on-save (#47
       gitStage: vi.fn(async () => {}),
       gitUnstage: vi.fn(async () => {}),
       gitCommit: vi.fn(async () => {}),
+      gitRevert: vi.fn(async () => {}),
       gitBranches: vi.fn(async () => ['main']),
       gitCheckout: vi.fn(async () => {}),
       gitLog: vi.fn(async () => []),

@@ -85,6 +85,9 @@ export interface CommandWiringDeps {
   /** Activate a workspace file and open the inline rename field at a 0-based range — the launcher's
    * rename effect (reuses the editor's F2 rename surface → lsp.rename → applyWorkspaceEdit). */
   renameSymbol(uri: string, range: Range): void;
+  /** Revert a commit by sha — the launcher's revert effect: confirms, calls the host `gitRevert`, and
+   * surfaces any git error (dirty tree / conflict). Only reached when {@link canUseGit}. */
+  gitRevert(sha: string): void;
 }
 
 export interface CommandWiring {
@@ -281,7 +284,21 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     findInModel: (entry) => deps.search.seed(entry.title),
     gotoRule: (entry) => gotoEntry(entry),
     viewCommit: () => deps.controller.selectRight('source-control'),
-    revertCommit: () => launcher.toast('Reverting a commit isn’t available from the launcher yet.'),
+    // Real git revert from the launcher (#1165): capability-gated on the host's git (browser has none),
+    // then hand the sha to the shell's confirm-and-revert flow. Close the launcher first so the confirm
+    // dialog owns the foreground. A host without git degrades honestly instead of a misleading no-op.
+    revertCommit: (entry) => {
+      if (!deps.canUseGit) {
+        launcher.toast('Reverting a commit needs the desktop app.');
+        return;
+      }
+      if (!entry.hash) {
+        launcher.toast('This commit has no hash to revert.');
+        return;
+      }
+      launcher.close();
+      deps.gitRevert(entry.hash);
+    },
     runCommand: (entry) => {
       if (entry.cmdId) registry.run(entry.cmdId);
     },
