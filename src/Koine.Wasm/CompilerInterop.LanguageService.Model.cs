@@ -206,14 +206,15 @@ public static partial class CompilerInterop
         }
     }
 
-    private static readonly WModelNode EmptyModelNode = new("model", "", "", [], []);
+    private static readonly WModelNode EmptyModelNode = new("model", "", "", [], [], []);
 
     private static WModelNode MapModelNode(ModelNode n) => new(
         n.Kind, n.QualifiedName, n.Title,
         n.Members.Select(MapModelMember).ToArray(),
-        n.Children.Select(MapModelNode).ToArray());
+        n.Children.Select(MapModelNode).ToArray(),
+        n.Transitions.Select(MapModelMember).ToArray());
 
-    private static WModelMember MapModelMember(ModelMember m) => new(m.Kind, m.Name, m.Type, m.Value);
+    private static WModelMember MapModelMember(ModelMember m) => new(m.Kind, m.Name, m.Type, m.Value, m.Via);
 
     private static WRoundTripDiagnostic MapRoundTripDiagnostic(Diagnostic d) =>
         new(d.Code, d.Message, SpanRange(d.Span), d.File);

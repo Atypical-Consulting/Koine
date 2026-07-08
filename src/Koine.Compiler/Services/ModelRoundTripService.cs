@@ -55,7 +55,7 @@ public static partial class ModelRoundTripService
             return root;
         }
 
-        return Find(root, qualifiedName) ?? new ModelNode("unknown", qualifiedName, qualifiedName, [], []);
+        return Find(root, qualifiedName) ?? new ModelNode("unknown", qualifiedName, qualifiedName, [], [], []);
     }
 
     /// <summary>
@@ -81,7 +81,7 @@ public static partial class ModelRoundTripService
             children.Add(BuildContextMap(map));
         }
 
-        return new ModelNode("model", "", "", [], children);
+        return new ModelNode("model", "", "", [], children, []);
     }
 
     private static ModelNode BuildContext(ContextNode ctx)
@@ -92,7 +92,7 @@ public static partial class ModelRoundTripService
             children.Add(BuildType(type, ctx.Name));
         }
 
-        return new ModelNode("context", ctx.Name, ctx.Name, [], children);
+        return new ModelNode("context", ctx.Name, ctx.Name, [], children, []);
     }
 
     private static ModelNode BuildType(TypeDecl type, string prefix)
@@ -100,46 +100,90 @@ public static partial class ModelRoundTripService
         var qualified = prefix + "." + type.Name;
         return type switch
         {
+            // The state machine lives on the ENTITY, not the aggregate — an aggregate node has no
+            // `States` of its own, so it gets `[]`; the transitions surface on its root entity child.
             AggregateDecl agg => new ModelNode(
                 "aggregate", qualified, agg.Name, [],
-                agg.Types.Select(t => BuildType(t, qualified)).ToList()),
+                agg.Types.Select(t => BuildType(t, qualified)).ToList(), []),
 
             EntityDecl entity => new ModelNode(
                 "entity", qualified, entity.Name,
                 entity.Members.Select(FieldMember).ToList(),
-                entity.States.Select(s => BuildStates(s, qualified)).ToList()),
+                entity.States.Select(s => BuildStates(entity, s, qualified)).ToList(),
+                // The flattened per-edge transitions across all the entity's state machines, surfaced
+                // on the owner so a consumer needn't parse the nested `.states.<field>` qualifiedName.
+                entity.States.SelectMany(s => TransitionMembers(entity, s)).ToList()),
 
             ValueObjectDecl vo => new ModelNode(
                 vo.IsQuantity ? "quantity" : "value", qualified, vo.Name,
-                vo.Members.Select(FieldMember).ToList(), []),
+                vo.Members.Select(FieldMember).ToList(), [], []),
 
             EnumDecl en => new ModelNode(
                 "enum", qualified, en.Name,
-                en.Members.Select(EnumMemberOf).ToList(), []),
+                en.Members.Select(EnumMemberOf).ToList(), [], []),
 
             EventDecl ev => new ModelNode(
                 "event", qualified, ev.Name,
-                ev.Members.Select(FieldMember).ToList(), []),
+                ev.Members.Select(FieldMember).ToList(), [], []),
 
             IntegrationEventDecl ie => new ModelNode(
                 "integration event", qualified, ie.Name,
-                ie.Members.Select(FieldMember).ToList(), []),
+                ie.Members.Select(FieldMember).ToList(), [], []),
 
-            _ => new ModelNode("type", qualified, type.Name, [], []),
+            _ => new ModelNode("type", qualified, type.Name, [], [], []),
         };
     }
 
-    private static ModelNode BuildStates(StatesDecl states, string entityQualified)
+    private static ModelNode BuildStates(EntityDecl owner, StatesDecl states, string entityQualified)
     {
         var qualified = entityQualified + ".states." + states.Field;
-        var transitions = states.Rules
-            .Select(r => new ModelMember(
-                "transition",
-                r.From,
-                r.Guard is null ? null : ExprDescriber.Describe(r.Guard),
-                string.Join(", ", r.To)))
-            .ToList();
-        return new ModelNode("states", qualified, states.Field, transitions, []);
+        return new ModelNode("states", qualified, states.Field, TransitionMembers(owner, states), [], []);
+    }
+
+    /// <summary>
+    /// The flattened per-edge transition members for one state machine: one <c>transition</c>
+    /// <see cref="ModelMember"/> per declared <c>From → single To</c> pair (a rule with N targets fans
+    /// out to N members; a terminal rule with an empty <c>To</c>, e.g. a bare <c>Paid</c>, contributes
+    /// none), each carrying the described guard and the correlated triggering command. Shared by the
+    /// nested <c>states</c> node and the owner entity node so the fan-out logic lives in one place.
+    /// </summary>
+    private static List<ModelMember> TransitionMembers(EntityDecl owner, StatesDecl states)
+    {
+        var members = new List<ModelMember>();
+        foreach (StateRule r in states.Rules)
+        {
+            var guard = r.Guard is null ? null : ExprDescriber.Describe(r.Guard);
+            foreach (var to in r.To)
+            {
+                members.Add(new ModelMember(
+                    "transition", r.From, guard, to, TriggeringCommand(owner, states.Field, to)));
+            }
+        }
+
+        return members;
+    }
+
+    /// <summary>
+    /// Best-effort correlation of a declared state edge with the command that drives it: the name of the
+    /// <b>first</b> command on <paramref name="owner"/> whose body assigns <paramref name="toState"/> to
+    /// <paramref name="field"/> (a <see cref="Transition"/> <c>field -&gt; toState</c>). Mirrors the
+    /// reachability check in <see cref="Semantics.EntityBehaviorValidator"/>. Only literal-state targets
+    /// (<see cref="IdentifierExpr"/>) correlate; returns <c>null</c> when no declared command matches.
+    /// </summary>
+    private static string? TriggeringCommand(EntityDecl owner, string field, string toState)
+    {
+        foreach (CommandDecl cmd in owner.Commands)
+        {
+            foreach (Transition tr in cmd.Body.OfType<Transition>())
+            {
+                if (tr.Field == field && tr.Value is IdentifierExpr id && id.Name == toState)
+                {
+                    return cmd.Name;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static ModelNode BuildContextMap(ContextMapNode map)
@@ -151,7 +195,7 @@ public static partial class ModelRoundTripService
                 RelationRole(r.Kind),
                 RelationDetail(r)))
             .ToList();
-        return new ModelNode("contextMap", ContextMapQualifiedName, "Context Map", relations, []);
+        return new ModelNode("contextMap", ContextMapQualifiedName, "Context Map", relations, [], []);
     }
 
     private static ModelMember FieldMember(Member m) => new(

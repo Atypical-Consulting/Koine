@@ -26,6 +26,7 @@ public class ModelRoundTripWireParityTests
                 Draft -> Placed
                 Placed -> Shipped
               }
+              command Place { status -> Placed }
             }
           }
         }
@@ -54,6 +55,28 @@ public class ModelRoundTripWireParityTests
         lsp["kind"]!.GetValue<string>().ShouldBe("model");
         Canonical(lsp).ShouldContain("Ordering.Money");
         Canonical(lsp).ShouldContain("Ordering.Order.Order.states.status");
+    }
+
+    [Fact]
+    public void Transition_via_and_owner_transitions_flow_identically_over_the_wire()
+    {
+        JsonNode lsp = LspModel(null);
+        JsonNode wasm = JsonNode.Parse(WasmModel(null))!;
+
+        // Identity is asserted elsewhere; this proves the additive transition projection (ModelMember.Via
+        // + ModelNode.Transitions) is actually present on BOTH wires, not merely equal-and-absent.
+        Canonical(lsp).ShouldBe(Canonical(wasm));
+
+        // Every `transition` member carries its correlated triggering command in `via`; the `Draft -> Placed`
+        // edge is driven by `command Place`.
+        bool placeIsTriggered = AllMembers(wasm)
+            .Where(m => m["kind"]?.GetValue<string>() == "transition")
+            .Any(m => m["via"]?.GetValue<string>() == "Place");
+        placeIsTriggered.ShouldBeTrue();
+
+        // The owner entity node surfaces the flattened per-edge transitions on its `transitions` array.
+        JsonNode owner = AllNodes(wasm).First(n => n!["qualifiedName"]?.GetValue<string>() == "Ordering.Order.Order")!;
+        (owner["transitions"]?.AsArray()?.Count ?? 0).ShouldBeGreaterThan(0);
     }
 
     [Fact]
@@ -110,6 +133,31 @@ public class ModelRoundTripWireParityTests
         wasm["uri"]!.GetValue<string>().ShouldBe("file:///t.koi");
         wasm["edits"]!.AsArray().Count.ShouldBe(1);
     }
+
+    // ---- Model-tree walking (used by the transition-projection assertions) ----
+
+    /// <summary>Every model node in the subtree (self + recursive <c>children</c>).</summary>
+    private static IEnumerable<JsonNode> AllNodes(JsonNode node)
+    {
+        yield return node;
+        if (node["children"] is JsonArray children)
+        {
+            foreach (JsonNode? child in children)
+            {
+                foreach (JsonNode descendant in AllNodes(child!))
+                {
+                    yield return descendant;
+                }
+            }
+        }
+    }
+
+    /// <summary>Every member across the whole tree — each node's <c>members</c> and its <c>transitions</c>.</summary>
+    private static IEnumerable<JsonNode> AllMembers(JsonNode root) =>
+        AllNodes(root).SelectMany(n =>
+            (n["members"]?.AsArray() ?? [])
+                .Concat(n["transitions"]?.AsArray() ?? []))
+            .Where(m => m is not null)!;
 
     // ---- LSP driving (domain-specific; the plumbing lives in WireParityHarness) ----
 

@@ -85,14 +85,11 @@ function symbolAndEventEntries(index: ModelIndex): CatalogEntry[] {
 }
 
 /**
- * Rules & states ← whatever the joined `ModelIndex` actually exposes for an aggregate/value/entity's
- * invariants and an enum's members. GAP (documented, not invented): a state MACHINE's transitions
- * (`StatesDecl`/`StateRule` in the compiler AST) are projected to a `ModelNode` whose qualifiedName is
- * nested under the owning entity's (`Entity.states.<field>`), a key `ModelIndex.byQn` never surfaces —
- * only glossary-entry qualified names are keys there — so transitions are NOT reachable from
- * `LauncherSources` today and this group cannot list them. What IS derivable: the diagram node's
- * `invariants` (business rules, when present) and an enum's own `enumMember` model members, which
- * often stand in for a lifecycle's named states.
+ * Rules & states ← whatever the joined `ModelIndex` actually exposes for a domain element: an
+ * aggregate/value/entity's `invariants`, an enum's `enumMember` states, and an aggregate/entity's real
+ * declared guarded state transitions (`element.transitions`, the owner-attached #1163 projection).
+ * Every edge listed here is a DECLARED one — the transitions come off the owner element that projects
+ * them, never inferred from enum-member adjacency or declaration order (the approximation #1145 removed).
  */
 function ruleEntries(index: ModelIndex): CatalogEntry[] {
   const out: CatalogEntry[] = [];
@@ -137,6 +134,31 @@ function ruleEntries(index: ModelIndex): CatalogEntry[] {
         });
       }
     }
+
+    // One entry per REAL declared guarded edge (#1163). These come off the OWNER entity/aggregate
+    // element that projects `transitions` — enum-`state` entries above come off the ENUM element, so
+    // the two never overlap. No edge is ever synthesized from enum-member order (#1145).
+    // The owner element flattens every state machine's edges into one `transitions` list, so a bare
+    // `<from>-><to>` id is NOT unique — two fields sharing an edge, or two guarded rules on the same
+    // edge (`A -> B when g1` / `A -> B when g2`), repeat it. The declaration-order index disambiguates
+    // so the launcher's per-entry `id` (a React key + a `lx-opt-…` DOM id) stays unique.
+    (element.transitions ?? []).forEach((t, i) => {
+      const guard = t.guard ? ` · when ${t.guard}` : '';
+      const via = t.via ? ` · via ${t.via}` : '';
+      out.push({
+        id: `rule:${entry.qualifiedName}:trans:${t.from}->${t.to}:${i}`,
+        cat: 'rule',
+        rkind: 'transition',
+        kind,
+        title: `${t.from} → ${t.to}`,
+        sub: `${entry.name}${guard}${via}`, // e.g. "Order · when totalIsPositive · via Submit"
+        ctx: entry.context,
+        keywords: keywordsOf(t.from, t.to, t.guard, t.via, entry.name),
+        qualifiedName: entry.qualifiedName,
+        element,
+        transition: t,
+      });
+    });
   }
   return out;
 }

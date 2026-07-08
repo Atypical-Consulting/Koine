@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest';
 import { act } from '@testing-library/preact';
 import { EditorView } from '@codemirror/view';
-import type { FsEntry, GitLogEntry, GitStatus, KoiFile, LspTransport, McpEndpoint, Platform } from '@/host/types';
+import type { FsEntry, GitLogEntry, GitNumstatEntry, GitStatus, KoiFile, LspTransport, McpEndpoint, Platform } from '@/host/types';
 import { buildShareUrl, buildWorkspaceShareUrl } from '@/export/share';
 import { loadSettings, saveSettings } from '@/settings/persistence';
 
@@ -245,6 +245,9 @@ class FakePlatform implements Platform {
     return this.gitUnavailable();
   }
   gitDiff(): Promise<string> {
+    return this.gitUnavailable();
+  }
+  gitNumstat(): Promise<GitNumstatEntry[]> {
     return this.gitUnavailable();
   }
   gitStage(): Promise<void> {

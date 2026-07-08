@@ -2,7 +2,17 @@
 // files go through the File System Access API (fs.ts). Used when the studio is served as a plain
 // web page rather than hosted in the Tauri desktop shell.
 import type { EditSession } from '@/ai/editSession';
-import type { FsEntry, GitLogEntry, GitStatus, KoiFile, LspTransport, McpEndpoint, Platform, SourceDoc } from '@/host/types';
+import type {
+  FsEntry,
+  GitLogEntry,
+  GitNumstatEntry,
+  GitStatus,
+  KoiFile,
+  LspTransport,
+  McpEndpoint,
+  Platform,
+  SourceDoc,
+} from '@/host/types';
 import { WasmLspTransport } from '@/host/browser/transport';
 import {
   runEditTool as runEditToolImpl,
@@ -152,6 +162,10 @@ export class BrowserPlatform implements Platform {
   }
 
   gitDiff(): Promise<string> {
+    return this.gitUnavailable();
+  }
+
+  gitNumstat(): Promise<GitNumstatEntry[]> {
     return this.gitUnavailable();
   }
 

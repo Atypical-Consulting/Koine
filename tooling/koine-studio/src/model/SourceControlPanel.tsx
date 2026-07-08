@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import type { GitFile, GitLogEntry, GitStatus, Platform } from '@/host/types';
+import type { GitFile, GitLogEntry, GitNumstatEntry, GitStatus, Platform } from '@/host/types';
 import { koiConfirm, createFloatingMenu, type FloatingMenu, type FloatingMenuItem } from '@atypical/koine-ui';
 
 // The Source Control panel (issue #272): the right-rail git surface — a branch header + switcher, the
@@ -26,6 +26,7 @@ export type GitSurface = Pick<
   | 'canUseGit'
   | 'gitStatus'
   | 'gitDiff'
+  | 'gitNumstat'
   | 'gitStage'
   | 'gitUnstage'
   | 'gitCommit'
@@ -84,32 +85,6 @@ function initials(author: string): string {
   if (parts.length === 0) return '?';
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
-/** Best-effort `+added / −removed` line counts parsed from a unified diff's hunk bodies (everything
- *  after the first `@@`), so the file-header lines are skipped by position rather than by a text guard.
- *  `GitFile` carries no line counts and `gitDiff` is lazy (per-row), so a row can only show real counts
- *  once ITS diff is open and parsed — otherwise the row falls back to a neutral placeholder rather than a
- *  misleading `+0`. Eager numstat is a tracked follow-up. */
-function diffStat(text: string): { add: number; del: number } {
-  let add = 0;
-  let del = 0;
-  // Count only inside the hunk body (after the first `@@` header). The file header lines (`--- a/…`,
-  // `+++ b/…`, `diff --git`, `index …`) live before it, so skipping them by position — rather than by a
-  // `startsWith('---'/'+++')` text guard — avoids miscounting a genuinely deleted/added source line that
-  // itself begins with `--`/`++` (e.g. a removed `-- comment`, which renders as `--- comment`).
-  let inHunk = false;
-  for (const line of text.split('\n')) {
-    if (!inHunk) {
-      if (line.startsWith('@@')) inHunk = true;
-      continue;
-    }
-    // Within the body: `+`/`-` prefixed lines are additions/deletions; a later `@@` starts a new hunk and
-    // isn't a `+`/`-` line, so it's skipped naturally.
-    if (line.startsWith('+')) add += 1;
-    else if (line.startsWith('-')) del += 1;
-  }
-  return { add, del };
 }
 
 /** Which file's inline diff is open, keyed by (relPath, area) so the staged and unstaged rows of one path
@@ -171,6 +146,10 @@ export function SourceControlPanel(props: {
   const [actionError, setActionError] = useState<string | null>(null);
   const [openDiff, setOpenDiff] = useState<OpenDiff | null>(null);
   const [diffText, setDiffText] = useState('');
+  // Eager per-(file, area) line counts (#1152), keyed `${staged}:${relPath}` — computed once per refresh by
+  // gitNumstat so each row shows its churn WITHOUT opening its diff. Empty when numstat is unavailable (a
+  // failed fetch), where every row falls back to the neutral `·`.
+  const [numstat, setNumstat] = useState<Map<string, GitNumstatEntry>>(() => new Map());
   // An internal tick: every refresh (the button, a post-mutation reload, the folder-switch nonce) bumps
   // it, and the fetch effect lists it as a dependency — so all refreshes funnel through the one effect,
   // each guarded against an unmount-stale resolve.
@@ -237,11 +216,12 @@ export function SourceControlPanel(props: {
       .then(() => git.gitStatus(folderToken))
       .then(async (st) => {
         if (!alive) return;
-        // The log + branch list are best-effort companions to the status; a failure in either leaves
-        // that section empty rather than collapsing the whole panel.
-        const [lg, br] = await Promise.all([
+        // The log + branch list + numstat are best-effort companions to the status; a failure in any
+        // one leaves that section empty (numstat → every row shows `·`) rather than collapsing the panel.
+        const [lg, br, ns] = await Promise.all([
           git.gitLog(folderToken).catch(() => [] as GitLogEntry[]),
           git.gitBranches(folderToken).catch(() => [] as string[]),
+          git.gitNumstat(folderToken).catch(() => [] as GitNumstatEntry[]),
         ]);
         if (!alive) return;
         // Clear `busy` in the SAME state flush as the data, so the rows never paint a frame disabled
@@ -249,6 +229,7 @@ export function SourceControlPanel(props: {
         setStatus(st);
         setLog(lg);
         setBranches(br);
+        setNumstat(new Map(ns.map((e) => [`${e.staged}:${e.relPath}`, e])));
         setError(null);
         setBusy(false);
       })
@@ -518,9 +499,12 @@ export function SourceControlPanel(props: {
   // `{relPath} {status}` so each row stays uniquely addressable and AT users hear the full path + kind.
   const fileRow = (f: GitFile) => {
     const expanded = openDiff?.relPath === f.relPath && openDiff?.staged === f.staged;
-    // Real +/− counts are only knowable once THIS row's diff is open and loaded (GitFile has none);
-    // otherwise a neutral placeholder, never a fake `+0`. See {@link diffStat}.
-    const stat = expanded && diffText ? diffStat(diffText) : null;
+    // Real +/− counts come solely from eager numstat (#1152) — every row shows its churn at rest, no diff
+    // opened, and consistently whether or not the diff is expanded. A binary file's counts are null, and an
+    // untracked file (absent from `git diff`) or a failed numstat fetch leaves no entry — all three render
+    // the neutral `·`, never a misleading `+0`.
+    const ns = numstat.get(`${f.staged}:${f.relPath}`);
+    const stat = ns && ns.added !== null && ns.removed !== null ? { add: ns.added, del: ns.removed } : null;
     const slash = f.relPath.lastIndexOf('/');
     const name = slash >= 0 ? f.relPath.slice(slash + 1) : f.relPath;
     const dir = slash >= 0 ? f.relPath.slice(0, slash) : '';

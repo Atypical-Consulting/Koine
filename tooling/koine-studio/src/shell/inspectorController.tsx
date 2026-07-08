@@ -690,6 +690,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (visibleCenters().includes('visual')) void loadDiagrams();
     invalidateBottomPanels(); // the Events/Relationships/Context Map tables are graph-derived too
     if (outputFiles.length) paintOutputRail(); // refresh the Output rail's scope emphasis (ADR 0009)
+    emphasiseContextMapScope(); // re-focus the active context's node on the Context Map (ADR 0009) — no refetch
   }
 
   // The store's `activeContext` slice is the single source of truth for the active scope: ANY writer —
@@ -2283,6 +2284,22 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     return { stage, details };
   }
 
+  // Focus the active bounded-context scope on the Context Map graph (ADR 0009 / #1188): mark the node
+  // whose bare context name matches the active scope so you can tell which context is active — a FOCUS,
+  // never a filter (every node stays drawn, the map is not blanked). Mirrors applySelectionHighlight's
+  // `.koi-svg-node[data-qname]` hook (a context node carries its bare name there). Re-applied after every
+  // (re)paint and on a live scope change; the graph content is scope-independent, so this never refetches.
+  function emphasiseContextMapScope(): void {
+    const scope = activeContext.get();
+    const active = isAllContexts(scope) ? null : scope;
+    for (const node of Array.from(contextMapView.querySelectorAll<HTMLElement>('.koi-ctxmap-graph .koi-svg-node'))) {
+      const on = active != null && node.dataset.qname === active;
+      node.classList.toggle('is-scoped', on);
+      if (on) node.setAttribute('aria-current', 'true');
+      else node.removeAttribute('aria-current');
+    }
+  }
+
   // Just write the slice; the captured subscription below persists the key and repaints on a change.
   function setContextMapMode(mode: ContextMapMode): void {
     appStore.getState().setContextMapView(mode);
@@ -2338,6 +2355,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
         onRelationSelect: (edge) => showRelationDetails(details, edge as ContextMapEdge | null),
         tooltip: (value) => contextMapTooltip(value),
       });
+      // Focus the active context's node once the graph is mounted (ADR 0009 / #1188).
+      if (seq === contextMapRenderSeq) emphasiseContextMapScope();
     } catch (e) {
       if (seq === contextMapRenderSeq) docMessage(stage, 'Could not render the context-map graph: ' + String(e), 'error');
     }

@@ -4,12 +4,32 @@
 // named `context.simpleName` while glossary entries are `context.aggregate.name` — is unit-tested.
 import type { DiagramNode, DocsResult, GlossaryEntry, GlossaryModel, ModelMember, ModelNode } from '@/lsp/lsp';
 
+/** A real, declared, guarded state-machine edge relayed off the owner node's `transitions` (#1163). */
+export interface StateTransition {
+  from: string;
+  to: string;
+  guard?: string;
+  via?: string;
+}
+
 /** A glossary entry joined with its diagram node (absent when the element has no class diagram). */
 export interface ModelElement {
   entry: GlossaryEntry;
   node?: DiagramNode;
   /** The element's structured-model members (the #91 field source used when no class node is drawn). */
   modelMembers?: ModelMember[];
+  /** The owning aggregate/entity's declared guarded state edges (#1163); absent with no state machine. */
+  transitions?: StateTransition[];
+}
+
+/** Map a `transition` ModelMember (name=from, value=to, type=guard, via=command) to a friendly edge. */
+function toStateTransition(m: ModelMember): StateTransition {
+  return {
+    from: m.name,
+    to: m.value ?? '',
+    guard: m.type ?? undefined,
+    via: m.via ?? undefined,
+  };
 }
 
 export interface ModelIndex {
@@ -47,8 +67,17 @@ export function buildModelIndex(glossary: GlossaryModel, docs: DocsResult, model
   // The structured-model members keyed by canonical qualified name (the same key as a glossary entry).
   // This is the field source for elements with no class node — a value object drawn only as a reference.
   const membersByQn = new Map<string, ModelMember[]>();
+  // Per-edge state transitions relayed off the OWNER entity/aggregate node (#1163) — keyed by the same
+  // node QN as its glossary entry, so the launcher reads `element.transitions` without touching the
+  // nested `.states.<field>` qualifiedName. The nested `states` node carries an empty `transitions`
+  // array (its edges live on `members`), so it is never collected here — no orphan entries.
+  const transitionsByQn = new Map<string, StateTransition[]>();
   const walk = (n: ModelNode): void => {
     if (n.qualifiedName && n.members.length) membersByQn.set(n.qualifiedName, n.members);
+    const edges = n.transitions ?? []; // tolerate a pre-#1163 payload with no `transitions` field
+    if (n.qualifiedName && edges.length) {
+      transitionsByQn.set(n.qualifiedName, edges.map(toStateTransition));
+    }
     for (const child of n.children) walk(child);
   };
   if (model) walk(model);
@@ -62,6 +91,7 @@ export function buildModelIndex(glossary: GlossaryModel, docs: DocsResult, model
       entry,
       node: nodesByCtxName.get(ctxName),
       modelMembers: membersByQn.get(entry.qualifiedName),
+      transitions: transitionsByQn.get(entry.qualifiedName),
     });
     if (!qnByCtxName.has(ctxName)) qnByCtxName.set(ctxName, entry.qualifiedName);
   }

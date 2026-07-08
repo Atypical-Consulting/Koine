@@ -110,12 +110,14 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // `scopeFiles` dep (interface + JSDoc) and its call inside rerenderScopedSurfaces that points the Files
   // tree at the active context, ~10 LOC of glue reusing the existing activeContext/`isAllContexts`
   // machinery (measured after merging the Output-rail slice in). Measured end-state (2503); #985 owns the split.
-  // Raised 2503 → 2547: #1165 threads two launcher focus targets into the right-rail. Source Control gets
-  // the sourceControlFocus/nonce pair + two <SourceControlPanel> focus props + the selectRight focus arg;
-  // the glossary gets a cached-model + renderGlossaryPanel helper + the selectDocsTab term arg (incl. the
-  // code-review one-shot-clear so a remount can't re-scroll to a stale term) — both reuse the existing
-  // load/render machinery. Measured post-merge end-state + 2; #985 owns the split.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2551 },
+  // Raised 2503 → 2570: two features that each grew inspectorController.tsx landed together in this merge.
+  // #1165 threads two launcher focus targets into the right-rail — the sourceControlFocus/nonce pair + two
+  // <SourceControlPanel> focus props + the selectRight focus arg, plus a cached-model + renderGlossaryPanel
+  // helper and the selectDocsTab term arg (with a code-review one-shot-clear so a remount can't re-scroll to
+  // a stale term). #1188 (ADR 0009) focuses the active context's NODE on the Context Map centre — the
+  // `emphasiseContextMapScope` helper (a `.koi-svg-node[data-qname]` mark mirroring applySelectionHighlight)
+  // called from paintContextMap and the scope fan-out. Combined measured end-state 2568 + 2; #985 owns the split.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2570 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   { file: 'src/settings/prefs.ts', maxLines: 2250 },

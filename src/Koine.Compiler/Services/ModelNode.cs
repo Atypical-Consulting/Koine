@@ -27,12 +27,18 @@ namespace Koine.Compiler.Services;
 /// members, a state machine's transitions, the context map's relations — in declaration order.</param>
 /// <param name="Children">The node's nested declarations — a context's types, an aggregate's nested
 /// types, an entity's state machines — in declaration order. Empty for a leaf declaration.</param>
+/// <param name="Transitions">For an entity/aggregate owner node, the flattened per-edge state
+/// transitions (each a <c>transition</c> <see cref="ModelMember"/> carrying from/guard/to/via) — the
+/// same edges the nested <c>states</c> child lists, surfaced on the owner so a consumer needn't
+/// reconstruct ownership from the <c>.states.&lt;field&gt;</c> qualifiedName. Empty for every node with
+/// no state machine. Additive-only (see the stability-contract note above).</param>
 public sealed record ModelNode(
     string Kind,
     string QualifiedName,
     string Title,
     IReadOnlyList<ModelMember> Members,
-    IReadOnlyList<ModelNode> Children);
+    IReadOnlyList<ModelNode> Children,
+    IReadOnlyList<ModelMember> Transitions);
 
 /// <summary>
 /// One editable leaf of a <see cref="ModelNode"/> (#91): a field, an enum member, a state-machine
@@ -47,9 +53,14 @@ public sealed record ModelNode(
 /// <c>List&lt;OrderLine&gt;</c>, <c>Decimal?</c>) for a field; a relation's role; an optional guard for
 /// a transition; <c>null</c> when not applicable.</param>
 /// <param name="Value">The current value: a field's initializer/derivation, an enum member's
-/// associated data, a transition's <c>to</c> states, or relation detail; <c>null</c> when none.</param>
+/// associated data, a transition's single <c>to</c> state, or relation detail; <c>null</c> when none.</param>
+/// <param name="Via">For a <c>transition</c> member, the name of the command/event that triggers
+/// reaching this edge's <c>to</c> state — a best-effort correlation against the owning entity's declared
+/// commands; <c>null</c> when no declared command drives it, and <c>null</c> for every non-transition
+/// member kind. Additive-only, like every field on this contract (see <see cref="ModelNode"/>).</param>
 public sealed record ModelMember(
     string Kind,
     string Name,
     string? Type,
-    string? Value);
+    string? Value,
+    string? Via = null);

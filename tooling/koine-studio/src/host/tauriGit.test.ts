@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { GitLogEntry, GitStatus } from '@/host/types';
+import type { GitLogEntry, GitNumstatEntry, GitStatus } from '@/host/types';
 
 // Drive TauriPlatform's source-control (git) surface against a mocked Tauri IPC: every git* method is a
 // thin `invoke('git_*', { … })` wrapper, so the contract under test is the command name + the camelCase
@@ -118,5 +118,20 @@ describe('TauriPlatform git surface', () => {
       parentDir: '/parent',
       dirName: undefined,
     });
+  });
+
+  it('gitNumstat invokes git_numstat with { dir } and returns the host entries unmapped', async () => {
+    // The Rust struct serializes straight to GitNumstatEntry (binary → null counts), so the wrapper is a
+    // verbatim pass-through — like gitStatus/gitLog, no manual remapping to assert.
+    const entries: GitNumstatEntry[] = [
+      { relPath: 'b.koi', staged: false, added: 5, removed: 2 },
+      { relPath: 'logo.png', staged: false, added: null, removed: null },
+    ];
+    invokeMock.mockResolvedValue(entries);
+
+    const result = await new TauriPlatform().gitNumstat('/work');
+
+    expect(invokeMock).toHaveBeenCalledWith('git_numstat', { dir: '/work' });
+    expect(result).toBe(entries);
   });
 });

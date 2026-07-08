@@ -34,6 +34,10 @@ export interface PreviewRule {
 export interface PreviewTransition {
   from: string;
   to: string;
+  /** The declared guard condition, when the edge has one (`when <guard>`). */
+  guard?: string;
+  /** The declared triggering command, when the edge has one (`via <cmd>()`). */
+  via?: string;
 }
 
 export interface PreviewDiffLine {
@@ -244,20 +248,35 @@ export interface TransitionInput {
   from: string;
   to: string;
   owner?: string;
+  guard?: string;
+  via?: string;
 }
 
-/** A state-machine transition builder. Kept for when REAL guarded-transition data (a `{ from, to }`
- * pair) becomes available to the launcher; it is deliberately NOT called for enum-state entries, which
- * only know a flat member list and must not fabricate an edge from declaration order (#1145 review). */
+/** A state-machine transition builder, driven by REAL declared guarded-edge data (#1163): the
+ * `from → to` states plus the edge's guard/trigger when it declares them. It is deliberately NOT called
+ * for enum-state entries, which only know a flat member list and must not fabricate an edge from
+ * declaration order (#1145 review). Optional keys (`guard`/`via`) are only ever set when present, so a
+ * guardless/triggerless edge yields a bare `{ from, to }` transition. */
 export function transitionPreview(input: TransitionInput): PreviewViewModel {
+  const transition: PreviewTransition = { from: input.from, to: input.to };
+  if (input.guard) transition.guard = input.guard;
+  if (input.via) transition.via = input.via;
+
+  const meta: [string, string][] = [];
+  // The owner is the entity/type that DECLARES the state machine — not necessarily the aggregate (an
+  // `aggregate Sales root Order` surfaces its transitions on the `Order` entity), so label it neutrally.
+  if (input.owner) meta.push(['Owner', input.owner]);
+  if (input.guard) meta.push(['Guard', input.guard]);
+  if (input.via) meta.push(['Via', input.via]);
+
   return {
     header: {
       glyph: 'state',
       name: `${input.from} → ${input.to}`,
       sub: input.owner ? `state transition · ${input.owner}` : 'state transition',
     },
-    transition: { from: input.from, to: input.to },
-    meta: input.owner ? [['Aggregate', input.owner]] : undefined,
+    transition,
+    meta: meta.length ? meta : undefined,
   };
 }
 
@@ -279,18 +298,18 @@ export function commitPreview(commit: GitLogEntry): PreviewViewModel {
 }
 
 /**
- * `previewFor`'s rkind==='state' branch: the HONEST state-list view — the selected state, the enum's
- * full declared member set, and a neutral note. It never synthesizes a `{ from, to }` transition from
- * declaration order: Koine's guarded state-machine transitions aren't indexed by `ModelIndex` today
- * (documented gap, buildCatalog.ts's ruleEntries), so an "A → B" edge would fabricate domain semantics
- * the model can't derive (#1145 review). Real transition data, if it ever lands, uses `transitionPreview`.
+ * `previewFor`'s rkind==='state' branch: the HONEST state-list view for an ENUM member — the selected
+ * state and the enum's full declared member set. It never synthesizes a `{ from, to }` transition from
+ * declaration order: an "A → B" edge inferred from enum-member order would fabricate domain semantics
+ * the model can't derive (#1145 review). Real guarded transitions ARE surfaced now (#1163), but as their
+ * own `rkind==='transition'` entries routed to `transitionPreview` — never from this enum-state view.
  */
-function stateOrTransitionPreview(entry: CatalogEntry, element: ModelElement): PreviewViewModel {
+function statePreview(entry: CatalogEntry, element: ModelElement): PreviewViewModel {
   const allStates = statesFor(element.modelMembers) ?? [];
   return {
     header: { chipSlug: 'enum', name: entry.title, sub: `state · ${element.entry.name}` },
     states: allStates.length ? allStates : undefined,
-    note: 'A declared state of this enum. Guarded transitions aren’t indexed yet.',
+    note: 'A declared state of this enum. Its guarded transitions are listed as their own entries.',
   };
 }
 
@@ -344,7 +363,11 @@ export function previewFor(entry: CatalogEntry, ctx: PreviewContext): PreviewVie
     case 'rule': {
       const element = ctx.element ?? entry.element;
       if (!element) return null;
-      if (entry.rkind === 'state') return stateOrTransitionPreview(entry, element);
+      if (entry.rkind === 'transition' && entry.transition) {
+        const t = entry.transition;
+        return transitionPreview({ from: t.from, to: t.to, guard: t.guard, via: t.via, owner: element.entry.name });
+      }
+      if (entry.rkind === 'state') return statePreview(entry, element);
       return rulePreview({ expr: entry.title, owner: element.entry.name, ctx: element.entry.context });
     }
     case 'commit': {
