@@ -1,0 +1,24 @@
+<Project>
+
+  <!-- Shared NuGet package README (issue #1190). One file, wired once, so every publishable package
+       (the CLI, the MCP tool, the compiler, and all the Koine.Emit.* emitters) ships a rich listing
+       instead of a bare one-liner — and `dotnet pack` no longer warns "missing a readme". Each
+       package's own <Description> still shows above this on the NuGet.org listing, so the packages
+       remain distinguishable; per-package bespoke READMEs can follow later for the headline packages.
+
+       Wired here rather than in Directory.Build.props because the guard reads $(IsPackable) /
+       $(PackAsTool): projects set those in their own csproj body, which is evaluated AFTER the early
+       props import but BEFORE this bottom targets import, so they're resolved here. The guard scopes
+       the README to exactly the publishable ids: the 14 compiler/emitter packages set
+       IsPackable=true in their body, and the two tool packages (Koine.Cli, Koine.Mcp) set
+       PackAsTool=true (their IsPackable comes from the SDK *default*, applied after this import — so
+       PackAsTool is what catches them here). Test / wasm / SourceGen projects (IsPackable=false, no
+       tool) stay untouched. PackagePath="README.md" is the name NuGet expects. -->
+  <PropertyGroup Condition="'$(IsPackable)' == 'true' or '$(PackAsTool)' == 'true'">
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(IsPackable)' == 'true' or '$(PackAsTool)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)nuget-readme.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+
+</Project>
