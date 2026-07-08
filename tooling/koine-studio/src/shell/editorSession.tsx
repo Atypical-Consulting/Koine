@@ -347,6 +347,12 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
         store={appStore}
         activeUri={deps.activeUri}
         onGoto={(line, col) => editor.goto(line, col)}
+        // Scope-to-context (#1188 / ADR 0009): when a bounded context is active, the strip shows that
+        // context's files' diagnostics; a cross-file row opens its file via the existing navigate seam.
+        scope={{
+          uriLabel: deps.uriLabel,
+          onOpen: (uri, range) => deps.onNavigate({ uri, range }),
+        }}
       />,
       deps.diagBody,
     );
