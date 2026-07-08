@@ -12,6 +12,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import type {
   FsEntry,
   GitLogEntry,
+  GitNumstatEntry,
   GitStatus,
   KoiFile,
   LspTransport,
@@ -455,6 +456,11 @@ export class TauriPlatform implements Platform {
   /** The unified diff for `relPath`: the staged diff (index vs HEAD) when `staged`, else the worktree diff. */
   gitDiff(folderToken: string, relPath: string, staged: boolean): Promise<string> {
     return invoke<string>('git_diff', { dir: folderToken, relPath, staged });
+  }
+
+  /** Per-(file, area) `+n/−n` line counts — one bounded `git diff --numstat` pair (worktree + `--cached`). */
+  gitNumstat(folderToken: string): Promise<GitNumstatEntry[]> {
+    return invoke<GitNumstatEntry[]>('git_numstat', { dir: folderToken });
   }
 
   /** Stage (`git add`) the given paths, moving each worktree/untracked change into the index. */
