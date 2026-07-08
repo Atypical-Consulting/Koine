@@ -45,14 +45,24 @@ function glyph(symbol: string): HTMLElement {
 
 /** One bounded-context row: a `◈` glyph, the context name, and a total-construct count badge. Clicking
  * drills into the context's tactical view. The whole row IS the button, carrying `data-ctx` so the rail
- * controller can address it for cross-axis highlighting (Task 5). */
-function contextRow(context: string, total: number, h: StrategicHandlers): HTMLElement {
+ * controller can address it for cross-axis highlighting (Task 5).
+ *
+ * When `scoped` (this context is the active scope, #146), the row carries a persistent marker mirroring
+ * the status-bar `Context:` control (ADR 0009): the navigator STAYS the global selector (it never narrows
+ * itself), but you can always tell which context is active. The marker is deliberately multi-cue so it
+ * doesn't rely on hue alone (WCAG AA) — `aria-current` + an ", active context" suffix name it to assistive
+ * tech, a filled `◆` (vs the outline `◈`) is a shape cue, and `_model.scss` adds an accent rail + wash. */
+function contextRow(context: string, total: number, h: StrategicHandlers, scoped: boolean): HTMLElement {
   const row = document.createElement('button');
   row.type = 'button';
-  row.className = 'koi-ctx-row';
+  row.className = 'koi-ctx-row' + (scoped ? ' koi-ctx-row--scoped' : '');
   row.dataset.ctx = context;
   row.setAttribute('role', 'treeitem');
-  row.setAttribute('aria-label', `${context}, ${total} construct${total === 1 ? '' : 's'}`);
+  if (scoped) row.setAttribute('aria-current', 'true');
+  row.setAttribute(
+    'aria-label',
+    `${context}, ${total} construct${total === 1 ? '' : 's'}${scoped ? ', active context' : ''}`,
+  );
 
   const name = document.createElement('span');
   name.className = 'koi-ctx-name';
@@ -62,7 +72,7 @@ function contextRow(context: string, total: number, h: StrategicHandlers): HTMLE
   count.className = 'koi-ctx-count';
   count.textContent = String(total);
 
-  row.append(glyph('◈'), name, count);
+  row.append(glyph(scoped ? '◆' : '◈'), name, count);
   row.addEventListener('click', () => h.onOpenContext(context));
   return row;
 }
@@ -211,15 +221,25 @@ function wireTreeNav(tree: HTMLElement): void {
  * same destination the Docs facet calls "Glossary" (#146) — so it carries that label, keeping "the
  * ubiquitous language" as its tooltip / accessible name. `relLinks` is the number of context-map
  * relationships (the caller passes it in — this renderer never fetches it).
+ *
+ * `activeContext` is the bounded context currently in scope (or `null` for the *All contexts* view): its
+ * row gets a persistent "active" marker mirroring the status-bar `Context:` control (ADR 0009 / #1188).
+ * The navigator itself is NOT narrowed — it stays the global *selector*, so every context is always
+ * listed; only the marker moves.
  */
-export function renderStrategic(model: GlossaryModel, relLinks: number, h: StrategicHandlers): HTMLElement {
+export function renderStrategic(
+  model: GlossaryModel,
+  relLinks: number,
+  h: StrategicHandlers,
+  activeContext: string | null = null,
+): HTMLElement {
   const root = document.createElement('div');
   root.className = 'koi-domain koi-domain-strategic';
   root.setAttribute('role', 'tree');
   root.setAttribute('aria-label', 'Domain');
 
   for (const { context, counts } of countsByContext(model)) {
-    root.appendChild(contextRow(context, totalConstructs(counts), h));
+    root.appendChild(contextRow(context, totalConstructs(counts), h, context === activeContext));
   }
 
   const doors = document.createElement('div');
@@ -418,7 +438,11 @@ export function mountDomainNavigator(
     // constructs match) — the same filter the Explorer outline uses, so the two never disagree.
     const model = filterGlossaryModel(cache.model, s.outlineFilter);
     filterInput.hidden = false;
-    paint(renderStrategic(model, cache.relLinks, strategicHandlers), 'strategic');
+    // Mark the active-context row (ADR 0009 / #1188) — the subscription below already re-renders on an
+    // `activeContext` change, so the marker follows the status-bar scope live. The unscoped sentinel
+    // passes `null` (no row marked).
+    const scope = isAllContexts(s.activeContext) ? null : s.activeContext;
+    paint(renderStrategic(model, cache.relLinks, strategicHandlers, scope), 'strategic');
   }
 
   async function doFetch(): Promise<void> {

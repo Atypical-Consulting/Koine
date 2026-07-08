@@ -208,6 +208,13 @@ export interface InspectorControllerDeps {
    * has already switched the rail to the Files axis (setAxis) before this fires.
    */
   revealInFiles(context: string): void;
+  /**
+   * Emphasise the active bounded-context scope in the Files tree (ADR 0009 / #1188) — the source-side
+   * arm of the scope fan-out (`rerenderScopedSurfaces`), the Files counterpart of the Output rail's
+   * emphasis. ide.ts owns the explorer, so it forwards to `explorer.setActiveContext`; `null` (the *All
+   * contexts* view) clears the emphasis. Emphasis, never hiding — every file op keeps working.
+   */
+  scopeFiles(context: string | null): void;
 
   /** The assistant panel, created lazily by ide.ts the first time its tab is shown. */
   ensureAssistant(): InspectorAssistant;
@@ -672,6 +679,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     inv('glossary');
     // The left-rail Explorer + Overview are always visible, so re-scope them immediately.
     void loadModel();
+    // The Files tree obeys the scope by EMPHASIS (ADR 0009): mark the active context's `.koi` and
+    // de-emphasise the other contexts' files — never hidden, so every file op keeps working. The
+    // strategic Domain navigator's own store subscription handles its active-context marker.
+    const scope = activeContext.get();
+    deps.scopeFiles(isAllContexts(scope) ? null : scope);
     // The diagram only re-scopes when the visual center is showing it — including as the SECONDARY
     // pane of a 2-up / in overview, so visibleCenters, not just the deck primary.
     if (visibleCenters().includes('visual')) void loadDiagrams();
