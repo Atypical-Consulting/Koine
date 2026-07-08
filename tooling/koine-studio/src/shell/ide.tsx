@@ -587,6 +587,9 @@ export function init(hooks: IdeHooks = {}): () => void {
     // Cross-axis "Reveal in Files" (#453): the tactical leaf already switched the rail to the Files axis
     // (setAxis) before this fires, so we just point the explorer at the context's `.koi`.
     revealInFiles: (context) => explorer.revealByContext(context),
+    // Files-tree scope emphasis (ADR 0009 / #1188): the controller's scope fan-out points the explorer at
+    // the active context so its `.koi` lights up and the other contexts' files de-emphasise.
+    scopeFiles: (context) => explorer.setActiveContext(context),
     ensureAssistant: () => panelHost.ensureAssistant(),
     ensureScenarios: () => panelHost.ensureScenarios(),
     ensureTerminal: () => panelHost.ensureTerminal(),

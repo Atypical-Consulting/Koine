@@ -211,6 +211,29 @@
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--koi-accent) 55%, transparent);
 }
 
+/* Active bounded-context scope emphasis (ADR 0009 / #1188): the tree obeys the active scope by EMPHASIS,
+   never hiding. The `.koi` whose stem names the active context is marked (`is-scoped`); the OTHER
+   contexts' `.koi` files de-emphasise (`dim`). Both cues stay legible without colour — the scoped row
+   bolds its filename and carries an accent ring (a present-vs-absent shape, not just a hue), and a
+   de-emphasised row is simply faded — so file ops and the whole-tree overview survive. */
+.explorer-row.is-scoped {
+  background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--koi-accent) 40%, transparent);
+}
+.explorer-row.is-scoped .explorer-name {
+  color: var(--koi-accent);
+  font-weight: 600;
+}
+
+/* A de-emphasised (out-of-scope) `.koi` fades but stays fully usable — hover restores it so file ops
+   never fight the dimming. The active (open) file is excluded from dimming in the renderer. */
+.explorer-row.dim {
+  opacity: 0.5;
+}
+.explorer-row.dim:hover {
+  opacity: 1;
+}
+
 /* Focus lives on the <li role=treeitem> (the focusable unit); paint the ring on its row. */
 .explorer-tree li[role='treeitem']:focus {
   outline: none;

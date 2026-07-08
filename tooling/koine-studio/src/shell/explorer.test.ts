@@ -987,3 +987,84 @@ describe('explorer', () => {
     expect(createLi.parentElement).toBe(tree);
   });
 });
+
+describe('explorer — active-context scope emphasis (ADR 0009 / #1188)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  // Two context files (distinct stems), a non-`.koi` file, and a folder — so the tests can prove the
+  // emphasis touches only the `.koi` context files and leaves folders / other files neutral.
+  function scopeTree(): FsEntry[] {
+    return [
+      { token: 'ROOT/Billing.koi', name: 'Billing.koi', relPath: 'Billing.koi', kind: 'file' },
+      { token: 'ROOT/Ordering.koi', name: 'Ordering.koi', relPath: 'Ordering.koi', kind: 'file' },
+      { token: 'ROOT/README.md', name: 'README.md', relPath: 'README.md', kind: 'file' },
+      { token: 'ROOT/sub', name: 'sub', relPath: 'sub', kind: 'dir', children: [] },
+    ];
+  }
+
+  const rowByName = (ex: ReturnType<typeof createExplorer>, name: string): HTMLElement =>
+    Array.from(ex.el.querySelectorAll<HTMLElement>('.explorer-row')).find(
+      (r) => r.querySelector('.explorer-name')?.textContent === name,
+    )!;
+
+  function mount(over?: Partial<ExplorerCallbacks>): ReturnType<typeof createExplorer> {
+    const ex = createExplorer({ ...makeCallbacks(), ...over });
+    document.body.appendChild(ex.el);
+    ex.render(scopeTree(), 'ROOT');
+    return ex;
+  }
+
+  it("emphasises the active context's .koi and de-emphasises the other contexts' .koi — never hiding", () => {
+    const ex = mount();
+    ex.setActiveContext('Billing');
+
+    expect(rowByName(ex, 'Billing.koi').classList.contains('is-scoped')).toBe(true);
+    expect(rowByName(ex, 'Billing.koi').classList.contains('dim')).toBe(false);
+    expect(rowByName(ex, 'Ordering.koi').classList.contains('dim')).toBe(true);
+    // Non-`.koi` files and folders stay neutral — the emphasis is on the context axis only.
+    expect(rowByName(ex, 'README.md').classList.contains('dim')).toBe(false);
+    expect(rowByName(ex, 'sub').classList.contains('dim')).toBe(false);
+    expect(rowByName(ex, 'sub').classList.contains('is-scoped')).toBe(false);
+    // Nothing is hidden — every row still renders (the whole-tree overview survives).
+    expect(ex.el.querySelectorAll('.explorer-row')).toHaveLength(4);
+  });
+
+  it('matches the context stem case-insensitively', () => {
+    const ex = mount();
+    ex.setActiveContext('BILLING');
+    expect(rowByName(ex, 'Billing.koi').classList.contains('is-scoped')).toBe(true);
+  });
+
+  it('clears the emphasis for the All-contexts view (null)', () => {
+    const ex = mount();
+    ex.setActiveContext('Billing');
+    ex.setActiveContext(null);
+    expect(ex.el.querySelector('.explorer-row.is-scoped')).toBeNull();
+    expect(ex.el.querySelector('.explorer-row.dim')).toBeNull();
+  });
+
+  it('a scope naming no .koi emphasises nothing — a no-op, not a whole-tree dim', () => {
+    const ex = mount();
+    ex.setActiveContext('Shipping');
+    expect(ex.el.querySelector('.explorer-row.is-scoped')).toBeNull();
+    expect(ex.el.querySelector('.explorer-row.dim')).toBeNull();
+  });
+
+  it('never dims the active (open) file, even when it is out of scope', () => {
+    const ex = mount({ isActive: (t: string) => t === 'ROOT/Ordering.koi' });
+    ex.setActiveContext('Billing');
+    // Ordering.koi is the OPEN file but a different context — it stays legible (aria-current highlight).
+    expect(rowByName(ex, 'Ordering.koi').classList.contains('dim')).toBe(false);
+    expect(rowByName(ex, 'Billing.koi').classList.contains('is-scoped')).toBe(true);
+  });
+
+  it('survives a diagnostics-driven re-render (the emphasis is applied in the render pass)', () => {
+    const ex = mount();
+    ex.setActiveContext('Billing');
+    ex.render(scopeTree(), 'ROOT'); // a fresh render, as a diagnostics push would trigger
+    expect(rowByName(ex, 'Billing.koi').classList.contains('is-scoped')).toBe(true);
+    expect(rowByName(ex, 'Ordering.koi').classList.contains('dim')).toBe(true);
+  });
+});

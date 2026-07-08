@@ -69,7 +69,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1401 → 1408: concept-7 "Flush" builds the Output file-rail scaffold inside #view-preview and
   // mounts the CodeMirror OutputView into its `.out-code` slot (ensureOutputScaffold + the import), plus a
   // one-line initInstantTooltip() boot call, ~7 LOC of composition-root wiring. Measured end-state.
-  { file: 'src/shell/ide.tsx', maxLines: 1408 },
+  // Raised 1408 → 1411: #1188 (ADR 0009) wires the Files-tree scope emphasis into the composition root —
+  // the one `scopeFiles` dep forwarding the controller's scope fan-out to `explorer.setActiveContext`,
+  // ~3 LOC. Measured end-state.
+  { file: 'src/shell/ide.tsx', maxLines: 1411 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.
@@ -95,7 +98,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // createFloatingMenu instance + the scopeMenuItems/toggleScopeMenu pair + the #sb-context click wiring
   // and its dispose cleanup, ~38 LOC of composition-root glue reusing the existing applyScope/
   // setActiveContext/`contexts` machinery. Measured end-state (2482), no headroom; #985 owns the split.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2482 },
+  // Raised 2482 → 2492: #1188 (ADR 0009) extends the scope fan-out to the source side — the new
+  // `scopeFiles` dep (interface + JSDoc) and its call inside rerenderScopedSurfaces that points the
+  // Files tree at the active context, ~10 LOC of composition-root glue reusing the existing
+  // activeContext/`isAllContexts` machinery. Measured end-state (2492), no headroom; #985 owns the split.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2492 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   { file: 'src/settings/prefs.ts', maxLines: 2250 },
@@ -148,7 +155,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Frozen 2026-07-02 at 1301 LOC (grown from the audit's 1284 @ fc83bcf5), ceil(1301 × 1.02) = 1328.
   // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
   // not mandate the split — #989 owns that.
-  { file: 'src/shell/explorer.ts', maxLines: 1328 },
+  // Raised 1328 → 1384: #1188 (ADR 0009) makes the Files tree obey the active-context scope by emphasis —
+  // the `setActiveContext` public API + its Explorer-interface JSDoc, the render-pass `activeContext`
+  // field, the `scopeMatch` analysis flag (so a scope naming no `.koi` is a no-op), the buildItem
+  // emphasis branch, and the `koiStem` stem→context helper, ~56 LOC (comment-heavy, matching the file's
+  // house style). Measured end-state, no headroom; #989 owns the split.
+  { file: 'src/shell/explorer.ts', maxLines: 1384 },
   // #982 decomposed workspaceController.ts into a thin facade + three sibling modules
   // (workspaceBuffers / workspaceMutations / workspaceSave). The facade measured 775 LOC post-split.
   // Raised 791 → 849: #1005 re-homes its Home resume/recents capture onto the facade after the #982 merge

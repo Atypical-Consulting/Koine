@@ -68,6 +68,16 @@ export interface Explorer {
    */
   revealByContext(context: string): void;
   /**
+   * Emphasise the active bounded-context scope (ADR 0009 / #1188): the `.koi` file whose stem names
+   * `context` is highlighted (a persistent accent marker) and the OTHER contexts' `.koi` files
+   * de-emphasise — NEVER hidden, so every file op and the whole-tree overview survive. Folders and
+   * non-`.koi` files stay neutral, and the active (open) file is never dimmed. Pass `null` (the *All
+   * contexts* view) to clear the emphasis. The mapping is the one-`.koi`-per-context stem convention
+   * {@link revealByContext} uses; a scope that names no file simply emphasises nothing — a no-op. The
+   * emphasis is applied in the render pass, so it survives the diagnostics-driven tree rebuilds.
+   */
+  setActiveContext(context: string | null): void;
+  /**
    * Teardown seam (#980). The explorer is a pre-Preact island with no owner-driven unmount, so nothing
    * released its deferred work between shell boots. dispose() clears the pending filter debounce (so a
    * queued `applyFilter → renderRoots` can't fire into a torn-down host), closes any open floating menu
@@ -206,6 +216,10 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
   // a diagnostics re-render with the SAME active file doesn't re-expand folders the user just closed —
   // we only reveal when the active file actually changes.
   let revealedActive: string | null = null;
+  // The active bounded-context scope to EMPHASISE (ADR 0009 / #1188), lowercased for a case-insensitive
+  // stem match, or null for the *All contexts* view. Read during the render pass (buildItem) so the
+  // emphasis survives every diagnostics-driven rebuild; setActiveContext updates it and re-renders.
+  let activeContext: string | null = null;
   // renderTree fires on every diagnostics push — including mid-interaction. Tearing the tree down
   // while an inline rename / inline create is open or a context menu / confirm is up would destroy the
   // input (committing a half-typed name on the resulting blur) or yank the surface out from under the
@@ -262,11 +276,20 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     matchCount: number;
     /** The active file and its ancestor directory tokens (for auto-reveal), or null. */
     active: { token: string; ancestors: string[] } | null;
+    /** True when the active-context scope names a `.koi` actually present — so buildItem only emphasises
+     *  when there's something to emphasise (a scope matching no file is a no-op, not a whole-tree dim). */
+    scopeMatch: boolean;
   }
 
   // The analysis from the in-progress render, consulted by buildItem (filter visibility + active row)
   // so it doesn't re-walk the tree or re-call cb.isActive per node.
-  let currentAnalysis: Analysis = { visible: new Set(), liveDirs: new Set(), matchCount: 0, active: null };
+  let currentAnalysis: Analysis = {
+    visible: new Set(),
+    liveDirs: new Set(),
+    matchCount: 0,
+    active: null,
+    scopeMatch: false,
+  };
 
   // ONE pre-render pass over the tree computing everything render() and buildItem need: filter
   // visibility, the live dir tokens, the filter match count, and the active file + its ancestor chain.
@@ -279,6 +302,7 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     const liveDirs = new Set<string>();
     let matchCount = 0;
     let active: { token: string; ancestors: string[] } | null = null;
+    let scopeMatch = false;
     const filtering = filterText !== '';
 
     // Returns whether `e` (or a descendant) is visible under the filter. `ancestorMatched` is true when
@@ -288,6 +312,7 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
       const selfMatch = filtering && nameMatches(e);
       if (selfMatch) matchCount++;
       if (e.kind === 'file' && !active && cb.isActive(e.token)) active = { token: e.token, ancestors };
+      if (e.kind === 'file' && activeContext !== null && koiStem(e.name) === activeContext) scopeMatch = true;
 
       const childAncestors = e.kind === 'dir' ? [...ancestors, e.token] : ancestors;
       let descendantVisible = false;
@@ -300,7 +325,7 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
       return isVisible;
     };
     for (const e of entries) walk(e, [], false);
-    return { visible, liveDirs, matchCount, active };
+    return { visible, liveDirs, matchCount, active, scopeMatch };
   }
 
   // --- rows -------------------------------------------------------------------
@@ -374,6 +399,17 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
         badge.textContent = String(errors || warnings);
         badge.title = `${errors} error(s), ${warnings} warning(s)`;
         row.appendChild(badge);
+      }
+
+      // Scope emphasis (ADR 0009 / #1188): a `.koi` file names its bounded context by stem, so when a
+      // context is in scope its file is emphasised (`is-scoped`) and the OTHER contexts' `.koi` files
+      // de-emphasise (`dim`) — never hidden, so file ops and the whole-tree overview survive. Non-`.koi`
+      // files stay neutral; the active (open) file is never dimmed even when it's out of scope. Gated on
+      // `scopeMatch` so a scope that names no present `.koi` emphasises nothing (a no-op, not a full dim).
+      if (activeContext !== null && currentAnalysis.scopeMatch) {
+        const stem = koiStem(entry.name);
+        if (stem === activeContext) row.classList.add('is-scoped');
+        else if (stem !== null && currentAnalysis.active?.token !== entry.token) row.classList.add('dim');
       }
     }
 
@@ -1281,6 +1317,19 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     row.scrollIntoView?.({ block: 'nearest' });
   }
 
+  // --- active-context scope emphasis (ADR 0009 / #1188) -----------------------
+
+  // Set the bounded-context scope to emphasise and re-render so the mark appears immediately (and
+  // persists across later diagnostics rebuilds, which read `activeContext` in buildItem). No-ops on an
+  // unchanged scope so a fan-out that re-asserts the same context doesn't force a needless rebuild. The
+  // re-render honours the interaction-defer path (renderRoots), so a scope change mid-rename/-drag waits.
+  function setActiveContext(context: string | null): void {
+    const next = context && context.trim() ? context.trim().toLowerCase() : null;
+    if (next === activeContext) return;
+    activeContext = next;
+    renderRoots(lastGroups);
+  }
+
   // Teardown seam (#980) — see the Explorer.dispose() JSDoc for the listener-detachment strategy.
   function dispose(): void {
     clearTimeout(filterTimer); // the 110 ms filter debounce must not fire applyFilter after teardown
@@ -1288,7 +1337,15 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     root.remove(); // detach el — removes the persistent tree/filter-input listeners' targets from the DOM
   }
 
-  return { el: root, render, renderRoots, revealByContext, dispose };
+  return { el: root, render, renderRoots, revealByContext, setActiveContext, dispose };
+}
+
+/** The bounded-context name a source file denotes — its `.koi` stem, lowercased — or null for a
+ *  non-`.koi` file. One `.koi` file is one bounded context (the stem convention {@link Explorer.revealByContext}
+ *  uses), so the stem is what the active-context scope emphasis matches against. */
+function koiStem(name: string): string | null {
+  const lower = name.toLowerCase();
+  return lower.endsWith('.koi') ? lower.slice(0, -'.koi'.length) : null;
 }
 
 /** The folder name shown in a group header: the root token's last non-empty path segment. */
