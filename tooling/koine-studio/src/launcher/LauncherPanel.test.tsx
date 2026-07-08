@@ -631,6 +631,29 @@ describe('LauncherPanel — shared Esc-stack (issue #1164)', () => {
     }
   });
 
+  test('an Escape from a focused menuitem closes just the menu via the shared stack, not any handler on .lx-actmenu', async () => {
+    const onClose = vi.fn();
+    const sources = makeKnownCatalogSources();
+    const view = mount(sources, onClose);
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+    fireEvent.click(view.getByText('actions').closest('button') as HTMLButtonElement);
+    expect(view.container.querySelector('.lx-actmenu')).toBeTruthy();
+
+    // The ONE path that could ever reach `ActionMenu`'s own keydown handler: focus lands on a
+    // `.lx-actitem` (role="menuitem", tabIndex=0) rather than the search input. A bubbling Escape from
+    // there must still dismiss the menu through the shared Esc-stack — menuitem → `.lx-actmenu` → the
+    // scrim (which lets Escape through since #1164) → document → the topmost (menu) layer — so the
+    // shared stack, NOT any handler bound on `.lx-actmenu`, is what closes it. Menu closes; the launcher
+    // beneath stays open. (Passes both before and after the handler removal — the characterization the
+    // removal must preserve.)
+    const menuitem = view.container.querySelector('.lx-actmenu [role="menuitem"]') as HTMLElement;
+    menuitem.focus();
+    fireEvent.keyDown(menuitem, { key: 'Escape' });
+
+    expect(view.container.querySelector('.lx-actmenu')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   test('hiding the launcher while the menu is open pops BOTH layers — no stale close-fn leaks onto the stack', async () => {
     const onClose = vi.fn();
     const sources = makeKnownCatalogSources();
