@@ -3,7 +3,8 @@
 // presentation over the `LauncherAction[]` view-model data — no DOM/LSP knowledge of its own, mirroring
 // `ResultRow.tsx`'s glyph-path pattern for the per-action icons. `LauncherPanel.tsx` owns the actual
 // `menuOpen`/`menuIndex` state and mounts/unmounts this component; full ↑/↓ + ↵ keyboard driving of
-// `selectedIndex` is Task 7 — this task wires mouse hover/click plus a self-contained Esc-to-close.
+// `selectedIndex` is Task 7 — this task wires mouse hover/click. Escape dismissal is NOT handled here:
+// koine-ui's shared Esc-stack owns it uniformly (the menu layer `LauncherPanel.tsx` registers, #1164).
 import type { ActionIcon, LauncherAction } from '@/launcher/actions';
 import { GlyphPaths } from '@/launcher/ResultRow';
 
@@ -75,27 +76,19 @@ export interface ActionMenuProps {
   selectedIndex: number;
   onSelect(index: number): void;
   onRun(index: number): void;
-  onClose(): void;
 }
 
 /**
  * The `.lx-actmenu` popover: a header naming the result, then one `.lx-actitem` row per action with
  * its icon/label/keycap. Mouse move selects a row (mirrors the result list's hover-to-select), click
- * runs it. `role="menu"`/`menuitem` + Esc-to-close (with `stopPropagation` so it doesn't also bubble
- * into the launcher's own Escape-closes-overlay handler) satisfy the popover a11y pattern; full ↑/↓
- * keyboard driving of `selectedIndex` from outside is Task 7's (`LauncherPanel` owns the state this
- * component only renders).
+ * runs it. `role="menu"`/`menuitem` satisfies the popover a11y pattern; full ↑/↓ keyboard driving of
+ * `selectedIndex` from outside is Task 7's (`LauncherPanel` owns the state this component only renders).
+ * Escape dismissal is owned by koine-ui's shared Esc-stack (the menu layer `LauncherPanel.tsx`
+ * registers, #1164) — this popover binds no keydown handler of its own, so there's a single Escape
+ * owner rather than a bespoke one here duplicating it.
  */
 export function ActionMenu(props: ActionMenuProps) {
-  const { actions, title, selectedIndex, onSelect, onRun, onClose } = props;
-
-  function onKeyDown(e: KeyboardEvent): void {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopPropagation();
-      onClose();
-    }
-  }
+  const { actions, title, selectedIndex, onSelect, onRun } = props;
 
   return (
     <div
@@ -107,7 +100,6 @@ export function ActionMenu(props: ActionMenuProps) {
       // aria-activedescendant on the menu — NOT aria-selected on the menuitems, which is the wrong pairing
       // for role="menu"/"menuitem" (aria-selected belongs to option/tab/etc.) (issue #1145 review).
       aria-activedescendant={`lx-act-${selectedIndex}`}
-      onKeyDown={onKeyDown}
     >
       <div class="lx-actmenu-head">{title}</div>
       {actions.map((action, i) => (

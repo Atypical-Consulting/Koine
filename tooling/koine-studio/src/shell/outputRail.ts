@@ -75,6 +75,12 @@ function basename(path: string): string {
 /**
  * Render the file rail: a `N files · LANG` head, then files grouped by context (first-seen order), each a
  * button tinted by `kind`. The selected file's row is marked `.on`. Clicking a row calls `onSelect(path)`.
+ *
+ * `activeContext` is the bounded-context scope to EMPHASISE (ADR 0009 — the Output rail obeys the active
+ * scope by emphasis, never hiding): the group whose context matches is marked active and the others are
+ * de-emphasised, so the whole-model overview stays intact. Pass `null` (the *All contexts* case) for no
+ * emphasis. Grouping is by the file's top-level folder, which equals the bounded-context name for the
+ * context-organised targets; a scope that matches no group simply emphasises nothing (a graceful no-op).
  */
 export function renderOutputRail(
   scaffold: OutputScaffold,
@@ -82,6 +88,7 @@ export function renderOutputRail(
   selectedPath: string | null,
   langLabel: string,
   onSelect: (path: string) => void,
+  activeContext: string | null = null,
 ): void {
   const rail = scaffold.rail;
   rail.textContent = '';
@@ -105,16 +112,35 @@ export function renderOutputRail(
     byGroup.get(ctx)!.push(f);
   }
 
+  // Scope emphasis (ADR 0009): emphasise the active context's group and de-emphasise the rest — never
+  // hide, so the whole-model overview survives. Applies only when the active scope actually has emitted
+  // files; a scope matching no group (or `null` = All contexts) emphasises nothing — a graceful no-op,
+  // rather than dimming the entire rail.
+  const emphasised = activeContext !== null && groups.includes(activeContext) ? activeContext : null;
+
   for (const ctx of groups) {
+    const isActive = emphasised !== null && ctx === emphasised;
+    const isDimmed = emphasised !== null && ctx !== emphasised;
+
     const head = document.createElement('div');
-    head.className = 'out-ctx';
-    head.textContent = ctx;
+    head.className = 'out-ctx' + (isActive ? ' on' : '') + (isDimmed ? ' dim' : '');
+    const ctxName = document.createElement('span');
+    ctxName.className = 'out-ctx-name';
+    ctxName.textContent = ctx;
+    head.appendChild(ctxName);
+    if (isActive) {
+      // A non-colour active marker so the scope reads without relying on hue alone (WCAG AA, ADR 0009).
+      const mark = document.createElement('span');
+      mark.className = 'out-ctx-active';
+      mark.textContent = 'active';
+      head.appendChild(mark);
+    }
     rail.appendChild(head);
 
     for (const f of byGroup.get(ctx)!) {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'out-file' + (f.path === selectedPath ? ' on' : '');
+      btn.className = 'out-file' + (f.path === selectedPath ? ' on' : '') + (isDimmed ? ' dim' : '');
       btn.setAttribute('role', 'tab');
       btn.setAttribute('aria-selected', f.path === selectedPath ? 'true' : 'false');
       btn.dataset.tip = f.path; // the full path — the row shows only the basename

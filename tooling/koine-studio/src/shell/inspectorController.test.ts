@@ -266,6 +266,7 @@ function makeDeps(lsp: Lsp, over: Partial<InspectorControllerDeps> = {}): Inspec
     onCopyDiagramMermaid: vi.fn(),
     gotoSourceSpan: vi.fn(),
     revealInFiles: vi.fn(),
+    scopeFiles: vi.fn(),
     ensureAssistant: vi.fn(() => makeAssistant()),
     initEdgeResizer: vi.fn(),
     ...over,
@@ -950,6 +951,23 @@ describe('createInspectorController — bounded-context scope', () => {
     ctl.invalidateDocViews();
     await ctl.getCachedDomainIndex();
     expect(lsp.contextMap.mock.calls.length).toBeGreaterThan(callsAfterBuild);
+  });
+
+  test('a scope change fans out to the Files tree via scopeFiles (context, then null for All) — ADR 0009', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    await ctl.refreshContextList();
+
+    // Picking a context emphasises its `.koi` in the Files tree; the fan-out passes the bare name.
+    vi.mocked(deps.scopeFiles).mockClear();
+    deps.store.getState().setActiveContext('Billing');
+    expect(deps.scopeFiles).toHaveBeenLastCalledWith('Billing');
+
+    // Returning to "All contexts" clears the emphasis (null), never hiding anything.
+    deps.store.getState().setActiveContext(ALL_CONTEXTS);
+    expect(deps.scopeFiles).toHaveBeenLastCalledWith(null);
   });
 });
 

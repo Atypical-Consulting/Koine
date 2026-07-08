@@ -411,7 +411,6 @@ export function LauncherPanel(props: LauncherPanelProps) {
             selectedIndex={menuIndex}
             onSelect={setMenuIndex}
             onRun={runMenuAction}
-            onClose={closeMenu}
           />
         )}
       </div>

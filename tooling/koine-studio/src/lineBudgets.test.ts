@@ -69,13 +69,15 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1401 → 1408: concept-7 "Flush" builds the Output file-rail scaffold inside #view-preview and
   // mounts the CodeMirror OutputView into its `.out-code` slot (ensureOutputScaffold + the import), plus a
   // one-line initInstantTooltip() boot call, ~7 LOC of composition-root wiring. Measured end-state.
-  // Raised 1408 → 1456: #1165 wires the Spotlight launcher's degraded quick actions into the composition
-  // root — the shared open-file-then-act helper `activateFileThen` (which go-to / find-usages / rename
-  // reuse), `revertCommitFromLauncher`, the reveal-in-file-manager thunk, and the five CommandWiringDeps
-  // seam registrations (findReferences / renameSymbol / gitRevert / canRevealInFileManager / revealPath).
-  // The code-review DRY pass collapsed three near-identical activate helpers into one, so this landed at
-  // 1454 rather than the ~1481 of the first cut. Measured end-state (1454) + 2.
-  { file: 'src/shell/ide.tsx', maxLines: 1456 },
+  // Raised 1408 → 1411: #1188 (ADR 0009) wires the Files-tree scope emphasis into the composition root —
+  // the one `scopeFiles` dep forwarding the controller's scope fan-out to `explorer.setActiveContext`,
+  // ~3 LOC. Measured end-state.
+  // Raised 1411 → 1457: #1165 wires the Spotlight launcher's degraded quick actions into the composition
+  // root — the shared open-file-then-act helper `activateFileThen` (go-to / find-usages / rename reuse it),
+  // `revertCommitFromLauncher`, the reveal-in-file-manager thunk, and the five CommandWiringDeps seam
+  // registrations (findReferences / renameSymbol / gitRevert / canRevealInFileManager / revealPath). A
+  // code-review DRY pass collapsed three near-identical activate helpers into one. Measured post-merge + 2.
+  { file: 'src/shell/ide.tsx', maxLines: 1459 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.
@@ -101,13 +103,19 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // createFloatingMenu instance + the scopeMenuItems/toggleScopeMenu pair + the #sb-context click wiring
   // and its dispose cleanup, ~38 LOC of composition-root glue reusing the existing applyScope/
   // setActiveContext/`contexts` machinery. Measured end-state (2482), no headroom; #985 owns the split.
-  // Raised 2482 → 2524: #1165 threads two launcher focus targets into the right-rail. Source Control gets
-  // the sourceControlFocus/nonce pair + two <SourceControlPanel> focus props + the selectRight focus arg
-  // (~13 LOC); the glossary gets a cached-model + renderGlossaryPanel helper + the selectDocsTab term arg
-  // that re-renders GlossaryPanel with a scroll target (~31 LOC, incl. the code-review one-shot-clear so a
-  // remount can't re-scroll to a stale term) — both reuse the existing load/render machinery, ~44 LOC
-  // total of composition-root wiring. Measured end-state (2526) + 2; #985 owns the split.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2528 },
+  // Raised 2482 → 2491: ADR 0009 makes the Output rail obey the active scope by EMPHASIS — a paintOutputRail
+  // helper reads the scope and the `activeContext` fan-out repaints the rail's emphasis without a re-emit
+  // (#1188). ~9 LOC of glue over the extracted outputRail renderer. Measured end-state (2491); #985 owns the split.
+  // Raised 2491 → 2503: #1188 (ADR 0009) also extends the same scope fan-out to the SOURCE side — the new
+  // `scopeFiles` dep (interface + JSDoc) and its call inside rerenderScopedSurfaces that points the Files
+  // tree at the active context, ~10 LOC of glue reusing the existing activeContext/`isAllContexts`
+  // machinery (measured after merging the Output-rail slice in). Measured end-state (2503); #985 owns the split.
+  // Raised 2503 → 2547: #1165 threads two launcher focus targets into the right-rail. Source Control gets
+  // the sourceControlFocus/nonce pair + two <SourceControlPanel> focus props + the selectRight focus arg;
+  // the glossary gets a cached-model + renderGlossaryPanel helper + the selectDocsTab term arg (incl. the
+  // code-review one-shot-clear so a remount can't re-scroll to a stale term) — both reuse the existing
+  // load/render machinery. Measured post-merge end-state + 2; #985 owns the split.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2551 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   { file: 'src/settings/prefs.ts', maxLines: 2250 },
@@ -160,7 +168,13 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Frozen 2026-07-02 at 1301 LOC (grown from the audit's 1284 @ fc83bcf5), ceil(1301 × 1.02) = 1328.
   // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
   // not mandate the split — #989 owns that.
-  { file: 'src/shell/explorer.ts', maxLines: 1328 },
+  // Raised 1328 → 1387: #1188 (ADR 0009) makes the Files tree obey the active-context scope by emphasis —
+  // the `setActiveContext` public API + its Explorer-interface JSDoc, the render-pass `activeContext`
+  // field, the `scopeMatch` analysis flag (so a scope naming no `.koi` is a no-op), the buildItem
+  // emphasis branch, the boot-flash guard in setActiveContext, and the `koiStem` stem→context helper,
+  // ~59 LOC (comment-heavy, matching the file's house style). Measured end-state, no headroom; #989 owns
+  // the split.
+  { file: 'src/shell/explorer.ts', maxLines: 1387 },
   // #982 decomposed workspaceController.ts into a thin facade + three sibling modules
   // (workspaceBuffers / workspaceMutations / workspaceSave). The facade measured 775 LOC post-split.
   // Raised 791 → 849: #1005 re-homes its Home resume/recents capture onto the facade after the #982 merge

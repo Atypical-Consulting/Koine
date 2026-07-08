@@ -208,6 +208,13 @@ export interface InspectorControllerDeps {
    * has already switched the rail to the Files axis (setAxis) before this fires.
    */
   revealInFiles(context: string): void;
+  /**
+   * Emphasise the active bounded-context scope in the Files tree (ADR 0009 / #1188) — the source-side
+   * arm of the scope fan-out (`rerenderScopedSurfaces`), the Files counterpart of the Output rail's
+   * emphasis. ide.ts owns the explorer, so it forwards to `explorer.setActiveContext`; `null` (the *All
+   * contexts* view) clears the emphasis. Emphasis, never hiding — every file op keeps working.
+   */
+  scopeFiles(context: string | null): void;
 
   /** The assistant panel, created lazily by ide.ts the first time its tab is shown. */
   ensureAssistant(): InspectorAssistant;
@@ -664,18 +671,25 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function rerenderScopedSurfaces(): void {
     // A scope change is a pure re-filter, not a model edit: mark the SCOPE-derived surfaces stale so the
     // not-currently-visible ones re-render scoped on their next visit, then repaint the live ones now.
-    // The Generated preview isn't scope-derived (it's target-derived), so it's deliberately left fresh —
-    // matching the old `docViewsLoaded.model/diagrams = false` + bottom-token bump that never touched it.
+    // The Generated preview's CONTENT is target-derived (not scope-derived), so it is deliberately NOT
+    // re-emitted here. Its rail EMPHASIS, however, obeys the scope (ADR 0009): repaint the rail from the
+    // current emit result so the active context's files light up and the rest de-emphasise — no re-emit.
     const inv = appStore.getState().invalidate;
     inv('model');
     inv('diagrams');
     inv('glossary');
     // The left-rail Explorer + Overview are always visible, so re-scope them immediately.
     void loadModel();
+    // The Files tree obeys the scope by EMPHASIS (ADR 0009): mark the active context's `.koi` and
+    // de-emphasise the other contexts' files — never hidden, so every file op keeps working. The
+    // strategic Domain navigator's own store subscription handles its active-context marker.
+    const scope = activeContext.get();
+    deps.scopeFiles(isAllContexts(scope) ? null : scope);
     // The diagram only re-scopes when the visual center is showing it — including as the SECONDARY
     // pane of a 2-up / in overview, so visibleCenters, not just the deck primary.
     if (visibleCenters().includes('visual')) void loadDiagrams();
     invalidateBottomPanels(); // the Events/Relationships/Context Map tables are graph-derived too
+    if (outputFiles.length) paintOutputRail(); // refresh the Output rail's scope emphasis (ADR 0009)
   }
 
   // The store's `activeContext` slice is the single source of truth for the active scope: ANY writer —
@@ -1971,6 +1985,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   };
   const targetLabel = (t: string): string => TARGET_LABEL[t] ?? t.toUpperCase();
 
+  // Paint the output rail from the current emit result + the active scope (ADR 0009: the rail obeys the
+  // scope by EMPHASIS, never hiding). Split out so the scope-change fan-out can refresh the emphasis
+  // without a re-emit. `null` for the *All contexts* case leaves every group plain.
+  function paintOutputRail(): void {
+    const ac = activeContext.get();
+    const emphasis = isAllContexts(ac) ? null : ac;
+    renderOutputRail(outputScaffold, outputFiles, selectedOutputPath, targetLabel(currentTarget), showOutputFile, emphasis);
+  }
+
   // Show one generated file in the viewer and reflect it in the rail + crumb + Copy button.
   function showOutputFile(path: string): void {
     const f = outputFiles.find((x) => x.path === path);
@@ -1980,7 +2003,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     lastPreview = f.contents;
     copyBtn.disabled = false;
     renderOutputCrumb(outputScaffold, path, targetLabel(currentTarget));
-    renderOutputRail(outputScaffold, outputFiles, selectedOutputPath, targetLabel(currentTarget), showOutputFile);
+    paintOutputRail();
   }
 
   // Clear the rail/crumb/viewer to a message (error / empty / failure states).
@@ -1989,7 +2012,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     selectedOutputPath = null;
     lastPreview = '';
     copyBtn.disabled = true;
-    renderOutputRail(outputScaffold, [], null, targetLabel(currentTarget), showOutputFile);
+    paintOutputRail();
     renderOutputCrumb(outputScaffold, null, '');
     output.setContent(message, 'plain');
   }

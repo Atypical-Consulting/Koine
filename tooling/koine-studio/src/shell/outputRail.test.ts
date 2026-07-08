@@ -71,6 +71,55 @@ describe('renderOutputRail', () => {
   });
 });
 
+describe('renderOutputRail — scope emphasis (ADR 0009)', () => {
+  const ctxByName = (rail: HTMLElement, name: string): HTMLElement =>
+    Array.from(rail.querySelectorAll('.out-ctx')).find(
+      (e) => e.querySelector('.out-ctx-name')?.textContent === name,
+    ) as HTMLElement;
+
+  test('emphasises the active context group and de-emphasises the rest — never hiding any', () => {
+    const s = ensureOutputScaffold(host());
+    renderOutputRail(s, FILES, null, 'C#', () => {}, 'Ordering');
+    // Every group + file is still rendered — emphasis, not hiding (the whole-model overview survives).
+    expect(s.rail.querySelectorAll('.out-ctx')).toHaveLength(3);
+    expect(s.rail.querySelectorAll('.out-file')).toHaveLength(4);
+
+    const ordering = ctxByName(s.rail, 'Ordering');
+    expect(ordering.classList.contains('on')).toBe(true);
+    expect(ordering.classList.contains('dim')).toBe(false);
+    // A non-colour active marker (its text) so the scope reads without relying on hue (WCAG AA).
+    expect(ordering.querySelector('.out-ctx-active')?.textContent).toBe('active');
+    expect(s.rail.querySelectorAll('.out-ctx-active')).toHaveLength(1); // only the active group
+
+    expect(ctxByName(s.rail, 'Kitchen').classList.contains('dim')).toBe(true);
+    expect(ctxByName(s.rail, 'runtime').classList.contains('dim')).toBe(true);
+
+    // The active group's files stay plain; the other groups' files de-emphasise.
+    const dimFiles = Array.from(s.rail.querySelectorAll('.out-file.dim')).map(
+      (e) => (e as HTMLElement).querySelector('.fname')?.textContent,
+    );
+    expect(dimFiles).toEqual(['Ticket.cs', 'KoineRuntime.cs']);
+  });
+
+  test('All contexts (scope omitted) leaves every group plain', () => {
+    const s = ensureOutputScaffold(host());
+    renderOutputRail(s, FILES, null, 'C#', () => {}); // activeContext omitted → null
+    expect(s.rail.querySelector('.out-ctx.on')).toBeNull();
+    expect(s.rail.querySelector('.out-ctx.dim')).toBeNull();
+    expect(s.rail.querySelector('.out-ctx-active')).toBeNull();
+    expect(s.rail.querySelector('.out-file.dim')).toBeNull();
+  });
+
+  test('a scope matching no emitted group emphasises nothing — a graceful no-op', () => {
+    const s = ensureOutputScaffold(host());
+    renderOutputRail(s, FILES, null, 'C#', () => {}, 'Shipping'); // no Shipping/ output
+    expect(s.rail.querySelector('.out-ctx.on')).toBeNull();
+    expect(s.rail.querySelector('.out-ctx.dim')).toBeNull(); // NOT the whole rail dimmed
+    expect(s.rail.querySelector('.out-ctx-active')).toBeNull();
+    expect(s.rail.querySelector('.out-file.dim')).toBeNull();
+  });
+});
+
 describe('renderOutputCrumb', () => {
   test('builds path segments (leaf marked) + a language chip', () => {
     const s = ensureOutputScaffold(host());
