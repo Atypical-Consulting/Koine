@@ -42,7 +42,7 @@ export interface CommandWiringDeps {
   controller: {
     runCheck(): void;
     selectOutput(tab: 'generated' | 'contextmap' | 'compatibility'): void;
-    selectDocsTab(tab: 'glossary' | 'adr' | 'notes'): void;
+    selectDocsTab(tab: 'glossary' | 'adr' | 'notes', term?: string): void;
     selectCenter(view: 'visual'): void;
     splitCodeCanvas(): void;
     selectTech(view: 'scenarios'): void;
@@ -296,7 +296,9 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
       }
       if (entry.file) deps.revealPath(entry.file);
     },
-    openGlossary: () => deps.controller.selectDocsTab('glossary'),
+    // Scroll the glossary to the SPECIFIC term (#1165) — its qualified name — instead of just opening the
+    // tab. A term outside the active scope simply opens the tab without scrolling (the panel degrades).
+    openGlossary: (entry) => deps.controller.selectDocsTab('glossary', entry.qualifiedName ?? entry.title),
     // Seed the workspace search with the term's bare name (#1165) — the identifier that appears
     // throughout the model source, not the dotted qualified name — instead of the old empty focus().
     findInModel: (entry) => deps.search.seed(entry.title),

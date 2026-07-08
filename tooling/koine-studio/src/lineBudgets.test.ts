@@ -101,12 +101,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // createFloatingMenu instance + the scopeMenuItems/toggleScopeMenu pair + the #sb-context click wiring
   // and its dispose cleanup, ~38 LOC of composition-root glue reusing the existing applyScope/
   // setActiveContext/`contexts` machinery. Measured end-state (2482), no headroom; #985 owns the split.
-  // Raised 2482 → 2500: #1165 threads a launcher focus target into the Source Control right-view — the
-  // sourceControlFocus/nonce pair, the two extra <SourceControlPanel> focus props, and the selectRight
-  // focus argument that stashes + bumps them, ~13 LOC of composition-root wiring reusing the existing
-  // load/render machinery. Measured end-state (2493) + headroom for the glossary selectDocsTab term-arg
-  // threading in the same arc; #985 still owns the split.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2500 },
+  // Raised 2482 → 2524: #1165 threads two launcher focus targets into the right-rail. Source Control gets
+  // the sourceControlFocus/nonce pair + two <SourceControlPanel> focus props + the selectRight focus arg
+  // (~13 LOC); the glossary gets a cached-model + renderGlossaryPanel helper + the selectDocsTab term arg
+  // that re-renders GlossaryPanel with a scroll target (~27 LOC) — both reuse the existing load/render
+  // machinery, ~40 LOC total of composition-root wiring. Measured end-state (2522) + 2; #985 owns the split.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2524 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   { file: 'src/settings/prefs.ts', maxLines: 2250 },

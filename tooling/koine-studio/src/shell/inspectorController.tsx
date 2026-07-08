@@ -272,7 +272,7 @@ export interface InspectorController {
   setAxis(axis: 'domain' | 'files'): void;
   selectTech(view: TechView): void;
   selectOutput(view: OutputTab): void;
-  selectDocsTab(view: DocsView): void;
+  selectDocsTab(view: DocsView, term?: string): void;
   selectBottomTab(tab: BottomTab): void;
   /** Reveal a right-rail view (Properties / AI Chat / Rules / Notes / Source Control), expanding the rail
    *  if collapsed. Palette commands (Show AI Chat, Explain this construct) route through here. A
@@ -805,6 +805,23 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // marked loaded only for the token it fetched. The status/empty/error states write the host
   // imperatively via docMessage, which unmounts any prior Preact tree first — so the reconciler and the
   // imperative write never fight over the same node (the prior-tasks hazard).
+  // The last-rendered glossary model + the pending scroll-to-term (#1165), so a launcher "Open glossary"
+  // can re-scroll an ALREADY-loaded glossary (no refetch) as well as a freshly-loaded one.
+  let lastGlossaryModel: GlossaryModel | null = null;
+  let glossaryScrollTerm: string | undefined;
+  let glossaryScrollNonce = 0;
+  function renderGlossaryPanel(model: GlossaryModel): void {
+    renderPanel(
+      glossaryView,
+      <GlossaryPanel
+        store={appStore}
+        model={model}
+        handlers={glossaryHandlers}
+        scrollToTerm={glossaryScrollTerm}
+        scrollNonce={glossaryScrollNonce}
+      />,
+    );
+  }
   async function loadGlossary(): Promise<void> {
     await guardedLoad({
       store: appStore,
@@ -813,10 +830,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       loading: () => docMessage(glossaryView, 'Loading glossary…'),
       fetch: () => lsp.glossaryModel(),
       render: (model) => {
+        lastGlossaryModel = model;
         if (!model.entries.length) {
           docMessage(glossaryView, 'No concepts yet — declare some types, or fix syntax errors to populate the glossary.');
         } else {
-          renderPanel(glossaryView, <GlossaryPanel store={appStore} model={model} handlers={glossaryHandlers} />);
+          renderGlossaryPanel(model);
         }
       },
       onError: (e) => docMessage(glossaryView, 'Glossary request failed: ' + String(e), 'error'),
@@ -1550,7 +1568,18 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     else if (docs === 'notes' && !notesLoaded) void loadNotes();
   }
 
-  function selectDocsTab(view: DocsView): void {
+  function selectDocsTab(view: DocsView, term?: string): void {
+    // A launcher scroll-to-term (#1165): stash it (bump the nonce so the panel applies it once). If the
+    // glossary is already loaded + fresh, re-render it now with the new target (no refetch); otherwise the
+    // lazy load below renders it with the target. The panel scrolls in a post-commit effect, which runs
+    // after setDocs below makes the Docs surface visible.
+    if (view === 'glossary' && term) {
+      glossaryScrollTerm = term;
+      glossaryScrollNonce += 1;
+      if (lastGlossaryModel?.entries.length && !appStore.getState().isStale('glossary')) {
+        renderGlossaryPanel(lastGlossaryModel);
+      }
+    }
     // setDocs sets the facet and brings Docs up if it isn't shown; the deck subscription applies the
     // chrome + lazy-loads.
     appStore.getState().setDocs(view);

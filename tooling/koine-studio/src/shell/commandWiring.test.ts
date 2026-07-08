@@ -631,6 +631,22 @@ describe('commandWiring', () => {
       expect(deps.controller.selectRight).toHaveBeenCalledWith('source-control', { commit: 'abcdef1234567' });
     });
 
+    it('openGlossary scrolls the glossary to the entry\'s term, not just opens the tab (#1165)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const entry = {
+        id: 'g:Ordering.Order',
+        cat: 'glossary',
+        title: 'Order',
+        qualifiedName: 'Ordering.Order',
+      } as unknown as CatalogEntry;
+      capturedActionDeps.openGlossary(entry);
+      // Passes the term (its qualified name) so the panel scrolls to it, not a bare tab open.
+      expect(deps.controller.selectDocsTab).toHaveBeenCalledWith('glossary', 'Ordering.Order');
+    });
+
     it('findInModel seeds the workspace search with the entry\'s term, not just focus (#1165)', () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);
