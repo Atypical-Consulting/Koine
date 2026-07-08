@@ -12,6 +12,14 @@ describe('BrowserPlatform host capabilities', () => {
     expect(new BrowserPlatform().usesServiceWorker).toBe(true);
   });
 
+  it('cannot reveal a file in the OS file manager (#1165)', () => {
+    expect(new BrowserPlatform().canRevealInFileManager).toBe(false);
+  });
+
+  it('revealPath is a graceful no-op in the browser (resolves, never throws) (#1165)', async () => {
+    await expect(new BrowserPlatform().revealPath('/anything')).resolves.toBeUndefined();
+  });
+
   // The cold-boot ladder asks this to decide what it may silently re-open: the OPFS default + the
   // `example-*` example dirs (re-acquire with no prompt), but NOT a picked folder (needs a gesture).
   describe('isAutoRestorableToken', () => {

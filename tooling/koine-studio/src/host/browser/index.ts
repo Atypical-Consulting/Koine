@@ -77,6 +77,14 @@ export class BrowserPlatform implements Platform {
     if (!win) console.warn(`Browser blocked opening external URL: ${url}`);
   }
 
+  // A browser tab has no OS file manager to reveal into (#1165), so this is false and revealPath is a
+  // graceful no-op — callers gate on the capability and degrade, never reaching a rejection.
+  readonly canRevealInFileManager = false;
+
+  revealPath(_path: string): Promise<void> {
+    return Promise.resolve();
+  }
+
   pickFolder(title: string): Promise<string | null> {
     return fs.pickFolder(title);
   }

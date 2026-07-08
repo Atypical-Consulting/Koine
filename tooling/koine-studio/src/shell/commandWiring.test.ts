@@ -102,6 +102,8 @@ function makeDeps(over: Partial<CommandWiringDeps> = {}): CommandWiringDeps {
     findReferences: vi.fn(),
     renameSymbol: vi.fn(),
     gitRevert: vi.fn(),
+    canRevealInFileManager: false,
+    revealPath: vi.fn(),
     ...over,
   };
 }
@@ -568,6 +570,32 @@ describe('commandWiring', () => {
       const entry = { id: 'sym:X', cat: 'symbol', title: 'X' } as unknown as CatalogEntry;
       capturedActionDeps.rename(entry);
       expect(deps.renameSymbol).not.toHaveBeenCalled();
+      expect(launcherToast).toHaveBeenCalledOnce();
+    });
+
+    it('revealFile reveals the file in the OS file manager when the host can, not open it in-editor (#1165)', () => {
+      const deps = makeDeps({ canRevealInFileManager: true });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const entry = { id: 'file:x', cat: 'file', title: 'a.koi', file: 'file:///ws/a.koi' } as unknown as CatalogEntry;
+      capturedActionDeps.revealFile(entry);
+      // Reveals in Finder/Explorer via the host seam…
+      expect(deps.revealPath).toHaveBeenCalledWith('file:///ws/a.koi');
+      // …NOT the old misleading "open the file in the editor" degrade.
+      expect(deps.openUri).not.toHaveBeenCalled();
+    });
+
+    it('revealFile degrades (no reveal, no in-editor open) on a host that cannot reveal (#1165)', () => {
+      const deps = makeDeps({ canRevealInFileManager: false });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const entry = { id: 'file:x', cat: 'file', title: 'a.koi', file: 'file:///ws/a.koi' } as unknown as CatalogEntry;
+      capturedActionDeps.revealFile(entry);
+      // Capability-checked degrade — never a platform.kind / token pattern-match, never the old openUri.
+      expect(deps.revealPath).not.toHaveBeenCalled();
+      expect(deps.openUri).not.toHaveBeenCalled();
       expect(launcherToast).toHaveBeenCalledOnce();
     });
 

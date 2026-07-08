@@ -69,13 +69,13 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1401 → 1408: concept-7 "Flush" builds the Output file-rail scaffold inside #view-preview and
   // mounts the CodeMirror OutputView into its `.out-code` slot (ensureOutputScaffold + the import), plus a
   // one-line initInstantTooltip() boot call, ~7 LOC of composition-root wiring. Measured end-state.
-  // Raised 1408 → 1478: #1165 wires the Spotlight launcher's degraded quick actions into the composition
+  // Raised 1408 → 1483: #1165 wires the Spotlight launcher's degraded quick actions into the composition
   // root — three open-file-then-act nav helpers (findReferencesAt / renameFromLauncher /
   // revertCommitFromLauncher, siblings of the existing revealLocation that reuse the editor's Shift-F12 /
-  // F2 surfaces + the host gitRevert) plus their three CommandWiringDeps seam registrations, ~62 LOC of
-  // launcher-seam wiring. Measured end-state (1474) + a few lines headroom for the remaining host-
-  // capability wiring in the same arc.
-  { file: 'src/shell/ide.tsx', maxLines: 1478 },
+  // F2 surfaces + the host gitRevert) plus the reveal-in-file-manager thunk and the five CommandWiringDeps
+  // seam registrations (findReferences / renameSymbol / gitRevert / canRevealInFileManager / revealPath),
+  // ~69 LOC of launcher-seam wiring. Measured end-state (1481) + a couple lines headroom.
+  { file: 'src/shell/ide.tsx', maxLines: 1483 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.

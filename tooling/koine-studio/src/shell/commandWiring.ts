@@ -89,6 +89,12 @@ export interface CommandWiringDeps {
   /** Revert a commit by sha — the launcher's revert effect: confirms, calls the host `gitRevert`, and
    * surfaces any git error (dirty tree / conflict). Only reached when {@link canUseGit}. */
   gitRevert(sha: string): void;
+  /** True when the host can reveal a file in the OS file manager (desktop). Gates the launcher's
+   * reveal-in-Explorer action — the browser host reports false and the action degrades. */
+  canRevealInFileManager: boolean;
+  /** Reveal a workspace file in the OS file manager (Finder / Explorer) — the launcher's reveal effect.
+   * Only reached when {@link canRevealInFileManager}. */
+  revealPath(uri: string): void;
 }
 
 export interface CommandWiring {
@@ -280,8 +286,15 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     // file rows key on — since the catalog only carries the file uri.
     openFileChanges: (entry) =>
       deps.controller.selectRight('source-control', { file: entry.sub ? `${entry.sub}/${entry.title}` : entry.title }),
+    // Reveal the file in the OS file manager (#1165), capability-gated on the host — never a
+    // platform.kind / token pattern-match. A host that can't reveal (the browser) degrades to an honest
+    // toast instead of the old misleading "open the file in the editor".
     revealFile: (entry) => {
-      if (entry.file) deps.openUri(entry.file);
+      if (!deps.canRevealInFileManager) {
+        launcher.toast('Revealing a file in the file manager needs the desktop app.');
+        return;
+      }
+      if (entry.file) deps.revealPath(entry.file);
     },
     openGlossary: () => deps.controller.selectDocsTab('glossary'),
     // Seed the workspace search with the term's bare name (#1165) — the identifier that appears

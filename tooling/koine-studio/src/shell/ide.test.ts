@@ -151,6 +151,7 @@ class FakePlatform implements Platform {
   readonly canSaveProjects = true;
   readonly canRunShell = false;
   readonly canUseGit = false;
+  readonly canRevealInFileManager = false;
   persistsWorkspace = true;
   readonly transport = new FakeLspTransport();
 
@@ -181,6 +182,9 @@ class FakePlatform implements Platform {
   }
   openExternal(): void {
     // no-op in tests
+  }
+  revealPath(): Promise<void> {
+    return Promise.resolve();
   }
   pickFolder(): Promise<string | null> {
     return Promise.resolve(null);

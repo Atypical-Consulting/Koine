@@ -1417,6 +1417,13 @@ export function init(hooks: IdeHooks = {}): () => void {
     findReferences: (uri, range) => void findReferencesAt(uri, range),
     renameSymbol: (uri, range) => void renameFromLauncher(uri, range),
     gitRevert: (sha) => void revertCommitFromLauncher(sha),
+    canRevealInFileManager: platform.canRevealInFileManager,
+    // Convert the workspace file uri to an on-disk path for the OS file manager; a uri with no path
+    // token (an unsaved / OPFS-only file) has nothing to reveal, so it's a no-op.
+    revealPath: (uri) => {
+      const token = fileUriToPath(uri);
+      if (token) platform.revealPath(token).catch((e) => setStatus('Reveal failed: ' + String(e), 'error'));
+    },
   });
 
   // The boot sequence (the lsp.start ladder + emit-target seed + the shared/single/restored/default
