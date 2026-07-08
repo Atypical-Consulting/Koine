@@ -42,7 +42,7 @@
     "@fontsource-variable/hanken-grotesk": "^5.2.5",
     "@fontsource-variable/jetbrains-mono": "^5.2.5",
     "@lezer/highlight": "^1.2.1",
-    "@maxgraph/core": "^0.23.0",
+    "@maxgraph/core": "^0.24.0",
     "@replit/codemirror-minimap": "^0.5.2",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2",
