@@ -322,6 +322,37 @@
   }
 }
 
+/* The active bounded-context scope (#146/#1188, ADR 0009): the strategic navigator STAYS the global
+   selector (it never narrows itself), but the row for the context currently in scope carries a
+   persistent marker mirroring the status-bar `Context:` control — an accent rail + wash and the filled
+   `◆` glyph (a non-colour shape cue), so you can always tell which context is active. The wash is faint
+   enough to hold the row's AA text contrast; the `◆`/`aria-current`/label suffix carry the meaning
+   without relying on hue. */
+.koi-ctx-row--scoped {
+  position: relative;
+  background: color-mix(in srgb, var(--koi-accent) 10%, transparent);
+
+  .koi-ctx-name {
+    color: var(--koi-accent);
+    font-weight: 600;
+  }
+
+  /* An accent rail down the inline-start edge — a present-vs-absent shape, legible without colour. */
+  &::before {
+    content: '';
+    position: absolute;
+    inset-block: 4px;
+    inset-inline-start: 0;
+    width: 2px;
+    border-radius: var(--koi-radius-pill);
+    background: var(--koi-accent);
+  }
+
+  &:hover {
+    background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+  }
+}
+
 /* The `◈` context diamond / `⤳`·`▤` doorway glyphs — decorative (aria-hidden); the accent colour ties
    them to the inspector's accent bar so the rail's navigators share one signature. */
 .koi-domain-glyph {
