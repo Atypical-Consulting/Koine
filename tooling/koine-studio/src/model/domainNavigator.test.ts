@@ -49,6 +49,41 @@ describe('renderStrategic', () => {
     (el.querySelector('[data-ctx="Ordering"]') as HTMLButtonElement).click();
     expect(onOpenContext).toHaveBeenCalledWith('Ordering');
   });
+
+  // --- the active-context marker (ADR 0009 / #1188) --------------------------------------------------
+  const noop = () => ({ onOpenContext: vi.fn(), onOpenContextMap: vi.fn(), onOpenGlossary: vi.fn() });
+  const glyphOf = (row: Element | null) => row?.querySelector('.koi-domain-glyph')?.textContent;
+
+  it('marks the active-context row (accent glyph + aria-current) and leaves the rest plain', () => {
+    const el = renderStrategic(fakeGlossary(['Ordering', 'Billing']), 4, noop(), 'Ordering');
+    const ordering = el.querySelector('[data-ctx="Ordering"]')!;
+    const billing = el.querySelector('[data-ctx="Billing"]')!;
+
+    expect(ordering.classList.contains('koi-ctx-row--scoped')).toBe(true);
+    expect(ordering.getAttribute('aria-current')).toBe('true');
+    expect(glyphOf(ordering)).toBe('◆'); // filled diamond — a non-colour shape cue
+    // The label names it "active context" so the marker reads without relying on hue (WCAG AA).
+    expect(ordering.getAttribute('aria-label')).toContain('active context');
+
+    // The navigator STAYS the selector: every context is still listed, only Billing is left plain.
+    expect(el.querySelectorAll('.koi-ctx-row')).toHaveLength(2);
+    expect(billing.classList.contains('koi-ctx-row--scoped')).toBe(false);
+    expect(billing.getAttribute('aria-current')).toBeNull();
+    expect(glyphOf(billing)).toBe('◈'); // outline diamond
+  });
+
+  it('marks no row for the All-contexts view (scope omitted → null)', () => {
+    const el = renderStrategic(fakeGlossary(['Ordering', 'Billing']), 4, noop());
+    expect(el.querySelector('.koi-ctx-row--scoped')).toBeNull();
+    expect(el.querySelector('[aria-current]')).toBeNull();
+    expect([...el.querySelectorAll('.koi-ctx-row .koi-domain-glyph')].every((g) => g.textContent === '◈')).toBe(true);
+  });
+
+  it('a scope naming no listed context marks nothing — a graceful no-op', () => {
+    const el = renderStrategic(fakeGlossary(['Ordering', 'Billing']), 4, noop(), 'Shipping');
+    expect(el.querySelector('.koi-ctx-row--scoped')).toBeNull();
+    expect(el.querySelectorAll('.koi-ctx-row')).toHaveLength(2); // nothing hidden
+  });
 });
 
 // --- the tactical body: an aggregate-centric tree over the model graph (Task 4, #453) -----------
