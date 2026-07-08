@@ -163,6 +163,16 @@ $ddd-kinds: (
   box-shadow: 0 0 0 2px var(--koi-accent);
 }
 
+/* Focus the active bounded-context scope on the Context Map (#1188, ADR 0009): the node for the context
+   currently in scope is FOCUSED — a persistent accent ring so you can tell which context is active — but
+   the map is never blanked and every other node stays fully drawn (the strategic overview survives). The
+   ring is a present-vs-absent shape (legible without colour), and the label carries `aria-current`. A
+   context node is a `.koi-node--simple`, so this only ever lights the bounded-context boxes. */
+.koi-ctxmap-graph .koi-node.is-scoped {
+  border-color: var(--koi-accent);
+  box-shadow: 0 0 0 2px var(--koi-accent), 0 0 0 5px color-mix(in srgb, var(--koi-accent) 28%, transparent);
+}
+
 /* Canvas-only annotations (#255): the HTML LABEL over each annotation cell shape (the shape carries the
    sticky/region fill + owns hit-testing). Like .koi-node, the label is click-through so the shape gets the
    drag. A note shows wrapped text on its sticky; a group shows a small corner label for its region. */

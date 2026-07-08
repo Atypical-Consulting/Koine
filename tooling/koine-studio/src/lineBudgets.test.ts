@@ -105,7 +105,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // `scopeFiles` dep (interface + JSDoc) and its call inside rerenderScopedSurfaces that points the Files
   // tree at the active context, ~10 LOC of glue reusing the existing activeContext/`isAllContexts`
   // machinery (measured after merging the Output-rail slice in). Measured end-state (2503); #985 owns the split.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2503 },
+  // Raised 2503 → 2522: #1188 (ADR 0009) focuses the active context's NODE on the Context Map centre — the
+  // `emphasiseContextMapScope` helper (a `.koi-svg-node[data-qname]` mark mirroring applySelectionHighlight)
+  // called from paintContextMap and the scope fan-out, ~19 LOC. Measured end-state (2522); #985 owns the split.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2522 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   { file: 'src/settings/prefs.ts', maxLines: 2250 },

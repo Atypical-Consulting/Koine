@@ -969,6 +969,33 @@ describe('createInspectorController — bounded-context scope', () => {
     deps.store.getState().setActiveContext(ALL_CONTEXTS);
     expect(deps.scopeFiles).toHaveBeenLastCalledWith(null);
   });
+
+  test('a scope change focuses the active context node on the Context Map — never blanks it (ADR 0009)', async () => {
+    const lsp = makeLsp();
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    await ctl.refreshContextList();
+
+    // Simulate a painted context-map graph (the maxGraph render is not exercised in happy-dom): two
+    // context nodes carrying their bare name on data-qname — the hook the scope fan-out drives.
+    const panel = domById('panel-contextmap');
+    panel.innerHTML =
+      '<div class="koi-ctxmap-graph">' +
+      '<div class="koi-node koi-svg-node" data-qname="Billing">Billing</div>' +
+      '<div class="koi-node koi-svg-node" data-qname="Ordering">Ordering</div>' +
+      '</div>';
+    const node = (q: string) => panel.querySelector<HTMLElement>(`.koi-svg-node[data-qname="${q}"]`)!;
+
+    deps.store.getState().setActiveContext('Billing');
+    expect(node('Billing').classList.contains('is-scoped')).toBe(true);
+    expect(node('Billing').getAttribute('aria-current')).toBe('true');
+    expect(node('Ordering').classList.contains('is-scoped')).toBe(false); // every node stays drawn — a focus, not a filter
+
+    deps.store.getState().setActiveContext(ALL_CONTEXTS); // All contexts → nothing focused
+    expect(node('Billing').classList.contains('is-scoped')).toBe(false);
+    expect(node('Billing').hasAttribute('aria-current')).toBe(false);
+  });
 });
 
 describe('createInspectorController — Domain-navigator drill syncs the status bar + canvas (#531)', () => {

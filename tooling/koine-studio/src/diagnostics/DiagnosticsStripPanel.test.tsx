@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { act, render } from '@testing-library/preact';
 import { createAppStore } from '@/store/index';
 import { DiagnosticsStripPanel } from '@/diagnostics/DiagnosticsStripPanel';
@@ -46,5 +46,64 @@ describe('DiagnosticsStripPanel', () => {
     );
     act(() => store.getState().setDiagnostics('file:///a.koi', [err('boom')]));
     expect(await axe(container)).toHaveNoViolations();
+  });
+});
+
+describe('DiagnosticsStripPanel — scope to context (ADR 0009 / #1188)', () => {
+  const scope = (onOpen = vi.fn()) => ({ uriLabel: (u: string) => u.split('/').pop()!, onOpen });
+
+  test('a real active context shows THAT context\'s files — following the context, not the active file', () => {
+    const store = createAppStore();
+    // The OPEN file is Ordering, but the scope is Billing — Problems must follow the CONTEXT, not the file.
+    store.getState().setActive('file:///Ordering.koi');
+    store.getState().setActiveContext('Billing');
+    const onOpen = vi.fn();
+    const { container } = render(
+      <DiagnosticsStripPanel
+        store={store}
+        activeUri={() => 'file:///Ordering.koi'}
+        onGoto={() => {}}
+        scope={scope(onOpen)}
+      />,
+    );
+    act(() => {
+      store.getState().setDiagnostics('file:///Billing.koi', [err('billing boom')]);
+      store.getState().setDiagnostics('file:///Ordering.koi', [err('ordering boom')]);
+    });
+
+    const rows = container.querySelectorAll('[data-role="diag-body"] button.diag');
+    expect(rows.length).toBe(1); // only Billing's — Ordering is a different context, and it's the OPEN file
+    expect(rows[0].textContent).toContain('Billing.koi'); // scoped rows are file-labelled
+    expect(rows[0].textContent).toContain('billing boom');
+    expect(rows[0].textContent).not.toContain('ordering boom');
+    expect(container.querySelector('[data-role="diag-count"]')!.textContent).toBe('1 error');
+
+    // A scoped row opens ITS file (not the active one) at the diagnostic's range.
+    (rows[0] as HTMLButtonElement).click();
+    expect(onOpen).toHaveBeenCalledWith('file:///Billing.koi', err('billing boom').range);
+  });
+
+  test('All contexts (with a scope provided) still shows only the ACTIVE file, byte-for-byte', () => {
+    const store = createAppStore(); // activeContext defaults to ALL_CONTEXTS
+    store.getState().setActive('file:///Ordering.koi');
+    const { container } = render(
+      <DiagnosticsStripPanel
+        store={store}
+        activeUri={() => 'file:///Ordering.koi'}
+        onGoto={() => {}}
+        scope={scope()}
+      />,
+    );
+    act(() => {
+      store.getState().setDiagnostics('file:///Billing.koi', [err('billing')]);
+      store.getState().setDiagnostics('file:///Ordering.koi', [err('ordering')]);
+    });
+
+    const rows = container.querySelectorAll('[data-role="diag-body"] button.diag');
+    expect(rows.length).toBe(1);
+    expect(rows[0].textContent).toContain('ordering'); // the active file
+    expect(rows[0].textContent).not.toContain('billing');
+    // Unscoped rows are NOT file-labelled — the strip is byte-for-byte the old active-file strip.
+    expect(rows[0].textContent!.startsWith('error ')).toBe(true);
   });
 });
