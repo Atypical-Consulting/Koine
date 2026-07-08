@@ -144,6 +144,13 @@ describe('SourceControlPanel', () => {
     const pngStat = await statOf('logo.png');
     expect(pngStat.querySelector('.none')?.textContent).toBe('·');
     expect(pngStat.querySelector('.add')).toBeNull();
+
+    // Opening the binary row's diff must NOT resurrect a fake +0/−0 from the diff body — it stays ·.
+    fireEvent.click(view.getByRole('button', { name: 'logo.png modified' }));
+    await view.findByLabelText('Diff for logo.png');
+    const pngAfterOpen = view.container.querySelector<HTMLElement>('[data-relpath="logo.png"] .koi-sc-stat');
+    expect(pngAfterOpen?.querySelector('.none')?.textContent).toBe('·');
+    expect(pngAfterOpen?.querySelector('.add')).toBeNull();
   });
 
   test('renders the branch switcher, the ahead/behind sync readout, and the Refresh control', async () => {

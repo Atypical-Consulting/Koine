@@ -87,32 +87,6 @@ function initials(author: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-/** Best-effort `+added / −removed` line counts parsed from a unified diff's hunk bodies (everything
- *  after the first `@@`), so the file-header lines are skipped by position rather than by a text guard.
- *  Eager numstat (#1152) is now the row's primary count source; this stays the FALLBACK that fills a row
- *  from its open diff when numstat has no entry for it (a failed numstat fetch) — a row with neither
- *  shows a neutral placeholder rather than a misleading `+0`. */
-function diffStat(text: string): { add: number; del: number } {
-  let add = 0;
-  let del = 0;
-  // Count only inside the hunk body (after the first `@@` header). The file header lines (`--- a/…`,
-  // `+++ b/…`, `diff --git`, `index …`) live before it, so skipping them by position — rather than by a
-  // `startsWith('---'/'+++')` text guard — avoids miscounting a genuinely deleted/added source line that
-  // itself begins with `--`/`++` (e.g. a removed `-- comment`, which renders as `--- comment`).
-  let inHunk = false;
-  for (const line of text.split('\n')) {
-    if (!inHunk) {
-      if (line.startsWith('@@')) inHunk = true;
-      continue;
-    }
-    // Within the body: `+`/`-` prefixed lines are additions/deletions; a later `@@` starts a new hunk and
-    // isn't a `+`/`-` line, so it's skipped naturally.
-    if (line.startsWith('+')) add += 1;
-    else if (line.startsWith('-')) del += 1;
-  }
-  return { add, del };
-}
-
 /** Which file's inline diff is open, keyed by (relPath, area) so the staged and unstaged rows of one path
  *  toggle independently — the same (file, area) identity git's diff is taken against. */
 interface OpenDiff {
@@ -460,17 +434,12 @@ export function SourceControlPanel(props: {
   // `{relPath} {status}` so each row stays uniquely addressable and AT users hear the full path + kind.
   const fileRow = (f: GitFile) => {
     const expanded = openDiff?.relPath === f.relPath && openDiff?.staged === f.staged;
-    // Real +/− counts: eager numstat (#1152) is the primary source — every row shows its churn at rest,
-    // no diff opened. A binary file's counts are null, and a numstat miss/failure leaves no entry; both
-    // fall through to parsing THIS row's open diff (`diffStat`), and finally to the neutral `·` — never a
-    // fake `+0`. See {@link diffStat}.
+    // Real +/− counts come solely from eager numstat (#1152) — every row shows its churn at rest, no diff
+    // opened, and consistently whether or not the diff is expanded. A binary file's counts are null, and an
+    // untracked file (absent from `git diff`) or a failed numstat fetch leaves no entry — all three render
+    // the neutral `·`, never a misleading `+0`.
     const ns = numstat.get(`${f.staged}:${f.relPath}`);
-    const stat =
-      ns && ns.added !== null && ns.removed !== null
-        ? { add: ns.added, del: ns.removed }
-        : expanded && diffText
-          ? diffStat(diffText)
-          : null;
+    const stat = ns && ns.added !== null && ns.removed !== null ? { add: ns.added, del: ns.removed } : null;
     const slash = f.relPath.lastIndexOf('/');
     const name = slash >= 0 ? f.relPath.slice(slash + 1) : f.relPath;
     const dir = slash >= 0 ? f.relPath.slice(0, slash) : '';
