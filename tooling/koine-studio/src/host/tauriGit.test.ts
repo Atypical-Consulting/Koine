@@ -57,6 +57,11 @@ describe('TauriPlatform git surface', () => {
     expect(invokeMock).toHaveBeenCalledWith('git_commit', { dir: '/work', message: 'feat: add aggregate' });
   });
 
+  it('gitRevert invokes git_revert with { dir, sha }', async () => {
+    await new TauriPlatform().gitRevert('/work', 'abc1234');
+    expect(invokeMock).toHaveBeenCalledWith('git_revert', { dir: '/work', sha: 'abc1234' });
+  });
+
   it('gitBranches invokes git_branches with { dir } and returns the branch names', async () => {
     invokeMock.mockResolvedValue(['main', 'dev']);
 

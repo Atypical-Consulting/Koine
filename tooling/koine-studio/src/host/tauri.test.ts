@@ -7,13 +7,21 @@ import { DEFAULT_SETTINGS, saveSettings } from '@/settings/persistence';
 // host-facing `McpEndpoint` ({ url, fallback }). `mcpCall` is mocked too so runCompilerTool's POST target
 // (the resolved `.url`) can be asserted without a real HTTP server. Only these two seams are mocked;
 // tauri.ts's other imports load normally under happy-dom.
-const { invokeMock, mcpCallMock } = vi.hoisted(() => ({
+const { invokeMock, mcpCallMock, revealItemInDirMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
   mcpCallMock: vi.fn(),
+  revealItemInDirMock: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@/mcp/mcp', () => ({ mcpCall: mcpCallMock }));
+// plugin-opener bundles its OWN `@tauri-apps/api/core` invoke, so the core mock above doesn't reach it;
+// mock the plugin surface directly to observe revealItemInDir (openUrl/openPath kept as no-op stubs).
+vi.mock('@tauri-apps/plugin-opener', () => ({
+  openUrl: vi.fn(),
+  openPath: vi.fn(),
+  revealItemInDir: revealItemInDirMock,
+}));
 
 import { TauriPlatform } from '@/host/tauri';
 import { createEditSession } from '@/ai/editSession';
@@ -25,6 +33,18 @@ beforeEach(() => {
   invokeMock.mockResolvedValue(null);
   mcpCallMock.mockReset();
   mcpCallMock.mockResolvedValue('');
+});
+
+describe('TauriPlatform reveal-in-file-manager (#1165)', () => {
+  it('reports canRevealInFileManager = true (the desktop host can open Finder/Explorer)', () => {
+    expect(new TauriPlatform().canRevealInFileManager).toBe(true);
+  });
+
+  it('revealPath reveals the file via plugin-opener revealItemInDir', async () => {
+    revealItemInDirMock.mockResolvedValue(undefined);
+    await new TauriPlatform().revealPath('/work/src/a.koi');
+    expect(revealItemInDirMock).toHaveBeenCalledWith('/work/src/a.koi');
+  });
 });
 
 describe('TauriPlatform MCP surface', () => {

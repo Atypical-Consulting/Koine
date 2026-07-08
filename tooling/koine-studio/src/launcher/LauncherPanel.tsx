@@ -34,17 +34,25 @@ export interface LauncherPanelProps {
    * binds it so a degraded action (rename/revert-commit) can honestly say "not available yet" instead of a
    * misleading silent jump. Optional so the unit tests mount the panel without it. */
   onRegisterToast?(show: (message: string) => void): void;
+  /** Hands the shell a callback that pins an entry's preview into THIS panel (issue #1165): commandWiring
+   * binds it so the `peek` quick action surfaces a read-only quick-look WITHOUT navigating. Optional so the
+   * unit tests mount the panel without it. */
+  onRegisterPeek?(peek: (entry: CatalogEntry) => void): void;
 }
 
 /** The panel body. Exported for unit tests; the shell mounts it via {@link createLauncher}. */
 export function LauncherPanel(props: LauncherPanelProps) {
-  const { sources, visible, onClose, actionDeps, onRegisterToast } = props;
+  const { sources, visible, onClose, actionDeps, onRegisterToast, onRegisterPeek } = props;
   const [input, setInput] = useState('');
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuIndex, setMenuIndex] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // A transient "peeked" entry (issue #1165): when set, its preview is PINNED into the pane below,
+  // overriding the selection-driven one — the `peek` quick action's non-navigating quick-look. Cleared
+  // on any query/mode change, on a selection move, and on close, so it never outlives the intent.
+  const [peekedEntry, setPeekedEntry] = useState<CatalogEntry | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -65,16 +73,25 @@ export function LauncherPanel(props: LauncherPanelProps) {
   // The keyboard-driven "selected" row (Task 7): `selectedIndex` is real state, reset to 0 below
   // whenever the query/mode changes so a fresh search always starts at the top result.
   const selected = visibleResults[selectedIndex];
-  const previewModel = selected ? previewFor(selected.entry, {}) : null;
+  // A pinned peek (#1165) takes precedence over the selection-driven preview; otherwise the selected
+  // row's preview shows as before.
+  const previewEntry = peekedEntry ?? selected?.entry ?? null;
+  const previewModel = previewEntry ? previewFor(previewEntry, {}) : null;
   const hasPreview = previewModel !== null;
 
   // Reset the selection to the top result whenever the effective (mode, query) changes — matches the
-  // prototype's `input.addEventListener("input", () => { sel = 0; render(); ...})`.
-  useEffect(() => setSelectedIndex(0), [mode.key, query]);
+  // prototype's `input.addEventListener("input", () => { sel = 0; render(); ...})`. A fresh query also
+  // dismisses any pinned peek (#1165) so the preview follows the new results.
+  useEffect(() => {
+    setSelectedIndex(0);
+    setPeekedEntry(null);
+  }, [mode.key, query]);
 
-  // Best-effort: keep the keyboard-selected row in view as ↑/↓ moves past the visible viewport.
+  // Best-effort: keep the keyboard-selected row in view as ↑/↓ moves past the visible viewport. Moving
+  // the selection also dismisses a pinned peek (#1165) so the preview snaps back to the selected row.
   useEffect(() => {
     resultsRef.current?.querySelector('.lx-item.sel')?.scrollIntoView({ block: 'nearest' });
+    setPeekedEntry(null);
   }, [selectedIndex]);
 
   function showToast(message: string): void {
@@ -91,6 +108,13 @@ export function LauncherPanel(props: LauncherPanelProps) {
   // (setToastMessage + the timer ref), so the mount-time closure stays correct for the panel's life.
   useEffect(() => {
     onRegisterToast?.(showToast);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Expose the peek pin to the shell once (issue #1165): `setPeekedEntry` is a stable state setter, so
+  // the mount-time closure stays correct for the panel's life.
+  useEffect(() => {
+    onRegisterPeek?.((entry) => setPeekedEntry(entry));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -159,6 +183,7 @@ export function LauncherPanel(props: LauncherPanelProps) {
       setSelectedIndex(0);
       setMenuOpen(false);
       setToastMessage(null);
+      setPeekedEntry(null);
     }
   }, [visible]);
 

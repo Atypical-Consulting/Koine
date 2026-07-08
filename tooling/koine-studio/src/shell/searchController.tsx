@@ -48,12 +48,18 @@ export interface SearchPanelHandle {
   toggle(): void;
   /** Open the panel and move focus into the query field. */
   focus(): void;
+  /** Open the panel with `term` pre-filled and the search run (issue #1165): the launcher's
+   * "Find in model" seeds the ubiquitous-language term instead of leaving the box empty. */
+  seed(term: string): void;
   readonly isOpen: boolean;
 }
 
 interface SearchPanelProps extends SearchPanelOptions {
   visible: boolean;
   onClose(): void;
+  /** Hands the shell a callback that sets THIS panel's query (issue #1165), so `handle.seed(term)` can
+   * pre-fill + run a search. Optional so the unit tests mount the panel without it. */
+  onRegisterSeed?(seed: (term: string) => void): void;
 }
 
 /**
@@ -112,6 +118,13 @@ export function SearchPanel(props: SearchPanelProps) {
   useEffect(() => {
     diskCache.current.clear();
   }, [props.visible, reloadToken]);
+
+  // Expose a query-seed to the shell once (issue #1165): `setQuery` is a stable state setter, so the
+  // mount-time closure stays correct for the panel's life. `handle.seed(term)` drives it after opening.
+  useEffect(() => {
+    props.onRegisterSeed?.((term) => setQuery(term));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Re-run the search (debounced) whenever the query / toggles / include change, whenever the panel
   // is (re)opened, and after a replace — so results reflect the current buffers and on-disk files.
@@ -336,9 +349,21 @@ export function createSearchPanel(opts: SearchPanelOptions): SearchPanelHandle {
   document.body.appendChild(host);
   let isOpen = false;
   let opener: HTMLElement | null = null; // element focused before the panel opened, restored on close
+  // Set once by the mounted panel (onRegisterSeed) so `handle.seed(term)` can pre-fill the query (#1165).
+  let requestSeed: ((term: string) => void) | null = null;
 
   function paint(): void {
-    render(<SearchPanel {...opts} visible={isOpen} onClose={close} />, host);
+    render(
+      <SearchPanel
+        {...opts}
+        visible={isOpen}
+        onClose={close}
+        onRegisterSeed={(fn) => {
+          requestSeed = fn;
+        }}
+      />,
+      host,
+    );
   }
 
   function open(): void {
@@ -366,11 +391,24 @@ export function createSearchPanel(opts: SearchPanelOptions): SearchPanelHandle {
     });
   }
 
+  // Open the panel with `term` pre-filled and the search run (#1165). `open()` flushes the mount so the
+  // seed callback is registered; seed the query, then focus/select the field so the user can refine it.
+  function seed(term: string): void {
+    open();
+    requestSeed?.(term);
+    requestAnimationFrame(() => {
+      const input = host.querySelector<HTMLInputElement>('.koi-search-query');
+      input?.focus();
+      input?.select();
+    });
+  }
+
   paint(); // mount once, hidden — toggling afterward is just a visibility prop flip
   return {
     open,
     close,
     focus,
+    seed,
     toggle() {
       if (isOpen) close();
       else focus();

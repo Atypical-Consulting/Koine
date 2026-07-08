@@ -77,6 +77,9 @@ export function renderGlossary(model: GlossaryModel, handlers: GlossaryHandlers)
 function renderEntry(entry: GlossaryEntry, handlers: GlossaryHandlers): HTMLElement {
   const row = document.createElement('div');
   row.className = 'koi-gloss-entry';
+  // A stable per-term anchor (#1165): the launcher's "Open glossary" scrolls to a term by its qualified
+  // name, so every row carries it (the same key the model index / catalog use).
+  row.dataset.qn = entry.qualifiedName;
 
   const head = document.createElement('div');
   head.className = 'koi-gloss-entry-head';

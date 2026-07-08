@@ -72,7 +72,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1408 → 1411: #1188 (ADR 0009) wires the Files-tree scope emphasis into the composition root —
   // the one `scopeFiles` dep forwarding the controller's scope fan-out to `explorer.setActiveContext`,
   // ~3 LOC. Measured end-state.
-  { file: 'src/shell/ide.tsx', maxLines: 1411 },
+  // Raised 1411 → 1457: #1165 wires the Spotlight launcher's degraded quick actions into the composition
+  // root — the shared open-file-then-act helper `activateFileThen` (go-to / find-usages / rename reuse it),
+  // `revertCommitFromLauncher`, the reveal-in-file-manager thunk, and the five CommandWiringDeps seam
+  // registrations (findReferences / renameSymbol / gitRevert / canRevealInFileManager / revealPath). A
+  // code-review DRY pass collapsed three near-identical activate helpers into one. Measured post-merge + 2.
+  { file: 'src/shell/ide.tsx', maxLines: 1459 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.
@@ -105,10 +110,14 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // `scopeFiles` dep (interface + JSDoc) and its call inside rerenderScopedSurfaces that points the Files
   // tree at the active context, ~10 LOC of glue reusing the existing activeContext/`isAllContexts`
   // machinery (measured after merging the Output-rail slice in). Measured end-state (2503); #985 owns the split.
-  // Raised 2503 → 2522: #1188 (ADR 0009) focuses the active context's NODE on the Context Map centre — the
+  // Raised 2503 → 2570: two features that each grew inspectorController.tsx landed together in this merge.
+  // #1165 threads two launcher focus targets into the right-rail — the sourceControlFocus/nonce pair + two
+  // <SourceControlPanel> focus props + the selectRight focus arg, plus a cached-model + renderGlossaryPanel
+  // helper and the selectDocsTab term arg (with a code-review one-shot-clear so a remount can't re-scroll to
+  // a stale term). #1188 (ADR 0009) focuses the active context's NODE on the Context Map centre — the
   // `emphasiseContextMapScope` helper (a `.koi-svg-node[data-qname]` mark mirroring applySelectionHighlight)
-  // called from paintContextMap and the scope fan-out, ~19 LOC. Measured end-state (2522); #985 owns the split.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2522 },
+  // called from paintContextMap and the scope fan-out. Combined measured end-state 2568 + 2; #985 owns the split.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2570 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   { file: 'src/settings/prefs.ts', maxLines: 2250 },

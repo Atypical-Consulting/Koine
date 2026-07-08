@@ -52,6 +52,7 @@ class FakePlatform implements Platform {
   readonly canSaveProjects = true;
   readonly canRunShell = false;
   readonly canUseGit = false;
+  readonly canRevealInFileManager = false;
   readonly persistsWorkspace = true;
 
   /** Per-root store: rootToken -> (relPath -> UTF-8 contents). */
@@ -104,6 +105,9 @@ class FakePlatform implements Platform {
     return Promise.resolve();
   }
   openExternal(): void {}
+  revealPath(): Promise<void> {
+    return Promise.resolve();
+  }
   pickFolder(): Promise<string | null> {
     return Promise.resolve(null);
   }
@@ -174,6 +178,9 @@ class FakePlatform implements Platform {
     return this.gitUnavailable();
   }
   gitCommit(): Promise<void> {
+    return this.gitUnavailable();
+  }
+  gitRevert(): Promise<void> {
     return this.gitUnavailable();
   }
   gitBranches(): Promise<string[]> {

@@ -94,11 +94,25 @@ interface OpenDiff {
   staged: boolean;
 }
 
+/**
+ * A focus request from the Spotlight launcher (issue #1165): reveal a SPECIFIC target inside the panel
+ * rather than just opening it. `file` is a workspace-relative path (opens that file's inline diff);
+ * `commit` is a full sha (highlights + scrolls to that commit in the recent log). Exactly one is set.
+ */
+export type SourceControlFocus = { file: string } | { commit: string };
+
 export function SourceControlPanel(props: {
   git: GitSurface;
   folderToken: string;
   /** Bumped by the controller to force a re-fetch (e.g. on a workspace folder switch); optional. */
   refreshNonce?: number;
+  /**
+   * A launcher focus target (issue #1165) — a file's diff to open, or a commit to highlight. Applied
+   * once per {@link focusNonce} bump (so re-fetches / dirty-count repaints don't re-trigger it). Optional.
+   */
+  focus?: SourceControlFocus;
+  /** Bumped by the controller each time a NEW {@link focus} is requested, so the panel re-applies it. */
+  focusNonce?: number;
   /**
    * How many open editor buffers have unsaved changes (#470). When > 0, **Commit** first prompts a
    * Save-all (via {@link onSaveAll}) so the commit reflects what the editor shows rather than the
@@ -147,6 +161,13 @@ export function SourceControlPanel(props: {
   // Whether the Recent-commits log shows its full history rather than the capped 10 newest (#1153). Flipped
   // by the "View all" button and the ⋮ menu's "View all commits" item; resets to capped on remount.
   const [showAllCommits, setShowAllCommits] = useState(false);
+  // The launcher-focused commit sha (issue #1165), highlighted + scrolled to; null when nothing is focused.
+  const [focusedCommit, setFocusedCommit] = useState<string | null>(null);
+  // The panel root, so a focus request can scroll its target (file row / commit row) into view.
+  const hostRef = useRef<HTMLDivElement>(null);
+  // The last focusNonce actually applied — so a focus fires ONCE per request, not on every re-fetch /
+  // dirty-count repaint (which re-run the apply effect with the same, already-handled nonce).
+  const appliedFocusNonce = useRef(0);
   // Which file groups are collapsed, keyed by label. Purely presentational + local — groups default to
   // expanded (empty set); the toggle just hides that group's file list via a CSS `collapsed` class.
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(() => new Set());
@@ -296,6 +317,50 @@ export function SourceControlPanel(props: {
     }
     if (diffReq.current === req) setDiffText(text);
   }
+
+  // Apply a launcher focus request (#1165) once its target is actually present: open the targeted file's
+  // inline diff, or highlight + scroll to the targeted commit. Re-runs when the nonce bumps AND when
+  // status/log resolve — the target rows don't exist until the async fetch lands, and on a re-open the
+  // re-fetch replaces a STALE snapshot, so the nonce is marked applied only once the target is FOUND
+  // (not on a not-found pass against stale data); `appliedFocusNonce` then makes each request fire once.
+  useEffect(() => {
+    const focus = props.focus;
+    const nonce = props.focusNonce ?? 0;
+    if (!focus || nonce === 0 || nonce === appliedFocusNonce.current) return;
+
+    if ('file' in focus) {
+      if (!status) return; // status still loading — a later status update re-runs this effect
+      const target = status.files.find((f) => f.relPath === focus.file);
+      if (!target) return; // not (yet) a changed file — retry when a fresher status arrives, else no-op
+      appliedFocusNonce.current = nonce; // found → apply exactly once
+      if (!(openDiff && openDiff.relPath === target.relPath && openDiff.staged === target.staged)) {
+        void onToggleDiff(target);
+      }
+      requestAnimationFrame(() =>
+        hostRef.current?.querySelector(`[data-relpath="${target.relPath}"]`)?.scrollIntoView({ block: 'nearest' }),
+      );
+    } else {
+      if (!log.length) return; // log still loading
+      if (!log.some((c) => c.sha === focus.commit)) return; // not in the log yet — retry on a fresher log
+      appliedFocusNonce.current = nonce; // found → apply exactly once
+      setShowAllCommits(true); // lift the capped list so the target is rendered even if it's older
+      setFocusedCommit(focus.commit);
+      requestAnimationFrame(() =>
+        hostRef.current?.querySelector(`[data-sha="${focus.commit}"]`)?.scrollIntoView({ block: 'nearest' }),
+      );
+    }
+    // props.focus is stable per nonce; status/log gate the apply until the target rows exist.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.focusNonce, status, log]);
+
+  // The commit highlight is a transient "you landed here" flash (#1165), not a persistent selection: the
+  // panel stays mounted across re-opens, so without this the ring would linger and reappear on a later
+  // focus-less open. Clear it after a beat (cleared on unmount / re-focus so no timer leaks past teardown).
+  useEffect(() => {
+    if (!focusedCommit) return;
+    const id = setTimeout(() => setFocusedCommit(null), 2600);
+    return () => clearTimeout(id);
+  }, [focusedCommit]);
 
   // --- empty states (after the hooks, so the hook order is stable) ----------
   if (!git.canUseGit) {
@@ -620,7 +685,7 @@ export function SourceControlPanel(props: {
   };
 
   return (
-    <div class="koi-sc">
+    <div class="koi-sc" ref={hostRef}>
       <div class="koi-sc-actions" role="toolbar" aria-label="Source control actions">
         <button
           type="button"
@@ -814,7 +879,15 @@ export function SourceControlPanel(props: {
             ) : (
               <ul class="koi-sc-log">
                 {shownLog.map((c) => (
-                  <li key={c.sha} class="koi-sc-log-item">
+                  <li
+                    key={c.sha}
+                    class="koi-sc-log-item"
+                    data-sha={c.sha}
+                    data-focused={focusedCommit === c.sha ? 'true' : undefined}
+                    // Programmatic cue so AT users know which commit the launcher's "View commit" landed on,
+                    // not just the visual accent ring (WCAG 2.1 AA).
+                    aria-current={focusedCommit === c.sha ? 'true' : undefined}
+                  >
                     {/* Decorative accent-tinted initials avatar; aria-hidden — the author is in the meta. */}
                     <span class="koi-sc-avatar" aria-hidden="true">
                       {initials(c.author)}

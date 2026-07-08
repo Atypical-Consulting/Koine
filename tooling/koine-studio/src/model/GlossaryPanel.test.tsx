@@ -38,6 +38,25 @@ describe('GlossaryPanel', () => {
     expect(container.textContent).not.toContain('Stock');
   });
 
+  test('scrolls the targeted term into view when a scroll target is given (#1165)', () => {
+    const store = createAppStore();
+    const scrolled: Element[] = [];
+    const orig = Element.prototype.scrollIntoView;
+    // happy-dom doesn't implement scrollIntoView; install a spy that records the element it lands on.
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    try {
+      render(
+        <GlossaryPanel store={store} model={model} handlers={handlers} scrollToTerm="Sales.Order" scrollNonce={1} />,
+      );
+      // The Order entry (data-qn="Sales.Order") is the one scrolled into view — not the whole panel.
+      expect(scrolled.some((e) => e.getAttribute('data-qn') === 'Sales.Order')).toBe(true);
+    } finally {
+      Element.prototype.scrollIntoView = orig;
+    }
+  });
+
   test('has no accessibility violations', async () => {
     const store = createAppStore();
     const { container } = render(<GlossaryPanel store={store} model={model} handlers={handlers} />);

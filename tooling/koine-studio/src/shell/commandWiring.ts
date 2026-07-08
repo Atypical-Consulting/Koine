@@ -20,6 +20,7 @@ import { createLauncher } from '@/launcher/createLauncher';
 import type { LauncherSources } from '@/launcher/buildCatalog';
 import type { LauncherActionDeps } from '@/launcher/actions';
 import type { CatalogEntry } from '@/launcher/catalog';
+import type { SourceControlFocus } from '@/model/SourceControlPanel';
 import type { ModelIndex } from '@/model/modelIndex';
 import type { GlossaryEntry, Range } from '@/lsp/lsp';
 import type { GitLogEntry } from '@/host/types';
@@ -32,7 +33,7 @@ export interface CommandWiringDeps {
   format(): void;
   goHome(): void;
   openFolder(): void;
-  search: { focus(): void; toggle(): void };
+  search: { focus(): void; toggle(): void; seed(term: string): void };
   requestNewModel(): void;
   // `buffers` is a THUNK, not a value: the workspace slice REPLACES its buffer Map on every mutation
   // (#982), so a value captured once at construction would freeze at the initial empty Map. Read live.
@@ -41,11 +42,11 @@ export interface CommandWiringDeps {
   controller: {
     runCheck(): void;
     selectOutput(tab: 'generated' | 'contextmap' | 'compatibility'): void;
-    selectDocsTab(tab: 'glossary' | 'adr' | 'notes'): void;
+    selectDocsTab(tab: 'glossary' | 'adr' | 'notes', term?: string): void;
     selectCenter(view: 'visual'): void;
     splitCodeCanvas(): void;
     selectTech(view: 'scenarios'): void;
-    selectRight(view: 'assistant' | 'source-control'): void;
+    selectRight(view: 'assistant' | 'source-control', focus?: SourceControlFocus): void;
     selectBottomTab(tab: 'review'): void;
   };
   generateProject: { open(): void };
@@ -79,6 +80,21 @@ export interface CommandWiringDeps {
   gitLog(): Promise<GitLogEntry[]> | null;
   /** Open a workspace file and reveal a 0-based range — the launcher's go-to-symbol/rule effect. */
   revealLocation(uri: string, range: Range): void;
+  /** Activate a workspace file and surface the LSP references picker at a 0-based range — the launcher's
+   * find-usages effect (reuses the editor's Shift-F12 surface at the entry's declaration). */
+  findReferences(uri: string, range: Range): void;
+  /** Activate a workspace file and open the inline rename field at a 0-based range — the launcher's
+   * rename effect (reuses the editor's F2 rename surface → lsp.rename → applyWorkspaceEdit). */
+  renameSymbol(uri: string, range: Range): void;
+  /** Revert a commit by sha — the launcher's revert effect: confirms, calls the host `gitRevert`, and
+   * surfaces any git error (dirty tree / conflict). Only reached when {@link canUseGit}. */
+  gitRevert(sha: string): void;
+  /** True when the host can reveal a file in the OS file manager (desktop). Gates the launcher's
+   * reveal-in-Explorer action — the browser host reports false and the action degrades. */
+  canRevealInFileManager: boolean;
+  /** Reveal a workspace file in the OS file manager (Finder / Explorer) — the launcher's reveal effect.
+   * Only reached when {@link canRevealInFileManager}. */
+  revealPath(uri: string): void;
 }
 
 export interface CommandWiring {
@@ -215,15 +231,22 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     glossary: () => cachedGlossary,
   };
 
-  // Resolve a symbol / event / rule entry to its declaring file + 0-based range and reveal it. Prefers the
-  // joined diagram node's sourceSpan (the file the declaration lives in) with the entry's nameRange; falls
-  // back to a plain open when only a file uri is known, and is a safe no-op when neither is present (an
-  // undrawn element carries no source location — see the task report's degrade list).
-  function gotoEntry(entry: CatalogEntry): void {
+  // Resolve a symbol / event / rule entry to its declaring file + 0-based range. Prefers the joined diagram
+  // node's sourceSpan (the file the declaration lives in) with the entry's nameRange; returns null when
+  // neither resolves (an undrawn element carries no source location). One resolver so go-to / find-usages /
+  // rename can never disagree about where a symbol lives.
+  function entryLocation(entry: CatalogEntry): { file: string; range: Range } | null {
     const file = entry.element?.node?.sourceSpan?.file ?? entry.file ?? null;
     const range = entry.nameRange ?? entry.element?.entry.nameRange ?? null;
-    if (file && range) deps.revealLocation(file, range);
-    else if (file) deps.openUri(file);
+    return file && range ? { file, range } : null;
+  }
+
+  // Reveal an entry's declaration; falls back to a plain open when only a file uri is known, and is a safe
+  // no-op when neither is present (see the task report's degrade list).
+  function gotoEntry(entry: CatalogEntry): void {
+    const loc = entryLocation(entry);
+    if (loc) deps.revealLocation(loc.file, loc.range);
+    else if (entry.file) deps.openUri(entry.file);
   }
 
   // Bind each high-level launcher action to the nearest real shell seam. Actions without a dedicated seam
@@ -234,22 +257,78 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
   // `.lx-toast` (#1145 review). `toast` here stays a no-op — LauncherPanel renders its own confirmation.
   const actionDeps: LauncherActionDeps = {
     gotoDefinition: (entry) => gotoEntry(entry),
-    findUsages: () => deps.search.focus(),
-    peek: (entry) => gotoEntry(entry),
-    rename: () => launcher.toast('Renaming a symbol isn’t available from the launcher yet.'),
+    // Surface the references picker at the entry's declaration (#1165): open + activate its file and
+    // show the editor's Shift-F12 references list at the name position. Falls back to focusing the
+    // text-search box only when the entry carries no source location (an undrawn element).
+    findUsages: (entry) => {
+      const loc = entryLocation(entry);
+      if (loc) deps.findReferences(loc.file, loc.range);
+      else deps.search.focus();
+    },
+    // A non-navigating quick-look (#1165): pin the entry's read-only preview into the launcher's own
+    // preview pane instead of jumping to it (gotoEntry navigates — that's what ↵ is for). Leaves the
+    // editor selection / active document untouched.
+    peek: (entry) => launcher.peek(entry),
+    // Inline rename from the launcher (#1165): open the editor's F2 rename field at the entry's
+    // declaration (which collects the new name and applies lsp.rename → applyWorkspaceEdit). Close the
+    // launcher first so the inline field isn't trapped behind the `.lx-scrim`. An entry with no source
+    // location (an undrawn element) can't be renamed — say so honestly instead of a silent no-op.
+    rename: (entry) => {
+      const loc = entryLocation(entry);
+      if (loc) {
+        launcher.close();
+        deps.renameSymbol(loc.file, loc.range);
+      } else {
+        launcher.toast('This symbol has no source location to rename.');
+      }
+    },
     copy: (text) => void navigator.clipboard?.writeText?.(text),
     openFile: (entry) => {
       if (entry.file) deps.openUri(entry.file);
     },
-    openFileChanges: () => deps.controller.selectRight('source-control'),
+    // Open the SPECIFIC file's diff in Source Control (#1165), not just the panel. The workspace-relative
+    // path is reconstructed from the entry's dir (`sub`) + basename (`title`) — the same path the panel's
+    // file rows key on — since the catalog only carries the file uri.
+    openFileChanges: (entry) =>
+      deps.controller.selectRight('source-control', { file: entry.sub ? `${entry.sub}/${entry.title}` : entry.title }),
+    // Reveal the file in the OS file manager (#1165), capability-gated on the host — never a
+    // platform.kind / token pattern-match. A host that can't reveal (the browser) degrades to an honest
+    // toast instead of the old misleading "open the file in the editor".
     revealFile: (entry) => {
-      if (entry.file) deps.openUri(entry.file);
+      if (!deps.canRevealInFileManager) {
+        launcher.toast('Revealing a file in the file manager needs the desktop app.');
+        return;
+      }
+      if (entry.file) deps.revealPath(entry.file);
     },
-    openGlossary: () => deps.controller.selectDocsTab('glossary'),
-    findInModel: () => deps.search.focus(),
+    // Scroll the glossary to the SPECIFIC term (#1165) — its qualified name — instead of just opening the
+    // tab. A term outside the active scope simply opens the tab without scrolling (the panel degrades).
+    openGlossary: (entry) => deps.controller.selectDocsTab('glossary', entry.qualifiedName ?? entry.title),
+    // Seed the workspace search with the term's bare name (#1165) — the identifier that appears
+    // throughout the model source, not the dotted qualified name — instead of the old empty focus().
+    findInModel: (entry) => deps.search.seed(entry.title),
     gotoRule: (entry) => gotoEntry(entry),
-    viewCommit: () => deps.controller.selectRight('source-control'),
-    revertCommit: () => launcher.toast('Reverting a commit isn’t available from the launcher yet.'),
+    // Focus the SPECIFIC commit in Source Control (#1165), not just the panel. A commit entry always
+    // carries its full sha; a missing hash degrades to opening the panel.
+    viewCommit: (entry) =>
+      entry.hash
+        ? deps.controller.selectRight('source-control', { commit: entry.hash })
+        : deps.controller.selectRight('source-control'),
+    // Real git revert from the launcher (#1165): capability-gated on the host's git (browser has none),
+    // then hand the sha to the shell's confirm-and-revert flow. Close the launcher first so the confirm
+    // dialog owns the foreground. A host without git degrades honestly instead of a misleading no-op.
+    revertCommit: (entry) => {
+      if (!deps.canUseGit) {
+        launcher.toast('Reverting a commit needs the desktop app.');
+        return;
+      }
+      if (!entry.hash) {
+        launcher.toast('This commit has no hash to revert.');
+        return;
+      }
+      launcher.close();
+      deps.gitRevert(entry.hash);
+    },
     runCommand: (entry) => {
       if (entry.cmdId) registry.run(entry.cmdId);
     },

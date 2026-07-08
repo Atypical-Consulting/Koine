@@ -692,6 +692,13 @@
   &:hover {
     background: color-mix(in srgb, var(--koi-fg) 5%, transparent);
   }
+
+  /* The launcher-focused commit (#1165): an accent ring + soft tint so "View commit" lands on a clearly
+     marked row. A ring (not a text-color change) keeps author/message contrast intact. */
+  &[data-focused='true'] {
+    background: color-mix(in srgb, var(--koi-accent) 12%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--koi-accent) 45%, transparent);
+  }
 }
 
 /* Round, accent-tinted monogram of the author's initials. Decorative (aria-hidden in the markup). */

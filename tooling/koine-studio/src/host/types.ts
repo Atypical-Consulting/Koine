@@ -256,6 +256,21 @@ export interface Platform {
    */
   openExternal(url: string): void;
 
+  /**
+   * Whether the host can reveal a file in the OS file manager (Finder / Explorer). The desktop reports
+   * true (it shells out to the opener plugin); the browser reports false — there is no OS file manager
+   * from a tab. Callers MUST check this before {@link revealPath} and degrade gracefully when it's false,
+   * exactly like {@link canRunShell} / {@link canUseGit} — never branch on the platform kind.
+   */
+  readonly canRevealInFileManager: boolean;
+
+  /**
+   * Reveal the file at an absolute path in the OS file manager, selecting it in its containing folder
+   * (Finder / Explorer). Desktop only; the browser host is a graceful no-op (it resolves without doing
+   * anything). Callers must check {@link canRevealInFileManager} first.
+   */
+  revealPath(path: string): Promise<void>;
+
   /** Prompt for a folder. Resolves to its opaque token, or null when cancelled/unsupported. */
   pickFolder(title: string): Promise<string | null>;
 
@@ -401,6 +416,15 @@ export interface Platform {
    * the browser stub rejects. Callers must check {@link canUseGit} first.
    */
   gitCommit(folderToken: string, message: string): Promise<void>;
+
+  /**
+   * Revert the commit `sha` of the workspace folder (`git revert --no-edit <sha>`), recording a new
+   * commit that undoes it — a forward commit, never a history rewrite. Rejects (with git's stderr) on a
+   * dirty working tree, a revert conflict, or a merge commit needing an explicit parent; the caller
+   * surfaces that message rather than swallowing it. Desktop only; the browser stub rejects. Callers
+   * must check {@link canUseGit} first.
+   */
+  gitRevert(folderToken: string, sha: string): Promise<void>;
 
   /**
    * The local branch names of the workspace folder. The currently checked-out branch is reported by

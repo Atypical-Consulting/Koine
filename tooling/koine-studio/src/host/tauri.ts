@@ -8,7 +8,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { appDataDir, documentDir, join } from '@tauri-apps/api/path';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import type {
   FsEntry,
   GitLogEntry,
@@ -275,6 +275,14 @@ export class TauriPlatform implements Platform {
     openUrl(url).catch((err) => console.error(`Failed to open external URL: ${url}`, err));
   }
 
+  /** The desktop shells out to a real OS file manager via the opener plugin. */
+  readonly canRevealInFileManager = true;
+
+  /** Reveal `path` in Finder / Explorer, selecting it in its folder (plugin-opener `revealItemInDir`). */
+  revealPath(path: string): Promise<void> {
+    return revealItemInDir(path);
+  }
+
   async pickFolder(title: string): Promise<string | null> {
     const picked = await openDialog({ directory: true, title });
     return Array.isArray(picked) ? picked[0] ?? null : picked;
@@ -476,6 +484,11 @@ export class TauriPlatform implements Platform {
   /** Commit the currently-staged changes with `message` (`git commit -m`). */
   gitCommit(folderToken: string, message: string): Promise<void> {
     return invoke('git_commit', { dir: folderToken, message }) as Promise<void>;
+  }
+
+  /** Revert the commit `sha`, recording a new commit that undoes it (`git revert --no-edit <sha>`). */
+  gitRevert(folderToken: string, sha: string): Promise<void> {
+    return invoke('git_revert', { dir: folderToken, sha }) as Promise<void>;
   }
 
   /** The local branch names of the workspace folder (the current one is reported by {@link gitStatus}). */

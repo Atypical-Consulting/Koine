@@ -3,7 +3,7 @@
 // and assert the observable behaviour — a results tree grouped by file with correct counts, an
 // invalid-regex inline error, live-buffer text winning over disk, and a click revealing the match.
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preact';
 import { SearchPanel, type SearchPanelOptions } from '@/shell/searchController';
 
 afterEach(() => cleanup());
@@ -41,6 +41,18 @@ describe('SearchPanel', () => {
     expect(view.getByText('b.koi')).toBeTruthy();
     // One match button per hit, across both files.
     expect(view.container.querySelectorAll('.koi-search-match')).toHaveLength(2);
+  });
+
+  test('seeding a term through onRegisterSeed sets the query and runs the search (#1165)', async () => {
+    const opts = makeOpts();
+    let seedFn: ((term: string) => void) | null = null;
+    const view = render(
+      <SearchPanel {...opts} visible={true} onClose={() => {}} onRegisterSeed={(fn) => (seedFn = fn)} />,
+    );
+    // The launcher's "Find in model" seeds the term instead of leaving the box empty.
+    act(() => seedFn!('Money'));
+    await view.findByText('2 results in 2 files');
+    expect((view.getByLabelText('Search text') as HTMLInputElement).value).toBe('Money');
   });
 
   test('clicking a result reveals the match with its file uri and 1-based line / 0-based column', async () => {

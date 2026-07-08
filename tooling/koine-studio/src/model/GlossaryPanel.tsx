@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'preact/hooks';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 import { useAppStore } from '@/store/hooks';
@@ -16,13 +17,33 @@ export function GlossaryPanel(props: {
   store: StoreApi<AppState>;
   model: GlossaryModel;
   handlers: GlossaryHandlers;
+  /** A qualified-name term to scroll into view (issue #1165) — the launcher's "Open glossary" target. */
+  scrollToTerm?: string;
+  /** Bumped by the controller each time a NEW scroll target is requested, so it's applied once. */
+  scrollNonce?: number;
 }) {
   const scope = useAppStore(props.store, (s) => s.activeContext);
   const scoped = scopeGlossaryModel(props.model, scope);
+  const hostRef = useRef<HTMLElement | null>(null);
+  const appliedNonce = useRef(0);
+
+  // Scroll the requested term into view once per nonce (#1165). The `scoped` dep re-runs this after the
+  // callback ref rebuilds the entries (so the anchor exists) and after a scope change; the nonce guard
+  // keeps it firing exactly once. A term outside the active scope has no row — no scroll, no error.
+  useEffect(() => {
+    const nonce = props.scrollNonce ?? 0;
+    if (!props.scrollToTerm || nonce === 0 || nonce === appliedNonce.current) return;
+    const target = hostRef.current?.querySelector<HTMLElement>(`[data-qn="${props.scrollToTerm}"]`);
+    if (!target) return; // term not in the current scope — open, don't scroll (unchanged behavior)
+    appliedNonce.current = nonce;
+    target.scrollIntoView({ block: 'center' });
+  }, [props.scrollToTerm, props.scrollNonce, scoped]);
+
   return (
     <div
       class="koi-glossary-mount"
       ref={(host: HTMLElement | null) => {
+        hostRef.current = host;
         if (!host) return;
         host.replaceChildren(renderGlossary(scoped, props.handlers));
       }}

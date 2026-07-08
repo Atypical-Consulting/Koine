@@ -12,6 +12,7 @@ import { render } from 'preact';
 import { el } from '@atypical/koine-ui';
 import type { LauncherActionDeps } from '@/launcher/actions';
 import type { LauncherSources } from '@/launcher/buildCatalog';
+import type { CatalogEntry } from '@/launcher/catalog';
 import { LauncherPanel } from '@/launcher/LauncherPanel';
 
 /** Imperative handle the shell drives from the ⌘K shortcut. */
@@ -23,6 +24,9 @@ export interface LauncherHandle {
   /** Raise the launcher's own `.lx-toast` from shell code (issue #1145 review): the binding for a
    * degraded quick-action that must honestly say "not available yet" instead of a misleading no-op. */
   toast(message: string): void;
+  /** Pin an entry's read-only preview into the panel's preview pane (issue #1165): the `peek` quick
+   * action's non-navigating quick-look, WITHOUT touching the editor or moving the keyboard selection. */
+  peek(entry: CatalogEntry): void;
 }
 
 /**
@@ -39,6 +43,8 @@ export function createLauncher(sources: LauncherSources, actionDeps: LauncherAct
   let opener: HTMLElement | null = null; // element focused before the launcher opened, restored on close
   // Set once by the mounted panel (onRegisterToast) so `handle.toast(...)` can raise its `.lx-toast`.
   let requestToast: ((message: string) => void) | null = null;
+  // Set once by the mounted panel (onRegisterPeek) so `handle.peek(entry)` can pin its preview (#1165).
+  let requestPeek: ((entry: CatalogEntry) => void) | null = null;
 
   function paint(): void {
     render(
@@ -49,6 +55,9 @@ export function createLauncher(sources: LauncherSources, actionDeps: LauncherAct
         actionDeps={actionDeps}
         onRegisterToast={(fn) => {
           requestToast = fn;
+        }}
+        onRegisterPeek={(fn) => {
+          requestPeek = fn;
         }}
       />,
       host,
@@ -83,6 +92,9 @@ export function createLauncher(sources: LauncherSources, actionDeps: LauncherAct
     },
     toast(message: string) {
       requestToast?.(message);
+    },
+    peek(entry: CatalogEntry) {
+      requestPeek?.(entry);
     },
   };
 }

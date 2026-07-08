@@ -20,6 +20,8 @@ vi.mock('@/launcher/createLauncher', () => ({ createLauncher: vi.fn() }));
 
 let launcherToggle: ReturnType<typeof vi.fn>;
 let launcherToast: ReturnType<typeof vi.fn>;
+let launcherPeek: ReturnType<typeof vi.fn>;
+let launcherClose: ReturnType<typeof vi.fn>;
 let launcherOpen = false;
 let capturedSources: LauncherSources;
 let capturedActionDeps: LauncherActionDeps;
@@ -57,7 +59,7 @@ function makeDeps(over: Partial<CommandWiringDeps> = {}): CommandWiringDeps {
     format: vi.fn(),
     goHome: vi.fn(),
     openFolder: vi.fn(),
-    search: { focus: vi.fn(), toggle: vi.fn() },
+    search: { focus: vi.fn(), toggle: vi.fn(), seed: vi.fn() },
     requestNewModel: vi.fn(),
     workspace: { saveAllDirty: vi.fn(), buffers: () => new Map() },
     copyShareLink: vi.fn(),
@@ -97,6 +99,11 @@ function makeDeps(over: Partial<CommandWiringDeps> = {}): CommandWiringDeps {
     canUseGit: false,
     gitLog: vi.fn(() => null),
     revealLocation: vi.fn(),
+    findReferences: vi.fn(),
+    renameSymbol: vi.fn(),
+    gitRevert: vi.fn(),
+    canRevealInFileManager: false,
+    revealPath: vi.fn(),
     ...over,
   };
 }
@@ -117,17 +124,19 @@ describe('commandWiring', () => {
     launcherOpen = false;
     launcherToggle = vi.fn();
     launcherToast = vi.fn();
+    launcherPeek = vi.fn();
+    launcherClose = vi.fn();
     const open = vi.fn();
-    const close = vi.fn();
     vi.mocked(createLauncher).mockReset();
     vi.mocked(createLauncher).mockImplementation((sources, actionDeps) => {
       capturedSources = sources;
       capturedActionDeps = actionDeps;
       return {
         open,
-        close,
+        close: launcherClose,
         toggle: launcherToggle,
         toast: launcherToast,
+        peek: launcherPeek,
         get isOpen() {
           return launcherOpen;
         },
@@ -503,22 +512,210 @@ describe('commandWiring', () => {
       vi.unstubAllGlobals();
     });
 
-    it('rename / revert honestly toast "not available" instead of a misleading jump / panel swap (#1145)', () => {
+    it('revertCommit reverts the entry\'s commit through the git seam when the host has git (#1165)', () => {
+      const deps = makeDeps({ canUseGit: true });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const commit = { id: 'commit:abc', cat: 'commit', title: 'fix: bug', hash: 'abc1234567' } as unknown as CatalogEntry;
+      capturedActionDeps.revertCommit(commit);
+      // Routes to the real git revert with the full sha, and closes the launcher…
+      expect(deps.gitRevert).toHaveBeenCalledWith('abc1234567');
+      expect(launcherClose).toHaveBeenCalledOnce();
+      // …instead of the old misleading Source Control panel swap or "not available" toast.
+      expect(deps.controller.selectRight).not.toHaveBeenCalled();
+      expect(launcherToast).not.toHaveBeenCalled();
+    });
+
+    it('revertCommit degrades honestly (no revert) on a host without git', () => {
+      const deps = makeDeps({ canUseGit: false });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const commit = { id: 'commit:abc', cat: 'commit', title: 'fix: bug', hash: 'abc1234' } as unknown as CatalogEntry;
+      capturedActionDeps.revertCommit(commit);
+      expect(deps.gitRevert).not.toHaveBeenCalled();
+      // Honest toast, and still no misleading panel swap.
+      expect(launcherToast).toHaveBeenCalledOnce();
+      expect(deps.controller.selectRight).not.toHaveBeenCalled();
+    });
+
+    it('rename opens the inline rename at the entry\'s declaration and closes the launcher (#1165)', () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
 
-      const symbol = { id: 'sym:Ordering.Order', cat: 'symbol', title: 'Order' } as unknown as CatalogEntry;
-      capturedActionDeps.rename(symbol);
-      expect(launcherToast).toHaveBeenLastCalledWith(expect.stringContaining('isn’t available'));
-      // ...and it does NOT do the old misleading thing (jump to the definition).
-      expect(deps.revealLocation).not.toHaveBeenCalled();
+      const range = { start: { line: 3, character: 2 }, end: { line: 3, character: 7 } };
+      const entry = {
+        id: 'sym:Ordering.Order',
+        cat: 'symbol',
+        title: 'Order',
+        file: 'file:///order.koi',
+        nameRange: range,
+      } as unknown as CatalogEntry;
+      capturedActionDeps.rename(entry);
+      // Routes to the editor's inline rename (lsp.rename) at the entry's file + declaration range…
+      expect(deps.renameSymbol).toHaveBeenCalledWith('file:///order.koi', range);
+      // …closes the launcher so the inline field isn't trapped behind the scrim…
+      expect(launcherClose).toHaveBeenCalledOnce();
+      // …and drops the old "isn’t available yet" toast.
+      expect(launcherToast).not.toHaveBeenCalled();
+    });
 
-      const commit = { id: 'commit:abc', cat: 'commit', title: 'fix: bug', hash: 'abc1234' } as unknown as CatalogEntry;
-      capturedActionDeps.revertCommit(commit);
-      expect(launcherToast).toHaveBeenCalledTimes(2);
-      // ...and it does NOT silently open the Source Control panel as if a revert happened.
-      expect(deps.controller.selectRight).not.toHaveBeenCalled();
+    it('rename toasts (no rename) for an entry with no source location', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const entry = { id: 'sym:X', cat: 'symbol', title: 'X' } as unknown as CatalogEntry;
+      capturedActionDeps.rename(entry);
+      expect(deps.renameSymbol).not.toHaveBeenCalled();
+      expect(launcherToast).toHaveBeenCalledOnce();
+    });
+
+    it('revealFile reveals the file in the OS file manager when the host can, not open it in-editor (#1165)', () => {
+      const deps = makeDeps({ canRevealInFileManager: true });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const entry = { id: 'file:x', cat: 'file', title: 'a.koi', file: 'file:///ws/a.koi' } as unknown as CatalogEntry;
+      capturedActionDeps.revealFile(entry);
+      // Reveals in Finder/Explorer via the host seam…
+      expect(deps.revealPath).toHaveBeenCalledWith('file:///ws/a.koi');
+      // …NOT the old misleading "open the file in the editor" degrade.
+      expect(deps.openUri).not.toHaveBeenCalled();
+    });
+
+    it('revealFile degrades (no reveal, no in-editor open) on a host that cannot reveal (#1165)', () => {
+      const deps = makeDeps({ canRevealInFileManager: false });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const entry = { id: 'file:x', cat: 'file', title: 'a.koi', file: 'file:///ws/a.koi' } as unknown as CatalogEntry;
+      capturedActionDeps.revealFile(entry);
+      // Capability-checked degrade — never a platform.kind / token pattern-match, never the old openUri.
+      expect(deps.revealPath).not.toHaveBeenCalled();
+      expect(deps.openUri).not.toHaveBeenCalled();
+      expect(launcherToast).toHaveBeenCalledOnce();
+    });
+
+    it('openFileChanges opens the specific file\'s diff in Source Control, not just the panel (#1165)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const entry = {
+        id: 'file:x',
+        cat: 'file',
+        title: 'a.koi',
+        sub: 'src',
+        file: 'file:///ws/src/a.koi',
+      } as unknown as CatalogEntry;
+      capturedActionDeps.openFileChanges(entry);
+      // Selects Source Control AND carries the file's workspace-relative path as the focus target…
+      expect(deps.controller.selectRight).toHaveBeenCalledWith('source-control', { file: 'src/a.koi' });
+    });
+
+    it('viewCommit focuses the specific commit in Source Control, not just the panel (#1165)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const entry = {
+        id: 'commit:abc',
+        cat: 'commit',
+        title: 'fix: bug',
+        hash: 'abcdef1234567',
+      } as unknown as CatalogEntry;
+      capturedActionDeps.viewCommit(entry);
+      expect(deps.controller.selectRight).toHaveBeenCalledWith('source-control', { commit: 'abcdef1234567' });
+    });
+
+    it('openGlossary scrolls the glossary to the entry\'s term, not just opens the tab (#1165)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const entry = {
+        id: 'g:Ordering.Order',
+        cat: 'glossary',
+        title: 'Order',
+        qualifiedName: 'Ordering.Order',
+      } as unknown as CatalogEntry;
+      capturedActionDeps.openGlossary(entry);
+      // Passes the term (its qualified name) so the panel scrolls to it, not a bare tab open.
+      expect(deps.controller.selectDocsTab).toHaveBeenCalledWith('glossary', 'Ordering.Order');
+    });
+
+    it('findInModel seeds the workspace search with the entry\'s term, not just focus (#1165)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const entry = {
+        id: 'g:Ordering.Order',
+        cat: 'glossary',
+        title: 'Order',
+        qualifiedName: 'Ordering.Order',
+      } as unknown as CatalogEntry;
+      capturedActionDeps.findInModel(entry);
+      // Seeds the search box with the term (the bare name that appears in the model source)…
+      expect(deps.search.seed).toHaveBeenCalledWith('Order');
+      // …instead of the old bare focus() that left the box empty.
+      expect(deps.search.focus).not.toHaveBeenCalled();
+    });
+
+    it('findUsages surfaces references at the entry\'s declaring position, not just search.focus (#1165)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const range = { start: { line: 3, character: 2 }, end: { line: 3, character: 7 } };
+      const entry = {
+        id: 'sym:Ordering.Order',
+        cat: 'symbol',
+        title: 'Order',
+        file: 'file:///order.koi',
+        nameRange: range,
+      } as unknown as CatalogEntry;
+      capturedActionDeps.findUsages(entry);
+      // Routes to the editor's references surface at the entry's file + declaration range…
+      expect(deps.findReferences).toHaveBeenCalledWith('file:///order.koi', range);
+      // …instead of the old bare focus() on the text-search box.
+      expect(deps.search.focus).not.toHaveBeenCalled();
+    });
+
+    it('findUsages degrades to search.focus for an entry with no source location', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      // An undrawn element carries no file/nameRange — nothing to resolve references from.
+      const entry = { id: 'sym:X', cat: 'symbol', title: 'X' } as unknown as CatalogEntry;
+      capturedActionDeps.findUsages(entry);
+      expect(deps.findReferences).not.toHaveBeenCalled();
+      expect(deps.search.focus).toHaveBeenCalledOnce();
+    });
+
+    it('peek surfaces a non-navigating quick-look — the launcher preview, never revealLocation/openUri (#1165)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const range = { start: { line: 3, character: 2 }, end: { line: 3, character: 7 } };
+      const entry = {
+        id: 'sym:Ordering.Order',
+        cat: 'symbol',
+        title: 'Order',
+        file: 'file:///order.koi',
+        nameRange: range,
+      } as unknown as CatalogEntry;
+      capturedActionDeps.peek(entry);
+      // Surfaces the read-only preview through the launcher's own preview surface...
+      expect(launcherPeek).toHaveBeenCalledWith(entry);
+      // ...and does NOT navigate: no editor jump (revealLocation) and no file open (openUri).
+      expect(deps.revealLocation).not.toHaveBeenCalled();
+      expect(deps.openUri).not.toHaveBeenCalled();
     });
 
     it('binds gotoDefinition to revealLocation using the entry\'s declaring file + nameRange', () => {

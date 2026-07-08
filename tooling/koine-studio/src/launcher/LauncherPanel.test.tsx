@@ -8,6 +8,7 @@ import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preac
 import { LauncherPanel } from '@/launcher/LauncherPanel';
 import type { LauncherActionDeps } from '@/launcher/actions';
 import type { LauncherSources } from '@/launcher/buildCatalog';
+import type { CatalogEntry } from '@/launcher/catalog';
 import { registerOverlay } from '@atypical/koine-ui';
 import type { Command } from '@atypical/koine-ui';
 import type { ModelIndex } from '@/model/modelIndex';
@@ -290,6 +291,36 @@ describe('LauncherPanel — live preview pane (issue #1143, task 5)', () => {
     const selectedRow = view.container.querySelector('.lx-item.sel') as HTMLElement;
     expect(selectedRow.textContent).toContain('Order');
     expect(view.container.querySelectorAll('.lx-item.sel')).toHaveLength(1);
+  });
+
+  // A quick-look (issue #1165): `peek` pins ANY entry's preview into the pane through the shell handle,
+  // WITHOUT navigating and WITHOUT moving the keyboard selection — the read-only counterpart to ↵.
+  test('peek pins the given entry\'s preview without moving the selected row (#1165)', async () => {
+    const sources = makeKnownCatalogSources();
+    let peekFn: ((entry: CatalogEntry) => void) | null = null;
+    const view = render(
+      <LauncherPanel
+        sources={sources}
+        visible={true}
+        onClose={vi.fn()}
+        actionDeps={makeActionDeps()}
+        onRegisterPeek={(fn) => {
+          peekFn = fn;
+        }}
+      />,
+    );
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+    // The empty-query default selects + previews the Order aggregate.
+    expect(view.container.querySelector('.lx-preview .pv-name')!.textContent).toBe('Order');
+
+    // Peek a DIFFERENT entry (a glossary term): its preview is pinned into the pane…
+    const peeked = { id: 'g:peeked', cat: 'glossary', title: 'Peeked Term' } as unknown as CatalogEntry;
+    act(() => peekFn!(peeked));
+    expect(view.container.querySelector('.lx-preview .pv-name')!.textContent).toBe('Peeked Term');
+
+    // …while the keyboard selection is untouched (Order is still the selected row).
+    const selectedRow = view.container.querySelector('.lx-item.sel') as HTMLElement;
+    expect(selectedRow.textContent).toContain('Order');
   });
 });
 

@@ -65,6 +65,13 @@ describe('renderGlossary', () => {
     expect((el.querySelector('.koi-gloss-bar-fill') as HTMLElement).style.width).toBe('67%');
   });
 
+  test('each entry carries its qualified-name anchor (data-qn) for scroll-to-term (#1165)', () => {
+    const el = renderGlossary(model, noopHandlers);
+    const anchors = Array.from(el.querySelectorAll('.koi-gloss-entry')).map((e) => e.getAttribute('data-qn'));
+    // The launcher's "Open glossary" scrolls to a term by its qualified name; every row must carry one.
+    expect(anchors).toEqual(['Ordering.Ordering', 'Ordering.Money', 'Ordering.Currency']);
+  });
+
   test('renders the context entry first, then types, each with its kind badge', () => {
     const el = renderGlossary(model, noopHandlers);
     const names = Array.from(el.querySelectorAll('.koi-gloss-name')).map((n) => n.textContent);
