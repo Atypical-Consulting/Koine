@@ -1327,7 +1327,10 @@ export function createExplorer(cb: ExplorerCallbacks): Explorer {
     const next = context && context.trim() ? context.trim().toLowerCase() : null;
     if (next === activeContext) return;
     activeContext = next;
-    renderRoots(lastGroups);
+    // Re-render to (un)mark the rows — but only once a tree exists. Before the first render (a persisted
+    // scope restored at boot can fan out ahead of the initial workspace render) `lastGroups` is empty, so
+    // rendering now would flash the empty-state; the stored field is applied by that first real render.
+    if (lastGroups.length) renderRoots(lastGroups);
   }
 
   // Teardown seam (#980) — see the Explorer.dispose() JSDoc for the listener-detachment strategy.

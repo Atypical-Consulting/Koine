@@ -155,12 +155,13 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Frozen 2026-07-02 at 1301 LOC (grown from the audit's 1284 @ fc83bcf5), ceil(1301 × 1.02) = 1328.
   // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
   // not mandate the split — #989 owns that.
-  // Raised 1328 → 1384: #1188 (ADR 0009) makes the Files tree obey the active-context scope by emphasis —
+  // Raised 1328 → 1387: #1188 (ADR 0009) makes the Files tree obey the active-context scope by emphasis —
   // the `setActiveContext` public API + its Explorer-interface JSDoc, the render-pass `activeContext`
   // field, the `scopeMatch` analysis flag (so a scope naming no `.koi` is a no-op), the buildItem
-  // emphasis branch, and the `koiStem` stem→context helper, ~56 LOC (comment-heavy, matching the file's
-  // house style). Measured end-state, no headroom; #989 owns the split.
-  { file: 'src/shell/explorer.ts', maxLines: 1384 },
+  // emphasis branch, the boot-flash guard in setActiveContext, and the `koiStem` stem→context helper,
+  // ~59 LOC (comment-heavy, matching the file's house style). Measured end-state, no headroom; #989 owns
+  // the split.
+  { file: 'src/shell/explorer.ts', maxLines: 1387 },
   // #982 decomposed workspaceController.ts into a thin facade + three sibling modules
   // (workspaceBuffers / workspaceMutations / workspaceSave). The facade measured 775 LOC post-split.
   // Raised 791 → 849: #1005 re-homes its Home resume/recents capture onto the facade after the #982 merge
