@@ -129,6 +129,105 @@ public class ModelRoundTripTests
         ModelRoundTripService.MembersOf(Compile(Sample), "Nope").ShouldBeEmpty();
     }
 
+    // ---- #1163: transition/command correlation + per-edge fan-out ---------
+
+    /// <summary>
+    /// A state machine exercising the four projection cases: a guarded edge a command drives
+    /// (<c>Draft → Submitted</c>), an edge no command drives (<c>Submitted → Placed</c>), a single
+    /// rule with two targets (<c>Placed → Shipped, Cancelled</c>), and a terminal state (<c>Paid</c>).
+    /// </summary>
+    private const string StateMachineSample = """
+        context Sales {
+          enum OrderStatus { Draft, Submitted, Placed, Shipped, Cancelled, Paid }
+          entity Order identified by OrderId {
+            status:          OrderStatus = Draft
+            totalIsPositive: Bool
+
+            states status {
+              Draft     -> Submitted when totalIsPositive
+              Submitted -> Placed
+              Placed    -> Shipped, Cancelled
+              Paid
+            }
+
+            command Submit { status -> Submitted }
+          }
+        }
+        """;
+
+    [Fact]
+    public void MembersOf_correlates_the_triggering_command_with_a_transition()
+    {
+        var transitions = ModelRoundTripService.MembersOf(Compile(StateMachineSample), "Sales.Order.states.status");
+
+        ModelMember draftToSubmitted = transitions.Single(t => t.Name == "Draft" && t.Value == "Submitted");
+        draftToSubmitted.Via.ShouldBe("Submit");
+        draftToSubmitted.Name.ShouldBe("Draft");
+        draftToSubmitted.Value.ShouldBe("Submitted");
+        draftToSubmitted.Type.ShouldBe("totalIsPositive");   // the guard, described target-agnostically
+    }
+
+    [Fact]
+    public void MembersOf_omits_the_trigger_when_no_command_drives_the_edge_but_keeps_the_edge()
+    {
+        var transitions = ModelRoundTripService.MembersOf(Compile(StateMachineSample), "Sales.Order.states.status");
+
+        ModelMember submittedToPlaced = transitions.Single(t => t.Name == "Submitted" && t.Value == "Placed");
+        submittedToPlaced.Via.ShouldBeNull();
+    }
+
+    [Fact]
+    public void MembersOf_fans_a_multi_target_rule_out_to_one_member_per_edge()
+    {
+        var transitions = ModelRoundTripService.MembersOf(Compile(StateMachineSample), "Sales.Order.states.status");
+
+        transitions.Where(t => t.Name == "Placed").Select(t => t.Value).ShouldBe(new[] { "Shipped", "Cancelled" });
+    }
+
+    [Fact]
+    public void MembersOf_omits_a_terminal_state_with_no_outgoing_edge()
+    {
+        var transitions = ModelRoundTripService.MembersOf(Compile(StateMachineSample), "Sales.Order.states.status");
+
+        transitions.ShouldNotContain(t => t.Name == "Paid");
+    }
+
+    // ---- #1163 (Task 2): per-edge transitions surfaced on the owning entity node ------------------
+
+    [Fact]
+    public void ModelToJson_exposes_transitions_directly_on_the_owning_entity_node()
+    {
+        ModelNode order = ModelRoundTripService.ModelToJson(Compile(StateMachineSample), "Sales.Order");
+
+        // The owner node itself lists the flattened per-edge transitions (not only the nested `states`
+        // child): Draft→Submitted, Submitted→Placed, Placed→Shipped, Placed→Cancelled = 4 edges;
+        // the terminal `Paid` contributes none.
+        order.Kind.ShouldBe("entity");
+        order.Transitions.Count.ShouldBe(4);
+        order.Transitions.ShouldAllBe(t => t.Kind == "transition");
+    }
+
+    [Fact]
+    public void ModelToJson_owner_transitions_carry_the_guard_and_triggering_command()
+    {
+        ModelNode order = ModelRoundTripService.ModelToJson(Compile(StateMachineSample), "Sales.Order");
+
+        ModelMember draftToSubmitted = order.Transitions.Single(t => t.Name == "Draft" && t.Value == "Submitted");
+        draftToSubmitted.Via.ShouldBe("Submit");
+        draftToSubmitted.Type.ShouldBe("totalIsPositive");   // the guard, described target-agnostically
+    }
+
+    [Fact]
+    public void ModelToJson_a_node_with_no_state_machine_has_an_empty_transitions_list()
+    {
+        ModelNode enumNode = ModelRoundTripService.ModelToJson(Compile(StateMachineSample), "Sales.OrderStatus");
+        ModelNode context = ModelRoundTripService.ModelToJson(Compile(StateMachineSample), "Sales");
+
+        enumNode.Transitions.ShouldNotBeNull();
+        enumNode.Transitions.ShouldBeEmpty();
+        context.Transitions.ShouldBeEmpty();
+    }
+
     [Fact]
     public Task ModelToJson_serialises_the_ordering_starter_to_a_stable_contract()
     {

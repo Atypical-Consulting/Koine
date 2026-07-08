@@ -37,6 +37,13 @@ const modelIndex: ModelIndex = {
         sourceSpan: null, stereotype: 'aggregate root', members: [],
         invariants: ['total must be non-negative', 'at least one line item'],
       },
+      // Real declared guarded edges relayed onto the owning aggregate element (#1163, Task 4): the
+      // launcher lists these verbatim — never an edge inferred from enum-member adjacency (#1145).
+      transitions: [
+        { from: 'Draft', to: 'Submitted', guard: 'totalIsPositive', via: 'Submit' },
+        { from: 'Placed', to: 'Shipped' },
+        { from: 'Placed', to: 'Cancelled' },
+      ],
     }],
     [moneyVo.qualifiedName, { entry: moneyVo }],
     [statusEnum.qualifiedName, {
@@ -140,6 +147,61 @@ describe('buildCatalog — rules & states', () => {
   test('derives state entries from an enum\'s members', async () => {
     const states = (await buildCatalog(sourcesWithGit)).filter((e) => e.cat === 'rule' && e.rkind === 'state');
     expect(states.map((s) => s.title)).toEqual(['Draft', 'Placed']);
+  });
+
+  test('emits one transition entry per DECLARED guarded edge, carrying guard + trigger in the sub', async () => {
+    const transitions = (await buildCatalog(sourcesWithGit)).filter((e) => e.cat === 'rule' && e.rkind === 'transition');
+    const submit = transitions.find((t) => t.title === 'Draft → Submitted');
+    expect(submit).toMatchObject({
+      id: 'rule:Ordering.Order:trans:Draft->Submitted:0',
+      cat: 'rule',
+      rkind: 'transition',
+      title: 'Draft → Submitted',
+      ctx: 'Ordering',
+      qualifiedName: 'Ordering.Order',
+    });
+    expect(submit?.sub).toContain('when totalIsPositive');
+    expect(submit?.sub).toContain('via Submit');
+    // The structured edge is carried through for the preview pane, not just the display strings.
+    expect(submit?.transition).toEqual({ from: 'Draft', to: 'Submitted', guard: 'totalIsPositive', via: 'Submit' });
+  });
+
+  test('never fabricates an edge from enum-member order — only the 3 declared edges appear', async () => {
+    const catalog = await buildCatalog(sourcesWithGit);
+    const transitions = catalog.filter((e) => e.cat === 'rule' && e.rkind === 'transition');
+    expect(transitions).toHaveLength(3);
+    // The enum OrderStatus still produces exactly its two member states and nothing more — the
+    // transitions come off the aggregate element, never off enum-member adjacency (#1145).
+    const states = catalog.filter((e) => e.cat === 'rule' && e.rkind === 'state');
+    expect(states.map((s) => s.title)).toEqual(['Draft', 'Placed']);
+  });
+
+  test('a guardless/triggerless edge still produces an entry whose sub is just the owner name', async () => {
+    const transitions = (await buildCatalog(sourcesWithGit)).filter((e) => e.cat === 'rule' && e.rkind === 'transition');
+    const shipped = transitions.find((t) => t.title === 'Placed → Shipped');
+    expect(shipped).toMatchObject({ id: 'rule:Ordering.Order:trans:Placed->Shipped:1', sub: 'Order' });
+    expect(shipped?.transition).toEqual({ from: 'Placed', to: 'Shipped' });
+  });
+
+  test('gives every fanned-out edge a unique id even when two edges share the same from→to', async () => {
+    // Two guarded rules on the same edge (`A -> B when g1` / `A -> B when g2`) both flatten onto the
+    // owner element with identical from/to; the id must still be unique (it is a React key + DOM id).
+    const collidingEntry = glossaryEntry({ name: 'Ticket', kind: 'entity', context: 'Support', qualifiedName: 'Support.Ticket' });
+    const index: ModelIndex = {
+      glossary: { entries: [collidingEntry] },
+      byQn: new Map([[collidingEntry.qualifiedName, {
+        entry: collidingEntry,
+        transitions: [
+          { from: 'Open', to: 'Closed', guard: 'isResolved' },
+          { from: 'Open', to: 'Closed', guard: 'isDuplicate' },
+        ],
+      }]]),
+      qnByCtxName: new Map(),
+    };
+    const catalog = await buildCatalog({ ...sourcesWithGit, modelIndex: () => Promise.resolve(index) });
+    const edges = catalog.filter((e) => e.cat === 'rule' && e.rkind === 'transition');
+    expect(edges).toHaveLength(2);
+    expect(new Set(edges.map((e) => e.id)).size).toBe(2); // no duplicate ids
   });
 });
 

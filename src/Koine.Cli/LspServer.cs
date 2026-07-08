@@ -2005,7 +2005,7 @@ internal sealed class LspServer
         var (model, _) = ParseUsable(sources);
         if (model is null)
         {
-            return ModelNodeJson(new ModelNode("model", "", "", [], []));
+            return ModelNodeJson(new ModelNode("model", "", "", [], [], []));
         }
 
         return ModelNodeJson(ModelRoundTripService.ModelToJson(model, TryGetStringParam(root, "qualifiedName")));
@@ -2146,6 +2146,9 @@ internal sealed class LspServer
         ["title"] = n.Title,
         ["members"] = n.Members.Select(m => (object)ModelMemberJson(m)).ToArray(),
         ["children"] = n.Children.Select(c => (object)ModelNodeJson(c)).ToArray(),
+        // Additive (#1163): the owner node's flattened per-edge transitions — WASM source-gen emits
+        // `Transitions` in camelCase, so the key MUST be `transitions` for wire parity.
+        ["transitions"] = n.Transitions.Select(m => (object)ModelMemberJson(m)).ToArray(),
     };
 
     private static Dictionary<string, object?> ModelMemberJson(ModelMember m) => new()
@@ -2154,6 +2157,8 @@ internal sealed class LspServer
         ["name"] = m.Name,
         ["type"] = m.Type,
         ["value"] = m.Value,
+        // Additive (#1163): a transition member's correlated triggering command (WASM emits `Via`→`via`).
+        ["via"] = m.Via,
     };
 
     /// <summary>Serialises round-trip diagnostics to a compact <c>{ code, message, range, uri }</c> shape.</summary>
