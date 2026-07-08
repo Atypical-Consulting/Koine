@@ -107,10 +107,26 @@ export function PreviewPane({ model }: PreviewPaneProps) {
       )}
 
       {transition && (
-        <div class="pv-states big">
-          <span class="pv-state on">{transition.from}</span>
-          <span class="pv-arrow">→</span>
-          <span class="pv-state on">{transition.to}</span>
+        <div class="pv-transition">
+          <div class="pv-states big">
+            <span class="pv-state on">{transition.from}</span>
+            <span class="pv-arrow" aria-hidden="true">→</span>
+            <span class="pv-state on">{transition.to}</span>
+          </div>
+          {(transition.guard || transition.via) && (
+            <p class="pv-transition-meta">
+              {transition.guard && (
+                <span class="pv-transition-part">
+                  when <code>{transition.guard}</code>
+                </span>
+              )}
+              {transition.via && (
+                <span class="pv-transition-part">
+                  via <code>{transition.via}()</code>
+                </span>
+              )}
+            </p>
+          )}
         </div>
       )}
 

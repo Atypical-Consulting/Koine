@@ -172,6 +172,15 @@ describe('transitionPreview', () => {
     expect(vm.transition).toEqual({ from: 'Draft', to: 'Placed' });
     expect(vm.header.name).toBe('Draft → Placed');
   });
+
+  test('surfaces a real edge\'s guard + trigger in the transition and meta', () => {
+    const vm = transitionPreview({ from: 'Draft', to: 'Submitted', guard: 'totalIsPositive', via: 'Submit', owner: 'Order' });
+    expect(vm.transition).toEqual({ from: 'Draft', to: 'Submitted', guard: 'totalIsPositive', via: 'Submit' });
+    expect(vm.header.name).toBe('Draft → Submitted');
+    expect(vm.meta).toContainEqual(['Aggregate', 'Order']);
+    expect(vm.meta).toContainEqual(['Guard', 'totalIsPositive']);
+    expect(vm.meta).toContainEqual(['Via', 'Submit']);
+  });
 });
 
 describe('commitPreview', () => {
@@ -273,6 +282,25 @@ describe('previewFor — dispatch', () => {
     expect(vm?.transition).toBeUndefined();
     expect(vm?.states).toEqual(['OnlyState']);
     expect(vm?.note).toBeTruthy();
+  });
+
+  test('rule (rkind "transition"): dispatches to transitionPreview off the carried edge, not rulePreview', () => {
+    const orderEntry = glossaryEntry({ name: 'Order', kind: 'aggregate', context: 'Ordering', qualifiedName: 'Ordering.Order' });
+    const orderElement: ModelElement = { entry: orderEntry };
+    const entry: CatalogEntry = {
+      id: 'rule:Ordering.Order:trans:Draft->Submitted', cat: 'rule', rkind: 'transition', title: 'Draft → Submitted',
+      qualifiedName: 'Ordering.Order', transition: { from: 'Draft', to: 'Submitted', guard: 'totalIsPositive', via: 'Submit' },
+    };
+
+    const vm = previewFor(entry, { element: orderElement });
+
+    expect(vm?.transition).toEqual({ from: 'Draft', to: 'Submitted', guard: 'totalIsPositive', via: 'Submit' });
+    expect(vm?.header.name).toBe('Draft → Submitted');
+    expect(vm?.meta).toContainEqual(['Aggregate', 'Order']);
+    expect(vm?.meta).toContainEqual(['Guard', 'totalIsPositive']);
+    expect(vm?.meta).toContainEqual(['Via', 'Submit']);
+    // NOT a rulePreview: the invariant-shaped rule block must not be produced for a transition.
+    expect(vm?.rule).toBeUndefined();
   });
 
   test('commit: dispatches to commitPreview via ctx.commit', () => {

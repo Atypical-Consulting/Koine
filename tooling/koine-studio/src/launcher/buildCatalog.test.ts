@@ -37,6 +37,13 @@ const modelIndex: ModelIndex = {
         sourceSpan: null, stereotype: 'aggregate root', members: [],
         invariants: ['total must be non-negative', 'at least one line item'],
       },
+      // Real declared guarded edges relayed onto the owning aggregate element (#1163, Task 4): the
+      // launcher lists these verbatim — never an edge inferred from enum-member adjacency (#1145).
+      transitions: [
+        { from: 'Draft', to: 'Submitted', guard: 'totalIsPositive', via: 'Submit' },
+        { from: 'Placed', to: 'Shipped' },
+        { from: 'Placed', to: 'Cancelled' },
+      ],
     }],
     [moneyVo.qualifiedName, { entry: moneyVo }],
     [statusEnum.qualifiedName, {
@@ -140,6 +147,40 @@ describe('buildCatalog — rules & states', () => {
   test('derives state entries from an enum\'s members', async () => {
     const states = (await buildCatalog(sourcesWithGit)).filter((e) => e.cat === 'rule' && e.rkind === 'state');
     expect(states.map((s) => s.title)).toEqual(['Draft', 'Placed']);
+  });
+
+  test('emits one transition entry per DECLARED guarded edge, carrying guard + trigger in the sub', async () => {
+    const transitions = (await buildCatalog(sourcesWithGit)).filter((e) => e.cat === 'rule' && e.rkind === 'transition');
+    const submit = transitions.find((t) => t.title === 'Draft → Submitted');
+    expect(submit).toMatchObject({
+      id: 'rule:Ordering.Order:trans:Draft->Submitted',
+      cat: 'rule',
+      rkind: 'transition',
+      title: 'Draft → Submitted',
+      ctx: 'Ordering',
+      qualifiedName: 'Ordering.Order',
+    });
+    expect(submit?.sub).toContain('when totalIsPositive');
+    expect(submit?.sub).toContain('via Submit');
+    // The structured edge is carried through for the preview pane, not just the display strings.
+    expect(submit?.transition).toEqual({ from: 'Draft', to: 'Submitted', guard: 'totalIsPositive', via: 'Submit' });
+  });
+
+  test('never fabricates an edge from enum-member order — only the 3 declared edges appear', async () => {
+    const catalog = await buildCatalog(sourcesWithGit);
+    const transitions = catalog.filter((e) => e.cat === 'rule' && e.rkind === 'transition');
+    expect(transitions).toHaveLength(3);
+    // The enum OrderStatus still produces exactly its two member states and nothing more — the
+    // transitions come off the aggregate element, never off enum-member adjacency (#1145).
+    const states = catalog.filter((e) => e.cat === 'rule' && e.rkind === 'state');
+    expect(states.map((s) => s.title)).toEqual(['Draft', 'Placed']);
+  });
+
+  test('a guardless/triggerless edge still produces an entry whose sub is just the owner name', async () => {
+    const transitions = (await buildCatalog(sourcesWithGit)).filter((e) => e.cat === 'rule' && e.rkind === 'transition');
+    const shipped = transitions.find((t) => t.title === 'Placed → Shipped');
+    expect(shipped).toMatchObject({ id: 'rule:Ordering.Order:trans:Placed->Shipped', sub: 'Order' });
+    expect(shipped?.transition).toEqual({ from: 'Placed', to: 'Shipped' });
   });
 });
 

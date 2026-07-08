@@ -545,6 +545,28 @@
   color: var(--koi-muted);
 }
 
+.pv-transition {
+  margin: 4px 0 16px;
+}
+
+.pv-transition .pv-states.big {
+  margin: 0;
+}
+
+.pv-transition-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  color: var(--koi-muted);
+}
+
+.pv-transition-meta code {
+  font-family: var(--koi-font-mono);
+  color: var(--koi-ink-soft);
+}
+
 .pv-fields {
   display: flex;
   flex-direction: column;

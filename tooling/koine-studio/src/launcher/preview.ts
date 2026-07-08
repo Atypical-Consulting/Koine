@@ -34,6 +34,10 @@ export interface PreviewRule {
 export interface PreviewTransition {
   from: string;
   to: string;
+  /** The declared guard condition, when the edge has one (`when <guard>`). */
+  guard?: string;
+  /** The declared triggering command, when the edge has one (`via <cmd>()`). */
+  via?: string;
 }
 
 export interface PreviewDiffLine {
@@ -244,20 +248,33 @@ export interface TransitionInput {
   from: string;
   to: string;
   owner?: string;
+  guard?: string;
+  via?: string;
 }
 
-/** A state-machine transition builder. Kept for when REAL guarded-transition data (a `{ from, to }`
- * pair) becomes available to the launcher; it is deliberately NOT called for enum-state entries, which
- * only know a flat member list and must not fabricate an edge from declaration order (#1145 review). */
+/** A state-machine transition builder, driven by REAL declared guarded-edge data (#1163): the
+ * `from → to` states plus the edge's guard/trigger when it declares them. It is deliberately NOT called
+ * for enum-state entries, which only know a flat member list and must not fabricate an edge from
+ * declaration order (#1145 review). Optional keys (`guard`/`via`) are only ever set when present, so a
+ * guardless/triggerless edge yields a bare `{ from, to }` transition. */
 export function transitionPreview(input: TransitionInput): PreviewViewModel {
+  const transition: PreviewTransition = { from: input.from, to: input.to };
+  if (input.guard) transition.guard = input.guard;
+  if (input.via) transition.via = input.via;
+
+  const meta: [string, string][] = [];
+  if (input.owner) meta.push(['Aggregate', input.owner]);
+  if (input.guard) meta.push(['Guard', input.guard]);
+  if (input.via) meta.push(['Via', input.via]);
+
   return {
     header: {
       glyph: 'state',
       name: `${input.from} → ${input.to}`,
       sub: input.owner ? `state transition · ${input.owner}` : 'state transition',
     },
-    transition: { from: input.from, to: input.to },
-    meta: input.owner ? [['Aggregate', input.owner]] : undefined,
+    transition,
+    meta: meta.length ? meta : undefined,
   };
 }
 
@@ -344,6 +361,10 @@ export function previewFor(entry: CatalogEntry, ctx: PreviewContext): PreviewVie
     case 'rule': {
       const element = ctx.element ?? entry.element;
       if (!element) return null;
+      if (entry.rkind === 'transition' && entry.transition) {
+        const t = entry.transition;
+        return transitionPreview({ from: t.from, to: t.to, guard: t.guard, via: t.via, owner: element.entry.name });
+      }
       if (entry.rkind === 'state') return stateOrTransitionPreview(entry, element);
       return rulePreview({ expr: entry.title, owner: element.entry.name, ctx: element.entry.context });
     }

@@ -6,7 +6,7 @@
 // tasks can look a glossary/model-index entry's `kind` straight up without a translation step.
 import type { ConceptSlug } from '@/model/conceptColors.generated';
 import type { Range } from '@/lsp/lsp';
-import type { ModelElement } from '@/model/modelIndex';
+import type { ModelElement, StateTransition } from '@/model/modelIndex';
 
 /** The seven result categories a catalog entry can belong to. */
 export type Category = 'action' | 'symbol' | 'event' | 'rule' | 'file' | 'glossary' | 'commit';
@@ -30,7 +30,8 @@ export interface CatalogEntry {
   file?: string;
   /** Commit sha (commit-category entries). */
   hash?: string;
-  /** Rule sub-kind, e.g. "rule" vs "state" (rule-category entries). */
+  /** Rule sub-kind: `'rule'` (an invariant), `'state'` (an enum member), or `'transition'` (a real
+   * declared guarded state-machine edge, #1163) — rule-category entries. */
   rkind?: string;
   /** Hook for a later task's live-preview pane; deliberately loose until that task defines its shape. */
   preview?: () => unknown;
@@ -58,6 +59,12 @@ export interface CatalogEntry {
    * preview without a second `modelIndex()` round-trip.
    */
   element?: ModelElement;
+  /**
+   * The structured declared guarded edge (`rkind === 'transition'` rule entries, #1163): carried so the
+   * live-preview pane renders `from → to` plus guard/trigger straight off the entry — never an edge
+   * inferred from enum-member order (#1145).
+   */
+  transition?: StateTransition;
 }
 
 /** A prefix-switchable search mode (`>`, `@`, `#`, `/`, `:`, or the no-prefix "all"). */
