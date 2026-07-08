@@ -100,7 +100,8 @@ export interface ModelNode {
   // Additive (#1163): for an entity/aggregate owner node, the flattened per-edge state transitions —
   // the same edges the nested `states` child lists, surfaced here so a consumer needn't reconstruct
   // ownership from the `.states.<field>` qualifiedName. [] for every node with no state machine.
-  transitions: ModelMember[];
+  // Optional (like `via` above) so a pre-#1163 payload still conforms — read it as `transitions ?? []`.
+  transitions?: ModelMember[];
 }
 export interface ModelMembersResult {
   members: ModelMember[];

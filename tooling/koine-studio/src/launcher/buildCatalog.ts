@@ -138,11 +138,15 @@ function ruleEntries(index: ModelIndex): CatalogEntry[] {
     // One entry per REAL declared guarded edge (#1163). These come off the OWNER entity/aggregate
     // element that projects `transitions` — enum-`state` entries above come off the ENUM element, so
     // the two never overlap. No edge is ever synthesized from enum-member order (#1145).
-    for (const t of element.transitions ?? []) {
+    // The owner element flattens every state machine's edges into one `transitions` list, so a bare
+    // `<from>-><to>` id is NOT unique — two fields sharing an edge, or two guarded rules on the same
+    // edge (`A -> B when g1` / `A -> B when g2`), repeat it. The declaration-order index disambiguates
+    // so the launcher's per-entry `id` (a React key + a `lx-opt-…` DOM id) stays unique.
+    (element.transitions ?? []).forEach((t, i) => {
       const guard = t.guard ? ` · when ${t.guard}` : '';
       const via = t.via ? ` · via ${t.via}` : '';
       out.push({
-        id: `rule:${entry.qualifiedName}:trans:${t.from}->${t.to}`,
+        id: `rule:${entry.qualifiedName}:trans:${t.from}->${t.to}:${i}`,
         cat: 'rule',
         rkind: 'transition',
         kind,
@@ -154,7 +158,7 @@ function ruleEntries(index: ModelIndex): CatalogEntry[] {
         element,
         transition: t,
       });
-    }
+    });
   }
   return out;
 }

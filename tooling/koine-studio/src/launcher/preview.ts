@@ -263,7 +263,9 @@ export function transitionPreview(input: TransitionInput): PreviewViewModel {
   if (input.via) transition.via = input.via;
 
   const meta: [string, string][] = [];
-  if (input.owner) meta.push(['Aggregate', input.owner]);
+  // The owner is the entity/type that DECLARES the state machine — not necessarily the aggregate (an
+  // `aggregate Sales root Order` surfaces its transitions on the `Order` entity), so label it neutrally.
+  if (input.owner) meta.push(['Owner', input.owner]);
   if (input.guard) meta.push(['Guard', input.guard]);
   if (input.via) meta.push(['Via', input.via]);
 
@@ -296,18 +298,18 @@ export function commitPreview(commit: GitLogEntry): PreviewViewModel {
 }
 
 /**
- * `previewFor`'s rkind==='state' branch: the HONEST state-list view — the selected state, the enum's
- * full declared member set, and a neutral note. It never synthesizes a `{ from, to }` transition from
- * declaration order: Koine's guarded state-machine transitions aren't indexed by `ModelIndex` today
- * (documented gap, buildCatalog.ts's ruleEntries), so an "A → B" edge would fabricate domain semantics
- * the model can't derive (#1145 review). Real transition data, if it ever lands, uses `transitionPreview`.
+ * `previewFor`'s rkind==='state' branch: the HONEST state-list view for an ENUM member — the selected
+ * state and the enum's full declared member set. It never synthesizes a `{ from, to }` transition from
+ * declaration order: an "A → B" edge inferred from enum-member order would fabricate domain semantics
+ * the model can't derive (#1145 review). Real guarded transitions ARE surfaced now (#1163), but as their
+ * own `rkind==='transition'` entries routed to `transitionPreview` — never from this enum-state view.
  */
-function stateOrTransitionPreview(entry: CatalogEntry, element: ModelElement): PreviewViewModel {
+function statePreview(entry: CatalogEntry, element: ModelElement): PreviewViewModel {
   const allStates = statesFor(element.modelMembers) ?? [];
   return {
     header: { chipSlug: 'enum', name: entry.title, sub: `state · ${element.entry.name}` },
     states: allStates.length ? allStates : undefined,
-    note: 'A declared state of this enum. Guarded transitions aren’t indexed yet.',
+    note: 'A declared state of this enum. Its guarded transitions are listed as their own entries.',
   };
 }
 
@@ -365,7 +367,7 @@ export function previewFor(entry: CatalogEntry, ctx: PreviewContext): PreviewVie
         const t = entry.transition;
         return transitionPreview({ from: t.from, to: t.to, guard: t.guard, via: t.via, owner: element.entry.name });
       }
-      if (entry.rkind === 'state') return stateOrTransitionPreview(entry, element);
+      if (entry.rkind === 'state') return statePreview(entry, element);
       return rulePreview({ expr: entry.title, owner: element.entry.name, ctx: element.entry.context });
     }
     case 'commit': {

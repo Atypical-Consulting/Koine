@@ -21,7 +21,7 @@ describe('ModelNode transition projection', () => {
   };
 
   test('a transition member projects from/to/guard/trigger onto the generic leaf fields', () => {
-    const edge = owner.transitions[0];
+    const edge = owner.transitions![0];
     expect(edge.name).toBe('Draft'); // from-state
     expect(edge.value).toBe('Submitted'); // to-state
     expect(edge.type).toBe('totalIsPositive'); // guard
@@ -30,6 +30,6 @@ describe('ModelNode transition projection', () => {
 
   test('the owner entity node carries its flattened transitions', () => {
     expect(owner.transitions).toHaveLength(1);
-    expect(owner.transitions.every((t) => t.kind === 'transition')).toBe(true);
+    expect(owner.transitions!.every((t) => t.kind === 'transition')).toBe(true);
   });
 });

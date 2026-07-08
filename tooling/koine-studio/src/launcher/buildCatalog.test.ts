@@ -153,7 +153,7 @@ describe('buildCatalog — rules & states', () => {
     const transitions = (await buildCatalog(sourcesWithGit)).filter((e) => e.cat === 'rule' && e.rkind === 'transition');
     const submit = transitions.find((t) => t.title === 'Draft → Submitted');
     expect(submit).toMatchObject({
-      id: 'rule:Ordering.Order:trans:Draft->Submitted',
+      id: 'rule:Ordering.Order:trans:Draft->Submitted:0',
       cat: 'rule',
       rkind: 'transition',
       title: 'Draft → Submitted',
@@ -179,8 +179,29 @@ describe('buildCatalog — rules & states', () => {
   test('a guardless/triggerless edge still produces an entry whose sub is just the owner name', async () => {
     const transitions = (await buildCatalog(sourcesWithGit)).filter((e) => e.cat === 'rule' && e.rkind === 'transition');
     const shipped = transitions.find((t) => t.title === 'Placed → Shipped');
-    expect(shipped).toMatchObject({ id: 'rule:Ordering.Order:trans:Placed->Shipped', sub: 'Order' });
+    expect(shipped).toMatchObject({ id: 'rule:Ordering.Order:trans:Placed->Shipped:1', sub: 'Order' });
     expect(shipped?.transition).toEqual({ from: 'Placed', to: 'Shipped' });
+  });
+
+  test('gives every fanned-out edge a unique id even when two edges share the same from→to', async () => {
+    // Two guarded rules on the same edge (`A -> B when g1` / `A -> B when g2`) both flatten onto the
+    // owner element with identical from/to; the id must still be unique (it is a React key + DOM id).
+    const collidingEntry = glossaryEntry({ name: 'Ticket', kind: 'entity', context: 'Support', qualifiedName: 'Support.Ticket' });
+    const index: ModelIndex = {
+      glossary: { entries: [collidingEntry] },
+      byQn: new Map([[collidingEntry.qualifiedName, {
+        entry: collidingEntry,
+        transitions: [
+          { from: 'Open', to: 'Closed', guard: 'isResolved' },
+          { from: 'Open', to: 'Closed', guard: 'isDuplicate' },
+        ],
+      }]]),
+      qnByCtxName: new Map(),
+    };
+    const catalog = await buildCatalog({ ...sourcesWithGit, modelIndex: () => Promise.resolve(index) });
+    const edges = catalog.filter((e) => e.cat === 'rule' && e.rkind === 'transition');
+    expect(edges).toHaveLength(2);
+    expect(new Set(edges.map((e) => e.id)).size).toBe(2); // no duplicate ids
   });
 });
 

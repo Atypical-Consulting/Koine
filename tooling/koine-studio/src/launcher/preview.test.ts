@@ -177,7 +177,7 @@ describe('transitionPreview', () => {
     const vm = transitionPreview({ from: 'Draft', to: 'Submitted', guard: 'totalIsPositive', via: 'Submit', owner: 'Order' });
     expect(vm.transition).toEqual({ from: 'Draft', to: 'Submitted', guard: 'totalIsPositive', via: 'Submit' });
     expect(vm.header.name).toBe('Draft → Submitted');
-    expect(vm.meta).toContainEqual(['Aggregate', 'Order']);
+    expect(vm.meta).toContainEqual(['Owner', 'Order']);
     expect(vm.meta).toContainEqual(['Guard', 'totalIsPositive']);
     expect(vm.meta).toContainEqual(['Via', 'Submit']);
   });
@@ -296,7 +296,7 @@ describe('previewFor — dispatch', () => {
 
     expect(vm?.transition).toEqual({ from: 'Draft', to: 'Submitted', guard: 'totalIsPositive', via: 'Submit' });
     expect(vm?.header.name).toBe('Draft → Submitted');
-    expect(vm?.meta).toContainEqual(['Aggregate', 'Order']);
+    expect(vm?.meta).toContainEqual(['Owner', 'Order']);
     expect(vm?.meta).toContainEqual(['Guard', 'totalIsPositive']);
     expect(vm?.meta).toContainEqual(['Via', 'Submit']);
     // NOT a rulePreview: the invariant-shaped rule block must not be produced for a transition.

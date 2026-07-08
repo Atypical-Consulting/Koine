@@ -167,6 +167,28 @@ describe('buildModelIndex — state transitions relay (#1163)', () => {
       { from: 'Placed', to: 'Cancelled', guard: undefined, via: 'Cancel' },
     ]);
   });
+
+  test('relays transitions for an aggregate-nested entity (Ctx.Agg.Entity — the shipped-template shape)', () => {
+    // `aggregate Sales root Order { entity Order … }` emits the entity node at QN `Ordering.Sales.Order`,
+    // matching its glossary entry — the case every real template uses, and the one the relay must join
+    // through the aggregate layer. (The wrapper nodes omit `transitions` on purpose — the field is
+    // optional, so a pre-#1163 payload conforms and the walk reads it as `?? []`.)
+    const gloss: GlossaryModel = { entries: [entry('Order', 'entity', 'Ordering', 'Ordering.Sales.Order')] };
+    const entityNode = modelNode('Ordering.Sales.Order', 'entity', [
+      { kind: 'transition', name: 'Draft', type: 'totalIsPositive', value: 'Submitted', via: 'Submit' },
+    ]);
+    const tree: ModelNode = {
+      kind: 'model', qualifiedName: '', title: '', members: [], children: [
+        { kind: 'context', qualifiedName: 'Ordering', title: 'Ordering', members: [], children: [
+          { kind: 'aggregate', qualifiedName: 'Ordering.Sales', title: 'Sales', members: [], children: [entityNode] },
+        ] },
+      ],
+    };
+    const index = buildModelIndex(gloss, docs(), tree);
+    expect(index.byQn.get('Ordering.Sales.Order')!.transitions).toEqual([
+      { from: 'Draft', to: 'Submitted', guard: 'totalIsPositive', via: 'Submit' },
+    ]);
+  });
 });
 
 describe('lookupElement', () => {
