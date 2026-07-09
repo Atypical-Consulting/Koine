@@ -1,12 +1,16 @@
-# 0008. Release assets built inside the release-please run
+---
+id: 8
+title: Release assets built inside the release-please run
+status: proposed
+date: 2026-07-06
+links:
+  - type: relates-to
+    target: 2
+---
 
-Date: 2026-07-06
+# Release assets built inside the release-please run
 
-## Status
-
-Proposed
-
-## Context
+## Context and Problem Statement
 
 [ADR 0002](0002-conventional-commits-and-automated-semver.md) adopted release-please: on merge of its
 release PR it bumps the version, tags `vX.Y.Z`, and creates a GitHub Release. ADR 0002's Decision 3
@@ -21,7 +25,17 @@ deliberately does **not** run `on: push` / `on: release` workflows for events cr
 We also want each release to ship downloadable executables: self-contained Koine CLI binaries
 (win-x64/linux-x64/osx-arm64) and unsigned Koine Studio desktop installers per OS.
 
-## Decision
+## Considered Options
+
+* Switch release-please to a PAT / GitHub App token so its tag would trigger `on: push: tags`.
+* Build and attach release assets inside the release-please workflow run itself, gated on
+  `release_created`.
+
+## Decision Outcome
+
+Chosen option: "Build and attach release assets inside the release-please workflow run", because the
+PAT / GitHub App token alternative works but requires managing a privileged secret and widens token
+scope; the same-run / `release_created` approach needs neither.
 
 We will build and attach release assets **inside the release-please workflow run**, gated on the
 `release-please-action` step's `release_created` output — not from any tag- or release-triggered
@@ -41,9 +55,6 @@ workflow.
 
 - Anything that must run on release is a gated job in `release-please.yml`, not a separate
   tag/release-triggered workflow — the latter silently never fires under the default token.
-- Alternative rejected: switching release-please to a PAT / GitHub App token so its tag would trigger
-  `on: push: tags`. That works but requires managing a privileged secret and widens token scope; the
-  same-run / `release_created` approach needs neither.
 - This supersedes ADR 0002's Decision 3 on the specific point that the tag triggers `release.yml`.
   The rest of ADR 0002 (Conventional Commits, release-please adoption, the bootstrap baseline) stands.
 - Adding a new release artifact means adding or adjusting a gated job here; the `workflow_dispatch`

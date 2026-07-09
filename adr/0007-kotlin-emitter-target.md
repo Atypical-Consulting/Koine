@@ -1,14 +1,13 @@
-# 0007. Kotlin emitter target
+---
+id: 7
+title: Kotlin emitter target
+status: proposed
+date: 2026-07-06
+---
 
-Date: 2026-07-06
+# Kotlin emitter target
 
-## Status
-
-Proposed
-
-<!-- One of: Proposed | Accepted | Rejected | Deprecated | Superseded by [NNNN](NNNN-xxx.md) -->
-
-## Context
+## Context and Problem Statement
 
 Koine compiles one target-agnostic semantic model to C#, TypeScript, Python, PHP, Rust, and — since
 [#858](https://github.com/Atypical-Consulting/Koine/issues/858) — Java. The Java brainstorm weighed
@@ -33,19 +32,26 @@ IEmitter`, and since [ADR-driven] issue #861 each backend is a self-contained
 
 The open question is whether Kotlin should share a "JVM emitter core" with Java (#858).
 
-## Decision
+## Considered Options
+
+* Share a "JVM emitter core" with the Java backend (#858).
+* A new, fully self-contained `src/Koine.Emit.Kotlin` backend, mirroring the sibling JVM backend's
+  structure but sharing no core with it.
+
+## Decision Outcome
+
+Chosen option: "A new, fully self-contained `src/Koine.Emit.Kotlin` backend, sharing no core with
+Java", because the emitted shapes diverge on nearly every construct — `data class` /
+`@JvmInline value class` vs `record`; `T?` vs `Optional`; `sealed interface DomainEvent` with
+exhaustive `when` vs Java's sealed interface; elvis `?:` vs conditional expressions — so a shared core
+would degenerate into two code paths behind one facade and would couple two otherwise-independent
+issues. The repo's proven grain is one self-contained backend per target.
 
 We will add a **new `--target kotlin` backend** as its own packable **`src/Koine.Emit.Kotlin`**
 assembly behind the existing `IEmitter` / `IEmitterProvider` seam, with **zero changes to `Parsing/`,
 `Ast/`, or `Semantics/`** (guarded by `AstPurityTests`). It mirrors the structure of the sibling JVM
 backend (`Koine.Emit.Java`): one package per bounded context (`<base>.<context>`) plus a shared
 `koine.runtime` package, one top-level type per `.kt` file.
-
-We will **not** share a "JVM emitter core" with the Java backend. The emitted shapes diverge on nearly
-every construct — `data class` / `@JvmInline value class` vs `record`; `T?` vs `Optional`; `sealed
-interface DomainEvent` with exhaustive `when` vs Java's sealed interface; elvis `?:` vs conditional
-expressions — so a shared core would degenerate into two code paths behind one facade and would couple
-two otherwise-independent issues. The repo's proven grain is one self-contained backend per target.
 
 Concrete choices:
 

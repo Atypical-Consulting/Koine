@@ -24,8 +24,11 @@ release-please from Conventional Commits — don't hand-edit it (see
 Significant architecture or process decisions (a new emitter target, a change to the compiler
 pipeline layering, a new cross-cutting validator, CI/release-process changes, a dependency the whole
 repo will lean on) **must** be captured as an Architecture Decision Record under
-[`/adr/`](adr/README.md) before or alongside the implementing PR — copy `adr/template.md` to the
-next `NNNN-title.md`, fill in Context/Decision/Consequences, and add it to `adr/README.md`'s index.
+[`/adr/`](adr/README.md), in [MADR 4.0](https://adr.github.io/madr/) format (see
+[ADR 0010](adr/0010-adopt-madr-4.0-for-architecture-decision-records.md)), before or alongside the
+implementing PR — copy `adr/template.md` to the next `NNNN-title.md`, fill in the frontmatter and the
+Context and Problem Statement/Considered Options/Decision Outcome/Consequences sections, and add it
+to `adr/README.md`'s index.
 A change that contradicts an `Accepted` ADR needs a new ADR that supersedes it, not silent drift.
 Skip an ADR for routine bug fixes and refactors that don't change a decision already on record.
 
