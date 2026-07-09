@@ -87,7 +87,9 @@ export default tseslint.config(
   },
   {
     // retired across the arc: #991 (domain navigator) + #992 (Properties/docs panels); file also decomposed by #985
-    files: ['src/shell/inspectorController.tsx'],
+    // (the sub-modules it's being split into — src/shell/inspector/** — inherit the SAME exemption while
+    // they still carry the moved-verbatim imperative DOM building; each shrinks/drops out as it converts).
+    files: ['src/shell/inspectorController.tsx', 'src/shell/inspector/**'],
     rules: { 'no-restricted-syntax': 'off' },
   },
   // Tests & stories: the deliberate fire-and-forget promises in vitest fixtures and Storybook play
